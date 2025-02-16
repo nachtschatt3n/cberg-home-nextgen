@@ -1,0 +1,14 @@
+---
+instance:
+  cluster:
+    networkPolicy: false
+  components:
+    - source-controller
+    - kustomize-controller
+    - helm-controller
+    - notification-controller
+  sync:
+    kind: GitRepository
+    url: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+    ref: "refs/heads/main"
+    path: kubernetes/flux/cluster
