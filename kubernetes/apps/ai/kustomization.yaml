@@ -1,0 +1,3 @@
+resources:
+  - namespace.yaml
+  - open-webui/ks.yaml
