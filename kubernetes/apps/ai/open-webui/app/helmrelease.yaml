@@ -37,7 +37,8 @@ spec:
         #   type: 'cpu'
         #   number: 1
         models:
-          - llama3
+          pull:
+            - llama3
 #      runtimeClassName: cpu
       persistentVolume:
         enabled: true
