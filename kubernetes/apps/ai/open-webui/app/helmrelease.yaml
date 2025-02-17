@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: open-webui
-      version: 3.1.1
+      version: 5.13.0
       sourceRef:
         kind: HelmRepository
         name: open-webui
@@ -44,16 +44,23 @@ spec:
 
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
-      enabled: false
+      enabled: true
       # -- This section can be used to pass required environment variables to your pipelines (e.g. Langfuse hostname)
       extraEnvVars:
       - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
         value: "False"
       - name: LITELLM_LOCAL_MODEL_COST_MAP
         value: "True"
+      tika:
+        # -- Automatically install Apache Tika to extend Open WebUI
+        enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
     ollamaUrls: []
+
+    websocket:
+      # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
+      enabled: false
 
     # -- Value of cluster domain
     clusterDomain: cluster.local
@@ -108,7 +115,7 @@ spec:
     extraEnvVars:
       # -- Default API key value for Pipelines. Should be updated in a production deployment, or be changed to the required API key if not using Pipelines
       - name: OLLAMA_BASE_URLS
-        value: "http://192.168.31.226:11434"
+        value: http://open-webui-ollama:11434
 #      - name: USER_AGENT
 #        value: "Open WebUI"
       - name: WEBUI_URL
