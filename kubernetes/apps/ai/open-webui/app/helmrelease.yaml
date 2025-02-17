@@ -57,14 +57,16 @@ spec:
         enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
-    ollamaUrls: []
+    ollamaUrls:
+      - name: ollama
+        url: http://open-webui-ollama:11434
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
       enabled: false
 
     # -- Value of cluster domain
-    clusterDomain: cluster.local
+    clusterDomain: uhl.cool
 
     annotations: {}
     podAnnotations: {}
@@ -115,8 +117,8 @@ spec:
     # -- Additional environments variables on the output Deployment definition. Most up-to-date environment variables can be found here: https://docs.openwebui.com/getting-started/env-configuration/
     extraEnvVars:
       # -- Default API key value for Pipelines. Should be updated in a production deployment, or be changed to the required API key if not using Pipelines
-      - name: OLLAMA_BASE_URLS
-        value: http://open-webui-ollama:11434
+      # - name: OLLAMA_BASE_URLS
+      #  value: http://open-webui-ollama:11434
 #      - name: USER_AGENT
 #        value: "Open WebUI"
       - name: WEBUI_URL
