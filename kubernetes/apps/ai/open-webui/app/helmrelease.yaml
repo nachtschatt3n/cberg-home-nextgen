@@ -57,9 +57,7 @@ spec:
         enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
-    ollamaUrls:
-      - name: ollama
-        url: http://open-webui-ollama:11434
+    ollamaUrls: []
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
