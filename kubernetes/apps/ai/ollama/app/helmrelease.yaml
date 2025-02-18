@@ -52,13 +52,22 @@ spec:
             # Intel Arc™ A-Series Graphics and Intel Data Center GPU Flex and
             # Intel Data Center GPU Max Series, please refer to links for
             # Runtime configurations.
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - SYS_ADMIN
+              allowPrivilegeEscalation: true
+              runAsUser: 0
             resources:
               requests:
                 cpu: 500m
                 memory: 16Gi
+                gpu.intel.com/i915: 1
               limits:
                 memory: 32Gi
-                gpu.intel.com/i915: 0
+                gpu.intel.com/i915: 1
+
     # -- Configure persistence settings for the chart under this key.
     persistence:
       config:
@@ -73,11 +82,3 @@ spec:
         ports:
           http:
             port: 11434
-    defaultPodOptions:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: OnRootMismatch
-        supplementalGroups: [44]
