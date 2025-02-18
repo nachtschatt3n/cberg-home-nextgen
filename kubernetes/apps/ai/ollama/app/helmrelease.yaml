@@ -34,7 +34,7 @@ spec:
         containers:
           main:
             image:
-              repository: visitsb/ollama-ipex:latest
+              repository: visitsb/ollama-ipex
               tag: 0.5.7
             env:
             # Make sure all layers of your model are running on Intel GPU
