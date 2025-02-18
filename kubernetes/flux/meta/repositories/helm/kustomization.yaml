@@ -14,7 +14,3 @@ resources:
   - ./metrics-server.yaml
   - ./spegel.yaml
   - ./stakater.yaml
-  - ./open-webui.yaml
-  - ./democratic-csi.yaml
-  - ./intel.yaml
-  - ./node-feature-discovery.yaml

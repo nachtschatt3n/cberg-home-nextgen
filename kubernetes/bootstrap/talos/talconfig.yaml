@@ -24,14 +24,13 @@ cniConfig:
   name: none
 
 nodes:
-  - hostname: "srv1"
+  - hostname: "k8s-nuc14-01"
     ipAddress: "192.168.55.11"
     installDiskSelector:
       serial: "S5GXNS0X201738E"
     machineSpec:
       secureboot: false
-    #talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
-    talosImageURL: factory.talos.dev/installer/de3b865124c5616da8084826167f8c0b0fbc9b905b146290db797024e84097fc
+    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -39,6 +38,46 @@ nodes:
         dhcp: false
         addresses:
           - "192.168.55.11/24"
+        routes:
+          - network: "0.0.0.0/0"
+            gateway: "192.168.55.1"
+        mtu: 1500
+        vip:
+          ip: "192.168.55.10"
+  - hostname: "k8s-nuc14-02"
+    ipAddress: "192.168.55.12"
+    installDiskSelector:
+      serial: "S5GXNS0X207008P"
+    machineSpec:
+      secureboot: false
+    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    controlPlane: true
+    networkInterfaces:
+      - deviceSelector:
+          hardwareAddr: "88:ae:dd:66:61:78"
+        dhcp: false
+        addresses:
+          - "192.168.55.12/24"
+        routes:
+          - network: "0.0.0.0/0"
+            gateway: "192.168.55.1"
+        mtu: 1500
+        vip:
+          ip: "192.168.55.10"
+  - hostname: "k8s-nuc14-03"
+    ipAddress: "192.168.55.13"
+    installDiskSelector:
+      serial: "S6Z1NU0XC43615L"
+    machineSpec:
+      secureboot: false
+    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    controlPlane: true
+    networkInterfaces:
+      - deviceSelector:
+          hardwareAddr: "88:ae:dd:65:a0:38"
+        dhcp: false
+        addresses:
+          - "192.168.55.13/24"
         routes:
           - network: "0.0.0.0/0"
             gateway: "192.168.55.1"
@@ -53,10 +92,10 @@ patches:
   - "@./patches/global/machine-network.yaml"
   - "@./patches/global/machine-sysctls.yaml"
   - "@./patches/global/machine-time.yaml"
-  - "@./patches/global/machine-udev.yaml"
-  - "@./patches/global/machine-intelgpu.yaml"
+
 # Controller patches
 controlPlane:
   patches:
     - "@./patches/controller/admission-controller-patch.yaml"
     - "@./patches/controller/cluster.yaml"
+
