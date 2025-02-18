@@ -1,0 +1,77 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app ollama-ipex
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      backend:
+        type: statefulset
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          main:
+            image:
+              repository: visitsb/ollama-ipex:latest
+              tag: 0.5.7
+            env:
+            # Make sure all layers of your model are running on Intel GPU
+              OLLAMA_NUM_GPU: 999
+              OLLAMA_KEEP_ALIVE: 1
+              OLLAMA_DEBUG: 1
+            # Use total memory as free memory
+              ZES_ENABLE_SYSMAN: 1
+            # Use GPU acceleration
+              SYCL_CACHE_PERSISTENT: 1
+            # For environment variables specific to
+            # Intel Arc™ A-Series Graphics and Intel Data Center GPU Flex and
+            # Intel Data Center GPU Max Series, please refer to links for
+            # Runtime configurations.
+            resources:
+              requests:
+                cpu: 500m
+                memory: 16Gi
+                gpu.intel.com/i915: "0"
+              limits:
+                memory: 16Gi
+                gpu.intel.com/i915: "0"
+        pod:
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: intel.feature.node.kubernetes.io/gpu
+                        operator: In
+                        values:
+                          - "true"
+          nodeSelector:
+            intel.feature.node.kubernetes.io/gpu: "true"
+    service:
+      backend:
+        controller: backend
+        ports:
+          http:
+            port: 11434
