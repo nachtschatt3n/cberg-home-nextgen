@@ -42,7 +42,7 @@ spec:
             env:
             # Make sure all layers of your model are running on Intel GPU
               OLLAMA_NUM_GPU: 999
-              OLLAMA_KEEP_ALIVE: 1
+              #OLLAMA_KEEP_ALIVE: 1
               OLLAMA_DEBUG: 1
             # Use total memory as free memory
               ZES_ENABLE_SYSMAN: 1
@@ -59,6 +59,14 @@ spec:
               limits:
                 memory: 32Gi
                 gpu.intel.com/i915: 1
+    # -- Configure persistence settings for the chart under this key.
+    persistence:
+      config:
+        type: persistentVolumeClaim
+        accessMode: ReadWriteOnce
+        size: 100Gi
+        globalMounts:
+          - path: /models
     service:
       backend:
         controller: backend
