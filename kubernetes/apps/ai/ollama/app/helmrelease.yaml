@@ -58,7 +58,7 @@ spec:
                 memory: 16Gi
               limits:
                 memory: 32Gi
-                gpu.intel.com/i915: 1
+                gpu.intel.com/i915: 0
     # -- Configure persistence settings for the chart under this key.
     persistence:
       config:
@@ -73,3 +73,11 @@ spec:
         ports:
           http:
             port: 11434
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [44]
