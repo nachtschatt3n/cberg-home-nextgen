@@ -16,3 +16,4 @@ resources:
   - ./stakater.yaml
   - ./open-webui.yaml
   - ./democratic-csi.yaml
+  - ./intel.yaml

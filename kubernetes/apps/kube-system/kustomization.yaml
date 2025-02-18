@@ -12,3 +12,4 @@ resources:
   - ./reloader/ks.yaml
   - ./spegel/ks.yaml
   - ./local-path-provisioner/ks.yaml
+  - ./intel-device-plugin/ks.yaml
