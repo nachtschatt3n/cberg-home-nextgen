@@ -30,7 +30,8 @@ nodes:
       serial: "S5GXNS0X201738E"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    #talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    talosImageURL: factory.talos.dev/installer/de3b865124c5616da8084826167f8c0b0fbc9b905b146290db797024e84097fc
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -52,10 +53,10 @@ patches:
   - "@./patches/global/machine-network.yaml"
   - "@./patches/global/machine-sysctls.yaml"
   - "@./patches/global/machine-time.yaml"
-
+  - "@./patches/global/machine-udev.yaml"
+  - "@./patches/global/machine-intelgpu.yaml"
 # Controller patches
 controlPlane:
   patches:
     - "@./patches/controller/admission-controller-patch.yaml"
     - "@./patches/controller/cluster.yaml"
-
