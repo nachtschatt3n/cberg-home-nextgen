@@ -37,21 +37,12 @@ spec:
         containers:
           main:
             image:
-              repository: visitsb/ollama-ipex
+              repository: intelanalytics/ipex-llm-inference-cpp-xpu
               tag: latest
             env:
-            # Make sure all layers of your model are running on Intel GPU
-              OLLAMA_NUM_GPU: 999
+              OLLAMA_HOST: "0.0.0.0:11434"
               #OLLAMA_KEEP_ALIVE: 1
               OLLAMA_DEBUG: 1
-            # Use total memory as free memory
-              ZES_ENABLE_SYSMAN: 1
-            # Use GPU acceleration
-              SYCL_CACHE_PERSISTENT: 1
-            # For environment variables specific to
-            # Intel Arc™ A-Series Graphics and Intel Data Center GPU Flex and
-            # Intel Data Center GPU Max Series, please refer to links for
-            # Runtime configurations.
             securityContext:
               privileged: true
               capabilities:
