@@ -35,7 +35,7 @@ spec:
           main:
             image:
               repository: visitsb/ollama-ipex
-              tag: 0.5.7
+              tag: latest
             env:
             # Make sure all layers of your model are running on Intel GPU
               OLLAMA_NUM_GPU: 999
