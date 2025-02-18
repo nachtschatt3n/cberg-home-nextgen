@@ -72,9 +72,9 @@ spec:
       config:
         type: persistentVolumeClaim
         accessMode: ReadWriteOnce
-        size: 100Gi
+        size: 10Gi
         globalMounts:
-          - path: /models
+          - path: /
     service:
       backend:
         controller: backend
