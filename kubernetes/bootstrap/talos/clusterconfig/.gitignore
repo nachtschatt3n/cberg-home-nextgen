@@ -1,2 +1,5 @@
 kubernetes-srv1.yaml
 talosconfig
+kubernetes-k8s-nuc14-01.yaml
+kubernetes-k8s-nuc14-02.yaml
+kubernetes-k8s-nuc14-03.yaml
