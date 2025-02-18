@@ -4,3 +4,6 @@ machine:
     fs.inotify.max_user_instances: "8192"  # Watchdog
     net.core.rmem_max: "7500000" # Cloudflared | QUIC
     net.core.wmem_max: "7500000" # Cloudflared | QUIC
+    net.core.somaxconn: "65535"
+    net.ipv4.tcp_fastopen: 3               # TCP Fast Open
+    net.ipv4.tcp_mtu_probing: 1            # Jumbo frames
