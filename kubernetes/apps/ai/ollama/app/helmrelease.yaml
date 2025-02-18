@@ -56,10 +56,9 @@ spec:
               requests:
                 cpu: 500m
                 memory: 16Gi
-                gpu.intel.com/i915: "0"
               limits:
-                memory: 16Gi
-                gpu.intel.com/i915: "0"
+                memory: 32Gi
+                gpu.intel.com/i915: 1
     service:
       backend:
         controller: backend
