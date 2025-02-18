@@ -101,6 +101,9 @@ spec:
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
     persistence:
       enabled: true
+      storageClass: local-hostpath
+      accessMode: ReadWriteOnce
+      size: 100Gi
 
     # -- Node labels for pod assignment.
     nodeSelector: {}
