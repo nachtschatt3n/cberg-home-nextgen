@@ -45,7 +45,7 @@ spec:
 
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
-      enabled: true
+      enabled: false
       # -- This section can be used to pass required environment variables to your pipelines (e.g. Langfuse hostname)
       extraEnvVars:
       - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
@@ -57,7 +57,9 @@ spec:
         enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
-    ollamaUrls: []
+    ollamaUrls:
+    - name: open-webui-ollama
+      url: http://open-webui-ollama:11434
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
