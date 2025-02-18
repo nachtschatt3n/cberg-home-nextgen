@@ -17,3 +17,4 @@ resources:
   - ./open-webui.yaml
   - ./democratic-csi.yaml
   - ./intel.yaml
+  - ./node-feature-discovery.yaml
