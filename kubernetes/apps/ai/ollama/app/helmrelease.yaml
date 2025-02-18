@@ -49,14 +49,14 @@ spec:
             # Intel Arc™ A-Series Graphics and Intel Data Center GPU Flex and
             # Intel Data Center GPU Max Series, please refer to links for
             # Runtime configurations.
-            resources:
-              requests:
-                cpu: 500m
-                memory: 16Gi
-                gpu.intel.com/i915: "0"
-              limits:
-                memory: 16Gi
-                gpu.intel.com/i915: "0"
+            # resources:
+            #   requests:
+            #     cpu: 500m
+            #     memory: 16Gi
+            #     gpu.intel.com/i915: "0"
+            #   limits:
+            #     memory: 16Gi
+            #     gpu.intel.com/i915: "0"
     service:
       backend:
         controller: backend
