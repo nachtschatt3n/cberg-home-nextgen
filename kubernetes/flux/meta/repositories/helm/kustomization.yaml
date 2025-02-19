@@ -7,14 +7,18 @@ resources:
   - ./cilium.yaml
   - ./controlplaneio.yaml
   - ./coredns.yaml
+  - ./csi-driver-smb.yaml
+  - ./democratic-csi.yaml
   - ./external-dns.yaml
+  - ./external-secrets.yaml
+  - ./grafana.yaml
   - ./ingress-nginx.yaml
+  - ./intel.yaml
   - ./jetstack.yaml
   - ./k8s-gateway.yaml
   - ./metrics-server.yaml
-  - ./spegel.yaml
-  - ./stakater.yaml
-  - ./intel.yaml
   - ./node-feature-discovery.yaml
   - ./open-webui.yaml
-  - ./democratic-csi.yaml
+  - ./spegel.yaml
+  - ./stakater.yaml
+  - ./weave-gitops.yaml
