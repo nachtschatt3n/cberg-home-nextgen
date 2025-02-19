@@ -93,9 +93,9 @@ spec:
                 service:
                   identifier: app
                   port: http
-    persistence:
-      media:
-        enabled: true
-        type: pvc
-        existingClaim: pvc-media
-        mountPath: /media
+    # persistence:
+    #   media:
+    #     enabled: true
+    #     type: pvc
+    #     existingClaim: pvc-media
+    #     mountPath: /media
