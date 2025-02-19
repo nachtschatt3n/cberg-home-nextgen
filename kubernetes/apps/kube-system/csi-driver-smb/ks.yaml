@@ -14,7 +14,8 @@ spec:
   prune: true
   sourceRef:
     kind: GitRepository
-    name: home-kubernetes
+    name: flux-system
+    namespace: flux-system
   wait: false
   interval: 30m
   retryInterval: 1m
@@ -27,7 +28,7 @@ metadata:
   name: &app csi-driver-smb-storage-classes
   namespace: kube-system
 spec:
-  targetNamespace: storage
+  targetNamespace: kube-system
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
@@ -38,7 +39,8 @@ spec:
   force: true
   sourceRef:
     kind: GitRepository
-    name: home-kubernetes
+    name: flux-system
+    namespace: flux-system
   wait: false
   interval: 30m
   retryInterval: 1m
