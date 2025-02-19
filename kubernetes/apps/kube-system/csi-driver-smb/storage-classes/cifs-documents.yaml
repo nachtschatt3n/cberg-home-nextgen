@@ -1,0 +1,8 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-documents"
+provisioner: smb.csi.k8s.io
+parameters:
+  source: "//${NAS_HOSTNAME}/documents"
