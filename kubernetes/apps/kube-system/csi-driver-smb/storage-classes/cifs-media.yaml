@@ -6,3 +6,5 @@ metadata:
 provisioner: smb.csi.k8s.io
 parameters:
   source: "//${NAS_HOSTNAME}/media"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
