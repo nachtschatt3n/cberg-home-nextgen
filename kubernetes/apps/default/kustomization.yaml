@@ -7,4 +7,4 @@ components:
   - ../../flux/components/common
 resources:
   - ./echo-server/ks.yaml
-  - ./cifs-pvcs/kustomization.yaml
+  - ./cifs-pvcs/ks.yaml
