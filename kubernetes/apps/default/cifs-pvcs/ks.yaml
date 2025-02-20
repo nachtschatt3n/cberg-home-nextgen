@@ -6,7 +6,7 @@ metadata:
   name: &app cifs-pvcs
   namespace: &namespace default
 spec:
-  interval: 30m
+  interval: 1m
   path: "./kubernetes/templates/csi-driver-smb/claims"
   prune: true
   sourceRef:
@@ -14,5 +14,5 @@ spec:
     name: flux-system
     namespace: flux-system
   targetNamespace: *namespace
-  timeout: 5m
+  timeout: 1m
   wait: false
