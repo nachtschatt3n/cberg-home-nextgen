@@ -83,7 +83,6 @@ parameters:
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
 
-
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
