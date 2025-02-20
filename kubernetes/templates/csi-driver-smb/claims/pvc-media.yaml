@@ -32,3 +32,4 @@ spec:
     - ReadWriteMany
   csi:
     driver: smb.csi.k8s.io
+    volumeHandle: pvc-media
