@@ -25,3 +25,10 @@ metadata:
   name: pvc-media
 spec:
   storageClassName: cifs-media
+  capacity:
+    storage: 2Ti
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  csi:
+    driver: smb.csi.k8s.io
