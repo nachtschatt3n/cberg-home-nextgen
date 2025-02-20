@@ -182,29 +182,6 @@ spec:
           limits:
             memory: 1Gi
 
-        affinity:
-          nodeAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: In
-                  values:
-                  - k3s-1
-          podAntiAffinity:
-            preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                  - key: app.kubernetes.io/name
-                    operator: In
-                    values:
-                    - nextcloud
-                topologyKey: kubernetes.io/hostname
-
-
     cronjob:
       enabled: true
       resources:
@@ -232,28 +209,6 @@ spec:
         memory: 334M
       limits:
         memory: 2Gi
-
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-              - k3s-2
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values:
-                - nextcloud
-            topologyKey: kubernetes.io/hostname
 
     livenessProbe:
       enabled: true
