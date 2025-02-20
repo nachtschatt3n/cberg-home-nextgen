@@ -10,6 +10,7 @@ allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/data"
+  mountOptions: "dir_mode=0777,file_mode=0777,uid=1000,gid=1000,noperm,mfsymlinks,noserverino"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -27,6 +28,7 @@ allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/media"
+  mountOptions: "dir_mode=0777,file_mode=0777,uid=1000,gid=1000,noperm,mfsymlinks,noserverino"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -44,6 +46,7 @@ allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/log"
+  mountOptions: "dir_mode=0777,file_mode=0777,uid=1000,gid=1000,noperm,mfsymlinks,noserverino"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -61,6 +64,7 @@ allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/export"
+  mountOptions: "dir_mode=0777,file_mode=0777,uid=1000,gid=1000,noperm,mfsymlinks,noserverino"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -78,6 +82,7 @@ allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/consume"
+  mountOptions: "dir_mode=0777,file_mode=0777,uid=1000,gid=1000,noperm,mfsymlinks,noserverino"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
