@@ -16,7 +16,6 @@ spec:
     requests:
       storage: 2Ti
   storageClassName: cifs-media
-  volumeName: media
 
 # yaml-language-server: $schema=https://kubernetesjsonschema.dev/v1.18.1-standalone-strict/persistentvolume.json
 ---
