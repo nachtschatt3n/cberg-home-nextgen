@@ -25,9 +25,9 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    csi:
-      driver:
-        name: smb.csi.k8s.io
-      secrets:
-        name: csi-driver-smb
-        namespace: kube-system
+    driver:
+      name: smb.csi.k8s.io
+    secrets:
+      enabled: true
+      name: csi-driver-smb
+      namespace: kube-system
