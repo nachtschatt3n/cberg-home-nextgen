@@ -131,21 +131,6 @@ spec:
         memory: 1.5Gi
       limits:
         memory: 8Gi
-    securityContext:
-      # Run as root to handle SMB mount permissions
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
-    podSecurityContext:
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
-    containers:
-      paperless:
-        securityContext:
-          runAsUser: 0
-          runAsGroup: 0
-          fsGroup: 0
     probes:
       liveness:
         enabled: false
