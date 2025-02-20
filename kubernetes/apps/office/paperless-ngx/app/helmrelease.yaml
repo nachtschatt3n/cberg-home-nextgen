@@ -130,25 +130,4 @@ spec:
         cpu: 500m
         memory: 1.5Gi
       limits:
-        memory: 4Gi
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-              - k3s-3
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values:
-                - paperless-ngx
-            topologyKey: kubernetes.io/hostname
+        memory: 8Gi
