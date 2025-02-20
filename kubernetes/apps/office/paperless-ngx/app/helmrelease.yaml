@@ -127,7 +127,7 @@ spec:
           replicaCount: 0
     resources:
       requests:
-        cpu: 500m
+        cpu: 4000m
         memory: 1.5Gi
       limits:
         memory: 8Gi
