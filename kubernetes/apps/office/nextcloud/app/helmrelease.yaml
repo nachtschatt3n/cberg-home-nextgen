@@ -1,0 +1,301 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: &app nextcloud
+spec:
+  interval: 60m
+  chart:
+    spec:
+      chart: *app
+      version: 5.0.0
+      sourceRef:
+        kind: HelmRepository
+        name: nextcloud
+        namespace: flux-system
+      interval: 60m
+  timeout: 30m
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  # Values link: https://github.com/nextcloud/helm/blob/master/charts/nextcloud/values.yaml
+  values:
+    image:
+      repository: nextcloud
+      tag: 28.0.12
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    ingress:
+        enabled: true
+        ingressClassName: "external"
+        annotations:
+          nginx.ingress.kubernetes.io/proxy-body-size: "4G"
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        hosts:
+          - host: "drive.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: main
+                    port:
+                      number: http
+        tls:
+          - secretName: nextcloud-tls
+            hosts:
+              - "drive.${SECRET_DOMAIN}"
+    nextcloud:
+      host: drive.${SECRET_DOMAIN}
+      phpConfigs: {}
+      # Extra config files created in /var/www/html/config/
+      # ref: https://docs.nextcloud.com/server/15/admin_manual/configuration_server/config_sample_php_parameters.html#multiple-config-php-file
+      configs:
+        custom.config.php: |-
+          <?php
+          $CONFIG = array (
+            'overwriteprotocol' => 'https',
+            'overwrite.cli.url' => 'https://drive.${SECRET_DOMAIN}',
+            'filelocking.enabled' => 'true',
+            'loglevel' => '2',
+            'enable_previews' => true,
+            'trusted_domains' =>
+              [
+                'drive',
+                'drive.${SECRET_DOMAIN}'
+              ],
+            'trusted_proxies' =>
+              [
+                'nginx'
+              ],
+            'forwarded_for_headers' =>
+              [
+                0 => 'X-Forwarded-For',
+                1 => 'HTTP_X_FORWARDED_FOR',
+              ],
+            'default_phone_region' => 'DE',
+          );
+
+
+
+      strategy:
+        type: Recreate
+
+      ##
+      ## Extra environment variables
+      extraEnv:
+      #  - name: SOME_SECRET_ENV
+      #    valueFrom:
+      #      secretKeyRef:
+      #        name: nextcloud
+      #        key: secret_key
+
+    nginx:
+      enabled: false
+
+    internalDatabase:
+      enabled: false
+    ##
+    ## External database configuration
+    ##
+    externalDatabase:
+      enabled: true
+
+      ## Supported database engines: mysql or postgresql
+      type: mysql
+
+      ## Database host
+      # host:
+
+      ## Database name
+      database: nextcloud
+
+      ## Use a existing secret
+      existingSecret:
+        enabled: true
+        secretName: nextcloud-config
+        usernameKey: db-username
+        passwordKey: db-password
+        # hostKey: db-hostname-or-ip
+        # databaseKey: db-name
+        mariadb:
+          enabled: true
+        postgresql:
+          enabled: false
+        redis:
+          enabled: false
+    ##
+    ## MariaDB chart configuration
+    ## ref: https://github.com/bitnami/charts/tree/main/bitnami/mariadb
+    ##
+    mariadb:
+      ## Whether to deploy a mariadb server from the bitnami mariab db helm chart
+      # to satisfy the applications database requirements. if you want to deploy this bitnami mariadb, set this and externalDatabase to true
+      # To use an ALREADY DEPLOYED mariadb database, set this to false and configure the externalDatabase parameters
+      enabled: true
+
+      auth:
+        database: nextcloud
+        # Use existing secret (auth.rootPassword, auth.password, and auth.replicationPassword will be ignored).
+        # secret must contain the keys mariadb-root-password, mariadb-replication-password and mariadb-password
+        existingSecret: nextcloud-config
+        existingSecretPasswordKey: mariadb-password
+        existingSecretRootPasswordKey: mariadb-root-password
+        username: nextcloud
+
+      architecture: standalone
+
+      ## Enable persistence using Persistent Volume Claims
+      ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
+      ##
+      primary:
+        persistence:
+          enabled: true
+          # Use an existing Persistent Volume Claim (must be created ahead of time)
+          existingClaim: "nextcloud-mariadb"
+          # storageClass: ""
+          #accessMode: ReadWriteOnce
+          #size: 8Gi
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 334M
+          limits:
+            memory: 1Gi
+
+        affinity:
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                  - k3s-1
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                    - nextcloud
+                topologyKey: kubernetes.io/hostname
+
+
+    cronjob:
+      enabled: true
+      resources:
+        limits:
+          memory: 1024M
+        requests:
+          cpu: 10m
+          memory: 500M
+
+    service:
+      type: ClusterIP
+      port: 8080
+
+    persistence:
+      enabled: true
+      existingClaim: "nextcloud-config"
+
+      nextcloudData:
+        enabled: true
+        existingClaim: "nextcloud-data"
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 334M
+      limits:
+        memory: 2Gi
+
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+              - k3s-2
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - nextcloud
+            topologyKey: kubernetes.io/hostname
+
+    livenessProbe:
+      enabled: true
+      initialDelaySeconds: 120
+      periodSeconds: 30
+      timeoutSeconds: 60
+      failureThreshold: 3
+      successThreshold: 1
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 60
+      periodSeconds: 60
+      timeoutSeconds: 5
+      failureThreshold: 10
+      successThreshold: 1
+    startupProbe:
+      enabled: true
+      initialDelaySeconds: 60
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 10
+      successThreshold: 1
+
+    hpa:
+      enabled: false
+
+    metrics:
+      enabled: true
+      replicaCount: 1
+      https: false
+      timeout: 5s
+
+      image:
+        repository: xperimental/nextcloud-exporter
+        tag: 0.6.2
+        pullPolicy: IfNotPresent
+
+      service:
+        type: ClusterIP
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9205"
+        labels: {}
+
+      resources:
+        limits:
+          memory: 64M
+        requests:
+          cpu: 10m
+          memory: 64M
+
+    rbac:
+      enabled: false
+      serviceaccount:
+        create: true
+        name: nextcloud-serviceaccount
