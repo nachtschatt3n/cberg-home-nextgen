@@ -92,11 +92,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 10Gi
-  storageClassName: csi-driver-nfs
+  storageClassName: cifs-paperless-data
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -105,11 +105,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 1Gi
-  storageClassName: csi-driver-nfs
+  storageClassName: cifs-paperless-log
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -118,11 +118,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 15Gi
-  storageClassName: csi-driver-nfs
+  storageClassName: cifs-paperless-media
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -131,11 +131,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 1Gi
-  storageClassName: csi-driver-nfs
+  storageClassName: cifs-paperless-export
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -144,8 +144,8 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 4Gi
-  storageClassName: csi-driver-nfs
+  storageClassName: cifs-paperless-consume
