@@ -66,7 +66,7 @@ spec:
           value: csi-driver-smb
         - op: add
           path: /parameters/csi.storage.k8s.io~1node-stage-secret-namespace
-          value: storage
+          value: kube-system
         - op: add
           path: /mountOptions
           value:
