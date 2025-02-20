@@ -24,13 +24,4 @@ kind: PersistentVolume
 metadata:
   name: pvc-media
 spec:
-  capacity:
-    storage: 2Ti
-  volumeMode: Filesystem
-  accessModes:
-    - ReadWriteMany
   storageClassName: cifs-media
-  csi:
-    driver: smb.csi.k8s.io
-    volumeAttributes:
-      source: "//${NAS_HOSTNAME}/media"
