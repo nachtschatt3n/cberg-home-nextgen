@@ -17,3 +17,4 @@ spec:
     requests:
       storage: 1Ti
   storageClassName: cifs-media
+#
