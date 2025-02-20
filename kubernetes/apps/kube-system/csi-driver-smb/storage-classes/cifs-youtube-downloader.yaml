@@ -9,7 +9,7 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
-  source: "//${NAS_HOSTNAME}/youtube-downloader"
+  source: "//${NAS_HOSTNAME}/youtube_downloader"
   subdir: ""
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
