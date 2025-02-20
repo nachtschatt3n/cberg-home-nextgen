@@ -4,7 +4,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-data"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
@@ -21,7 +21,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
@@ -38,7 +38,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-log"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
@@ -55,7 +55,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-export"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
@@ -72,7 +72,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-consume"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
@@ -92,11 +92,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 10Gi
-  storageClassName: cifs-paperless-data
+  storageClassName: csi-driver-nfs
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -105,11 +105,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
-  storageClassName: cifs-paperless-log
+  storageClassName: csi-driver-nfs
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -118,11 +118,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 15Gi
-  storageClassName: cifs-paperless-media
+  storageClassName: csi-driver-nfs
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -131,11 +131,11 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
-  storageClassName: cifs-paperless-export
+  storageClassName: csi-driver-nfs
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -144,8 +144,8 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 4Gi
-  storageClassName: cifs-paperless-consume
+  storageClassName: csi-driver-nfs
