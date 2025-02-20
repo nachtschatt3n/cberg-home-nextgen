@@ -8,16 +8,17 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - vers=3.0
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - mfsymlinks
+  - cache=none
+  - actimeo=0
   - noserverino
   - multichannel
   - max_channels=4
-  - nolock
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/data"
@@ -36,16 +37,17 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - vers=3.0
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - mfsymlinks
+  - cache=none
+  - actimeo=0
   - noserverino
   - multichannel
   - max_channels=4
-  - nolock
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/media"
@@ -64,16 +66,17 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - vers=3.0
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - mfsymlinks
+  - cache=none
+  - actimeo=0
   - noserverino
   - multichannel
   - max_channels=4
-  - nolock
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/log"
@@ -92,16 +95,17 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - vers=3.0
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - mfsymlinks
+  - cache=none
+  - actimeo=0
   - noserverino
   - multichannel
   - max_channels=4
-  - nolock
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/export"
@@ -120,16 +124,17 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - vers=3.0
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - mfsymlinks
+  - cache=none
+  - actimeo=0
   - noserverino
   - multichannel
   - max_channels=4
-  - nolock
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
   subdir: "/consume"
