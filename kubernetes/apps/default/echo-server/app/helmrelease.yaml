@@ -93,10 +93,3 @@ spec:
                 service:
                   identifier: app
                   port: http
-    persistence:
-      media:
-        enabled: true
-        type: persistentVolumeClaim
-        existingClaim: media
-        globalMounts:
-          - path: /media
