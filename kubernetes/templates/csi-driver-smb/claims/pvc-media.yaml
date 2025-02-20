@@ -32,7 +32,6 @@ spec:
   storageClassName: cifs-media
   csi:
     driver: smb.csi.k8s.io
-    volumeHandle: media
     volumeAttributes:
       source: "//${NAS_HOSTNAME}/media"
       subdir: ""
