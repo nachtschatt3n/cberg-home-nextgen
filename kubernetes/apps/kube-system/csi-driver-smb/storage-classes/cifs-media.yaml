@@ -9,7 +9,7 @@ reclaimPolicy: Retain
 #allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/media"
-  #subdir: ""
+  subdir: ""
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
