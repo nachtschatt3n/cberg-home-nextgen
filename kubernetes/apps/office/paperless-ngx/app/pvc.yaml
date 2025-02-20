@@ -1,0 +1,170 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-ngx-data-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: csi-driver-nfs
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: "nas_csi_paperless_data"
+    volumeAttributes:
+      server: "192.168.31.226"
+      share: "/mnt/user/k8s_csi"
+      subDir: "paperless-ngx-data"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-ngx-log-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: csi-driver-nfs
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: "nas_csi_paperless_log"
+    volumeAttributes:
+      server: "192.168.31.226"
+      share: "/mnt/user/k8s_csi"
+      subDir: "paperless-ngx-log"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-ngx-media-pv
+spec:
+  capacity:
+    storage: 15Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: csi-driver-nfs
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: "nas_csi_paperless_media"
+    volumeAttributes:
+      server: "192.168.31.226"
+      share: "/mnt/user/k8s_csi"
+      subDir: "paperless-ngx-media"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-ngx-export-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: csi-driver-nfs
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: "nas_csi_paperless_export"
+    volumeAttributes:
+      server: "192.168.31.226"
+      share: "/mnt/user/k8s_csi"
+      subDir: "paperless-ngx-export"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: paperless-ngx-consume-pv
+spec:
+  capacity:
+    storage: 4Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: csi-driver-nfs
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: "nas_csi_paperless_consume"
+    volumeAttributes:
+      server: "192.168.31.226"
+      share: "/mnt/user/k8s_csi"
+      subDir: "paperless-ngx-consume"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-data
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: csi-driver-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-log
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: csi-driver-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-media
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 15Gi
+  storageClassName: csi-driver-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-export
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: csi-driver-nfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-consume
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 4Gi
+  storageClassName: csi-driver-nfs
