@@ -11,6 +11,7 @@ resources:
   - ./democratic-csi.yaml
   - ./external-dns.yaml
   - ./external-secrets.yaml
+  - ./gabe565.yaml
   - ./grafana.yaml
   - ./ingress-nginx.yaml
   - ./intel.yaml
