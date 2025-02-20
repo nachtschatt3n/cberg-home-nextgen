@@ -3,7 +3,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: pvc-youtube-downloader
+  name: youtube-downloader
   namespace: kube-system
   annotations:
     volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io

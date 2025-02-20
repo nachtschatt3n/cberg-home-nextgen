@@ -1,4 +1,4 @@
-# yaml-language-server: $schema
+# yaml-language-server: $schema=https://kubernetesjsonschema.dev/v1.18.1-standalone-strict/storageclass.json
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -6,7 +6,8 @@ metadata:
   name: "cifs-media"
 provisioner: smb.csi.k8s.io
 reclaimPolicy: Retain
-#allowVolumeExpansion: true
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
 parameters:
   source: "//${NAS_HOSTNAME}/media"
   subdir: ""
