@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: *app
-      version: 5.0.0
+      version: 6.6.4
       sourceRef:
         kind: HelmRepository
         name: nextcloud
@@ -29,7 +29,7 @@ spec:
   values:
     image:
       repository: nextcloud
-      tag: 28.0.12
+      tag: latest
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
@@ -54,6 +54,19 @@ spec:
               - "drive.${SECRET_DOMAIN}"
     nextcloud:
       host: drive.${SECRET_DOMAIN}
+      defaultConfigs:
+        .htaccess: true
+        apache-pretty-urls.config.php: true
+        apcu.config.php: true
+        apps.config.php: true
+        autoconfig.php: true
+        redis.config.php: true
+        reverse-proxy.config.php: true
+        s3.config.php: false
+        smtp.config.php: true
+        swift.config.php: false
+        upgrade-disable-web.config.php: true
+        imaginary.config.php: false
       phpConfigs: {}
       # Extra config files created in /var/www/html/config/
       # ref: https://docs.nextcloud.com/server/15/admin_manual/configuration_server/config_sample_php_parameters.html#multiple-config-php-file
@@ -82,8 +95,6 @@ spec:
               ],
             'default_phone_region' => 'DE',
           );
-
-
 
       strategy:
         type: Recreate
