@@ -146,3 +146,10 @@ spec:
           runAsUser: 0
           runAsGroup: 0
           fsGroup: 0
+    probes:
+      liveness:
+        enabled: false
+      readiness:
+        enabled: false
+      startup:
+        enabled: false
