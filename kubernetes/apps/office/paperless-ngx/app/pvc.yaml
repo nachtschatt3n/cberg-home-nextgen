@@ -4,7 +4,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-data"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -33,7 +33,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -62,7 +62,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-log"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -91,7 +91,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-export"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -120,7 +120,7 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-consume"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
