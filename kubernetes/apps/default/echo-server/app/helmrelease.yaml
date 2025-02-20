@@ -98,5 +98,6 @@ spec:
         enabled: true
         type: persistentVolumeClaim
         existingClaim: pvc-media
+        existingClaimNamespace: kube-system
         globalMounts:
           - path: /media
