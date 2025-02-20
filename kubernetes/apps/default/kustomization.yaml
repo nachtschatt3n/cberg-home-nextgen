@@ -6,5 +6,5 @@ namespace: default
 components:
   - ../../flux/components/common
 resources:
-  - ./echo-server/ks.yaml
+#  - ./echo-server/ks.yaml
   - ./cifs-pvcs/ks.yaml
