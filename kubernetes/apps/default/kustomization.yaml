@@ -5,6 +5,6 @@ kind: Kustomization
 namespace: default
 components:
   - ../../flux/components/common
-#resources:
-  #- ./cifs-pvcs/ks.yaml
-  #- ./echo-server/ks.yaml
+resources:
+#  - ./cifs-pvcs/ks.yaml
+  - ./echo-server/ks.yaml
