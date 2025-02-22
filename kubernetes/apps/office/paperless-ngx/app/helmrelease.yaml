@@ -125,19 +125,12 @@ spec:
         replica:
           enabled: false
           replicaCount: 0
-    resources:
-      requests:
-        cpu: 4000m
-        memory: 1.5Gi
-      limits:
-        memory: 8Gi
-    probes:
-      liveness:
-        enabled: false
-      readiness:
-        enabled: false
-      startup:
-        enabled: false
+#    resources:
+      # requests:
+      #   cpu: 4000m
+      #   memory: 1.5Gi
+      # limits:
+      #   memory: 8Gi
     securityContext:
       runAsUser: 1000
       runAsGroup: 1000
