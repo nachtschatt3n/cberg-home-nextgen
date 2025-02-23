@@ -71,8 +71,8 @@ spec:
               - *host
 
     persistence:
-      config:
-        enabled: true
+      # config:
+      #   enabled: true
       media:
         enabled: true
         storageClass: cifs-media
