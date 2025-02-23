@@ -276,19 +276,19 @@ spec:
     extraContainers: []
 
     # Hardware acceleration volumes
-    extraVolumes:
-      - name: dri
-        hostPath:
-          path: /dev/dri
-      - name: smb-media
-        hostPath:
-          path: /smb-media
-          type: DirectoryOrCreate
-        persistentVolumeClaim:
-          claimName: jellyfin-media-smb
+    # extraVolumes:
+    #   - name: dri
+    #     hostPath:
+    #       path: /dev/dri
+    #   - name: smb-media
+    #     hostPath:
+    #       path: /smb-media
+    #       type: DirectoryOrCreate
+    #     persistentVolumeClaim:
+    #       claimName: jellyfin-media-smb
 
-    extraVolumeMounts:
-      - name: dri
-        mountPath: /dev/dri
-      - name: smb-media
-        mountPath: /smb-media
+    # extraVolumeMounts:
+    #   - name: dri
+    #     mountPath: /dev/dri
+    #   - name: smb-media
+    #     mountPath: /smb-media
