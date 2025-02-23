@@ -137,8 +137,10 @@ spec:
       requests:
         cpu: 100m
         memory: 250Mi
+        gpu.intel.com/i915: 1
       limits:
-        memory: 4Gi
+        memory: 8Gi
+        gpu.intel.com/i915: 1
 
     # -- Configure liveness probe for Jellyfin.
     livenessProbe:
@@ -222,7 +224,7 @@ spec:
         # existingClaim: ''
       media:
         # -- set to false to use emptyDir
-        enabled: true
+        enabled: false
         accessMode: ReadWriteOnce
         size: 25Gi
         # -- Custom annotations to be added to the PVC
@@ -230,7 +232,7 @@ spec:
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
         #storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount
-        existingClaim: jellyfin-media-smb
+        #existingClaim:
 
     # -- Configuration for metrics collection and monitoring
     metrics:
@@ -278,6 +280,12 @@ spec:
       - name: dri
         hostPath:
           path: /dev/dri
+      - name: media
+        hostPath:
+          path: /smb-media
+          type: DirectoryOrCreate
+        persistentVolumeClaim:
+          claimName: jellyfin-media-smb
 
     extraVolumeMounts:
       - name: dri
