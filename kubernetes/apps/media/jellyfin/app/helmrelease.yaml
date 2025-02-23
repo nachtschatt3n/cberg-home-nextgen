@@ -73,7 +73,6 @@ spec:
     persistence:
       config:
         enabled: true
-        existingClaim: jellyfin-config
       media:
         enabled: true
         storageClass: cifs-media
