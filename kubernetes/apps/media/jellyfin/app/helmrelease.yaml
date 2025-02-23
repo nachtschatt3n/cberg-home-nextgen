@@ -119,7 +119,7 @@ spec:
         # kubernetes.io/ingress.class: nginx
         external-dns.alpha.kubernetes.io/target: "jellyfin.${SECRET_DOMAIN}"
       hosts:
-        - host: jellyfin.${SECRET_DOMAIN
+        - host: jellyfin.${SECRET_DOMAIN}
           paths:
             - path: /
               pathType: ImplementationSpecific
