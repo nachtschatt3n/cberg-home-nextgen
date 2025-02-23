@@ -32,22 +32,6 @@ parameters:
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
 
----
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: "cifs-nextcloud-mariadb"
-provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
-volumeBindingMode: Immediate
-allowVolumeExpansion: true
-parameters:
-  source: "//${NAS_HOSTNAME}/nextcloud"
-  subdir: "/mariadb"
-  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
-  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
-  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
-  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
 
 ---
 apiVersion: v1
@@ -73,15 +57,4 @@ spec:
     requests:
       storage: 5Gi
   storageClassName: cifs-nextcloud-config
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: nextcloud-mariadb
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 15Gi
-  storageClassName: cifs-nextcloud-mariadb
+
