@@ -66,8 +66,13 @@ spec:
     podLabels: {}
 
     # -- Security context for the pod.
-    podSecurityContext: {}
-      # fsGroup: 2000
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      supplementalGroups:
+        - 44  # video group
+        - 109 # render group
 
     # -- Security context for the container.
     securityContext: {}
@@ -119,23 +124,21 @@ spec:
         # kubernetes.io/ingress.class: nginx
         external-dns.alpha.kubernetes.io/target: "jellyfin.${SECRET_DOMAIN}"
       hosts:
-        - host: jellyfin.${SECRET_DOMAIN}
+        - host: &host "jellyfin.${SECRET_DOMAIN}"
           paths:
             - path: /
               pathType: ImplementationSpecific
       tls:
-        - secretName: jellyfin-tls
-          hosts:
-            - jellyfin.${SECRET_DOMAIN}
+        - hosts:
+            - *host
 
     # -- Resource requests and limits for the Jellyfin container.
-    resources: {}
-      # limits:
-      #   cpu: 100m
-      #   memory: 128Mi
-      # requests:
-      #   cpu: 100m
-      #   memory: 128Mi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 250Mi
+      limits:
+        memory: 4Gi
 
     # -- Configure liveness probe for Jellyfin.
     livenessProbe:
@@ -187,7 +190,23 @@ spec:
       # -- Additional arguments for the entrypoint command.
       args: []
       # -- Additional environment variables for the container.
-      env: []
+      env:
+        - name: JELLYFIN_PublishedServerUrl
+          value: "https://jellyfin.${SECRET_DOMAIN}"
+        - name: JELLYFIN_FFmpeg__EnableHardwareEncoding
+          value: "true"
+        - name: JELLYFIN_FFmpeg__EnableVAAPI
+          value: "true"
+        - name: JELLYFIN_FFmpeg__VAAPIDevice
+          value: "/dev/dri/renderD128"
+        - name: JELLYFIN_FFmpeg__EnableIntelVaapiLowPowerH264
+          value: "true"
+        - name: JELLYFIN_FFmpeg__EnableIntelVaapiLowPowerHevc
+          value: "true"
+        - name: JELLYFIN_FFmpeg__EnableVaapiCopy
+          value: "true"
+        - name: JELLYFIN_FFmpeg__EnableIntelVaapiVp9
+          value: "true"
 
     persistence:
       config:
@@ -211,12 +230,12 @@ spec:
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
         #storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount
-        existingClaim: 'jellyfin-media-smb'
+        existingClaim: jellyfin-media-smb
 
     # -- Configuration for metrics collection and monitoring
     metrics:
       # -- Enable or disable metrics collection - Ensure you have started and configured your Jellyfin instance first as this will fail if system.xml does not exist yet.
-      enabled: false
+      enabled: true
       command:
         - bash
         - '-c'
@@ -226,13 +245,13 @@ spec:
       # -- Configuration for the Prometheus ServiceMonitor
       serviceMonitor:
         # -- Enable or disable the creation of a ServiceMonitor resource
-        enabled: false
+        enabled: true
         # -- Namespace where the ServiceMonitor resource should be created. Defaults to Release.Namespace
         namespace: ''
         # -- Labels to add to the ServiceMonitor resource
         labels: {}
         # -- Interval at which metrics should be scraped
-        interval: 30s
+        interval: 1m
         # -- Timeout for scraping metrics
         scrapeTimeout: 30s
         # -- Path to scrape for metrics
@@ -253,3 +272,13 @@ spec:
 
     # -- additional sidecar containers to run inside the pod.
     extraContainers: []
+
+    # Hardware acceleration volumes
+    extraVolumes:
+      - name: dri
+        hostPath:
+          path: /dev/dri
+
+    extraVolumeMounts:
+      - name: dri
+        mountPath: /dev/dri
