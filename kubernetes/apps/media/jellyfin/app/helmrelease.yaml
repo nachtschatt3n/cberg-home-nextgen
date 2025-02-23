@@ -224,13 +224,13 @@ spec:
         # existingClaim: ''
       media:
         # -- set to false to use emptyDir
-        enabled: false
+        enabled: true
         accessMode: ReadWriteOnce
         size: 25Gi
         # -- Custom annotations to be added to the PVC
         annotations: {}
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
-        #storageClass: 'local-hostpath'
+        storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount
         #existingClaim:
 
@@ -280,7 +280,7 @@ spec:
       - name: dri
         hostPath:
           path: /dev/dri
-      - name: media
+      - name: smb-media
         hostPath:
           path: /smb-media
           type: DirectoryOrCreate
@@ -290,3 +290,5 @@ spec:
     extraVolumeMounts:
       - name: dri
         mountPath: /dev/dri
+      - name: smb-media
+        mountPath: /smb-media
