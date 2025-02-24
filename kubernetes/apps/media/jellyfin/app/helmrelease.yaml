@@ -103,7 +103,7 @@ spec:
 
     # -- Deployment strategy configuration. See `kubectl explain deployment.spec.strategy`.
     deploymentStrategy:
-      type: RollingUpdate
+      type: Recreate
 
     service:
       # -- Service type (ClusterIP, NodePort, or LoadBalancer).
