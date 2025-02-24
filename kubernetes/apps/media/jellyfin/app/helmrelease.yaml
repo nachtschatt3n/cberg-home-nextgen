@@ -271,9 +271,36 @@ spec:
 
     # -- additional init containers to run inside the pod.
     extraInitContainers:
-      debug:
+      - name: debug
         image: busybox
-        command: [ "sleep", "infinity" ]
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Debug container starting..."
+            echo "Checking directory structure:"
+            ls -la /config
+            ls -la /media
+            echo "Waiting for debugging..."
+            sleep infinity
+        volumeMounts:
+          - name: config
+            mountPath: /config
+          - name: media
+            mountPath: /media
+          - name: dri
+            mountPath: /dev/dri
+          - name: v4l
+            mountPath: /dev/v4l
+
+    # Ensure probes are disabled during debugging
+    probes:
+      liveness:
+        enabled: false
+      readiness:
+        enabled: false
+      startup:
+        enabled: false
 
     # -- additional sidecar containers to run inside the pod .
     extraContainers: []
