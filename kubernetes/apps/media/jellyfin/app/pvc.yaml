@@ -16,3 +16,21 @@ spec:
     requests:
       storage: 2Ti
   storageClassName: cifs-jellyfin-media
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config-smb
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Mi
+  storageClassName: cifs-jellyfin-config
