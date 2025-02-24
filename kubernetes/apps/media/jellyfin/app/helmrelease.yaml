@@ -79,7 +79,6 @@ spec:
       runAsUser: 0
       runAsGroup: 0
       fsGroup: 0
-      runAsNonRoot: true
 
       # runAsUser: 1000
       # runAsGroup: 1000
@@ -100,7 +99,7 @@ spec:
       runAsUser: 0
       runAsGroup: 0
       fsGroup: 0
-      runAsNonRoot: true
+
       # capabilities:
       #   drop:
       #   - ALL
@@ -244,9 +243,9 @@ spec:
         # -- Custom annotations to be added to the PVC
         annotations: {}
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
-        storageClass: 'local-hostpath'
+        #storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount
-        # existingClaim: ''
+        existingClaim: 'jellyfin-config-smb'
       media:
         # -- set to false to use emptyDir
         enabled: true
