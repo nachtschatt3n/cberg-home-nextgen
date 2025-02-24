@@ -275,7 +275,7 @@ spec:
         image: busybox
         command: [ "sleep", "infinity" ]
 
-    # -- additional sidecar containers to run inside the pod.
+    # -- additional sidecar containers to run inside the pod .
     extraContainers: []
 
     # Hardware acceleration volumes
