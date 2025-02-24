@@ -363,3 +363,53 @@ If this repo is too hot to handle or too cold to hold check out these following 
 ## 🤝 Thanks
 
 Big shout out to all the contributors, sponsors and everyone else who has helped on this project.
+
+
+
+
+
+
+
+
+kubectl run debug-shell --rm -it \
+  --image=ubuntu \
+  --overrides='{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "debug-shell"
+  },
+  "spec": {
+    "hostPID": true,
+    "hostIPC": true,
+    "containers": [
+      {
+        "name": "debug",
+        "image": "ubuntu",
+        "stdin": true,
+        "tty": true,
+        "securityContext": {
+          "privileged": true,
+          "allowPrivilegeEscalation": true,
+          "capabilities": {
+            "add": ["SYS_ADMIN"]
+          },
+          "runAsUser": 0
+        },
+        "resources": {
+          "requests": {
+            "gpu.intel.com/i915": 1
+          },
+          "limits": {
+            "gpu.intel.com/i915": 1
+          }
+        },
+        "command": [
+          "/bin/bash",
+          "-c",
+          "apt update && DEBIAN_FRONTEND=noninteractive apt install -y wget intel-media-va-driver-non-free vainfo ffmpeg unzip vim neovim zsh && chsh -s $(which zsh) && mkdir -p /root/test_media && cd /root/test_media && wget https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip && unzip bbb_sunflower_1080p_30fps_normal.mp4.zip && sh -c \"$(wget -O- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended && exec zsh"
+        ]
+      }
+    ]
+  }
+}' -- bash
