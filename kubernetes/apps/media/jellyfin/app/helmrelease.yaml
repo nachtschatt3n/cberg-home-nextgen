@@ -197,8 +197,8 @@ spec:
       args: []
       # -- Additional environment variables for the container.
       env:
-        - name: JELLYFIN_PublishedServerUrl
-          value: "https://jellyfin.${SECRET_DOMAIN}"
+#        - name: JELLYFIN_PublishedServerUrl
+#          value: "https://jellyfin.${SECRET_DOMAIN}"
         - name: JELLYFIN_FFmpeg__EnableHardwareEncoding
           value: "true"
         - name: JELLYFIN_FFmpeg__EnableVAAPI
