@@ -75,7 +75,7 @@ spec:
       capabilities:
         add:
           - SYS_ADMIN
-        allowPrivilegeEscalation: true
+      allowPrivilegeEscalation: true
       runAsUser: 0
       runAsGroup: 0
       fsGroup: 0
@@ -95,10 +95,9 @@ spec:
       capabilities:
         add:
           - SYS_ADMIN
-        allowPrivilegeEscalation: true
+      allowPrivilegeEscalation: true
       runAsUser: 0
       runAsGroup: 0
-      fsGroup: 0
 
       # capabilities:
       #   drop:
@@ -301,6 +300,7 @@ spec:
       - name: dev-dri
         hostPath:
           path: /dev/dri
+          type: Directory
 
     extraVolumeMounts:
       - name: dev-dri
