@@ -76,12 +76,19 @@ spec:
         add:
           - SYS_ADMIN
         allowPrivilegeEscalation: true
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
-      supplementalGroups:
-        - 44  # video group
-        - 109 # render group
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+      runAsNonRoot: true
+
+      # runAsUser: 1000
+      # runAsGroup: 1000
+      # runAsUser: 1000
+      # runAsGroup: 1000
+      # fsGroup: 1000
+      # supplementalGroups:
+      #   - 44  # video group
+      #   - 109 # render group
 
     # -- Security context for the container.
     securityContext:
@@ -90,7 +97,10 @@ spec:
         add:
           - SYS_ADMIN
         allowPrivilegeEscalation: true
-
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+      runAsNonRoot: true
       # capabilities:
       #   drop:
       #   - ALL
@@ -287,11 +297,22 @@ spec:
     # -- additional init containers to run inside the pod.
     extraInitContainers: []
 
+
+    extraVolumes:
+      - name: dev-dri
+        hostPath:
+          path: /dev/dri
+
+    extraVolumeMounts:
+      - name: dev-dri
+        mountPath: /dev/dri
+
+
     # -- additional sidecar containers to run inside the pod .
-    extraContainers: []
+    #extraContainers: []
 
     # Hardware acceleration volumes
-    extraVolumes:
+    #extraVolumes: []
       # - name: media
       #   hostPath:
       #     path: /media
@@ -305,5 +326,5 @@ spec:
     #   - name: smb-media
     #     mountPath: /smb-media
 
-    strategy:
-      type: Recreate    # Important for single GPU
+#    strategy:
+#      type: Recreate    # Important for single GPU
