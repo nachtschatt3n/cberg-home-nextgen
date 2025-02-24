@@ -46,7 +46,7 @@ spec:
       containers:
         -
           name: intelgpu-demo-job-1
-          image: intel/intel-opencl-icd:latest
+          image: michaelbeaumont/intel-opencl-icd
           imagePullPolicy: IfNotPresent
           command: [ "clinfo" ]
           resources:
