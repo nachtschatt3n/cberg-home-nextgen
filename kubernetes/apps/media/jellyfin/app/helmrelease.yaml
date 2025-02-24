@@ -270,7 +270,10 @@ spec:
         targetLabels: []
 
     # -- additional init containers to run inside the pod.
-    extraInitContainers: []
+    extraInitContainers:
+      debug:
+        image: busybox
+        command: [ "sleep", "infinity" ]
 
     # -- additional sidecar containers to run inside the pod.
     extraContainers: []
