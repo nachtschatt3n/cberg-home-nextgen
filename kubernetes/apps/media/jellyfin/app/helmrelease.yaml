@@ -276,15 +276,6 @@ spec:
     # -- additional init containers to run inside the pod.
     extraInitContainers: []
 
-    # Ensure probes are disabled during debugging
-    probes:
-      liveness:
-        enabled: false
-      readiness:
-        enabled: false
-      startup:
-        enabled: false
-
     # -- additional sidecar containers to run inside the pod .
     extraContainers: []
 
