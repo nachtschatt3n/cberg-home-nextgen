@@ -71,6 +71,11 @@ spec:
 
     # -- Security context for the pod.
     podSecurityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+        allowPrivilegeEscalation: true
       runAsUser: 1000
       runAsGroup: 1000
       fsGroup: 1000
@@ -79,7 +84,13 @@ spec:
         - 109 # render group
 
     # -- Security context for the container.
-    securityContext: {}
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+        allowPrivilegeEscalation: true
+
       # capabilities:
       #   drop:
       #   - ALL
