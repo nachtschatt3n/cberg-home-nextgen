@@ -232,9 +232,9 @@ spec:
         # -- Custom annotations to be added to the PVC
         annotations: {}
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
-        storageClass: 'local-hostpath'
+        #storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount
-        #existingClaim:-
+        existingClaim: 'jellyfin-media-smb'
 
     # -- Configuration for metrics collection and monitoring
     metrics:
@@ -288,12 +288,12 @@ spec:
 
     # Hardware acceleration volumes
     extraVolumes:
-      - name: media
-        hostPath:
-          path: /media
-          type: DirectoryOrCreate
-          persistentVolumeClaim:
-            claimName: jellyfin-media-smb
+      # - name: media
+      #   hostPath:
+      #     path: /media
+      #     type: DirectoryOrCreate
+      #     persistentVolumeClaim:
+      #       claimName: jellyfin-media-smb
 
     # extraVolumeMounts:
     #   - name: dri
