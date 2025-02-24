@@ -272,28 +272,7 @@ spec:
         targetLabels: []
 
     # -- additional init containers to run inside the pod.
-    extraInitContainers:
-      - name: debug
-        image: busybox
-        command:
-          - /bin/sh
-          - -c
-          - |
-            echo "Debug container starting..."
-            echo "Checking directory structure:"
-            ls -la /config
-            ls -la /media
-            echo "Waiting for debugging..."
-            sleep infinity
-        volumeMounts:
-          - name: config
-            mountPath: /config
-          - name: media
-            mountPath: /media
-          - name: dri
-            mountPath: /dev/dri
-          - name: v4l
-            mountPath: /dev/v4l
+    extraInitContainers: []
 
     # Ensure probes are disabled during debugging
     probes:
@@ -308,16 +287,13 @@ spec:
     extraContainers: []
 
     # Hardware acceleration volumes
-    # extraVolumes:
-    #   - name: dri
-    #     hostPath:
-    #       path: /dev/dri
-    #   - name: smb-media
-    #     hostPath:
-    #       path: /smb-media
-    #       type: DirectoryOrCreate
-    #     persistentVolumeClaim:
-    #       claimName: jellyfin-media-smb
+    extraVolumes:
+      - name: media
+        hostPath:
+          path: /media
+          type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: jellyfin-media-smb
 
     # extraVolumeMounts:
     #   - name: dri
