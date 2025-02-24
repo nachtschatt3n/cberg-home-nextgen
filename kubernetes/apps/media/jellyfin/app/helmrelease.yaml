@@ -22,8 +22,10 @@ spec:
       retries: 1
   upgrade:
     cleanupOnFail: true
+    force: false
     remediation:
       retries: 1
+      remediateLastFailure: true
     timeout: 30s
   uninstall:
     keepHistory: false
@@ -300,3 +302,6 @@ spec:
     #     mountPath: /dev/dri
     #   - name: smb-media
     #     mountPath: /smb-media
+
+    strategy:
+      type: Recreate    # Important for single GPU
