@@ -167,7 +167,7 @@ spec:
 
     # -- Configure liveness probe for Jellyfin.
     livenessProbe:
-      initialDelaySeconds: 10
+      initialDelaySeconds: 1200
       tcpSocket:
         port: http
       # successThreshold: 1
@@ -177,7 +177,7 @@ spec:
 
     # -- Configure readiness probe for Jellyfin.
     readinessProbe:
-      initialDelaySeconds: 10
+      initialDelaySeconds: 1200
       tcpSocket:
         port: http
       # successThreshold: 1
