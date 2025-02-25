@@ -30,7 +30,7 @@ nodes:
       serial: "S5GXNS0X201738E"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -50,7 +50,7 @@ nodes:
       serial: "S5GXNS0X207008P"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -70,7 +70,7 @@ nodes:
       serial: "S6Z1NU0XC43615L"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/064d2c892ac9a3a7da7fa550dbdd1516908bd9dfe355ad345ff4e9d8f8b34930
+    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
