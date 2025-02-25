@@ -7,7 +7,7 @@ metadata:
   namespace: media
 spec:
   interval: 30m
-  timeout: 30s
+  timeout: 10m
   chart:
     spec:
       chart: jellyfin
@@ -26,7 +26,7 @@ spec:
     remediation:
       retries: 1
       remediateLastFailure: true
-    timeout: 30s
+    timeout: 10m
   uninstall:
     keepHistory: false
   values:
