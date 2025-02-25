@@ -33,6 +33,7 @@ spec:
     requests:
       storage: 100Mi
   storageClassName: cifs-jellyfin-config
+
 # ---
 # apiVersion: v1
 # kind: PersistentVolumeClaim
