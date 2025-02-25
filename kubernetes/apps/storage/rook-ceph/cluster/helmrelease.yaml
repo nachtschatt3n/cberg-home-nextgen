@@ -23,11 +23,6 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
-  dependsOn:
-    - name: rook-ceph-operator
-      namespace: storage
-    - name: snapshot-controller
-      namespace: storage
   values:
     monitoring:
       enabled: true
