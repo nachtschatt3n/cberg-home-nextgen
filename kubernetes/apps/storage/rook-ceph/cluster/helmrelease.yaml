@@ -55,7 +55,7 @@ spec:
           - name: insights
             enabled: true
           #- name: pg_autoscaler
-         #   enabled: true
+          #   enabled: true
           - name: rook
             enabled: true
       network:
@@ -68,6 +68,7 @@ spec:
         #devicePathFilter: /dev/disk/by-id/nvme-Micron_7450_MTFDKBA800TFS_.*
         config:
           osdsPerDevice: "1"
+      namespace: storage
     cephFileSystems:
       - name: &cephFileSystemName ceph-filesystem
         spec:
