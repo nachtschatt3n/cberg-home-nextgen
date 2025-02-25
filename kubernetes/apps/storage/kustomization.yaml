@@ -5,7 +5,7 @@ kind: Kustomization
 namespace: storage
 components:
   - ../../flux/components/common
-resources:
-  - ./snapshot-controller/ks.yaml
-  - ./volsync/ks.yaml
-  - ./rook-ceph/ks.yaml
+#resources:
+#  - ./snapshot-controller/ks.yaml
+#  - ./volsync/ks.yaml
+#  - ./rook-ceph/ks.yaml
