@@ -8,4 +8,4 @@ components:
 resources:
   - ./snapshot-controller/ks.yaml
   - ./volsync/ks.yaml
-  - ./rook-ceph/ks.yaml
+#  - ./rook-ceph/ks.yaml
