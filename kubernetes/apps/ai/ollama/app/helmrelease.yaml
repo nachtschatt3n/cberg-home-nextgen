@@ -44,7 +44,7 @@ spec:
               #OLLAMA_KEEP_ALIVE: 1
               OLLAMA_DEBUG: 1
             command:
-              - "/bin/sh"
+              - "/bin/bash"
               - "-c"
               - |
                 source ipex-llm-init --gpu --device $DEVICE
