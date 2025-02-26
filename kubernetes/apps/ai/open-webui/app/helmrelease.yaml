@@ -42,9 +42,7 @@ spec:
 #      runtimeClassName: cpu
       persistentVolume:
         enabled: true
-        existingClaim: open-webui
-        accessMode: ReadWriteOnce
-        size: 100Gi
+        existingClaim: open-webui-ollama
 
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
@@ -104,9 +102,7 @@ spec:
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
     persistence:
       enabled: true
-      storageClass: local-hostpath
-      accessMode: ReadWriteOnce
-      size: 2Gi
+      existingClaim: open-webui
 
     # -- Node labels for pod assignment.
     nodeSelector: {}

@@ -71,10 +71,7 @@ spec:
     # -- Configure persistence settings for the chart under this key.
     persistence:
       config:
-        type: persistentVolumeClaim
-        storageClass: local-hostpath
-        accessMode: ReadWriteOnce
-        size: 10Gi
+        existingClaim: ollama-ipex-config
         globalMounts:
           - path: /
     service:
