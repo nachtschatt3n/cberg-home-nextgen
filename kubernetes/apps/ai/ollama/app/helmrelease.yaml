@@ -83,3 +83,21 @@ spec:
         ports:
           http:
             port: 11434
+    podSecurityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+      allowPrivilegeEscalation: true
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 250Mi
+        gpu.intel.com/i915: 1
+      limits:
+        memory: 8Gi
+        gpu.intel.com/i915: 1
+

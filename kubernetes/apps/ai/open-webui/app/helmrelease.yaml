@@ -42,7 +42,7 @@ spec:
 #      runtimeClassName: cpu
       persistentVolume:
         enabled: true
-        storageClass: local-hostpath
+        existingClaim: open-webui
         accessMode: ReadWriteOnce
         size: 100Gi
 
