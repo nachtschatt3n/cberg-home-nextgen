@@ -27,22 +27,22 @@ spec:
     nameOverride: ""
     ollama:
       # -- Automatically install Ollama Helm chart from https://otwld.github.io/ollama-helm/. Use [Helm Values](https://github.com/otwld/ollama-helm/#helm-values) to configure
-      enabled: true
-      # -- If enabling embedded Ollama, update fullnameOverride to your desired Ollama name value, or else it will use the default ollama.name value from the Ollama chart
-      fullnameOverride: "open-webui-ollama"
-      # -- Example Ollama configuration with nvidia GPU enabled, automatically downloading a model, and deploying a PVC for model persistence
-      ollama:
-        # gpu:
-        #   enabled: true
-        #   type: 'cpu'
-        #   number: 1
-        models:
-          pull:
-            - llama3
-#      runtimeClassName: cpu
-      persistentVolume:
-        enabled: true
-        existingClaim: open-webui-ollama
+      enabled: false
+#       # -- If enabling embedded Ollama, update fullnameOverride to your desired Ollama name value, or else it will use the default ollama.name value from the Ollama chart
+#       fullnameOverride: "open-webui-ollama"
+#       # -- Example Ollama configuration with nvidia GPU enabled, automatically downloading a model, and deploying a PVC for model persistence
+#       ollama:
+#         # gpu:
+#         #   enabled: true
+#         #   type: 'cpu'
+#         #   number: 1
+#         models:
+#           pull:
+#             - llama3
+# #      runtimeClassName: cpu
+#       persistentVolume:
+#         enabled: true
+#         existingClaim: open-webui-ollama
 
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
@@ -58,9 +58,7 @@ spec:
         enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
-    ollamaUrls:
-    - name: open-webui-ollama
-      url: http://open-webui-ollama:11434
+    ollamaUrls: []
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
