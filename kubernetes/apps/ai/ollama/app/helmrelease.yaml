@@ -47,13 +47,12 @@ spec:
               - "/bin/bash"
               - "-c"
               - |
-                if [ -f "/INSTALLED" ]; then
-                  echo "Installation already completed. Starting Ollama..."
-                  export OLLAMA_HOST=0.0.0.0:11434
-                  exec /start-ollama.sh
+                apt update
+                apt install --no-install-recommends -q -y software-properties-common ca-certificates wget ocl-icd-libopencl1 zsh vim curl git coreutils sed build-essential gcc-11 g++-11 lowdown
+                if [ -f "/tmp/gpu" ]; then
+                  echo "Download already completed. Prepare for Ollama..."
                 else
-                  apt update
-                  apt install --no-install-recommends -q -y software-properties-common ca-certificates wget ocl-icd-libopencl1 zsh vim curl git
+                  echo "Downloading Intel GPU dependencies..."
                   mkdir -p /tmp/gpu
                   cd /tmp/gpu
                   wget https://github.com/oneapi-src/level-zero/releases/download/v1.19.2/level-zero_1.19.2+u24.04_amd64.deb
@@ -62,22 +61,24 @@ spec:
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/intel-level-zero-gpu_1.6.32224.5_amd64.deb
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/intel-opencl-icd_24.52.32224.5_amd64.deb
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/libigdgmm12_22.5.5_amd64.deb
-                  dpkg -i *.deb
-                  rm *.deb
-                  cd /
                   wget https://github.com/mattcurf/ollama-intel-gpu/releases/download/v0.0.1/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
+                  git clone https://github.com/aristocratos/btop.git
+                fi
+                  dpkg -i *.deb
                   mkdir -p /usr/local
                   tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
-                  rm ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
-                  ln -sf /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama /usr/local/bin/ollama
-                  echo -e "#!/bin/bash\nexport OLLAMA_HOST=0.0.0.0:11434\n/usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve" > /start-ollama.sh
-                  chmod +x /start-ollama.sh
-                  touch /INSTALLED
+                  cd btop
+                  make
+                  make install
+                  cd ..
                   echo "Intel GPU setup complete. Starting Ollama..."
+                  export ONEAPI_DEVICE_SELECTOR=level_zero:0
+                  export IPEX_LLM_NUM_CTX=16384
                   export ZES_ENABLE_SYSMAN=1
+                  export ZES_ENABLE_SYSMAN_DEVICE=0
                   export OLLAMA_HOST=0.0.0.0:11434
-                  exec /start-ollama.sh
-                fi
+                  exec /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve
+
             probes:
               liveness:
                 enabled: true
@@ -125,6 +126,12 @@ spec:
         existingClaim: ollama-ipex-config
         globalMounts:
           - path: /root/.ollama
+      temp:
+        enabled: true
+        existingClaim: ollama-ipex-config
+        globalMounts:
+          - path: /tmp
+
     hostNetwork: false
     securityContext:
       privileged: true
