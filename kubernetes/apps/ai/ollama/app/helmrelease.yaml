@@ -90,6 +90,7 @@ spec:
                 memory: 16Gi
                 gpu.intel.com/i915: 1
               limits:
+                memory: 60Gi
                 gpu.intel.com/i915: 1
     service:
       main:
@@ -97,13 +98,18 @@ spec:
         ports:
           http:
             port: 11434
+
     persistence:
       config:
         enabled: true
         existingClaim: ollama-ipex-config
         globalMounts:
-          - path: /
-
+          - path: /root/.ollama
+      models:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/models
     hostNetwork: false
     securityContext:
       privileged: true
