@@ -70,13 +70,30 @@ spec:
                   tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
                   rm ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
                   ln -sf /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama /usr/local/bin/ollama
-                  echo -e "#!/bin/bash\nexport OLLAMA_HOST=0.0.0.0:11434\n/usr/local/bin/ollama serve" > /start-ollama.sh
+                  echo -e "#!/bin/bash\nexport OLLAMA_HOST=0.0.0.0:11434\n/usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve" > /start-ollama.sh
                   chmod +x /start-ollama.sh
                   touch /INSTALLED
                   echo "Intel GPU setup complete. Starting Ollama..."
+                  export ZES_ENABLE_SYSMAN=1
                   export OLLAMA_HOST=0.0.0.0:11434
                   exec /start-ollama.sh
                 fi
+            probes:
+              liveness:
+                enabled: true
+                type: HTTP
+                path: /api/version
+                port: 11434
+              readiness:
+                enabled: true
+                type: HTTP
+                path: /api/version
+                port: 11434
+              startup:
+                enabled: true
+                type: HTTP
+                path: /api/version
+                port: 11434
             securityContext:
               privileged: true
               capabilities:
