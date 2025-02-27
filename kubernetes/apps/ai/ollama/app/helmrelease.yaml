@@ -81,18 +81,14 @@ spec:
             probes:
               liveness:
                 enabled: true
-                type: HTTP
+                type: AUTO
                 port: 11434
               readiness:
                 enabled: true
-                type: HTTP
-                port: 11434
-              startup:
-                enabled: true
-                type: HTTP
+                type: AUTO
                 port: 11434
                 spec:
-                  initialDelaySeconds: 90
+                  initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 5
