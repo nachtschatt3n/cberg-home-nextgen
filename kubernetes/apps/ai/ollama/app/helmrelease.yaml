@@ -80,19 +80,16 @@ spec:
                 fi
             probes:
               liveness:
-                enabled: true
+                enabled: false
                 type: HTTP
-                path: /api/version
                 port: 11434
               readiness:
-                enabled: true
+                enabled: false
                 type: HTTP
-                path: /api/version
                 port: 11434
               startup:
-                enabled: true
+                enabled: false
                 type: HTTP
-                path: /api/version
                 port: 11434
             securityContext:
               privileged: true
