@@ -80,15 +80,15 @@ spec:
                 fi
             probes:
               liveness:
-                enabled: false
+                enabled: true
                 type: HTTP
                 port: 11434
               readiness:
-                enabled: false
+                enabled: true
                 type: HTTP
                 port: 11434
               startup:
-                enabled: false
+                enabled: true
                 type: HTTP
                 port: 11434
                 spec:
@@ -124,11 +124,6 @@ spec:
         existingClaim: ollama-ipex-config
         globalMounts:
           - path: /root/.ollama
-      models:
-        enabled: true
-        type: emptyDir
-        globalMounts:
-          - path: /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/models
     hostNetwork: false
     securityContext:
       privileged: true
