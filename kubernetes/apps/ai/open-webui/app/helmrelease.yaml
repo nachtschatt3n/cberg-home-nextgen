@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: open-webui
-      version: 5.13.0
+      version: 5.17.0
       sourceRef:
         kind: HelmRepository
         name: open-webui
@@ -58,7 +58,8 @@ spec:
         enabled: false
 
     # -- A list of Ollama API endpoints. These can be added in lieu of automatically installing the Ollama Helm chart, or in addition to it.
-    ollamaUrls: []
+    ollamaUrls:
+      - http://ollama-ipex.ai.svc.cluster.local:11434
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
