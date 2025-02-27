@@ -66,6 +66,7 @@ spec:
                   git clone https://github.com/aristocratos/btop.git
                   touch /root/.downloads/downloads.done
                 fi
+                  echo "Installing Intel GPU dependencies..."
                   dpkg -i *.deb
                   mkdir -p /usr/local
                   tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
