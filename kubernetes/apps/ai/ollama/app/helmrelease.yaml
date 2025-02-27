@@ -92,7 +92,7 @@ spec:
                 type: HTTP
                 port: 11434
                 spec:
-                  initialDelaySeconds: 360
+                  initialDelaySeconds: 90
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 5
