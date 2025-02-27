@@ -49,12 +49,13 @@ spec:
               - |
                 apt update
                 apt install --no-install-recommends -q -y software-properties-common ca-certificates wget ocl-icd-libopencl1 zsh vim curl git coreutils sed build-essential gcc-11 g++-11 lowdown
-                if [ -f "/tmp/gpu" ]; then
+                if [ -f "/root/.downloads/downloads.done" ]; then
                   echo "Download already completed. Prepare for Ollama..."
+                  cd /root/.downloads
                 else
                   echo "Downloading Intel GPU dependencies..."
-                  mkdir -p /tmp/gpu
-                  cd /tmp/gpu
+                  mkdir -p /root/.downloads
+                  cd /root/.downloads
                   wget https://github.com/oneapi-src/level-zero/releases/download/v1.19.2/level-zero_1.19.2+u24.04_amd64.deb
                   wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.5.6/intel-igc-core-2_2.5.6+18417_amd64.deb
                   wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.5.6/intel-igc-opencl-2_2.5.6+18417_amd64.deb
@@ -63,6 +64,7 @@ spec:
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/libigdgmm12_22.5.5_amd64.deb
                   wget https://github.com/mattcurf/ollama-intel-gpu/releases/download/v0.0.1/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
                   git clone https://github.com/aristocratos/btop.git
+                  touch /root/.downloads/downloads.done
                 fi
                   dpkg -i *.deb
                   mkdir -p /usr/local
@@ -129,7 +131,7 @@ spec:
         enabled: true
         existingClaim: ollama-ipex-tmp
         globalMounts:
-          - path: /tmp
+          - path: /root/.downloads
 
     hostNetwork: false
     securityContext:
