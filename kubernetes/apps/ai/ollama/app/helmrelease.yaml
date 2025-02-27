@@ -83,12 +83,17 @@ spec:
                 enabled: true
                 type: AUTO
                 port: 11434
+                spec:
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
               readiness:
                 enabled: true
                 type: AUTO
                 port: 11434
                 spec:
-                  initialDelaySeconds: 10
+                  initialDelaySeconds: 30
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 5
