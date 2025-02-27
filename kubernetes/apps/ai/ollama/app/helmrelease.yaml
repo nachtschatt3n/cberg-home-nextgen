@@ -43,14 +43,14 @@ spec:
               OLLAMA_HOST: "0.0.0.0:11434"
               #OLLAMA_KEEP_ALIVE: 1
               OLLAMA_DEBUG: 1
-            command:
-              - "/bin/bash"
-              - "-c"
-              - |
-                source ipex-llm-init --gpu --device $DEVICE
-                export OLLAMA_HOST=0.0.0.0:11434
-                cd /llm/ollama
-                ./ollama serve
+            # command:
+            #   - "/bin/bash"
+            #   - "-c"
+            #   - |
+            #     source ipex-llm-init --gpu --device $DEVICE
+            #     export OLLAMA_HOST=0.0.0.0:11434
+            #     cd /llm/ollama
+            #     ./ollama serve
 
             securityContext:
               privileged: true

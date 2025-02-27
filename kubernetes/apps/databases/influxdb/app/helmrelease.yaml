@@ -1,0 +1,77 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: influxdb
+  namespace: default
+spec:
+  interval: 25m
+  chart:
+    spec:
+      # renovate: registryUrl=https://helm.influxdata.com/
+      chart: influxdb2
+      version: 2.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: influxdata
+        namespace: flux-system
+      interval: 15m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  dependsOn:
+    - name: local-path-provisioner
+      namespace: kube-system
+  values:
+    image:
+      repository: docker.io/library/influxdb
+      tag: 2.5.1
+      pullPolicy: IfNotPresent
+    adminUser:
+      create: true
+      organization: sc
+      bucket: default
+      user: "admin"
+      retention_policy: "0s"
+      existingSecret: influxdb-secret
+    pdb:
+      create: false
+    env:
+      - name: TZ
+        value: "${TIMEZONE}"
+    service:
+      type: LoadBalancer
+      ports:
+        http:
+          port: 8086
+        rpc:
+          enabled: true
+          port: 8088
+    ingress:
+      enabled: true
+      ingressClassName: internal
+      annotations:
+        hajimari.io/enable: "true"
+        hajimari.io/appName: "Influx DB"
+        hajimari.io/icon: "database"
+        hajimari.io/group: "databases"
+      hostname: &host "influx.${SECRET_DOMAIN}"
+      hosts:
+        - &host "influx.${SECRET_DOMAIN}"
+      tls:
+        - hosts:
+            - *host
+    persistence:
+      enabled: true
+      useExisting: true
+      name: influxdb2-data
+    resources:
+      requests:
+        cpu: 100m
+        memory: 500M
+      limits:
+        memory: 1Gi
