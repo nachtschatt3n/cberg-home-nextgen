@@ -84,8 +84,8 @@ spec:
                 type: AUTO
                 port: 11434
                 spec:
-                  initialDelaySeconds: 30
-                  periodSeconds: 10
+                  initialDelaySeconds: 50
+                  periodSeconds: 30
                   timeoutSeconds: 5
                   failureThreshold: 5
               readiness:
@@ -93,8 +93,8 @@ spec:
                 type: AUTO
                 port: 11434
                 spec:
-                  initialDelaySeconds: 30
-                  periodSeconds: 10
+                  initialDelaySeconds: 50
+                  periodSeconds: 30
                   timeoutSeconds: 5
                   failureThreshold: 5
             securityContext:
