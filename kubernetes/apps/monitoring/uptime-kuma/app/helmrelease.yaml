@@ -1,0 +1,115 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: uptime-kuma
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: uptime-kuma
+      version: 2.18.0
+      sourceRef:
+        kind: HelmRepository
+        name: dirsigler
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    image:
+      repository: louislam/uptime-kuma
+      tag: 1.23.13-debian
+    env:
+      - name: UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN
+        value: "true"
+      - name: TZ
+        value: "${TIMEZONE}"
+    ingress:
+      enabled: true
+      ingressClassName: internal
+      annotations:
+        hajimari.io/icon: mdi:chart-line
+        hajimari.io/appName: "Uptime Kuma"
+        hajimari.io/group: "monitoring"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+        nginx.ingress.kubernetes.io/server-snippets: |
+          location / {
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_http_version 1.1;
+            proxy_set_header X-Forwarded-Host $http_host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header Host $host;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_cache_bypass $http_upgrade;
+          }
+      hosts:
+        - host: &host "kuma-monitoring.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - *host
+    persistence:
+      enabled: true
+      storageClassName: local-hostpath
+    volume:
+      enabled: true
+      accessMode: ReadWriteOnce
+      size: 4Gi
+      # If you want to use a storage class other than the default, uncomment this
+      # line and define the storage class name
+      storageClassName: local-hostpath
+      # Reuse your own pre-existing PVC.
+      # existingClaim: ""
+
+# Prometheus ServiceMonitor configuration
+    serviceMonitor:
+      enabled: true
+      # -- Scrape interval. If not set, the Prometheus default scrape interval is used.
+      interval: 60s
+      # -- Timeout if metrics can't be retrieved in given time interval
+      scrapeTimeout: 10s
+      # -- Scheme to use when scraping, e.g. http (default) or https.
+      scheme: ~
+      # -- TLS configuration to use when scraping, only applicable for scheme https.
+      tlsConfig: {}
+      # -- Prometheus [RelabelConfigs] to apply to samples before scraping
+      relabelings: []
+      # -- Prometheus [MetricRelabelConfigs] to apply to samples before ingestion
+      metricRelabelings: []
+      # -- Prometheus ServiceMonitor selector, only select Prometheus's with these
+      # labels (if not set, select any Prometheus)
+      selector: {}
+
+      # -- Namespace where the ServiceMonitor resource should be created, default is
+      # the same as the release namespace
+      namespace: ~
+      # -- Additional labels to add to the ServiceMonitor
+      additionalLabels: {}
+      # -- Additional annotations to add to the ServiceMonitor
+      annotations: {}
+
+      # -- BasicAuth credentials for scraping metrics, use API token and any string for username
+      # basicAuth:
+      #   username: "metrics"
+      #   password: ""
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi

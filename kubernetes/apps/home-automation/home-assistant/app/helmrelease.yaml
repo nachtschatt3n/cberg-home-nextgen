@@ -1,0 +1,149 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: home-assistant
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: home-assistant
+      version: 0.2.82
+      sourceRef:
+        kind: HelmRepository
+        name: pajikos
+        namespace: flux-system
+  maxHistory: 3
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  #dependsOn:
+    #- name: local-path-provisioner
+    #  namespace: kube-system
+  values:
+    image:
+      repository: ghcr.io/home-assistant/home-assistant
+      tag: 2024.10.2
+    env:
+      - name: TZ
+        value: "${TIMEZONE}"
+    service:
+      type: ClusterIP
+      port: 8123
+    ingress:
+      enabled: true
+      className: "external"
+      annotations:
+        hajimari.io/icon: mdi:home-assistant
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+      hosts:
+        - host: &host "hass.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - *host
+    persistence:
+      enabled: true
+      storageClass: csi-driver-nfs
+      accessMode: ReadWriteOnce
+      size: 15Gi
+    # Configuration for Home Assistant
+    configuration:
+      # Enable or disable the configuration setup for Home Assistant
+      enabled: true
+      # Force init will merge the current configuration file with the default configuration on every start
+      # This is useful when you want to ensure that the configuration file is always up to date
+      forceInit: true
+      # List of trusted proxies in the format of CIDR notation in a case of using a reverse proxy
+      # Here is the list of the most common private IP ranges, use your list of possible trusted proxies, usually, it's the IP of the reverse proxy
+      trusted_proxies:
+        - 10.42.0.0/16      # Add the IP address of your cluster CIDR
+      # Editing templateConfig allows you to customize the configuration.yaml file
+      # You can use Go template functions to customize the configuration
+      templateConfig: |-
+        # Loads default set of integrations. Do not remove.
+        default_config:
+
+        {{- if .Values.ingress.enabled }}
+        http:
+          use_x_forwarded_for: true
+          trusted_proxies:
+            {{- range .Values.configuration.trusted_proxies }}
+            - {{ . }}
+            {{- end }}
+        {{- end}}
+        # Load frontend themes from the themes folder
+        frontend:
+          themes: !include_dir_merge_named themes
+        automation: !include automations.yaml
+        script: !include scripts.yaml
+        scene: !include scenes.yaml
+    addons:
+      codeserver:
+        enabled: false
+        # image:
+        #   repository: ghcr.io/coder/code-server
+        #   tag: 4.19.1
+        # env:
+        #   - name: TZ
+        #     value: "${TIMEZONE}"
+        # workingDir: "/config"
+        # args:
+        #   - --auth
+        #   - "none"
+        #   - --user-data-dir
+        #   - "/config/.vscode"
+        #   - --extensions-dir
+        #   - "/config/.vscode"
+        # ingress:
+        #   enabled: true
+        #   ingressClassName: internal
+        #   annotations:
+        #     hajimari.io/icon: mdi:microsoft-visual-studio-code
+        #   hosts:
+        #     - host: &codehost "hass-code.${SECRET_DOMAIN}"
+        #       paths:
+        #         - path: /
+        #           pathType: Prefix
+        #   tls:
+        #     - hosts:
+        #         - *codehost
+    resources:
+      requests:
+        cpu: 100m
+        memory: 1000Mi
+      limits:
+        memory: 1Gi
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - k3s-2
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - home-assistant
+            topologyKey: kubernetes.io/hostname
+
+    # podSecurityContext:
+    #   runAsUser: 0
+    #   runAsGroup: 0
+    #   fsGroup: 0
+    #   fsGroupChangePolicy: "OnRootMismatch"

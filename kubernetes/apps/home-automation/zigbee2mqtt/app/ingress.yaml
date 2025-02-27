@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zigbee2mqtt
+spec:
+  ingressClassName: internal
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: zigbee2mqtt.${SECRET_DOMAIN}
+  rules:
+  - host: zigbee2mqtt.${SECRET_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: zigbee2mqtt
+            port:
+              number: 8080
