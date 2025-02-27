@@ -119,7 +119,6 @@ spec:
         ports:
           http:
             port: 11434
-
     persistence:
       config:
         enabled: true
@@ -128,7 +127,7 @@ spec:
           - path: /root/.ollama
       temp:
         enabled: true
-        existingClaim: ollama-ipex-config
+        existingClaim: ollama-ipex-tmp
         globalMounts:
           - path: /tmp
 
