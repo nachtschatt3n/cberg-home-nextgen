@@ -48,6 +48,12 @@ spec:
               - "-c"
               - |
                 apt update
+                export ONEAPI_DEVICE_SELECTOR=level_zero:0
+                export IPEX_LLM_NUM_CTX=16384
+                export ZES_ENABLE_SYSMAN=1
+                export ZES_ENABLE_SYSMAN_DEVICE=0
+                export OLLAMA_HOST=0.0.0.0:11434
+                export GIN_MODE=release
                 apt install --no-install-recommends -q -y software-properties-common ca-certificates wget ocl-icd-libopencl1 zsh vim curl git coreutils sed build-essential gcc-11 g++-11 lowdown rocm*
                 if [ -f "/root/.downloads/downloads.done" ]; then
                   echo "Download already completed. Prepare for Ollama..."
@@ -75,12 +81,6 @@ spec:
                   make install
                   cd ..
                   echo "Intel GPU setup complete. Starting Ollama..."
-                  export ONEAPI_DEVICE_SELECTOR=level_zero:0
-                  export IPEX_LLM_NUM_CTX=16384
-                  export ZES_ENABLE_SYSMAN=1
-                  export ZES_ENABLE_SYSMAN_DEVICE=0
-                  export OLLAMA_HOST=0.0.0.0:11434
-                  export GIN_MODE=release
                   exec /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve
 
             probes:
