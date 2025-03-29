@@ -80,6 +80,7 @@ spec:
                   export ZES_ENABLE_SYSMAN=1
                   export ZES_ENABLE_SYSMAN_DEVICE=0
                   export OLLAMA_HOST=0.0.0.0:11434
+                  export GIN_MODE=release
                   exec /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve
 
             probes:
