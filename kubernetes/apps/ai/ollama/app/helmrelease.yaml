@@ -68,20 +68,23 @@ spec:
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/intel-level-zero-gpu_1.6.32224.5_amd64.deb
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/intel-opencl-icd_24.52.32224.5_amd64.deb
                   wget https://github.com/intel/compute-runtime/releases/download/24.52.32224.5/libigdgmm12_22.5.5_amd64.deb
-                  wget https://github.com/mattcurf/ollama-intel-gpu/releases/download/v0.0.1/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
+                  #wget https://github.com/mattcurf/ollama-intel-gpu/releases/download/v0.0.1/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz
+                  wget https://github.com/mattcurf/ollama-intel-gpu/releases/download/v0.0.2/ollama-ipex-llm-2.2.0b20250313-ubuntu.tar.gz
                   git clone https://github.com/aristocratos/btop.git
                   touch /root/.downloads/downloads.done
                 fi
                   echo "Installing Intel GPU dependencies..."
                   dpkg -i *.deb
                   mkdir -p /usr/local
-                  tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
+                  #tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
+                  tar xvf ollama-ipex-llm-2.2.0b20250313-ubuntu.tar.gz -C /usr/local
                   cd btop
                   make
                   make install
                   cd ..
                   echo "Intel GPU setup complete. Starting Ollama..."
-                  exec /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve
+                  #exec /usr/local/ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu/ollama serve
+                  exec /usr/local/ollama-ipex-llm-2.2.0b20250313-ubuntu/ollama serve
 
             probes:
               liveness:
