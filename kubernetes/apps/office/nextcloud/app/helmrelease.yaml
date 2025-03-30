@@ -67,7 +67,10 @@ spec:
         swift.config.php: false
         upgrade-disable-web.config.php: true
         imaginary.config.php: false
-      phpConfigs: {}
+      phpConfigs:
+        zz-memory_limit.ini: |-
+          upload_max_filesize=5G
+          memory_limit=512M
       # Extra config files created in /var/www/html/config/
       # ref: https://docs.nextcloud.com/server/15/admin_manual/configuration_server/config_sample_php_parameters.html#multiple-config-php-file
       configs:
