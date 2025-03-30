@@ -16,24 +16,6 @@ parameters:
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
 
 ---
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: "cifs-nextcloud-config"
-provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
-volumeBindingMode: Immediate
-allowVolumeExpansion: true
-parameters:
-  source: "//${NAS_HOSTNAME}/nextcloud"
-  subdir: "/config"
-  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
-  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
-  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
-  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
-
-
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -45,16 +27,3 @@ spec:
     requests:
       storage: 300Gi
   storageClassName: cifs-nextcloud-data
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: nextcloud-config
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi
-  storageClassName: cifs-nextcloud-config
-

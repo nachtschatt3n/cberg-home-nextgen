@@ -170,8 +170,8 @@ spec:
         persistence:
           enabled: true
           # Use an existing Persistent Volume Claim (must be created ahead of time)
-          #existingClaim: "nextcloud-mariadb"
-          storageClass: "local-hostpath"
+          existingClaim: "nextcloud-mariadb"
+          #storageClass: "local-hostpath"
           #accessMode: ReadWriteOnce
           #size: 8Gi
 
