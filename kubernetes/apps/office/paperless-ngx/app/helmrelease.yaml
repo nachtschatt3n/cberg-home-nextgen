@@ -82,7 +82,7 @@ spec:
     persistence:
       data:
         enabled: true
-        existingClaim: paperless-ngx-data
+        existingClaim: paperless-data
       log:
         enabled: true
         existingClaim: paperless-ngx-log
