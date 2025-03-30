@@ -78,6 +78,7 @@ spec:
             'overwrite.cli.url' => 'https://drive.${SECRET_DOMAIN}',
             'filelocking.enabled' => 'true',
             'loglevel' => '2',
+            'check_data_directory_permissions' => 'false',
             'enable_previews' => true,
             'trusted_domains' =>
               [
