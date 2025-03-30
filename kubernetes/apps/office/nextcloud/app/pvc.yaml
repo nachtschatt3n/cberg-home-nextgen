@@ -7,6 +7,19 @@ provisioner: smb.csi.k8s.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
+mountOptions:
+  - vers=3.0
+  - dir_mode=0770
+  - file_mode=0770
+  - uid=1000
+  - gid=1000
+  - noperm
+  - cache=none
+  - actimeo=0
+  - noserverino
+  - multichannel
+  - max_channels=4
+
 parameters:
   source: "//${NAS_HOSTNAME}/nextcloud"
   subdir: "/data"
@@ -14,6 +27,7 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
+
 
 ---
 apiVersion: v1
