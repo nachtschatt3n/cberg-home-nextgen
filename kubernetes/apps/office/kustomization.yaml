@@ -7,4 +7,4 @@ components:
   - ../../flux/components/common
 #resources:
 #  - ./nextcloud/ks.yaml
-#  - ./paperless-ngx/ks.yaml
+  - ./paperless-ngx/ks.yaml
