@@ -110,8 +110,8 @@ spec:
       primary:
         persistence:
           enabled: true
-          storageClass: "local-hostpath"
-          size: 8Gi
+          existingClaim: paperless-mariadb
+          size: 5Gi
     redis:
       enabled: true
       auth:
@@ -120,8 +120,8 @@ spec:
       master:
         persistence:
           enabled: true
-          storageClass: "local-hostpath"
-          size: 2Gi
+          existingClaim: paperless-redis
+          size: 5Gi
         replica:
           enabled: false
           replicaCount: 0
