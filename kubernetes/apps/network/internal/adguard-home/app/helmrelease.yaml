@@ -40,6 +40,8 @@ spec:
     service:
       app:
         controller: adguard-home
+        service:
+          type: LoadBalancer
         ports:
           http:
             port: 3000
@@ -60,4 +62,4 @@ spec:
               - path: /
                 service:
                   identifier: app
-                  port: http
+                  port: 3000
