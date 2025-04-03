@@ -300,9 +300,9 @@ spec:
       bind_host: 0.0.0.0
       bind_port: 80
       beta_bind_port: 0
-      #users: {}
-      #- name: ${ADMIN_USERNAME}
-      #  password: ${ADMIN_PASSWORD}
+      users:
+      - name: ${ADMIN_USERNAME}
+        password: ${ADMIN_PASSWORD}
       auth_attempts: 5
       block_auth_min: 15
       http_proxy: ""
@@ -392,8 +392,8 @@ spec:
         port_dnscrypt: 0
         allow_unencrypted_doh: false
         strict_sni_check: false
-        certificate_path: /opt/adguardhome/conf/certs/tls.crt
-        private_key_path: /opt/adguardhome/conf/certs/tls.key
+        certificate_path: "/opt/adguardhome/conf/certs/tls.crt"
+        private_key_path: "/opt/adguardhome/conf/certs/tls.key"
       filters:
       - enabled: true
         url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
