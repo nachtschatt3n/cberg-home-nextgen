@@ -41,7 +41,7 @@ spec:
 
     services:
       adminPanel:
-        type: ClusterIP
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         port: 3000
@@ -54,7 +54,7 @@ spec:
         # -- (int) Node port for the Admin Panel (when applicable)
         nodePort:
       http:
-        type: ClusterIP
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for HTTP (when applicable)
@@ -72,7 +72,7 @@ spec:
         ipFamilies:
       https:
         enabled: true
-        type: ClusterIP
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for HTTPS (when applicable)
@@ -90,7 +90,7 @@ spec:
         ipFamilies:
       dns:
         enabled: true
-        type: NodePort
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for DNS (when applicable)
@@ -111,7 +111,7 @@ spec:
         ipFamilies:
       dnsOverTls:
         enabled: true
-        type: NodePort
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for DNS over TLS (when applicable)
@@ -129,7 +129,7 @@ spec:
         ipFamilies:
       dnsOverQuic:
         enabled: true
-        type: NodePort
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         port1:
@@ -150,7 +150,7 @@ spec:
         ipFamilies:
       dnscrypt:
         enabled: true
-        type: NodePort
+        type: LoadBalancer
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for DNSCrypt (when applicable)
