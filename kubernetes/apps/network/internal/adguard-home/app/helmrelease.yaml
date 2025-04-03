@@ -155,7 +155,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS Over QUIC (when applicable)
-        loadBalancerIP: "192.168.55.5"
+        loadBalancerIP: "192.168.55.8"
         # -- Dual-stack policy for DNS Over QUIC
         ipFamilyPolicy:
         # -- Dual-stack families for DNS Over QUIC; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
