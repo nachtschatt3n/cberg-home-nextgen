@@ -17,11 +17,11 @@ spec:
         namespace: flux-system
   install:
     remediation:
-      retries: 3
+      retries: 1
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 1
   values:
     # Default values for adguard-home.
     # This is a YAML-formatted file.
@@ -254,8 +254,8 @@ spec:
     affinity: {}
 
     # -- Strategy used to replace old Pods by new ones
-    strategy: {}
-      # type: RollingUpdate
+    strategy:
+      type: Recreate
       # rollingUpdate:
       #   maxSurge: 1
       #   maxUnavailable: 33%
