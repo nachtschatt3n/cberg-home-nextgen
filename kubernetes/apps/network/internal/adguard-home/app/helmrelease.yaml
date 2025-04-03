@@ -134,8 +134,8 @@ spec:
       limits:
         memory: 256Mi
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 4000m
+        memory: 2Gi
 
     autoscaling:
       enabled: false
@@ -156,16 +156,7 @@ spec:
     # -- Host networking requested for the pod. Beware that setting this to true requires all container ports declared in the pod to be free on the node. This can be useful for example to expose AdGuard Home as a DHCP Server.
     hostNetwork: false
 
-    # Explicitly set probes to null
-    #livenessProbe: null
-    #readinessProbe: null
-    #startupProbe: null
 
-    # Or you can uncomment these lines in your existing config
-    #priorityClassName: ""
-    #livenessProbe: null
-    #readinessProbe: null
-    #startupProbe: null
 
     # # -- Liveness probe configuration
     # # @default -- See below
@@ -314,7 +305,7 @@ spec:
         blocked_response_ttl: 10
         parental_block_host: family-block.dns.adguard.com
         safebrowsing_block_host: standard-block.dns.adguard.com
-        ratelimit: 20
+        ratelimit: 0
         ratelimit_whitelist: []
         refuse_any: true
         upstream_dns:
