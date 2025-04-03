@@ -298,9 +298,9 @@ spec:
       bind_host: 0.0.0.0
       bind_port: 80
       beta_bind_port: 0
-      users:
-      - name: ${ADMIN_USERNAME}
-        password: ${ADMIN_PASSWORD}
+      users: {}
+      #- name: ${ADMIN_USERNAME}
+      #  password: ${ADMIN_PASSWORD}
       auth_attempts: 5
       block_auth_min: 15
       http_proxy: ""
