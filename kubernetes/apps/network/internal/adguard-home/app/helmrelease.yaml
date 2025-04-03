@@ -104,14 +104,13 @@ spec:
         enabled: true
         type: LoadBalancer
         # -- Service annotations
-        annotations:
-          lbipam.cilium.io/ips: "192.168.55.53"
+        annotations: {}
         # -- Internal cluster service IP for DNS (when applicable)
         clusterIP: ""
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS (when applicable)
-        loadBalancerIP:
+        loadBalancerIP: "192.168.55.5"
         tcp:
           port: 53
           nodePort:
@@ -132,7 +131,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS over TLS (when applicable)
-        loadBalancerIP:
+        loadBalancerIP: "192.168.55.5"
         # -- (int) Node port for DNS over TLS (when applicable)
         port: 853
         nodePort:
@@ -156,7 +155,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS Over QUIC (when applicable)
-        loadBalancerIP:
+        loadBalancerIP: "192.168.55.5"
         # -- Dual-stack policy for DNS Over QUIC
         ipFamilyPolicy:
         # -- Dual-stack families for DNS Over QUIC; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
@@ -171,7 +170,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNSCrypt (when applicable)
-        loadBalancerIP:
+        loadBalancerIP: "192.168.55.5"
         tcp:
           port: 5443
           nodePort:
@@ -215,7 +214,7 @@ spec:
         #    hosts:
         #      - chart-example.
       https:
-        enabled: true
+        enabled: false
         className: "internal"
         annotations:
           hajimari.io/icon: simple-icons:adguard
@@ -384,7 +383,7 @@ spec:
       tls:
         enabled: true
         server_name: "adguard.${SECRET_DOMAIN}"
-        force_https: true
+        force_https: false
         port_https: 443
         port_dns_over_tls: 853
         port_dns_over_quic: 784
