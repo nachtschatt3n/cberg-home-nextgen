@@ -41,13 +41,13 @@ spec:
 
     service:
       app:
-        controller: app
+        controller: adguard-home
         type: LoadBalancer
         ports:
           http:
             port: 80
       dns-tcp:
-        controller: app
+        controller: adguard-home
         type: LoadBalancer
         externalTrafficPolicy: Local
         annotations:
@@ -60,7 +60,7 @@ spec:
             enabled: true
             port: 853
       dns-udp:
-        controller: app
+        controller: adguard-home
         type: LoadBalancer
         externalTrafficPolicy: Local
         annotations:
