@@ -39,7 +39,7 @@ spec:
                 memory: 1000Mi
     service:
       app:
-        controller: adguard-home
+        #controller: adguard-home
         type: LoadBalancer
         ports:
           http:
