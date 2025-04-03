@@ -42,6 +42,7 @@ spec:
     service:
       app:
         controller: main
+        type: LoadBalancer
         ports:
           http:
             port: 80
