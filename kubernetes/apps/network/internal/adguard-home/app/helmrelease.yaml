@@ -41,10 +41,10 @@ spec:
 
     securityContext: {}
     services:
-      # adminPanel:
-      #   enabled: true
-      #   type: LoadBalancer
-      #   port: 3000
+      adminPanel:
+        enabled: true
+        type: LoadBalancer
+        port: 3000
       http:
         enabled: true
         type: LoadBalancer
@@ -60,43 +60,41 @@ spec:
           port: 53
         udp:
           port: 53
-      # dnsOverTls:
-      #   enabled: true
-      #   type: LoadBalancer
-      #   port: 853
-      # dnsOverQuic:
-      #   enabled: true
-      #   type: LoadBalancer
-      #   port1:
-      #     port: 784
-      #   port2:
-      #     port: 8853
-      #   annotations:
-      #     service.kubernetes.io/load-balancer-class: "loadbalancer"
-      # dnscrypt:
-      #   enabled: true
-      #   type: LoadBalancer
-      #   tcp:
-      #     port: 5443
-      #   udp:
-      #     port: 5443
-      #   annotations:
-      #     service.kubernetes.io/load-balancer-class: "loadbalancer"
+      dnsOverTls:
+        enabled: true
+        type: LoadBalancer
+        port: 853
+      dnsOverQuic:
+        enabled: true
+        type: LoadBalancer
+        port: 784
+        #port: 8853
+        annotations:
+          service.kubernetes.io/load-balancer-class: "loadbalancer"
+      dnscrypt:
+        enabled: true
+        type: LoadBalancer
+        tcp:
+          port: 5443
+        udp:
+          port: 5443
+        annotations:
+          service.kubernetes.io/load-balancer-class: "loadbalancer"
     ingresses:
-      # adminPanel:
-      #   enabled: true
-      #   className: internal
-      #   hosts:
-      #     - host: &host adg-admin.${SECRET_DOMAIN}
-      #   paths:
-      #     - path: /
-      #       pathType: Prefix
-      #       service:
-      #         name: main
-      #         port: 3000
-      #   tls:
-      #     - hosts:
-      #         - *host
+      adminPanel:
+        enabled: true
+        className: internal
+        hosts:
+          - host: &host adg-admin.${SECRET_DOMAIN}
+        paths:
+          - path: /
+            pathType: Prefix
+            service:
+              name: main
+              port: 3000
+        tls:
+          - hosts:
+              - *host
       http:
         enabled: true
         className: internal
@@ -144,45 +142,13 @@ spec:
         memory: 128Mi
 
     autoscaling:
-      enabled: false
+      enabled: true
 
     nodeSelector: {}
 
     # Remove this empty tolerations array
     # tolerations: []
 
-    affinity:
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                  - key: app.kubernetes.io/name
-                    operator: In
-                    values:
-                      - adguard-home
-              topologyKey: "kubernetes.io/hostname"
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: In
-                  values:
-                    - k3s-0
-                    - k3s-2
-                    - k3s-3
-
-    # Keep only this tolerations section
-    tolerations:
-      - key: "node-role.kubernetes.io/master"
-        operator: "Exists"
-        effect: "NoSchedule"
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: "Exists"
-        effect: "NoSchedule"
 
     # -- Strategy used to replace old Pods by new ones
     strategy:
