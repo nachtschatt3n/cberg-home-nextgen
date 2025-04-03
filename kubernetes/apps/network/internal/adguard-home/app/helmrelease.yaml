@@ -34,24 +34,44 @@ spec:
               TZ: Europe/Berlin
             resources:
               requests:
-                cpu: 1000m
+                cpu: 500m
               limits:
-                memory: 1000Mi
+                cpu: 4000m
+                memory: 2000Mi
+
     service:
       app:
-        controller: adguard-home
-        type: LoadBalancer
         ports:
           http:
             port: 80
+      dns-tcp:
+        enabled: true
+        type: LoadBalancer
+        externalTrafficPolicy: Local
+        annotations:
+          metallb.universe.tf/allow-shared-ip: adguard-home
+        ports:
           dns-tcp:
             enabled: true
             port: 53
-            protocol: TCP
+          dns-over-tls:
+            enabled: true
+            port: 853
+      dns-udp:
+        enabled: true
+        type: LoadBalancer
+        externalTrafficPolicy: Local
+        annotations:
+          metallb.universe.tf/allow-shared-ip: adguard-home
+        ports:
           dns-udp:
             enabled: true
-            port: 53
             protocol: UDP
+            port: 53
+          dns-over-quic:
+            enabled: true
+            protocol: UDP
+            port: 784
     ingress:
       app:
         className: internal
@@ -62,3 +82,8 @@ spec:
                 service:
                   identifier: app
                   port: http
+    persistence:
+      config:
+        enabled: true
+        mountPath: /opt/adguardhome
+        existingClaim: adguard-home-config
