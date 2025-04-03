@@ -142,7 +142,7 @@ spec:
         memory: 128Mi
 
     autoscaling:
-      enabled: true
+      enabled: false
 
     nodeSelector: {}
 
