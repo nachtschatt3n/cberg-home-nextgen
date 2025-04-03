@@ -131,7 +131,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS over TLS (when applicable)
-        loadBalancerIP: "192.168.55.5"
+        loadBalancerIP: "192.168.55.6"
         # -- (int) Node port for DNS over TLS (when applicable)
         port: 853
         nodePort:
@@ -170,7 +170,7 @@ spec:
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNSCrypt (when applicable)
-        loadBalancerIP: "192.168.55.5"
+        loadBalancerIP: "192.168.55.7"
         tcp:
           port: 5443
           nodePort:
@@ -328,7 +328,7 @@ spec:
         parental_block_host: family-block.dns.adguard.com
         safebrowsing_block_host: standard-block.dns.adguard.com
         ratelimit: 0
-        ratelimit_whitelist: []
+        ratelimit_whitelist: [192.168.0.0/16]
         refuse_any: true
         upstream_dns:
         - "[/kuma.mathiasuhl.com/]https://dns.cloudflare.com/dns-query"
