@@ -39,8 +39,8 @@ spec:
                 memory: 1000Mi
     service:
       app:
-        #controller: adguard-home
-        type: LoadBalancer
+        controller: adguard-home
+        type: ClusterIP
         ports:
           http:
             port: 3000
