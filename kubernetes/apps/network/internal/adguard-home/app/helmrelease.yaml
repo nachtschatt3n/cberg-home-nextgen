@@ -41,10 +41,6 @@ spec:
 
     securityContext: {}
     services:
-      adminPanel:
-        enabled: true
-        type: LoadBalancer
-        port: 3000
       http:
         enabled: true
         type: LoadBalancer
@@ -81,20 +77,20 @@ spec:
         annotations:
           service.kubernetes.io/load-balancer-class: "loadbalancer"
     ingresses:
-      adminPanel:
-        enabled: true
-        className: internal
-        hosts:
-          - host: &host adg-admin.${SECRET_DOMAIN}
-        paths:
-          - path: /
-            pathType: Prefix
-            service:
-              name: main
-              port: 3000
-        tls:
-          - hosts:
-              - *host
+      # adminPanel:
+      #   enabled: true
+      #   className: internal
+      #   hosts:
+      #     - host: &host adg-admin.${SECRET_DOMAIN}
+      #   paths:
+      #     - path: /
+      #       pathType: Prefix
+      #       service:
+      #         name: main
+      #         port: 3000
+      #   tls:
+      #     - hosts:
+      #         - *host
       http:
         enabled: true
         className: internal
@@ -261,15 +257,15 @@ spec:
       # -- Note that this depends on the Access Mode set for the persistent volume claim (PVC) specified.
       # -- As a consequence, backups will not be possible if the PVC access mode is set to ReadWriteOncePod (Kubernetes 1.22+),
       # -- since the volume will be accessible only to the sole Adguard Home pod.
-      enabled: false
+      enabled: true
       # -- How frequently the Backup job should run. Cron Syntax, as supported by Kubernetes CronJobs
       schedule: "@daily"
-      concurrencyPolicy: Forbid
+      concurrencyPolicy: true
       restartPolicy: OnFailure
       ttlSecondsAfterFinished: 300
       activeDeadlineSeconds: 1800
       backoffLimit: 1
-      parallelism: 1
+      parallelism: 2
       imagePullPolicy: IfNotPresent
       resources: {}
       aws:
