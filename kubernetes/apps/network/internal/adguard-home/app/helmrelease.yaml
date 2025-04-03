@@ -84,8 +84,8 @@ spec:
                 service:
                   identifier: app
                   port: http
-    persistence:
-      config:
-        existingClaim: adguard-home-config
-        globalMounts:
-          - path: /opt/adguardhome
+    # persistence:
+    #   config:
+    #     existingClaim: adguard-home-config
+    #     globalMounts:
+    #       - path: /
