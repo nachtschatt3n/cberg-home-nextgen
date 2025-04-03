@@ -41,11 +41,12 @@ spec:
 
     service:
       app:
+        controller: main
         ports:
           http:
             port: 80
       dns-tcp:
-        enabled: true
+        controller: main
         type: LoadBalancer
         externalTrafficPolicy: Local
         annotations:
@@ -58,7 +59,7 @@ spec:
             enabled: true
             port: 853
       dns-udp:
-        enabled: true
+        controller: main
         type: LoadBalancer
         externalTrafficPolicy: Local
         annotations:
