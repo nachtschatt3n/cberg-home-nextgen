@@ -83,8 +83,8 @@ spec:
                 service:
                   identifier: app
                   port: http
-    # persistence:
-    #   config:
-    #     enabled: true
-    #     mountPath: /opt/adguardhome
-    #     existingClaim: adguard-home-config
+    persistence:
+      config:
+        enabled: true
+        mountPath: /opt/adguardhome
+        existingClaim: adguard-home-config
