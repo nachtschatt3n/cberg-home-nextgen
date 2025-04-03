@@ -327,7 +327,7 @@ spec:
         parental_block_host: family-block.dns.adguard.com
         safebrowsing_block_host: standard-block.dns.adguard.com
         ratelimit: 0
-        ratelimit_whitelist: [192.168.0.0/16]
+        ratelimit_whitelist: [192.168.0.0]
         refuse_any: true
         upstream_dns:
         - "[/kuma.mathiasuhl.com/]https://dns.cloudflare.com/dns-query"
