@@ -257,7 +257,7 @@ spec:
       # -- Note that this depends on the Access Mode set for the persistent volume claim (PVC) specified.
       # -- As a consequence, backups will not be possible if the PVC access mode is set to ReadWriteOncePod (Kubernetes 1.22+),
       # -- since the volume will be accessible only to the sole Adguard Home pod.
-      enabled: true
+      enabled: false
       # -- How frequently the Backup job should run. Cron Syntax, as supported by Kubernetes CronJobs
       schedule: "@daily"
       concurrencyPolicy: true
