@@ -29,4 +29,3 @@ resources:
   - ./stakater.yaml
   - ./weave-gitops.yaml
   - ./longhorn.yaml
-  - ./rm3l.yaml
