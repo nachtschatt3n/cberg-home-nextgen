@@ -5,4 +5,4 @@ namespace: network
 resources:
   - ./helmrelease.yaml
   - ./certificate.yaml
-  - ./secret.yaml
+  - ./secret.sops.yaml
