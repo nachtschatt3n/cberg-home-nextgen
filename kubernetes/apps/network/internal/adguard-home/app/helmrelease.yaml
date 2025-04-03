@@ -35,6 +35,17 @@ spec:
       # Overrides the image tag whose default is the chart appVersion.
       tag: "v0.107.59"
 
+    env:
+      - name: ADMIN_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: adguard-home-credentials
+            key: admin-password
+      - name: ADMIN_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: adguard-home-credentials
+            key: admin-username
 
     serviceAccount:
       # Specifies whether a service account should be created
@@ -288,10 +299,9 @@ spec:
       bind_host: 0.0.0.0
       bind_port: 80
       beta_bind_port: 0
-      users: []
-      # - name: admin
-      #   # -- password encoded via httpasswd : r3allyPl34s3Ch4ng3M3
-      #   password: $2y$05$0mz52NwW/bheVxROVUIVQ.Gf1HOyBP/SPK5DRmN/B0y.GNBN80xXO
+      users:
+      - name: ${ADMIN_USERNAME}
+        password: ${ADMIN_PASSWORD}
       auth_attempts: 5
       block_auth_min: 15
       http_proxy: ""
