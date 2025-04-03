@@ -40,7 +40,7 @@ spec:
     service:
       app:
         controller: adguard-home
-        type: ClusterIP
+        type: LoadBalancer
         ports:
           http:
             port: 80
