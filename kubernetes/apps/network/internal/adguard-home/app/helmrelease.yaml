@@ -257,11 +257,10 @@ spec:
     strategy:
       type: Recreate
 
-
     # -- Rolling update strategy
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 33%
+    #rollingUpdate:
+    #  maxSurge: 1
+    #  maxUnavailable: 33%
 
 
     persistence:
