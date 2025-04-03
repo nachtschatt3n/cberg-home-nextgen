@@ -42,12 +42,20 @@ spec:
         controller: adguard-home
         ports:
           http:
-            port: *port
+            port: 3000
+          dns-tcp:
+            enabled: true
+            port: 53
+            protocol: TCP
+          dns-udp:
+            enabled: true
+            port: 53
+            protocol: UDP
     ingress:
       app:
         className: internal
         hosts:
-          - host: adguard-home.${SECRET_DOMAIN}"
+          - host: "adguard-home.${SECRET_DOMAIN}"
             paths:
               - path: /
                 service:
