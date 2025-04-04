@@ -26,12 +26,12 @@ spec:
   values:
     image:
       repository: louislam/uptime-kuma
-      tag: 2.0.0-beta.2
+      tag: 1.23.15-debian
     env:
       - name: UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN
         value: "true"
       - name: TZ
-        value: "${TIMEZONE}"
+        value: "Europe/Berlin"
     ingress:
       enabled: true
       ingressClassName: internal
