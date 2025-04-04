@@ -8,4 +8,4 @@ resources:
  # - ./mosquitto/ks.yaml
   #- ./home-assistant/ks.yaml
 #  - ./node-red/ks.yaml
-  - ./io-broker/ks.yaml
+  - ./iobroker/ks.yaml
