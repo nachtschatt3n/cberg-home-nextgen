@@ -118,9 +118,9 @@ spec:
         #         - *codehost
     resources:
       requests:
-        cpu: 100m
+        cpu: 1000m
       limits:
-        memory: 4Gi
+        memory: 8Gi
 
 
     # podSecurityContext:
