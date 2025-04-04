@@ -249,11 +249,7 @@ spec:
     persistence:
       config-replicated:
         enabled: true
-        type: persistentVolumeClaim
-        accessMode: ReadWriteOnce
-        #storageClass: replicate-nvme
-        storageClass: local-hostpath
-        size: 10Gi
+        existingClaim: iobroker-config
         globalMounts:
           - path: /opt/iobroker
             readOnly: false
