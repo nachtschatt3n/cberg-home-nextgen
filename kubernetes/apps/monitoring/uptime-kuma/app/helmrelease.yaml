@@ -55,7 +55,7 @@ spec:
             proxy_cache_bypass $http_upgrade;
           }
       hosts:
-        - host: &host "kuma-monitoring.${SECRET_DOMAIN}"
+        - host: &host "kuma.${SECRET_DOMAIN}"
           paths:
             - path: /
               pathType: Prefix
@@ -64,16 +64,13 @@ spec:
             - *host
     persistence:
       enabled: true
-      storageClassName: local-hostpath
     volume:
       enabled: true
-      accessMode: ReadWriteOnce
-      size: 4Gi
       # If you want to use a storage class other than the default, uncomment this
       # line and define the storage class name
-      storageClassName: local-hostpath
+      #storageClassName: local-hostpath
       # Reuse your own pre-existing PVC.
-      # existingClaim: ""
+      existingClaim: "kuma-monitoring-config"
 
 # Prometheus ServiceMonitor configuration
     serviceMonitor:
@@ -112,4 +109,4 @@ spec:
         cpu: 100m
         memory: 128Mi
       limits:
-        memory: 256Mi
+        memory: 1Gi
