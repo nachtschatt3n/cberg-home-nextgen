@@ -30,10 +30,10 @@ spec:
   values:
     image:
       repository: ghcr.io/home-assistant/home-assistant
-      tag: 2024.10.2
+      tag: 2025.4.1
     env:
       - name: TZ
-        value: "${TIMEZONE}"
+        value: "Europe/Berlin"
     service:
       type: ClusterIP
       port: 8123
@@ -53,9 +53,8 @@ spec:
             - *host
     persistence:
       enabled: true
-      storageClass: csi-driver-nfs
-      accessMode: ReadWriteOnce
-      size: 15Gi
+      existingClaim: home-assistant-config
+
     # Configuration for Home Assistant
     configuration:
       # Enable or disable the configuration setup for Home Assistant
@@ -120,27 +119,9 @@ spec:
     resources:
       requests:
         cpu: 100m
-        memory: 1000Mi
       limits:
-        memory: 1Gi
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-            - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: In
-                  values:
-                    - k3s-2
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-                - key: app.kubernetes.io/name
-                  operator: In
-                  values:
-                    - home-assistant
-            topologyKey: kubernetes.io/hostname
+        memory: 4Gi
+
 
     # podSecurityContext:
     #   runAsUser: 0
