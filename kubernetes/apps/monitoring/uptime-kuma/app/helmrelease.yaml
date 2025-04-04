@@ -34,7 +34,7 @@ spec:
         value: "Europe/Berlin"
     ingress:
       enabled: true
-      ingressClassName: internal
+      ingressClassName: "external"
       annotations:
         hajimari.io/icon: mdi:chart-line
         hajimari.io/appName: "Uptime Kuma"
