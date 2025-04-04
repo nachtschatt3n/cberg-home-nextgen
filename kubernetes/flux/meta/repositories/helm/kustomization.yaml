@@ -32,3 +32,4 @@ resources:
   - ./rm3l.yaml
   - ./dirsigler.yaml
   - ./pajikos.yaml
+  - ./n8n.yaml
