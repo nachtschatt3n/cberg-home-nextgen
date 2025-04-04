@@ -30,3 +30,4 @@ resources:
   - ./weave-gitops.yaml
   - ./longhorn.yaml
   - ./rm3l.yaml
+  - ./dirsigler.yaml
