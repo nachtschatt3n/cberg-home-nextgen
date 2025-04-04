@@ -22,9 +22,6 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 1
-  dependsOn:
-    - name: local-path-provisioner
-      namespace: kube-system
   values:
     defaultPodOptions:
       hostname: iobroker
