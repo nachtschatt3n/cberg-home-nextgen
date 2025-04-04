@@ -30,7 +30,7 @@ spec:
     # Default values within the n8n application can be found under https://github.com/n8n-io/n8n/blob/master/packages/cli/src/config/index.ts
     n8n:
       # if not specified n8n on first launch creates a random encryption key for encrypting saved credentials and saves it in the ~/.n8n folder
-      encryption_key:
+      #encryption_key:
     # defaults:
 
     config:
@@ -97,7 +97,7 @@ spec:
     generic:
       timezone: Europe/Berlin
     # path:         # Path n8n is deployed to - default: "/"
-      host: n8n.mathiasuhl.com         # Host name n8n can be reached - default: localhost
+      host: n8n.${SECRET_DOMAIN}         # Host name n8n can be reached - default: localhost
     # port:         # HTTP port n8n can be reached - default: 5678
     # listen_address: # IP address n8n should listen on - default: 0.0.0.0
     # protocol:       # HTTP Protocol via which n8n can be reached - possible values [http , https] - default: http
@@ -132,7 +132,7 @@ spec:
     # Set additional environment variables on the Deployment
     extraEnv: {}
     # Set this if running behind a reverse proxy and the external port is different from the port n8n runs on
-    WEBHOOK_URL: "https://n8n.mathiasuhl.com/"
+    WEBHOOK_URL: "https://n8n.${SECRET_DOMAIN}/"
 
     # Set additional environment from existing secrets
     extraEnvSecrets: {}
@@ -158,7 +158,7 @@ spec:
       ##   set, choosing the default provisioner.  (gp2 on AWS, standard on
       ##   GKE, AWS & OpenStack)
       ##
-      storageClass: local-hostpath
+      #storageClass: local-hostpath
       ## PVC annotations
       #
       # If you need this annotation include it under values.yml file and pvc.yml template will add it.
@@ -169,14 +169,14 @@ spec:
       #   helm.sh/resource-policy: keep
       ## Persistent Volume Access Mode
       ##
-      accessModes:
-        - ReadWriteOnce
+      #accessModes:
+      #  - ReadWriteOnce
       ## Persistent Volume size
       ##
-      size: 1Gi
+      #size: 1Gi
       ## Use an existing PVC
       ##
-      # existingClaim:
+      existingClaim: n8n-config
 
     replicaCount: 1
 
@@ -194,7 +194,7 @@ spec:
       repository: n8nio/n8n
       pullPolicy: IfNotPresent
       # Overrides the image tag whose default is the chart appVersion.
-      tag: ""
+      tag: "1.86.0"
 
     imagePullSecrets: []
     nameOverride: ""
@@ -312,7 +312,7 @@ spec:
       # resources, such as Minikube. If you do want to specify resources, uncomment the following
       # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
       limits:
-        memory: 2Gi
+        memory: 4Gi
       requests:
         cpu: 250m
         memory: 512Mi
@@ -350,8 +350,8 @@ spec:
     ## Bitnami Redis configuration
     ## https://github.com/bitnami/charts/tree/master/bitnami/redis
     redis:
-      enabled: false
-      # architecture: standalone
+      enabled: true
+      architecture: standalone
 
       # master:
       #  persistence:
