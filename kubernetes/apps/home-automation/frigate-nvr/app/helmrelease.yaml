@@ -27,7 +27,7 @@ spec:
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate
-      tag: 0.13.1
+      tag: 0.15.0
 
     env:
       TZ: "Europe/Berlin"
@@ -58,8 +58,6 @@ spec:
                 roles:
                   - detect
                   - record
-
-
 
 
 
