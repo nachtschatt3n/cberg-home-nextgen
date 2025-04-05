@@ -10,3 +10,4 @@ resources:
   - ./n8n/ks.yaml
   - ./zigbee2mqtt/ks.yaml
   - ./mosquitto/ks.yaml
+  - ./frigate-nvr/ks.yaml

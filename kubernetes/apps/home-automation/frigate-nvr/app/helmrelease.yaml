@@ -1,0 +1,118 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: frigate
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: frigate
+      version: 7.3.0
+      sourceRef:
+        kind: HelmRepository
+        name: blakeblackshear
+        namespace: flux-system
+  maxHistory: 3
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    image:
+      repository: ghcr.io/blakeblackshear/frigate
+      tag: 0.13.1
+
+    env:
+      - name: TZ
+        value: "Europe/Berlin"
+      - name: LIBVA_DRIVER_NAME
+        value: "i965"
+
+    # Frigate configuration
+    config: |
+      mqtt:
+        host: "mosquitto.home-automation.svc.cluster.local"
+        port: 1883
+        # Update with your actual MQTT credentials if needed
+        # user: admin
+        # password: ""
+
+      # Default detector settings
+      detectors:
+        cpu1:
+          type: cpu
+
+      # Frigate requires at least one camera to be defined
+      cameras:
+        kids:
+          ffmpeg:
+            inputs:
+              - path: rtsp://camac:Ja3YP@192.168.33.91/live
+                roles:
+                  - detect
+                  - record
+          detect:
+            width: 1280
+            height: 720
+            fps: 5
+        entry:
+          ffmpeg:
+            inputs:
+              - path: rtsp://camac:Ja3YP@192.168.33.92/live
+                roles:
+                  - detect
+                  - record
+          detect:
+            width: 1280
+            height: 720
+            fps: 5
+
+
+
+    # Configure persistence for recordings, database, etc.
+    persistence:
+      config:
+        enabled: true
+        existingClaim: frigate-config
+      media:
+        enabled: true
+        existingClaim: frigate-media
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 5000
+
+    # Ingress configuration
+    ingress:
+      enabled: true
+      className: "external"
+      annotations:
+        hajimari.io/icon: mdi:cctv
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+      hosts:
+        - host: &host "frigate.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - *host
+
+    # Resource requests and limits
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        memory: 8Gi
+
+    # Set shared memory size for ffmpeg
+    shmSize: "2Gi"
