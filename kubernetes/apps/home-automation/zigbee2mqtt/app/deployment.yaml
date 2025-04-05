@@ -44,5 +44,4 @@ spec:
           privileged: true
       volumes:
       - name: data
-        persistentVolumeClaim:
-          claimName: zigbee2mqtt-data
+        existingClaim: zigbee2mqtt-data
