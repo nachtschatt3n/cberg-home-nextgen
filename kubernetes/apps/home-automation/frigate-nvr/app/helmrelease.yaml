@@ -103,13 +103,15 @@ spec:
     #         - "frigate.${SECRET_DOMAIN}"
 
     ingress:
-      enabled: true
+      enabled: false
       ingressClassName: internal
       hosts:
         - host: frigate.example.com
           paths:
             - path: "/"
-      tls: []
+              pathType: Prefix
+              portName: http
+
 
 
     # Resource requests and limits
