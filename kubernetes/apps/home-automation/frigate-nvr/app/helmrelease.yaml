@@ -42,7 +42,7 @@ spec:
         # user: admin
         # password: ""
       genai:
-        enabled: True
+        enabled: false
         provider: ollama
         base_url: http://ollama-ipex.ai.svc.cluster.local:11434
         model: llava:7b
@@ -63,7 +63,7 @@ spec:
         kids:
           enabled: true
           genai:
-            use_snapshot: True
+            use_snapshot: false
             prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
             object_prompts:
               person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
@@ -78,7 +78,7 @@ spec:
         entry:
           enabled: true
           genai:
-            use_snapshot: True
+            use_snapshot: false
             prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
             object_prompts:
               person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
