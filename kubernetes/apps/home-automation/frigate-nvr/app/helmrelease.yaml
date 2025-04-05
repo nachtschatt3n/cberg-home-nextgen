@@ -108,8 +108,7 @@ spec:
       hosts:
         - host: frigate.example.com
           paths:
-            - path: /
-              pathType: Prefix
+            - path: "/"
       tls: []
 
 
