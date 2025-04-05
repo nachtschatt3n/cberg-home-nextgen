@@ -4,17 +4,17 @@ metadata:
   name: frigate
   namespace: home-automation
   annotations:
-    external-dns.alpha.kubernetes.io/target: external.uhl.cool
+    #external-dns.alpha.kubernetes.io/target: external.uhl.cool
     hajimari.io/icon: mdi:cctv
     meta.helm.sh/release-name: frigate
     meta.helm.sh/release-namespace: home-automation
 spec:
-  ingressClassName: external
+  ingressClassName: internal
   tls:
     - hosts:
-        - frigate.uhl.cool
+        - "frigate.${SECRET_DOMAIN}"
   rules:
-    - host: frigate.uhl.cool
+    - host: "frigate.${SECRET_DOMAIN}"
       http:
         paths:
           - path: /
