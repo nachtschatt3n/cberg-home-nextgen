@@ -99,7 +99,7 @@ spec:
       hosts:
         - host: "frigate.${SECRET_DOMAIN}"
           paths:
-          - path: '/'
+          - path: /
             portName: http-auth
       tls:
         - hosts:
