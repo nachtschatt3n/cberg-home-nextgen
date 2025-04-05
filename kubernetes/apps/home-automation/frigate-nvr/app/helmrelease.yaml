@@ -29,9 +29,6 @@ spec:
       repository: ghcr.io/blakeblackshear/frigate
       tag: 0.13.1
 
-    podAnnotations:
-      configmap.reloader.stakater.com/reload: "frigate-config"
-
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "i965"
