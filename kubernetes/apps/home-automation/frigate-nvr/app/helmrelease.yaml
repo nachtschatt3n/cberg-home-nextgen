@@ -108,8 +108,7 @@ spec:
       hosts:
         - host: frigate.uhl.cool
           paths:
-            - path: /
-              pathType: Prefix
+            - path: "/"
       tls: []
 
 
