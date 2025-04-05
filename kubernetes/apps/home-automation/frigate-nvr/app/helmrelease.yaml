@@ -29,11 +29,12 @@ spec:
       repository: ghcr.io/blakeblackshear/frigate
       tag: 0.13.1
 
+    podAnnotations:
+      configmap.reloader.stakater.com/reload: "frigate-config"
+
     env:
-      - name: TZ
-        value: "Europe/Berlin"
-      - name: LIBVA_DRIVER_NAME
-        value: "i965"
+      TZ: "Europe/Berlin"
+      LIBVA_DRIVER_NAME: "i965"
 
     # Frigate configuration
     config: |
@@ -74,8 +75,6 @@ spec:
             height: 720
             fps: 5
 
-
-
     # Configure persistence for recordings, database, etc.
     persistence:
       config:
@@ -100,8 +99,8 @@ spec:
       hosts:
         - host: &host "frigate.${SECRET_DOMAIN}"
           paths:
-            - path: /
-              pathType: Prefix
+            - pathType: Prefix
+              path: /
       tls:
         - hosts:
             - *host
