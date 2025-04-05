@@ -98,6 +98,9 @@ spec:
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
       hosts:
         - host: &host "frigate.${SECRET_DOMAIN}"
+          paths:
+            - path: "/"
+              pathType: Prefix
       tls:
         - hosts:
             - *host
