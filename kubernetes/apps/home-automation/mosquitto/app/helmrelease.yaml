@@ -68,7 +68,7 @@ spec:
       main:
         controller: mosquitto
         type: LoadBalancer
-        loadBalancerIP: "192.168.31.236"
+        loadBalancerIP: "192.168.55.15"
         externalTrafficPolicy: Local
         ports:
           mqtt:
@@ -95,7 +95,7 @@ spec:
               - mqtt.${SECRET_DOMAIN}
     persistence:
       data:
-        existingClaim: mosquitto
+        existingClaim: mosquitto-config
       config-file:
         type: configMap
         name: mosquitto-configmap

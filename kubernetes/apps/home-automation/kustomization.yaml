@@ -9,3 +9,4 @@ resources:
   - ./iobroker/ks.yaml
   - ./n8n/ks.yaml
   - ./zigbee2mqtt/ks.yaml
+  - ./mosquitto/ks.yaml
