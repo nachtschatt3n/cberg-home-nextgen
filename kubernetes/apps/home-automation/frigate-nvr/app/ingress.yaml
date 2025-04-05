@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frigate
+  namespace: home-automation
+  annotations:
+    external-dns.alpha.kubernetes.io/target: external.example.com
+    hajimari.io/icon: mdi:cctv
+    meta.helm.sh/release-name: frigate
+    meta.helm.sh/release-namespace: home-automation
+spec:
+  ingressClassName: external
+  tls:
+    - hosts:
+        - frigate.example.com
+  rules:
+    - host: frigate.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frigate
+                port:
+                  number: 5000

@@ -5,3 +5,4 @@ resources:
   - ./pvc.yaml
   - ./storageclass.yaml
   - ./helmrelease.yaml
+  - ./ingress.yaml
