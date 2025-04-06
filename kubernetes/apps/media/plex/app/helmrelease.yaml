@@ -34,18 +34,7 @@ spec:
       port: 32400
 
     ingress:
-      enabled: true
-      ingressClassName: internal
-      annotations:
-        external-dns.alpha.kubernetes.io/target: plex.uhl.cool
-      hosts:
-        - host: plex.uhl.cool
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - plex.uhl.cool
+      enabled: false
 
     pms:
       resources:
