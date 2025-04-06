@@ -65,6 +65,7 @@ spec:
 
     # -- Add kubernetes liveness probe to pms container.
     livenessProbe:
+      enabled: true
       httpGet:
         path: /identity
         port: 32400
@@ -75,6 +76,7 @@ spec:
 
     # -- Add kubernetes readiness probe to pms container.
     readinessProbe:
+      enabled: true
       httpGet:
         path: /identity
         port: 32400
