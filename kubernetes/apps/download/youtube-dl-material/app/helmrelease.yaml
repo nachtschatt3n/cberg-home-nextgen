@@ -78,12 +78,12 @@ spec:
                     port: 8080
                   failureThreshold: 30
                   periodSeconds: 10
-    defaultPodOptions:
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: "OnRootMismatch"
+    # defaultPodOptions:
+    #   securityContext:
+    #     runAsUser: 1000
+    #     runAsGroup: 1000
+    #     fsGroup: 1000
+    #     fsGroupChangePolicy: "OnRootMismatch"
 
     service:
       main:
@@ -109,28 +109,28 @@ spec:
           - hosts:
               - *host
 
-    # persistence:
-    #   downloads:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/audio
-    #         subPath: audio
-    #   videos:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/video
-    #         subPath: video
-    #   appdata:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/appdata
-    #         subPath: appdata
-    #   subscriptions:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/subscriptions
-    #         subPath: subscriptions
+    persistence:
+      downloads:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/audio
+            subPath: audio
+      videos:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/video
+            subPath: video
+      appdata:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/appdata
+            subPath: appdata
+      subscriptions:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/subscriptions
+            subPath: subscriptions
