@@ -63,6 +63,26 @@ spec:
       PLEX_PREFERENCE_7: "HardwareAcceleratedCodecs=1"
       PLEX_CLAIM: "claim-q9Z44LEtGQR-myxM86AF"
 
+    # -- Add kubernetes liveness probe to pms container.
+    livenessProbe:
+      httpGet:
+        path: /identity
+        port: 32400
+      initialDelaySeconds: 60
+      periodSeconds: 60
+      timeoutSeconds: 1
+      failureThreshold: 3
+
+    # -- Add kubernetes readiness probe to pms container.
+    readinessProbe:
+      httpGet:
+        path: /identity
+        port: 32400
+      initialDelaySeconds: 60
+      periodSeconds: 60
+      timeoutSeconds: 1
+      failureThreshold: 3
+
     extraVolumes:
       - name: dev-dri
         hostPath:
