@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: tzahi12345/youtubedl-material
-              tag: 4.4
+              tag: nightly
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
