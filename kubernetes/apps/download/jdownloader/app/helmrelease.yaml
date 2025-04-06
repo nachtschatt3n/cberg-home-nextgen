@@ -1,0 +1,130 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: jdownloader
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  dependsOn:
+    - name: cloudflared
+      namespace: network
+  values:
+    controllers:
+      main:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: jlesage/jdownloader-2
+              tag: latest
+            env:
+              TZ: ${TIMEZONE}
+              USER_ID: 1000
+              GROUP_ID: 1000
+              KEEP_APP_RUNNING: 1
+              DISPLAY_WIDTH: 1280
+              DISPLAY_HEIGHT: 768
+              VNC_PASSWORD: ${SECRET_VNC_PASSWORD}
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                memory: 2Gi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5800
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5800
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5800
+                  failureThreshold: 30
+                  periodSeconds: 10
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 5800
+            targetPort: 5800
+          vnc:
+            port: 5900
+            targetPort: 5900
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        hosts:
+          - host: &host "jdownloader.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                service:
+                  name: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+
+    persistence:
+      config:
+        enabled: true
+        existingClaim: jdownloader-media
+        mountPath: /config
+        subPath: config
+      downloads:
+        enabled: true
+        existingClaim: jdownloader-media
+        mountPath: /output
+        subPath: downloads
+      watch:
+        enabled: true
+        existingClaim: jdownloader-media
+        mountPath: /watch
+        subPath: watch
