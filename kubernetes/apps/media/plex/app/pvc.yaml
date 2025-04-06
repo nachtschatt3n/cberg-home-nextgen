@@ -15,15 +15,3 @@ spec:
     requests:
       storage: 2Ti
   storageClassName: cifs-plex-media
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: plex-config
-  namespace: media
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
