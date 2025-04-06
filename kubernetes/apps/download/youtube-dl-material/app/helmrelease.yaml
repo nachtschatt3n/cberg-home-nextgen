@@ -99,9 +99,10 @@ spec:
           - host: &host "youtube-dl.${SECRET_DOMAIN}"
             paths:
               - path: /
+                pathType: Prefix
                 service:
                   name: main
-                  port: http
+                  port: 8080
         tls:
           - hosts:
               - *host
@@ -110,20 +111,24 @@ spec:
       downloads:
         enabled: true
         existingClaim: youtube-dl-media
-        mountPath: /app/audio
-        subPath: audio
+        globalMounts:
+          - path: /app/audio
+            subPath: audio
       videos:
         enabled: true
         existingClaim: youtube-dl-media
-        mountPath: /app/video
-        subPath: video
+        globalMounts:
+          - path: /app/video
+            subPath: video
       appdata:
         enabled: true
         existingClaim: youtube-dl-media
-        mountPath: /app/appdata
-        subPath: appdata
+        globalMounts:
+          - path: /app/appdata
+            subPath: appdata
       subscriptions:
         enabled: true
         existingClaim: youtube-dl-media
-        mountPath: /app/subscriptions
-        subPath: subscriptions
+        globalMounts:
+          - path: /app/subscriptions
+            subPath: subscriptions
