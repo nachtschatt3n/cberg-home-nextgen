@@ -4,6 +4,6 @@ kind: Kustomization
 namespace: download
 components:
   - ../../flux/components/common
-resources:
-  - ./youtube-dl-material/ks.yaml
-  - ./jdownloader/ks.yaml
+#resources:
+ # - ./youtube-dl-material/ks.yaml
+ # - ./jdownloader/ks.yaml
