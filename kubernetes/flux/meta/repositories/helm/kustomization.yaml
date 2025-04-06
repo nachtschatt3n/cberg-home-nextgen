@@ -24,6 +24,7 @@ resources:
   - ./nextcloud.yaml
   - ./node-feature-discovery.yaml
   - ./open-webui.yaml
+  - ./plex.yaml
   - ./piraeus.yaml
   - ./rook-ceph.yaml
   - ./spegel.yaml
