@@ -91,7 +91,6 @@ spec:
         ports:
           http:
             port: 17442
-        name: youtube-dl-material
 
     ingress:
       main:
