@@ -30,7 +30,7 @@ spec:
       pullPolicy: IfNotPresent
 
     service:
-      type: ClusterIP
+      type: LoadBalancer
       port: 32400
 
     ingress:
