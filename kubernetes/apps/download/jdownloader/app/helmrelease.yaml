@@ -21,13 +21,10 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-  dependsOn:
-    - name: cloudflared
-      namespace: network
   values:
     controllers:
       main:
-        strategy: RollingUpdate
+        strategy: Recreate
         containers:
           app:
             image:
