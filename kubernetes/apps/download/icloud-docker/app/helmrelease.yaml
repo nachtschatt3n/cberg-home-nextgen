@@ -1,0 +1,92 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: icloud-docker
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  dependsOn:
+    - name: cloudflared
+      namespace: network
+  values:
+    controllers:
+      main:
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: mandarons/icloud-drive
+              tag: latest
+              pullPolicy: IfNotPresent
+            env:
+              TZ: ${TIMEZONE}
+              PUID: 1000
+              PGID: 1000
+              ENV_CONFIG_FILE_PATH: /config/config.yaml
+            envFrom:
+              - secretRef:
+                  name: icloud-docker-secrets
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+            probes:
+              liveness:
+                enabled: false
+              readiness:
+                enabled: false
+              startup:
+                enabled: false
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+
+    service:
+      main:
+        enabled: false
+
+    ingress:
+      main:
+        enabled: false
+
+    persistence:
+      config:
+        enabled: true
+        type: configMap
+        name: icloud-docker-config
+        globalMounts:
+          - path: /config/config.yaml
+            subPath: config.yaml
+      data:
+        enabled: true
+        existingClaim: icloud-docker-data
+        globalMounts:
+          - path: /icloud
+            readOnly: false
+      session:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /config/session_data
