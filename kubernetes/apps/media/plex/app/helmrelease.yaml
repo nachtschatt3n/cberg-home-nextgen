@@ -29,19 +29,23 @@ spec:
       tag: 1.41.5.9522-a96edc606
       pullPolicy: IfNotPresent
 
+    service:
+      type: ClusterIP
+      port: 32400
+
     ingress:
       enabled: true
       ingressClassName: internal
       annotations:
-        external-dns.alpha.kubernetes.io/target: "plex.${SECRET_DOMAIN}"
+        external-dns.alpha.kubernetes.io/target: plex.example.com
       hosts:
-        - host: "plex.${SECRET_DOMAIN}"
+        - host: plex.example.com
           paths:
             - path: /
               pathType: Prefix
       tls:
         - hosts:
-            - "plex.${SECRET_DOMAIN}"
+            - plex.example.com
 
     pms:
       resources:
