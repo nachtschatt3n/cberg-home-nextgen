@@ -1,0 +1,129 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: youtube-dl-material
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  dependsOn:
+    - name: cloudflared
+      namespace: network
+  values:
+    controllers:
+      main:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: tzahi12345/youtubedl-material
+              tag: latest
+            env:
+              TZ: ${TIMEZONE}
+              ALLOW_CONFIG_MUTATIONS: "true"
+              UID: 1000
+              GID: 1000
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 1Gi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  failureThreshold: 30
+                  periodSeconds: 10
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 8080
+            targetPort: 8080
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        hosts:
+          - host: &host "youtube-dl.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                service:
+                  name: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+
+    persistence:
+      downloads:
+        enabled: true
+        existingClaim: youtube-dl-media
+        mountPath: /app/audio
+        subPath: audio
+      videos:
+        enabled: true
+        existingClaim: youtube-dl-media
+        mountPath: /app/video
+        subPath: video
+      appdata:
+        enabled: true
+        existingClaim: youtube-dl-media
+        mountPath: /app/appdata
+        subPath: appdata
+      subscriptions:
+        enabled: true
+        existingClaim: youtube-dl-media
+        mountPath: /app/subscriptions
+        subPath: subscriptions
