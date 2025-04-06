@@ -33,7 +33,8 @@ spec:
           app:
             image:
               repository: tzahi12345/youtubedl-material
-              tag: latest
+              tag: 4.4
+              pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
               ALLOW_CONFIG_MUTATIONS: "true"
