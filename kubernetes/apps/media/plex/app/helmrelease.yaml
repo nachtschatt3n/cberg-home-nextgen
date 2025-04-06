@@ -61,6 +61,7 @@ spec:
       PLEX_PREFERENCE_5: "DisableTLSv1_0=1"
       PLEX_PREFERENCE_6: "TranscoderQuality=0"
       PLEX_PREFERENCE_7: "HardwareAcceleratedCodecs=1"
+      PLEX_CLAIM: "claim-q9Z44LEtGQR-myxM86AF"
 
     extraVolumes:
       - name: dev-dri
