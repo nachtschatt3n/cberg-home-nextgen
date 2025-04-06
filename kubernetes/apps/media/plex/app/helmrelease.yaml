@@ -34,18 +34,7 @@ spec:
       port: 32400
 
     ingress:
-      enabled: true
-      ingressClassName: internal
-      annotations:
-        external-dns.alpha.kubernetes.io/target: plex.example.com
-      hosts:
-        - host: plex.example.com
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - plex.example.com
+      enabled: false
 
     pms:
       resources:
