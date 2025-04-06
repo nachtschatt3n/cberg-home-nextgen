@@ -109,7 +109,7 @@ spec:
           - hosts:
               - *host
 
-    # persistence:
+    persistence:
     #   downloads:
     #     enabled: true
     #     existingClaim: youtube-dl-media
@@ -128,9 +128,9 @@ spec:
     #     globalMounts:
     #       - path: /app/appdata
     #         subPath: appdata
-    #   subscriptions:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/subscriptions
-    #         subPath: subscriptions
+      subscriptions:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/subscriptions
+            subPath: subscriptions
