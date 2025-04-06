@@ -90,8 +90,8 @@ spec:
         controller: main
         ports:
           http:
-            port: 8080
-            targetPort: 8080
+            port: 17442
+            targetPort: 17442
 
     ingress:
       main:
@@ -104,7 +104,7 @@ spec:
                 pathType: Prefix
                 service:
                   name: main
-                  port: 8080
+                  port: 17442
         tls:
           - hosts:
               - *host
