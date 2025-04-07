@@ -6,4 +6,4 @@ components:
   - ../../flux/components/common
 resources:
   - ./influxdb/ks.yaml
-#  - ./mariadb/ks.yaml
+  - ./mariadb/ks.yaml
