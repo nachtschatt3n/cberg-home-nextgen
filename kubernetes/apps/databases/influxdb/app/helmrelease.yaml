@@ -62,13 +62,12 @@ spec:
       tls:
         - hosts:
             - *host
-    persistence:
-      enabled: true
-      useExisting: true
-      name: influxdb2-data
     resources:
       requests:
         cpu: 100m
         memory: 500M
       limits:
         memory: 8Gi
+    persistence:
+      enabled: true
+      existingClaim: influxdb2-data
