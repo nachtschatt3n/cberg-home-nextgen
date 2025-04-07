@@ -23,9 +23,6 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-  dependsOn:
-    - name: local-path-provisioner
-      namespace: kube-system
   values:
     image:
       repository: docker.io/library/influxdb
@@ -74,4 +71,4 @@ spec:
         cpu: 100m
         memory: 500M
       limits:
-        memory: 1Gi
+        memory: 8Gi
