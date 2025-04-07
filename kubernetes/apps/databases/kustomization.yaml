@@ -4,6 +4,6 @@ kind: Kustomization
 namespace: databases
 components:
   - ../../flux/components/common
-resources:
-  - ./influxdb/ks.yaml
+#resources:
+#   - ./influxdb/ks.yaml
 #   - ./mariadb/ks.yaml
