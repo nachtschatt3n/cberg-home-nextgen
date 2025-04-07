@@ -17,6 +17,7 @@ resources:
   - ./grafana.yaml
   - ./ingress-nginx.yaml
   - ./intel.yaml
+  - ./influxdata.yaml
   - ./jellyfin.yaml
   - ./jetstack.yaml
   - ./k8s-gateway.yaml
