@@ -2,4 +2,12 @@
 # yaml-language-server: $schema=https://json.schemastore.org/kustomization
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+resources:
+  - ./bjw-s.yaml
+  - ./controlplaneio.yaml
+  - ./n8n.yaml
+  - ./bitnami.yaml
+  - ./weave-gitops.yaml
+  - ./coredns.yaml
+  - ./spegel.yaml
+  - ./stakater.yaml
