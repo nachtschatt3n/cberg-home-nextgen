@@ -38,8 +38,6 @@ spec:
             env:
               TZ: ${TIMEZONE}
               ALLOW_CONFIG_MUTATIONS: "true"
-              UID: 1000
-              GID: 1000
             resources:
               requests:
                 cpu: 100m
@@ -78,12 +76,6 @@ spec:
                     port: 17442
                   failureThreshold: 30
                   periodSeconds: 10
-    defaultPodOptions:
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: "OnRootMismatch"
 
     service:
       main:
