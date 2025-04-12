@@ -101,11 +101,11 @@ spec:
               - *host
 
     persistence:
-      # appdata:
-      #   enabled: true
-      #   existingClaim: youtube-dl-appdata
-      #   globalMounts:
-      #     - path: /app/appdata
+      appdata:
+        enabled: true
+        existingClaim: youtube-dl-appdata
+        globalMounts:
+          - path: /app/appdata
       # audio:
       #   enabled: true
       #   existingClaim: youtube-dl-media
