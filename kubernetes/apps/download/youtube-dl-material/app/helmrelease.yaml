@@ -101,24 +101,23 @@ spec:
               - *host
 
     persistence:
-    #   downloads:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/audio
-    #         subPath: audio
-    #   videos:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/video
-    #         subPath: video
-    #   appdata:
-    #     enabled: true
-    #     existingClaim: youtube-dl-media
-    #     globalMounts:
-    #       - path: /app/appdata
-    #         subPath: appdata
+      appdata:
+        enabled: true
+        existingClaim: youtube-dl-appdata
+        globalMounts:
+          - path: /app/appdata
+      audio:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/audio
+            subPath: audio
+      videos:
+        enabled: true
+        existingClaim: youtube-dl-media
+        globalMounts:
+          - path: /app/video
+            subPath: video
       subscriptions:
         enabled: true
         existingClaim: youtube-dl-media
