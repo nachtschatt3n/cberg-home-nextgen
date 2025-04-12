@@ -106,12 +106,12 @@ spec:
       #   existingClaim: youtube-dl-appdata
       #   globalMounts:
       #     - path: /app/appdata
-      audio:
-        enabled: true
-        existingClaim: youtube-dl-media
-        globalMounts:
-          - path: /app/audio
-            subPath: audio
+      # audio:
+      #   enabled: true
+      #   existingClaim: youtube-dl-media
+      #   globalMounts:
+      #     - path: /app/audio
+      #       subPath: audio
       videos:
         enabled: true
         existingClaim: youtube-dl-media
