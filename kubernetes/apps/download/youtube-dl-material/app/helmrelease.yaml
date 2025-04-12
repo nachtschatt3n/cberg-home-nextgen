@@ -102,8 +102,8 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: youtube-dl-material
-                  port: http
+                  name: main
+                  port: 17442
         tls:
           - hosts:
               - *host
