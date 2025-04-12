@@ -94,7 +94,7 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
+                  name: youtube-dl-material
                   port: 17442
         tls:
           - hosts:
