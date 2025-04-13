@@ -103,7 +103,7 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
+                  name: jdownloader
                   port: 5800
         tls:
           - hosts:
