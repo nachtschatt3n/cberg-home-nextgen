@@ -40,7 +40,9 @@ spec:
               KEEP_APP_RUNNING: 1
               DISPLAY_WIDTH: 1280
               DISPLAY_HEIGHT: 768
-              VNC_PASSWORD: ${SECRET_VNC_PASSWORD}
+            envFrom:
+              - secretRef:
+                  name: jdownloader-secret
             resources:
               requests:
                 cpu: 200m
