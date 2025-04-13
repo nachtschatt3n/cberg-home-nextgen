@@ -37,8 +37,6 @@ spec:
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
-              USER_ID: 1000
-              GROUP_ID: 1000
               KEEP_APP_RUNNING: 1
               DISPLAY_WIDTH: 1280
               DISPLAY_HEIGHT: 768
@@ -81,12 +79,6 @@ spec:
                     port: 5800
                   failureThreshold: 30
                   periodSeconds: 10
-    defaultPodOptions:
-      securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        fsGroupChangePolicy: "OnRootMismatch"
 
     service:
       main:
@@ -115,22 +107,22 @@ spec:
           - hosts:
               - *host
 
-    # persistence:
-    #   config:
-    #     enabled: true
-    #     existingClaim: jdownloader-media
-    #     globalMounts:
-    #       - path: /config
-    #         subPath: config
-    #   downloads:
-    #     enabled: true
-    #     existingClaim: jdownloader-media
-    #     globalMounts:
-    #       - path: /output
-    #         subPath: downloads
-    #   watch:
-    #     enabled: true
-    #     existingClaim: jdownloader-media
-    #     globalMounts:
-    #       - path: /watch
-    #         subPath: watch
+    persistence:
+      config:
+        enabled: true
+        existingClaim: jdownloader-config
+        globalMounts:
+          - path: /config
+            subPath: config
+      downloads:
+        enabled: true
+        existingClaim: jdownloader-downloads
+        globalMounts:
+          - path: /output
+            subPath: downloads
+      watch:
+        enabled: true
+        existingClaim: jdownloader-watch
+        globalMounts:
+          - path: /watch
+            subPath: watch
