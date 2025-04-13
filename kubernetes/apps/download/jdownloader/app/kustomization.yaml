@@ -6,3 +6,4 @@ resources:
   - ./storageclass.yaml
   - ./pvc.yaml
   - ./helmrelease.yaml
+  - ./secret.sops.yaml
