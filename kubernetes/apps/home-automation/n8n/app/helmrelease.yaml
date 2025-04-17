@@ -30,7 +30,7 @@ spec:
     # Default values within the n8n application can be found under https://github.com/n8n-io/n8n/blob/master/packages/cli/src/config/index.ts
     n8n:
       # if not specified n8n on first launch creates a random encryption key for encrypting saved credentials and saves it in the ~/.n8n folder
-      encryption_key:
+    #  encryption_key:
     # defaults:
 
     config:
