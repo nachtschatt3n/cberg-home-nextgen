@@ -64,13 +64,13 @@ spec:
               port: 6379
       secret: {}
       extraEnv:
-        - name: N8N_HOST
+        N8N_HOST:
           value: "n8n.${SECRET_DOMAIN}"
-        - name: N8N_PROTOCOL
+        N8N_PROTOCOL:
           value: "http"
-        - name: N8N_EDITOR_BASE_URL
+        N8N_EDITOR_BASE_URL:
           value: "https://n8n.${SECRET_DOMAIN}"
-        - name: WEBHOOK_URL
+        WEBHOOK_URL:
           value: "https://n8n.${SECRET_DOMAIN}"
       persistence:
         enabled: true
