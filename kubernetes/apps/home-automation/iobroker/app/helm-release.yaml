@@ -213,7 +213,11 @@ spec:
                 service:
                   name: main
                   port: nodered
-
+              - path: /
+                pathType: Prefix
+                service:
+                  name: main
+                  port: vis
 
           # - host: "nodered.${SECRET_DOMAIN}"
           #   paths:
