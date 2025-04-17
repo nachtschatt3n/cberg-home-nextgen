@@ -38,7 +38,7 @@ spec:
       className: external
       annotations:
         hajimari.io/enable: "true"
-        hajimari.io.appName: "n8n"
+        hajimari.io/appName: "n8n"
         hajimari.io.icon: "robot"
       hosts:
         - host: n8n.${SECRET_DOMAIN}
