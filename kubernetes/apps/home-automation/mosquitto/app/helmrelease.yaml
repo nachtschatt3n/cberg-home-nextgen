@@ -1,4 +1,3 @@
----
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
@@ -65,14 +64,13 @@ spec:
             fsGroup: 65534
             fsGroupChangePolicy: OnRootMismatch
     service:
+      annotations:
+        external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}
       main:
         controller: mosquitto
         type: LoadBalancer
         loadBalancerIP: "192.168.55.15"
         externalTrafficPolicy: Cluster
-        metadata:
-          annotations:
-            external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}
         ports:
           mqtt:
             protocol: TCP
