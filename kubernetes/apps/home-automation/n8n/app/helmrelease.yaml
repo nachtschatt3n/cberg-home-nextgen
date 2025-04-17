@@ -90,7 +90,7 @@ spec:
 
     # ── Webhook handler ──
     webhook:
-      enabled: true
+      enabled: false
       count: 1
 
     # ── Redis ──
