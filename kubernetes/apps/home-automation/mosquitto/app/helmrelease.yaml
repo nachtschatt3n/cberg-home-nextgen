@@ -70,6 +70,8 @@ spec:
         type: LoadBalancer
         loadBalancerIP: "192.168.55.15"
         externalTrafficPolicy: Cluster
+        annotations:
+          external-dns.alpha.kubernetes.io/hostname: mqtt.example.com
         ports:
           mqtt:
             protocol: TCP
@@ -78,21 +80,7 @@ spec:
             targetPort: 1883
     ingress:
       main:
-        enabled: true
-        className: internal
-        annotations:
-          external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}
-        hosts:
-          - host: mqtt.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: main
-                  port: 1883
-        tls:
-          - hosts:
-              - mqtt.${SECRET_DOMAIN}
+        enabled: false
     persistence:
       data:
         existingClaim: mosquitto-config
