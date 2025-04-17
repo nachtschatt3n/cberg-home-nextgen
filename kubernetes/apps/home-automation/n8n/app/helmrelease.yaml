@@ -38,8 +38,8 @@ spec:
       className: external
       annotations:
         hajimari.io/enable: "true"
-        hajimari.io/appName: "n8n"
-        hajimari.io.icon:  "robot"
+        hajimari.io.appName: "n8n"
+        hajimari.io.icon: "robot"
       hosts:
         - host: n8n.${SECRET_DOMAIN}
           paths: ["/"]
@@ -51,11 +51,11 @@ spec:
     main:
       config:
         generic:
-          host:     n8n.${SECRET_DOMAIN}
+          host: n8n.${SECRET_DOMAIN}
           protocol: http
           timezone: Europe/Berlin
         executions:
-          pruneData:       "true"
+          pruneData: "true"
           pruneDataMaxAge: 3760
         queue:
           bull:
@@ -73,8 +73,8 @@ spec:
         - name: WEBHOOK_URL
           value: "https://n8n.${SECRET_DOMAIN}"
       persistence:
-        enabled:       true
-        type:          existing
+        enabled: true
+        type: existing
         existingClaim: n8n-config
       replicaCount: 1
       service:
@@ -90,9 +90,9 @@ spec:
     # ── Webhook handler ──
     webhook:
       enabled: true
-      count:   1
+      count: 1
 
     # ── Redis ──
     redis:
-      enabled:      true
+      enabled: true
       architecture: standalone
