@@ -131,9 +131,12 @@ spec:
 
     # Set additional environment variables on the Deployment
     extraEnv:
-      N8N_HOST: "n8n.${SECRET_DOMAIN}"
-      N8N_EDITOR_BASE_URL: "https://n8n.${SECRET_DOMAIN}"
-      WEBHOOK_URL: "https://n8n.${SECRET_DOMAIN}"
+      N8N_HOST:
+        value: "n8n.${SECRET_DOMAIN}"
+      N8N_EDITOR_BASE_URL:
+        value: "https://n8n.${SECRET_DOMAIN}"
+      WEBHOOK_URL:
+        value: "https://n8n.${SECRET_DOMAIN}"
 
     # Set additional environment from existing secrets
     extraEnvSecrets: {}
