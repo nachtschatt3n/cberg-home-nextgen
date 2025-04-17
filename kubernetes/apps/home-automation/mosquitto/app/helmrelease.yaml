@@ -81,6 +81,12 @@ spec:
     ingress:
       main:
         enabled: false
+        ingressClassName: "internal"
+        annotations:
+          hajimari.io/enable: "true"
+          hajimari.io/appName: "Mosquitto"
+        hosts:
+          - host: "mqtt.${SECRET_DOMAIN}"
     persistence:
       data:
         existingClaim: mosquitto-config
