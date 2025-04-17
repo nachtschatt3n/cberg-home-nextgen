@@ -55,6 +55,7 @@ spec:
           protocol: http
           timezone: Europe/Berlin
         executions:
+          process: queue
           pruneData: "true"
           pruneDataMaxAge: 3760
         queue:
