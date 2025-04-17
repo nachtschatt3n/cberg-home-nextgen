@@ -67,6 +67,7 @@ spec:
     ##
     service:
       type: LoadBalancer
+      externalTrafficPolicy: Cluster
       ports:
         http:
           port: 8086
