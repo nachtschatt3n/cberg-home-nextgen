@@ -150,7 +150,7 @@ spec:
       ##
       enabled: true
       # what type volume, possible options are [existing, emptyDir, dynamic] dynamic for Dynamic Volume Provisioning, existing for using an existing Claim
-      type: dynamic
+      type: existing
       ## Persistent Volume Storage Class
       ## If defined, storageClassName: <storageClass>
       ## If set to "-", storageClassName: "", which disables dynamic provisioning
