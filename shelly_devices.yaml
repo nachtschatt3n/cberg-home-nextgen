@@ -1,0 +1,124 @@
+devices:
+- name: Shelly PM1 Kitchen counter left 2
+  ip: 192.168.33.24
+  type: shelly
+- name: Shelly PM1 tub room light sw
+  ip: 192.168.33.23
+  type: shelly
+- name: Shelly PM1 kitchen counter left 1
+  ip: 192.168.33.21
+  type: shelly
+- name: Shelly PM1 Upper Bath room light sw
+  ip: 192.168.33.45
+  type: shelly
+- name: Shelly PM1 Kitchen Oven
+  ip: 192.168.33.44
+  type: shelly
+- name: Shelly PM1 Entry Outlet 2
+  ip: 192.168.33.19
+  type: shelly
+- name: Shelly PM1 fridge
+  ip: 192.168.33.22
+  type: shelly
+- name: Shelly PM1 Kitchen Microwave
+  ip: 192.168.33.12
+  type: shelly
+- name: Shelly PM1 countertop right 3
+  ip: 192.168.33.15
+  type: shelly
+- name: Shelly I4 Entry SW02
+  ip: 192.168.33.33
+  type: shelly
+- name: shellyplugsg3-8cbfea966c2c 6c:2c
+  ip: 192.168.32.22
+  type: shelly
+- name: shellyplugsg3-b08184a53ff0 3f:f0
+  ip: 192.168.33.154
+  type: shelly
+- name: Shelly Plug S ServerRack
+  ip: 192.168.33.34
+  type: shelly
+- name: shellyplugsg3-8cbfea91eea0 ee:a0
+  ip: 192.168.33.227
+  type: shelly
+- name: Shelly Plug Server 2
+  ip: 192.168.33.51
+  type: shelly
+- name: Shelly PM1 Entry Outlet 1
+  ip: 192.168.33.18
+  type: shelly
+- name: Shelly Plug Freezer
+  ip: 192.168.33.39
+  type: shelly
+- name: Shelly I4 Upper Hallway sw01
+  ip: 192.168.33.27
+  type: shelly
+- name: Shelly PM1 Living room bar shelf 2
+  ip: 192.168.33.29
+  type: shelly
+- name: Shelly I4 Kitchen sw2
+  ip: 192.168.33.14
+  type: shelly
+- name: Shelly PM1 Kitchen counter right 2
+  ip: 192.168.33.28
+  type: shelly
+- name: Shelly I4 kitchen sw1
+  ip: 192.168.33.20
+  type: shelly
+- name: Shelly Plug Dryer
+  ip: 192.168.33.37
+  type: shelly
+- name: shellyplugsg3-b08184a53f00 3f:00
+  ip: 192.168.32.170
+  type: shelly
+- name: Shelly Wall Display Living Room
+  ip: 192.168.33.42
+  type: shelly
+- name: Shelly PM1 Kitchen Dishwasher
+  ip: 192.168.33.13
+  type: shelly
+- name: Shelly Plug Pallet Heater
+  ip: 192.168.33.49
+  type: shelly
+- name: Shelly Plug Hifi & Hue, Tahoma, Flic Hub
+  ip: 192.168.33.48
+  type: shelly
+- name: Shelly Plug Game Consoles
+  ip: 192.168.33.46
+  type: shelly
+- name: Shelly I4 Entry SW01
+  ip: 192.168.33.32
+  type: shelly
+- name: Shelly PM1 Hallway Light
+  ip: 192.168.33.16
+  type: shelly
+- name: Shelly I4 Entry SW04
+  ip: 192.168.33.30
+  type: shelly
+- name: Shelly Plug Washer
+  ip: 192.168.33.40
+  type: shelly
+- name: Shelly I4 Entry SW03
+  ip: 192.168.33.31
+  type: shelly
+- name: Shelly 25 Entry Blinds
+  ip: 192.168.33.17
+  type: shelly
+- name: Shelly PM1 Kitchen counter right 1
+  ip: 192.168.33.25
+  type: shelly
+- name: Shelly Wall Display Kitchen
+  ip: 192.168.33.43
+  type: shelly
+- name: Shelly PM1 Kitchen coffee up
+  ip: 192.168.33.26
+  type: shelly
+- name: Shelly Plug NAS Server
+  ip: 192.168.33.52
+  type: shelly
+- name: shellyplugsg3-8cbfea9469d0 69:d0
+  ip: 192.168.33.123
+  type: shelly
+- name: Shelly PM1 Living room bar shelf 1
+  ip: 192.168.33.11
+  type: shelly
