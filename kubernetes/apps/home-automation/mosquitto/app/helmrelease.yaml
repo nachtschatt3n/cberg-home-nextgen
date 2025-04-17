@@ -80,7 +80,7 @@ spec:
     ingress:
       main:
         enabled: false
-        ingressClassName: "internal"
+        ingress: "internal"
         annotations:
           hajimari.io/enable: "true"
           hajimari.io/appName: "Mosquitto"
