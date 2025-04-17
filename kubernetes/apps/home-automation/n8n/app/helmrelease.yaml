@@ -33,6 +33,7 @@ spec:
       # if not specified n8n on first launch creates a random encryption key for encrypting saved credentials and saves it in the ~/.n8n folder
     #  encryption_key:
     # defaults:
+      host: "n8n.${SECRET_DOMAIN}"
 
     config:
       executions:
