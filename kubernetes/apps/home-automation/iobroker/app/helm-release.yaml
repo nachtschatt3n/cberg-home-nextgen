@@ -172,14 +172,14 @@ spec:
             protocol: TCP
             enabled: true
             port: 1883
-          mqttws:
-            protocol: TCP
-            enabled: true
-            port: 1884
-          mqttshelly:
-            protocol: TCP
-            enabled: true
-            port: 1885
+          # mqttws:
+          #   protocol: TCP
+          #   enabled: true
+          #   port: 1884
+          # mqttshelly:
+          #   protocol: TCP
+          #   enabled: true
+          #   port: 1885
           nuki:
             protocol: TCP
             enabled: true
@@ -208,41 +208,41 @@ spec:
                 service:
                   name: main
                   port: http
-          - host: "nodered.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: main
-                  port: nodered
-          - host: "vis.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: main
-                  port: vis
-          - host: "apiiobroker.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: main
-                  port: iobrokerapi
-          - host: "lovelace.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: main
-                  port: lovelace
+          # - host: "nodered.${SECRET_DOMAIN}"
+          #   paths:
+          #     - path: /
+          #       pathType: Prefix
+          #       service:
+          #         name: main
+          #         port: nodered
+          # - host: "vis.${SECRET_DOMAIN}"
+          #   paths:
+          #     - path: /
+          #       pathType: Prefix
+          #       service:
+          #         name: main
+          #         port: vis
+          # - host: "apiiobroker.${SECRET_DOMAIN}"
+          #   paths:
+          #     - path: /
+          #       pathType: Prefix
+          #       service:
+          #         name: main
+          #         port: iobrokerapi
+          # - host: "lovelace.${SECRET_DOMAIN}"
+          #   paths:
+          #     - path: /
+          #       pathType: Prefix
+          #       service:
+          #         name: main
+          #         port: lovelace
         tls:
           - hosts:
             - "iobroker.${SECRET_DOMAIN}"
-            - "nodered.${SECRET_DOMAIN}"
-            - "vis.${SECRET_DOMAIN}"
-            - "iobrokerapi.${SECRET_DOMAIN}"
-            - "lovelace.${SECRET_DOMAIN}"
+            # - "nodered.${SECRET_DOMAIN}"
+            # - "vis.${SECRET_DOMAIN}"
+            # - "iobrokerapi.${SECRET_DOMAIN}"
+            # - "lovelace.${SECRET_DOMAIN}"
     persistence:
       config-replicated:
         enabled: true
