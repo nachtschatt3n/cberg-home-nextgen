@@ -7,7 +7,7 @@ components:
 resources:
   - ./home-assistant/ks.yaml
   - ./iobroker/ks.yaml
-  - ./n8n/ks.yaml
+#  - ./n8n/ks.yaml
 #  - ./zigbee2mqtt/ks.yaml
   - ./mosquitto/ks.yaml
   - ./frigate-nvr/ks.yaml
