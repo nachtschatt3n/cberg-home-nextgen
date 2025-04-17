@@ -57,6 +57,11 @@ spec:
         executions:
           pruneData:       "true"
           pruneDataMaxAge: 3760
+        queue:
+          bull:
+            redis:
+              host: "n8n-redis-master"
+              port: 6379
       secret: {}
       extraEnv:
         - name: N8N_HOST
