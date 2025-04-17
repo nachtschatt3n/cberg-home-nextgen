@@ -91,7 +91,7 @@ spec:
                 pathType: Prefix
                 service:
                   name: main
-                  port: mqtt
+                  port: 80
     persistence:
       data:
         existingClaim: mosquitto-config
