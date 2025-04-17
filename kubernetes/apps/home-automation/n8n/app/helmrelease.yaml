@@ -100,7 +100,7 @@ spec:
       host: n8n.${SECRET_DOMAIN}         # Host name n8n can be reached - default: localhost
     # port:         # HTTP port n8n can be reached - default: 5678
     # listen_address: # IP address n8n should listen on - default: 0.0.0.0
-    # protocol:       # HTTP Protocol via which n8n can be reached - possible values [http , https] - default: http
+    # protocol: https       # HTTP Protocol via which n8n can be reached - possible values [http , https] - default: http
     # ssl_key:        # SSL Key for HTTPS Protocol - default: ''
     # ssl_cert:       # SSL Cert for HTTPS Protocol - default: ''
     # security:
@@ -131,10 +131,14 @@ spec:
 
     # Set additional environment variables on the Deployment
     extraEnv:
-      - name: WEBHOOK_URL
-        value: "https://n8n.${SECRET_DOMAIN}/"
+      - name: N8N_HOST
+        value: "n8n.${SECRET_DOMAIN}"
+      - name: N8N_PROTOCOL
+        value: "http"
       - name: N8N_EDITOR_BASE_URL
-        value: "https://n8n.${SECRET_DOMAIN}/"
+        value: "https://n8n.${SECRET_DOMAIN}"
+      - name: WEBHOOK_URL
+        value: "https://n8n.${SECRET_DOMAIN}"
 
     # Set additional environment from existing secrets
     extraEnvSecrets: {}
@@ -196,7 +200,7 @@ spec:
       repository: n8nio/n8n
       pullPolicy: IfNotPresent
       # Overrides the image tag whose default is the chart appVersion.
-      tag: "1.86.0"
+      tag: "1.88.0"
 
     imagePullSecrets: []
     nameOverride: ""
@@ -215,25 +219,11 @@ spec:
 
     podLabels: {}
 
-    podSecurityContext:
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
-
-    securityContext: {}
-      # capabilities:
-      #   drop:
-      #   - ALL
-      # readOnlyRootFilesystem: true
-      #  runAsNonRoot: true
-      #  runAsUser: 1000
 
     # here you can specify lifecycle hooks - it can be used e.g to easily add packages to the container without building
     # your own docker image
     # see https://github.com/8gears/n8n-helm-chart/pull/30
-    lifecycle:
-      {}
+    lifecycle: {}
 
     #  here's the sample configuration to add mysql-client to the container
     # lifecycle:
@@ -341,7 +331,7 @@ spec:
       # With .Values.scaling.webhook.enabled=true you disable Webhooks from the main process but you enable the processing on a different Webhook instance.
       # See https://github.com/8gears/n8n-helm-chart/issues/39#issuecomment-1579991754 for the full explanation.
       webhook:
-        enabled: false
+        enabled: true
         count: 1
 
       # redis:
