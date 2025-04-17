@@ -69,7 +69,7 @@ spec:
         controller: mosquitto
         type: LoadBalancer
         loadBalancerIP: "192.168.55.15"
-        externalTrafficPolicy: Local
+        externalTrafficPolicy: Cluster
         ports:
           mqtt:
             protocol: TCP
