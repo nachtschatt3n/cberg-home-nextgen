@@ -131,11 +131,13 @@ spec:
 
     # Set additional environment variables on the Deployment
     extraEnv:
-      N8N_HOST:
+      - name: N8N_HOST
         value: "n8n.${SECRET_DOMAIN}"
-      N8N_EDITOR_BASE_URL:
+      - name: N8N_PROTOCOL
+        value: "http"
+      - name: N8N_EDITOR_BASE_URL
         value: "https://n8n.${SECRET_DOMAIN}"
-      WEBHOOK_URL:
+      - name: WEBHOOK_URL
         value: "https://n8n.${SECRET_DOMAIN}"
 
     # Set additional environment from existing secrets
@@ -213,7 +215,8 @@ spec:
       # If not set and create is true, a name is generated using the fullname template
       #name: ""
 
-    podAnnotations: {}
+    podAnnotations:
+      rollme: "{{ randAlphaNum 5 }}"
 
     podLabels: {}
 
