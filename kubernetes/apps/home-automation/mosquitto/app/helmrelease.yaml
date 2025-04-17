@@ -69,14 +69,14 @@ spec:
         type: LoadBalancer
         loadBalancerIP: "192.168.55.15"
         externalTrafficPolicy: Cluster
+        annotations:
+          external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}
         ports:
           mqtt:
             protocol: TCP
             enabled: true
             port: 1883
             targetPort: 1883
-      annotations:
-        external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}
     ingress:
       main:
         enabled: false
