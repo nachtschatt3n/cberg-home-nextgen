@@ -64,4 +64,3 @@ spec:
         existingClaim: home-assistant-config
         globalMounts:
           - path: /config
-            mountPath: /config
