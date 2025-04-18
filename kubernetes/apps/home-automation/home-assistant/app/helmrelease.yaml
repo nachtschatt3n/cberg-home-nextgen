@@ -1,4 +1,3 @@
----
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
@@ -134,14 +133,14 @@ spec:
     #   runAsGroup: 0
     #   fsGroup: 0
     #   fsGroupChangePolicy: "OnRootMismatch"
-  persistence:
-    enabled: false
+    persistence:
+      enabled: false
 
-  additionalVolumes:
-    - name: config
-      persistentVolumeClaim:
-        claimName: home-assistant-config
+    additionalVolumes:
+      - name: config
+        persistentVolumeClaim:
+          claimName: home-assistant-config
 
-  additionalMounts:
-    - name: config
-      mountPath: /config
+    additionalMounts:
+      - name: config
+        mountPath: /config
