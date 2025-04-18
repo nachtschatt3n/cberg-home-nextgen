@@ -51,11 +51,15 @@ spec:
       tls:
         - hosts:
             - *host
+
     persistence:
       enabled: true
-      useExisting: true
-      name: home-assistant-config
-      storageClass: longhorn-static
+      existingVolume: "home-assistant-config"    # Name of the PV (or Longhorn volume) to use
+      storageClass: "longhorn-static"           # Must match the PV's storage class
+      accessMode: ReadWriteOnce                # Match the PV's access mode
+      size: 1Gi                               # Match or be <= the PV's actual size
+    # (Remove or do not use any `useExisting` or `name` fields, as the chart doesn’t use those)
+
 
     # Configuration for Home Assistant
     configuration:
