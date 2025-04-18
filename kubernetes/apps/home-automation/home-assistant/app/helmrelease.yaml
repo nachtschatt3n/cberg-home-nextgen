@@ -7,140 +7,61 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: home-assistant
-      version: 0.2.82
+      chart: app-template
+      version: 3.7.1
       sourceRef:
         kind: HelmRepository
-        name: pajikos
+        name: bjw-s
         namespace: flux-system
-  maxHistory: 3
   install:
     remediation:
-      retries: 1
+      retries: 3
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 1
-  uninstall:
-    keepHistory: false
-  #dependsOn:
-    #- name: local-path-provisioner
-    #  namespace: kube-system
+      strategy: rollback
+      retries: 3
   values:
-    image:
-      repository: ghcr.io/home-assistant/home-assistant
-      tag: 2025.4.1
-    env:
-      - name: TZ
-        value: "Europe/Berlin"
+    controllers:
+      home-assistant:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/home-assistant/home-assistant
+              tag: 2025.4.1
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+            resources:
+              requests:
+                cpu: 1000m
+              limits:
+                memory: 8Gi
     service:
-      type: ClusterIP
-      port: 8123
+      main:
+        controller: home-assistant
+        ports:
+          http:
+            port: 8123
     ingress:
-      enabled: true
-      className: "external"
-      annotations:
-        hajimari.io/icon: mdi:home-assistant
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-      hosts:
-        - host: &host "hass.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - *host
-
-    # persistence:
-    #   enabled: true
-    #   existingVolume: "home-assistant-config"    # Name of the PV (or Longhorn volume) to use
-    #   storageClass: "longhorn-static"           # Must match the PV's storage class
-    #   accessMode: ReadWriteOnce                # Match the PV's access mode
-    #   size: 1Gi                               # Match or be <= the PV's actual size
-    # (Remove or do not use any `useExisting` or `name` fields, as the chart doesn’t use those)
-
-
-    # Configuration for Home Assistant
-    configuration:
-      # Enable or disable the configuration setup for Home Assistant
-      enabled: true
-      # Force init will merge the current configuration file with the default configuration on every start
-      # This is useful when you want to ensure that the configuration file is always up to date
-      forceInit: true
-      # List of trusted proxies in the format of CIDR notation in a case of using a reverse proxy
-      # Here is the list of the most common private IP ranges, use your list of possible trusted proxies, usually, it's the IP of the reverse proxy
-      trusted_proxies:
-        - 0.0.0.0/0     # Add the IP address of your cluster CIDR
-      # Editing templateConfig allows you to customize the configuration.yaml file
-      # You can use Go template functions to customize the configuration
-      templateConfig: |-
-        # Loads default set of integrations. Do not remove.
-        default_config:
-
-        {{- if .Values.ingress.enabled }}
-        http:
-          use_x_forwarded_for: true
-          trusted_proxies:
-            {{- range .Values.configuration.trusted_proxies }}
-            - {{ . }}
-            {{- end }}
-        {{- end}}
-        # Load frontend themes from the themes folder
-        frontend:
-          themes: !include_dir_merge_named themes
-        automation: !include automations.yaml
-        script: !include scripts.yaml
-        scene: !include scenes.yaml
-    addons:
-      codeserver:
-        enabled: false
-        # image:
-        #   repository: ghcr.io/coder/code-server
-        #   tag: 4.19.1
-        # env:
-        #   - name: TZ
-        #     value: "${TIMEZONE}"
-        # workingDir: "/config"
-        # args:
-        #   - --auth
-        #   - "none"
-        #   - --user-data-dir
-        #   - "/config/.vscode"
-        #   - --extensions-dir
-        #   - "/config/.vscode"
-        # ingress:
-        #   enabled: true
-        #   ingressClassName: internal
-        #   annotations:
-        #     hajimari.io/icon: mdi:microsoft-visual-studio-code
-        #   hosts:
-        #     - host: &codehost "hass-code.${SECRET_DOMAIN}"
-        #       paths:
-        #         - path: /
-        #           pathType: Prefix
-        #   tls:
-        #     - hosts:
-        #         - *codehost
-    resources:
-      requests:
-        cpu: 1000m
-      limits:
-        memory: 8Gi
-
-
-    # podSecurityContext:
-    #   runAsUser: 0
-    #   runAsGroup: 0
-    #   fsGroup: 0
-    #   fsGroupChangePolicy: "OnRootMismatch"
+      main:
+        enabled: true
+        className: external
+        annotations:
+          hajimari.io/icon: mdi:home-assistant
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        hosts:
+          - host: "hass.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
     persistence:
-      enabled: false
-
-    additionalVolumes:
-      - name: config
-        persistentVolumeClaim:
-          claimName: home-assistant-config
-
-    additionalMounts:
-      - name: config
-        mountPath: /config
+      config:
+        enabled: true
+        type: persistentVolumeClaim
+        existingClaim: home-assistant-config
+        globalMounts:
+          - path: /config
+            mountPath: /config
