@@ -117,15 +117,15 @@ spec:
       # -- Service type (ClusterIP, NodePort, or LoadBalancer).
       type: ClusterIP
       # -- Configure dual-stack IP family policy. See: https://kubernetes.io/docs/concepts/services-networking/dual-stack/
-      ipFamilyPolicy: ""
+      #ipFamilyPolicy: ""
       # -- Supported IP families (IPv4, IPv6).
-      ipFamilies: []
+      #ipFamilies: []
       # -- Specific IP address for the LoadBalancer.
-      loadBalancerIP: ""
+      #loadBalancerIP: ""
       # -- Class of the LoadBalancer.
-      loadBalancerClass: ""
+      #loadBalancerClass: ""
       # -- Source ranges allowed to access the LoadBalancer.
-      loadBalancerSourceRanges: []
+      #loadBalancerSourceRanges: []
       # -- Port for the Jellyfin service.
       port: 8096
       # -- Name of the port in the service.
@@ -135,7 +135,7 @@ spec:
       # -- Labels for the service.
       labels: {}
       # -- External traffic policy (Cluster or Local).
-      # externalTrafficPolicy: Cluster
+      externalTrafficPolicy: Cluster
       # -- NodePort for the service (if applicable).
       # nodePort:
 
