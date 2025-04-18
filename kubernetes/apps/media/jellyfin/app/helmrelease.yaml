@@ -238,8 +238,8 @@ spec:
       config:
         # -- set to false to use emptyDir
         enabled: true
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        #accessMode: ReadWriteOnce
+        #size: 5Gi
         # -- Custom annotations to be added to the PVC
         annotations: {}
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
@@ -249,10 +249,10 @@ spec:
       media:
         # -- set to false to use emptyDir
         enabled: true
-        accessMode: ReadWriteOnce
-        size: 25Gi
+        #accessMode: ReadWriteOnce
+        #size: 25Gi
         # -- Custom annotations to be added to the PVC
-        annotations: {}
+        #annotations: {}
         # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
         #storageClass: 'local-hostpath'
         ## -- Use an existing PVC for this mount

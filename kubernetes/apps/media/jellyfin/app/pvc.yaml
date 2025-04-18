@@ -11,7 +11,7 @@ metadata:
     csi-driver-smb: "cifs-share"
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 2Ti
