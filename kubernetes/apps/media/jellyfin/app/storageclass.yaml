@@ -1,4 +1,3 @@
----
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -14,10 +13,9 @@ mountOptions:
   - uid=1000
   - gid=1000
   - noperm
-  - cache=none
-  - actimeo=0
   - noserverino
   - multichannel
+  - seal=no
   - max_channels=4
 parameters:
   source: "//${NAS_HOSTNAME}/media"
