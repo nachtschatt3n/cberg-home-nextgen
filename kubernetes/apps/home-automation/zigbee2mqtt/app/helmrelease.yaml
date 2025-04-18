@@ -55,8 +55,12 @@ spec:
             paths:
               - path: /
                 pathType: ImplementationSpecific
+                service:
+                  name: zigbee2mqtt
+                  port: 8080
     persistence:
       data:
         enabled: true
         existingClaim: zigbee2mqtt-data
-        mountPath: /data
+        globalMounts:
+          - path: /data
