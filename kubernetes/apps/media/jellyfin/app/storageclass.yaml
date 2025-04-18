@@ -15,7 +15,6 @@ mountOptions:
   - noperm
   - noserverino
   - multichannel
-  - seal=no
   - max_channels=4
 parameters:
   source: "//${NAS_HOSTNAME}/media"
