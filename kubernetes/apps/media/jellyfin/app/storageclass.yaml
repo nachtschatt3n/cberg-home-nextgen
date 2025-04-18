@@ -3,33 +3,24 @@ kind: StorageClass
 metadata:
   name: "cifs-jellyfin-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
-# mountOptions:
-#   - vers=3.0
-#   - dir_mode=0777
-#   - file_mode=0777
-#   - uid=1000
-#   - gid=1000
-#   - noperm
-#   - noserverino
-#   - multichannel
-#   - max_channels=4
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - serverino
-  - multichannel
-  - max_channels=4
+  - noatime
   - rsize=1048576
   - wsize=1048576
   - cache=loose
   - actimeo=30
+  - serverino
+  - multichannel
+  - max_channels=4
 parameters:
   source: "//${NAS_HOSTNAME}/media"
   subdir: "/"
