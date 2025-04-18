@@ -53,7 +53,9 @@ spec:
             - *host
     persistence:
       enabled: true
-      existingClaim: home-assistant-config
+      useExisting: true
+      name: home-assistant-config
+      storageClass: longhorn-static
 
     # Configuration for Home Assistant
     configuration:
