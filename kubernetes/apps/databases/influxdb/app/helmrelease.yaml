@@ -94,7 +94,8 @@ spec:
     ##
     persistence:
       enabled: true
-      existingClaim: influxdb2-data
+      useExisting: true
+      name: influxdb2-data
 
     setDefaultUser:
       enabled: true
@@ -225,7 +226,7 @@ spec:
         requests:
           # memory: 512Mi
           # cpu: 2
-          ephemeral-storage: "8Gi"
+          #ephemeral-storage: "8Gi"
         # limits:
           # memory: 1Gi
           # cpu: 4
