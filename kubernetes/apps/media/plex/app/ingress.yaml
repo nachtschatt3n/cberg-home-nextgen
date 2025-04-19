@@ -7,7 +7,7 @@ metadata:
   annotations:
     external-dns.alpha.kubernetes.io/target: &host "plex.${SECRET_DOMAIN}"
 spec:
-  ingressClassName: "external"
+  ingressClassName: "internal"
   rules:
     - host: *host
       http:
