@@ -26,10 +26,7 @@ data:
         storage:
           volumeClaimTemplate:
             spec:
-              storageClassName: longhorn-static
-              resources:
-                requests:
-                  storage: 1Gi
+              volumeName: alertmanager
     kube-state-metrics:
       metricLabelsAllowlist:
         - "deployments=[*]"
