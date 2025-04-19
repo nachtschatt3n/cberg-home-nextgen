@@ -193,6 +193,36 @@ data:
             - port: http
               path: /metrics
               interval: 30s
+        - name: adguard-home
+          namespaceSelector:
+            matchNames: ["network"]
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: adguard-home
+          endpoints:
+            - port: http
+              path: /metrics
+              interval: 30s
+        - name: frigate
+          namespaceSelector:
+            matchNames: ["home-automation"]
+          selector:
+            matchLabels:
+              app: frigate
+          endpoints:
+            - port: http
+              path: /api/prometheus
+              interval: 30s
+        - name: mosquitto
+          namespaceSelector:
+            matchNames: ["home-automation"]
+          selector:
+            matchLabels:
+              app: mosquitto
+          endpoints:
+            - port: metrics
+              path: /metrics
+              interval: 30s
     grafana:
       enabled: false
       forceDeployDashboards: true
