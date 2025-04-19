@@ -27,6 +27,10 @@ data:
           volumeClaimTemplate:
             spec:
               volumeName: alertmanager
+              storageClassName: longhorn-static
+              resources:
+                requests:
+                  storage: 1Gi
     kube-state-metrics:
       metricLabelsAllowlist:
         - "deployments=[*]"
@@ -133,6 +137,10 @@ data:
           volumeClaimTemplate:
             spec:
               volumeName: prometheus
+              storageClassName: longhorn-static
+              resources:
+                requests:
+                  storage: 25Gi
     grafana:
       enabled: false
       forceDeployDashboards: true
