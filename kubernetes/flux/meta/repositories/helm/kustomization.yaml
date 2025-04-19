@@ -29,3 +29,4 @@ resources:
   - ./rm3l.yaml
   - ./dirsigler.yaml
   - ./pajikos.yaml
+  - ./prometheus-community.yaml
