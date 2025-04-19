@@ -41,7 +41,7 @@ spec:
       - --events
       - --ignore-ingress-tls-spec
       - --ingress-class=external
-      - --metrics-address=0.0.0.0:7979
+      - --metrics-address=0.0.0.0:7979^
     policy: sync
     sources: ["crd", "ingress"]
     txtPrefix: k8s.
