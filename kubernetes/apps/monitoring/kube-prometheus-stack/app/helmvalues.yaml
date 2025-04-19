@@ -27,7 +27,7 @@ data:
           volumeClaimTemplate:
             spec:
               volumeName: alertmanager
-              storageClassName: longhorn-static
+              storageClassName: longhorn
               resources:
                 requests:
                   storage: 1Gi
@@ -136,8 +136,7 @@ data:
         storageSpec:
           volumeClaimTemplate:
             spec:
-              volumeName: prometheus
-              storageClassName: longhorn-static
+              storageClassName: longhorn
               resources:
                 requests:
                   storage: 25Gi
