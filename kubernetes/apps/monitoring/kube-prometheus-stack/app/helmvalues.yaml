@@ -26,7 +26,6 @@ data:
         storage:
           volumeClaimTemplate:
             spec:
-              volumeName: alertmanager
               storageClassName: longhorn
               resources:
                 requests:
