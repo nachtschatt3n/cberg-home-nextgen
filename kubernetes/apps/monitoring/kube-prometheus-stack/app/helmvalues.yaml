@@ -149,8 +149,8 @@ data:
             matchLabels:
               app: longhorn-manager
           endpoints:
-            - port: metrics
-              path: /v1/metrics
+            - port: manager
+              path: /metrics
               interval: 30s
     grafana:
       enabled: false
