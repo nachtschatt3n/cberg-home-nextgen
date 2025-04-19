@@ -152,6 +152,47 @@ data:
             - port: manager
               path: /metrics
               interval: 30s
+        - name: ingress-nginx
+          namespaceSelector:
+            matchNames: ["network"]
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+          endpoints:
+            - port: metrics
+              path: /metrics
+              interval: 30s
+        - name: external-dns
+          namespaceSelector:
+            matchNames: ["network"]
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: external-dns
+          endpoints:
+            - port: metrics
+              path: /metrics
+              interval: 30s
+        - name: nextcloud-metrics
+          namespaceSelector:
+            matchNames: ["office"]
+          selector:
+            matchLabels:
+              app: nextcloud-metrics
+          endpoints:
+            - port: metrics
+              path: /metrics
+              interval: 30s
+        - name: influxdb
+          namespaceSelector:
+            matchNames: ["databases"]
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: influxdb
+          endpoints:
+            - port: http
+              path: /metrics
+              interval: 30s
     grafana:
       enabled: false
       forceDeployDashboards: true
