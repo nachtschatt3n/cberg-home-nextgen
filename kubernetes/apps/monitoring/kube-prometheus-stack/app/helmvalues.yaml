@@ -136,10 +136,6 @@ data:
           volumeClaimTemplate:
             spec:
               volumeName: prometheus
-              storageClassName: longhorn-static
-              resources:
-                requests:
-                  storage: 25Gi
     grafana:
       enabled: false
       forceDeployDashboards: true
