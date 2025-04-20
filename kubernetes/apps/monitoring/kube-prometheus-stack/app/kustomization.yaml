@@ -6,4 +6,12 @@ resources:
   - ./helmvalues.yaml
   - ./helmrelease.yaml
   - ./alertmanager-telegram-config.yaml
+vars:
+  - name: TELEGRAM_CHAT_ID
+    objref:
+      kind: Secret
+      name: alertmanager-telegram-secret
+      apiVersion: v1
+    fieldref:
+      fieldpath: stringData.chat-id
 
