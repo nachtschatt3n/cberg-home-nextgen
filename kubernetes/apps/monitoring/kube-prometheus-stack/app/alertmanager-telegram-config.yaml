@@ -10,9 +10,9 @@ spec:
     receiver: telegram
     groupBy:
       - alertname
-    groupWait: 30s
-    groupInterval: 5m
-    repeatInterval: 1h
+    groupWait: 0s
+    groupInterval: 0s
+    repeatInterval: 0s
   receivers:
     - name: telegram
       telegramConfigs:
@@ -20,6 +20,7 @@ spec:
             name: alertmanager-telegram-secret
             key: bot-token
           chatID: 671676995  # numeric chat ID (must be an integer)
+          parseMode: MarkdownV2  # use Markdown V2 parsing to support `*` formatting
           sendResolved: true
           message: |
             *Alert:* {{ .CommonLabels.alertname }}
