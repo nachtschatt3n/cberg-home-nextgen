@@ -28,6 +28,7 @@ data:
         matchNames:
           - monitoring
       alertmanagerSpec:
+        logLevel: debug
         storage:
           volumeClaimTemplate:
             spec:
