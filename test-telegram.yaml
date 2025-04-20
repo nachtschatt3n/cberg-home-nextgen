@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: test-telegram
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: telegram-test
+    rules:
+    - alert: TelegramTest
+      expr: vector(1)
+      for: 0m
+      labels:
+        severity: info
+      annotations:
+        summary: "🚀 Telegram test alert"
+        description: "This alert should immediately hit Telegram"

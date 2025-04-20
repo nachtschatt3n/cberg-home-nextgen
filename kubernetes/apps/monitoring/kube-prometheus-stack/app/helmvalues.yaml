@@ -21,13 +21,13 @@ data:
         tls:
           - hosts:
               - "alertmanager.${SECRET_DOMAIN}"
+      alertmanagerConfigSelector:
+        matchLabels:
+          alertmanager-config: telegram
+      alertmanagerConfigNamespaceSelector:
+        matchNames:
+          - monitoring
       alertmanagerSpec:
-        alertmanagerConfigSelector:
-          matchLabels:
-            alertmanager-config: telegram
-        alertmanagerConfigNamespaceSelector:
-          matchNames:
-            - monitoring
         storage:
           volumeClaimTemplate:
             spec:
@@ -130,6 +130,9 @@ data:
               - "prometheus.${SECRET_DOMAIN}"
       prometheusSpec:
         ruleSelectorNilUsesHelmValues: false
+        ruleSelector:
+          matchLabels:
+            release: kube-prometheus-stack
         serviceMonitorSelectorNilUsesHelmValues: false
         serviceMonitorSelector:
           matchLabels:
