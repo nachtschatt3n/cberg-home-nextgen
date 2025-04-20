@@ -1,4 +1,3 @@
----
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -20,9 +19,9 @@ spec:
         - botToken:
             name: alertmanager-telegram-secret
             key: bot-token
-#        - chatID:
-#            name: alertmanager-telegram-secret
-#            key: chat-id
+          chatId:
+            name: alertmanager-telegram-secret
+            key: chat-id
           sendResolved: true
           message: |
             *Alert:* {{ .CommonLabels.alertname }}
