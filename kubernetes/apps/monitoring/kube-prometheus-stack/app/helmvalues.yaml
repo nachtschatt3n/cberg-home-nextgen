@@ -21,8 +21,12 @@ data:
         tls:
           - hosts:
               - "alertmanager.${SECRET_DOMAIN}"
-      alertmanagerConfigSelector: {}
-      alertmanagerConfigNamespaceSelector: {}
+      alertmanagerConfigSelector:
+        matchLabels:
+          alertmanager-config: telegram
+      alertmanagerConfigNamespaceSelector:
+        matchNames:
+          - monitoring
       alertmanagerSpec:
         storage:
           volumeClaimTemplate:
