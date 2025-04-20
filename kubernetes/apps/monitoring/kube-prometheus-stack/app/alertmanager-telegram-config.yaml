@@ -19,7 +19,7 @@ spec:
         - botToken:
             name: alertmanager-telegram-secret
             key: bot-token
-          chatID: $(TELEGRAM_CHAT_ID)
+          chatID: 671676995  # numeric chat ID (must be an integer)
           sendResolved: true
           message: |
             *Alert:* {{ .CommonLabels.alertname }}
