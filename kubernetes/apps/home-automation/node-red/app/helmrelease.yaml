@@ -24,6 +24,9 @@ spec:
   uninstall:
     keepHistory: false
   values:
+    defaultPodOptions:
+      securityContext:
+        runAsUser: 0
     controllers:
       node-red:
         containers:
