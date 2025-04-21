@@ -6,6 +6,7 @@ metadata:
   labels:
     alertmanager-config: telegram
 spec:
+  inhibit_rules: []  # disable default inhibit rules that block info-level alerts
   route:
     receiver: telegram
     groupBy:
