@@ -6,14 +6,14 @@ metadata:
   labels:
     alertmanager-config: telegram
 spec:
-  inhibit_rules: []  # disable default inhibit rules that block info-level alerts
+  inhibitRules: []  # disable default inhibit rules that block info-level alerts
   route:
     receiver: telegram
     groupBy:
       - alertname
     groupWait: 0s
     groupInterval: 1s
-    repeatInterval: 1s
+    repeatInterval: 120s
   receivers:
     - name: telegram
       telegramConfigs:
