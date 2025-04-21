@@ -10,5 +10,5 @@ resources:
   - ./zigbee2mqtt/ks.yaml
   - ./mosquitto/ks.yaml
   - ./frigate-nvr/ks.yaml
-#  - ./node-red/ks.yaml
+  - ./node-red/ks.yaml
 
