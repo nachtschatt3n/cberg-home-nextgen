@@ -66,6 +66,9 @@ spec:
       data:
         enabled: true
         existingClaim: node-red-data
+        #storageClassName: csi-driver-nfs
+        accessMode: ReadWriteMany
+        #size: 1Gi
         mountPath: /data
 
     resources:
