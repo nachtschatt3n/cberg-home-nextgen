@@ -60,22 +60,12 @@ spec:
               pathType: ImplementationSpecific
 
       tls:
-        - secretName: node-red
-          hosts:
-          - node.${SECRET_DOMAIN}
-          certificate:
-            enabled: true
-            issuerRef:
-              kind: ClusterIssuer
-              name: letsencrypt-production
+          hosts: &host
 
     persistence:
       data:
         enabled: true
         existingClaim: node-red-data
-        #storageClassName: csi-driver-nfs
-        #accessMode: ReadWriteOnce
-        #size: 1Gi
         mountPath: /data
 
     resources:
@@ -83,9 +73,4 @@ spec:
         cpu: 100m
         memory: 128Mi
       limits:
-        memory: 500Mi
-
-    podSecurityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
+        memory: 1Gi
