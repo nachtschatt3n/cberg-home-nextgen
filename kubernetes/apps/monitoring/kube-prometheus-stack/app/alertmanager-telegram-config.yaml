@@ -22,8 +22,11 @@ spec:
           chatID: 671676995  # numeric chat ID (must be an integer)
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
-          message: |
-            Alert: {{ .CommonLabels.alertname }}
-            Severity: {{ .CommonLabels.severity }}
-            Instance: {{ .CommonLabels.instance }}
-            Summary: {{ .CommonAnnotations.summary }}
+          message: '{{ template "telegram.message". }}'
+          # message: |
+          #   Alert: {{ .CommonLabels.alertname }}
+          #   Severity: {{ .CommonLabels.severity }}
+          #   Instance: {{ .CommonLabels.instance }}
+          #   Summary: {{ .CommonAnnotations.summary }}
+      templates:
+      - '../message_templates/telegram.tmpl' # path to our telegram.tmpl
