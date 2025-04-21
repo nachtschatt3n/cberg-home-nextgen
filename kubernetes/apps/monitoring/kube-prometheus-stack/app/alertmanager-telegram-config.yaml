@@ -6,7 +6,6 @@ metadata:
   labels:
     alertmanager-config: telegram
 spec:
-  inhibitRules: []  # disable inherited inhibition rules so all alerts are sent
   route:
     receiver: telegram
     groupBy:
@@ -23,6 +22,12 @@ spec:
           chatID: 671676995  # numeric chat ID (must be an integer)
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
+          message: |
+            Alert: {{ .CommonLabels.alertname }}
+            Severity: {{ .CommonLabels.severity }}
+            Instance: {{ .CommonLabels.instance }}
+            Summary: {{ .CommonAnnotations.summary }}
+
           # message: |
           #   {{ define "alert_list" }}{{ range . }}
           #   ---
@@ -52,13 +57,3 @@ spec:
           #   {{ template "alert_list" .Alerts.Resolved }}
           #   {{ end }}
           #   {{ end }}
-
-
-
-
-
-          message: |
-            Alert: {{ .CommonLabels.alertname }}
-            Severity: {{ .CommonLabels.severity }}
-            Instance: {{ .CommonLabels.instance }}
-            Summary: {{ .CommonAnnotations.summary }}
