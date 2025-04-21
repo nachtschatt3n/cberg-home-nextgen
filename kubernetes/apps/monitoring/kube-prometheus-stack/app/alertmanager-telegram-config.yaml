@@ -23,7 +23,7 @@ spec:
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
-            <b>Alert:</b> {{ .CommonLabels.alertname }}<br>
-            <b>Severity:</b> {{ .CommonLabels.severity }}<br>
-            <b>Instance:</b> {{ .CommonLabels.instance }}<br>
-            <b>Summary:</b> {{ .CommonAnnotations.summary }}
+            Alert: {{ .CommonLabels.alertname }}
+            Severity: {{ .CommonLabels.severity }}
+            Instance: {{ .CommonLabels.instance }}
+            Summary: {{ .CommonAnnotations.summary }}
