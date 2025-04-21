@@ -20,10 +20,10 @@ spec:
             name: alertmanager-telegram-secret
             key: bot-token
           chatID: 671676995  # numeric chat ID (must be an integer)
-          parseMode: MarkdownV2  # use Markdown V2 parsing to support `*` formatting
+          parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
-            *Alert:* {{ .CommonLabels.alertname }}
-            *Severity:* {{ .CommonLabels.severity }}
-            *Instance:* {{ .CommonLabels.instance }}
-            *Summary:* {{ .CommonAnnotations.summary }}
+            <b>Alert:</b> {{ .CommonLabels.alertname }}<br/>
+            <b>Severity:</b> {{ .CommonLabels.severity }}<br/>
+            <b>Instance:</b> {{ .CommonLabels.instance }}<br/>
+            <b>Summary:</b> {{ .CommonAnnotations.summary }}
