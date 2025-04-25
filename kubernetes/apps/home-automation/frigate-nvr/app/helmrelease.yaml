@@ -30,7 +30,7 @@ spec:
       tag: 0.15.1
     env:
       TZ: "Europe/Berlin"
-      LIBVA_DRIVER_NAME: "i965"
+    #LIBVA_DRIVER_NAME: "i965"
 
     # Frigate configuration
     config: |
