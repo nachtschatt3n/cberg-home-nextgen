@@ -51,6 +51,9 @@ spec:
         input_pixel_format: bgr
         path: /openvino-model/ssdlite_mobilenet_v2.xml
         labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+
+      ffmpeg:
+        hwaccel_args: preset-intel-qsv-h264
       genai:
         enabled: false
         provider: ollama
