@@ -31,15 +31,6 @@ spec:
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "i965"
-    podSecurityContext:
-      privileged: true
-      capabilities:
-        add:
-          - SYS_ADMIN
-      allowPrivilegeEscalation: true
-      runAsUser: 0
-      runAsGroup: 0
-      fsGroup: 0
 
     # Frigate configuration
     config: |
@@ -166,3 +157,19 @@ spec:
 
     # Set shared memory size for ffmpeg
     shmSize: "2Gi"
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+      allowPrivilegeEscalation: true
+
+    extraVolumes:
+      - name: dev-dri
+        hostPath:
+          path: /dev/dri
+          type: Directory
+
+    extraVolumeMounts:
+      - name: dev-dri
+        mountPath: /dev/dri
