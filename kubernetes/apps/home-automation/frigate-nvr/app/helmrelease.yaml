@@ -28,10 +28,18 @@ spec:
     image:
       repository: ghcr.io/blakeblackshear/frigate
       tag: 0.15.1
-
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "i965"
+    podSecurityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+      allowPrivilegeEscalation: true
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
 
     # Frigate configuration
     config: |
