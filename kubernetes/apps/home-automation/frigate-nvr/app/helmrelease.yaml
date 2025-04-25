@@ -27,7 +27,7 @@ spec:
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate
-      tag: 0.15.0
+      tag: 0.15.1
 
     env:
       TZ: "Europe/Berlin"
@@ -140,8 +140,10 @@ spec:
       requests:
         cpu: 1000m
         memory: 1Gi
+        gpu.intel.com/i915: 1
       limits:
         memory: 8Gi
+        gpu.intel.com/i915: 1
 
     # Set shared memory size for ffmpeg
     shmSize: "2Gi"
