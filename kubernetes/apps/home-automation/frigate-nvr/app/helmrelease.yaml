@@ -79,8 +79,8 @@ spec:
         enabled: True
         mode: continuous
       auth:
-        reset_admin_password: true
-        enabled: true
+        #reset_admin_password: true
+        enabled: True
       cameras:
         kids:
           enabled: true
@@ -157,7 +157,7 @@ spec:
               - hair brush
           ffmpeg:
             inputs:
-              - path: rtsp://camac:Ja3YP@192.168.33.91/live
+              - path: rtsp://camac:Ja3YP@192.168.33.93/live
                 roles:
                   - detect
                   - record
