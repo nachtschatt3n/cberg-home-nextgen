@@ -75,6 +75,9 @@ spec:
           retain:
             days: 30
             mode: motion
+      birdseye:
+        enabled: True
+        mode: continuous
       cameras:
         kids:
           enabled: true
@@ -123,6 +126,7 @@ spec:
                 roles:
                   - detect
                   - record
+
 
 
 
