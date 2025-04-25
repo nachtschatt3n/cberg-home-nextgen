@@ -88,14 +88,6 @@ spec:
               person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
             objects:
               - person
-          audio:
-            enabled: false
-            listen:
-              - bark
-              - fire_alarm
-              - scream
-              - speech
-              - yell
           ffmpeg:
               inputs:
                 - path: rtsp://camac:Ja3YP@192.168.33.91/live
@@ -103,6 +95,14 @@ spec:
                     - audio
                     - detect
                     - record
+          audio:
+            enabled: true
+            listen:
+              - bark
+              - fire_alarm
+              - scream
+              - speech
+              - yell
 
         entry:
           enabled: true
@@ -136,6 +136,7 @@ spec:
                 roles:
                   - detect
                   - record
+                  - audio
         heater:
           enabled: true
           genai:
@@ -168,7 +169,7 @@ spec:
                 roles:
                   - detect
                   - record
-
+                  - audio
 
 
 
