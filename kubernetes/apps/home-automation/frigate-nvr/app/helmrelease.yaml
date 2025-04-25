@@ -78,8 +78,6 @@ spec:
       birdseye:
         enabled: True
         mode: continuous
-      audio:
-        enabled: True
       cameras:
         kids:
           enabled: true
@@ -91,7 +89,7 @@ spec:
             objects:
               - person
           audio:
-            enabled: True
+            enabled: false
             listen:
               - bark
               - fire_alarm
@@ -102,7 +100,7 @@ spec:
               inputs:
                 - path: rtsp://camac:Ja3YP@192.168.33.91/live
                   roles:
-                    - audio
+                    #- audio
                     - detect
                     - record
 
