@@ -30,7 +30,7 @@ spec:
       tag: 0.15.1
     env:
       TZ: "Europe/Berlin"
-    #LIBVA_DRIVER_NAME: "i965"
+    #LIBVA_DRIVER_NAME: "i915"
 
     # Frigate configuration
     config: |
@@ -53,7 +53,8 @@ spec:
         labelmap_path: /openvino-model/coco_91cl_bkgr.txt
 
       ffmpeg:
-        hwaccel_args: preset-vaapi
+        #hwaccel_args: preset-vaapi
+        hwaccel_args: preset-intel-qsv-h264
       genai:
         enabled: false
         provider: ollama
