@@ -10,7 +10,7 @@ spec:
     receiver: telegram
     groupBy:
       - alertname
-    groupWait: 0s
+    groupWait: 1s
     groupInterval: 1s
     repeatInterval: 120s
   receivers:
