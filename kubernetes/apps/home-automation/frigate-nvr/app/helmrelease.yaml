@@ -102,6 +102,7 @@ spec:
               inputs:
                 - path: rtsp://camac:Ja3YP@192.168.33.91/live
                   roles:
+                    - audio
                     - detect
                     - record
 
