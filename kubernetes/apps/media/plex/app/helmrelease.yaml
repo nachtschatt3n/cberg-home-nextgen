@@ -41,10 +41,10 @@ spec:
         requests:
           cpu: 100m
           memory: 1Gi
-          gpu.intel.com/i915: 1
+          #gpu.intel.com/i915: 1
         limits:
           memory: 8Gi
-          gpu.intel.com/i915: 1
+          #gpu.intel.com/i915: 1
 
       gpu:
         nvidia:
@@ -60,7 +60,7 @@ spec:
       PLEX_PREFERENCE_4: "LogVerbose=0"
       PLEX_PREFERENCE_5: "DisableTLSv1_0=1"
       PLEX_PREFERENCE_6: "TranscoderQuality=0"
-      PLEX_PREFERENCE_7: "HardwareAcceleratedCodecs=1"
+      #PLEX_PREFERENCE_7: "HardwareAcceleratedCodecs=1"
       PLEX_CLAIM: "claim-q9Z44LEtGQR-myxM86AF"
 
     # -- Add kubernetes liveness probe to pms container.
@@ -86,16 +86,16 @@ spec:
       failureThreshold: 3
 
     extraVolumes:
-      - name: dev-dri
-        hostPath:
-          path: /dev/dri
-          type: Directory
+      # - name: dev-dri
+      #   hostPath:
+      #     path: /dev/dri
+      #     type: Directory
       - name: plex-media
         persistentVolumeClaim:
           claimName: plex-media-smb
 
-    extraVolumeMounts:
-      - name: dev-dri
-        mountPath: /dev/dri
-      - name: plex-media
-        mountPath: /data
+    # extraVolumeMounts:
+    #   - name: dev-dri
+    #     mountPath: /dev/dri
+    #   - name: plex-media
+    #     mountPath: /data
