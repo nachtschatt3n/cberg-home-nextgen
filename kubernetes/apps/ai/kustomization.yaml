@@ -4,6 +4,6 @@ kind: Kustomization
 namespace: ai
 components:
   - ../../flux/components/common
-resources:
+#resources:
 #  - ./open-webui/ks.yaml
 #  - ./ollama/ks.yaml
