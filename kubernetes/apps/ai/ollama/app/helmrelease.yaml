@@ -75,7 +75,6 @@ spec:
                   echo "Installing Intel GPU dependencies..."
                   dpkg -i *.deb
                   mkdir -p /usr/local
-                  #tar xvf ollama-0.5.4-ipex-llm-2.2.0b20250220-ubuntu.tgz -C /usr/local
                   tar xvf ollama-ipex-llm-2.3.0b20250415-ubuntu.tgz -C /usr/local
                   cd btop
                   make
