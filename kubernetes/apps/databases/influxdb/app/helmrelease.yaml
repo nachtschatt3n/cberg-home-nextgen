@@ -79,10 +79,13 @@ spec:
       enabled: true
       ingressClassName: internal
       annotations:
-        hajimari.io/enable: "true"
-        hajimari.io/appName: "Influx DB"
-        hajimari.io/icon: "database"
-        hajimari.io/group: "databases"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Influx DB"
+        gethomepage.dev/description: "InfluxDB is an open-source time series database"
+        gethomepage.dev/group: "Databases"
+        gethomepage.dev/icon: "influxdb.png"
+      labels:
+        gethomepage.dev/enabled: "true"
       hostname: &host "influx.${SECRET_DOMAIN}"
       hosts:
         - &host "influx.${SECRET_DOMAIN}"

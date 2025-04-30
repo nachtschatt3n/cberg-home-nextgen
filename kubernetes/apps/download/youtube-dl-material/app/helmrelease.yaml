@@ -88,6 +88,14 @@ spec:
       main:
         enabled: true
         className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "YouTube-DL Material"
+          gethomepage.dev/description: "YouTube-DL Material is a web interface for YouTube-DL"
+          gethomepage.dev/group: "Download"
+          gethomepage.dev/icon: "youtube-dl-material.png"
+          labels:
+            gethomepage.dev/enabled: "true"
         hosts:
           - host: &host "youtube-dl.${SECRET_DOMAIN}"
             paths:

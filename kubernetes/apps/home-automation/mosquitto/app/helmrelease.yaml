@@ -82,8 +82,13 @@ spec:
         enabled: false
         #ingressclass: "internal"
         annotations:
-          hajimari.io/enable: "true"
-          hajimari.io/appName: "Mosquitto"
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Mosquitto"
+          gethomepage.dev/description: "Mosquitto is an open-source message broker that implements the MQTT protocol"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "mosquitto.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
           - host: "mqtt.${SECRET_DOMAIN}"
             paths:

@@ -4,7 +4,14 @@ kind: Ingress
 metadata:
   name: plex
   namespace: media
+  labels:
+    gethomepage.dev/enabled: "true"
   annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Plex"
+    gethomepage.dev/description: "Media streaming server"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "plex.png"
     external-dns.alpha.kubernetes.io/target: &host "plex.${SECRET_DOMAIN}"
 spec:
   ingressClassName: "internal"

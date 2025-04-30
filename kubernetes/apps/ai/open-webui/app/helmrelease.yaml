@@ -94,11 +94,14 @@ spec:
       tls: true
       existingSecret: ""
       annotations:
-        hajimari.io/enable: "true"
-        hajimari.io/appName: "open-webui"
-        hajimari.io/icon: "web"
-        hajimari.io/group: "ai"
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Open WebUI"
+        gethomepage.dev/description: "Web UI for Ollama"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "open-webui.png"
+      labels:
+        gethomepage.dev/enabled: "true"
     persistence:
       enabled: true
       existingClaim: open-webui

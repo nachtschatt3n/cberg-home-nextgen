@@ -97,6 +97,14 @@ spec:
       main:
         enabled: true
         className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "JDownloader"
+          gethomepage.dev/description: "JDownloader is a free and open-source download manager"
+          gethomepage.dev/group: "Download"
+          gethomepage.dev/icon: "jdownloader.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
           - host: &host "jdownloader.${SECRET_DOMAIN}"
             paths:

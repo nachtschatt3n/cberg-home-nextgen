@@ -57,7 +57,14 @@ spec:
       main:
         enabled: true
         className: internal
-        annotations: {}
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Node-RED"
+          gethomepage.dev/description: "Flow-based programming tool for wiring together hardware devices, APIs and online services"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "node-red.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
           - host: "node.${SECRET_DOMAIN}"
             paths:

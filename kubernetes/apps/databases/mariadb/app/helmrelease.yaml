@@ -51,10 +51,14 @@ spec:
       enabled: true
       ingressClassName: internal
       annotations:
-        hajimari.io/enable: "true"
-        hajimari.io/appName: "MariaDB"
-        hajimari.io/icon: "database"
-        hajimari.io/group: "databases"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "MariaDB"
+        gethomepage.dev/description: "MariaDB is a community-developed, commercially supported, and open-source relational database"
+        gethomepage.dev/group: "Databases"
+        gethomepage.dev/icon: "mariadb.png"
+      labels:
+        gethomepage.dev/enabled: "true"
+
       hostname: &host "mariadb.${SECRET_DOMAIN}"
       hosts:
         - &host "mariadb.${SECRET_DOMAIN}"
