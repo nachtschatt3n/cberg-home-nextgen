@@ -91,12 +91,12 @@ spec:
       services:
         - Infrasructure:
           - Unifi:
-              href: https://unifi.${PRIVATE_DOMAIN}
+              href: http://192.168.55.1
               icon: unifi.png
               widget:
                 type: unifi
-                url: https://unifi.${PRIVATE_DOMAIN}
-                key: {{HOMEPAGE_VAR_UNIFI_TOKEN}}
+                url: http://192.168.55.1
+                # key: {{HOMEPAGE_VAR_UNIFI_TOKEN}}
           - Brother Laser:
               icon: brother
               href: https://192.168.1.8/sws/index.html
@@ -127,6 +127,7 @@ spec:
               showLabel: true
         - openmeteo:
             label: Home
+            timezone: Europe/Berlin
             units: metric
             cache: 5
         - datetime:
