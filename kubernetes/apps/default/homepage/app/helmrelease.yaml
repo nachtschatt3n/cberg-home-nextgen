@@ -98,7 +98,7 @@ spec:
             memory: true
         - adguard:
             type: adguard
-            url: https://adguard.${SECRET_DOMAIN}
+            url: http://adguard-home-http.network.svc.cluster.local
         - search:
             provider: duckduckgo
             target: _blank
