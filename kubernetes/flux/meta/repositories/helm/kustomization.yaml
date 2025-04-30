@@ -30,3 +30,4 @@ resources:
   - ./dirsigler.yaml
   - ./pajikos.yaml
   - ./prometheus-community.yaml
+  - ./jameswynn.yaml
