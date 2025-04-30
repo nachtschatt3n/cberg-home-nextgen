@@ -29,7 +29,7 @@ spec:
     # Enable RBAC. RBAC is necessary to use Kubernetes integration
     enableRbac: true
 
-    extraClusterRoles:
+    #extraClusterRoles:
       # - apiGroups:
       #   - some-group
       #   resources:
@@ -95,8 +95,12 @@ spec:
               icon: unifi.png
               widget:
                 type: unifi
-                url: http://192.168.55.1
-                # key: {{HOMEPAGE_VAR_UNIFI_TOKEN}}
+                url: https://api.ui.com
+                key:
+                  valueFrom:
+                    secretKeyRef:
+                      name: homepage-secret
+                      key: UNIFI_API_KEY
           - Brother Laser:
               icon: brother
               href: https://192.168.1.8/sws/index.html
