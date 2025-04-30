@@ -182,22 +182,22 @@ spec:
         theme: dark
         color: slate
         headerStyle: boxed
-        layout:
-          AI:
-            style: row
-            columns: 2
-          "Home Automation":
-            style: row
-            columns: 2
-          "Network Services":
-            style: row
-            columns: 2
-          Infrastructure:
-            style: row
-            columns: 2
-          Monitoring:
-            style: row
-            columns: 3
+        # layout:
+        #   AI:
+        #     style: row
+        #     columns: 2
+        #   "Home Automation":
+        #     style: row
+        #     columns: 2
+        #   "Network Services":
+        #     style: row
+        #     columns: 2
+        #   Infrastructure:
+        #     style: row
+        #     columns: 2
+        #   Monitoring:
+        #     style: row
+        #     columns: 3
 
         # title: Homepage
         # headerStyle: boxed
