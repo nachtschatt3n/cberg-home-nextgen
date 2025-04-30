@@ -89,6 +89,27 @@ spec:
                   href: https://github.com/
 
       services:
+        - Infrasructure:
+          - FRITZ!Box:
+            icon: unifi
+            href: http://192.168.30.1
+            description: Unifi Dream Machine Pro
+            #ping: 192.168.55.1
+            siteMonitor: http://192.168.55.1
+            widget:
+              type: unifi
+              url: http://192.168.30.1
+              fields:
+                - uptime
+                - received
+                - sent
+          - Brother Laser:
+              icon: brother
+              href: https://192.168.1.8/sws/index.html
+              description: HP LaserJet Printer Management
+              # ping: harbor.techtales.io
+              siteMonitor: https://192.168.1.8/
+
       widgets:
         - resources:
             # change backend to 'kubernetes' to use Kubernetes integration. Requires RBAC.
@@ -96,22 +117,9 @@ spec:
             expanded: true
             cpu: true
             memory: true
-        - adguard:
-            type: adguard
-            url: http://adguard-home-http.network.svc.cluster.local
         - search:
             provider: duckduckgo
             target: _blank
-        - longhorn:
-            # Show the expanded view
-            expanded: true
-            # Shows a node representing the aggregate values
-            total: true
-            # Shows the node names as labels
-            labels: true
-            # Show the nodes
-            nodes: true
-        ## Uncomment to enable Kubernetes integration
         - kubernetes:
             cluster:
               show: true
