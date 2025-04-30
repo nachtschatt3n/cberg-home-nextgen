@@ -93,7 +93,7 @@ spec:
           gethomepage.dev/name: "YouTube-DL Material"
           gethomepage.dev/description: "YouTube-DL Material is a web interface for YouTube-DL"
           gethomepage.dev/group: "Download"
-          gethomepage.dev/icon: "youtube-dl-material.png"
+          gethomepage.dev/icon: "youtube.png"
         labels:
             gethomepage.dev/enabled: "true"
         hosts:
