@@ -2,10 +2,18 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: zigbee2mqtt
-spec:
-  ingressClassName: internal
+  namespace: home-automation
+  labels:
+    gethomepage.dev/enabled: "true"
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: zigbee2mqtt.${SECRET_DOMAIN}
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Zigbee2MQTT"
+    gethomepage.dev/description: "Zigbee to MQTT bridge"
+    gethomepage.dev/group: "Home Automation"
+    gethomepage.dev/icon: "zigbee2mqtt.png"
+    external-dns.alpha.kubernetes.io/target: &host "zigbee2mqtt.${SECRET_DOMAIN}"
+spec:
+  ingressClassName: "internal"
   rules:
   - host: zigbee2mqtt.${SECRET_DOMAIN}
     http:

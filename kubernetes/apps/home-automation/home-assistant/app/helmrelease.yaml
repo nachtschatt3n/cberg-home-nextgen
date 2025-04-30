@@ -48,8 +48,15 @@ spec:
         enabled: true
         className: external
         annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Home Assistant"
+          gethomepage.dev/description: "Open source home automation platform"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "home-assistant.png"
           hajimari.io/icon: mdi:home-assistant
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
           - host: "hass.${SECRET_DOMAIN}"
             paths:

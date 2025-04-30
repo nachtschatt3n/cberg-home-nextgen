@@ -121,8 +121,13 @@ data:
         enabled: true
         ingressClassName: internal
         annotations:
-          hajimari.io/appName: Prometheus
-          hajimari.io/icon: simple-icons:prometheus
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Prometheus"
+          gethomepage.dev/description: "Prometheus is an open-source monitoring system with a time series database"
+          gethomepage.dev/group: "Monitoring"
+          gethomepage.dev/icon: "prometheus.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         pathType: Prefix
         hosts:
           - "prometheus.${SECRET_DOMAIN}"

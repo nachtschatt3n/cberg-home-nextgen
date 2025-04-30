@@ -145,8 +145,14 @@ spec:
       enabled: true
       className: "internal"
       annotations:
-        # kubernetes.io/ingress.class: nginx
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Jellyfin"
+        gethomepage.dev/description: "Media streaming server"
+        gethomepage.dev/group: "Media"
+        gethomepage.dev/icon: "jellyfin.png"
         external-dns.alpha.kubernetes.io/target: "jellyfin.${SECRET_DOMAIN}"
+      labels:
+        gethomepage.dev/enabled: "true"
       hosts:
         - host: &host "jellyfin.${SECRET_DOMAIN}"
           paths:
