@@ -142,6 +142,8 @@ spec:
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
+        ingress: true
+
       docker:
       settings:
 
