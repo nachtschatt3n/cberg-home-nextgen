@@ -92,7 +92,7 @@ spec:
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
-                icon: solar.png
+                icon: mdi-solar-power
                 description: Solar Inverter Gateway
             - Awtrix:
                 href: http://192.168.33.135
@@ -104,11 +104,11 @@ spec:
                 description: KVM over IP
             - "Zigbee Hub":
                 href: http://192.168.31.177
-                icon: zigbee.png
+                icon: zigbee2mqtt.png
                 description: Samotech SM310 Zigbee Hub
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
-                icon: zigbee.png
+                icon: zigbee2mqtt.png
                 description: SLZB-06P10 Zigbee Coordinator
             - "Unifi NAS Pro":
                 href: http://192.168.31.230
