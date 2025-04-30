@@ -109,7 +109,6 @@ spec:
         - search:
             provider: duckduckgo
             target: _blank
-      docker: ""
 
     env:
       - name: HOMEPAGE_ALLOWED_HOSTS
