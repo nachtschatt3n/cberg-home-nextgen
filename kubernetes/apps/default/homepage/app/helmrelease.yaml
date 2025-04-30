@@ -182,22 +182,39 @@ spec:
         theme: dark
         color: slate
         headerStyle: boxed
-        # layout:
-        #   AI:
-        #     style: row
-        #     columns: 2
-        #   "Home Automation":
-        #     style: row
-        #     columns: 2
-        #   "Network Services":
-        #     style: row
-        #     columns: 2
-        #   Infrastructure:
-        #     style: row
-        #     columns: 2
-        #   Monitoring:
-        #     style: row
-        #     columns: 3
+        useEqualHeights: true
+
+        layout:
+          AI:
+            style: row
+            columns: 1
+          Databases:
+            style: row
+            columns: 1
+          System:
+            style: row
+            columns: 2
+          "Network Services":
+            style: row
+            columns: 1
+          "Home Automation":
+            style: row
+            columns: 1
+          Monitoring:
+            style: row
+            columns: 1
+          Infrastructure:
+            style: row
+            columns: 1
+          Media:
+            style: row
+            columns: 1
+          Office:
+            style: row
+            columns: 1
+          "Download":
+            style: row
+            columns: 1
 
         # title: Homepage
         # headerStyle: boxed
