@@ -206,9 +206,14 @@ spec:
       http:
         enabled: true
         className: "internal"
-        annotations: {}
-          # kubernetes.io/ingress.class: nginx
-          # kubernetes.io/tls-acme: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "AdGuard Home"
+          gethomepage.dev/description: "Network-wide ad blocking and DNS server"
+          gethomepage.dev/group: "Network"
+          gethomepage.dev/icon: "adguard.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
           - host: &host adguard.${SECRET_DOMAIN}
             paths:
