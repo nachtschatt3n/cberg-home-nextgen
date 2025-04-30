@@ -93,14 +93,14 @@ spec:
           - Unifi:
               href: http://192.168.55.1
               icon: unifi.png
-              widget:
-                type: unifi
-                url: https://api.ui.com
-                key:
-                  valueFrom:
-                    secretKeyRef:
-                      name: homepage-secret
-                      key: UNIFI_API_KEY
+              # widget:
+              #   type: unifi
+              #   url: https://api.ui.com
+              #   key:
+              #     valueFrom:
+              #       secretKeyRef:
+              #         name: homepage-secret
+              #         key: UNIFI_API_KEY
           - Brother Laser:
               icon: brother
               href: https://192.168.1.8/sws/index.html
