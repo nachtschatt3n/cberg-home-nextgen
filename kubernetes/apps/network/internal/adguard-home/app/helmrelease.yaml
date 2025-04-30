@@ -210,8 +210,8 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "AdGuard Home"
           gethomepage.dev/description: "Network-wide ad blocking and DNS server"
-          gethomepage.dev/group: "Network"
-          gethomepage.dev/icon: "adguard.png"
+          gethomepage.dev/group: "Network Services"
+          gethomepage.dev/icon: "adguard-home.png"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -226,8 +226,7 @@ spec:
       https:
         enabled: false
         className: "internal"
-        annotations:
-          hajimari.io/icon: simple-icons:adguard
+        annotations: {}
         hosts:
           - host: &host "adguard.${SECRET_DOMAIN}"
             paths:
