@@ -84,10 +84,8 @@ spec:
     ingress:
       app:
         className: external
-        labels:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Echo Server"
         annotations:
+          gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Echo Server"
           gethomepage.dev/description: "A simple echo server"
           gethomepage.dev/group: "Network Services"
