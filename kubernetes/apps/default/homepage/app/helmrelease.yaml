@@ -66,10 +66,6 @@ spec:
               limits:
                 cpu: 500m
                 memory: 512Mi
-            volumeMounts:
-              - name: homepage-config
-                mountPath: /app/config
-                readOnly: true
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
