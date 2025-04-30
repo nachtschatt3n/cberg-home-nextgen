@@ -96,7 +96,8 @@ spec:
       logs:
         enabled: true
         type: emptyDir
-        mountPath: /app/config/logs
+        globalMounts:
+          - path: /app/config/logs
     ingress:
       app:
         className: internal
