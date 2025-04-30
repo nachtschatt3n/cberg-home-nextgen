@@ -90,48 +90,51 @@ spec:
 
       services:
         - Infrasructure:
-          - FRITZ!Box:
-            icon: unifi
-            href: http://192.168.30.1
-            description: Unifi Dream Machine Pro
-            #ping: 192.168.55.1
-            siteMonitor: http://192.168.55.1
-            widget:
-              type: unifi
-              url: http://192.168.30.1
-              fields:
-                - uptime
-                - received
-                - sent
+          - Unifi:
+              href: https://unifi.${PRIVATE_DOMAIN}
+              icon: unifi.png
+              widget:
+                type: unifi
+                url: https://unifi.${PRIVATE_DOMAIN}
+                key: {{HOMEPAGE_VAR_UNIFI_TOKEN}}
           - Brother Laser:
               icon: brother
               href: https://192.168.1.8/sws/index.html
-              description: HP LaserJet Printer Management
+              description: Brother Laser Printer Management
               # ping: harbor.techtales.io
               siteMonitor: https://192.168.1.8/
 
       widgets:
         - resources:
-            # change backend to 'kubernetes' to use Kubernetes integration. Requires RBAC.
             backend: kubernetes
-            expanded: true
             cpu: true
+            expanded: true
             memory: true
         - search:
-            provider: duckduckgo
+            provider: [brave, google]
+            focus: false
             target: _blank
         - kubernetes:
             cluster:
-              show: true
               cpu: true
               memory: true
+              show: true
               showLabel: true
-              label: "cluster"
             nodes:
-              show: true
               cpu: true
               memory: true
+              show: false
               showLabel: true
+        - openmeteo:
+            label: Home
+            units: metric
+            cache: 5
+        - datetime:
+            text_size: l
+            format:
+              dateStyle: long
+              timeStyle: short
+              hourCycle: h23
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
