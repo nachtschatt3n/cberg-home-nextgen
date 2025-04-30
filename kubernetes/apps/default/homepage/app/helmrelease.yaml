@@ -111,6 +111,9 @@ spec:
             expanded: true
             cpu: true
             memory: true
+        - adguard:
+            type: adguard
+            url: https://adguard.${SECRET_DOMAIN}
         - search:
             provider: duckduckgo
             target: _blank
