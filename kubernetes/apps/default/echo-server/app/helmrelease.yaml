@@ -84,8 +84,15 @@ spec:
     ingress:
       app:
         className: external
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
+          gethomepage.dev/name: "Echo Server"
+          gethomepage.dev/description: "A simple echo server"
+          gethomepage.dev/group: "Network Services"
+          gethomepage.dev/icon: "echo-server.png"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+
         hosts:
           - host: "{{ .Release.Name }}.${SECRET_DOMAIN}"
             paths:
