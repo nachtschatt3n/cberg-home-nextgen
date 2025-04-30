@@ -90,8 +90,13 @@ spec:
     persistence:
       config:
         enabled: true
+        type: emptyDir
         globalMounts:
           - path: /app/config
+      logs:
+        enabled: true
+        type: emptyDir
+        mountPath: /app/config/logs
     ingress:
       app:
         className: internal
