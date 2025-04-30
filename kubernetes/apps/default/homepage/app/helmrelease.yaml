@@ -89,24 +89,48 @@ spec:
                   href: https://github.com/
 
       services:
-        - Infrasructure:
-          - Unifi:
-              href: http://192.168.55.1
-              icon: unifi.png
-              # widget:
-              #   type: unifi
-              #   url: https://api.ui.com
-              #   key:
-              #     valueFrom:
-              #       secretKeyRef:
-              #         name: homepage-secret
-              #         key: UNIFI_API_KEY
-          - Brother Laser:
-              icon: brother
-              href: https://192.168.1.8/sws/index.html
-              description: Brother Laser Printer Management
-              # ping: harbor.techtales.io
-              siteMonitor: https://192.168.1.8/
+        - Infrastructure:
+            - openDTU:
+                href: http://192.168.33.220
+                icon: solar.png
+                description: Solar Inverter Gateway
+            - Awtrix:
+                href: http://192.168.33.135
+                icon: matrix.png
+                description: LED Matrix Display
+            - PiKVM:
+                href: http://192.168.30.154
+                icon: pikvm.png
+                description: KVM over IP
+            - "Zigbee Hub":
+                href: http://192.168.31.177
+                icon: zigbee.png
+                description: Samotech SM310 Zigbee Hub
+            - "Zigbee Coordinator":
+                href: http://192.168.32.20
+                icon: zigbee.png
+                description: SLZB-06P10 Zigbee Coordinator
+            - "Unifi NAS Pro":
+                href: http://192.168.31.230
+                icon: unifi.png
+                description: Network Attached Storage
+        - "Network Services":
+            - Unifi:
+                href: http://192.168.55.1
+                icon: unifi.png
+                # widget:
+                #     type: unifi
+                #     url: https://api.ui.com
+                #     key:
+                #         valueFrom:
+                #             secretKeyRef:
+                #                 name: homepage-secret
+                #                 key: UNIFI_API_KEY
+            - Brother Laser:
+                icon: brother
+                href: http://192.168.33.153
+                description: Brother HL 2360DW
+                siteMonitor: http://192.168.33.153
 
       widgets:
         - resources:
