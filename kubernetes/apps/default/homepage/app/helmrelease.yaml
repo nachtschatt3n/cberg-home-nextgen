@@ -187,34 +187,34 @@ spec:
         layout:
           AI:
             style: row
-            columns: 1
+            columns: 3
           Databases:
             style: row
-            columns: 1
+            columns: 3
           System:
             style: row
-            columns: 2
+            columns: 3
           "Network Services":
             style: row
-            columns: 1
+            columns: 3
           "Home Automation":
             style: row
-            columns: 1
+            columns: 3
           Monitoring:
             style: row
-            columns: 1
+            columns: 3
           Infrastructure:
             style: row
-            columns: 1
+            columns: 3
           Media:
             style: row
-            columns: 1
+            columns: 3
           Office:
             style: row
-            columns: 1
+            columns: 3
           "Download":
             style: row
-            columns: 1
+            columns: 3
 
         # title: Homepage
         # headerStyle: boxed
