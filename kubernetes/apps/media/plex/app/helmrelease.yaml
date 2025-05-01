@@ -86,16 +86,16 @@ spec:
       failureThreshold: 3
 
     extraVolumes:
+      - name: plex-media
+        persistentVolumeClaim:
+          claimName: plex-media-smb
       # - name: dev-dri
       #   hostPath:
       #     path: /dev/dri
       #     type: Directory
-      - name: plex-media
-        persistentVolumeClaim:
-          claimName: plex-media-smb
 
-     extraVolumeMounts:
-    #   - name: dev-dri
-    #      mountPath: /dev/dri
+    extraVolumeMounts:
       - name: plex-media
         mountPath: /data
+    #   - name: dev-dri
+    #      mountPath: /dev/dri
