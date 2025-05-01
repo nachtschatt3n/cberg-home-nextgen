@@ -43,7 +43,7 @@ spec:
         ports:
           http:
             port: 8123
-          CoIoT:
+          colot:
             enabled: true
             port: 5683
     ingress:
