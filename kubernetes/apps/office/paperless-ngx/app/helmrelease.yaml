@@ -133,11 +133,12 @@ spec:
         enabled: true
         mountPath: /usr/src/paperless/consume
         existingClaim: paperless-ngx-consume
-      # prompts:
-      #   enabled: true
-      #   type: configMap
-      #   name: paperless-gpt-prompts
-      #   mountPath: /app/prompts
+      prompts:
+        enabled: true
+        #type: configMap
+        type: emptyDir
+        #name: paperless-gpt-prompts
+        mountPath: /app/prompts
       hocr:
         enabled: true
         type: emptyDir
@@ -254,8 +255,8 @@ spec:
             mountPath: /usr/src/paperless/export
           - name: consume
             mountPath: /usr/src/paperless/consume
-          # - name: prompts
-          #   mountPath: /app/prompts
+          - name: prompts
+            mountPath: /app/prompts
           - name: hocr
             mountPath: /app/hocr
           - name: pdf
