@@ -7,7 +7,7 @@ components:
   - ../../flux/components/common
 resources:
   - ./jellyfin/ks.yaml
-#  - ./plex/ks.yaml
+  - ./plex/ks.yaml
 
 ---
 apiVersion: v1
