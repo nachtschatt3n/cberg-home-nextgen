@@ -133,6 +133,23 @@ spec:
         enabled: true
         mountPath: /usr/src/paperless/consume
         existingClaim: paperless-ngx-consume
+      prompts:
+        enabled: true
+        type: configMap
+        name: paperless-gpt-prompts
+        mountPath: /app/prompts
+      hocr:
+        enabled: true
+        type: emptyDir
+        mountPath: /app/hocr
+      pdf:
+        enabled: true
+        type: emptyDir
+        mountPath: /app/pdf
+      gptdb:
+        enabled: true
+        type: emptyDir
+        mountPath: /app/db
     postgresql:
       enabled: false
     mariadb:
@@ -225,7 +242,7 @@ spec:
             cpu: 500m
             memory: 1Gi
           limits:
-            memory: 2Gi
+            memory: 4Gi
         securityContext:
           runAsUser: 1000
           runAsGroup: 1000
@@ -237,3 +254,11 @@ spec:
             mountPath: /usr/src/paperless/export
           - name: consume
             mountPath: /usr/src/paperless/consume
+          - name: prompts
+            mountPath: /app/prompts
+          - name: hocr
+            mountPath: /app/hocr
+          - name: pdf
+            mountPath: /app/pdf
+          - name: gptdb
+            mountPath: /app/db
