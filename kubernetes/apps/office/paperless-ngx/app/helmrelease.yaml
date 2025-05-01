@@ -242,6 +242,8 @@ spec:
             value: "true"
           - name: PDF_REPLACE
             value: "true"
+          - name: PDF_UPLOAD
+            value: "true"
         resources:
           requests:
             cpu: 500m
