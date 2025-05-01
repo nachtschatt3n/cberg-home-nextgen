@@ -226,8 +226,10 @@ spec:
             value: "ollama"
           - name: VISION_LLM_PROVIDER
             value: "ollama"
+          - name: LLM_LANGUAGE
+            value: "German"
           - name: VISION_LLM_MODEL
-            value: "llava:latest"
+            value: "minicpm-v"
           - name: OLLAMA_BASE_URL
             value: "http://ollama-ipex.ai.svc.cluster.local:11434"
           - name: OLLAMA_HOST
