@@ -65,7 +65,7 @@ spec:
       paperless-gpt:
         controller: paperless-gpt
         ports:
-          http:
+          gpt:
             port: 8080
     ingress:
       main:
@@ -109,7 +109,7 @@ spec:
                   service:
                     name: paperless-gpt
                     port:
-                      number: 8080
+                      name: gpt
         tls:
           - hosts:
               - "paperless-gpt.${SECRET_DOMAIN}"
