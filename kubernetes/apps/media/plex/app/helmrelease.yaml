@@ -94,8 +94,8 @@ spec:
         persistentVolumeClaim:
           claimName: plex-media-smb
 
-    # extraVolumeMounts:
+     extraVolumeMounts:
     #   - name: dev-dri
-    #     mountPath: /dev/dri
-    #   - name: plex-media
-    #     mountPath: /data
+    #      mountPath: /dev/dri
+      - name: plex-media
+        mountPath: /data
