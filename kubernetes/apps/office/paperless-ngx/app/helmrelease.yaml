@@ -208,8 +208,8 @@ spec:
             value: "ollama"
           - name: OLLAMA_BASE_URL
             value: "http://ollama-ipex.ai.svc.cluster.local:11434"
-          - name: OLLAMA_MODEL
-            value: "deepseek-coder:33b"
+          - name: LLM_MODEL
+            value: "deepseek-r1:8b"
           - name: TOKEN_LIMIT
             value: "4096"
           - name: OCR_LIMIT_PAGES
