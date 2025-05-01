@@ -133,6 +133,12 @@ spec:
                 description: Brother HL 2360DW
                 siteMonitor: http://192.168.33.153
 
+            - "Epson Scanner ES-580W":
+                icon: brother
+                href: http://192.168.32.201
+                description: Epson ES-580W
+                siteMonitor: http://192.168.32.201
+
       widgets:
         - resources:
             backend: kubernetes
