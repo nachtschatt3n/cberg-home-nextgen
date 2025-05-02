@@ -48,7 +48,14 @@ spec:
       main:
         enabled: true
         className: internal
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Zigbee2MQTT"
+          gethomepage.dev/description: "Zigbee to MQTT bridge"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "zigbee2mqtt.png"
           external-dns.alpha.kubernetes.io/hostname: zigbee2mqtt.${SECRET_DOMAIN}
         hosts:
           - host: "zigbee2mqtt.${SECRET_DOMAIN}"
