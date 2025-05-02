@@ -44,6 +44,7 @@ spec:
         ports:
           http:
             port: 8123
+            primary: true
           colot:
             enabled: true
             protocol: UDP
@@ -68,8 +69,7 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  identifier: main
-                  port: 8123
+                  name: main
     persistence:
       config:
         enabled: true
