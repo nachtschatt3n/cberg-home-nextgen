@@ -69,8 +69,8 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
-                  port: 8123
+                  identifier: main
+                  port: http
     persistence:
       config:
         enabled: true
