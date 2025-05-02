@@ -67,9 +67,9 @@ spec:
             paths:
               - path: /
                 pathType: Prefix
-                port: http
                 service:
                   identifier: main
+                  port: http
     persistence:
       config:
         enabled: true
