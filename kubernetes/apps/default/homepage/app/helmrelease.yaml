@@ -102,10 +102,10 @@ spec:
                 href: http://192.168.30.154
                 icon: pikvm.png
                 description: KVM over IP
-            - "Zigbee Hub":
-                href: http://192.168.31.177
+            - "Zigbee Router GF":
+                href: http://192.168.32.21
                 icon: zigbee2mqtt.png
-                description: Samotech SM310 Zigbee Hub
+                description: SLZB-06 Zigbee Router Ground Floor
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
                 icon: zigbee2mqtt.png
