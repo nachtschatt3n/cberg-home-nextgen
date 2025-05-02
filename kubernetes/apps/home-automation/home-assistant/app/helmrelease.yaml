@@ -70,6 +70,7 @@ spec:
                 pathType: Prefix
                 service:
                   name: main
+                  port: 8123
     persistence:
       config:
         enabled: true
