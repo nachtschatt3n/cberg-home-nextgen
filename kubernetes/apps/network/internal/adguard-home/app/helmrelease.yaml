@@ -214,8 +214,8 @@ spec:
           gethomepage.dev/icon: "adguard-home.png"
           gethomepage.dev/widget.type: "adguard"
           gethomepage.dev/widget.url: "https://adguard.${SECRET_DOMAIN}"
-          gethomepage.dev/widget.username: "{{ .Values.env[1].valueFrom.secretKeyRef.key }}"
-          gethomepage.dev/widget.password: "{{ .Values.env[0].valueFrom.secretKeyRef.key }}"
+          gethomepage.dev/widget.username: "${ADMIN_USERNAME}"
+          gethomepage.dev/widget.password: "${ADMIN_PASSWORD}"
 
         labels:
           gethomepage.dev/enabled: "true"
