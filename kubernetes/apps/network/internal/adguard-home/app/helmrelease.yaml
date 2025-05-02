@@ -212,6 +212,11 @@ spec:
           gethomepage.dev/description: "Network-wide ad blocking and DNS server"
           gethomepage.dev/group: "Network Services"
           gethomepage.dev/icon: "adguard-home.png"
+          gethomepage.dev/widget.type: "adguard"
+          gethomepage.dev/widget.url: "https://adguard.${SECRET_DOMAIN}"
+          gethomepage.dev/widget.username: "{{ .Values.env[1].valueFrom.secretKeyRef.key }}"
+          gethomepage.dev/widget.password: "{{ .Values.env[0].valueFrom.secretKeyRef.key }}"
+
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
