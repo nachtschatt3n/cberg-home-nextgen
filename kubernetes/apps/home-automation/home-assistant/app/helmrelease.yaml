@@ -46,6 +46,7 @@ spec:
             port: 8123
           colot:
             enabled: true
+            protocol: UDP
             port: 5683
     ingress:
       main:
