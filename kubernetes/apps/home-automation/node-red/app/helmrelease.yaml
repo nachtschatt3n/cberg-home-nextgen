@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: nodered/node-red
-              tag: 3.1-debian
+              tag: 4.0.9
             env:
               - name: TZ
                 value: "${TIMEZONE}"
