@@ -1,0 +1,121 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app kopia
+  namespace: backup
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        type: deployment
+        containers:
+          main:
+            image:
+              repository: kopia/kopia
+              tag: latest
+            env:
+              KOPIA_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: kopia-secrets
+                    key: KOPIA_PASSWORD
+              TZ: "Europe/Berlin"
+            command:
+              - "server"
+              - "start"
+              - "--disable-csrf-token-checks"
+              - "--insecure"
+              - "--address=0.0.0.0:51515"
+              - "--server-username=admin"
+              - "--server-password"
+              - "$(SERVER_PASSWORD)"
+            envFrom:
+              - secretRef:
+                  name: kopia-secrets
+            probes:
+              liveness:
+                enabled: true
+                type: AUTO
+                port: 51515
+                spec:
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                type: AUTO
+                port: 51515
+                spec:
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 51515
+    persistence:
+      config:
+        enabled: true
+        type: emptyDir
+        #existingClaim: kopia-config
+        globalMounts:
+          - path: /app/config
+      cache:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /app/cache
+      logs:
+        enabled: true
+        type: emptyDir
+        #existingClaim: kopia-logs
+        globalMounts:
+          - path: /app/logs
+      repository:
+        enabled: true
+        type: emptyDir
+        #existingClaim: kopia-repository
+        globalMounts:
+          - path: /repository
+      tmp:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+    hostNetwork: false
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
