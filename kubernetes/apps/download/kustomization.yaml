@@ -5,6 +5,6 @@ namespace: download
 components:
   - ../../flux/components/common
 resources:
-  - ./youtube-dl-material/ks.yaml
+#  - ./youtube-dl-material/ks.yaml
   - ./jdownloader/ks.yaml
 #  - ./icloud-docker/ks.yaml
