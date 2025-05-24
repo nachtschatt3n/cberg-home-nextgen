@@ -17,8 +17,6 @@ mountOptions:
   - cache=none
   - actimeo=0
   - noserverino
-  - multichannel
-  - max_channels=4
 parameters:
   source: "//${NAS_HOSTNAME}/media/downloads"
   subdir: "/youtube-dl"
