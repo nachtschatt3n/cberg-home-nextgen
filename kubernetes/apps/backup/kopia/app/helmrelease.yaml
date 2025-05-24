@@ -85,35 +85,35 @@ spec:
         ports:
           http:
             port: 51515
-    persistence:
-      config:
-        enabled: true
-        type: emptyDir
-        #existingClaim: kopia-config
-        globalMounts:
-          - path: /app/config
-      cache:
-        enabled: true
-        type: emptyDir
-        globalMounts:
-          - path: /app/cache
-      logs:
-        enabled: true
-        type: emptyDir
-        #existingClaim: kopia-logs
-        globalMounts:
-          - path: /app/logs
-      repository:
-        enabled: true
-        type: emptyDir
-        #existingClaim: kopia-repository
-        globalMounts:
-          - path: /repository
-      tmp:
-        enabled: true
-        type: emptyDir
-        globalMounts:
-          - path: /tmp
+    #persistence:
+      # config:
+      #   enabled: true
+      #   type: emptyDir
+      #   #existingClaim: kopia-config
+      #   globalMounts:
+      #     - path: /app/config
+      # cache:
+      #   enabled: true
+      #   type: emptyDir
+      #   globalMounts:
+      #     - path: /app/cache
+      # logs:
+      #   enabled: true
+      #   type: emptyDir
+      #   #existingClaim: kopia-logs
+      #   globalMounts:
+      #     - path: /app/logs
+      # repository:
+      #   enabled: true
+      #   type: emptyDir
+      #   #existingClaim: kopia-repository
+      #   globalMounts:
+      #     - path: /repository
+      # tmp:
+      #   enabled: true
+      #   type: emptyDir
+      #   globalMounts:
+      #     - path: /tmp
     hostNetwork: false
     securityContext:
       runAsUser: 1000
