@@ -98,4 +98,4 @@ spec:
       - name: plex-media
         mountPath: /data
       - name: dev-dri
-         mountPath: /dev/dri
+        mountPath: /dev/dri
