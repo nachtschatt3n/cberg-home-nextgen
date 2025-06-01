@@ -105,13 +105,11 @@ spec:
         size: 10Gi
         storageClass: "longhorn"
         accessMode: ReadWriteOnce
-        existingClaim: scrypted-data
       media:
         enabled: true
         size: 50Gi
         storageClass: "longhorn"
         accessMode: ReadWriteOnce
-        existingClaim: scrypted-media
     extraVolumes:
       - name: dev-dri
         hostPath:
