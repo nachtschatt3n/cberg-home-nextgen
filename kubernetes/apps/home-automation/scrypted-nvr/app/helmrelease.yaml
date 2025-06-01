@@ -1,0 +1,125 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: scrypted
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      scrypted:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: koush/scrypted
+              tag: latest
+            env:
+              - name: SCRYPTED_DEBUG
+                value: "true"
+              - name: SCRYPTED_DEBUG_LEVEL
+                value: "info"
+            probes:
+              liveness:
+                enabled: true
+              readiness:
+                enabled: true
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - SYS_ADMIN
+              allowPrivilegeEscalation: true
+              runAsUser: 0
+              runAsGroup: 0
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+                gpu.intel.com/i915: 1
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+                gpu.intel.com/i915: 1
+        pod:
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+            runAsGroup: 0
+            fsGroup: 0
+          hostIPC: true
+          hostNetwork: true
+          hostPID: true
+    service:
+      main:
+        controller: scrypted
+        type: LoadBalancer
+        loadBalancerIP: "192.168.55.16"
+        externalTrafficPolicy: Cluster
+        annotations:
+          external-dns.alpha.kubernetes.io/hostname: scrypted.${SECRET_DOMAIN}
+        ports:
+          web:
+            protocol: TCP
+            enabled: true
+            port: 10443
+            targetPort: 10443
+    ingress:
+      main:
+        enabled: true
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Scrypted"
+          gethomepage.dev/description: "Scrypted is a home automation platform that supports various camera and device integrations"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "scrypted.png"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: "scrypted.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  name: main
+                  port: 10443
+    persistence:
+      data:
+        enabled: true
+        size: 10Gi
+        storageClass: "longhorn"
+        mountPath: "/root/.scrypted"
+      media:
+        enabled: true
+        size: 50Gi
+        storageClass: "longhorn"
+        mountPath: "/root/.scrypted/media"
+    extraVolumes:
+      - name: dev-dri
+        hostPath:
+          path: /dev/dri
+          type: Directory
+    extraVolumeMounts:
+      - name: dev-dri
+        mountPath: /dev/dri
