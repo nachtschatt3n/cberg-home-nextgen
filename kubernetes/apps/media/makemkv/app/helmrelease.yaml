@@ -44,18 +44,27 @@ spec:
 
     ingress:
       main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "MakeMKV"
+          gethomepage.dev/description: "DVD and Blu-ray ripping software"
+          gethomepage.dev/group: "Media"
+          gethomepage.dev/icon: "makemkv.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
-          - host: "makemkv.${SECRET_DOMAIN}"
+          - host: &host "makemkv.${SECRET_DOMAIN}"
             paths:
               - path: /
-                pathType: ImplementationSpecific
+                pathType: Prefix
                 service:
-                  name: makemkv
-                  port: 5800
+                  identifier: main
+                  port: http
         tls:
-          - secretName: makemkv-tls
-            hosts:
-              - "makemkv.${SECRET_DOMAIN}"
+          - hosts:
+              - *host
 
     persistence:
       config:
