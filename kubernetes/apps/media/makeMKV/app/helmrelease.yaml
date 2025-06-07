@@ -1,0 +1,116 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/common-3.2.0/charts/library/common/values.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: makemkv
+  namespace: media
+spec:
+  interval: 30m
+  timeout: 10m
+  chart:
+    spec:
+      chart: app-template
+      version: 1.0.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: true
+    force: false
+    remediation:
+      retries: 1
+      remediateLastFailure: true
+    timeout: 10m
+  uninstall:
+    keepHistory: false
+  values:
+    image:
+      repository: jlesage/makemkv
+      tag: latest
+      pullPolicy: IfNotPresent
+
+    service:
+      type: ClusterIP
+      port: 5800
+
+    ingress:
+      enabled: true
+      className: "internal"
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "MakeMKV"
+        gethomepage.dev/description: "DVD and Blu-ray ripper"
+        gethomepage.dev/group: "Media"
+        gethomepage.dev/icon: "makemkv.png"
+        external-dns.alpha.kubernetes.io/target: "makemkv.${SECRET_DOMAIN}"
+      hosts:
+        - host: &host "makemkv.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: ImplementationSpecific
+      tls:
+        - hosts:
+            - *host
+
+    persistence:
+      config:
+        enabled: true
+        existingClaim: makemkv-config
+      media:
+        enabled: true
+        existingClaim: makemkv-media
+
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+      allowPrivilegeEscalation: true
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 250Mi
+        gpu.intel.com/i915: 1
+      limits:
+        memory: 4Gi
+        gpu.intel.com/i915: 1
+
+    extraVolumes:
+      - name: dev-dri
+        hostPath:
+          path: /dev/dri
+          type: Directory
+      - name: makemkv-media
+        persistentVolumeClaim:
+          claimName: makemkv-media
+      - name: makemkv-config
+        persistentVolumeClaim:
+          claimName: makemkv-config
+
+    extraVolumeMounts:
+      - name: dev-dri
+        mountPath: /dev/dri
+      - name: makemkv-media
+        mountPath: /output
+      - name: makemkv-config
+        mountPath: /config
+
+    env:
+      - name: MAKEMKV_KEY
+        value: "BETA"
+      - name: AUTO_DISC_RIPPER
+        value: "1"
+      - name: AUTO_DISC_RIPPER_EJECT
+        value: "1"
+      - name: AUTO_DISC_RIPPER_PARALLEL_RIP
+        value: "1"
