@@ -58,14 +58,6 @@ spec:
                 cpu: 2000m
                 memory: 4Gi
                 gpu.intel.com/i915: 1
-        pod:
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            fsGroup: 0
-          hostIPC: true
-          hostNetwork: true
-          hostPID: true
     service:
       main:
         controller: scrypted
