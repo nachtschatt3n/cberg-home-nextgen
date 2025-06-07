@@ -60,7 +60,7 @@ spec:
                 gpu.intel.com/i915: 1
     service:
       main:
-        controller: scrypted
+        #controller: scrypted
         type: LoadBalancer
         #loadBalancerIP: "192.168.55.16"
         #externalTrafficPolicy: Cluster
