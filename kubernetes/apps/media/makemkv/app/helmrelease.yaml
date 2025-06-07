@@ -49,6 +49,9 @@ spec:
             paths:
               - path: /
                 pathType: ImplementationSpecific
+                service:
+                  name: makemkv
+                  port: 5800
         tls:
           - secretName: makemkv-tls
             hosts:
