@@ -35,6 +35,10 @@ spec:
       tag: latest
       pullPolicy: IfNotPresent
 
+    controller:
+      type: "app"
+      enabled: true
+
     service:
       main:
         type: ClusterIP
