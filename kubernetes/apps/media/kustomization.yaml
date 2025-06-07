@@ -8,7 +8,7 @@ components:
 resources:
   - ./jellyfin/ks.yaml
   - ./plex/ks.yaml
-  - ./makemkv/ks.yaml
+  - ./makeMKV/ks.yaml
 
 ---
 apiVersion: v1
