@@ -37,26 +37,22 @@ spec:
 
     service:
       main:
-        enabled: true
         controller: main
         ports:
-          main:
+          http:
             port: 5800
 
     ingress:
       main:
-        enabled: true
         hosts:
-          main:
-            host: "makemkv.${SECRET_DOMAIN}"
+          - host: "makemkv.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: ImplementationSpecific
         tls:
-          main:
+          - secretName: makemkv-tls
             hosts:
               - "makemkv.${SECRET_DOMAIN}"
-            secretName: makemkv-tls
 
     persistence:
       config:
