@@ -38,33 +38,25 @@ spec:
     service:
       main:
         enabled: true
-        type: ClusterIP
+        controller: main
         ports:
-          http:
+          main:
             port: 5800
 
     ingress:
       main:
         enabled: true
-        className: "internal"
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "MakeMKV"
-          gethomepage.dev/description: "DVD and Blu-ray ripper"
-          gethomepage.dev/group: "Media"
-          gethomepage.dev/icon: "makemkv.png"
         hosts:
-          - host: "makemkv.${SECRET_DOMAIN}"
+          main:
+            host: "makemkv.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: ImplementationSpecific
-                service:
-                  name: makemkv
-                  port: 5800
         tls:
-          - secretName: makemkv-tls
+          main:
             hosts:
               - "makemkv.${SECRET_DOMAIN}"
+            secretName: makemkv-tls
 
     persistence:
       config:
