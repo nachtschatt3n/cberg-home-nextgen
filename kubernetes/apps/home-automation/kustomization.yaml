@@ -11,5 +11,5 @@ resources:
   - ./mosquitto/ks.yaml
   - ./frigate-nvr/ks.yaml
   - ./node-red/ks.yaml
-#  - ./scrypted-nvr/ks.yaml
+  - ./scrypted-nvr/ks.yaml
 
