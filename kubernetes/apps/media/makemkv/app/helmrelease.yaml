@@ -36,27 +36,34 @@ spec:
       pullPolicy: IfNotPresent
 
     service:
-      type: ClusterIP
-      port: 5800
+      main:
+        type: ClusterIP
+        ports:
+          http:
+            port: 5800
 
     ingress:
-      enabled: true
-      className: "internal"
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "MakeMKV"
-        gethomepage.dev/description: "DVD and Blu-ray ripper"
-        gethomepage.dev/group: "Media"
-        gethomepage.dev/icon: "makemkv.png"
-        external-dns.alpha.kubernetes.io/target: "makemkv.${SECRET_DOMAIN}"
-      hosts:
-        - host: &host "makemkv.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: ImplementationSpecific
-      tls:
-        - hosts:
-            - *host
+      main:
+        enabled: true
+        className: "internal"
+        annotations:
+          kubernetes.io/ingress.class: "internal"
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "MakeMKV"
+          gethomepage.dev/description: "DVD and Blu-ray ripper"
+          gethomepage.dev/group: "Media"
+          gethomepage.dev/icon: "makemkv.png"
+          external-dns.alpha.kubernetes.io/target: "makemkv.${SECRET_DOMAIN}"
+        hosts:
+          - host: "makemkv.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+        tls:
+          - secretName: makemkv-tls
+            hosts:
+              - "makemkv.${SECRET_DOMAIN}"
 
     persistence:
       config:
