@@ -60,7 +60,7 @@ spec:
                 gpu.intel.com/i915: 1
     service:
       main:
-        controller: main
+        controller: scrypted
         type: LoadBalancer
         #loadBalancerIP: "192.168.55.16"
         #externalTrafficPolicy: Cluster
@@ -73,7 +73,7 @@ spec:
             port: 11080
             targetPort: 11080
     ingress:
-      main:
+      scrypted:
         enabled: true
         annotations:
           gethomepage.dev/enabled: "true"
