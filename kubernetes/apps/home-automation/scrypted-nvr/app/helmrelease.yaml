@@ -89,7 +89,7 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
+                  name: scrypted
                   port: 11080
     persistence:
       data:
