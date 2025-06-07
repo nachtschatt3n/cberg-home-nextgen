@@ -38,7 +38,7 @@ spec:
     service:
       main:
         type: ClusterIP
-        controller: "makemkv"
+        controller: "app"
         ports:
           http:
             port: 5800
