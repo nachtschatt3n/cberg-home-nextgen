@@ -117,3 +117,33 @@ spec:
     controllers:
       main:
         type: deployment
+        containers:
+          main:
+            image:
+              repository: jlesage/makemkv
+              tag: latest
+              pullPolicy: IfNotPresent
+            env:
+              - name: MAKEMKV_KEY
+                value: "BETA"
+              - name: AUTO_DISC_RIPPER
+                value: "1"
+              - name: AUTO_DISC_RIPPER_EJECT
+                value: "1"
+              - name: AUTO_DISC_RIPPER_PARALLEL_RIP
+                value: "1"
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - SYS_ADMIN
+              allowPrivilegeEscalation: true
+              runAsUser: 0
+            resources:
+              requests:
+                cpu: 100m
+                memory: 250Mi
+                gpu.intel.com/i915: 1
+              limits:
+                memory: 4Gi
+                gpu.intel.com/i915: 1
