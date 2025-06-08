@@ -63,7 +63,7 @@ spec:
                   --insecure \
                   --address=0.0.0.0:51515 \
                   --server-username=admin \
-                  --server-password-file=/tmp/server-password
+                  --server-password="$SERVER_PASSWORD"
             envFrom:
               - secretRef:
                   name: kopia-secrets
