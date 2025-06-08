@@ -90,18 +90,26 @@ spec:
     ingress:
       main:
         enabled: true
+        className: internal
         annotations:
-          kubernetes.io/ingress.class: nginx
-          cert-manager.io/cluster-issuer: letsencrypt-prod
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Kopia"
+          gethomepage.dev/description: "Kopia - Fast And Secure Open-Source Backup"
+          gethomepage.dev/group: "Backup"
+          gethomepage.dev/icon: "kopia.png"
+        labels:
+          gethomepage.dev/enabled: "true"
         hosts:
-          - host: kopia.home.cberg.de
+          - host: &host "kopia.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
+                service:
+                  name: kopia
+                  port: 51515
         tls:
-          - secretName: kopia-tls
-            hosts:
-              - kopia.home.cberg.de
+          - hosts:
+              - *host
     persistence:
       config:
         enabled: true
