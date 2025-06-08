@@ -35,12 +35,18 @@ spec:
               repository: kopia/kopia
               tag: latest
             env:
-              KOPIA_PASSWORD:
+              - name: KOPIA_PASSWORD
                 valueFrom:
                   secretKeyRef:
                     name: kopia-secrets
                     key: KOPIA_PASSWORD
-              TZ: "Europe/Berlin"
+              - name: SERVER_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: kopia-secrets
+                    key: SERVER_PASSWORD
+              - name: TZ
+                value: "Europe/Berlin"
             command:
               - "/bin/sh"
               - "-c"
