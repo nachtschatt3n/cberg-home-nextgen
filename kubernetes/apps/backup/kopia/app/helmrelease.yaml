@@ -57,12 +57,13 @@ spec:
                 echo "Initializing repository..."
                 kopia repository create filesystem --path=/repository
                 echo "Starting server..."
+                echo "$SERVER_PASSWORD" > /tmp/server-password
                 exec kopia server start \
                   --disable-csrf-token-checks \
                   --insecure \
                   --address=0.0.0.0:51515 \
                   --server-username=admin \
-                  --server-password="$SERVER_PASSWORD"
+                  --server-password-file=/tmp/server-password
             envFrom:
               - secretRef:
                   name: kopia-secrets
@@ -120,7 +121,7 @@ spec:
                   port: http
         tls:
           - hosts:
-              - *host
+              - "kopia.${SECRET_DOMAIN}"
     persistence:
       config:
         enabled: true
