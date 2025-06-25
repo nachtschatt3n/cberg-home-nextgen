@@ -1,15 +1,15 @@
-# IPEX-LLM Deployment
+# IPEX-LLM Ollama Deployment
 
-This directory contains the Kubernetes deployment configuration for Intel IPEX-LLM, an optimized LLM inference server for Intel GPUs.
+This directory contains the Kubernetes deployment configuration for Intel IPEX-LLM with Ollama, providing optimized LLM inference on Intel GPUs using the Ollama API.
 
 ## Overview
 
-IPEX-LLM is Intel's optimized LLM inference library that provides high-performance inference on Intel GPUs using Intel Extension for PyTorch (IPEX). This deployment uses the `app-template` chart from bjw-s to create a StatefulSet with Intel GPU support.
+This deployment uses Intel's IPEX-LLM inference engine with Ollama, providing high-performance LLM inference on Intel GPUs. Based on the [blog post by Robert Važan](https://blog.machinezoo.com/Ollama_on_Intel_Arc_A380_using_IPEX-LLM), this approach offers better compatibility and easier model management compared to direct IPEX-LLM server usage.
 
 ## Configuration
 
 ### Image
-- **Base Image**: `intelanalytics/ipex-llm-inference-cpp-xpu:latest` - Official Intel IPEX-LLM inference image with pre-installed dependencies
+- **Base Image**: `intelanalytics/ipex-llm-inference-cpp-xpu:latest` - Official Intel IPEX-LLM inference image with Ollama
 - **Architecture**: Optimized for Intel GPUs with oneAPI support
 
 ### Resources
@@ -22,55 +22,77 @@ IPEX-LLM is Intel's optimized LLM inference library that provides high-performan
 
 ### Environment Variables
 - `ONEAPI_DEVICE_SELECTOR`: "level_zero:0" - Selects the first Intel GPU
-- `IPEX_LLM_NUM_CTX`: "16384" - Context window size
-- `IPEX_LLM_DEVICE`: "xpu" - Uses Intel GPU for inference
+- `OLLAMA_HOST`: "0.0.0.0:11434" - Ollama server host and port
+- `OLLAMA_MAX_LOADED_MODELS`: "1" - Maximum loaded models (GPU memory optimization)
+- `OLLAMA_NUM_PARALLEL`: "1" - Number of parallel requests
 - `ZES_ENABLE_SYSMAN`: "1" - Enables Intel GPU system management
+- `USE_XETLA`: "OFF" - Disables XETLA for better compatibility
 
 ### Dependencies
 - Intel Device Plugin for GPU support
 - Intel oneAPI Base Toolkit (pre-installed in image)
 - Intel Extension for PyTorch (pre-installed in image)
-- IPEX-LLM Python package (pre-installed in image)
+- IPEX-LLM with Ollama (pre-installed in image)
 
 ## Usage
 
 The service will be available at:
-- **Internal**: `ipex-llm.ai.svc.cluster.local:8000`
+- **Internal**: `ipex-llm.ai.svc.cluster.local:11434`
 - **External**: `ipex-llm.your-domain.com` (via ingress)
 
 ### API Endpoints
-- Chat completion: `POST /v1/chat/completions`
-- Model listing: `GET /v1/models`
-- Health check: `GET /health`
+- **Ollama API**: Standard Ollama API endpoints
+- **Model management**: `GET /api/tags` - List models
+- **Chat completion**: `POST /api/generate` - Generate text
+- **Model operations**: `POST /api/pull` - Download models
 
-## Model Management
+### Model Management
 
-Models should be placed in the `/models` directory which is mounted as a persistent volume. The service will automatically detect and load available models.
+Models can be managed using standard Ollama commands:
+```bash
+# Pull a model
+curl -X POST http://ipex-llm.ai.svc.cluster.local:11434/api/pull -d '{"name": "llama3.1:8b"}'
 
-## Server Configuration
+# List models
+curl http://ipex-llm.ai.svc.cluster.local:11434/api/tags
 
-The IPEX-LLM server is started with the following optimized settings:
-- **Device**: XPU (Intel GPU)
-- **Max Batched Tokens**: 4096
-- **Max Sequences**: 256
-- **Quantization**: Disabled (full precision)
+# Generate text
+curl -X POST http://ipex-llm.ai.svc.cluster.local:11434/api/generate -d '{"model": "llama3.1:8b", "prompt": "Hello, how are you?"}'
+```
+
+## Supported Models
+
+Based on the blog post, the following models work well with 6GB VRAM:
+- **llama3.1:8b** with 10K tokens context - Good for article summarization
+- **qwen2.5-coder:7b** with 24K context - Effective for coding tasks
+- **llama3.2:3b** with 32K context
+- **llama3.2:1b** with 128K context
+
+## Performance
+
+Performance benchmarks from the blog post (tokens/second):
+- **Prompt Processing**: 250-500 t/s depending on context length
+- **Text Generation**: 11-45 t/s depending on model size
+- **Context Support**: Up to 128K tokens for smaller models
 
 ## Installation Process
 
-The deployment follows this installation sequence:
-1. Install system dependencies (Intel GPU drivers, oneAPI)
-2. Install PyTorch and Intel Extension for PyTorch
-3. Install IPEX-LLM with all dependencies
-4. Start the IPEX-LLM server
+The deployment follows this startup sequence:
+1. Create Ollama directory structure
+2. Initialize Ollama if not already done
+3. Set up Intel GPU environment
+4. Start Ollama server with IPEX-LLM support
 
 ## Troubleshooting
 
 1. **GPU not detected**: Ensure Intel Device Plugin is running and GPU is available
-2. **Memory issues**: Increase memory limits if loading large models
-3. **Startup failures**: Check logs for Intel GPU environment setup issues
+2. **Memory issues**: Reduce `OLLAMA_MAX_LOADED_MODELS` if loading large models
+3. **Model loading**: Use `OLLAMA_NUM_PARALLEL=1` for stability
+4. **Performance**: Monitor for the slowdown bug mentioned in the blog post
 
 ## References
 
+- [Ollama on Intel Arc A380 using IPEX-LLM](https://blog.machinezoo.com/Ollama_on_Intel_Arc_A380_using_IPEX-LLM) - Robert Važan's blog post
 - [IPEX-LLM GitHub](https://github.com/intel/ipex-llm)
 - [Intel Extension for PyTorch](https://github.com/intel/intel-extension-for-pytorch)
 - [Intel oneAPI](https://www.intel.com/content/www/us/en/developer/tools/oneapi/overview.html)

@@ -47,36 +47,42 @@ spec:
               ZES_ENABLE_SYSMAN_DEVICE: "0"
               GIN_MODE: "release"
               LANG: "en_US.UTF-8"
-              # ipex-llm specific environment variables
+              # Ollama specific environment variables
+              OLLAMA_HOST: "0.0.0.0:11434"
+              OLLAMA_MAX_LOADED_MODELS: "1"
+              OLLAMA_NUM_PARALLEL: "1"
+              # IPEX-LLM specific environment variables
               IPEX_LLM_DEVICE: "xpu"
               IPEX_LLM_CPU_ARCH: "x86-64"
               IPEX_LLM_GPU_ARCH: "pvc"
+              USE_XETLA: "OFF"
             command:
               - "/bin/bash"
               - "-c"
               - |
-                # Create model directory
-                mkdir -p /models
+                # Create Ollama directory
+                mkdir -p /llm/ollama
+                cd /llm/ollama
 
-                # Set up Intel GPU environment
-                source /opt/intel/oneapi/setvars.sh
+                # Initialize Ollama if not already done
+                if [ ! -f "./ollama" ]; then
+                  echo "Initializing Ollama..."
+                  init-ollama
+                fi
 
-                # Start IPEX-LLM server with proper configuration
-                exec python3 -m ipex_llm.llm_chat.server \
-                  --model-path /models \
-                  --host 0.0.0.0 \
-                  --port 8000 \
-                  --device xpu \
-                  --max-num-batched-tokens 4096 \
-                  --max-num-seqs 256 \
-                  --load-in-8bit false \
-                  --load-in-4bit false
+                # Set up Intel GPU environment (skip if already set)
+                if [ -z "$ONEAPI_DEVICE_SELECTOR" ]; then
+                  source /opt/intel/oneapi/setvars.sh
+                fi
+
+                echo "Starting Ollama with IPEX-LLM support..."
+                exec ./ollama serve
 
             probes:
               liveness:
                 enabled: true
                 type: AUTO
-                port: 8000
+                port: 11434
                 spec:
                   initialDelaySeconds: 60
                   periodSeconds: 30
@@ -85,7 +91,7 @@ spec:
               readiness:
                 enabled: true
                 type: AUTO
-                port: 8000
+                port: 11434
                 spec:
                   initialDelaySeconds: 60
                   periodSeconds: 30
@@ -111,13 +117,13 @@ spec:
         controller: main
         ports:
           http:
-            port: 8000
+            port: 11434
     persistence:
       config:
         enabled: true
         existingClaim: ipex-llm-config
         globalMounts:
-          - path: /models
+          - path: /llm/ollama
       temp:
         enabled: true
         existingClaim: ipex-llm-tmp
