@@ -37,7 +37,7 @@ spec:
         containers:
           main:
             image:
-              repository: intel/ipex-llm
+              repository: intelanalytics/ipex-llm-inference-cpp-xpu
               tag: latest
             env:
               TZ: "Europe/Berlin"

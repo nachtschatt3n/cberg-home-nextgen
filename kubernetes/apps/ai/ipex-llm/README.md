@@ -9,7 +9,7 @@ IPEX-LLM is Intel's optimized LLM inference library that provides high-performan
 ## Configuration
 
 ### Image
-- **Base Image**: `intel/ipex-llm:latest` - Official Intel IPEX-LLM image with pre-installed dependencies
+- **Base Image**: `intelanalytics/ipex-llm-inference-cpp-xpu:latest` - Official Intel IPEX-LLM inference image with pre-installed dependencies
 - **Architecture**: Optimized for Intel GPUs with oneAPI support
 
 ### Resources
@@ -54,6 +54,14 @@ The IPEX-LLM server is started with the following optimized settings:
 - **Max Batched Tokens**: 4096
 - **Max Sequences**: 256
 - **Quantization**: Disabled (full precision)
+
+## Installation Process
+
+The deployment follows this installation sequence:
+1. Install system dependencies (Intel GPU drivers, oneAPI)
+2. Install PyTorch and Intel Extension for PyTorch
+3. Install IPEX-LLM with all dependencies
+4. Start the IPEX-LLM server
 
 ## Troubleshooting
 
