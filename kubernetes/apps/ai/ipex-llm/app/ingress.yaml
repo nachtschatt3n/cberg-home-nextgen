@@ -8,8 +8,8 @@ metadata:
     gethomepage.dev/enabled: "true"
   annotations:
     gethomepage.dev/enabled: "true"
-    gethomepage.dev/name: "IPEX-LLM"
-    gethomepage.dev/description: "Intel IPEX-LLM inference server"
+    gethomepage.dev/name: "IPEX-LLM Ollama"
+    gethomepage.dev/description: "Intel IPEX-LLM Ollama inference server"
     gethomepage.dev/group: "AI"
     gethomepage.dev/icon: "intel.png"
     external-dns.alpha.kubernetes.io/target: &host "ipex-llm.${SECRET_DOMAIN}"
@@ -25,7 +25,7 @@ spec:
               service:
                 name: ipex-llm
                 port:
-                  number: 8000
+                  number: 11434
   tls:
     - hosts:
         - *host
