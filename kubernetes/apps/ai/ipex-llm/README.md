@@ -49,6 +49,7 @@ The service will be available at:
 ### Model Management
 
 Models can be managed using standard Ollama commands:
+
 ```bash
 # Pull a model
 curl -X POST http://ipex-llm.ai.svc.cluster.local:11434/api/pull -d '{"name": "llama3.1:8b"}'
@@ -63,6 +64,7 @@ curl -X POST http://ipex-llm.ai.svc.cluster.local:11434/api/generate -d '{"model
 ## Supported Models
 
 Based on the blog post, the following models work well with 6GB VRAM:
+
 - **llama3.1:8b** with 10K tokens context - Good for article summarization
 - **qwen2.5-coder:7b** with 24K context - Effective for coding tasks
 - **llama3.2:3b** with 32K context
@@ -71,6 +73,7 @@ Based on the blog post, the following models work well with 6GB VRAM:
 ## Performance
 
 Performance benchmarks from the blog post (tokens/second):
+
 - **Prompt Processing**: 250-500 t/s depending on context length
 - **Text Generation**: 11-45 t/s depending on model size
 - **Context Support**: Up to 128K tokens for smaller models
@@ -78,6 +81,7 @@ Performance benchmarks from the blog post (tokens/second):
 ## Installation Process
 
 The deployment follows this startup sequence:
+
 1. Create Ollama directory structure
 2. Initialize Ollama if not already done
 3. Set up Intel GPU environment
