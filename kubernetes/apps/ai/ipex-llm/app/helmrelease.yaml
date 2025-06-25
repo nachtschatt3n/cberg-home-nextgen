@@ -1,0 +1,139 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app ipex-llm
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  dependsOn:
+    - name: intel-device-plugin-gpu
+      namespace: kube-system
+  values:
+    controllers:
+      main:
+        type: statefulset
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          main:
+            image:
+              repository: intel/ipex-llm
+              tag: latest
+            env:
+              TZ: "Europe/Berlin"
+              ONEAPI_DEVICE_SELECTOR: "level_zero:0"
+              IPEX_LLM_NUM_CTX: "16384"
+              ZES_ENABLE_SYSMAN: "1"
+              ZES_ENABLE_SYSMAN_DEVICE: "0"
+              GIN_MODE: "release"
+              LANG: "en_US.UTF-8"
+              # ipex-llm specific environment variables
+              IPEX_LLM_DEVICE: "xpu"
+              IPEX_LLM_CPU_ARCH: "x86-64"
+              IPEX_LLM_GPU_ARCH: "pvc"
+            command:
+              - "/bin/bash"
+              - "-c"
+              - |
+                # Create model directory
+                mkdir -p /models
+
+                # Set up Intel GPU environment
+                source /opt/intel/oneapi/setvars.sh
+
+                # Start IPEX-LLM server with proper configuration
+                exec python3 -m ipex_llm.llm_chat.server \
+                  --model-path /models \
+                  --host 0.0.0.0 \
+                  --port 8000 \
+                  --device xpu \
+                  --max-num-batched-tokens 4096 \
+                  --max-num-seqs 256 \
+                  --load-in-8bit false \
+                  --load-in-4bit false
+
+            probes:
+              liveness:
+                enabled: true
+                type: AUTO
+                port: 8000
+                spec:
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                type: AUTO
+                port: 8000
+                spec:
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 5
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - SYS_ADMIN
+              allowPrivilegeEscalation: true
+              runAsUser: 0
+            resources:
+              requests:
+                cpu: 1000m
+                memory: 32Gi
+                gpu.intel.com/i915: 1
+              limits:
+                memory: 32Gi
+                gpu.intel.com/i915: 1
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 8000
+    persistence:
+      config:
+        enabled: true
+        existingClaim: ipex-llm-config
+        globalMounts:
+          - path: /models
+      temp:
+        enabled: true
+        existingClaim: ipex-llm-tmp
+        globalMounts:
+          - path: /tmp
+
+    hostNetwork: false
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+          - SYS_ADMIN
+      allowPrivilegeEscalation: true
+      runAsUser: 0
+      runAsGroup: 0
+      fsGroup: 0
+    podSecurityContext:
+      hostPID: true
+      hostIPC: true
