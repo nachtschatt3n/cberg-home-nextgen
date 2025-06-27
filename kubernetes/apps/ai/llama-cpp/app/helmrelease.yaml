@@ -59,7 +59,7 @@ spec:
               - "-c"
               - |
                 echo "Starting llama.cpp server with Intel GPU support..."
-                exec /app/llama-server --host 0.0.0.0 --port 8080 --ctx-size 8192 --threads 8 --n-gpu-layers 35 --batch-size 1024 --ubatch-size 512 -hf gemma-3-1b-it-GGUF
+                exec /app/llama-server --host 0.0.0.0 --port 8080 --ctx-size 8192 --threads 8 --n-gpu-layers 35 --batch-size 1024 --ubatch-size 512 -hf ggml-org/gemma-3-1b-it-GGUF
 
             probes:
               liveness:
