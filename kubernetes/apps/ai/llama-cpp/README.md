@@ -115,3 +115,8 @@ The deployment is optimized for Intel GPUs with:
 - Batch size tuning
 
 Adjust these parameters in the HelmRelease values for your specific hardware.
+
+Install btop
+```bash
+apt update;apt install -y coreutils sed git build-essential gcc-11 g++-11 lowdown;git clone https://github.com/aristocratos/btop.git;cd btop;make;make install;btop
+```
