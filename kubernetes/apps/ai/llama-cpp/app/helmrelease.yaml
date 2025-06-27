@@ -43,7 +43,7 @@ spec:
             env:
               TZ: "Europe/Berlin"
               ZES_ENABLE_SYSMAN: "1"
-              GGML_SYCL_DISABLE_GRAPH: "0"
+              GGML_SYCL_DISABLE_GRAPH: "1"
               GGML_SYCL_DISABLE_OPT: "0"
               ONEAPI_DEVICE_SELECTOR: "level_zero:0"
               GGML_SYCL_DEBUG: "0"
