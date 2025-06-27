@@ -42,17 +42,17 @@ spec:
               tag: full-intel
             env:
               TZ: "Europe/Berlin"
-              ZES_ENABLE_SYSMAN: "1"
-              GGML_SYCL_DISABLE_GRAPH: "1"
-              GGML_SYCL_DISABLE_OPT: "0"
-              ONEAPI_DEVICE_SELECTOR: "level_zero:0"
-              GGML_SYCL_DEBUG: "0"
-              SYCL_DEVICE_FILTER: "level_zero:gpu:0"
-              INTEL_DEVICE_SELECTOR: "level_zero:gpu:0"
-              GGML_SYCL_PRIORITIZE_DMMV: "0"
-              GGML_SYCL_DISABLE_DNN: "1"
-              OMP_NUM_THREADS: "8"
-              MKL_NUM_THREADS: "8"
+              # ZES_ENABLE_SYSMAN: "1"
+              # GGML_SYCL_DISABLE_GRAPH: "1"
+              # GGML_SYCL_DISABLE_OPT: "0"
+              # ONEAPI_DEVICE_SELECTOR: "level_zero:0"
+              # GGML_SYCL_DEBUG: "0"
+              # SYCL_DEVICE_FILTER: "level_zero:gpu:0"
+              # INTEL_DEVICE_SELECTOR: "level_zero:gpu:0"
+              # GGML_SYCL_PRIORITIZE_DMMV: "0"
+              # GGML_SYCL_DISABLE_DNN: "1"
+              # OMP_NUM_THREADS: "8"
+              # MKL_NUM_THREADS: "8"
               # exec /app/llama-server --host 0.0.0.0 --port 8080 --ctx-size 8192 --threads 8 --n-gpu-layers 35 --batch-size 1024 --ubatch-size 512 -hf unsloth/Llama-3.2-3B-Instruct-GGUF
             command:
               - "/bin/bash"
