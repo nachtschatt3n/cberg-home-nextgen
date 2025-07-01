@@ -30,7 +30,7 @@ spec:
       tag: 0.15.1
     env:
       TZ: "Europe/Berlin"
-    #LIBVA_DRIVER_NAME: "i915"
+      LIBVA_DRIVER_NAME: "i915"
 
     # Frigate configuration
     config: |
@@ -56,7 +56,8 @@ spec:
         model_size: large
         reindex: False
       ffmpeg:
-        hwaccel_args: preset-intel-qsv-h264
+      # hwaccel_args: preset-intel-qsv-h264
+        hwaccel_args: preset-intel-qsv-*
       genai:
         enabled: false
         provider: ollama
