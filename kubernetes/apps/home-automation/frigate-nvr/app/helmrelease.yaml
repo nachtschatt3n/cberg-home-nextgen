@@ -57,7 +57,7 @@ spec:
         reindex: False
       ffmpeg:
       # hwaccel_args: preset-intel-qsv-h264
-        hwaccel_args: preset-intel-qsv-*
+        hwaccel_args: preset-intel-qsv-h265
       genai:
         enabled: false
         provider: ollama
