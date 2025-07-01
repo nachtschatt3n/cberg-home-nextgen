@@ -8,17 +8,18 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
-  - uid=1000
-  - gid=1000
+  - uid=0
+  - gid=0
   - noperm
-  - cache=none
-  - actimeo=0
-  - noserverino
-  - multichannel
-  - max_channels=4
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
 parameters:
   source: "//${NAS_HOSTNAME}/frigate"
   subdir: "/media"
