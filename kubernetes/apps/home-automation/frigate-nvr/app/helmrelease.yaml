@@ -30,7 +30,7 @@ spec:
       tag: 0.15.1
     env:
       TZ: "Europe/Berlin"
-      LIBVA_DRIVER_NAME: "i915"
+      LIBVA_DRIVER_NAME: "iHD"
 
     # Frigate configuration
     config: |
