@@ -64,7 +64,7 @@ spec:
                   --ctx-size 131072 --n-predict 131072 \
                   --threads 8 --n-gpu-layers 35 \
                   --batch-size 1024 --ubatch-size 512 \
-                  -hf unsloth/Qwen3-4B-Dynamic2.0-GGUF:Q4_K_M \
+                  -hf unsloth/Qwen3-4B-GGUF:Q4_K_M \
                   --jinja --chat-template llama3 \
                   --reasoning-format deepseek \
                   --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0
