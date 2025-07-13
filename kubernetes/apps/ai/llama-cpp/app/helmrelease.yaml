@@ -65,7 +65,7 @@ spec:
                   --threads 8 --n-gpu-layers 35 \
                   --batch-size 1024 --ubatch-size 512 \
                   -hf Qwen/Qwen3-4B-GGUF:Q4_K_M \
-                  --jinja --prompt-template chatml \
+                  --jinja --chat-template llama3 \
                   --reasoning-format deepseek \
                   --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0
             probes:
