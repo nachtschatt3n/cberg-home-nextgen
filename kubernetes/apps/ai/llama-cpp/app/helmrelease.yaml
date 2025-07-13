@@ -61,7 +61,7 @@ spec:
               - |
                 echo "Starting llama.cpp server with Intel GPU support..."
                 exec /app/llama-server --host 0.0.0.0 --port 8080 \
-                  --ctx-size 8192 --n-predict 1024 \
+                  --ctx-size 32768 --n-predict 1000 \
                   --threads 8 --n-gpu-layers 20 \
                   --batch-size 1024 --ubatch-size 512 \
                   -hf unsloth/Qwen3-4B-GGUF:Q4_K_M \
