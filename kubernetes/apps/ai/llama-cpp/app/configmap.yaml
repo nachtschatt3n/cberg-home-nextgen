@@ -18,6 +18,9 @@ data:
     {% elif message.role == "tool" -%}
     <|im_start|>tool
     {{ message.tool_call.function.name }}: {{ message.tool_call.function.arguments }}<|im_end|>
+    {% elif message.role == "tool_result" -%}
+    <|im_start|>tool_result
+    {{ message.tool_name }}: {{ message.tool_result | tojson }}<|im_end|>
     {% endif %}
     {% endfor %}
     <|im_start|>assistant
