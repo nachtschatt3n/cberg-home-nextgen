@@ -170,7 +170,7 @@ spec:
                   - detect
                   - record
                   - audio
-        heater:
+        guest_room:
           enabled: true
           genai:
             use_snapshot: false
