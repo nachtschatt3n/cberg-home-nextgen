@@ -18,7 +18,7 @@ data:
         },
         "filesystem": {
           "command": "uvx",
-          "args": ["mcp-server-filesystem", "--root", "/workspace"]
+          "args": ["mcp-server-filesystem", "--root", "/"]
         }
       }
     }
