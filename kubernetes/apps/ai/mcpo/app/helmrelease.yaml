@@ -42,12 +42,20 @@ spec:
               - name: PORT
                 value: "8000"
               - name: API_KEY
-                value: "top-secret"
+                valueFrom:
+                  secretKeyRef:
+                    name: mcpo-api-key
+                    key: api-key
+              - name: PAPERLESS_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: mcpo-api-key
+                    key: paperless-api-key
             args:
               - "--port"
               - "8000"
               - "--api-key"
-              - "top-secret"
+              - "$(API_KEY)"
               - "--config"
               - "/config/config.json"
 
