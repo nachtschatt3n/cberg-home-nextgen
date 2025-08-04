@@ -54,14 +54,6 @@ spec:
               - "top-secret"
               - "--config"
               - "/config/config.json"
-            volumeMounts:
-              - name: mcpo-config
-                mountPath: /config
-                readOnly: true
-        volumes:
-          - name: mcpo-config
-            configMap:
-              name: mcpo-config
 
     service:
       main:
@@ -77,6 +69,22 @@ spec:
     ingress:
       main:
         enabled: false
+        hosts:
+          - host: mcpo.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  name: main
+                  port: 80
 
     persistence:
-      enabled: false
+      config:
+        type: configMap
+        name: mcpo-config
+        advancedMounts:
+          mcpo:
+            app:
+              - path: /config/config.json
+                subPath: config.json
+                readOnly: true
