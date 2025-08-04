@@ -58,6 +58,7 @@ spec:
               - "$(API_KEY)"
               - "--config"
               - "/config/config.json"
+              - "--hot-reload"
 
     service:
       main:
