@@ -17,8 +17,11 @@ data:
           "args": ["-y", "@modelcontextprotocol/server-memory"]
         },
         "paperless": {
-          "command": "npx",
-          "args": ["@nloui/paperless-mcp", "http://paperless-ngx.office.svc.cluster.local:8000", "$(PAPERLESS_API_KEY)"]
+          "command": "sh",
+          "args": [
+            "-c",
+            "npx @nloui/paperless-mcp http://paperless-ngx.office.svc.cluster.local:8000 $PAPERLESS_API_KEY"
+          ]
         }
       }
     }
