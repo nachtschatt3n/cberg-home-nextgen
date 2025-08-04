@@ -31,7 +31,10 @@ spec:
             image:
               repository: ghcr.io/open-webui/mcpo
               tag: git-44ce6d0
-            probes: {}
+            probes:
+              liveness: {}
+              readiness: {}
+              startup: {}
             resources:
               requests:
                 cpu: 10m
