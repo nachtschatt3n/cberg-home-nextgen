@@ -24,72 +24,65 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    image:
-      repository: ghcr.io/open-webui/mcpo
-      tag: git-44ce6d0
-      pullPolicy: "IfNotPresent"
-
-    imagePullSecrets: []
-
-    replicaCount: 1
-
-    serviceAccount:
-      create: true
-      annotations: {}
-      name: ""
+    controllers:
+      mcpo:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/open-webui/mcpo
+              tag: git-44ce6d0
+            probes:
+              liveness:
+                enabled: true
+              readiness:
+                enabled: true
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+            env:
+              - name: PORT
+                value: "8000"
+              - name: API_KEY
+                value: "top-secret"
+            args:
+              - "--port"
+              - "8000"
+              - "--api-key"
+              - "top-secret"
+              - "--config"
+              - "/config/config.json"
+            volumeMounts:
+              - name: mcpo-config
+                mountPath: /config
+                readOnly: true
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+        volumes:
+          - name: mcpo-config
+            configMap:
+              name: mcpo-config
 
     service:
-      type: ClusterIP
-      port: 8000
-      annotations: {}
-      labels: {}
+      main:
+        controller: mcpo
+        type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            enabled: true
+            port: 8000
+            targetPort: 8000
 
     ingress:
-      enabled: false
-
-    resources: {}
+      main:
+        enabled: false
 
     persistence:
       enabled: false
-
-    env:
-      - name: PORT
-        value: "8000"
-      - name: API_KEY
-        value: "top-secret"
-
-    # -- Node labels for pod assignment.
-    nodeSelector: {}
-
-    # -- Tolerations for pod assignment
-    tolerations: []
-
-    # -- Affinity for pod assignment
-    affinity: {}
-
-    # -- Configure pod security context
-    podSecurityContext: {}
-
-    # -- Configure container security context
-    containerSecurityContext: {}
-
-    # -- Additional command arguments
-    args:
-      - "--port"
-      - "8000"
-      - "--api-key"
-      - "top-secret"
-      - "--config"
-      - "/config/config.json"
-
-    # -- Volume mounts
-    volumeMounts:
-      - name: mcpo-config
-        mountPath: /config
-        readOnly: true
-
-    # -- Volumes
-    volumes:
-      - name: mcpo-config
-        configMap:
-          name: mcpo-config
