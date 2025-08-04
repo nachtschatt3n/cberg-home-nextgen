@@ -16,9 +16,9 @@ data:
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-memory"]
         },
-        "filesystem": {
-          "command": "uvx",
-          "args": ["mcp-server-filesystem", "--root", "/"]
+        "paperless": {
+          "command": "npx",
+          "args": ["paperless-mcp", "http://paperless-ngx.office.svc.cluster.local:8000", "$PAPERLESS_API_KEY"]
         }
       }
     }
