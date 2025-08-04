@@ -7,3 +7,4 @@ components:
 resources:
   - ./open-webui/ks.yaml
   - ./ollama/ks.yaml
+  - ./mcpo/ks.yaml

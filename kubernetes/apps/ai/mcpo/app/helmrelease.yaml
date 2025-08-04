@@ -1,0 +1,95 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: mcpo
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 0.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    image:
+      repository: ghcr.io/open-webui/mcpo
+      tag: git-44ce6d0
+      pullPolicy: "IfNotPresent"
+
+    imagePullSecrets: []
+
+    replicaCount: 1
+
+    serviceAccount:
+      create: true
+      annotations: {}
+      name: ""
+
+    service:
+      type: ClusterIP
+      port: 8000
+      annotations: {}
+      labels: {}
+
+    ingress:
+      enabled: false
+
+    resources: {}
+
+    persistence:
+      enabled: false
+
+    env:
+      - name: PORT
+        value: "8000"
+      - name: API_KEY
+        value: "top-secret"
+
+    # -- Node labels for pod assignment.
+    nodeSelector: {}
+
+    # -- Tolerations for pod assignment
+    tolerations: []
+
+    # -- Affinity for pod assignment
+    affinity: {}
+
+    # -- Configure pod security context
+    podSecurityContext: {}
+
+    # -- Configure container security context
+    containerSecurityContext: {}
+
+    # -- Additional command arguments
+    args:
+      - "--port"
+      - "8000"
+      - "--api-key"
+      - "top-secret"
+      - "--config"
+      - "/config/config.json"
+
+    # -- Volume mounts
+    volumeMounts:
+      - name: mcpo-config
+        mountPath: /config
+        readOnly: true
+
+    # -- Volumes
+    volumes:
+      - name: mcpo-config
+        configMap:
+          name: mcpo-config
