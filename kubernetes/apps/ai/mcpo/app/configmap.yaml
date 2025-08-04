@@ -18,7 +18,7 @@ data:
         },
         "paperless": {
           "command": "npx",
-          "args": ["@nloui/paperless-mcp", "http://paperless-ngx.office.svc.cluster.local:8000", "$PAPERLESS_API_KEY"]
+          "args": ["@nloui/paperless-mcp", "http://paperless-ngx.office.svc.cluster.local:8000", "$(PAPERLESS_API_KEY)"]
         }
       }
     }
