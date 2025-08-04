@@ -7,5 +7,3 @@ components:
 resources:
   - ./open-webui/ks.yaml
   - ./ollama/ks.yaml
-  - ./llama-cpp/ks.yaml
-#  - ./ipex-llm/ks.yaml
