@@ -33,9 +33,9 @@ spec:
               tag: git-44ce6d0
             probes:
               liveness:
-                enabled: true
+                enabled: false
               readiness:
-                enabled: true
+                enabled: false
             resources:
               requests:
                 cpu: 10m
