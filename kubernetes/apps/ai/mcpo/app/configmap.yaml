@@ -10,7 +10,7 @@ data:
       "mcpServers": {
         "time": {
           "command": "uvx",
-          "args": ["mcp-server-time", "--local-timezone=Europe/Berlin"]
+          "args": ["mcp-server-time", "--local-timezone", "Europe/Berlin"]
         },
         "memory": {
           "command": "npx",
