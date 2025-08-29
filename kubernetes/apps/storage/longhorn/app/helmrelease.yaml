@@ -26,7 +26,7 @@ spec:
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn
         backupTarget: "smb://192.168.31.230/backups/backupstore"
-        backupTargetCredentialSecret: "longhorn-backup-credentials"
+        backupTargetCredentialSecret: "kube-system/csi-driver-smb"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
