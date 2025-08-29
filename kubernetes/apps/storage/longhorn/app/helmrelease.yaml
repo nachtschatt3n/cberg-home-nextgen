@@ -26,7 +26,7 @@ spec:
         guaranteedEngineManagerCPU: 12
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn
-        backupTarget: "cifs://192.168.31.230/"
+        backupTarget: "cifs://192.168.31.230/backup"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
