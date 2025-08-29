@@ -6,3 +6,6 @@ resources:
   - helmrelease.yaml
   - ingress.yaml
   - secret.sops.yaml
+  - system-backup-job.yaml
+  - recurring-backup-job.yaml
+  - manual-system-backup.yaml

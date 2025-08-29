@@ -1,0 +1,54 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: longhorn-system-backup
+  namespace: storage
+spec:
+  template:
+    spec:
+      serviceAccountName: longhorn-backup
+      containers:
+      - name: system-backup
+        image: longhornio/longhorn-manager:v1.6.4
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          kubectl create systembackup longhorn-system-backup-$(date +%Y%m%d-%H%M%S) \
+            --namespace=storage \
+            --dry-run=client -o yaml | \
+          kubectl apply -f -
+        env:
+        - name: KUBECONFIG
+          value: /var/run/secrets/kubernetes.io/serviceaccount/config
+      restartPolicy: Never
+  backoffLimit: 3
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: longhorn-backup
+  namespace: storage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: longhorn-system-backup
+rules:
+- apiGroups: ["longhorn.io"]
+  resources: ["systembackups"]
+  verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: longhorn-system-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: longhorn-system-backup
+subjects:
+- kind: ServiceAccount
+  name: longhorn-backup
+  namespace: storage
