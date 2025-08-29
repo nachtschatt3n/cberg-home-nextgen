@@ -27,7 +27,7 @@ spec:
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn
         backupTarget: "cifs://192.168.31.230/backups"
-        backupTargetCredentialSecret: "csi-driver-smb"
+        backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
