@@ -31,5 +31,3 @@ resources:
   - ./pajikos.yaml
   - ./prometheus-community.yaml
   - ./jameswynn.yaml
-
-# test
