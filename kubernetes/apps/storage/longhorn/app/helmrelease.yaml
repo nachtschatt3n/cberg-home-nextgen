@@ -21,7 +21,7 @@ spec:
         replicaSoftAntiAffinity: true
         replicaAutoBalance: true
         createDefaultDiskLabeledNodes: true
-        defaultReplicaCount: 3
+        defaultReplicaCount: 2
         guaranteedEngineManagerCPU: 12
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn
@@ -53,7 +53,7 @@ spec:
         disableReplicaRebuild: false
       persistence:
         defaultClass: true
-        defaultClassReplicaCount: 3
+        defaultClassReplicaCount: 2
       ui:
         enabled: true
         service:
