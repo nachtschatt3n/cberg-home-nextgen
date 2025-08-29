@@ -16,6 +16,7 @@ spec:
         namespace: flux-system
   values:
     longhorn:
+      namespaceOverride: storage
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
         replicaSoftAntiAffinity: true
