@@ -1,0 +1,95 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: music-assistant-server
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: music-assistant-server
+      version: 0.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: andibraeu
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    image:
+      repository: musicassistant/music-assistant
+      tag: latest
+      pullPolicy: IfNotPresent
+
+    service:
+      type: ClusterIP
+      port: 8095
+
+    ingress:
+      enabled: true
+      className: internal
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Music Assistant"
+        gethomepage.dev/description: "Music Assistant Server for Home Assistant"
+        gethomepage.dev/group: "Home Automation"
+        gethomepage.dev/icon: "music-assistant.png"
+        hajimari.io/icon: mdi:music
+      labels:
+        gethomepage.dev/enabled: "true"
+      hosts:
+        - host: "music.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+              service:
+                name: music-assistant-server
+                port: 8095
+      tls:
+        - hosts:
+            - "music.${SECRET_DOMAIN}"
+
+    persistence:
+      config:
+        enabled: true
+        type: persistentVolumeClaim
+        existingClaim: music-assistant-config
+        globalMounts:
+          - path: /config
+      cache:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /cache
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 1Gi
+
+    env:
+      - name: TZ
+        value: "Europe/Berlin"
+      - name: MUSIC_ASSISTANT_CONFIG_PATH
+        value: "/config"
+      - name: MUSIC_ASSISTANT_CACHE_PATH
+        value: "/cache"
+
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
