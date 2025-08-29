@@ -19,14 +19,15 @@ spec:
       namespaceOverride: storage
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
-        replicaSoftAntiAffinity: true
-        replicaAutoBalance: true
-        createDefaultDiskLabeledNodes: true
-        defaultReplicaCount: 2
+        replicaSoftAntiAffinity: false
+        replicaAutoBalance: false
+        createDefaultDiskLabeledNodes: false
+        defaultReplicaCount: 3
+        defaultDataLocality: disabled
         guaranteedEngineManagerCPU: 12
         guaranteedReplicaManagerCPU: 12
-        defaultLonghornStaticStorageClass: longhorn
-        backupTarget: "cifs://192.168.31.230/backup"
+        defaultLonghornStaticStorageClass: longhorn-static
+        backupTarget: "cifs://192.168.31.230/backups"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
@@ -54,7 +55,7 @@ spec:
         disableReplicaRebuild: false
       persistence:
         defaultClass: true
-        defaultClassReplicaCount: 2
+        defaultClassReplicaCount: 3
       ui:
         enabled: true
         service:
