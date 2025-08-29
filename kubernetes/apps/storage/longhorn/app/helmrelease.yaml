@@ -25,8 +25,8 @@ spec:
         guaranteedEngineManagerCPU: 12
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn
-        backupTarget: ""
-        backupTargetCredentialSecret: ""
+        backupTarget: "smb://192.168.31.230/backups/backupstore"
+        backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
