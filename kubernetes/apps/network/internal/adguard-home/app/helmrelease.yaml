@@ -85,7 +85,7 @@ spec:
         ipFamilies:
       https:
         enabled: false
-        type: LoadBalancer
+        type: ClusterIP
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for HTTPS (when applicable)
@@ -185,7 +185,7 @@ spec:
 
     ingresses:
       adminPanel:
-        enabled: true
+        enabled: false
         className: "internal"
         annotations:
           gethomepage.dev/enabled: "true"
@@ -229,7 +229,7 @@ spec:
         #    hosts:
         #      - chart-example.
       https:
-        enabled: false
+        enabled: true
         className: "internal"
         annotations: {}
         hosts:
