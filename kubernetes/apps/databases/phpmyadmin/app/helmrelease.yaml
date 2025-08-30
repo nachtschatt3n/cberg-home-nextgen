@@ -28,7 +28,7 @@ spec:
       repository: bitnami/phpmyadmin
       tag: 5.2.1
       pullPolicy: IfNotPresent
-    
+
     mariadb:
       enabled: false
       externalDatabase:
@@ -37,7 +37,7 @@ spec:
         user: root
         password: "${MARIADB_ROOT_PASSWORD}"
         database: ""
-    
+
     ingress:
       enabled: true
       ingressClassName: internal
@@ -55,12 +55,12 @@ spec:
       tls:
         - hosts:
             - *host
-    
+
     service:
       type: ClusterIP
       ports:
         http: 80
-    
+
     resources:
       requests:
         cpu: 100m
