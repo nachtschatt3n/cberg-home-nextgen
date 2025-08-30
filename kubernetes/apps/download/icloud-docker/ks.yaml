@@ -6,6 +6,9 @@ metadata:
   name: &app icloud-docker
   namespace: &namespace download
 spec:
+  dependsOn:
+    - name: icloud-docker-secrets
+      namespace: download
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
