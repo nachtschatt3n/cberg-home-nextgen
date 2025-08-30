@@ -72,6 +72,8 @@ metadata:
     nginx.ingress.kubernetes.io/websocket-services: "nextcloud-whiteboard"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
     external-dns.alpha.kubernetes.io/target: "external.uhl.cool"
 spec:
   ingressClassName: external
