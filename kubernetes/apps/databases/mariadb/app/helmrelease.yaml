@@ -28,11 +28,7 @@ spec:
       repository: bitnami/mariadb
       tag: 10.11.5
       pullPolicy: IfNotPresent
-    auth:
-      rootPassword: "${MARIADB_ROOT_PASSWORD}"
-      database: "${MARIADB_DATABASE}"
-      username: "${MARIADB_USER}"
-      password: "${MARIADB_PASSWORD}"
+
     primary:
       persistence:
         enabled: true
