@@ -11,8 +11,7 @@ mountOptions:
   - vers=3.0
   - dir_mode=0777
   - file_mode=0777
-  - uid=1000
-  - gid=1000
+  - guest
   - noperm
   - noatime
   - rsize=1048576
