@@ -19,6 +19,8 @@ mountOptions:
   - cache=loose
   - actimeo=30
   - serverino
+  - domain=WORKGROUP
+  - sec=ntlmssp
 parameters:
   source: "//${NAS_HOSTNAME}/media"
   subdir: "/"
