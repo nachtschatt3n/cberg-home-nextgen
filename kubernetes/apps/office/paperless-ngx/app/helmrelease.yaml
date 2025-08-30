@@ -202,4 +202,6 @@ spec:
           runAsGroup: 1000
           fsGroup: 1000
 
-    additionalContainers:
+    # additionalContainers:
+    #   - name: sidecar
+    #     image: nginx:alpine
