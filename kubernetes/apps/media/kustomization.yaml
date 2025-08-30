@@ -7,8 +7,8 @@ components:
   - ../../flux/components/common
 resources:
   - ./jellyfin/ks.yaml
-#   - ./plex/ks.yaml
-#   - ./makemkv/ks.yaml
+  - ./plex/ks.yaml
+  - ./makemkv/ks.yaml
 
 ---
 apiVersion: v1
