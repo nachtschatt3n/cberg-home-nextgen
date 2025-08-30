@@ -20,10 +20,10 @@ spec:
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
         replicaSoftAntiAffinity: false
-        replicaAutoBalance: false
+        replicaAutoBalance: best-effort
         createDefaultDiskLabeledNodes: false
-        defaultReplicaCount: 3
-        defaultDataLocality: disabled
+        defaultReplicaCount: 2
+        defaultDataLocality: best-effort
         guaranteedEngineManagerCPU: 12
         guaranteedReplicaManagerCPU: 12
         defaultLonghornStaticStorageClass: longhorn-static
@@ -32,7 +32,6 @@ spec:
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
-        upgradeChecker: true
         backupstorePollInterval: 300
         taintToleration: ""
         systemManagedComponentsNodeSelector: ""
@@ -41,21 +40,47 @@ spec:
         offlineReplicaRebuilding: enabled
         disableSchedulingOnCordonedNode: true
         replicaZoneSoftAntiAffinity: true
-        removeSnapshotsDuringFilesystemTrim: enabled
-        snapshotDataIntegrity: enabled
-        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: disabled
-        autoSalvage: enabled
+        removeSnapshotsDuringFilesystemTrim: true
+        snapshotDataIntegrity: fast-check
+        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
+        snapshotMaxCount: 250
+        backupCompressionMethod: lz4
+        backupConcurrentLimit: 2
+        restoreConcurrentLimit: 2
+        failedBackupTTL: 1440
+        fastReplicaRebuildEnabled: true
+        engineReplicaTimeout: 8
+        replicaFileSyncHttpClientTimeout: 30
+        replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: true
         replicaReplenishmentWaitInterval: 600
         concurrentReplicaRebuildPerNodeLimit: 5
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
         mkfsExt4Parameters: ""
-        priorityClass: ""
-        disableReplicaRebuild: false
+        priorityClass: longhorn-critical
+        autoCleanupRecurringJobBackupSnapshot: true
+        autoCleanupSystemGeneratedSnapshot: true
+        recurringSuccessfulJobsHistoryLimit: 1
+        recurringFailedJobsHistoryLimit: 1
+        recurringJobMaxRetention: 100
+        restoreVolumeRecurringJobs: false
+        orphanAutoDeletion: false
+        detachManuallyAttachedVolumesWhenCordoned: false
+        nodeDownPodDeletionPolicy: do-nothing
+        allowEmptyDiskSelectorVolume: true
+        allowEmptyNodeSelectorVolume: true
+        allowCollectingLonghornUsageMetrics: true
+        kubernetesClusterAutoscalerEnabled: false
+        logLevel: Info
+        upgradeChecker: true
+        v1DataEngine: true
+        v2DataEngine: false
+        v2DataEngineGuaranteedInstanceManagerCPU: 1250
+        v2DataEngineHugepageLimit: 2048
       persistence:
         defaultClass: true
-        defaultClassReplicaCount: 3
+        defaultClassReplicaCount: 2
       ui:
         enabled: true
         service:
