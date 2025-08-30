@@ -1,7 +1,0 @@
----
-apiVersion: longhorn.io/v1beta2
-kind: SystemBackup
-metadata:
-  name: longhorn-system-backup-manual-20240829
-  namespace: storage
-spec: {}
