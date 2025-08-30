@@ -66,6 +66,7 @@ spec:
         # -- (int) Node port for the Admin Panel (when applicable)
         nodePort:
       http:
+        enabled: false
         type: LoadBalancer
         # -- Service annotations
         annotations: {}
@@ -83,7 +84,7 @@ spec:
         # -- Dual-stack families for HTTP, for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
       https:
-        enabled: true
+        enabled: false
         type: LoadBalancer
         # -- Service annotations
         annotations: {}
@@ -184,7 +185,7 @@ spec:
 
     ingresses:
       adminPanel:
-        enabled: false
+        enabled: true
         className: "internal"
         annotations:
           gethomepage.dev/enabled: "true"
