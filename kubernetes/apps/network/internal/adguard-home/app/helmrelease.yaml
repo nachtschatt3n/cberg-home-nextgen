@@ -84,7 +84,7 @@ spec:
         # -- Dual-stack families for HTTP, for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
       https:
-        enabled: false
+        enabled: true
         type: ClusterIP
         # -- Service annotations
         annotations: {}
@@ -225,22 +225,27 @@ spec:
               - path: /
                 pathType: ImplementationSpecific
         tls: []
+        service:
+          name: adguard-home-http
+          port: 80
         #  - secretName: chart-example-tls
         #    hosts:
         #      - chart-example.
       https:
         enabled: true
         className: "internal"
-        annotations: {}
+        annotations:
+          nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+          nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
         hosts:
           - host: &host "adguard.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: ImplementationSpecific
-        tls:
-          - hosts:
-              - *host
-            secretName: adguard-home-tls
+        tls: []
+        service:
+          name: adguard-home-https
+          port: 443
 
     resources: {}
       # We usually recommend not to specify default resources and to leave this as a conscious
