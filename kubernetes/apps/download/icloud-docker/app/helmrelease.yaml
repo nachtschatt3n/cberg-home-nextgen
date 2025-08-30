@@ -65,6 +65,7 @@ spec:
 
     service:
       main:
+        controller: main
         enabled: false
 
     ingress:
