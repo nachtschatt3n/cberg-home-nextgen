@@ -14,4 +14,3 @@ spec:
     requests:
       storage: 25Gi
   storageClassName: longhorn-static
-  volumeName: jellyfin-config
