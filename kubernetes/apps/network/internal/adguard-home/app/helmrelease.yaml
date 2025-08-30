@@ -55,7 +55,6 @@ spec:
       http:
         enabled: true
         type: ClusterIP
-        externalTrafficPolicy: Cluster
         port: 80
 
       dns:
