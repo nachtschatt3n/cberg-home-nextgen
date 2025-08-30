@@ -52,55 +52,10 @@ spec:
       create: true
 
     services:
-      adminPanel:
-        type: ClusterIP
-        # -- Service annotations
-        annotations: {}
-        port: 3000
-        # -- Internal cluster service IP for the Admin Panel (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for the Admin Panel (when applicable)
-        loadBalancerIP:
-        # -- (int) Node port for the Admin Panel (when applicable)
-        nodePort:
-      http:
-        enabled: true
-        type: ClusterIP
-        # -- Service annotations
-        annotations: {}
-        # -- Internal cluster service IP for HTTP (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for HTTP (when applicable)
-        loadBalancerIP:
-        # -- (int) Node port for HTTP (when applicable)
-        port: 80
-        nodePort:
-        # -- Dual-stack policy for HTTP
-        ipFamilyPolicy:
-        # -- Dual-stack families for HTTP, for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
-        ipFamilies:
-      https:
-        enabled: true
-        type: ClusterIP
-        # -- Service annotations
-        annotations: {}
-        # -- Internal cluster service IP for HTTPS (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for HTTPS (when applicable)
-        loadBalancerIP:
-        # -- (int) Node port for HTTPS (when applicable)
-        nodePort:
-        port: 443
-        # -- Dual-stack policy for HTTPS
-        ipFamilyPolicy:
-        # -- Dual-stack families for HTTPS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
-        ipFamilies:
+      main:
+        http:
+          port: 80
+
       dns:
         enabled: true
         type: LoadBalancer
@@ -184,27 +139,7 @@ spec:
         ipFamilies:
 
     ingresses:
-      adminPanel:
-        enabled: false
-        className: "internal"
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "AdGuard Home"
-          gethomepage.dev/description: "Network-wide ad blocking and DNS server"
-          gethomepage.dev/group: "Network"
-          gethomepage.dev/icon: "adguard.png"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: admin.adguard-home-example.local
-            paths:
-              - path: /
-                pathType: ImplementationSpecific
-        tls: []
-        #  - secretName: chart-example-tls
-        #    hosts:
-        #      - chart-example.
-      http:
+      main:
         enabled: true
         className: "internal"
         annotations:
@@ -224,28 +159,9 @@ spec:
             paths:
               - path: /
                 pathType: ImplementationSpecific
-        tls: []
-        service:
-          name: adguard-home-http
-          port: 80
-        #  - secretName: chart-example-tls
-        #    hosts:
-        #      - chart-example.
-      https:
-        enabled: true
-        className: "internal"
-        annotations:
-          nginx.ingress.kubernetes.io/ssl-passthrough: "true"
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-        hosts:
-          - host: &host "adguard.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: ImplementationSpecific
-        tls: []
-        service:
-          name: adguard-home-https
-          port: 443
+        tls:
+          - hosts:
+              - *host
 
     resources: {}
       # We usually recommend not to specify default resources and to leave this as a conscious
