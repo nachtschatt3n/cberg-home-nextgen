@@ -120,15 +120,7 @@ spec:
             'maintenance_window_end' => 6,
             'htaccess.RewriteBase' => '/',
             'htaccess.IgnoreFrontController' => true,
-            'mail_smtpmode' => 'smtp',
-            'mail_smtphost' => 'smtp.gmail.com',
-            'mail_smtpport' => 587,
-            'mail_smtpsecure' => 'tls',
-            'mail_smtpauth' => true,
-            'mail_smtpname' => '${SECRET_SMTP_USERNAME}',
-            'mail_smtppassword' => '${SECRET_SMTP_PASSWORD}',
-            'mail_from_address' => '${SECRET_SMTP_USERNAME}',
-            'mail_domain' => 'gmail.com',
+
           );
 
       strategy:
@@ -137,16 +129,11 @@ spec:
       ##
       ## Extra environment variables
       extraEnv:
-        - name: SECRET_SMTP_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: smtp-username
-        - name: SECRET_SMTP_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: smtp-password
+      #  - name: SOME_SECRET_ENV
+      #    valueFrom:
+      #      secretKeyRef:
+      #        name: nextcloud
+      #        key: secret_key
 
     nginx:
       enabled: false
