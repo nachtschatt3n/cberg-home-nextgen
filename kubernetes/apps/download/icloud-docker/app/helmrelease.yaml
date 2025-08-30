@@ -40,6 +40,11 @@ spec:
               PUID: 1000
               PGID: 1000
               ENV_CONFIG_FILE_PATH: /config/config.yaml
+              ENV_ICLOUD_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: icloud-docker-secrets
+                    key: SECRET_ICLOUD_PASSWORD
             envFrom:
               - secretRef:
                   name: icloud-docker-secrets
