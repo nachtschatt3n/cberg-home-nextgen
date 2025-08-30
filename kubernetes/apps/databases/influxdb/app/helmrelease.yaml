@@ -66,7 +66,7 @@ spec:
     ## ref: http://kubernetes.io/docs/user-guide/services/
     ##
     service:
-      type: LoadBalancer
+      type: ClusterIP
       externalTrafficPolicy: Cluster
       ports:
         http:
