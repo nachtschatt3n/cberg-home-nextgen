@@ -57,6 +57,11 @@ spec:
         type: ClusterIP
         port: 80
 
+      https:
+        enabled: true
+        type: ClusterIP
+        port: 443
+
       dns:
         enabled: true
         type: LoadBalancer
@@ -101,9 +106,24 @@ spec:
             paths:
               - path: /
                 pathType: ImplementationSpecific
-        tls:
-          - hosts:
-              - *host
+        tls: []
+        service:
+          name: adguard-home-http
+          port: 80
+
+      https:
+        enabled: true
+        className: "internal"
+        annotations: {}
+        hosts:
+          - host: &host adguard.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+        tls: []
+        service:
+          name: adguard-home-https
+          port: 443
 
     resources: {}
       # We usually recommend not to specify default resources and to leave this as a conscious
