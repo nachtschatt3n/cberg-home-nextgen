@@ -250,10 +250,9 @@ spec:
         size: 25Gi
         # -- Custom annotations to be added to the PVC
         annotations: {}
-        # -- If undefined (the default) or set to null, no storageClassName spec is set, choosing the default provisioner.
-        storageClass: 'longhorn-static'
         ## -- Use an existing PVC for this mount
-        #existingClaim: 'jellyfin-config'
+        existingClaim: 'jellyfin-config'
+        # storageClass not needed when using existingClaim
       media:
         # -- set to false to use emptyDir
         enabled: true
