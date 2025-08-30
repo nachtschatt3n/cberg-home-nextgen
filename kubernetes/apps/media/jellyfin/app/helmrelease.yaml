@@ -115,8 +115,7 @@ spec:
 
     service:
       # -- Service type (ClusterIP, NodePort, or LoadBalancer).
-      #type: ClusterIP
-      type: LoadBalancer
+      type: ClusterIP
       # -- Configure dual-stack IP family policy. See: https://kubernetes.io/docs/concepts/services-networking/dual-stack/
       #ipFamilyPolicy: ""
       # -- Supported IP families (IPv4, IPv6).
@@ -151,6 +150,9 @@ spec:
         gethomepage.dev/group: "Media"
         gethomepage.dev/icon: "jellyfin.png"
         external-dns.alpha.kubernetes.io/target: "jellyfin.${SECRET_DOMAIN}"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-buffering: "off"
       labels:
         gethomepage.dev/enabled: "true"
       hosts:
