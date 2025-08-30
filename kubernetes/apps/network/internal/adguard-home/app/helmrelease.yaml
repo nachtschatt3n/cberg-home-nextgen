@@ -106,7 +106,7 @@ spec:
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for DNS (when applicable)
-        clusterIP: "Local"
+        clusterIP: ""
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS (when applicable)
