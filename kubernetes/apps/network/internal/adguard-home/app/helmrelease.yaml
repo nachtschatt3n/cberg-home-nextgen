@@ -122,7 +122,7 @@ spec:
         # -- Dual-stack families for DNS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
       dnsOverTls:
-        enabled: true
+        enabled: false
         type: LoadBalancer
         # -- Service annotations
         annotations: {}
@@ -140,7 +140,7 @@ spec:
         # -- Dual-stack families for DNS over TLS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
       dnsOverQuic:
-        enabled: true
+        enabled: false
         type: LoadBalancer
         # -- Service annotations
         annotations: {}
@@ -161,7 +161,7 @@ spec:
         # -- Dual-stack families for DNS Over QUIC; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
       dnscrypt:
-        enabled: true
+        enabled: false
         type: LoadBalancer
         # -- Service annotations
         annotations: {}
