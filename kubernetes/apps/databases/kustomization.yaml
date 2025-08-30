@@ -5,5 +5,18 @@ namespace: databases
 components:
   - ../../flux/components/common
 resources:
- - ./influxdb/ks.yaml
-#   - ./mariadb/ks.yaml
+  - ./influxdb/ks.yaml
+  - ./mariadb/ks.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
