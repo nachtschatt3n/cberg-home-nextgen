@@ -12,7 +12,7 @@ mountOptions:
   - guest
   - noperm
 parameters:
-  source: "//${NAS_HOSTNAME}/media"
+  source: "//${NAS_HOSTNAME}/backups"
   subdir: "/"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
