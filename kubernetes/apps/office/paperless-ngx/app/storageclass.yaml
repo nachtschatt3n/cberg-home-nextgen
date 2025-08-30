@@ -8,20 +8,21 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - cache=none
-  - actimeo=0
-  - noserverino
-  - multichannel
-  - max_channels=4
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
-  subdir: "/log"
+  subdir: "log"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -37,20 +38,21 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - cache=none
-  - actimeo=0
-  - noserverino
-  - multichannel
-  - max_channels=4
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
-  subdir: "/media"
+  subdir: "media"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -66,20 +68,21 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - cache=none
-  - actimeo=0
-  - noserverino
-  - multichannel
-  - max_channels=4
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
-  subdir: "/export"
+  subdir: "export"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
@@ -95,20 +98,21 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=3.0
+  - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
   - uid=1000
   - gid=1000
   - noperm
-  - cache=none
-  - actimeo=0
-  - noserverino
-  - multichannel
-  - max_channels=4
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
 parameters:
   source: "//${NAS_HOSTNAME}/paperless_ngx"
-  subdir: "/consume"
+  subdir: "consume"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
