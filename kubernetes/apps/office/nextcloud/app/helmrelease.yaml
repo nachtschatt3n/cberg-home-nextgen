@@ -48,6 +48,8 @@ spec:
           nginx.ingress.kubernetes.io/websocket-services: "nextcloud"
           nginx.ingress.kubernetes.io/ssl-redirect: "true"
           nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+          nginx.ingress.kubernetes.io/configuration-snippet: |
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
@@ -308,6 +310,8 @@ spec:
             memory: 128Mi
           limits:
             memory: 256Mi
+
+
 
     rbac:
       enabled: false
