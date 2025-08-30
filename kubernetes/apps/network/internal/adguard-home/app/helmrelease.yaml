@@ -52,9 +52,11 @@ spec:
       create: true
 
     services:
-      main:
-        http:
-          port: 80
+      http:
+        enabled: true
+        type: ClusterIP
+        externalTrafficPolicy: Cluster
+        port: 80
 
       dns:
         enabled: true
@@ -77,69 +79,10 @@ spec:
         ipFamilyPolicy:
         # -- Dual-stack families for DNS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
         ipFamilies:
-      dnsOverTls:
-        enabled: false
-        type: LoadBalancer
-        # -- Service annotations
-        annotations: {}
-        # -- Internal cluster service IP for DNS over TLS (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for DNS over TLS (when applicable)
-        loadBalancerIP: "192.168.55.6"
-        # -- (int) Node port for DNS over TLS (when applicable)
-        port: 853
-        nodePort:
-        # -- Dual-stack policy for DNS over TLS
-        ipFamilyPolicy:
-        # -- Dual-stack families for DNS over TLS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
-        ipFamilies:
-      dnsOverQuic:
-        enabled: false
-        type: LoadBalancer
-        # -- Service annotations
-        annotations: {}
-        port1:
-          port: 784
-          nodePort:
-        port2:
-          port: 8853
-          nodePort:
-        # -- Internal cluster service IP for DNS Over QUIC (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for DNS Over QUIC (when applicable)
-        loadBalancerIP: "192.168.55.8"
-        # -- Dual-stack policy for DNS Over QUIC
-        ipFamilyPolicy:
-        # -- Dual-stack families for DNS Over QUIC; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
-        ipFamilies:
-      dnscrypt:
-        enabled: false
-        type: LoadBalancer
-        # -- Service annotations
-        annotations: {}
-        # -- Internal cluster service IP for DNSCrypt (when applicable)
-        clusterIP: ""
-        # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
-        externalTrafficPolicy:
-        # -- Load balancer IP for DNSCrypt (when applicable)
-        loadBalancerIP: "192.168.55.7"
-        tcp:
-          port: 5443
-          nodePort:
-        udp:
-          port: 5443
-          nodePort:
-        # -- Dual-stack policy for DNSCrypt
-        ipFamilyPolicy:
-        # -- Dual-stack families for DNSCrypt; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
-        ipFamilies:
+
 
     ingresses:
-      main:
+      http:
         enabled: true
         className: "internal"
         annotations:
