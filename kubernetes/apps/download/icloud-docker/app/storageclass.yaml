@@ -20,8 +20,8 @@ mountOptions:
   - multichannel
   - max_channels=4
 parameters:
-  source: "//${NAS_HOSTNAME}/media/downloads"
-  subdir: "/icloud"
+  source: "//${NAS_HOSTNAME}/backups"
+  subdir: "/icloud-backup"
   csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
