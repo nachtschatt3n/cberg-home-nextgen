@@ -4,6 +4,6 @@ kind: Kustomization
 namespace: backup
 components:
   - ../../flux/components/common
-# resources:
-#   - ./kopia/ks.yaml
+resources:
+  - ./kopia/ks.yaml
 #  - ./icloud-drive-sync/ks.yaml
