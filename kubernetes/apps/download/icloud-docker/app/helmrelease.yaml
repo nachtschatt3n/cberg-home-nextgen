@@ -81,7 +81,7 @@ spec:
     persistence:
       config:
         enabled: true
-        type: secret
+        type: configMap
         name: icloud-docker-config
         globalMounts:
           - path: /config/config.yaml

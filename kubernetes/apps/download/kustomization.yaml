@@ -8,4 +8,4 @@ resources:
   - ./icloud-docker/secrets-ks.yaml
   - ./youtube-dl-material/ks.yaml
   - ./jdownloader/ks.yaml
-  - ./icloud-docker/ks.yaml
+#  - ./icloud-docker/ks.yaml

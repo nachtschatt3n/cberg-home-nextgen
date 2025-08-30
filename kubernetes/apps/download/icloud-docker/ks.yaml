@@ -22,7 +22,3 @@ spec:
   targetNamespace: *namespace
   timeout: 5m
   wait: false
-  postBuild:
-    substituteFrom:
-      - kind: Secret
-        name: icloud-docker-secrets
