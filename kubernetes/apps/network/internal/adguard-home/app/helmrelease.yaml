@@ -53,7 +53,7 @@ spec:
 
     services:
       adminPanel:
-        type: LoadBalancer
+        type: ClusterIP
         # -- Service annotations
         annotations: {}
         port: 3000
@@ -66,8 +66,8 @@ spec:
         # -- (int) Node port for the Admin Panel (when applicable)
         nodePort:
       http:
-        enabled: false
-        type: LoadBalancer
+        enabled: true
+        type: ClusterIP
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for HTTP (when applicable)
