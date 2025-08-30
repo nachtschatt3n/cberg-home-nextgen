@@ -11,7 +11,7 @@ data:
         level: "info"
         filename: "/config/icloud.log"
       credentials:
-        username: "placeholder-will-be-from-secret"
+        username: "${SECRET_ICLOUD_USERNAME}"
         retry_login_interval: 600
       root: "/icloud"
       region: global
