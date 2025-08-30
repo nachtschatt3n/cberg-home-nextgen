@@ -9,18 +9,8 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
   - vers=3.0
-  - dir_mode=0777
-  - file_mode=0777
   - guest
   - noperm
-  - noatime
-  - rsize=1048576
-  - wsize=1048576
-  - cache=loose
-  - actimeo=30
-  - serverino
-  - domain=WORKGROUP
-  - sec=ntlmssp
 parameters:
   source: "//${NAS_HOSTNAME}/media"
   subdir: "/"
