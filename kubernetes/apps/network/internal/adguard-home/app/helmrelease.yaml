@@ -106,17 +106,17 @@ spec:
         # -- Service annotations
         annotations: {}
         # -- Internal cluster service IP for DNS (when applicable)
-        clusterIP: ""
+        clusterIP: "Local"
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"
         externalTrafficPolicy:
         # -- Load balancer IP for DNS (when applicable)
         loadBalancerIP: "192.168.55.5"
         tcp:
           port: 53
-          nodePort:
+          nodePort: 53
         udp:
           port: 53
-          nodePort:
+          nodePort: 53
         # -- Dual-stack policy for DNS
         ipFamilyPolicy:
         # -- Dual-stack families for DNS; for dual-stack parameters see official kubernetes [dual-stack concept documentation](https://kubernetes.io/docs/concepts/services-networking/dual-stack/).
