@@ -42,6 +42,12 @@ spec:
           gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "nextcloud.png"
           nginx.ingress.kubernetes.io/proxy-body-size: "4G"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+          nginx.ingress.kubernetes.io/websocket-services: "nextcloud"
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
@@ -97,14 +103,32 @@ spec:
               ],
             'trusted_proxies' =>
               [
-                'nginx'
+                '10.0.0.0/8',
+                '172.16.0.0/12',
+                '192.168.0.0/16',
+                '127.0.0.1',
+                '::1'
               ],
+            'websocket.server' => 'wss://drive.${SECRET_DOMAIN}',
             'forwarded_for_headers' =>
               [
                 0 => 'X-Forwarded-For',
                 1 => 'HTTP_X_FORWARDED_FOR',
               ],
             'default_phone_region' => 'DE',
+            'maintenance_window_start' => 2,
+            'maintenance_window_end' => 6,
+            'htaccess.RewriteBase' => '/',
+            'htaccess.IgnoreFrontController' => true,
+            'mail_smtpmode' => 'smtp',
+            'mail_smtphost' => 'smtp.gmail.com',
+            'mail_smtpport' => 587,
+            'mail_smtpsecure' => 'tls',
+            'mail_smtpauth' => true,
+            'mail_smtpname' => '${SECRET_SMTP_USERNAME}',
+            'mail_smtppassword' => '${SECRET_SMTP_PASSWORD}',
+            'mail_from_address' => '${SECRET_SMTP_USERNAME}',
+            'mail_domain' => 'gmail.com',
           );
 
       strategy:
@@ -113,11 +137,16 @@ spec:
       ##
       ## Extra environment variables
       extraEnv:
-      #  - name: SOME_SECRET_ENV
-      #    valueFrom:
-      #      secretKeyRef:
-      #        name: nextcloud
-      #        key: secret_key
+        - name: SECRET_SMTP_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-config
+              key: smtp-username
+        - name: SECRET_SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-config
+              key: smtp-password
 
     nginx:
       enabled: false
@@ -153,6 +182,10 @@ spec:
           enabled: false
         redis:
           enabled: true
+          host: nextcloud-redis
+          port: 6379
+          password: ""
+          database: 0
     ##
     ## MariaDB chart configuration
     ## ref: https://github.com/bitnami/charts/tree/main/bitnami/mariadb
@@ -270,6 +303,22 @@ spec:
         requests:
           cpu: 10m
           memory: 64M
+
+    redis:
+      enabled: true
+      architecture: standalone
+      auth:
+        enabled: false
+      primary:
+        persistence:
+          enabled: true
+          size: 1Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
 
     rbac:
       enabled: false
