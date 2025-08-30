@@ -35,7 +35,7 @@ spec:
         host: mariadb.databases.svc.cluster.local
         port: 3306
         user: root
-        password: "${mariadb-root-password}"
+        password: "${MARIADB_ROOT_PASSWORD}"
         database: ""
     
     ingress:
