@@ -1,0 +1,103 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud-whiteboard
+  namespace: office
+  labels:
+    app: nextcloud-whiteboard
+    app.kubernetes.io/name: nextcloud-whiteboard
+    app.kubernetes.io/instance: nextcloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud-whiteboard
+  template:
+    metadata:
+      labels:
+        app: nextcloud-whiteboard
+    spec:
+      containers:
+      - name: whiteboard-server
+        image: ghcr.io/nextcloud-releases/whiteboard:stable
+        ports:
+        - containerPort: 3002
+          name: websocket
+        env:
+        - name: JWT_SECRET_KEY
+          value: "a68fdf7688d44d432ca8c2b5e6fc1fdbef2427dffe91e4a2f382080454449fbe"
+        - name: NEXTCLOUD_URL
+          value: "https://drive.example.com"
+        - name: STORAGE_STRATEGY
+          value: "lru"
+        - name: PORT
+          value: "3002"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3002
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextcloud-whiteboard
+  namespace: office
+  labels:
+    app: nextcloud-whiteboard
+    app.kubernetes.io/name: nextcloud-whiteboard
+    app.kubernetes.io/instance: nextcloud
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3002
+    targetPort: 3002
+    protocol: TCP
+    name: websocket
+  selector:
+    app: nextcloud-whiteboard
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextcloud-whiteboard
+  namespace: office
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/websocket-services: "nextcloud-whiteboard"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    external-dns.alpha.kubernetes.io/target: "external.example.com"
+spec:
+  ingressClassName: external
+  rules:
+  - host: drive.example.com
+    http:
+      paths:
+      - path: /whiteboard
+        pathType: Prefix
+        backend:
+          service:
+            name: nextcloud-whiteboard
+            port:
+              number: 3002
+  tls:
+  - hosts:
+    - drive.example.com
+    secretName: nextcloud-tls
