@@ -48,7 +48,8 @@ spec:
         controller: music-assistant-server
         ports:
           http:
-            port: 8095
+            #port: 8095
+            port: 443
             primary: true
     ingress:
       main:
