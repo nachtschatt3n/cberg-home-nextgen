@@ -23,9 +23,6 @@ spec:
       strategy: rollback
       retries: 3
   values:
-    defaultPodOptions:
-      securityContext:
-        runAsUser: 0
     controllers:
       music-assistant-server:
         containers:
@@ -46,12 +43,6 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 1Gi
-            securityContext:
-              capabilities:
-                add:
-                  - SYS_ADMIN
-                  - DAC_READ_SEARCH
-              allowPrivilegeEscalation: true
     service:
       main:
         controller: music-assistant-server
