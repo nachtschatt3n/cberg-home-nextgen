@@ -5,7 +5,6 @@ metadata:
   name: longhorn-ui
   namespace: storage
   annotations:
-    kubernetes.io/ingress.class: internal
     cert-manager.io/cluster-issuer: letsencrypt-production
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: "Longhorn"
@@ -14,6 +13,7 @@ metadata:
     gethomepage.dev/icon: "longhorn.png"
     hajimari.io/icon: simple-icons:longhorn
 spec:
+  ingressClassName: internal
   tls:
     - hosts:
         - "longhorn.${SECRET_DOMAIN}"
