@@ -39,7 +39,6 @@ spec:
             memory: 128Mi
           limits:
             memory: 256Mi
-
 ---
 apiVersion: v1
 kind: Service
@@ -82,10 +81,10 @@ metadata:
 spec:
   ingressClassName: external
   rules:
-  - host: drive.uhl.cool
+  - host: whiteboard.uhl.cool
     http:
       paths:
-      - path: /whiteboard
+      - path: /
         pathType: Prefix
         backend:
           service:
@@ -94,5 +93,5 @@ spec:
               number: 3002
   tls:
   - hosts:
-    - drive.uhl.cool
+    - whiteboard.uhl.cool
     secretName: nextcloud-tls
