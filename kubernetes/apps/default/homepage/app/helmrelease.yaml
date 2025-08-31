@@ -156,6 +156,8 @@ spec:
         services: true
         # Enable automatic widget discovery
         widgets: true
+        # Disable status service to prevent label selector errors
+        status: false
 
       docker:
       settings:
