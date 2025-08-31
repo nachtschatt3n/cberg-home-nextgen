@@ -151,7 +151,7 @@ spec:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
         ingress: true
-        gateway: true
+        gateway: false
         # Enable automatic service discovery from ingress annotations
         services: true
         # Enable automatic widget discovery
