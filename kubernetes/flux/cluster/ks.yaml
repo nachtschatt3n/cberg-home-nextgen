@@ -18,6 +18,7 @@ spec:
     name: flux-system
     namespace: flux-system
   # Flux repositories under this need flux-system hardcoded as namespace for Renovate lookups
+  targetNamespace: *namespace
   wait: true
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
