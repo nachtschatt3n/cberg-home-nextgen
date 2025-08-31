@@ -66,7 +66,7 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Music Assistant"
-          gethomepage.dev/description: "Music Assistant Server for Home Assistant"
+          gethomepage.dev/description: "Music for Home Assistant"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "music-assistant.png"
           hajimari.io/icon: mdi:music
