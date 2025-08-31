@@ -28,7 +28,7 @@ spec:
         containers:
           app:
             image:
-              repository: musicassistant/music-assistant-server
+              repository: ghcr.io/music-assistant/server
               tag: latest
             env:
               - name: TZ
