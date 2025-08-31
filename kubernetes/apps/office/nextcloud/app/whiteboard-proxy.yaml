@@ -39,7 +39,6 @@ spec:
             memory: 128Mi
           limits:
             memory: 256Mi
-
 ---
 apiVersion: v1
 kind: Service
@@ -82,10 +81,10 @@ metadata:
 spec:
   ingressClassName: external
   rules:
-  - host: drive.example.com
+  - host: whiteboard.example.com
     http:
       paths:
-      - path: /whiteboard
+      - path: /
         pathType: Prefix
         backend:
           service:
@@ -94,5 +93,5 @@ spec:
               number: 3002
   tls:
   - hosts:
-    - drive.example.com
+    - whiteboard.example.com
     secretName: nextcloud-tls
