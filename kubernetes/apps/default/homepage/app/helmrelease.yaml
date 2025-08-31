@@ -90,159 +90,8 @@ spec:
                 - abbr: GH
                   href: https://github.com/
 
-      services:
-        - "🏠 Home Automation":
-            - "Home Assistant":
-                href: https://hass.uhl.cool
-                icon: home-assistant.png
-                description: Smart home automation hub
-                group: Home Automation
-            - "Frigate NVR":
-                href: https://frigate.uhl.cool
-                icon: frigate.png
-                description: AI-powered video surveillance
-                group: Home Automation
-            - "Node-RED":
-                href: https://node.uhl.cool
-                icon: nodered.png
-                description: Visual programming for IoT
-                group: Home Automation
-            - "n8n":
-                href: https://n8n.uhl.cool
-                icon: n8n.png
-                description: Workflow automation platform
-                group: Home Automation
-            - "Zigbee2MQTT":
-                href: https://zigbee2mqtt.uhl.cool
-                icon: zigbee2mqtt.png
-                description: Zigbee device management
-                group: Home Automation
-            - "Scrypted":
-                href: https://scrypted.uhl.cool
-                icon: scrypted.png
-                description: Video doorbell integration
-                group: Home Automation
-            - "IoBroker":
-                href: https://iobroker.uhl.cool
-                icon: iobroker.png
-                description: IoT platform and automation
-                group: Home Automation
-
-        - "📺 Media & Entertainment":
-            - "Plex":
-                href: https://plex.uhl.cool
-                icon: plex.png
-                description: Media server and streaming
-                group: Media
-            - "Jellyfin":
-                href: https://jellyfin.uhl.cool
-                icon: jellyfin.png
-                description: Open-source media solution
-                group: Media
-            - "MakeMKV":
-                href: https://makemkv.uhl.cool
-                icon: makemkv.png
-                description: DVD/Blu-ray ripping tool
-                group: Media
-
-        - "💾 Office & Productivity":
-            - "Nextcloud":
-                href: https://drive.uhl.cool
-                icon: nextcloud.png
-                description: File storage and collaboration
-                group: Office
-            - "Nextcloud Whiteboard":
-                href: https://whiteboard.uhl.cool
-                icon: whiteboard.png
-                description: Collaborative whiteboarding
-                group: Office
-            - "Paperless-ngx":
-                href: https://paperless.uhl.cool
-                icon: paperless.png
-                description: Document management system
-                group: Office
-
-        - "🔧 System & Infrastructure":
-            - "Grafana":
-                href: https://grafana.uhl.cool
-                icon: grafana.png
-                description: Monitoring and analytics
-                group: Monitoring
-            - "Prometheus":
-                href: https://prometheus.uhl.cool
-                icon: prometheus.png
-                description: Metrics collection and alerting
-                group: Monitoring
-            - "Alertmanager":
-                href: https://alertmanager.uhl.cool
-                icon: alertmanager.png
-                description: Alert routing and management
-                group: Monitoring
-            - "Uptime Kuma":
-                href: https://kuma.uhl.cool
-                icon: uptime-kuma.png
-                description: Uptime monitoring
-                group: Monitoring
-            - "Longhorn UI":
-                href: https://longhorn.uhl.cool
-                icon: longhorn.png
-                description: Storage management
-                group: Storage
-
-        - "🌐 Network Services":
-            - "AdGuard Home":
-                href: https://adguard.uhl.cool
-                icon: adguard.png
-                description: DNS ad-blocking and filtering
-                group: "Network Services"
-            - "Flux Webhook":
-                href: https://flux-webhook.uhl.cool
-                icon: flux.png
-                description: GitOps webhook endpoint
-                group: "Network Services"
-
-        - "🤖 AI & Development":
-            - "Open WebUI":
-                href: https://open-webui.uhl.cool
-                icon: open-webui.png
-                description: AI chat interface
-                group: AI
-
-        - "📥 Download & Backup":
-            - "JDownloader":
-                href: https://jdownloader.uhl.cool
-                icon: jdownloader.png
-                description: Download manager
-                group: Download
-            - "YouTube-DL Material":
-                href: https://youtube-dl.uhl.cool
-                icon: youtube-dl.png
-                description: YouTube video downloader
-                group: Download
-            - "Kopia":
-                href: https://kopia.uhl.cool
-                icon: kopia.png
-                description: Backup and restore tool
-                group: Backup
-
-        - "🗄️ Databases":
-            - "InfluxDB":
-                href: https://influx.uhl.cool
-                icon: influxdb.png
-                description: Time series database
-                group: Databases
-            - "phpMyAdmin":
-                href: https://phpmyadmin.uhl.cool
-                icon: phpmyadmin.png
-                description: MySQL database management
-                group: Databases
-
-        - "🛠️ Utilities":
-            - "Echo Server":
-                href: https://echo-server.uhl.cool
-                icon: echo-server.png
-                description: HTTP echo server for testing
-                group: Utilities
+      # Services will be automatically discovered from Kubernetes ingress annotations
+      # No need to define them statically when using Kubernetes integration
 
       widgets:
         - resources:
@@ -303,6 +152,10 @@ spec:
         mode: cluster
         ingress: true
         gateway: true
+        # Enable automatic service discovery from ingress annotations
+        services: true
+        # Enable automatic widget discovery
+        widgets: true
 
       docker:
       settings:
@@ -318,34 +171,8 @@ spec:
         headerStyle: boxed
         useEqualHeights: true
 
-        layout:
-          "🏠 Home Automation":
-            style: row
-            columns: 4
-          "📺 Media & Entertainment":
-            style: row
-            columns: 3
-          "💾 Office & Productivity":
-            style: row
-            columns: 3
-          "🔧 System & Infrastructure":
-            style: row
-            columns: 3
-          "🌐 Network Services":
-            style: row
-            columns: 2
-          "🤖 AI & Development":
-            style: row
-            columns: 2
-          "📥 Download & Backup":
-            style: row
-            columns: 3
-          "🗄️ Databases":
-            style: row
-            columns: 2
-          "🛠️ Utilities":
-            style: row
-            columns: 2
+        # Layout will be automatically determined from discovered services
+        # No need to define static layout when using Kubernetes integration
 
         # title: Homepage
         # headerStyle: boxed
