@@ -50,11 +50,8 @@ spec:
         loadBalancerIP: "192.168.55.25"
         ports:
           http:
-            port: 443
-            primary: true
-          home-assistant:
             port: 8095
-            nodePort: 443
+            primary: true
           stream:
             port: 8097
           stream-alt:
