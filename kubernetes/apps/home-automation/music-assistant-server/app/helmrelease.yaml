@@ -46,11 +46,16 @@ spec:
     service:
       main:
         controller: music-assistant-server
+        type: ClusterIP
+        clusterIP: 10.96.49.42
         ports:
           http:
-            #port: 8095
-            port: 443
+            port: 8095
             primary: true
+          stream:
+            port: 8097
+          stream-alt:
+            port: 8098
     ingress:
       main:
         enabled: true
