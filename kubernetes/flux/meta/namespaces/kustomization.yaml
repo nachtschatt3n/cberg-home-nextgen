@@ -1,0 +1,16 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ai.yaml
+  - backup.yaml
+  - databases.yaml
+  - default.yaml
+  - download.yaml
+  - home-automation.yaml
+  - media.yaml
+  - monitoring.yaml
+  - network.yaml
+  - office.yaml
+  - storage.yaml
