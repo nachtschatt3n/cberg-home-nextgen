@@ -28,7 +28,7 @@ spec:
         containers:
           app:
             image:
-              repository: musicassistant/music-assistant
+              repository: musicassistant/music-assistant-server
               tag: latest
             env:
               - name: TZ
