@@ -27,12 +27,6 @@ spec:
   values:
     controllers:
       echo-server:
-        strategy: RollingUpdate
-        rollingUpdate:
-          maxSurge: 1
-          maxUnavailable: 0
-        minReadySeconds: 10
-        revisionHistoryLimit: 3
         containers:
           app:
             image:
