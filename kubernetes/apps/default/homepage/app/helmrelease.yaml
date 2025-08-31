@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: homepage
-      version: 2.0.2
+      version: 2.1.0
       sourceRef:
         kind: HelmRepository
         name: jameswynn
@@ -24,7 +24,7 @@ spec:
   values:
     image:
       repository: ghcr.io/gethomepage/homepage
-      # tag: v0.6.0
+      # tag: v1.2.0
 
     # Enable RBAC. RBAC is necessary to use Kubernetes integration
     enableRbac: true
@@ -53,8 +53,10 @@ spec:
     controller:
       strategy: RollingUpdate
       rollingUpdate:
-        maxSurge: 25%
-        maxUnavailable: 25%
+        maxSurge: 1
+        maxUnavailable: 0
+      minReadySeconds: 10
+      revisionHistoryLimit: 3
 
     # Enable the ingress to expose Homepage to the network.
     ingress:
@@ -264,10 +266,30 @@ spec:
         type: emptyDir
         mountPath: /app/config/logs
 
-    # resources:
-    #   requests:
-    #     memory: 10Mi
-    #     cpu: 10m
-    #   limits:
-    #     memory: 200Mi
-    #     cpu: 500m
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 25m
+      limits:
+        memory: 256Mi
+        cpu: 200m
+
+    # Security context for better security
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+      capabilities:
+        drop:
+          - ALL
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+
+    # Pod security context
+    podSecurityContext:
+      fsGroup: 1000
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
