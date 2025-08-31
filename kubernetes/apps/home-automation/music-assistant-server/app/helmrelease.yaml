@@ -54,6 +54,7 @@ spec:
             primary: true
           home-assistant:
             port: 8095
+            nodePort: 443
           stream:
             port: 8097
           stream-alt:
