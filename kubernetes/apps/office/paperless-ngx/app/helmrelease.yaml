@@ -90,30 +90,6 @@ spec:
         tls:
           - hosts:
               - *host
-      gpt:
-        enabled: true
-        ingressClassName: "internal"
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Paperless-GPT"
-          gethomepage.dev/description: "AI-powered document processing"
-          gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "paperless.png"
-          hajimari.io/icon: mdi:robot
-        hosts:
-          - host: "paperless-gpt.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                backend:
-                  service:
-                    name: paperless-ngx-paperless-gpt
-                    port:
-                      name: gpt
-        tls:
-          - hosts:
-              - "paperless-gpt.${SECRET_DOMAIN}"
-
     persistence:
       data:
         enabled: true
