@@ -136,7 +136,7 @@ spec:
             uptime: true
             cpu: true
             memory: true
-            disk: true
+            disk: false
         # - glances:
         #     url: http://192.168.55.100:61208
         #     username: admin
