@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: homepage
-      version: 2.1.0
+      version: 2.0.2
       sourceRef:
         kind: HelmRepository
         name: jameswynn
@@ -24,7 +24,7 @@ spec:
   values:
     image:
       repository: ghcr.io/gethomepage/homepage
-      # tag: v1.2.0
+      # tag: v0.6.0
 
     # Enable RBAC. RBAC is necessary to use Kubernetes integration
     enableRbac: true
@@ -53,10 +53,8 @@ spec:
     controller:
       strategy: RollingUpdate
       rollingUpdate:
-        maxSurge: 1
-        maxUnavailable: 0
-      minReadySeconds: 10
-      revisionHistoryLimit: 3
+        maxSurge: 25%
+        maxUnavailable: 25%
 
     # Enable the ingress to expose Homepage to the network.
     ingress:
@@ -90,8 +88,56 @@ spec:
                 - abbr: GH
                   href: https://github.com/
 
-      # Services will be automatically discovered from Kubernetes ingress annotations
-      # No need to define them statically when using Kubernetes integration
+      services:
+        - Infrastructure:
+            - openDTU:
+                href: http://192.168.33.220
+                icon: mdi-solar-power
+                description: Solar Inverter Gateway
+            - Awtrix:
+                href: http://192.168.33.135
+                icon: matrix.png
+                description: LED Matrix Display
+            - PiKVM:
+                href: http://192.168.30.154
+                icon: pikvm.png
+                description: KVM over IP
+            - "Zigbee Router GF":
+                href: http://192.168.32.21
+                icon: zigbee2mqtt.png
+                description: SLZB-06 Zigbee Router Ground Floor
+            - "Zigbee Coordinator":
+                href: http://192.168.32.20
+                icon: zigbee2mqtt.png
+                description: SLZB-06P10 Zigbee Coordinator
+            - "Unifi NAS Pro":
+                href: http://192.168.31.230
+                icon: unifi.png
+                description: Network Attached Storage
+        - "Network Services":
+            - Unifi:
+                href: http://192.168.55.1
+                icon: unifi.png
+                description: Unifi Controller
+                # widget:
+                #     type: unifi
+                #     url: https://api.ui.com
+                #     key:
+                #         valueFrom:
+                #             secretKeyRef:
+                #                 name: homepage-secret
+                #                 key: UNIFI_API_KEY
+            - Brother Laser:
+                icon: brother
+                href: http://192.168.33.153
+                description: Brother HL 2360DW
+                siteMonitor: http://192.168.33.153
+
+            - "Epson Scanner ES-580W":
+                icon: epson-iprint
+                href: http://192.168.32.201
+                description: Epson ES-580W
+                siteMonitor: http://192.168.32.201
 
       widgets:
         - resources:
@@ -112,12 +158,7 @@ spec:
             nodes:
               cpu: true
               memory: true
-              show: true
-              showLabel: true
-            pods:
-              cpu: true
-              memory: true
-              show: true
+              show: false
               showLabel: true
         - openmeteo:
             label: Home
@@ -130,34 +171,11 @@ spec:
               dateStyle: long
               timeStyle: short
               hourCycle: h23
-        - system:
-            hostname: true
-            os: true
-            uptime: true
-            cpu: true
-            memory: true
-            disk: false
-        # - glances:
-        #     url: http://192.168.55.100:61208
-        #     username: admin
-        #     password: admin
-        #     system: true
-        #     cpu: true
-        #     memory: true
-        #     disk: true
-        #     network: true
-        #     temperature: true
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
         ingress: true
-        gateway: false
-        # Enable automatic service discovery from ingress annotations
-        services: true
-        # Enable automatic widget discovery
-        widgets: true
-        # Disable status service to prevent label selector errors
-        status: false
+        gateway: true
 
       docker:
       settings:
@@ -173,8 +191,31 @@ spec:
         headerStyle: boxed
         useEqualHeights: true
 
-        # Layout will be automatically determined from discovered services
-        # No need to define static layout when using Kubernetes integration
+        layout:
+          AI:
+          Databases:
+          System:
+          "Network Services":
+            style: row
+            columns: 4
+          "Home Automation":
+            style: row
+            columns: 5
+          Monitoring:
+            style: row
+            columns: 3
+          Infrastructure:
+            style: row
+            columns: 3
+          Media:
+            style: row
+            columns: 2
+          Office:
+            style: row
+            columns: 2
+          "Download":
+            style: row
+            columns: 2
 
         # title: Homepage
         # headerStyle: boxed
@@ -223,27 +264,10 @@ spec:
         type: emptyDir
         mountPath: /app/config/logs
 
-    resources:
-      requests:
-        memory: 64Mi
-        cpu: 25m
-      limits:
-        memory: 256Mi
-        cpu: 200m
-
-    # Security context for homelab environment
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-          - ALL
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
-
-    # Pod security context
-    podSecurityContext:
-      fsGroup: 1000
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
+    # resources:
+    #   requests:
+    #     memory: 10Mi
+    #     cpu: 10m
+    #   limits:
+    #     memory: 200Mi
+    #     cpu: 500m
