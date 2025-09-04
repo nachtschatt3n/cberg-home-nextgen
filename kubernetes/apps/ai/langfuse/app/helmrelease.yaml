@@ -25,6 +25,12 @@ spec:
     keepHistory: false
   values:
     langfuse:
+      additionalEnv:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgres
+              key: url
       salt:
         secretKeyRef:
           name: langfuse-secret
