@@ -1,0 +1,45 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: langfuse
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: langfuse
+      version: "*"
+      sourceRef:
+        kind: HelmRepository
+        name: langfuse
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    # Minimal values, see https://langfuse.com/self-hosting/deployment/kubernetes-helm for options
+    # You may want to externalize Postgres/Clickhouse/Redis later; defaults deploy them in-cluster
+    ingress:
+      enabled: true
+      className: external
+      host: &host "langfuse.${SECRET_DOMAIN}"
+      annotations:
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Langfuse"
+        gethomepage.dev/description: "Open-source observability for LLM apps"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "https://raw.githubusercontent.com/langfuse/langfuse/main/apps/web/public/favicon-32x32.png"
+      tls:
+        enabled: true
+        secretName: ""
+    # Set cluster domain if chart supports it; otherwise omit
+    service:
+      type: ClusterIP
