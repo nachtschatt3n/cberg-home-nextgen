@@ -69,3 +69,7 @@ spec:
       deploy: true
       auth:
         existingSecret: langfuse-postgres
+    clickhouse:
+      deploy: true
+      auth:
+        existingSecret: langfuse-clickhouse
