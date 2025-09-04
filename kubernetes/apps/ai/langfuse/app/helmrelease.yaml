@@ -83,7 +83,7 @@ spec:
       auth:
         enabled: true
         existingSecret: langfuse-redis
-        existingSecretKey: valkey-password
+        existingSecretPasswordKey: valkey-password
     clickhouse:
       deploy: true
       auth:
