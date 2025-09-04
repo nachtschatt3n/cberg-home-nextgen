@@ -84,6 +84,8 @@ spec:
         existingSecret: langfuse-postgres
         secretKeys:
           userPasswordKey: password
+    redis:
+      deploy: false
     clickhouse:
       deploy: true
       auth:
