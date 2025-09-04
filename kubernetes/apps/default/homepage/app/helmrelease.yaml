@@ -94,75 +94,33 @@ spec:
                 href: https://openwebui.${SECRET_DOMAIN}
                 icon: openwebui.png
                 description: Open WebUI for AI models
-                widget:
-                  type: iframe
-                  url: https://openwebui.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
         - Databases:
             - "InfluxDB":
                 href: https://influxdb.${SECRET_DOMAIN}
                 icon: influxdb.png
                 description: Time series database
-                widget:
-                  type: influxdb
-                  url: https://influxdb.${SECRET_DOMAIN}
-                  database: telegraf
             - phpMyAdmin:
                 href: https://phpmyadmin.${SECRET_DOMAIN}
                 icon: phpmyadmin.png
                 description: MySQL administration
-                widget:
-                  type: iframe
-                  url: https://phpmyadmin.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
         - System:
             - Homepage:
                 href: https://homepage.${SECRET_DOMAIN}
                 icon: homepage.png
                 description: A modern, secure, application dashboard
-                widget:
-                  type: iframe
-                  url: https://homepage.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
         - "Network Services":
             - AdGuard:
                 href: https://adguard.${SECRET_DOMAIN}
                 icon: adguard.png
                 description: Network-wide ad blocking
-                widget:
-                  type: adguard
-                  url: https://adguard.${SECRET_DOMAIN}
-                  username: admin
-                  password:
-                    valueFrom:
-                      secretKeyRef:
-                        name: adguard-secret
-                        key: password
             - Echo:
                 href: https://echo.${SECRET_DOMAIN}
                 icon: echo.png
                 description: Echo Server
-                widget:
-                  type: iframe
-                  url: https://echo.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 300px
             - Unifi:
                 href: https://unifi.${SECRET_DOMAIN}
                 icon: unifi.png
                 description: Unifi Controller
-                widget:
-                  type: unifi
-                  url: https://unifi.${SECRET_DOMAIN}
-                  username: admin
-                  password:
-                    valueFrom:
-                      secretKeyRef:
-                        name: unifi-secret
-                        key: password
             - Brother:
                 icon: brother.png
                 href: http://192.168.33.153
@@ -173,125 +131,51 @@ spec:
                 href: https://frigate.${SECRET_DOMAIN}
                 icon: frigate.png
                 description: NVR with AI object detection
-                widget:
-                  type: frigate
-                  url: https://frigate.${SECRET_DOMAIN}
-                  apiKey:
-                    valueFrom:
-                      secretKeyRef:
-                        name: frigate-secret
-                        key: api-key
             - "Home Assistant":
                 href: https://homeassistant.${SECRET_DOMAIN}
                 icon: homeassistant.png
                 description: Open source home automation
-                widget:
-                  type: homeassistant
-                  url: https://homeassistant.${SECRET_DOMAIN}
-                  token:
-                    valueFrom:
-                      secretKeyRef:
-                        name: homeassistant-secret
-                        key: token
             - IoBroker:
                 href: https://iobroker.${SECRET_DOMAIN}
                 icon: iobroker.png
                 description: IoT platform
-                widget:
-                  type: iframe
-                  url: https://iobroker.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
             - "Music Assistant":
                 href: https://music.${SECRET_DOMAIN}
                 icon: music-assistant.png
                 description: Music streaming assistant
-                widget:
-                  type: iframe
-                  url: https://music.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
             - "Node-RED":
                 href: https://nodered.${SECRET_DOMAIN}
                 icon: nodered.png
                 description: Flow-based programming
-                widget:
-                  type: iframe
-                  url: https://nodered.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
             - Scrypted:
                 href: https://scrypted.${SECRET_DOMAIN}
                 icon: scrypted.png
                 description: HomeKit bridge
-                widget:
-                  type: iframe
-                  url: https://scrypted.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
             - Zigbee2MQTT:
                 href: https://zigbee2mqtt.${SECRET_DOMAIN}
                 icon: zigbee2mqtt.png
                 description: Zigbee to MQTT bridge
-                widget:
-                  type: iframe
-                  url: https://zigbee2mqtt.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
             - n8n:
                 href: https://n8n.${SECRET_DOMAIN}
                 icon: n8n.png
                 description: Workflow automation
-                widget:
-                  type: iframe
-                  url: https://n8n.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
         - Monitoring:
             - Alertmanager:
                 href: https://alertmanager.${SECRET_DOMAIN}
                 icon: alertmanager.png
                 description: Alert management
-                widget:
-                  type: iframe
-                  url: https://alertmanager.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 300px
             - "Uptime Kuma":
                 href: https://uptime.${SECRET_DOMAIN}
                 icon: uptime-kuma.png
                 description: Uptime monitoring
-                widget:
-                  type: uptime-kuma
-                  url: https://uptime.${SECRET_DOMAIN}
-                  username: admin
-                  password:
-                    valueFrom:
-                      secretKeyRef:
-                        name: uptime-kuma-secret
-                        key: password
             - Grafana:
                 href: https://grafana.${SECRET_DOMAIN}
                 icon: grafana.png
                 description: Analytics and monitoring
-                widget:
-                  type: grafana
-                  url: https://grafana.${SECRET_DOMAIN}
-                  username: admin
-                  password:
-                    valueFrom:
-                      secretKeyRef:
-                        name: grafana-secret
-                        key: password
             - Prometheus:
                 href: https://prometheus.${SECRET_DOMAIN}
                 icon: prometheus.png
                 description: Metrics collection
-                widget:
-                  type: iframe
-                  url: https://prometheus.${SECRET_DOMAIN}
-                  width: 100%
-                  height: 400px
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
@@ -378,19 +262,6 @@ spec:
         services: true
         pods: true
         nodes: true
-        # Enable service discovery for ingresses
-        serviceDiscovery:
-          enabled: true
-          # Discover services with specific labels
-          labels:
-            - "gethomepage.dev/enabled=true"
-          # Namespaces to discover services in
-          namespaces:
-            - "default"
-            - "home-automation"
-            - "monitoring"
-            - "databases"
-            - "ai"
 
       docker:
       settings:
