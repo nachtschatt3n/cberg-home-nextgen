@@ -31,6 +31,8 @@ spec:
             secretKeyRef:
               name: langfuse-postgres
               key: url
+        - name: DATABASE_PORT
+          value: "5432"
       salt:
         secretKeyRef:
           name: langfuse-secret
