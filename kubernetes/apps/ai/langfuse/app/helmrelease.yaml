@@ -78,12 +78,6 @@ spec:
         existingSecret: langfuse-postgres
         secretKeys:
           userPasswordKey: password
-    redis:
-      deploy: true
-      auth:
-        enabled: true
-        existingSecret: langfuse-redis
-        existingSecretPasswordKey: valkey-password
     clickhouse:
       deploy: true
       auth:
