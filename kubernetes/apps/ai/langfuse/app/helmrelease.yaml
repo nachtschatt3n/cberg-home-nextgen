@@ -25,6 +25,7 @@ spec:
     keepHistory: false
   values:
     langfuse:
+      enabled: false
       additionalEnv:
         - name: DATABASE_URL
           valueFrom:
