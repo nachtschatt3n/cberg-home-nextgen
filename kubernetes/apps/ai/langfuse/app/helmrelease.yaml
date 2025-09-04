@@ -1,4 +1,4 @@
----
+apt ls ---
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
@@ -33,6 +33,12 @@ spec:
         secretKeyRef:
           name: langfuse-secret
           key: encryptionKey
+    nextauth:
+      url: "https://langfuse.${SECRET_DOMAIN}"
+      secret:
+        secretKeyRef:
+          name: langfuse-secret
+          key: nextauthSecret
     ingress:
       enabled: true
       className: external
