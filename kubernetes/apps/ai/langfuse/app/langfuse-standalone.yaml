@@ -1,0 +1,224 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: langfuse-redis
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: redis
+      version: "*"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  values:
+    auth:
+      enabled: true
+      existingSecret: langfuse-redis
+      existingSecretPasswordKey: redis-password
+    architecture: standalone
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: langfuse-postgresql
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: postgresql
+      version: "*"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  values:
+    auth:
+      existingSecret: langfuse-postgres
+      secretKeys:
+        adminPasswordKey: password
+    primary:
+      persistence:
+        enabled: true
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: clickhouse
+      version: "*"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  values:
+    auth:
+      existingSecret: langfuse-clickhouse
+      existingSecretPasswordKey: clickhouse-password
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-web
+  template:
+    metadata:
+      labels:
+        app: langfuse-web
+    spec:
+      containers:
+      - name: langfuse-web
+        image: langfuse/langfuse:3.106.1
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgres
+              key: url
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-redis
+              key: redis-password
+        - name: REDIS_CONNECTION_STRING
+          value: "redis://default:$(REDIS_PASSWORD)@langfuse-redis-master:6379/0"
+        - name: CLICKHOUSE_URL
+          value: "http://langfuse-clickhouse:8123"
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-clickhouse
+              key: clickhouse-password
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: encryptionKey
+        - name: NEXTAUTH_URL
+          value: "https://langfuse.uhl.cool"
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: nextauthSecret
+        - name: PORT
+          value: "3000"
+        - name: HOSTNAME
+          value: "0.0.0.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      containers:
+      - name: langfuse-worker
+        image: langfuse/langfuse-worker:3.106.1
+        ports:
+        - containerPort: 3030
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgres
+              key: url
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-redis
+              key: redis-password
+        - name: REDIS_CONNECTION_STRING
+          value: "redis://default:$(REDIS_PASSWORD)@langfuse-redis-master:6379/0"
+        - name: CLICKHOUSE_URL
+          value: "http://langfuse-clickhouse:8123"
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-clickhouse
+              key: clickhouse-password
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: encryptionKey
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  namespace: ai
+spec:
+  selector:
+    app: langfuse-web
+  ports:
+  - port: 3000
+    targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: langfuse-ingress
+  namespace: ai
+  annotations:
+    external-dns.alpha.kubernetes.io/target: "external.uhl.cool"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Langfuse"
+    gethomepage.dev/description: "Open-source observability for LLM apps"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "langfuse.png"
+spec:
+  ingressClassName: external
+  tls:
+  - hosts:
+    - langfuse.uhl.cool
+  rules:
+  - host: langfuse.uhl.cool
+    http:
+      paths:
+      - path: /
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: langfuse-web
+            port:
+              number: 3000

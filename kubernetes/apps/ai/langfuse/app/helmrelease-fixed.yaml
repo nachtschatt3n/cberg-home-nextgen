@@ -1,0 +1,102 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: langfuse
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: langfuse
+      version: "*"
+      sourceRef:
+        kind: HelmRepository
+        name: langfuse
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 1
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    langfuse:
+      additionalEnv:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgres
+              key: url
+        - name: REDIS_HOST
+          value: "langfuse-redis-primary"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-redis
+              key: valkey-password
+        - name: REDIS_CONNECTION_STRING
+          value: "redis://default:$(REDIS_PASSWORD)@$(REDIS_HOST):$(REDIS_PORT)/0"
+      salt:
+        secretKeyRef:
+          name: langfuse-secret
+          key: salt
+      encryptionKey:
+        secretKeyRef:
+          name: langfuse-secret
+          key: encryptionKey
+      nextauth:
+        url: "https://langfuse.${SECRET_DOMAIN}"
+        secret:
+          secretKeyRef:
+            name: langfuse-secret
+            key: nextauthSecret
+    nextauth:
+      url: "https://langfuse.${SECRET_DOMAIN}"
+      secret:
+        secretKeyRef:
+          name: langfuse-secret
+          key: nextauthSecret
+    ingress:
+      enabled: true
+      className: external
+      annotations:
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Langfuse"
+        gethomepage.dev/description: "Open-source observability for LLM apps"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "langfuse.png"
+      hosts:
+        - host: "langfuse.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: ImplementationSpecific
+      tls:
+        enabled: true
+        secretName: ""
+    service:
+      type: ClusterIP
+    postgresql:
+      deploy: true
+      port: 5432
+      auth:
+        existingSecret: langfuse-postgres
+        secretKeys:
+          userPasswordKey: password
+    redis:
+      deploy: true
+      auth:
+        enabled: true
+        existingSecret: langfuse-redis
+        existingSecretPasswordKey: valkey-password
+    clickhouse:
+      deploy: true
+      auth:
+        existingSecret: langfuse-clickhouse
+        existingSecretKey: password
