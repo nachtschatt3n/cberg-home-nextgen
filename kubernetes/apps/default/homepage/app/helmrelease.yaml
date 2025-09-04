@@ -275,7 +275,7 @@ spec:
         theme: dark
         color: slate
         headerStyle: boxed
-        useEqualHeights: true
+        useEqualHeights: false
 
         layout:
           AI:
