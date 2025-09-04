@@ -88,30 +88,7 @@ spec:
                 - abbr: GH
                   href: https://github.com/
 
-      services:
-        - Databases:
-            - "InfluxDB":
-                href: https://influxdb.${SECRET_DOMAIN}
-                icon: influxdb.png
-                description: Time series database
-            - phpMyAdmin:
-                href: https://phpmyadmin.${SECRET_DOMAIN}
-                icon: phpmyadmin.png
-                description: MySQL administration
-        - System:
-            - Homepage:
-                href: https://homepage.${SECRET_DOMAIN}
-                icon: homepage.png
-                description: A modern, secure, application dashboard
         - "Network Services":
-            - AdGuard:
-                href: https://adguard.${SECRET_DOMAIN}
-                icon: adguard.png
-                description: Network-wide ad blocking
-            - Echo:
-                href: https://echo.${SECRET_DOMAIN}
-                icon: echo.png
-                description: Echo Server
             - Unifi:
                 href: https://unifi.${SECRET_DOMAIN}
                 icon: unifi.png
@@ -121,56 +98,6 @@ spec:
                 href: http://192.168.33.153
                 description: Brother HL 2360DW
                 siteMonitor: http://192.168.33.153
-        - "Home Automation":
-            - Frigate:
-                href: https://frigate.${SECRET_DOMAIN}
-                icon: frigate.png
-                description: NVR with AI object detection
-            - "Home Assistant":
-                href: https://homeassistant.${SECRET_DOMAIN}
-                icon: homeassistant.png
-                description: Open source home automation
-            - IoBroker:
-                href: https://iobroker.${SECRET_DOMAIN}
-                icon: iobroker.png
-                description: IoT platform
-            - "Music Assistant":
-                href: https://music.${SECRET_DOMAIN}
-                icon: music-assistant.png
-                description: Music streaming assistant
-            - "Node-RED":
-                href: https://nodered.${SECRET_DOMAIN}
-                icon: nodered.png
-                description: Flow-based programming
-            - Scrypted:
-                href: https://scrypted.${SECRET_DOMAIN}
-                icon: scrypted.png
-                description: HomeKit bridge
-            - Zigbee2MQTT:
-                href: https://zigbee2mqtt.${SECRET_DOMAIN}
-                icon: zigbee2mqtt.png
-                description: Zigbee to MQTT bridge
-            - n8n:
-                href: https://n8n.${SECRET_DOMAIN}
-                icon: n8n.png
-                description: Workflow automation
-        - Monitoring:
-            - Alertmanager:
-                href: https://alertmanager.${SECRET_DOMAIN}
-                icon: alertmanager.png
-                description: Alert management
-            - "Uptime Kuma":
-                href: https://uptime.${SECRET_DOMAIN}
-                icon: uptime-kuma.png
-                description: Uptime monitoring
-            - Grafana:
-                href: https://grafana.${SECRET_DOMAIN}
-                icon: grafana.png
-                description: Analytics and monitoring
-            - Prometheus:
-                href: https://prometheus.${SECRET_DOMAIN}
-                icon: prometheus.png
-                description: Metrics collection
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
