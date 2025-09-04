@@ -24,6 +24,15 @@ spec:
   uninstall:
     keepHistory: false
   values:
+    langfuse:
+      salt:
+        secretKeyRef:
+          name: langfuse-secret
+          key: salt
+      encryptionKey:
+        secretKeyRef:
+          name: langfuse-secret
+          key: encryptionKey
     ingress:
       enabled: true
       className: external
