@@ -31,6 +31,11 @@ spec:
             secretKeyRef:
               name: langfuse-postgres
               key: url
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-redis
+              key: valkey-password
       salt:
         secretKeyRef:
           name: langfuse-secret
