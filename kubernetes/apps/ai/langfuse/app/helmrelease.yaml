@@ -65,3 +65,7 @@ spec:
         secretName: ""
     service:
       type: ClusterIP
+    postgresql:
+      deploy: true
+      auth:
+        existingSecret: langfuse-postgres

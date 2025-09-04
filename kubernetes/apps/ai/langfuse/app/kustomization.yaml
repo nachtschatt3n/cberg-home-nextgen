@@ -6,3 +6,4 @@ namespace: ai
 resources:
   - ./helmrelease.yaml
   - ./secret.sops.yaml
+  - ./postgresql-secret.sops.yaml
