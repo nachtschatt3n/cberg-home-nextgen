@@ -31,8 +31,6 @@ spec:
             secretKeyRef:
               name: langfuse-postgres
               key: url
-        - name: DATABASE_PORT
-          value: "5432"
       salt:
         secretKeyRef:
           name: langfuse-secret
@@ -80,6 +78,12 @@ spec:
         existingSecret: langfuse-postgres
         secretKeys:
           userPasswordKey: password
+    redis:
+      deploy: true
+      auth:
+        enabled: true
+        existingSecret: langfuse-redis
+        existingSecretKey: valkey-password
     clickhouse:
       deploy: true
       auth:
