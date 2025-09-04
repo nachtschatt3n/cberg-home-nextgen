@@ -33,6 +33,12 @@ spec:
         secretKeyRef:
           name: langfuse-secret
           key: encryptionKey
+      nextauth:
+        url: "https://langfuse.${SECRET_DOMAIN}"
+        secret:
+          secretKeyRef:
+            name: langfuse-secret
+            key: nextauthSecret
     nextauth:
       url: "https://langfuse.${SECRET_DOMAIN}"
       secret:
