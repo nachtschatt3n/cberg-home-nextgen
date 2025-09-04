@@ -1,69 +1,9 @@
----
-apiVersion: helm.toolkit.fluxcd.io/v2beta2
-kind: HelmRelease
-metadata:
-  name: langfuse-redis
-  namespace: ai
-spec:
-  interval: 30m
-  chart:
-    spec:
-      chart: redis
-      version: "*"
-      sourceRef:
-        kind: HelmRepository
-        name: bitnami
-        namespace: flux-system
-  values:
-    auth:
-      enabled: true
-      existingSecret: langfuse-redis
-      existingSecretPasswordKey: redis-password
-    architecture: standalone
----
-apiVersion: helm.toolkit.fluxcd.io/v2beta2
-kind: HelmRelease
-metadata:
-  name: langfuse-postgresql
-  namespace: ai
-spec:
-  interval: 30m
-  chart:
-    spec:
-      chart: postgresql
-      version: "*"
-      sourceRef:
-        kind: HelmRepository
-        name: bitnami
-        namespace: flux-system
-  values:
-    auth:
-      existingSecret: langfuse-postgres
-      secretKeys:
-        adminPasswordKey: password
-    primary:
-      persistence:
-        enabled: true
----
-apiVersion: helm.toolkit.fluxcd.io/v2beta2
-kind: HelmRelease
-metadata:
-  name: langfuse-clickhouse
-  namespace: ai
-spec:
-  interval: 30m
-  chart:
-    spec:
-      chart: clickhouse
-      version: "*"
-      sourceRef:
-        kind: HelmRepository
-        name: bitnami
-        namespace: flux-system
-  values:
-    auth:
-      existingSecret: langfuse-clickhouse
-      existingSecretPasswordKey: clickhouse-password
+# Redis is already deployed by the original Langfuse chart
+# We'll use the existing Redis service
+# PostgreSQL is already deployed by the original Langfuse chart
+# We'll use the existing PostgreSQL service
+# ClickHouse is already deployed by the original Langfuse chart
+# We'll use the existing ClickHouse service
 ---
 apiVersion: apps/v1
 kind: Deployment
