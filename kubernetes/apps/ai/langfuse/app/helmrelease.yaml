@@ -67,8 +67,11 @@ spec:
       type: ClusterIP
     postgresql:
       deploy: true
+      port: 5432
       auth:
         existingSecret: langfuse-postgres
+        secretKeys:
+          userPasswordKey: password
     clickhouse:
       deploy: true
       auth:
