@@ -89,11 +89,6 @@ spec:
                   href: https://github.com/
 
       services:
-        - AI:
-            - "Open WebUI":
-                href: https://openwebui.${SECRET_DOMAIN}
-                icon: openwebui.png
-                description: Open WebUI for AI models
         - Databases:
             - "InfluxDB":
                 href: https://influxdb.${SECRET_DOMAIN}
@@ -213,10 +208,9 @@ spec:
             cpu: true
             expanded: true
             memory: true
-            storage: true
             network: true
         - search:
-            provider: [brave, google, duckduckgo]
+            provider: [google, duckduckgo]
             focus: false
             target: _blank
         - kubernetes:
