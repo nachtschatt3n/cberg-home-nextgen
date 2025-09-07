@@ -70,6 +70,9 @@ spec:
                   httpGet:
                     path: /_cluster/health
                     port: 9200
+                    httpHeaders:
+                      - name: Authorization
+                        value: "Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="
                   initialDelaySeconds: 60
                   periodSeconds: 30
                   timeoutSeconds: 10
@@ -81,6 +84,9 @@ spec:
                   httpGet:
                     path: /_cluster/health
                     port: 9200
+                    httpHeaders:
+                      - name: Authorization
+                        value: "Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="
                   initialDelaySeconds: 60
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -92,6 +98,9 @@ spec:
                   httpGet:
                     path: /_cluster/health
                     port: 9200
+                    httpHeaders:
+                      - name: Authorization
+                        value: "Basic ZWxhc3RpYzpjaGFuZ2VtZQ=="
                   failureThreshold: 30
                   periodSeconds: 10
 
