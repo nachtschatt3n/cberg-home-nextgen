@@ -1,0 +1,61 @@
+---
+# YouTube media volume on CIFS
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tube-archivist-youtube
+  namespace: download
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Ti
+  storageClassName: cifs-tube-archivist-media
+---
+# Cache volume on Longhorn
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tube-archivist-cache
+  namespace: download
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+---
+# Redis data volume on Longhorn
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tube-archivist-redis-data
+  namespace: download
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+---
+# Elasticsearch data volume on Longhorn
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tube-archivist-elasticsearch-data
+  namespace: download
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
