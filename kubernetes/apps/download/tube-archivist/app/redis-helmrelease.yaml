@@ -75,9 +75,6 @@ spec:
                       - ping
                   failureThreshold: 30
                   periodSeconds: 10
-            volumeMounts:
-              - name: redis-data
-                mountPath: /data
 
     service:
       main:

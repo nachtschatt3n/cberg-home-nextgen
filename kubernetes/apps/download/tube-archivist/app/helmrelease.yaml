@@ -89,11 +89,6 @@ spec:
                     port: 8000
                   failureThreshold: 30
                   periodSeconds: 10
-            volumeMounts:
-              - name: youtube-volume
-                mountPath: /youtube
-              - name: cache-volume
-                mountPath: /cache
 
     service:
       main:
