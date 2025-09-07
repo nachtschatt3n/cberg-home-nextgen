@@ -13,4 +13,5 @@ resources:
   - ./node-red/ks.yaml
   - ./scrypted-nvr/ks.yaml
   - ./music-assistant-server/ks.yaml
+  - ./esphome/ks.yaml
 
