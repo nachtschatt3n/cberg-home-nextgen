@@ -26,6 +26,18 @@ spec:
     controllers:
       main:
         strategy: Recreate
+        initContainers:
+          - name: fix-permissions
+            image: busybox:1.35
+            command: ['sh', '-c']
+            args:
+              - |
+                chown -R 1000:1000 /usr/share/elasticsearch/data
+                mkdir -p /usr/share/elasticsearch/data/snapshot
+                chown -R 1000:1000 /usr/share/elasticsearch/data/snapshot
+            volumeMounts:
+              - name: elasticsearch-data
+                mountPath: /usr/share/elasticsearch/data
         containers:
           app:
             image:
