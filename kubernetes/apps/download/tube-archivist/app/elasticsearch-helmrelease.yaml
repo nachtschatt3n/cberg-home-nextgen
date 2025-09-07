@@ -79,8 +79,8 @@ spec:
                         value: "Basic ZWxhc3RpYzpQOWk0IXRpamxyZjM0b2ppZWZ3c20ua2RzZl8="
                   initialDelaySeconds: 60
                   periodSeconds: 30
-                  timeoutSeconds: 10
-                  failureThreshold: 5
+                  timeoutSeconds: 60
+                  failureThreshold: 15
               readiness:
                 enabled: true
                 custom: true
