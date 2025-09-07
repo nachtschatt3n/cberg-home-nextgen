@@ -29,8 +29,8 @@ spec:
         containers:
           app:
             image:
-              repository: docker.elastic.co/elasticsearch/elasticsearch
-              tag: 8.16.0
+              repository: bbilly1/tubearchivist-es
+              #tag: 8.16.0
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
@@ -38,14 +38,19 @@ spec:
               ES_JAVA_OPTS: "-Xms1g -Xmx1g"
               discovery.type: "single-node"
               xpack.security.enabled: "true"
-              xpack.security.http.ssl.enabled: "false"
-              xpack.security.transport.ssl.enabled: "false"
+              path.repo: "/usr/share/elasticsearch/data/snapshot"
             resources:
               requests:
                 cpu: 500m
                 memory: 1Gi
               limits:
                 memory: 2Gi
+            securityContext:
+              capabilities:
+                add:
+                  - IPC_LOCK
+              runAsUser: 1000
+              runAsGroup: 1000
             probes:
               liveness:
                 enabled: true
