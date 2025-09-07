@@ -29,8 +29,8 @@ spec:
         containers:
           app:
             image:
-              repository: bbilly1/tubearchivist-es
-              tag: latest
+              repository: docker.elastic.co/elasticsearch/elasticsearch
+              tag: 8.16.0
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
@@ -40,7 +40,6 @@ spec:
               xpack.security.enabled: "true"
               xpack.security.http.ssl.enabled: "false"
               xpack.security.transport.ssl.enabled: "false"
-              path.repo: "/tmp"
             resources:
               requests:
                 cpu: 500m
