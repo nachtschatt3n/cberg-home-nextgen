@@ -4,5 +4,6 @@ kind: Kustomization
 namespace: home-automation
 resources:
   - ./pvc.yaml
+  - ./values.sops.yaml
   - ./helmrelease.yaml
 

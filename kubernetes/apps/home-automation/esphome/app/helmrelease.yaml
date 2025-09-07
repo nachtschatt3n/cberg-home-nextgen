@@ -53,4 +53,8 @@ spec:
       # media:
       #   enabled: true
       #   existingClaim: esphome-media
+  valuesFrom:
+    - kind: Secret
+      name: esphome-values
+      valuesKey: values.yaml
 
