@@ -1,0 +1,98 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tube-archivist-elasticsearch
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: docker.elastic.co/elasticsearch/elasticsearch
+              tag: 8.16.0
+              pullPolicy: IfNotPresent
+            env:
+              TZ: ${TIMEZONE}
+              ELASTIC_PASSWORD: ${TUBE_ARCHIVIST_ELASTIC_PASSWORD}
+              ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+              discovery.type: "single-node"
+              xpack.security.enabled: "true"
+              xpack.security.http.ssl.enabled: "false"
+              xpack.security.transport.ssl.enabled: "false"
+              path.repo: "/usr/share/elasticsearch/data/snapshot"
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                memory: 2Gi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /_cluster/health
+                    port: 9200
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /_cluster/health
+                    port: 9200
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /_cluster/health
+                    port: 9200
+                  failureThreshold: 30
+                  periodSeconds: 10
+            volumeMounts:
+              - name: elasticsearch-data
+                mountPath: /usr/share/elasticsearch/data
+
+    service:
+      main:
+        controller: main
+        ports:
+          elasticsearch:
+            port: 9200
+
+    persistence:
+      elasticsearch-data:
+        enabled: true
+        existingClaim: tube-archivist-elasticsearch-data
+        globalMounts:
+          - path: /usr/share/elasticsearch/data
