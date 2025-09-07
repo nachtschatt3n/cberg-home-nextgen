@@ -42,11 +42,23 @@ spec:
             env:
               TZ: ${TIMEZONE}
               TA_HOST: "https://tube-archivist.${SECRET_DOMAIN}"
-              TA_USERNAME: ${TUBE_ARCHIVIST_USERNAME}
-              TA_PASSWORD: ${TUBE_ARCHIVIST_PASSWORD}
+              TA_USERNAME:
+                valueFrom:
+                  secretKeyRef:
+                    name: tube-archivist-secrets
+                    key: TUBE_ARCHIVIST_USERNAME
+              TA_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: tube-archivist-secrets
+                    key: TUBE_ARCHIVIST_PASSWORD
               REDIS_CON: "redis://tube-archivist-redis:6379"
               ES_URL: "http://tube-archivist-elasticsearch:9200"
-              ELASTIC_PASSWORD: ${TUBE_ARCHIVIST_ELASTIC_PASSWORD}
+              ELASTIC_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: tube-archivist-secrets
+                    key: TUBE_ARCHIVIST_ELASTIC_PASSWORD
               ELASTIC_USER: "elastic"
               TA_AUTO_UPDATE_YTDLP: "release"
               DISABLE_STATIC_AUTH: "false"
