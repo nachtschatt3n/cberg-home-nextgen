@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: esphome-values
+  namespace: home-automation
+type: Opaque
+stringData:
+  values.yaml: |
+    esphome:
+      settings:
+        username: "test"
+        password: "ChangeMe."
+
