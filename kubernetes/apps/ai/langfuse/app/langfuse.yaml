@@ -68,6 +68,8 @@ spec:
             secretKeyRef:
               name: langfuse-clickhouse
               key: password
+        - name: CLICKHOUSE_MIGRATION_URL
+          value: "http://langfuse-clickhouse:8123"
         readinessProbe:
           httpGet:
             path: /api/health
@@ -154,6 +156,8 @@ spec:
             secretKeyRef:
               name: langfuse-clickhouse
               key: password
+        - name: CLICKHOUSE_MIGRATION_URL
+          value: "http://langfuse-clickhouse:8123"
         resources:
           requests:
             memory: "256Mi"
