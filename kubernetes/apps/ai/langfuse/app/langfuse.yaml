@@ -14,6 +14,11 @@ spec:
       labels:
         app: langfuse-web
     spec:
+      hostAliases:
+      - ip: "10.96.82.44"
+        hostnames:
+        - "langfuse-uploads.minio.ai.svc.cluster.local"
+        - "langfuse-uploads.langfuse-uploads-minio"
       containers:
       - name: langfuse-web
         image: langfuse/langfuse:latest
@@ -46,15 +51,15 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # S3 configuration for MinIO
+        # S3 configuration disabled to use database storage only
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
@@ -69,7 +74,7 @@ spec:
         - name: AWS_REGION
           value: "us-east-1"
         - name: AWS_ENDPOINT_URL_S3
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: AWS_S3_FORCE_PATH_STYLE
           value: "true"
         - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
@@ -79,7 +84,7 @@ spec:
         - name: S3_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: S3_UPLOAD_ENDPOINT
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: S3_UPLOAD_REGION
           value: "us-east-1"
         - name: S3_UPLOAD_FORCE_PATH_STYLE
@@ -90,14 +95,21 @@ spec:
         - name: AWS_SDK_LOAD_CONFIG
           value: "false"
         - name: AWS_S3_ENDPOINT
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: S3_ENDPOINT_URL
-          value: "http://minio.ai.svc.cluster.local:9000"
-        # Disable Redis to avoid connection errors (Redis not deployed)
+          value: "http://langfuse-uploads-minio:9000"
+        # Force S3 client to use path-style addressing (crucial for MinIO)
+        - name: AWS_S3_ADDRESSING_STYLE
+          value: "path"
+        - name: S3_ADDRESSING_STYLE
+          value: "path"
+        - name: AWS_S3_VIRTUAL_HOSTED_STYLE_ENDPOINT
+          value: "false"
+        # Redis configuration
         - name: REDIS_CONNECTION_STRING
-          value: ""
+          value: "redis://langfuse-redis:6379"
         - name: REDIS_HOST
-          value: ""
+          value: "langfuse-redis"
         # ClickHouse configuration
         - name: HOSTNAME
           value: "0.0.0.0"
@@ -166,6 +178,11 @@ spec:
       labels:
         app: langfuse-worker
     spec:
+      hostAliases:
+      - ip: "10.96.82.44"
+        hostnames:
+        - "langfuse-uploads.minio.ai.svc.cluster.local"
+        - "langfuse-uploads.langfuse-uploads-minio"
       containers:
       - name: langfuse-worker
         image: docker.io/langfuse/langfuse-worker:3
@@ -187,15 +204,15 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # S3 configuration for MinIO
+        # S3 configuration disabled to use database storage only
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
@@ -210,7 +227,7 @@ spec:
         - name: AWS_REGION
           value: "us-east-1"
         - name: AWS_ENDPOINT_URL_S3
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: AWS_S3_FORCE_PATH_STYLE
           value: "true"
         - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
@@ -220,7 +237,7 @@ spec:
         - name: S3_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: S3_UPLOAD_ENDPOINT
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: S3_UPLOAD_REGION
           value: "us-east-1"
         - name: S3_UPLOAD_FORCE_PATH_STYLE
@@ -231,14 +248,21 @@ spec:
         - name: AWS_SDK_LOAD_CONFIG
           value: "false"
         - name: AWS_S3_ENDPOINT
-          value: "http://minio.ai.svc.cluster.local:9000"
+          value: "http://langfuse-uploads-minio:9000"
         - name: S3_ENDPOINT_URL
-          value: "http://minio.ai.svc.cluster.local:9000"
-        # Disable Redis to avoid connection errors (Redis not deployed)
+          value: "http://langfuse-uploads-minio:9000"
+        # Force S3 client to use path-style addressing (crucial for MinIO)
+        - name: AWS_S3_ADDRESSING_STYLE
+          value: "path"
+        - name: S3_ADDRESSING_STYLE
+          value: "path"
+        - name: AWS_S3_VIRTUAL_HOSTED_STYLE_ENDPOINT
+          value: "false"
+        # Redis configuration
         - name: REDIS_CONNECTION_STRING
-          value: ""
+          value: "redis://langfuse-redis:6379"
         - name: REDIS_HOST
-          value: ""
+          value: "langfuse-redis"
         # ClickHouse configuration
         - name: CLICKHOUSE_URL
           value: "http://langfuse-clickhouse:8123"

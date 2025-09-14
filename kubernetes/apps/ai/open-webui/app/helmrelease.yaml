@@ -46,7 +46,7 @@ spec:
 
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
-      enabled: false
+      enabled: true
       # -- This section can be used to pass required environment variables to your pipelines (e.g. Langfuse hostname)
       extraEnvVars:
       - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
@@ -74,7 +74,7 @@ spec:
     # -- Open WebUI image tags can be found here: https://github.com/open-webui/open-webui/pkgs/container/open-webui
     image:
       repository: ghcr.io/open-webui/open-webui
-      tag: v0.6.26
+      tag: v0.6.28
       pullPolicy: "IfNotPresent"
     resources: {}
     service:

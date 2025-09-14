@@ -6,6 +6,7 @@ namespace: ai
 resources:
   - ./postgresql.yaml
   - ./clickhouse.yaml
+  - ./redis.yaml
   - ./langfuse.yaml
   - ./ingress.yaml
   - ./secret.sops.yaml
