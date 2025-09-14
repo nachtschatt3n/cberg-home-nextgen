@@ -37,6 +37,16 @@ spec:
             secretKeyRef:
               name: langfuse-redis
               key: valkey-password
+        # Admin setup
+        - name: LANGFUSE_INIT_USER_EMAIL
+          value: "admin@example.com"
+        - name: LANGFUSE_INIT_USER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: adminPassword
+        - name: SIGN_UP_DISABLED
+          value: "false"
       salt:
         secretKeyRef:
           name: langfuse-secret
