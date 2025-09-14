@@ -46,15 +46,46 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # Disable all blob storage features with dummy values
+        # Enable S3 uploads with MinIO
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
-          value: "dummy"
+          value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "false"
+          value: "true"
+        # MinIO S3 configuration
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: AWS_ENDPOINT_URL_S3
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: AWS_S3_FORCE_PATH_STYLE
+          value: "true"
+        - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
+          value: "true"
+        - name: AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS
+          value: "true"
+        - name: S3_UPLOAD_BUCKET
+          value: "langfuse-uploads"
+        - name: S3_UPLOAD_ENDPOINT
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: S3_UPLOAD_REGION
+          value: "us-east-1"
+        - name: S3_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: S3_FORCE_PATH_STYLE
+          value: "true"
         # ClickHouse configuration
         - name: HOSTNAME
           value: "0.0.0.0"
@@ -145,15 +176,46 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # Disable all blob storage features
+        # Enable S3 uploads with MinIO
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
-          value: "dummy"
+          value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "false"
+          value: "true"
+        # MinIO S3 configuration
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: AWS_ENDPOINT_URL_S3
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: AWS_S3_FORCE_PATH_STYLE
+          value: "true"
+        - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
+          value: "true"
+        - name: AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS
+          value: "true"
+        - name: S3_UPLOAD_BUCKET
+          value: "langfuse-uploads"
+        - name: S3_UPLOAD_ENDPOINT
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: S3_UPLOAD_REGION
+          value: "us-east-1"
+        - name: S3_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: S3_FORCE_PATH_STYLE
+          value: "true"
         # ClickHouse configuration
         - name: CLICKHOUSE_URL
           value: "http://langfuse-clickhouse:8123"
