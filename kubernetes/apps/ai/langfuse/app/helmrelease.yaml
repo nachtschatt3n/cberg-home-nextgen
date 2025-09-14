@@ -57,24 +57,7 @@ spec:
         secretKeyRef:
           name: langfuse-secret
           key: nextauthSecret
-    ingress:
-      enabled: true
-      className: external
-      annotations:
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Langfuse"
-        gethomepage.dev/description: "Open-source observability for LLM apps"
-        gethomepage.dev/group: "AI"
-        gethomepage.dev/icon: "langfuse.png"
-      hosts:
-        - host: "langfuse.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: ImplementationSpecific
-      tls:
-        enabled: true
-        secretName: ""
+    # Ingress is managed separately via ingress.yaml
     service:
       type: ClusterIP
     postgresql:

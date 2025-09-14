@@ -1,0 +1,29 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: langfuse
+  namespace: ai
+  annotations:
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Langfuse"
+    gethomepage.dev/description: "Open-source observability for LLM apps"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "langfuse.png"
+spec:
+  ingressClassName: external
+  tls:
+    - hosts:
+        - "langfuse.${SECRET_DOMAIN}"
+  rules:
+    - host: "langfuse.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: langfuse-web
+                port:
+                  number: 3000
