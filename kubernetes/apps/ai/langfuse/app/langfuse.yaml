@@ -46,7 +46,7 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # Enable S3 uploads with MinIO
+        # S3 configuration for MinIO
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
           value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
@@ -55,7 +55,7 @@ spec:
           value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
           value: "true"
-        # MinIO S3 configuration
+        # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -86,11 +86,6 @@ spec:
           value: "true"
         - name: S3_FORCE_PATH_STYLE
           value: "true"
-        # Disable Redis to avoid connection errors
-        - name: REDIS_CONNECTION_STRING
-          value: ""
-        - name: REDIS_HOST
-          value: ""
         # Additional AWS SDK configuration for MinIO compatibility
         - name: AWS_SDK_LOAD_CONFIG
           value: "false"
@@ -98,12 +93,16 @@ spec:
           value: "http://minio.ai.svc.cluster.local:9000"
         - name: S3_ENDPOINT_URL
           value: "http://minio.ai.svc.cluster.local:9000"
+        # Disable Redis to avoid connection errors (Redis not deployed)
+        - name: REDIS_CONNECTION_STRING
+          value: ""
+        - name: REDIS_HOST
+          value: ""
         # ClickHouse configuration
         - name: HOSTNAME
           value: "0.0.0.0"
         - name: PORT
           value: "3000"
-        # ClickHouse configuration
         - name: CLICKHOUSE_URL
           value: "http://langfuse-clickhouse:8123"
         - name: CLICKHOUSE_USER
@@ -117,7 +116,7 @@ spec:
           value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
           value: "false"
-        # Admin initialization
+        # Admin initialization (for first-time setup)
         - name: LANGFUSE_INIT_USER_EMAIL
           value: "admin@uhl.cool"
         - name: LANGFUSE_INIT_USER_NAME
@@ -188,7 +187,7 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # Enable S3 uploads with MinIO
+        # S3 configuration for MinIO
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
           value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
@@ -197,7 +196,7 @@ spec:
           value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
           value: "true"
-        # MinIO S3 configuration
+        # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -228,11 +227,6 @@ spec:
           value: "true"
         - name: S3_FORCE_PATH_STYLE
           value: "true"
-        # Disable Redis to avoid connection errors
-        - name: REDIS_CONNECTION_STRING
-          value: ""
-        - name: REDIS_HOST
-          value: ""
         # Additional AWS SDK configuration for MinIO compatibility
         - name: AWS_SDK_LOAD_CONFIG
           value: "false"
@@ -240,6 +234,11 @@ spec:
           value: "http://minio.ai.svc.cluster.local:9000"
         - name: S3_ENDPOINT_URL
           value: "http://minio.ai.svc.cluster.local:9000"
+        # Disable Redis to avoid connection errors (Redis not deployed)
+        - name: REDIS_CONNECTION_STRING
+          value: ""
+        - name: REDIS_HOST
+          value: ""
         # ClickHouse configuration
         - name: CLICKHOUSE_URL
           value: "http://langfuse-clickhouse:8123"
