@@ -74,6 +74,21 @@ spec:
           value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
           value: "false"
+        # Admin initialization
+        - name: LANGFUSE_INIT_USER_EMAIL
+          value: "admin@example.com"
+        - name: LANGFUSE_INIT_USER_NAME
+          value: "Admin User"
+        - name: LANGFUSE_INIT_USER_PASSWORD
+          value: "admin123"
+        - name: LANGFUSE_INIT_ORG_NAME
+          value: "Home Automation"
+        - name: LANGFUSE_INIT_PROJECT_NAME
+          value: "Home Assistant"
+        - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+          value: "pk-lf-home-assistant-2024"
+        - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+          value: "sk-lf-home-assistant-secret-2024"
         resources:
           requests:
             memory: "512Mi"
