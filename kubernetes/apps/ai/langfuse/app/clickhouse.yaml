@@ -1,5 +1,25 @@
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-clickhouse-config
+  namespace: ai
+data:
+  cluster.xml: |
+    <clickhouse>
+        <remote_servers>
+            <default>
+                <shard>
+                    <replica>
+                        <host>127.0.0.1</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </default>
+        </remote_servers>
+    </clickhouse>
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: langfuse-clickhouse
@@ -58,6 +78,9 @@ spec:
         - name: data
           mountPath: /var/lib/clickhouse
           subPath: clickhouse
+        - name: config
+          mountPath: /etc/clickhouse-server/config.d/cluster.xml
+          subPath: cluster.xml
         readinessProbe:
           httpGet:
             path: /ping
@@ -81,6 +104,9 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: langfuse-clickhouse-pvc
+      - name: config
+        configMap:
+          name: langfuse-clickhouse-config
 ---
 apiVersion: v1
 kind: Service
