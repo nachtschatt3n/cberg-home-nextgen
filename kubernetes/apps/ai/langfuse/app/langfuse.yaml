@@ -1,0 +1,143 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-web
+  template:
+    metadata:
+      labels:
+        app: langfuse-web
+    spec:
+      containers:
+      - name: langfuse-web
+        image: langfuse/langfuse:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgresql
+              key: DATABASE_URL
+        - name: NEXTAUTH_URL
+          value: "https://langfuse.${SECRET_DOMAIN}"
+        - name: NEXTAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: nextauthSecret
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: encryptionKey
+        - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
+          value: "false"
+        # Disable all blob storage features
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+          value: "false"
+        # Basic configuration
+        - name: HOSTNAME
+          value: "0.0.0.0"
+        - name: PORT
+          value: "3000"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  namespace: ai
+spec:
+  selector:
+    app: langfuse-web
+  ports:
+  - port: 3000
+    targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      containers:
+      - name: langfuse-worker
+        image: langfuse/langfuse:latest
+        command: ["node", "worker.js"]
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-postgresql
+              key: DATABASE_URL
+        - name: SALT
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: salt
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: encryptionKey
+        # Disable all blob storage features
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
+          value: "false"
+        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+          value: "false"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
