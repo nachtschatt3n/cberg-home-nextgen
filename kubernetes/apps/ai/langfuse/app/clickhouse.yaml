@@ -26,6 +26,10 @@ data:
         <distributed_ddl>
             <path>/clickhouse/task_queue/ddl</path>
         </distributed_ddl>
+        <macros>
+            <shard>01</shard>
+            <replica>replica_1</replica>
+        </macros>
     </clickhouse>
 ---
 apiVersion: v1
