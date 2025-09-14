@@ -85,7 +85,7 @@ spec:
         secretKeys:
           userPasswordKey: password
     redis:
-      deploy: false
+      deploy: true
       host: langfuse-redis-primary
     clickhouse:
       deploy: true
