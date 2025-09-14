@@ -17,6 +17,15 @@ data:
                 </shard>
             </default>
         </remote_servers>
+        <zookeeper>
+            <node>
+                <host>langfuse-zookeeper</host>
+                <port>2181</port>
+            </node>
+        </zookeeper>
+        <distributed_ddl>
+            <path>/clickhouse/task_queue/ddl</path>
+        </distributed_ddl>
     </clickhouse>
 ---
 apiVersion: v1
@@ -123,3 +132,54 @@ spec:
   - name: native
     port: 9000
     targetPort: 9000
+---
+# Simple ZooKeeper for ClickHouse clustering
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-zookeeper
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-zookeeper
+  template:
+    metadata:
+      labels:
+        app: langfuse-zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: zookeeper:3.9-jre17
+        ports:
+        - containerPort: 2181
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        - name: ZOO_MY_ID
+          value: "1"
+        - name: ZOO_SERVERS
+          value: "server.1=0.0.0.0:2888:3888;2181"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-zookeeper
+  namespace: ai
+spec:
+  selector:
+    app: langfuse-zookeeper
+  ports:
+  - name: client
+    port: 2181
+    targetPort: 2181
