@@ -167,14 +167,14 @@ spec:
           value: "false"
         readinessProbe:
           httpGet:
-            path: /api/health
+            path: /
             port: 3000
           initialDelaySeconds: 30
           timeoutSeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
-            path: /api/health
+            path: /
             port: 3000
           initialDelaySeconds: 60
           timeoutSeconds: 5
