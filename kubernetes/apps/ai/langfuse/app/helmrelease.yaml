@@ -80,6 +80,10 @@ spec:
     redis:
       deploy: true
       host: langfuse-redis-primary
+      auth:
+        enabled: true
+        existingSecret: langfuse-redis
+        existingSecretPasswordKey: valkey-password
     clickhouse:
       deploy: true
       auth:
