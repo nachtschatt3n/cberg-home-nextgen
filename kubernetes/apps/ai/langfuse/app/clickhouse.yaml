@@ -151,7 +151,7 @@ spec:
     spec:
       containers:
       - name: zookeeper
-        image: zookeeper:3.9-jre17
+        image: zookeeper:3.9
         ports:
         - containerPort: 2181
         env:
