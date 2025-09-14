@@ -46,14 +46,16 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # Disable all blob storage features
+        # Disable all blob storage features with dummy values
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
           value: "false"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "dummy"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
           value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
           value: "false"
-        # Basic configuration
+        # ClickHouse configuration
         - name: HOSTNAME
           value: "0.0.0.0"
         - name: PORT
@@ -143,6 +145,8 @@ spec:
         # Disable all blob storage features
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
           value: "false"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "dummy"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
           value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
