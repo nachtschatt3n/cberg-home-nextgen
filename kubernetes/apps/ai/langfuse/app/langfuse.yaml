@@ -91,6 +91,13 @@ spec:
           value: ""
         - name: REDIS_HOST
           value: ""
+        # Additional AWS SDK configuration for MinIO compatibility
+        - name: AWS_SDK_LOAD_CONFIG
+          value: "false"
+        - name: AWS_S3_ENDPOINT
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: S3_ENDPOINT_URL
+          value: "http://minio.ai.svc.cluster.local:9000"
         # ClickHouse configuration
         - name: HOSTNAME
           value: "0.0.0.0"
@@ -226,6 +233,13 @@ spec:
           value: ""
         - name: REDIS_HOST
           value: ""
+        # Additional AWS SDK configuration for MinIO compatibility
+        - name: AWS_SDK_LOAD_CONFIG
+          value: "false"
+        - name: AWS_S3_ENDPOINT
+          value: "http://minio.ai.svc.cluster.local:9000"
+        - name: S3_ENDPOINT_URL
+          value: "http://minio.ai.svc.cluster.local:9000"
         # ClickHouse configuration
         - name: CLICKHOUSE_URL
           value: "http://langfuse-clickhouse:8123"
