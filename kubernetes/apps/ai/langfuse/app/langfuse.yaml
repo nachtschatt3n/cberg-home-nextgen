@@ -69,7 +69,9 @@ spec:
               name: langfuse-clickhouse
               key: password
         - name: CLICKHOUSE_MIGRATION_URL
-          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/langfuse"
+          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
+        - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
         readinessProbe:
           httpGet:
             path: /api/health
@@ -157,7 +159,9 @@ spec:
               name: langfuse-clickhouse
               key: password
         - name: CLICKHOUSE_MIGRATION_URL
-          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/langfuse"
+          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
+        - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
         resources:
           requests:
             memory: "256Mi"
