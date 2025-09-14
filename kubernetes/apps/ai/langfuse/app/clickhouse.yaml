@@ -1,0 +1,99 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai
+type: Opaque
+stringData:
+  password: clickhouse123
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-clickhouse-pvc
+  namespace: ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app: langfuse-clickhouse
+    spec:
+      containers:
+      - name: clickhouse
+        image: clickhouse/clickhouse-server:24.1-alpine
+        ports:
+        - containerPort: 8123
+        - containerPort: 9000
+        env:
+        - name: CLICKHOUSE_DB
+          value: langfuse
+        - name: CLICKHOUSE_USER
+          value: default
+        - name: CLICKHOUSE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-clickhouse
+              key: password
+        - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+          value: "1"
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/clickhouse
+          subPath: clickhouse
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: 8123
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: langfuse-clickhouse-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai
+spec:
+  selector:
+    app: langfuse-clickhouse
+  ports:
+  - name: http
+    port: 8123
+    targetPort: 8123
+  - name: native
+    port: 9000
+    targetPort: 9000

@@ -5,6 +5,7 @@ kind: Kustomization
 namespace: ai
 resources:
   - ./postgresql.yaml
+  - ./clickhouse.yaml
   - ./langfuse.yaml
   - ./ingress.yaml
   - ./secret.sops.yaml
