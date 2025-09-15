@@ -6,9 +6,10 @@ metadata:
   namespace: home-automation
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
-      storage: 1Gi
-  storageClassName: longhorn
+      storage: 5Gi
+  storageClassName: longhorn-static
+  volumeName: esphome-config
 
