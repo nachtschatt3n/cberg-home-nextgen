@@ -24,7 +24,7 @@ spec:
   values:
     # Run as a CronJob with default policy profile and LowNodeUtilization enabled
     kind: CronJob
-    schedule: "*/2 * * * *"
+    schedule: "0 4 * * *"
     deschedulerPolicyAPIVersion: descheduler/v1alpha2
     deschedulerPolicy:
       profiles:
