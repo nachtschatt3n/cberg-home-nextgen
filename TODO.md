@@ -1,0 +1,2 @@
+- [ ] Deploy descheduler via Flux in kube-system
+- [ ] Verify pod rebalance and adjust thresholds if needed
