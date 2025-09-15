@@ -37,6 +37,18 @@ spec:
                 value: "/config"
               - name: MUSIC_ASSISTANT_CACHE_PATH
                 value: "/cache"
+              - name: MUSIC_ASSISTANT_WEB_BIND_PORT
+                value: "80"
+            ports:
+              - name: http
+                containerPort: 80
+                protocol: TCP
+              - name: stream
+                containerPort: 8097
+                protocol: TCP
+              - name: stream-alt
+                containerPort: 8098
+                protocol: TCP
             resources:
               requests:
                 cpu: 100m
@@ -51,11 +63,14 @@ spec:
         ports:
           http:
             port: 80
+            targetPort: 80
             primary: true
           stream:
             port: 8097
+            targetPort: 8097
           stream-alt:
             port: 8098
+            targetPort: 8098
     ingress:
       main:
         enabled: true
