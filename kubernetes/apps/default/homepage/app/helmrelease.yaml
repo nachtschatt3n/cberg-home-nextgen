@@ -51,10 +51,7 @@ spec:
             port: 3000
 
     controller:
-      strategy: RollingUpdate
-      rollingUpdate:
-        maxSurge: 25%
-        maxUnavailable: 25%
+      strategy: Recreate
 
     # Enable the ingress to expose Homepage to the network.
     ingress:
