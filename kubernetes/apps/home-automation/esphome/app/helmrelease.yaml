@@ -47,9 +47,13 @@ spec:
             - path: /
               pathType: Prefix
     persistence:
+      enabled: true
+      existingClaim: esphome-config
+      # Alternative format - try both
       config:
         enabled: true
         existingClaim: esphome-config
+        mountPath: /config
       # Optional CIFS media mount if needed later
       # media:
       #   enabled: true
