@@ -46,7 +46,13 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # S3 configuration - using UI configuration only, no environment variables
+        # S3 configuration - enable flags only, credentials from UI
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
+          value: "true"
+        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+          value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
@@ -214,7 +220,13 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # S3 configuration - using UI configuration only, no environment variables
+        # S3 configuration - enable flags only, credentials from UI
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
+          value: "true"
+        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+          value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
