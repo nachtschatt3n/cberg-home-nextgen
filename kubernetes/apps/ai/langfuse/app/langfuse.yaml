@@ -201,7 +201,7 @@ spec:
     spec:
       containers:
       - name: langfuse-worker
-        image: docker.io/langfuse/langfuse-worker:v3.111.0
+        image: docker.io/langfuse/langfuse-worker:3.111.0
         env:
         - name: NODE_ENV
           value: production
