@@ -59,6 +59,22 @@ spec:
           value: "langfuse"
         - name: LANGFUSE_S3_BATCH_EXPORT_BUCKET
           value: "langfuse"
+        - name: LANGFUSE_S3_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_ENDPOINT
+          value: "http://langfuse-web:9000"
+        - name: LANGFUSE_S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_FORCE_PATH_STYLE
+          value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
@@ -239,6 +255,22 @@ spec:
           value: "langfuse"
         - name: LANGFUSE_S3_BATCH_EXPORT_BUCKET
           value: "langfuse"
+        - name: LANGFUSE_S3_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_ENDPOINT
+          value: "http://langfuse-web:9000"
+        - name: LANGFUSE_S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_FORCE_PATH_STYLE
+          value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
