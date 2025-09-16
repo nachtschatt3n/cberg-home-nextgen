@@ -53,6 +53,12 @@ spec:
           value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
           value: "true"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_BATCH_EXPORT_BUCKET
+          value: "langfuse"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
@@ -227,6 +233,12 @@ spec:
           value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
           value: "true"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_BATCH_EXPORT_BUCKET
+          value: "langfuse"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
