@@ -48,11 +48,11 @@ spec:
           value: "false"
         # S3 configuration - enable flags only, credentials from UI
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
@@ -264,11 +264,11 @@ spec:
               key: encryptionKey
         # S3 configuration - enable flags only, credentials from UI
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
