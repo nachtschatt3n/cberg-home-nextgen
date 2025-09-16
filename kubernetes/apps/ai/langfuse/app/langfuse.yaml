@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: langfuse-web
-        image: langfuse/langfuse:latest
+        image: langfuse/langfuse:v3.111.0
         ports:
         - containerPort: 3000
         env:
@@ -201,7 +201,7 @@ spec:
     spec:
       containers:
       - name: langfuse-worker
-        image: docker.io/langfuse/langfuse-worker:3
+        image: docker.io/langfuse/langfuse-worker:v3.111.0
         env:
         - name: NODE_ENV
           value: production
