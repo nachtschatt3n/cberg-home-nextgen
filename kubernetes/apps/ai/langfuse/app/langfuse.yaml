@@ -14,6 +14,10 @@ spec:
       labels:
         app: langfuse-web
     spec:
+      hostAliases:
+      - ip: "127.0.0.1"
+        hostnames:
+        - "langfuse.localhost"
       containers:
       - name: langfuse-web
         image: langfuse/langfuse:3.111.0
@@ -28,7 +32,7 @@ spec:
               name: langfuse-postgresql
               key: DATABASE_URL
         - name: NEXTAUTH_URL
-          value: "http://localhost:3000"
+          value: "https://langfuse.${SECRET_DOMAIN}"
         - name: NEXTAUTH_SECRET
           valueFrom:
             secretKeyRef:
@@ -48,11 +52,11 @@ spec:
           value: "false"
         # S3 configuration - enable flags only, credentials from UI
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
@@ -66,9 +70,9 @@ spec:
         - name: AWS_DEFAULT_REGION
           value: "us-east-1"
         - name: LANGFUSE_S3_ENDPOINT
-          value: "http://localhost:9000"
+          value: "http://langfuse.localhost:9000"
         - name: AWS_ENDPOINT_URL_S3
-          value: "http://localhost:9000"
+          value: "http://langfuse.localhost:9000"
         - name: LANGFUSE_S3_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -264,11 +268,11 @@ spec:
               key: encryptionKey
         # S3 configuration - enable flags only, credentials from UI
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "false"
+          value: "true"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
@@ -282,9 +286,9 @@ spec:
         - name: AWS_DEFAULT_REGION
           value: "us-east-1"
         - name: LANGFUSE_S3_ENDPOINT
-          value: "http://localhost:9000"
+          value: "http://langfuse.localhost:9000"
         - name: AWS_ENDPOINT_URL_S3
-          value: "http://localhost:9000"
+          value: "http://langfuse.localhost:9000"
         - name: LANGFUSE_S3_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
