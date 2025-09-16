@@ -28,7 +28,7 @@ spec:
               name: langfuse-postgresql
               key: DATABASE_URL
         - name: NEXTAUTH_URL
-          value: "https://langfuse.${SECRET_DOMAIN}"
+          value: "http://localhost:3000"
         - name: NEXTAUTH_SECRET
           valueFrom:
             secretKeyRef:
