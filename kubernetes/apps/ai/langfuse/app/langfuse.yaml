@@ -46,15 +46,15 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # S3 configuration enabled with local MinIO
+        # S3 configuration disabled - store traces in database only
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
@@ -267,15 +267,15 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # S3 configuration enabled with local MinIO
+        # S3 configuration disabled - store traces in database only
         - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
           value: "langfuse-uploads"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
+          value: "false"
         - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
+          value: "false"
         # MinIO S3 credentials
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
