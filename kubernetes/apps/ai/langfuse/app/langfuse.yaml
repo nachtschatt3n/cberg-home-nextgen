@@ -46,60 +46,7 @@ spec:
               key: encryptionKey
         - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
           value: "false"
-        # S3 configuration enabled with local MinIO
-        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
-        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
-          value: "langfuse-uploads"
-        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
-        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
-        # MinIO S3 credentials
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-s3-credentials
-              key: AWS_ACCESS_KEY_ID
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-s3-credentials
-              key: AWS_SECRET_ACCESS_KEY
-        - name: AWS_REGION
-          value: "us-east-1"
-        - name: AWS_ENDPOINT_URL_S3
-          value: "http://localhost:9000"
-        - name: AWS_S3_FORCE_PATH_STYLE
-          value: "true"
-        - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
-          value: "true"
-        - name: AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS
-          value: "true"
-        - name: S3_UPLOAD_BUCKET
-          value: "langfuse-uploads"
-        - name: S3_UPLOAD_ENDPOINT
-          value: "http://localhost:9000"
-        - name: S3_UPLOAD_REGION
-          value: "us-east-1"
-        - name: S3_UPLOAD_FORCE_PATH_STYLE
-          value: "true"
-        - name: S3_FORCE_PATH_STYLE
-          value: "true"
-        # Additional AWS SDK configuration for MinIO compatibility
-        - name: AWS_SDK_LOAD_CONFIG
-          value: "false"
-        - name: AWS_S3_ENDPOINT
-          value: "http://localhost:9000"
-        - name: S3_ENDPOINT_URL
-          value: "http://localhost:9000"
-        # Force S3 client to use path-style addressing (crucial for MinIO)
-        - name: AWS_S3_ADDRESSING_STYLE
-          value: "path"
-        - name: S3_ADDRESSING_STYLE
-          value: "path"
-        - name: AWS_S3_VIRTUAL_HOSTED_STYLE_ENDPOINT
-          value: "false"
+        # S3 configuration - using UI configuration only, no environment variables
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
@@ -267,60 +214,7 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: encryptionKey
-        # S3 configuration enabled with local MinIO
-        - name: LANGFUSE_S3_EVENT_UPLOAD_ENABLED
-          value: "true"
-        - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
-          value: "langfuse-uploads"
-        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENABLED
-          value: "true"
-        - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
-          value: "true"
-        # MinIO S3 credentials
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-s3-credentials
-              key: AWS_ACCESS_KEY_ID
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-s3-credentials
-              key: AWS_SECRET_ACCESS_KEY
-        - name: AWS_REGION
-          value: "us-east-1"
-        - name: AWS_ENDPOINT_URL_S3
-          value: "http://langfuse-web:9000"
-        - name: AWS_S3_FORCE_PATH_STYLE
-          value: "true"
-        - name: AWS_S3_USE_PATH_STYLE_ENDPOINT
-          value: "true"
-        - name: AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS
-          value: "true"
-        - name: S3_UPLOAD_BUCKET
-          value: "langfuse-uploads"
-        - name: S3_UPLOAD_ENDPOINT
-          value: "http://langfuse-web:9000"
-        - name: S3_UPLOAD_REGION
-          value: "us-east-1"
-        - name: S3_UPLOAD_FORCE_PATH_STYLE
-          value: "true"
-        - name: S3_FORCE_PATH_STYLE
-          value: "true"
-        # Additional AWS SDK configuration for MinIO compatibility
-        - name: AWS_SDK_LOAD_CONFIG
-          value: "false"
-        - name: AWS_S3_ENDPOINT
-          value: "http://langfuse-web:9000"
-        - name: S3_ENDPOINT_URL
-          value: "http://langfuse-web:9000"
-        # Force S3 client to use path-style addressing (crucial for MinIO)
-        - name: AWS_S3_ADDRESSING_STYLE
-          value: "path"
-        - name: S3_ADDRESSING_STYLE
-          value: "path"
-        - name: AWS_S3_VIRTUAL_HOSTED_STYLE_ENDPOINT
-          value: "false"
+        # S3 configuration - using UI configuration only, no environment variables
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
