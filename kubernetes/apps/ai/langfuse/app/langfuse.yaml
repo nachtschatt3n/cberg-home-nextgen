@@ -181,20 +181,6 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "250m"
----
-# PersistentVolumeClaim for MinIO data storage
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: langfuse-minio-data
-  namespace: ai
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: longhorn
         readinessProbe:
           httpGet:
             path: /minio/health/ready
@@ -211,6 +197,20 @@ spec:
       - name: minio-data
         persistentVolumeClaim:
           claimName: langfuse-minio-data
+---
+# PersistentVolumeClaim for MinIO data storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-minio-data
+  namespace: ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
 ---
 apiVersion: v1
 kind: Service
