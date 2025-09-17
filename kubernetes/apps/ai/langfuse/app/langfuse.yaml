@@ -286,9 +286,9 @@ spec:
         - name: AWS_DEFAULT_REGION
           value: "us-east-1"
         - name: LANGFUSE_S3_ENDPOINT
-          value: "http://langfuse.localhost:9000"
+          value: "http://localhost:9000"
         - name: AWS_ENDPOINT_URL_S3
-          value: "http://langfuse.localhost:9000"
+          value: "http://localhost:9000"
         - name: LANGFUSE_S3_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
