@@ -49,17 +49,17 @@ spec:
           gethomepage.dev/description: "ESPHome dashboard"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "esphome.png"
-          external-dns.alpha.kubernetes.io/hostname: esphome.${SECRET_DOMAIN}
+          external-dns.alpha.kubernetes.io/hostname: "esphome.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: esphome.${SECRET_DOMAIN}
+          - host: "esphome.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
                 service:
                   name: esphome
-                  port: http
+                  port: 6052
     persistence:
       config:
         enabled: true
