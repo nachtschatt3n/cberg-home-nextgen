@@ -99,6 +99,40 @@ spec:
           value: "true"
         - name: AWS_S3_USE_PATH_STYLE
           value: "true"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+          value: "http://langfuse-web.ai.svc.cluster.local:9000"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+          value: "http://langfuse-web.ai.svc.cluster.local:9000"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
           value: "redis://langfuse-redis:6379"
@@ -314,6 +348,40 @@ spec:
         - name: S3_USE_PATH_STYLE
           value: "true"
         - name: AWS_S3_USE_PATH_STYLE
+          value: "true"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+          value: "http://langfuse-web.ai.svc.cluster.local:9000"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+          value: "true"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
+          value: "langfuse"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_ACCESS_KEY_ID
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-s3-credentials
+              key: AWS_SECRET_ACCESS_KEY
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT
+          value: "http://langfuse-web.ai.svc.cluster.local:9000"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_REGION
+          value: "us-east-1"
+        - name: LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE
           value: "true"
         # Redis configuration
         - name: REDIS_CONNECTION_STRING
