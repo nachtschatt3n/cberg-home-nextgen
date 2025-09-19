@@ -4,6 +4,8 @@ Welcome to my opinionated and extensible template for deploying a single Kuberne
 
 At a high level this project makes use of [makejinja](https://github.com/mirkolenz/makejinja) to read in a [configuration file](./config.sample.yaml) which renders out templates that will allow you to install and manage your Kubernetes cluster with.
 
+> 👥 Looking to contribute? Start with the [Repository Guidelines](AGENTS.md) for structure, tooling, and workflow conventions.
+
 ## ✨ Features
 
 The features included will depend on the type of configuration you want to use. There are currently **2 different types** of **configurations** available with this template.
