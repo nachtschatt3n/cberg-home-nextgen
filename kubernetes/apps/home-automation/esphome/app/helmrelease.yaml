@@ -8,12 +8,12 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: charts/esphome
+      chart: app-template
+      version: 3.7.1
       sourceRef:
-        kind: GitRepository
-        name: jlpedrosa-esphome
+        kind: HelmRepository
+        name: bjw-s
         namespace: flux-system
-      interval: 30m
   install:
     remediation:
       retries: 3
@@ -23,43 +23,50 @@ spec:
       strategy: rollback
       retries: 3
   values:
-    image:
-      repository: ghcr.io/esphome/esphome
-      tag: "2025.8.3"
-    env:
-      TZ: "Europe/Berlin"
+    controllers:
+      esphome:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/esphome/esphome
+              tag: "2025.8.3"
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
     service:
-      type: ClusterIP
-      port: 6052
+      main:
+        controller: esphome
+        ports:
+          http:
+            port: 6052
     ingress:
-      enabled: true
-      className: internal
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "ESPHome"
-        gethomepage.dev/description: "ESPHome dashboard"
-        gethomepage.dev/group: "Home Automation"
-        gethomepage.dev/icon: "esphome.png"
-        external-dns.alpha.kubernetes.io/hostname: esphome.${SECRET_DOMAIN}
-      hosts:
-        - host: esphome.${SECRET_DOMAIN}
-          paths:
-            - path: /
-              pathType: Prefix
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "ESPHome"
+          gethomepage.dev/description: "ESPHome dashboard"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "esphome.png"
+          external-dns.alpha.kubernetes.io/hostname: esphome.${SECRET_DOMAIN}
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: esphome.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  name: esphome
+                  port: http
     persistence:
-      enabled: true
-      existingClaim: esphome-config
-      # Alternative format - try both
       config:
         enabled: true
         existingClaim: esphome-config
-        mountPath: /config
-      # Optional CIFS media mount if needed later
-      # media:
-      #   enabled: true
-      #   existingClaim: esphome-media
+        globalMounts:
+          - path: /config
   valuesFrom:
     - kind: Secret
       name: esphome-values
       valuesKey: values.yaml
-
