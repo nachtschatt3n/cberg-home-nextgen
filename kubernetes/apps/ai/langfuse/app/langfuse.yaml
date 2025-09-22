@@ -115,8 +115,6 @@ spec:
           value: "us-east-1"
         - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
           value: "true"
-        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
-          value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
@@ -173,10 +171,10 @@ spec:
           value: "sk-lf-home-assistant-secret-2024"
         resources:
           requests:
-            memory: "512Mi"
+            memory: "1Gi"
             cpu: "250m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "500m"
       # MinIO sidecar container for local S3 storage
       - name: minio
@@ -365,8 +363,6 @@ spec:
           value: "us-east-1"
         - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
           value: "true"
-        - name: LANGFUSE_S3_MEDIA_UPLOAD_BUCKET
-          value: "langfuse"
         - name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
