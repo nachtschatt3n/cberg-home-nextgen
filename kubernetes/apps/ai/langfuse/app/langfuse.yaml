@@ -5,6 +5,8 @@ metadata:
   name: langfuse-web
   namespace: ai
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:
