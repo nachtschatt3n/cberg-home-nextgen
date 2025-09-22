@@ -6,8 +6,10 @@ metadata:
   namespace: ai
 spec:
   strategy:
-    type: Recreate
-    rollingUpdate: null
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
   replicas: 1
   selector:
     matchLabels:
