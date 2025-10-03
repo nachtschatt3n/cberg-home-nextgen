@@ -26,30 +26,6 @@ spec:
     controllers:
       absenty:
         strategy: Recreate
-        initContainers:
-          db-setup:
-            image:
-              repository: ghcr.io/nachtschatt3n/absenty
-              tag: production-dev-latest
-              pullPolicy: IfNotPresent
-            command:
-              - /bin/sh
-              - -c
-              - |
-                mkdir -p /app/tmp /app/log
-                bundle exec rails db:prepare RAILS_ENV=production
-            env:
-              - name: TZ
-                value: "Europe/Berlin"
-              - name: RAILS_ENV
-                value: "production"
-              - name: RACK_ENV
-                value: "production"
-              - name: DATABASE_URL
-                value: "sqlite3:///data/absenty.sqlite3"
-            envFrom:
-              - secretRef:
-                  name: absenty-secrets
         containers:
           app:
             image:
