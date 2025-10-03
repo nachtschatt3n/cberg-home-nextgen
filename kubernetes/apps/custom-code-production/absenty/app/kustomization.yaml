@@ -5,3 +5,4 @@ namespace: custom-code-production
 resources:
   - helmrelease.yaml
   - secret.sops.yaml
+  - ghcr-secret.sops.yaml
