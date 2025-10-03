@@ -37,7 +37,6 @@ spec:
               - -c
               - |
                 mkdir -p /app/tmp /app/log
-                chown -R 1000:1000 /app/tmp /app/log
                 bundle exec rails db:prepare RAILS_ENV=production
             env:
               - name: TZ
@@ -51,8 +50,6 @@ spec:
             envFrom:
               - secretRef:
                   name: absenty-secrets
-            securityContext:
-              runAsUser: 0
         containers:
           app:
             image:
@@ -165,3 +162,8 @@ spec:
         type: emptyDir
         globalMounts:
           - path: /app/tmp
+      log:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /app/log
