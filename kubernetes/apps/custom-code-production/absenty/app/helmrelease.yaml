@@ -80,6 +80,8 @@ spec:
                   timeoutSeconds: 5
                   failureThreshold: 3
     defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-secret
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
