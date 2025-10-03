@@ -137,4 +137,4 @@ spec:
         enabled: true
         type: emptyDir
         globalMounts:
-          - path: /tmp
+          - path: /app/tmp
