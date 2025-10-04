@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: sha-362ad01
+              tag: sha-fa26975
               pullPolicy: IfNotPresent
             env:
               - name: TZ
