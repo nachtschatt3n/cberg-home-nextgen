@@ -30,12 +30,6 @@ spec:
       # The error reporting is fully anonymous and helps developers
       error_reporting:
         enabled: true
-      postgresql:
-        host: "mariadb.databases.svc.cluster.local"
-        name: "authentik"
-        user: "authentik"
-        password: "${SECRET_AUTHENTIK_DB_PASSWORD}"
-        port: 3306
       redis:
         host: "authentik-redis"
 
@@ -47,11 +41,22 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
+        # MySQL/MariaDB configuration
+        - name: AUTHENTIK_POSTGRESQL__ENGINE
+          value: "django.db.backends.mysql"
+        - name: AUTHENTIK_POSTGRESQL__HOST
+          value: "mariadb.databases.svc.cluster.local"
+        - name: AUTHENTIK_POSTGRESQL__NAME
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__USER
+          value: "authentik"
         - name: AUTHENTIK_POSTGRESQL__PASSWORD
           valueFrom:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_DB_PASSWORD
+        - name: AUTHENTIK_POSTGRESQL__PORT
+          value: "3306"
       ingress:
         enabled: true
         ingressClassName: external
@@ -91,11 +96,22 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
+        # MySQL/MariaDB configuration
+        - name: AUTHENTIK_POSTGRESQL__ENGINE
+          value: "django.db.backends.mysql"
+        - name: AUTHENTIK_POSTGRESQL__HOST
+          value: "mariadb.databases.svc.cluster.local"
+        - name: AUTHENTIK_POSTGRESQL__NAME
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__USER
+          value: "authentik"
         - name: AUTHENTIK_POSTGRESQL__PASSWORD
           valueFrom:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_DB_PASSWORD
+        - name: AUTHENTIK_POSTGRESQL__PORT
+          value: "3306"
       resources:
         requests:
           cpu: 100m
