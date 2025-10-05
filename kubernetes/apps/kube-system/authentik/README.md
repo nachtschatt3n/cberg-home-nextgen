@@ -5,12 +5,12 @@ This directory contains the Flux configuration for deploying Authentik as an ide
 ## Overview
 
 Authentik is deployed with the following configuration:
-- **Version**: 2024.12.6
+- **Version**: 2025.8.4
 - **Namespace**: kube-system
 - **Database**: External MariaDB (databases namespace)
 - **Cache**: Internal Redis with Longhorn storage
 - **Replicas**: 2 server pods, 2 worker pods
-- **Ingress**: Internal ingress class at `auth.${SECRET_DOMAIN}`
+- **Ingress**: External ingress class at `auth.${SECRET_DOMAIN}` (accessible from internet)
 - **Monitoring**: Prometheus ServiceMonitor enabled
 
 ## Pre-deployment Setup
@@ -108,9 +108,10 @@ Prometheus metrics are enabled and available at:
    - Verify Longhorn storage is available
 
 3. **Ingress Issues**
-   - Verify internal ingress controller is running
+   - Verify external ingress controller is running
    - Check certificate generation
    - Confirm DNS resolution for auth.${SECRET_DOMAIN}
+   - Verify Cloudflare Tunnel configuration for external access
 
 ### Logs
 
