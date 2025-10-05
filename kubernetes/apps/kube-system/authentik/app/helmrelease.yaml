@@ -64,6 +64,8 @@ spec:
           gethomepage.dev/description: "Identity Provider and SSO"
           gethomepage.dev/group: "Authentication"
           gethomepage.dev/icon: "authentik.png"
+          # Point to external CNAME for Cloudflare tunnel
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         hosts:
           - "auth.${SECRET_DOMAIN}"
         paths:
