@@ -33,3 +33,4 @@ resources:
   - ./prometheus-community.yaml
   - ./jameswynn.yaml
   - ./descheduler.yaml
+  - ./authentik.yaml

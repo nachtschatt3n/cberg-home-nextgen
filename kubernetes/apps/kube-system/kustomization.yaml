@@ -15,4 +15,5 @@ resources:
   - ./intel-device-plugin/ks.yaml
   - ./node-feature-discovery/ks.yaml
   - ./descheduler/ks.yaml
+  - ./authentik/ks.yaml
   #- ./local-path-provisioner/ks.yaml

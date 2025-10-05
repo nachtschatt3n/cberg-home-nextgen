@@ -1,0 +1,111 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: authentik
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: authentik
+      version: 2024.12.6
+      sourceRef:
+        kind: HelmRepository
+        name: authentik
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    global:
+      deploymentAnnotations:
+        secret.reloader.stakater.com/reload: authentik-secret
+
+    authentik:
+      secret_key: "${SECRET_AUTHENTIK_SECRET_KEY}"
+      # The error reporting is fully anonymous and helps developers
+      error_reporting:
+        enabled: true
+      postgresql:
+        host: "mariadb.databases.svc.cluster.local"
+        name: "authentik"
+        user: "authentik"
+        password: "${SECRET_AUTHENTIK_DB_PASSWORD}"
+        port: 3306
+      redis:
+        host: "authentik-redis"
+
+    server:
+      replicas: 2
+      ingress:
+        enabled: true
+        ingressClassName: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Authentik"
+          gethomepage.dev/description: "Identity Provider and SSO"
+          gethomepage.dev/group: "Authentication"
+          gethomepage.dev/icon: "authentik.png"
+        hosts:
+          - host: &host "auth.${SECRET_DOMAIN}"
+            paths:
+              - path: "/"
+                pathType: Prefix
+        tls:
+          - hosts:
+              - *host
+
+      metrics:
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            interval: 30s
+            scrapeTimeout: 3s
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+
+    worker:
+      replicas: 2
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+
+    redis:
+      enabled: true
+      auth:
+        enabled: false
+      master:
+        persistence:
+          enabled: true
+          storageClass: longhorn
+          size: 8Gi
+      replica:
+        persistence:
+          enabled: true
+          storageClass: longhorn
+          size: 8Gi
+
+    postgresql:
+      # Use external MariaDB instead
+      enabled: false
+
+    geoip:
+      enabled: true
+      accountId: "${SECRET_AUTHENTIK_GEOIP_ACCOUNT_ID}"
+      licenseKey: "${SECRET_AUTHENTIK_GEOIP_LICENSE_KEY}"
+
+    serviceMonitor:
+      enabled: true
