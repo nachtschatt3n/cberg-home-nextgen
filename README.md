@@ -226,6 +226,27 @@ To enable Renovate, click the 'Configure' button over at their [Github app page]
 
 The base Renovate configuration in your repository can be viewed at [.github/renovate.json5](./.github/renovate.json5). By default it is scheduled to be active with PRs every weekend, but you can [change the schedule to anything you want](https://docs.renovatebot.com/presets-schedule), or remove it if you want Renovate to open PRs right away.
 
+## 🤖 GitHub Actions Workflows
+
+This repository includes several automated workflows powered by GitHub Actions:
+
+### Mise Workflow
+- **Schedule**: Weekly (Sunday at midnight)
+- **Purpose**: Automatically checks for and creates PRs for dependency updates managed by [mise](https://mise.jdx.dev/)
+- **Permissions**: Requires `contents:write` and `pull-requests:write` to create PRs
+
+### Release Workflow  
+- **Schedule**: Monthly (1st of each month at midnight)
+- **Purpose**: Automatically creates releases with generated release notes
+- **Permissions**: Requires `contents:write` to create releases
+
+### Repository Settings Required
+For these workflows to function properly, the following repository settings are required:
+- **Actions > General > Workflow permissions**: Set to "Read and write permissions"
+- **Actions > General**: "Allow GitHub Actions to create and approve pull requests" must be enabled
+
+All workflows use the default `GITHUB_TOKEN` following the principle of least privilege.
+
 ## 🐛 Debugging
 
 Below is a general guide on trying to debug an issue with an resource or application. For example, if a workload/resource is not showing up or a pod has started but in a `CrashLoopBackOff` or `Pending` state. Most of these steps do not include a way to fix the problem as the problem could be one of many different things.
@@ -363,55 +384,4 @@ If this repo is too hot to handle or too cold to hold check out these following 
 </div>
 
 ## 🤝 Thanks
-
 Big shout out to all the contributors, sponsors and everyone else who has helped on this project.
-
-
-
-
-
-
-
-
-kubectl run debug-shell --rm -it \
-  --image=ubuntu \
-  --overrides='{
-  "apiVersion": "v1",
-  "kind": "Pod",
-  "metadata": {
-    "name": "debug-shell"
-  },
-  "spec": {
-    "hostPID": true,
-    "hostIPC": true,
-    "containers": [
-      {
-        "name": "debug",
-        "image": "ubuntu",
-        "stdin": true,
-        "tty": true,
-        "securityContext": {
-          "privileged": true,
-          "allowPrivilegeEscalation": true,
-          "capabilities": {
-            "add": ["SYS_ADMIN"]
-          },
-          "runAsUser": 0
-        },
-        "resources": {
-          "requests": {
-            "gpu.intel.com/i915": 1
-          },
-          "limits": {
-            "gpu.intel.com/i915": 1
-          }
-        },
-        "command": [
-          "/bin/bash",
-          "-c",
-          "apt update && DEBIAN_FRONTEND=noninteractive apt install -y wget intel-media-va-driver-non-free vainfo ffmpeg unzip vim neovim zsh && chsh -s $(which zsh) && mkdir -p /root/test_media && cd /root/test_media && wget https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip && unzip bbb_sunflower_1080p_30fps_normal.mp4.zip && sh -c \"$(wget -O- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended && exec zsh"
-        ]
-      }
-    ]
-  }
-}' -- bash
