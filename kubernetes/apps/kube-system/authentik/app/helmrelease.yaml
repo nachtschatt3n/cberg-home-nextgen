@@ -41,6 +41,20 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
+        # PostgreSQL connection configuration
+        - name: AUTHENTIK_POSTGRESQL__HOST
+          value: "authentik-postgresql"
+        - name: AUTHENTIK_POSTGRESQL__NAME
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__USER
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_DB_PASSWORD
+        - name: AUTHENTIK_POSTGRESQL__PORT
+          value: "5432"
       ingress:
         enabled: true
         ingressClassName: external
@@ -80,6 +94,20 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
+        # PostgreSQL connection configuration
+        - name: AUTHENTIK_POSTGRESQL__HOST
+          value: "authentik-postgresql"
+        - name: AUTHENTIK_POSTGRESQL__NAME
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__USER
+          value: "authentik"
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_DB_PASSWORD
+        - name: AUTHENTIK_POSTGRESQL__PORT
+          value: "5432"
       resources:
         requests:
           cpu: 100m
