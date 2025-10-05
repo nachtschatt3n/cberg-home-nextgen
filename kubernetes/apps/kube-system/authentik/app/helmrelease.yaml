@@ -31,7 +31,7 @@ spec:
       error_reporting:
         enabled: true
       redis:
-        host: "authentik-redis"
+        host: "authentik-redis-master"
 
     server:
       replicas: 2
