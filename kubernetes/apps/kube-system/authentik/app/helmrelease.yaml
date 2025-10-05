@@ -27,7 +27,6 @@ spec:
         secret.reloader.stakater.com/reload: authentik-secret
 
     authentik:
-      secret_key: "${SECRET_AUTHENTIK_SECRET_KEY}"
       # The error reporting is fully anonymous and helps developers
       error_reporting:
         enabled: true
@@ -39,6 +38,17 @@ spec:
         port: 3306
       redis:
         host: "authentik-redis"
+      env:
+        AUTHENTIK_SECRET_KEY:
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_SECRET_KEY
+        AUTHENTIK_POSTGRESQL__PASSWORD:
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_DB_PASSWORD
 
     server:
       replicas: 2
