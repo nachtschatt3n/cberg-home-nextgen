@@ -38,20 +38,20 @@ spec:
         port: 3306
       redis:
         host: "authentik-redis"
+
+    server:
+      replicas: 2
       env:
-        AUTHENTIK_SECRET_KEY:
+        - name: AUTHENTIK_SECRET_KEY
           valueFrom:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
-        AUTHENTIK_POSTGRESQL__PASSWORD:
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
           valueFrom:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_DB_PASSWORD
-
-    server:
-      replicas: 2
       ingress:
         enabled: true
         ingressClassName: external
@@ -85,6 +85,17 @@ spec:
 
     worker:
       replicas: 2
+      env:
+        - name: AUTHENTIK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_SECRET_KEY
+        - name: AUTHENTIK_POSTGRESQL__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: authentik-secret
+              key: SECRET_AUTHENTIK_DB_PASSWORD
       resources:
         requests:
           cpu: 100m
