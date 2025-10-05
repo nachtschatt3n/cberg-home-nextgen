@@ -13,7 +13,15 @@ spec:
     groupWait: 1s
     groupInterval: 1s
     repeatInterval: 120s
+    routes:
+      # Suppress Watchdog alerts (always firing, not useful for notifications)
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            value: Watchdog
   receivers:
+    # Null receiver for suppressed alerts (like Watchdog)
+    - name: "null"
     - name: telegram
       telegramConfigs:
         - botToken:
