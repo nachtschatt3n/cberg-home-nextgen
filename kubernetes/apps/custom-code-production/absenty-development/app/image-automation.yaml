@@ -1,0 +1,83 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: absenty
+  namespace: custom-code-production
+spec:
+  image: ghcr.io/nachtschatt3n/absenty
+  interval: 10m
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: absenty-development
+  namespace: custom-code-production
+spec:
+  imageRepositoryRef:
+    name: absenty
+  policy:
+    alphabetical:
+      order: asc
+  filterTags:
+    pattern: '^development-latest$'
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: absenty-production
+  namespace: custom-code-production
+spec:
+  imageRepositoryRef:
+    name: absenty
+  policy:
+    alphabetical:
+      order: asc
+  filterTags:
+    pattern: '^production-latest$'
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: absenty-image-updates
+  namespace: custom-code-production
+spec:
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@users.noreply.github.com
+        name: fluxcdbot
+      messageTemplate: |
+        chore(absenty): update container images
+
+        Automation name: {{ .AutomationObject }}
+
+        Files updated:
+        {{ range $filename, $_ := .Updated.Files -}}
+        - {{ $filename }}
+        {{ end -}}
+
+        Objects updated:
+        {{ range $resource, $_ := .Updated.Objects -}}
+        - {{ $resource.Kind }} {{ $resource.Name }}
+        {{ end -}}
+
+        Images updated:
+        {{ range .Updated.Images -}}
+        - {{ .Name }}: {{ .OldTag }} -> {{ .NewTag }}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    strategy: Setters
+    path: "./kubernetes/apps/custom-code-production"
