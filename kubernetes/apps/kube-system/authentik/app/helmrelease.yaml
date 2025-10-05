@@ -56,9 +56,8 @@ spec:
         paths:
           - "/"
         tls:
-          enabled: true
-          hosts:
-            - "auth.${SECRET_DOMAIN}"
+          - hosts:
+              - "auth.${SECRET_DOMAIN}"
 
       metrics:
         prometheus:
