@@ -1,27 +1,51 @@
 # Repository Guidelines
 
+## Project Overview
+This is a personalized home operations repository for managing a production Kubernetes homelab cluster. The infrastructure runs on 3x Intel NUC14 Pro systems with Talos Linux v1.9.4, Kubernetes v1.32.2, and Flux v2.4.0 for GitOps automation.
+
+**Key Infrastructure:**
+- **Hardware**: 3x Intel NUC14 Pro (18 cores, ~64GB RAM, NVMe SSD, 2.5GbE networking)
+- **OS**: Talos Linux v1.9.4 (immutable, secure-by-default)
+- **Network**: UniFi infrastructure with 10GbE backbone, AdGuard Home DNS at 192.168.55.5
+- **Storage**: Longhorn distributed storage + UNAS-CBERG NAS at 192.168.31.230
+- **Applications**: 50+ applications across home automation, media, AI/ML, monitoring, and productivity
+
 ## Project Structure & Module Organization
-This template deploys a Talos + Flux stack; keep rendered manifests aligned with config changes.
-- `kubernetes/` holds bootstrap manifests, app releases, and Flux sync targets.
-- `templates/` and `makejinja.toml` define the Jinja sources rendered into `kubernetes/` via Task/Mise.
-- `.taskfiles/` holds Taskfile extensions for templating, Talos bootstrap, and helper utilities.
-- `.github/` carries automation; `tools/` and `requirements.txt` pin CLI dependencies.
+- `kubernetes/apps/` - Applications organized by category (home-automation, media, ai, monitoring, etc.)
+- `kubernetes/bootstrap/` - Talos cluster bootstrap configuration and initial applications
+- `kubernetes/components/` - Reusable Kustomize components shared across applications
+- `kubernetes/flux/` - Flux system configuration for GitOps automation
+- `tools/` - Utility scripts including SNMP temperature monitoring for UniFi devices
+- `docs/` - Documentation and network topology diagrams
 
 ## Build, Test, and Development Commands
-Trust and install the Mise toolchain:
+Install development environment using Mise:
 ```sh
-mise trust && mise install && mise run deps
+mise trust
+mise install
 ```
-Render templates (edit `config.yaml` between steps):
+
+Access and monitor the cluster:
 ```sh
-task template:init
-task template:configure
+# Set up cluster access
+export KUBECONFIG=$PWD/kubeconfig
+
+# Monitor Flux GitOps status
+flux get kustomizations -A
+flux get helmreleases -A
+
+# Debug applications
+kubectl get pods -A
+kubectl logs -n <namespace> <pod-name>
+
+# Force Flux reconciliation
+flux -n flux-system reconcile ks flux-system --with-source
 ```
-Bootstrap and reconcile:
+
+Bootstrap cluster (if rebuilding):
 ```sh
 task bootstrap:talos
 task bootstrap:apps
-task reconcile
 ```
 
 ## Coding Style & Naming Conventions
@@ -40,10 +64,18 @@ task reconcile
 - PRs should outline the change, list the Task targets run, reference related issues, and attach screenshots or logs for cluster-impacting updates.
 
 ## Storage & Persistence Policies
-- Route high-capacity volumes through the existing CIFS mounts; don't attach raw disks, reuse CIFS-backed PVs in `kubernetes/apps`.
-- Databases and config state must live on Longhorn; create static PV/PVC pairs in the Longhorn UI and reference them from manifests to ensure replica scheduling.
+- **Distributed Storage**: Longhorn provides replicated storage across the 3-node cluster for critical data
+- **Bulk Storage**: UNAS-CBERG NAS (192.168.31.230) provides CIFS/SMB shares for media and backups
+- **Database Storage**: MariaDB, InfluxDB, and application state use Longhorn persistent volumes
+- **Media Storage**: Plex, Jellyfin, and media applications connect to NAS via CIFS for large file storage
+- **Backup Strategy**: Kopia handles automated backups, iCloud Drive Sync for selective cloud backup
 
-## Secrets & Configuration Tips
-- Guard `age.key`, `.sops.yaml`, `deploy.key`; rotate via `task template:init` when sharing access.
-- Keep `config.yaml` authoritative—document overrides in its comments rather than ad-hoc READMEs.
-- Store external credentials in SOPS-encrypted `kubernetes/**/secret.sops.yaml`; verify with `sops --decrypt` before applying.
+## Network & Security Configuration
+- **DNS**: AdGuard Home (192.168.55.5) provides network-wide ad blocking and recursive DNS
+  - Supports DNS-over-TLS (port 853) and DNS-over-HTTPS via internal ingress
+  - Split-DNS: internal domains (*.example.com) → 192.168.55.101, external → Cloudflare/Quad9
+- **TLS Certificates**: cert-manager with Let's Encrypt for automated certificate management
+- **Ingress**: Internal ingress class for LAN access, external for internet-facing services via Cloudflare Tunnel
+- **Secrets Management**: SOPS with age encryption for storing secrets in Git
+  - Critical files: `age.key`, `.sops.yaml`, encrypted secrets in `*.sops.yaml` files
+- **UniFi Network**: DMP-CBERG gateway, SW-48-PoE core switch, SW-24-PoE distribution
