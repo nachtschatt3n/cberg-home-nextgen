@@ -103,9 +103,7 @@ spec:
       enabled: false
 
     geoip:
-      enabled: true
-      accountId: "${SECRET_AUTHENTIK_GEOIP_ACCOUNT_ID}"
-      licenseKey: "${SECRET_AUTHENTIK_GEOIP_LICENSE_KEY}"
+      enabled: false
 
     serviceMonitor:
       enabled: true
