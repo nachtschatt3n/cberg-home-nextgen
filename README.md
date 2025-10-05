@@ -114,7 +114,7 @@ Network-wide ad blocking and DNS resolution is handled by [AdGuard Home](kuberne
 - **Upstream Resolvers**: 
   - Cloudflare DNS-over-HTTPS and DNS-over-TLS for public domains
   - Quad9 DNS-over-HTTPS for redundancy
-  - Split-DNS for internal domains (`*.uhl.cool` → `192.168.55.101`)
+- Split-DNS for internal domains (`*.example.com` → `192.168.55.101`)
 
 **Client Configuration:**
 - Configure UniFi DHCP to push `192.168.55.5` as the primary DNS server
