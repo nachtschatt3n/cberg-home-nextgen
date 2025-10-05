@@ -41,28 +41,6 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
-        # MySQL/MariaDB configuration
-        - name: AUTHENTIK_POSTGRESQL__ENGINE
-          value: "django.db.backends.mysql"
-        - name: AUTHENTIK_POSTGRESQL__HOST
-          value: "mariadb.databases.svc.cluster.local"
-        - name: AUTHENTIK_POSTGRESQL__NAME
-          value: "authentik"
-        - name: AUTHENTIK_POSTGRESQL__USER
-          value: "authentik"
-        - name: AUTHENTIK_POSTGRESQL__PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: authentik-secret
-              key: SECRET_AUTHENTIK_DB_PASSWORD
-        - name: AUTHENTIK_POSTGRESQL__PORT
-          value: "3306"
-        - name: AUTHENTIK_POSTGRESQL__OPTIONS__INIT_COMMAND
-          value: "SET sql_mode='STRICT_TRANS_TABLES'"
-        - name: AUTHENTIK_POSTGRESQL__OPTIONS__CHARSET
-          value: "utf8mb4"
-        - name: AUTHENTIK_POSTGRESQL__SSLMODE
-          value: "disable"
       ingress:
         enabled: true
         ingressClassName: external
@@ -102,28 +80,6 @@ spec:
             secretKeyRef:
               name: authentik-secret
               key: SECRET_AUTHENTIK_SECRET_KEY
-        # MySQL/MariaDB configuration
-        - name: AUTHENTIK_POSTGRESQL__ENGINE
-          value: "django.db.backends.mysql"
-        - name: AUTHENTIK_POSTGRESQL__HOST
-          value: "mariadb.databases.svc.cluster.local"
-        - name: AUTHENTIK_POSTGRESQL__NAME
-          value: "authentik"
-        - name: AUTHENTIK_POSTGRESQL__USER
-          value: "authentik"
-        - name: AUTHENTIK_POSTGRESQL__PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: authentik-secret
-              key: SECRET_AUTHENTIK_DB_PASSWORD
-        - name: AUTHENTIK_POSTGRESQL__PORT
-          value: "3306"
-        - name: AUTHENTIK_POSTGRESQL__OPTIONS__INIT_COMMAND
-          value: "SET sql_mode='STRICT_TRANS_TABLES'"
-        - name: AUTHENTIK_POSTGRESQL__OPTIONS__CHARSET
-          value: "utf8mb4"
-        - name: AUTHENTIK_POSTGRESQL__SSLMODE
-          value: "disable"
       resources:
         requests:
           cpu: 100m
@@ -147,8 +103,20 @@ spec:
           size: 8Gi
 
     postgresql:
-      # Use external MariaDB instead
-      enabled: false
+      # Use built-in PostgreSQL for compatibility
+      enabled: true
+      auth:
+        username: authentik
+        database: authentik
+        existingSecret: authentik-secret
+        secretKeys:
+          adminPasswordKey: SECRET_AUTHENTIK_DB_PASSWORD
+          userPasswordKey: SECRET_AUTHENTIK_DB_PASSWORD
+      primary:
+        persistence:
+          enabled: true
+          storageClass: longhorn
+          size: 8Gi
 
     geoip:
       enabled: false
