@@ -2,7 +2,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
-  name: &app absenty
+  name: &app absenty-development
   namespace: custom-code-production
 spec:
   interval: 30m
@@ -30,15 +30,15 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: sha-fa26975
-              pullPolicy: IfNotPresent
+              tag: development-latest
+              pullPolicy: Always
             env:
               - name: TZ
                 value: "Europe/Berlin"
               - name: RAILS_ENV
-                value: "production"
+                value: "development"
               - name: RACK_ENV
-                value: "production"
+                value: "development"
               - name: PORT
                 value: "3000"
               - name: RAILS_LOG_TO_STDOUT
@@ -46,16 +46,16 @@ spec:
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
               - name: DATABASE_URL
-                value: "sqlite3:///data/absenty.sqlite3"
+                value: "sqlite3:///data/absenty-development.sqlite3"
             envFrom:
               - secretRef:
-                  name: absenty-secrets
+                  name: absenty-development-secrets
             resources:
               requests:
-                cpu: 100m
-                memory: 256Mi
+                cpu: 50m
+                memory: 128Mi
               limits:
-                memory: 1Gi
+                memory: 512Mi
             probes:
               liveness:
                 enabled: true
@@ -111,15 +111,15 @@ spec:
         className: external
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Absenty"
-          gethomepage.dev/description: "Employee management system"
+          gethomepage.dev/name: "Absenty (Dev)"
+          gethomepage.dev/description: "Employee management system - Development"
           gethomepage.dev/group: "Custom Code"
           gethomepage.dev/icon: "rails.png"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "absenty.${SECRET_DOMAIN}"
+          - host: &host "absenty-dev.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -137,6 +137,7 @@ spec:
         size: 5Gi
         globalMounts:
           - path: /data
+        retain: true
       storage:
         enabled: true
         type: persistentVolumeClaim
@@ -144,6 +145,7 @@ spec:
         size: 10Gi
         globalMounts:
           - path: /storage
+        retain: true
       tmp:
         enabled: true
         type: emptyDir
