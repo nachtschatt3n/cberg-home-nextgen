@@ -3,14 +3,14 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: &app absenty
+  name: &app absenty-production
   namespace: &namespace custom-code-production
 spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
   interval: 30m
-  path: ./kubernetes/apps/custom-code-production/absenty/app
+  path: ./kubernetes/apps/custom-code-production/absenty-production/app
   prune: true
   sourceRef:
     kind: GitRepository
