@@ -29,7 +29,6 @@ data:
       alertmanagerConfigSelector:
         matchLabels:
           alertmanager-config: telegram
-      # Remove namespace selector to allow alerts from all namespaces
       # alertmanagerConfigNamespaceSelector:
       #   matchNames:
       #     - monitoring
