@@ -41,6 +41,8 @@ spec:
                 value: "development"
               - name: PORT
                 value: "3000"
+              - name: BINDING
+                value: "0.0.0.0"
               - name: RAILS_LOG_TO_STDOUT
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
