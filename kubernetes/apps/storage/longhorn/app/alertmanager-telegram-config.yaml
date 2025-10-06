@@ -34,7 +34,13 @@ spec:
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
-            Alert: {{ .CommonLabels.alertname }}
-            Severity: {{ .CommonLabels.severity }}
-            Instance: {{ .CommonLabels.instance }}
+            🚨 <b>{{ .CommonLabels.alertname }}</b>
+            Severity: {{ .CommonLabels.severity | toUpper }}
+            Component: {{ .CommonLabels.component | default "Unknown" }}
+            {{ if .CommonAnnotations.summary }}
             Summary: {{ .CommonAnnotations.summary }}
+            {{ end }}
+            {{ range .Alerts }}
+            • {{ .Annotations.summary | default .Labels.alertname }}
+            {{ if .Annotations.description }}  {{ .Annotations.description }}{{ end }}
+            {{ end }}
