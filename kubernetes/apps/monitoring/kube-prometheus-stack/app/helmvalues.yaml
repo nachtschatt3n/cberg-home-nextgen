@@ -26,42 +26,14 @@ data:
         tls:
           - hosts:
               - "alertmanager.${SECRET_DOMAIN}"
-      config:
-        global:
-          telegram_api_url: 'https://api.telegram.org'
-        route:
-          receiver: 'null'
-          group_by: ['namespace']
-          routes:
-            # Route all alerts to Telegram except Watchdog
-            - receiver: 'telegram'
-              group_by: ['alertname']
-              group_wait: 1s
-              group_interval: 1s
-              repeat_interval: 2m
-              matchers:
-                - alertname!="Watchdog"
-            # Suppress Watchdog alerts
-            - receiver: 'null'
-              matchers:
-                - alertname="Watchdog"
-        receivers:
-          - name: 'null'
-          - name: 'telegram'
-            telegram_configs:
-              - send_resolved: true
-                bot_token_file: /etc/alertmanager/secrets/alertmanager-telegram-secret/bot-token
-                chat_id: 671676995
-                parse_mode: 'HTML'
-                message: |
-                  Alert: {{ .CommonLabels.alertname }}
-                  Severity: {{ .CommonLabels.severity }}
-                  Instance: {{ .CommonLabels.instance }}
-                  Summary: {{ .CommonAnnotations.summary }}
+      alertmanagerConfigSelector:
+        matchLabels:
+          alertmanager-config: telegram
+      # Allow AlertmanagerConfigs from all namespaces
+      alertmanagerConfigNamespaceSelector:
+        matchExpressions: []
       alertmanagerSpec:
         logLevel: debug
-        secrets:
-          - alertmanager-telegram-secret
         storage:
           volumeClaimTemplate:
             spec:
