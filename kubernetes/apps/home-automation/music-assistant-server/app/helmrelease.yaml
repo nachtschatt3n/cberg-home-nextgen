@@ -94,9 +94,14 @@ spec:
           - hosts:
               - "music.${SECRET_DOMAIN}"
     persistence:
-      config:
+      data:
         enabled: true
         existingClaim: music-assistant-config
         globalMounts:
-          - path: /config
+          - path: /data
+      cache:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /cache
 
