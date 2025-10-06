@@ -35,11 +35,14 @@ spec:
           message: |
             🚨 <b>{{ .CommonLabels.alertname }}</b>
             Severity: {{ .CommonLabels.severity | toUpper }}
-            Component: {{ .CommonLabels.component | default "Unknown" }}
-            {{ if .CommonAnnotations.summary }}
-            Summary: {{ .CommonAnnotations.summary }}
-            {{ end }}
+            {{ if .CommonLabels.component }}Component: {{ .CommonLabels.component }}{{ end }}
+            {{ if .CommonLabels.node }}Node: {{ .CommonLabels.node }}{{ else if .CommonLabels.instance }}Instance: {{ .CommonLabels.instance }}{{ end }}
+            
             {{ range .Alerts }}
-            • {{ .Annotations.summary | default .Labels.alertname }}
-            {{ if .Annotations.description }}  {{ .Annotations.description }}{{ end }}
+            • <b>{{ .Annotations.summary | default .Labels.alertname }}</b>
+            {{ if .Labels.node }}  🖥 Node: {{ .Labels.node }}{{ end }}
+            {{ if .Labels.volume }}  💾 Volume: {{ .Labels.volume }}{{ end }}
+            {{ if .Labels.pvc }}  📋 PVC: {{ .Labels.pvc }}{{ end }}
+            {{ if .Labels.pvc_namespace }}  💼 Namespace: {{ .Labels.pvc_namespace }}{{ end }}
+            {{ if .Annotations.description }}  📝 {{ .Annotations.description }}{{ end }}
             {{ end }}
