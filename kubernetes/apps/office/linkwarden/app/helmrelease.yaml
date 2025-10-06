@@ -111,10 +111,7 @@ spec:
     persistence:
       data:
         enabled: true
-        type: pvc
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 20Gi
+        existingClaim: linkwarden-data
         globalMounts:
           - path: /data
     probes:
