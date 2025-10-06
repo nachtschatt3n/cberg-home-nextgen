@@ -1,0 +1,40 @@
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: telegram
+  namespace: storage
+  labels:
+    alertmanager-config: telegram
+spec:
+  route:
+    receiver: telegram
+    groupBy:
+      - alertname
+    groupWait: 1s
+    groupInterval: 1s
+    repeatInterval: 120s
+    # Match all alerts from any namespace by not specifying namespace matchers
+    matchers: []
+    routes:
+      # Suppress Watchdog alerts (always firing, not useful for notifications)
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            value: Watchdog
+  receivers:
+    # Null receiver for suppressed alerts (like Watchdog)
+    - name: "null"
+    - name: telegram
+      telegramConfigs:
+        - botToken:
+            name: alertmanager-telegram-secret
+            key: bot-token
+          chatID: 671676995  # numeric chat ID (must be an integer)
+          parseMode: HTML  # use HTML parsing to avoid escaping issues
+          sendResolved: true
+          message: |
+            Alert: {{ .CommonLabels.alertname }}
+            Severity: {{ .CommonLabels.severity }}
+            Instance: {{ .CommonLabels.instance }}
+            Summary: {{ .CommonAnnotations.summary }}
