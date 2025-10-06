@@ -107,7 +107,7 @@ spec:
         gethomepage.dev/enabled: "true"
     persistence:
       enabled: true
-      existingClaim: open-webui
+      existingClaim: open-webui-10g
 
     # -- Node labels for pod assignment.
     nodeSelector: {}
