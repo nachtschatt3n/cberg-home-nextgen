@@ -29,9 +29,7 @@ data:
       alertmanagerConfigSelector:
         matchLabels:
           alertmanager-config: telegram
-      # alertmanagerConfigNamespaceSelector:
-      #   matchNames:
-      #     - monitoring
+      alertmanagerConfigNamespaceSelector: {}
       alertmanagerSpec:
         logLevel: debug
         storage:
