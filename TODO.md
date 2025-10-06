@@ -1,2 +1,6 @@
+- [ ] Music Assitant is not storning the config files https://music.uhl.cool/#/settings/providers
+- [ ] deploy local sentry.dev (https://develop.sentry.dev/self-hosted/configuration/)
+- [ ] AI update Home Assitant (https://www.home-assistant.io/blog/2025/09/11/ai-in-home-assistant/)
+- [ ] Look into Droplet (https://shop.hydrificwater.com/pages/buy-droplet?srsltid=AfmBOopzSdq_OQo7uOwvcQy1LbmBKulusbhvno2uxdQxPcQ9Twt7KS-c)
 - [ ] Deploy descheduler via Flux in kube-system
 - [ ] Verify pod rebalance and adjust thresholds if needed
