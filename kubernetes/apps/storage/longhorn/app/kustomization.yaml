@@ -6,3 +6,4 @@ resources:
   - helmrelease.yaml
   - ingress.yaml
   - secret.sops.yaml
+  - alertmanager-telegram-config.yaml
