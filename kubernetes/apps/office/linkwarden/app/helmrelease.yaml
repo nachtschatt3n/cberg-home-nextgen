@@ -37,7 +37,7 @@ spec:
               tag: 1.37.0
             command: ["/bin/sh", "-c"]
             args:
-              - until nc -zv linkwarden-mariadb 3306; do echo 'waiting for mariadb'; sleep 2; done;
+              - until nc -zv linkwarden-postgresql 5432; do echo 'waiting for postgres'; sleep 2; done;
           wait-meili:
             image:
               repository: busybox
