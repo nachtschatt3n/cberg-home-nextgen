@@ -4,3 +4,13 @@
 - [ ] Look into Droplet (https://shop.hydrificwater.com/pages/buy-droplet?srsltid=AfmBOopzSdq_OQo7uOwvcQy1LbmBKulusbhvno2uxdQxPcQ9Twt7KS-c)
 - [ ] Deploy descheduler via Flux in kube-system
 - [ ] Verify pod rebalance and adjust thresholds if needed
+
+- [ ] Saveguard access to internal services with authentik for:
+  - https://esphome.uhl.cool
+  - https://frigate.uhl.cool
+  - https://music.uhl.cool
+  - https://node.uhl.cool/
+  - https://alertmanager.uhl.cool
+  - https://prometheus.uhl.cool/
+  - https://kopia.uhl.cool
+  - https://makemkv.uhl.cool
