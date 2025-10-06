@@ -113,7 +113,7 @@ spec:
         enabled: true
         existingClaim: linkwarden-data
         globalMounts:
-          - path: /data
+          - path: /app/data
     probes:
       liveness:
         enabled: true
