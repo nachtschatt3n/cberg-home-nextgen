@@ -153,8 +153,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn backup failed for volume {{ $labels.volume }}"
-            description: "A backup operation for volume {{ $labels.volume }} has failed."
+            summary: "Longhorn backup failed for volume {{ $labels.volume | default $labels.backup }}"
+            description: "A backup operation for volume {{ $labels.volume | default $labels.backup }} (backup: {{ $labels.backup }}) has failed on node {{ $labels.instance }}."
             runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
         - alert: LonghornBackupError
@@ -165,8 +165,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn backup error for volume {{ $labels.volume }}"
-            description: "A backup operation for volume {{ $labels.volume }} has encountered an error."
+            summary: "Longhorn backup error for volume {{ $labels.volume | default $labels.backup }}"
+            description: "A backup operation for volume {{ $labels.volume | default $labels.backup }} (backup: {{ $labels.backup }}) has encountered an error on node {{ $labels.instance }}."
             runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
     - name: longhorn.system.health
@@ -204,6 +204,6 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "High I/O latency detected on volume {{ $labels.volume }}"
-            description: "Volume {{ $labels.volume }} is experiencing high I/O latency ({{ $value }}ms)."
+            summary: "High I/O latency detected on volume {{ $labels.volume | default $labels.pvc }}"
+            description: "Volume {{ $labels.volume | default $labels.pvc }} (PVC: {{ $labels.pvc }}, namespace: {{ $labels.pvc_namespace }}) is experiencing high I/O latency ({{ $value }}ms) on node {{ $labels.node }}."
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
