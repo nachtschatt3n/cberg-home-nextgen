@@ -70,10 +70,7 @@ spec:
     persistence:
       data:
         enabled: true
-        type: pvc
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        existingClaim: linkwarden-meilisearch-data
         globalMounts:
           - path: /meili_data
     probes:
