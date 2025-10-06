@@ -153,8 +153,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn backup failed for volume {{ $labels.volume | default $labels.backup }}"
-            description: "A backup operation for volume {{ $labels.volume | default $labels.backup }} (backup: {{ $labels.backup }}) has failed on node {{ $labels.instance }}."
+            summary: "Longhorn backup failed for volume {{ $labels.volume or $labels.backup }}"
+            description: "A backup operation for volume {{ $labels.volume or $labels.backup }} (backup: {{ $labels.backup }}) has failed on node {{ $labels.instance }}."
             runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
         - alert: LonghornBackupError
@@ -165,8 +165,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn backup error for volume {{ $labels.volume | default $labels.backup }}"
-            description: "A backup operation for volume {{ $labels.volume | default $labels.backup }} (backup: {{ $labels.backup }}) has encountered an error on node {{ $labels.instance }}."
+            summary: "Longhorn backup error for volume {{ $labels.volume or $labels.backup }}"
+            description: "A backup operation for volume {{ $labels.volume or $labels.backup }} (backup: {{ $labels.backup }}) has encountered an error on node {{ $labels.instance }}."
             runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
     - name: longhorn.system.health
@@ -204,6 +204,6 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "High I/O latency on {{ $labels.pvc | default $labels.volume }} ({{ $value | printf \"%.0f\"}}ms)"
-            description: "Volume {{ $labels.volume | default $labels.pvc }} (PVC: {{ $labels.pvc }}, namespace: {{ $labels.pvc_namespace }}) is experiencing high I/O latency of {{ $value }}ms on node {{ $labels.node }}. This may indicate storage performance issues or heavy I/O load."
+            summary: "High I/O latency on {{ $labels.pvc or $labels.volume }} ({{ $value | printf \"%.0f\"}}ms)"
+            description: "Volume {{ $labels.volume or $labels.pvc }} (PVC: {{ $labels.pvc }}, namespace: {{ $labels.pvc_namespace }}) is experiencing high I/O latency of {{ $value }}ms on node {{ $labels.node }}. This may indicate storage performance issues or heavy I/O load."
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
