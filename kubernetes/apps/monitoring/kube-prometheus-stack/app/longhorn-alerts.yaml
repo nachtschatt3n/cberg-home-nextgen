@@ -1,0 +1,208 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+spec:
+  groups:
+    - name: longhorn.volume.usage
+      interval: 30s
+      rules:
+        - alert: LonghornVolumeUsageWarning
+          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 80
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} usage is high"
+            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Consider expanding the volume or cleaning up data."
+            runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
+
+        - alert: LonghornVolumeUsageCritical
+          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 90
+          for: 2m
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} usage is critically high"
+            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Immediate action required to prevent storage exhaustion."
+            runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
+
+        - alert: LonghornVolumeUsageEmergency
+          expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 99
+          for: 30s
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is nearly full"
+            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Storage exhaustion imminent!"
+            runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
+
+    - name: longhorn.volume.health
+      interval: 30s
+      rules:
+        - alert: LonghornVolumeDetached
+          expr: longhorn_volume_state == 0
+          for: 2m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is detached"
+            description: "Longhorn volume {{ $labels.volume }} has been detached for more than 2 minutes."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness == 2
+          for: 2m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is degraded"
+            description: "Longhorn volume {{ $labels.volume }} is running in a degraded state with reduced redundancy."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornVolumeFaulted
+          expr: longhorn_volume_robustness == 3
+          for: 30s
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn volume {{ $labels.volume }} is faulted"
+            description: "Longhorn volume {{ $labels.volume }} is in a faulted state and may be inaccessible."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+    - name: longhorn.node.health
+      interval: 30s
+      rules:
+        - alert: LonghornNodeDown
+          expr: longhorn_node_status{condition="ready"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} is not ready"
+            description: "Longhorn node {{ $labels.node }} has been not ready for more than 2 minutes."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornNodeSchedulingDisabled
+          expr: longhorn_node_status{condition="allowScheduling"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} has scheduling disabled"
+            description: "Longhorn node {{ $labels.node }} has volume scheduling disabled."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+    - name: longhorn.disk.usage
+      interval: 30s
+      rules:
+        - alert: LonghornDiskUsageHigh
+          expr: (longhorn_disk_usage_bytes / longhorn_disk_capacity_bytes) * 100 >= 85
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn disk usage is high on node {{ $labels.node }}"
+            description: "Disk usage on Longhorn node {{ $labels.node }} is {{ $value | printf \"%.1f\" }}% full."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornDiskUsageCritical
+          expr: (longhorn_disk_usage_bytes / longhorn_disk_capacity_bytes) * 100 >= 95
+          for: 2m
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn disk usage is critically high on node {{ $labels.node }}"
+            description: "Disk usage on Longhorn node {{ $labels.node }} is {{ $value | printf \"%.1f\" }}% full. New volume creation may fail."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+    - name: longhorn.backup.status
+      interval: 30s
+      rules:
+        - alert: LonghornBackupFailed
+          expr: longhorn_backup_state == 3
+          for: 1m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn backup failed for volume {{ $labels.volume }}"
+            description: "A backup operation for volume {{ $labels.volume }} has failed."
+            runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
+
+        - alert: LonghornBackupError
+          expr: longhorn_backup_state == 4
+          for: 1m
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn backup error for volume {{ $labels.volume }}"
+            description: "A backup operation for volume {{ $labels.volume }} has encountered an error."
+            runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
+
+    - name: longhorn.system.health
+      interval: 30s
+      rules:
+        - alert: LonghornManagerDown
+          expr: up{job="longhorn-backend"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn manager is down on node {{ $labels.node }}"
+            description: "Longhorn manager on node {{ $labels.node }} is not responding."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornInstanceManagerDown
+          expr: longhorn_instance_manager_cpu_usage_millicpu == 0
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "Longhorn instance manager may be down on node {{ $labels.node }}"
+            description: "Longhorn instance manager on node {{ $labels.node }} appears inactive."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
+
+        - alert: LonghornHighVolumeLatency
+          expr: longhorn_volume_read_latency > 200 or longhorn_volume_write_latency > 200
+          for: 5m
+          labels:
+            severity: warning
+            category: storage
+            component: longhorn
+          annotations:
+            summary: "High I/O latency detected on volume {{ $labels.volume }}"
+            description: "Volume {{ $labels.volume }} is experiencing high I/O latency ({{ $value }}ms)."
+            runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
