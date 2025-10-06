@@ -13,6 +13,8 @@ spec:
     groupWait: 1s
     groupInterval: 1s
     repeatInterval: 120s
+    # Match all alerts from any namespace by not specifying namespace matchers
+    matchers: []
     routes:
       # Suppress Watchdog alerts (always firing, not useful for notifications)
       - receiver: "null"
