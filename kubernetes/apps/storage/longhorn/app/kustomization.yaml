@@ -7,3 +7,4 @@ resources:
   - ingress.yaml
   - secret.sops.yaml
   - alertmanager-telegram-config.yaml
+  - backup-credentials.sops.yaml
