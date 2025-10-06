@@ -5,5 +5,4 @@ resources:
   - ./secret.sops.yaml
   - ./helmvalues.yaml
   - ./helmrelease.yaml
-  - ./alertmanager-telegram-config.yaml
   - ./longhorn-alerts.yaml
