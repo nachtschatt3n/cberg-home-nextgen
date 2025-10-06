@@ -50,5 +50,5 @@ spec:
             {{- end }}
             {{- if gt (len .Alerts) 10 }}
             
-            ... and {{ sub (len .Alerts) 10 }} more alerts
+            ... and more alerts ({{ len .Alerts }} total)
             {{- end }}
