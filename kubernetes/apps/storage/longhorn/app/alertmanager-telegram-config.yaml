@@ -34,32 +34,22 @@ spec:
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
-            🚨 <b>{{ .CommonLabels.alertname }}</b>
+            🚨 <b>{{ .CommonLabels.alertname }}</b> ({{ len .Alerts }} alerts)
             Severity: {{ .CommonLabels.severity | toUpper }}
-            {{- if .CommonLabels.component }}
-            Component: {{ .CommonLabels.component }}
-            {{- end }}
-            {{- if .CommonLabels.node }}
-            Node: {{ .CommonLabels.node }}
-            {{- else if .CommonLabels.instance }}
-            Instance: {{ .CommonLabels.instance }}
-            {{- end }}
+            {{- if .CommonLabels.component }} | Component: {{ .CommonLabels.component }}{{- end }}
+            {{- if .CommonLabels.node }} | Node: {{ .CommonLabels.node }}{{- end }}
             
-            {{ range .Alerts -}}
-            • <b>{{- if .Annotations.summary }}{{ .Annotations.summary }}{{- else }}{{ .Labels.alertname }}{{- end }}</b>
-            {{- if .Labels.node }}
-              🖥 Node: {{ .Labels.node }}
+            {{- if gt (len .Alerts) 10 }}
+            ⚠️ Showing first 10 of {{ len .Alerts }} alerts:
             {{- end }}
-            {{- if .Labels.volume }}
-              💾 Volume: {{ .Labels.volume }}
+            {{- range $i, $alert := .Alerts }}
+            {{- if lt $i 10 }}
+            • {{- if $alert.Annotations.summary }} {{ $alert.Annotations.summary }}{{- else }} {{ $alert.Labels.alertname }}{{- end }}
+            {{- if $alert.Labels.volume }} ({{ $alert.Labels.volume }}){{- end }}
+            {{- if $alert.Labels.node }} [{{ $alert.Labels.node }}]{{- end }}
             {{- end }}
-            {{- if .Labels.pvc }}
-              📋 PVC: {{ .Labels.pvc }}
             {{- end }}
-            {{- if .Labels.pvc_namespace }}
-              💼 Namespace: {{ .Labels.pvc_namespace }}
+            {{- if gt (len .Alerts) 10 }}
+            
+            ... and {{ sub (len .Alerts) 10 }} more alerts
             {{- end }}
-            {{- if .Annotations.description }}
-              📝 {{ .Annotations.description }}
-            {{- end }}
-            {{ end }}
