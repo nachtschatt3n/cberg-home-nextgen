@@ -24,6 +24,9 @@ kind: PersistentVolumeClaim
 metadata:
   name: tube-archivist-cache
   namespace: download
+  labels:
+    app.kubernetes.io/name: tube-archivist
+    app.kubernetes.io/component: cache
 spec:
   accessModes:
     - ReadWriteMany
