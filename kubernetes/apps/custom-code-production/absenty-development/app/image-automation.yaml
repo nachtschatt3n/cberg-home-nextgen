@@ -22,7 +22,7 @@ spec:
     alphabetical:
       order: asc
   filterTags:
-    pattern: '^development-latest$'
+    pattern: '^sha-[0-9a-f]+-dev$'
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -36,7 +36,7 @@ spec:
     alphabetical:
       order: asc
   filterTags:
-    pattern: '^production-latest$'
+    pattern: '^sha-[0-9a-f]+$'
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
