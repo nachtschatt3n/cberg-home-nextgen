@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: development-latest # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
+              tag: sha-b85fa05-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
               pullPolicy: Always
             env:
               - name: TZ
@@ -47,6 +47,8 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
+              - name: RAILS_ALLOW_ALL_HOSTS
+                value: "true"
               - name: DATABASE_URL
                 value: "sqlite3:///data/absenty-development.sqlite3"
             envFrom:
