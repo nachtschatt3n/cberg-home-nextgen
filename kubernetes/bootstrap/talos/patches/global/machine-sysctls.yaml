@@ -2,5 +2,16 @@ machine:
   sysctls:
     fs.inotify.max_user_watches: "1048576" # Watchdog
     fs.inotify.max_user_instances: "8192"  # Watchdog
-    net.core.rmem_max: "7500000" # Cloudflared | QUIC
-    net.core.wmem_max: "7500000" # Cloudflared | QUIC
+    net.core.rmem_max: "16777216" # Cloudflared | QUIC | Increased for high throughput
+    net.core.wmem_max: "16777216" # Cloudflared | QUIC | Increased for high throughput
+    # Network performance tuning to prevent NIC overload
+    net.core.netdev_max_backlog: "5000" # Increase backlog queue size
+    net.core.rmem_default: "262144" # Default receive buffer
+    net.core.wmem_default: "262144" # Default send buffer
+    net.ipv4.tcp_rmem: "4096 87380 16777216" # TCP receive buffer sizes
+    net.ipv4.tcp_wmem: "4096 65536 16777216" # TCP send buffer sizes
+    # NFS tuning - prevent hung tasks
+    net.core.netdev_budget: "600" # Packets processed per NAPI poll
+    net.core.netdev_budget_usecs: "8000" # Max time per NAPI poll (microseconds)
+    vm.dirty_ratio: "10" # Start blocking writes at 10% dirty memory
+    vm.dirty_background_ratio: "5" # Start background writeback at 5%
