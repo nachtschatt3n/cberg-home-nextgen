@@ -190,6 +190,8 @@ spec:
         args:
         - |
           mkdir -p /data/langfuse-uploads
+          mc alias set minio http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+          mc mb minio/langfuse || true
           minio server /data --console-address :9001 --address :9000
         env:
         - name: MINIO_ROOT_USER
