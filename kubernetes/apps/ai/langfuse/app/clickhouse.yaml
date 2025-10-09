@@ -7,28 +7,29 @@ metadata:
 data:
   cluster.xml: |
     <clickhouse>
-        <remote_servers>
-            <default>
-                <shard>
-                    <replica>
-                        <host>127.0.0.1</host>
-                        <port>9000</port>
-                    </replica>
-                </shard>
-            </default>
-        </remote_servers>
         <zookeeper>
             <node>
                 <host>langfuse-zookeeper</host>
                 <port>2181</port>
             </node>
         </zookeeper>
+        <remote_servers>
+            <default>
+                <shard>
+                    <replica>
+                        <host>localhost</host>
+                        <port>9000</port>
+                    </replica>
+                </shard>
+            </default>
+        </remote_servers>
         <distributed_ddl>
             <path>/clickhouse/task_queue/ddl</path>
         </distributed_ddl>
         <macros>
-            <shard>01</shard>
-            <replica>replica_1</replica>
+            <cluster>default</cluster>
+            <shard>1</shard>
+            <replica>langfuse_clickhouse_1</replica>
         </macros>
     </clickhouse>
 ---
