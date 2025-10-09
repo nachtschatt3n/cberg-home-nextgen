@@ -158,7 +158,7 @@ spec:
         - name: CLICKHOUSE_MIGRATION_URL
           value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
-          value: "false"
+          value: "true"
         # Admin initialization (for first-time setup)
         - name: LANGFUSE_INIT_USER_EMAIL
           value: "admin@example.com"
@@ -402,7 +402,7 @@ spec:
         - name: CLICKHOUSE_MIGRATION_URL
           value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
-          value: "false"
+          value: "true"
         resources:
           requests:
             memory: "256Mi"
