@@ -171,9 +171,9 @@ spec:
         - name: LANGFUSE_INIT_PROJECT_NAME
           value: "Home Assistant"
         - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
-          value: "pk-lf-home-assistant-2024"
+          value: "pk-lf-1faaf69e-729d-46f7-8e2b-e7b1b1f335a2"
         - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
-          value: "sk-lf-home-assistant-secret-2024"
+          value: "sk-lf-8185461e-3550-4089-b21a-3bc0148bb0f6"
         resources:
           requests:
             memory: "1Gi"
