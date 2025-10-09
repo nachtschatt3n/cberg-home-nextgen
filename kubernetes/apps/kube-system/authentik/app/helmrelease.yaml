@@ -34,7 +34,7 @@ spec:
         host: "authentik-redis-master"
 
     server:
-      replicas: 2
+      replicas: 3
       env:
         - name: AUTHENTIK_SECRET_KEY
           valueFrom:
@@ -89,7 +89,7 @@ spec:
           memory: 2Gi
 
     worker:
-      replicas: 2
+      replicas: 3
       env:
         - name: AUTHENTIK_SECRET_KEY
           valueFrom:
