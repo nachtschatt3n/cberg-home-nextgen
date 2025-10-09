@@ -2,7 +2,7 @@ machine:
   files:
     # Enable RPS (Receive Packet Steering) to distribute network interrupts across all CPUs
     # This prevents a single CPU from being overwhelmed during high network I/O
-    - path: /etc/udev/rules.d/50-rps.rules
+    - path: /var/etc/udev/rules.d/50-rps.rules
       permissions: 0644
       op: create
       content: |
