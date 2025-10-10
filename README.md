@@ -73,6 +73,8 @@ The cluster runs on enterprise-grade Intel NUC systems with high-speed networkin
 
 **Additional Infrastructure:**
 - **NAS**: UNAS-CBERG at `192.168.31.230` provides bulk storage, backups, and SMB/NFS shares
+- **AI Compute**: Mac Mini M4 Pro for GPU-accelerated AI workloads and local LLM inference
+- **Remote Management**: PiKVM devices provide KVM-over-IP access to all Kubernetes nodes
 - **Network**: UniFi infrastructure with 10GbE backbone and 2.5GbE to compute nodes
 
 ---
@@ -95,11 +97,13 @@ NUCs  UNAS   [APs] (U6+, U6 Pro, U7 Pro, UAP AC LR)
 ```
 
 **Key Network Components:**
-- **Gateway**: DMP-CBERG (UniFi Dream Machine Pro) - Routing, firewall, IDS/IPS
+- **Gateway**: DMP-CBERG (UniFi Dream Machine Pro) - Routing, firewall, IDS/IPS, WireGuard VPN
 - **Core Switch**: Basement-SW-48 with 10GbE SFP+ uplinks
 - **Distribution**: Basement-SW-24-PoE with 2.5GbE to compute nodes
-- **Access Points**: Strategic placement for full wireless coverage
+- **Access Points**: Strategic placement for full wireless coverage (U6+, U6 Pro, U7 Pro, UAP AC LR)
 - **Storage**: UNAS-CBERG connected via 10GbE SFP+ for high-speed data access
+- **Remote Management**: PiKVM devices for KVM-over-IP access to Kubernetes nodes
+- **AI Compute**: Mac Mini M4 Pro for GPU-accelerated machine learning workloads
 
 ---
 
@@ -236,6 +240,55 @@ external.${SECRET_DOMAIN} → ${TUNNEL_ID}.cfargotunnel.com
 - Web Application Firewall (WAF) protection
 - Automatic TLS/SSL via Cloudflare
 
+### VPN Access - UniFi WireGuard
+
+The UniFi Dream Machine Pro provides secure VPN access for remote administration and internal service access:
+
+**Configuration:**
+- **VPN Type**: WireGuard (modern, fast, secure VPN protocol)
+- **Managed By**: UniFi Network Controller on DMP-CBERG
+- **Use Cases**:
+  - Remote access to internal services when away from home
+  - Secure administration of Kubernetes cluster and infrastructure
+  - Access to PiKVM remote management interfaces
+  - Internal DNS resolution via AdGuard Home while connected
+
+**Security Features:**
+- Modern cryptography with WireGuard protocol
+- Peer-to-peer encryption
+- Minimal attack surface
+- Split-tunnel support for selective routing
+- Integration with UniFi Threat Management
+
+**Access:**
+- VPN clients connect to the UniFi Dream Machine Pro
+- Once connected, full access to internal network (192.168.x.x)
+- Automatic DNS configuration points to AdGuard Home
+- Access to all internal services via `*.${SECRET_DOMAIN}`
+
+### Remote Management - PiKVM
+
+PiKVM devices provide hardware-level remote access to Kubernetes nodes for troubleshooting and maintenance:
+
+**Features:**
+- **KVM-over-IP**: Full keyboard, video, and mouse access over network
+- **Remote Power Control**: Power on/off/reset capabilities for each node
+- **BIOS Access**: Pre-boot configuration and troubleshooting without physical access
+- **Virtual Media**: Mount ISO images remotely for OS installation or recovery
+- **Web Interface**: Browser-based access to console and controls
+
+**Deployment:**
+- PiKVM device connected to each Kubernetes node
+- Accessible via VPN or internal network
+- Provides out-of-band management independent of node OS
+- Critical for Talos Linux maintenance and emergency recovery
+
+**Use Cases:**
+- BIOS configuration and firmware updates
+- Talos Linux installation and bootstrapping
+- Emergency recovery when nodes are unresponsive
+- Monitoring boot process and troubleshooting hardware issues
+
 ### Traffic Flow Examples
 
 **Internal Access (LAN Client → Internal Service):**
@@ -296,10 +349,10 @@ The cluster hosts a variety of applications organized by functional category:
 - **InfluxDB** - Time-series database for metrics
 - **phpMyAdmin** - Database administration interface
 
-### 🤖 AI & Machine Learning  
-- **Ollama** - Local LLM inference server
+### 🤖 AI & Machine Learning
+- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro
 - **Open WebUI** - Chat interface for AI models
-- **Langfuse** - LLM observability and analytics
+- **Langfuse** - LLM observability and analytics with S3-compatible MinIO storage
 
 ### 📄 Office & Productivity
 - **Nextcloud** - Self-hosted cloud storage and collaboration
