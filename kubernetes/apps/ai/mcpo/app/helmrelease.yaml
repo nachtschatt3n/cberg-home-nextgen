@@ -52,33 +52,38 @@ spec:
                 pip install --upgrade pip
                 pip install uv
 
-                echo "Copying Node.js to shared volume..."
-                mkdir -p /shared/nodejs/bin /shared/nodejs/lib
+                echo "Installing MCP server npm packages..."
+                npm install -g --prefix /shared \
+                  @upstash/context7-mcp \
+                  prometheus-mcp \
+                  @modelcontextprotocol/server-github
 
-                # Copy Node.js binary and libraries
-                cp /usr/bin/node /shared/nodejs/bin/
-                cp /usr/bin/npm /shared/nodejs/bin/
-                cp /usr/bin/npx /shared/nodejs/bin/
+                echo "Copying Node.js and tools..."
+                mkdir -p /shared/bin
+                cp /usr/bin/node /shared/bin/
+                cp /usr/local/bin/uv /shared/bin/
+                cp /usr/local/bin/uvx /shared/bin/
 
-                # Copy Node.js libraries
-                if [ -d /usr/lib/node_modules ]; then
-                  cp -r /usr/lib/node_modules /shared/nodejs/lib/
-                fi
+                echo "Creating wrapper scripts..."
+                # Create npm wrapper that works with installed packages
+                cat > /shared/bin/npm <<'NPMWRAPPER'
+#!/bin/sh
+export NODE_PATH="/shared/lib/node_modules"
+exec /shared/bin/node /shared/lib/node_modules/npm/bin/npm-cli.js "$@"
+NPMWRAPPER
+                chmod +x /shared/bin/npm
 
-                echo "Copying Python uv to shared volume..."
-                mkdir -p /shared/python/bin
-                cp /usr/local/bin/uv /shared/python/bin/
-                cp /usr/local/bin/uvx /shared/python/bin/
-
-                # Copy Python libraries for uv
-                if [ -d /usr/local/lib/python3.11/site-packages/uv ]; then
-                  mkdir -p /shared/python/lib
-                  cp -r /usr/local/lib/python3.11/site-packages/uv* /shared/python/lib/ || true
-                fi
+                # Create npx wrapper
+                cat > /shared/bin/npx <<'NPXWRAPPER'
+#!/bin/sh
+export NODE_PATH="/shared/lib/node_modules"
+exec /shared/bin/node /shared/lib/node_modules/npm/bin/npx-cli.js "$@"
+NPXWRAPPER
+                chmod +x /shared/bin/npx
 
                 echo "Runtime setup complete"
-                ls -la /shared/nodejs/bin/
-                ls -la /shared/python/bin/
+                ls -la /shared/bin/
+                ls -la /shared/lib/node_modules/ | head -20
         containers:
           app:
             image:
@@ -86,9 +91,9 @@ spec:
               tag: git-44ce6d0
             env:
               - name: PATH
-                value: "/shared/nodejs/bin:/shared/python/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               - name: NODE_PATH
-                value: "/shared/nodejs/lib/node_modules"
+                value: "/shared/lib/node_modules"
               - name: PORT
                 value: "8000"
               - name: API_KEY
