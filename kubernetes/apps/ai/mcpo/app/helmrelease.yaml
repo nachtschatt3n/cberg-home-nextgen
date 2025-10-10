@@ -24,13 +24,16 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    defaultPodOptions:
-      serviceAccountName: mcpo
+    serviceAccount:
+      create: false
+      name: mcpo
     controllers:
       mcpo:
         initContainers:
           runtime-setup:
-            image: python:3.11-slim
+            image:
+              repository: python
+              tag: 3.11-slim
             command:
               - /bin/sh
               - -c
@@ -58,17 +61,11 @@ spec:
 
                 echo "Runtime setup complete"
                 ls -la /shared/bin/
-            volumeMounts:
-              - name: runtime-tools
-                mountPath: /shared
         containers:
           app:
             image:
               repository: ghcr.io/open-webui/mcpo
               tag: git-44ce6d0
-            volumeMounts:
-              - name: runtime-tools
-                mountPath: /shared
             env:
               - name: PATH
                 value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
