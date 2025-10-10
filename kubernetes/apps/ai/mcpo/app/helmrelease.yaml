@@ -141,7 +141,8 @@ spec:
 
     ingress:
       main:
-        enabled: false
+        enabled: true
+        className: internal
         hosts:
           - host: mcpo.${SECRET_DOMAIN}
             paths:
@@ -149,7 +150,10 @@ spec:
                 pathType: Prefix
                 service:
                   name: main
-                  port: 80
+                  port: http
+        tls:
+          - hosts:
+              - mcpo.${SECRET_DOMAIN}
 
     persistence:
       config:
