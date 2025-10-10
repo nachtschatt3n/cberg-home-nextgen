@@ -51,6 +51,16 @@ spec:
                   secretKeyRef:
                     name: mcpo-api-key
                     key: paperless-api-key
+              - name: CONTEXT7_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: mcpo-api-key
+                    key: context7-api-key
+              - name: GITHUB_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: mcpo-api-key
+                    key: github-token
             args:
               - "--port"
               - "8000"
