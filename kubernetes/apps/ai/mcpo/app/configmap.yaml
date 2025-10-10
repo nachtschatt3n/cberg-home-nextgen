@@ -9,15 +9,15 @@ data:
     {
       "mcpServers": {
         "context7": {
-          "command": "npx",
-          "args": ["-y", "@upstash/context7-mcp"],
+          "command": "node",
+          "args": ["/shared/lib/node_modules/@upstash/context7-mcp/dist/index.js"],
           "env": {
             "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
           }
         },
         "prometheus": {
-          "command": "npx",
-          "args": ["prometheus-mcp@latest", "stdio"],
+          "command": "node",
+          "args": ["/shared/lib/node_modules/prometheus-mcp/dist/index.mjs", "stdio"],
           "env": {
             "PROMETHEUS_URL": "http://prometheus-operated.monitoring.svc.cluster.local:9090"
           }
@@ -35,8 +35,8 @@ data:
           "env": {}
         },
         "github": {
-          "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "command": "node",
+          "args": ["/shared/lib/node_modules/@modelcontextprotocol/server-github/dist/index.js"],
           "env": {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
           }
