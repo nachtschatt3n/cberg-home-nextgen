@@ -65,20 +65,16 @@ spec:
                 cp /usr/local/bin/uvx /shared/bin/
 
                 echo "Creating wrapper scripts..."
-                # Create npm wrapper that works with installed packages
-                cat > /shared/bin/npm <<'NPMWRAPPER'
-#!/bin/sh
-export NODE_PATH="/shared/lib/node_modules"
-exec /shared/bin/node /shared/lib/node_modules/npm/bin/npm-cli.js "$@"
-NPMWRAPPER
+                # Create npm wrapper
+                echo '#!/bin/sh' > /shared/bin/npm
+                echo 'export NODE_PATH="/shared/lib/node_modules"' >> /shared/bin/npm
+                echo 'exec /shared/bin/node /shared/lib/node_modules/npm/bin/npm-cli.js "$@"' >> /shared/bin/npm
                 chmod +x /shared/bin/npm
 
                 # Create npx wrapper
-                cat > /shared/bin/npx <<'NPXWRAPPER'
-#!/bin/sh
-export NODE_PATH="/shared/lib/node_modules"
-exec /shared/bin/node /shared/lib/node_modules/npm/bin/npx-cli.js "$@"
-NPXWRAPPER
+                echo '#!/bin/sh' > /shared/bin/npx
+                echo 'export NODE_PATH="/shared/lib/node_modules"' >> /shared/bin/npx
+                echo 'exec /shared/bin/node /shared/lib/node_modules/npm/bin/npx-cli.js "$@"' >> /shared/bin/npx
                 chmod +x /shared/bin/npx
 
                 echo "Runtime setup complete"
