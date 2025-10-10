@@ -8,33 +8,38 @@ data:
   config.json: |
     {
       "mcpServers": {
-        "time": {
-          "command": "python3",
-          "args": ["-c", "import datetime, json; print(json.dumps([{\"type\": \"datetime\", \"content\": datetime.datetime.now().isoformat()}]))"]
-        },
-        "memory": {
-          "command": "python3",
-          "args": ["-c", "import json; print(json.dumps([{\"type\": \"context\", \"content\": {\"message\": \"Memory context available\"}}]))"]
-        },
-        "paperless": {
-          "command": "python3",
-          "args": ["-c", "import json, os; import urllib.request as req; req.urlopen('http://paperless-ngx.office.svc.cluster.local:8000').read(); print(json.dumps([{\"type\": \"document\", \"content\": {\"message\": \"Paperless documents retrieved\"}}]))"]
-        },
         "context7": {
-          "command": "python3",
-          "args": ["-c", "import json, os; import urllib.request as req; headers = {'Authorization': 'Bearer ' + os.environ.get('CONTEXT7_API_KEY')}; req = req.Request('https://mcp.context7.com/mcp', headers=headers); print(json.dumps([{\"type\": \"context\", \"content\": json.loads(req.urlopen(req).read())}]))"]
-        },
-        "alertmanager": {
-          "command": "python3",
-          "args": ["-c", "import json, urllib.request as req; print(json.dumps([{\"type\": \"alert\", \"content\": json.loads(req.urlopen('http://alertmanager-operated.monitoring.svc.cluster.local:9093/api/v2/alerts').read())}]))"]
+          "command": "npx",
+          "args": ["-y", "@upstash/context7-mcp"],
+          "env": {
+            "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
+          }
         },
         "prometheus": {
-          "command": "python3",
-          "args": ["-c", "import json, urllib.request as req; print(json.dumps([{\"type\": \"alert\", \"content\": json.loads(req.urlopen('http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/alerts').read())}]))"]
+          "command": "npx",
+          "args": ["prometheus-mcp@latest", "stdio"],
+          "env": {
+            "PROMETHEUS_URL": "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+          }
+        },
+        "alertmanager": {
+          "command": "uvx",
+          "args": ["alertmanager-mcp-server"],
+          "env": {
+            "ALERTMANAGER_URL": "http://alertmanager-operated.monitoring.svc.cluster.local:9093"
+          }
+        },
+        "kubernetes": {
+          "command": "uvx",
+          "args": ["mcp-kubernetes-server", "--disable-write", "--disable-delete"],
+          "env": {}
         },
         "github": {
-          "command": "python3",
-          "args": ["-c", "import json, os; import urllib.request as req; headers = {'Authorization': 'token ' + os.environ.get('GITHUB_TOKEN')}; req = req.Request('https://api.github.com/user/repos', headers=headers); print(json.dumps([{\"type\": \"repository\", \"content\": json.loads(req.urlopen(req).read())}]))"]
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+          }
         }
       }
     }
