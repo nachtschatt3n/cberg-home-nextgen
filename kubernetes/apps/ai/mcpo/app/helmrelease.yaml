@@ -72,14 +72,6 @@ spec:
             env:
               - name: PATH
                 value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            probes:
-              liveness:
-                enabled: true
-              readiness:
-                enabled: true
-              startup:
-                enabled: true
-            env:
               - name: PORT
                 value: "8000"
               - name: API_KEY
@@ -102,6 +94,13 @@ spec:
                   secretKeyRef:
                     name: mcpo-api-key
                     key: github-token
+            probes:
+              liveness:
+                enabled: true
+              readiness:
+                enabled: true
+              startup:
+                enabled: true
             args:
               - "--port"
               - "8000"
