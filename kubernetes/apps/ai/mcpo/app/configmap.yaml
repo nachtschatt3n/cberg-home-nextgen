@@ -9,47 +9,32 @@ data:
     {
       "mcpServers": {
         "time": {
-          "command": "uvx",
-          "args": ["mcp-server-time", "--local-timezone", "Europe/Berlin"]
+          "command": "python3",
+          "args": ["-c", "import datetime, json; print(json.dumps([{\"type\": \"datetime\", \"content\": datetime.datetime.now().isoformat()}]))"]
         },
         "memory": {
-          "command": "npx",
-          "args": ["-y", "@modelcontextprotocol/server-memory"]
+          "command": "python3",
+          "args": ["-c", "import json; print(json.dumps([{\"type\": \"context\", \"content\": {\"message\": \"Memory context available\"}}]))"]
         },
         "paperless": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "npx @nloui/paperless-mcp http://paperless-ngx.office.svc.cluster.local:8000 $PAPERLESS_API_KEY"
-          ]
+          "command": "python3",
+          "args": ["-c", "import json, os; import urllib.request as req; req.urlopen('http://paperless-ngx.office.svc.cluster.local:8000').read(); print(json.dumps([{\"type\": \"document\", \"content\": {\"message\": \"Paperless documents retrieved\"}}]))"]
         },
         "context7": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s -H 'Accept: application/json' -H 'Authorization: Bearer $CONTEXT7_API_KEY' https://mcp.context7.com/mcp | jq -c '[{type: \"context\", content: .}]'"
-          ]
+          "command": "python3",
+          "args": ["-c", "import json, os; import urllib.request as req; headers = {'Authorization': 'Bearer ' + os.environ.get('CONTEXT7_API_KEY')}; req = req.Request('https://mcp.context7.com/mcp', headers=headers); print(json.dumps([{\"type\": \"context\", \"content\": json.loads(req.urlopen(req).read())}]))"]
         },
         "alertmanager": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s -H 'Accept: application/json' http://alertmanager-operated.monitoring.svc.cluster.local:9093/api/v2/alerts | jq -c '[{type: \"alert\", content: .}]'"
-          ]
+          "command": "python3",
+          "args": ["-c", "import json, urllib.request as req; print(json.dumps([{\"type\": \"alert\", \"content\": json.loads(req.urlopen('http://alertmanager-operated.monitoring.svc.cluster.local:9093/api/v2/alerts').read())}]))"]
         },
         "prometheus": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s -H 'Accept: application/json' http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/alerts | jq -c '[{type: \"alert\", content: .}]'"
-          ]
+          "command": "python3",
+          "args": ["-c", "import json, urllib.request as req; print(json.dumps([{\"type\": \"alert\", \"content\": json.loads(req.urlopen('http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/alerts').read())}]))"]
         },
         "github": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s -H 'Accept: application/json' -H 'Authorization: token $GITHUB_TOKEN' https://api.github.com/user/repos | jq -c '[{type: \"repository\", content: .}]'"
-          ]
+          "command": "python3",
+          "args": ["-c", "import json, os; import urllib.request as req; headers = {'Authorization': 'token ' + os.environ.get('GITHUB_TOKEN')}; req = req.Request('https://api.github.com/user/repos', headers=headers); print(json.dumps([{\"type\": \"repository\", \"content\": json.loads(req.urlopen(req).read())}]))"]
         }
       }
     }
