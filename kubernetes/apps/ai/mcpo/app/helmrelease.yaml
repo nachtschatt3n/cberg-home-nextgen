@@ -52,15 +52,33 @@ spec:
                 pip install --upgrade pip
                 pip install uv
 
-                echo "Copying binaries to shared volume..."
-                mkdir -p /shared/bin
-                cp /usr/bin/node /shared/bin/ || true
-                cp /usr/bin/npx /shared/bin/ || true
-                cp /usr/local/bin/uv /shared/bin/ || true
-                cp /usr/local/bin/uvx /shared/bin/ || true
+                echo "Copying Node.js to shared volume..."
+                mkdir -p /shared/nodejs/bin /shared/nodejs/lib
+
+                # Copy Node.js binary and libraries
+                cp /usr/bin/node /shared/nodejs/bin/
+                cp /usr/bin/npm /shared/nodejs/bin/
+                cp /usr/bin/npx /shared/nodejs/bin/
+
+                # Copy Node.js libraries
+                if [ -d /usr/lib/node_modules ]; then
+                  cp -r /usr/lib/node_modules /shared/nodejs/lib/
+                fi
+
+                echo "Copying Python uv to shared volume..."
+                mkdir -p /shared/python/bin
+                cp /usr/local/bin/uv /shared/python/bin/
+                cp /usr/local/bin/uvx /shared/python/bin/
+
+                # Copy Python libraries for uv
+                if [ -d /usr/local/lib/python3.11/site-packages/uv ]; then
+                  mkdir -p /shared/python/lib
+                  cp -r /usr/local/lib/python3.11/site-packages/uv* /shared/python/lib/ || true
+                fi
 
                 echo "Runtime setup complete"
-                ls -la /shared/bin/
+                ls -la /shared/nodejs/bin/
+                ls -la /shared/python/bin/
         containers:
           app:
             image:
@@ -68,7 +86,9 @@ spec:
               tag: git-44ce6d0
             env:
               - name: PATH
-                value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/shared/nodejs/bin:/shared/python/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              - name: NODE_PATH
+                value: "/shared/nodejs/lib/node_modules"
               - name: PORT
                 value: "8000"
               - name: API_KEY
