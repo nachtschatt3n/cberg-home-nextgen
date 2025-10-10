@@ -27,14 +27,14 @@ spec:
     controllers:
       mcpo:
         initContainers:
-          node-setup:
-            image: node:21-slim
+          python-setup:
+            image: python:3.11-slim
             command:
               - /bin/sh
               - -c
               - |
                 apt-get update && \
-                apt-get install -y curl jq
+                apt-get install -y python3-urllib3
             volumeMounts:
               - name: node-modules
                 mountPath: /shared
