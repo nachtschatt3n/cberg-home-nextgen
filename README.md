@@ -73,7 +73,7 @@ The cluster runs on enterprise-grade Intel NUC systems with high-speed networkin
 
 **Additional Infrastructure:**
 - **NAS**: UNAS-CBERG at `192.168.31.230` provides bulk storage, backups, and SMB/NFS shares
-- **AI Compute**: Mac Mini M4 Pro for GPU-accelerated AI workloads and local LLM inference
+- **AI Compute**: Mac Mini M4 Pro running LM Studio for GPU-accelerated LLM inference with Metal Performance Shaders (MPS)
 - **Remote Management**: PiKVM devices provide KVM-over-IP access to all Kubernetes nodes
 - **Network**: UniFi infrastructure with 10GbE backbone and 2.5GbE to compute nodes
 
@@ -103,7 +103,7 @@ NUCs  UNAS   [APs] (U6+, U6 Pro, U7 Pro, UAP AC LR)
 - **Access Points**: Strategic placement for full wireless coverage (U6+, U6 Pro, U7 Pro, UAP AC LR)
 - **Storage**: UNAS-CBERG connected via 10GbE SFP+ for high-speed data access
 - **Remote Management**: PiKVM devices for KVM-over-IP access to Kubernetes nodes
-- **AI Compute**: Mac Mini M4 Pro for GPU-accelerated machine learning workloads
+- **AI Compute**: Mac Mini M4 Pro running LM Studio with OpenAI-compatible API endpoints and Metal acceleration
 
 ---
 
@@ -350,7 +350,7 @@ The cluster hosts a variety of applications organized by functional category:
 - **phpMyAdmin** - Database administration interface
 
 ### 🤖 AI & Machine Learning
-- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro
+- **LM Studio** - Local LLM inference server running on Mac Mini M4 Pro with OpenAI-compatible API endpoints
 - **Open WebUI** - Chat interface for AI models
 - **Langfuse** - LLM observability and analytics with S3-compatible MinIO storage
 
