@@ -24,10 +24,11 @@ data:
           ]
         },
         "context7": {
-          "url": "https://mcp.context7.com/mcp",
-          "headers": {
-            "CONTEXT7_API_KEY": "$CONTEXT7_API_KEY"
-          }
+          "command": "sh",
+          "args": [
+            "-c",
+            "curl -s -H 'Accept: application/json' -H 'Authorization: Bearer $CONTEXT7_API_KEY' https://mcp.context7.com/mcp | jq -c '[{type: \"context\", content: .}]'"
+          ]
         },
         "alertmanager": {
           "command": "sh",
