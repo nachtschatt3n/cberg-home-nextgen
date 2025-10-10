@@ -105,21 +105,156 @@ NUCs  UNAS   [APs] (U6+, U6 Pro, U7 Pro, UAP AC LR)
 
 ## 🛡️ DNS & Security
 
-Network-wide ad blocking and DNS resolution is handled by [AdGuard Home](kubernetes/apps/network/internal/adguard-home/app/helmrelease.yaml) running in the Kubernetes cluster:
+The cluster implements a multi-layered DNS architecture combining internal service discovery, external DNS automation, and secure external access through Cloudflare Tunnel.
 
-**AdGuard Home Configuration:**
-- **Service IP**: `192.168.55.5` (LoadBalancer service)
+### DNS Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "External Network"
+        Internet[Internet]
+        CF[Cloudflare]
+    end
+
+    subgraph "Internal Network"
+        Clients[LAN Clients]
+        AdGuard[AdGuard Home<br/>192.168.55.5]
+    end
+
+    subgraph "Kubernetes Cluster"
+        K8sGW[k8s-gateway<br/>192.168.55.101]
+        ExtDNS[external-dns]
+        CloudFlared[cloudflared tunnel]
+        ExtIngress[External Ingress<br/>ingress-nginx]
+        IntIngress[Internal Ingress<br/>ingress-nginx]
+        Apps[Applications]
+    end
+
+    Internet -->|HTTPS| CF
+    CF -->|Cloudflare Tunnel| CloudFlared
+    CloudFlared --> ExtIngress
+    ExtIngress --> Apps
+
+    Clients -->|DNS Queries| AdGuard
+    AdGuard -->|Internal *.domain| K8sGW
+    AdGuard -->|External Queries| CF
+    K8sGW --> IntIngress
+    IntIngress --> Apps
+
+    ExtDNS -.->|Manages Records| CF
+    K8sGW -.->|Watches| IntIngress
+    ExtDNS -.->|Watches| ExtIngress
+```
+
+### AdGuard Home - Network DNS & Ad Blocking
+
+[AdGuard Home](kubernetes/apps/network/internal/adguard-home/app/helmrelease.yaml) provides network-wide ad blocking and DNS resolution:
+
+**Configuration:**
+- **Service IP**: `192.168.55.5` (LoadBalancer via Cilium LBIPAM)
 - **Web Interface**: Available via internal ingress with TLS
 - **DNS Protocols**: Standard DNS (53), DNS-over-TLS (853), DNS-over-HTTPS via ingress
-- **Upstream Resolvers**: 
-  - Cloudflare DNS-over-HTTPS and DNS-over-TLS for public domains
-  - Quad9 DNS-over-HTTPS for redundancy
-- Split-DNS for internal domains (`*.example.com` → `192.168.55.101`)
+- **Upstream Resolvers**:
+  - Cloudflare DNS-over-HTTPS (1.1.1.1) and DNS-over-TLS for public domains
+  - Quad9 DNS-over-HTTPS (9.9.9.9) for redundancy
+- **Split-DNS Configuration**:
+  - Internal domains (`*.${SECRET_DOMAIN}`) → Forward to k8s-gateway at `192.168.55.101`
+  - External domains → Resolve via Cloudflare/Quad9
+  - Ad blocking rules applied to all external queries
 
 **Client Configuration:**
-- Configure UniFi DHCP to push `192.168.55.5` as the primary DNS server
-- Clients can use encrypted DNS via DoT port 853 or DoH via the internal ingress
-- Split-DNS automatically resolves internal domains while blocking ads for external traffic
+- UniFi DHCP server pushes `192.168.55.5` as primary DNS to all LAN clients
+- Clients can optionally use encrypted DNS via DoT (port 853) or DoH (via ingress)
+- All DNS queries benefit from network-wide ad blocking and malware protection
+
+### k8s-gateway - Internal Service Discovery
+
+[k8s-gateway](kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml) provides DNS resolution for internal Kubernetes services:
+
+**Configuration:**
+- **Service IP**: `192.168.55.101` (LoadBalancer via Cilium LBIPAM)
+- **Domain**: `*.${SECRET_DOMAIN}` (configured in cluster secrets)
+- **Function**: Resolves DNS queries for services with `ingress-class: internal`
+- **Watched Resources**: Ingress and Service objects in the cluster
+- **TTL**: 1 second for fast failover and updates
+
+**How It Works:**
+1. k8s-gateway watches all Ingress resources with `ingressClassName: internal`
+2. When a client queries `service.${SECRET_DOMAIN}`, AdGuard Home forwards to k8s-gateway
+3. k8s-gateway returns the internal ingress LoadBalancer IP
+4. Client connects directly to the service via internal network
+
+**Example:**
+```
+home-assistant.${SECRET_DOMAIN} → 192.168.55.101 → Internal Ingress → Home Assistant Pod
+```
+
+### external-dns - Automated DNS Management
+
+[external-dns](kubernetes/apps/network/external/external-dns/helmrelease.yaml) automatically manages DNS records in Cloudflare:
+
+**Configuration:**
+- **Provider**: Cloudflare DNS with API token authentication
+- **Domain Filter**: `${SECRET_DOMAIN}` (configured in cluster secrets)
+- **Sources**: Ingress resources with `ingressClassName: external` and DNSEndpoint CRDs
+- **Record Type**: CNAME records proxied through Cloudflare
+- **TXT Ownership**: `k8s.` prefix for record ownership tracking
+
+**How It Works:**
+1. external-dns watches Ingress resources with `ingressClassName: external`
+2. For each external ingress with annotation `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"`
+3. Creates a CNAME record: `service.${SECRET_DOMAIN} → external.${SECRET_DOMAIN}`
+4. Cloudflare proxies the request through their CDN for DDoS protection
+
+**DNSEndpoint CRD:**
+The master CNAME record is managed via DNSEndpoint:
+```yaml
+external.${SECRET_DOMAIN} → ${TUNNEL_ID}.cfargotunnel.com
+```
+
+### Cloudflare Tunnel - Secure External Access
+
+[cloudflared](kubernetes/apps/network/external/cloudflared/helmrelease.yaml) provides secure external access without opening firewall ports:
+
+**Configuration:**
+- **Tunnel Mode**: Runs as a Cloudflare Tunnel client
+- **Protocol**: QUIC with post-quantum encryption support
+- **Target**: Routes to external ingress-nginx LoadBalancer
+- **Authentication**: Tunnel credentials stored in secret
+
+**How It Works:**
+1. cloudflared establishes an outbound connection to Cloudflare's network
+2. External requests to `*.${SECRET_DOMAIN}` hit Cloudflare's edge
+3. Cloudflare proxies the request through the encrypted tunnel
+4. Request arrives at external ingress-nginx in the cluster
+5. ingress-nginx routes to the appropriate service
+
+**Security Benefits:**
+- No inbound firewall rules required
+- All traffic encrypted through Cloudflare Tunnel
+- DDoS protection via Cloudflare's network
+- Web Application Firewall (WAF) protection
+- Automatic TLS/SSL via Cloudflare
+
+### Traffic Flow Examples
+
+**Internal Access (LAN Client → Internal Service):**
+```
+Client → AdGuard Home (192.168.55.5)
+       → k8s-gateway (192.168.55.101)
+       → Internal Ingress
+       → Service Pod
+```
+
+**External Access (Internet → Public Service):**
+```
+Internet → Cloudflare DNS (${SECRET_DOMAIN})
+        → Cloudflare CDN (proxied)
+        → Cloudflare Tunnel (QUIC/TLS)
+        → cloudflared pod
+        → External Ingress
+        → Service Pod
+```
 
 ---
 
