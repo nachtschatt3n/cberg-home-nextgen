@@ -8,8 +8,8 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 <div align="center">
 
-[![Talos](https://img.shields.io/badge/Talos-v1.9.4-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.32.2-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
+[![Talos](https://img.shields.io/badge/Talos-v1.11.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
 [![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.4.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
@@ -32,7 +32,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 ### Core Components
 
-- **Operating System**: [Talos Linux v1.9.4](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration
+- **Operating System**: [Talos Linux v1.11.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration
 - **Container Runtime**: [Containerd 2.0.2](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
 - **Networking**: [Cilium](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
@@ -216,22 +216,54 @@ This Git repository contains the following directories:
 
 ## 🔧 Development
 
-### Prerequisites
+### Prerequisites & Tool Management
 
-- [mise](https://mise.jdx.dev/) for tool management
-- [kubectl](https://kubernetes.io/docs/reference/kubectl/) for cluster access
-- [talosctl](https://www.talos.dev/) for Talos management
-- [flux](https://fluxcd.io/) for GitOps operations
+This repository uses [mise](https://mise.jdx.dev/) for unified development tool management. All required tools are defined in [`.mise.toml`](.mise.toml) and automatically installed and configured when you enter the project directory.
+
+**Managed Tools:**
+- **Python 3.13** - For automation scripts and utilities
+- **uv** - Fast Python package installer
+- **kubectl 1.34.0** - Kubernetes CLI
+- **flux 2.4.0** - GitOps toolkit CLI
+- **talosctl 1.11.0** - Talos Linux management
+- **talhelper 3.0.37** - Talos configuration helper
+- **sops 3.9.4** - Secrets encryption
+- **helm 3.17.1** - Kubernetes package manager
+- **kustomize 5.6.0** - Kubernetes manifest customization
+- **age 1.2.1** - Encryption tool for SOPS
+- **Additional utilities**: jq, yq, cloudflared, gum, kubeconform
+
+**Environment Variables:**
+
+When in the project directory, mise automatically sets:
+```bash
+KUBECONFIG=$PWD/kubeconfig              # Cluster access
+KUBERNETES_DIR=$PWD/kubernetes          # Kubernetes manifests
+SOPS_AGE_KEY_FILE=$PWD/age.key         # SOPS encryption key
+TALOSCONFIG=$PWD/kubernetes/bootstrap/talos/clusterconfig/talosconfig
+VIRTUAL_ENV=$PWD/.venv                  # Python virtual environment
+```
 
 ### Getting Started
 
 ```bash
-# Install development tools
+# Install mise (if not already installed)
+# macOS: brew install mise
+# Other: https://mise.jdx.dev/getting-started.html
+
+# Trust and install all tools
 mise trust
 mise install
 
-# Access cluster  
-export KUBECONFIG=$PWD/kubeconfig
+# Environment is auto-configured when entering directory
+# Verify tools are available
+mise ls
+python --version   # Python 3.13.8
+kubectl version    # kubectl 1.34.0
+flux version       # flux 2.4.0
+
+# Access cluster (KUBECONFIG already set by mise)
+kubectl get nodes
 
 # Monitor Flux
 flux get kustomizations -A
@@ -240,6 +272,10 @@ flux get helmreleases -A
 # Debug applications
 kubectl get pods -A
 kubectl logs -n <namespace> <pod-name>
+
+# Upgrade tools to latest versions
+mise upgrade
+mise prune  # Clean up old versions
 ```
 
 ---
