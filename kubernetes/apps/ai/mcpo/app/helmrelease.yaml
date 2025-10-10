@@ -26,25 +26,31 @@ spec:
   values:
     controllers:
       mcpo:
+        initContainers:
+          node-setup:
+            image: node:21-slim
+            command:
+              - /bin/sh
+              - -c
+              - |
+                apt-get update && \
+                apt-get install -y curl kubectl && \
+                npm install -g @modelcontextprotocol/context7-mcp @modelcontextprotocol/alertmanager-mcp @modelcontextprotocol/prometheus-mcp @github/mcp-server && \
+                cp -r /usr/local/lib/node_modules /shared/
+            volumeMounts:
+              - name: node-modules
+                mountPath: /shared
         containers:
           app:
             image:
               repository: ghcr.io/open-webui/mcpo
               tag: git-44ce6d0
+            volumeMounts:
+              - name: node-modules
+                mountPath: /usr/local/lib/node_modules
             env:
               - name: PATH
-                value: "/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/include/node:/usr/local/node/bin"
-            lifecycle:
-              postStart:
-                exec:
-                  command:
-                    - /bin/sh
-                    - -c
-                    - |
-                      apt-get update && \
-                      apt-get install -y curl && \
-                      curl -fsSL https://deb.nodesource.com/setup_21.x | bash - && \
-                      apt-get install -y nodejs
+                value: "/usr/local/lib/node_modules/.bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             probes:
               liveness:
                 enabled: true
@@ -117,3 +123,9 @@ spec:
               - path: /config/config.json
                 subPath: config.json
                 readOnly: true
+      node-modules:
+        type: emptyDir
+        advancedMounts:
+          mcpo:
+            app:
+              - path: /usr/local/lib/node_modules
