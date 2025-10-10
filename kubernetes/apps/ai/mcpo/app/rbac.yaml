@@ -25,6 +25,16 @@ rules:
       - serviceaccounts
       - events
     verbs: ["get", "list", "watch"]
+  # Core resource status subresources
+  - apiGroups: [""]
+    resources:
+      - pods/status
+      - pods/log
+      - services/status
+      - nodes/status
+      - persistentvolumeclaims/status
+      - persistentvolumes/status
+    verbs: ["get", "list"]
   # Apps resources
   - apiGroups: ["apps"]
     resources:
@@ -33,12 +43,26 @@ rules:
       - replicasets
       - statefulsets
     verbs: ["get", "list", "watch"]
+  # Apps status subresources
+  - apiGroups: ["apps"]
+    resources:
+      - deployments/status
+      - daemonsets/status
+      - replicasets/status
+      - statefulsets/status
+    verbs: ["get", "list"]
   # Batch resources
   - apiGroups: ["batch"]
     resources:
       - jobs
       - cronjobs
     verbs: ["get", "list", "watch"]
+  # Batch status subresources
+  - apiGroups: ["batch"]
+    resources:
+      - jobs/status
+      - cronjobs/status
+    verbs: ["get", "list"]
   # Networking resources
   - apiGroups: ["networking.k8s.io"]
     resources:
