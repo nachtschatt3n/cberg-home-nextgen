@@ -24,36 +24,20 @@ data:
           ]
         },
         "context7": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -X POST -H 'Authorization: Bearer $CONTEXT7_API_KEY' -H 'Content-Type: application/json' https://context7.com/api/v1/mcp"
-          ]
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/context7-mcp", "$CONTEXT7_API_KEY", "--api-url", "mcp.context7.com/mcp"]
         },
         "alertmanager": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s http://alertmanager-operated.monitoring.svc.cluster.local:9093/api/v2/alerts"
-          ]
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/alertmanager-mcp", "--url", "http://alertmanager-operated.monitoring.svc.cluster.local:9093"]
         },
         "prometheus": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -s http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/alerts"
-          ]
-        },
-        "kubernetes": {
-          "command": "kubectl",
-          "args": ["get", "--raw", "/api/v1/nodes"]
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/prometheus-mcp", "--url", "http://prometheus-operated.monitoring.svc.cluster.local:9090"]
         },
         "github": {
-          "command": "sh",
-          "args": [
-            "-c",
-            "curl -H 'Authorization: token $GITHUB_TOKEN' https://api.github.com/user"
-          ]
+          "command": "npx",
+          "args": ["-y", "@github/mcp-server", "$GITHUB_TOKEN"]
         }
       }
     }
