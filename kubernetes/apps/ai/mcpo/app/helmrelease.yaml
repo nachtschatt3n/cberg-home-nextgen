@@ -24,19 +24,42 @@ spec:
   uninstall:
     keepHistory: false
   values:
+    defaultPodOptions:
+      serviceAccountName: mcpo
     controllers:
       mcpo:
         initContainers:
-          python-setup:
+          runtime-setup:
             image: python:3.11-slim
             command:
               - /bin/sh
               - -c
               - |
-                apt-get update && \
-                apt-get install -y python3-urllib3
+                set -e
+                echo "Installing Node.js and npm..."
+                apt-get update
+                apt-get install -y curl ca-certificates gnupg
+                mkdir -p /etc/apt/keyrings
+                curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+                echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list
+                apt-get update
+                apt-get install -y nodejs
+
+                echo "Installing Python uv..."
+                pip install --upgrade pip
+                pip install uv
+
+                echo "Copying binaries to shared volume..."
+                mkdir -p /shared/bin
+                cp /usr/bin/node /shared/bin/ || true
+                cp /usr/bin/npx /shared/bin/ || true
+                cp /usr/local/bin/uv /shared/bin/ || true
+                cp /usr/local/bin/uvx /shared/bin/ || true
+
+                echo "Runtime setup complete"
+                ls -la /shared/bin/
             volumeMounts:
-              - name: node-modules
+              - name: runtime-tools
                 mountPath: /shared
         containers:
           app:
@@ -44,11 +67,11 @@ spec:
               repository: ghcr.io/open-webui/mcpo
               tag: git-44ce6d0
             volumeMounts:
-              - name: node-modules
-                mountPath: /usr/local/lib/node_modules
+              - name: runtime-tools
+                mountPath: /shared
             env:
               - name: PATH
-                value: "/usr/local/lib/node_modules/.bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             probes:
               liveness:
                 enabled: true
@@ -121,9 +144,11 @@ spec:
               - path: /config/config.json
                 subPath: config.json
                 readOnly: true
-      node-modules:
+      runtime-tools:
         type: emptyDir
         advancedMounts:
           mcpo:
             app:
-              - path: /usr/local/lib/node_modules
+              - path: /shared
+            runtime-setup:
+              - path: /shared
