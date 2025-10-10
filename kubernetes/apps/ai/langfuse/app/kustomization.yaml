@@ -10,4 +10,4 @@ resources:
   - ./langfuse.yaml
   - ./ingress.yaml
   - ./secret.sops.yaml
-  - ./s3-credentials.yaml
+  - ./s3-credentials.sops.yaml

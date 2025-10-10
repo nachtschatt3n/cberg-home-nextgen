@@ -189,10 +189,27 @@ spec:
         - -c
         args:
         - |
-          mkdir -p /data/langfuse-uploads
-          mc alias set minio http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
-          mc mb minio/langfuse || true
-          minio server /data --console-address :9001 --address :9000
+          # Start MinIO server in background
+          minio server /data --console-address :9001 --address :9000 &
+          MINIO_PID=$!
+
+          # Wait for MinIO to be ready
+          echo "Waiting for MinIO to start..."
+          for i in {1..30}; do
+            if mc alias set minio http://localhost:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} 2>/dev/null; then
+              echo "MinIO is ready"
+              break
+            fi
+            echo "Waiting for MinIO... attempt $i/30"
+            sleep 2
+          done
+
+          # Create bucket if it doesn't exist
+          mc mb minio/langfuse 2>/dev/null || echo "Bucket 'langfuse' already exists or could not be created"
+          mc ls minio/langfuse && echo "Bucket 'langfuse' is accessible"
+
+          # Keep container running by waiting for MinIO process
+          wait $MINIO_PID
         env:
         - name: MINIO_ROOT_USER
           valueFrom:
