@@ -22,6 +22,38 @@ data:
             "-c",
             "npx @nloui/paperless-mcp http://paperless-ngx.office.svc.cluster.local:8000 $PAPERLESS_API_KEY"
           ]
+        },
+        "context7": {
+          "command": "sh",
+          "args": [
+            "-c",
+            "curl -X POST -H 'Authorization: Bearer $CONTEXT7_API_KEY' -H 'Content-Type: application/json' https://context7.com/api/v1/mcp"
+          ]
+        },
+        "alertmanager": {
+          "command": "sh",
+          "args": [
+            "-c",
+            "curl -s http://alertmanager-operated.monitoring.svc.cluster.local:9093/api/v2/alerts"
+          ]
+        },
+        "prometheus": {
+          "command": "sh",
+          "args": [
+            "-c",
+            "curl -s http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/alerts"
+          ]
+        },
+        "kubernetes": {
+          "command": "kubectl",
+          "args": ["get", "--raw", "/api/v1/nodes"]
+        },
+        "github": {
+          "command": "sh",
+          "args": [
+            "-c",
+            "curl -H 'Authorization: token $GITHUB_TOKEN' https://api.github.com/user"
+          ]
         }
       }
     }
