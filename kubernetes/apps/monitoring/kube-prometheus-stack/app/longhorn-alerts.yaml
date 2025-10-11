@@ -21,8 +21,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn volume {{ $labels.volume }} usage is high"
-            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Consider expanding the volume or cleaning up data."
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} usage is high"
+            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Consider expanding the volume or cleaning up data."
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
         - alert: LonghornVolumeUsageCritical
@@ -33,8 +33,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn volume {{ $labels.volume }} usage is critically high"
-            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Immediate action required to prevent storage exhaustion."
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} usage is critically high"
+            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Immediate action required to prevent storage exhaustion."
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
         - alert: LonghornVolumeUsageEmergency
@@ -45,8 +45,8 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn volume {{ $labels.volume }} is nearly full"
-            description: "Longhorn volume {{ $labels.volume }} in namespace {{ $labels.pvc_namespace }} is {{ $value | printf \"%.1f\" }}% full. Storage exhaustion imminent!"
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} is nearly full"
+            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Storage exhaustion imminent!"
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
     - name: longhorn.volume.health
