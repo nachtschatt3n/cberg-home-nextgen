@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: sha-b85fa05-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
+              tag: sha-b521904-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
               pullPolicy: Always
             env:
               - name: TZ
