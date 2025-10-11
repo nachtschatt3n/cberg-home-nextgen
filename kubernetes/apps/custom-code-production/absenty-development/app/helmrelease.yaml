@@ -32,6 +32,10 @@ spec:
               repository: ghcr.io/nachtschatt3n/absenty
               tag: sha-7d72e03-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
               pullPolicy: Always
+            command:
+              - bash
+              - -lc
+              - bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
