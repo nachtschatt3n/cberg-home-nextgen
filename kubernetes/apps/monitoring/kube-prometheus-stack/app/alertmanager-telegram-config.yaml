@@ -29,7 +29,7 @@ spec:
           - name: category
             value: storage
         groupWait: 1s
-        groupInterval: 1s
+        groupInterval: 86400s  # 24 hours - prevent frequent updates
         repeatInterval: 86400s  # 24 hours
         continue: false
   receivers:
