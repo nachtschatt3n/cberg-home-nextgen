@@ -21,6 +21,17 @@ spec:
         matchers:
           - name: alertname
             value: Watchdog
+      # Low-impact warning alerts - once per day
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: warning
+          - name: category
+            value: storage
+        groupWait: 1s
+        groupInterval: 1s
+        repeatInterval: 86400s  # 24 hours
+        continue: false
   receivers:
     # Null receiver for suppressed alerts (like Watchdog)
     - name: "null"
@@ -44,7 +55,6 @@ spec:
             {{- range $i, $alert := .Alerts }}
             {{- if lt $i 10 }}
             • {{- if $alert.Annotations.summary }} {{ $alert.Annotations.summary }}{{- else }} {{ $alert.Labels.alertname }}{{- end }}
-            {{- if $alert.Labels.volume }} ({{ $alert.Labels.volume }}){{- end }}
             {{- if $alert.Labels.node }} [{{ $alert.Labels.node }}]{{- end }}
             {{- end }}
             {{- end }}
