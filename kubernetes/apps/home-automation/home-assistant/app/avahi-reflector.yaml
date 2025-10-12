@@ -16,7 +16,6 @@ data:
     deny-interfaces=lo
     ratelimit-interval-usec=1000000
     ratelimit-burst=1000
-    enable-reflector=yes
     enable-dbus=no
     disallow-other-stacks=no
 
