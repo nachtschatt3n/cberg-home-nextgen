@@ -41,6 +41,10 @@ spec:
                 set -e
                 echo "===== Starting tool installation ====="
 
+                # Create shared directory structure
+                mkdir -p /shared/bin
+                mkdir -p /shared/lib/node_modules
+
                 # Update package lists
                 apt-get update
 
@@ -105,7 +109,6 @@ spec:
 
                 # Copy binaries to shared
                 echo "Copying binaries..."
-                mkdir -p /shared/bin
                 cp /usr/bin/node /shared/bin/
                 cp /usr/bin/zsh /shared/bin/
                 cp /usr/bin/git /shared/bin/
