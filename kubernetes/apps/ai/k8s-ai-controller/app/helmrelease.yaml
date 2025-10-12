@@ -108,11 +108,10 @@ spec:
                 # Install MCP servers
                 echo "Installing MCP servers..."
                 npm install -g --prefix /shared \
-                  @modelcontextprotocol/server-kubernetes \
                   @modelcontextprotocol/server-github \
                   @modelcontextprotocol/server-filesystem \
                   @upstash/context7-mcp \
-                  prometheus-mcp
+                  prometheus-mcp || echo "Warning: Some MCP servers failed to install"
 
                 # Copy binaries to shared
                 echo "Copying binaries..."
