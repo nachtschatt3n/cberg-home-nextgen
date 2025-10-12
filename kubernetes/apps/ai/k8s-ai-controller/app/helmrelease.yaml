@@ -121,18 +121,10 @@ spec:
 
                 # Create npm/npx wrappers
                 echo "Creating wrapper scripts..."
-                cat > /shared/bin/npm <<'EOF'
-#!/bin/sh
-export NODE_PATH="/shared/lib/node_modules"
-exec /shared/bin/node /shared/lib/node_modules/npm/bin/npm-cli.js "$@"
-EOF
+                printf '#!/bin/sh\nexport NODE_PATH="/shared/lib/node_modules"\nexec /shared/bin/node /shared/lib/node_modules/npm/bin/npm-cli.js "$@"\n' > /shared/bin/npm
                 chmod +x /shared/bin/npm
 
-                cat > /shared/bin/npx <<'EOF'
-#!/bin/sh
-export NODE_PATH="/shared/lib/node_modules"
-exec /shared/bin/node /shared/lib/node_modules/npm/bin/npx-cli.js "$@"
-EOF
+                printf '#!/bin/sh\nexport NODE_PATH="/shared/lib/node_modules"\nexec /shared/bin/node /shared/lib/node_modules/npm/bin/npx-cli.js "$@"\n' > /shared/bin/npx
                 chmod +x /shared/bin/npx
 
                 # Setup zsh
