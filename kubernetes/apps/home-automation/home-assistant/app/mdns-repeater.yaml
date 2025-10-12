@@ -20,13 +20,52 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: mdns-repeater
-        image: angelnu/multicast-relay:latest
+        image: python:3.11-alpine
         imagePullPolicy: IfNotPresent
-        args:
-        - --interfaces
-        - enp86s0
-        - cilium_host
-        - --verbose
+        command:
+        - python3
+        - -u
+        - -c
+        - |
+          import socket
+          import struct
+          import select
+          import sys
+          
+          MCAST_GRP = '224.0.0.251'
+          MCAST_PORT = 5353
+          
+          interfaces = ['enp86s0', 'cilium_host']
+          
+          print(f"Starting mDNS repeater for interfaces: {', '.join(interfaces)}")
+          
+          sockets = {}
+          for iface in interfaces:
+              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+              sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+              sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, (iface + '\0').encode())
+              sock.bind(('', MCAST_PORT))
+              mreq = struct.pack('4sl', socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+              sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+              sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+              sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+              sockets[iface] = sock
+              print(f"✓ Listening on {iface}")
+          
+          print("mDNS repeater running - forwarding packets between interfaces")
+          
+          while True:
+              readable, _, _ = select.select(list(sockets.values()), [], [])
+              for sock in readable:
+                  data, addr = sock.recvfrom(10240)
+                  recv_iface = [k for k, v in sockets.items() if v == sock][0]
+                  
+                  for iface, send_sock in sockets.items():
+                      if iface != recv_iface:
+                          try:
+                              send_sock.sendto(data, (MCAST_GRP, MCAST_PORT))
+                          except Exception as e:
+                              print(f"Error forwarding {recv_iface} -> {iface}: {e}")
         securityContext:
           privileged: true
           capabilities:
@@ -39,9 +78,9 @@ spec:
         resources:
           requests:
             cpu: 10m
-            memory: 16Mi
+            memory: 32Mi
           limits:
-            memory: 64Mi
+            memory: 128Mi
       tolerations:
       - effect: NoSchedule
         operator: Exists
