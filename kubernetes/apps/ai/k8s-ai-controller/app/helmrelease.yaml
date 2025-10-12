@@ -76,7 +76,7 @@ spec:
                 # Install flux CLI
                 echo "Installing flux CLI..."
                 curl -s https://fluxcd.io/install.sh | bash
-                mv /root/.local/bin/flux /shared/bin/
+                cp /usr/local/bin/flux /shared/bin/
 
                 # Install GitHub CLI
                 echo "Installing GitHub CLI..."
