@@ -20,22 +20,13 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: mdns-repeater
-        image: alpine:3.19
+        image: angelnu/multicast-relay:latest
         imagePullPolicy: IfNotPresent
-        command:
-        - /bin/sh
-        - -c
-        - |
-          set -e
-          echo "Installing mdns-repeater..."
-          apk add --no-cache mdns-repeater
-          
-          echo "Starting mdns-repeater for interfaces: enp86s0 cilium_host"
-          echo "This will bridge mDNS traffic between physical network and Kubernetes pod network"
-          
-          # mdns-repeater syntax: mdns-repeater-client [interface1] [interface2] ...
-          # It will forward mDNS packets between all specified interfaces
-          exec mdns-repeater enp86s0 cilium_host
+        args:
+        - --interfaces
+        - enp86s0
+        - cilium_host
+        - --verbose
         securityContext:
           privileged: true
           capabilities:
