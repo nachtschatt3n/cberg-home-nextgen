@@ -66,7 +66,7 @@ spec:
     - patch: |
         - op: replace
           path: /spec/template/spec/containers/0/image
-          value: ghcr.io/nachtschatt3n/k8s-self-ai-ops:1.0.3
+          value: ghcr.io/nachtschatt3n/k8s-self-ai-ops:1.0.4
       target:
         kind: Deployment
         name: k8s-mcp-server
