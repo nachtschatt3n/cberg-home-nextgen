@@ -34,6 +34,12 @@ spec:
             image:
               repository: debian
               tag: bookworm-slim
+            env:
+              - name: GITHUB_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: k8s-ai-controller-api-key
+                    key: github-token
             command:
               - /bin/bash
               - -c
@@ -45,8 +51,6 @@ spec:
                 echo "Creating shared directories..."
                 mkdir -p /shared/bin
                 mkdir -p /shared/lib/node_modules
-                ls -la /shared/
-                ls -la /shared/bin || echo "/shared/bin does not exist"
 
                 # Update package lists
                 apt-get update
@@ -145,6 +149,23 @@ spec:
                 /shared/bin/node --version
                 /shared/bin/git --version
                 /shared/bin/zsh --version
+
+                # Clone cberg-home-nextgen repository
+                echo "===== Cloning cberg-home-nextgen repository ====="
+                cd /workspace
+                if [ -d "cberg-home-nextgen" ]; then
+                  echo "Repository already exists, pulling latest changes..."
+                  cd cberg-home-nextgen
+                  git pull || echo "Failed to pull, will continue with existing repo"
+                else
+                  echo "Cloning repository..."
+                  if [ -n "$GITHUB_TOKEN" ] && [ "$GITHUB_TOKEN" != "" ]; then
+                    git clone https://oauth2:${GITHUB_TOKEN}@github.com/nachtschatt3n/cberg-home-nextgen.git
+                  else
+                    git clone https://github.com/nachtschatt3n/cberg-home-nextgen.git
+                  fi
+                fi
+                echo "===== Repository ready at /workspace/cberg-home-nextgen ====="
         containers:
           app:
             image:
@@ -174,10 +195,25 @@ spec:
             probes:
               liveness:
                 enabled: true
+                spec:
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
               readiness:
                 enabled: true
+                spec:
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
               startup:
                 enabled: true
+                spec:
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 60
             args:
               - "--port"
               - "8000"
@@ -244,4 +280,6 @@ spec:
         advancedMounts:
           k8s-ai-controller:
             app:
+              - path: /workspace
+            setup-tools:
               - path: /workspace
