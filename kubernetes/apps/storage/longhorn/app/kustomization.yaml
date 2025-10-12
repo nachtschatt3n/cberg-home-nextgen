@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - helmrelease.yaml
   - ingress.yaml
+  - limitrange.yaml
   - secret.sops.yaml
   - alertmanager-telegram-config.yaml
   - backup-credentials.sops.yaml

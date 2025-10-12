@@ -9,6 +9,8 @@ spec:
   url: https://github.com/nachtschatt3n/k8s-self-ai-ops
   ref:
     tag: v1.0.1
+  secretRef:
+    name: github-k8s-self-ai-ops
   ignore: |
     # exclude all
     /*

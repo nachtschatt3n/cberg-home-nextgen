@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mdns-repeater
+  namespace: home-automation
+  labels:
+    app.kubernetes.io/name: mdns-repeater
+    app.kubernetes.io/component: mdns
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mdns-repeater
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mdns-repeater
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: mdns-repeater
+        image: alpine:3.19
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Installing mdns-repeater..."
+          apk add --no-cache mdns-repeater
+
+          echo "Starting mdns-repeater for interfaces: enp86s0 cilium_host"
+          echo "This will bridge mDNS traffic between physical network and Kubernetes pod network"
+
+          # mdns-repeater syntax: mdns-repeater-client [interface1] [interface2] ...
+          # It will forward mDNS packets between all specified interfaces
+          exec mdns-repeater enp86s0 cilium_host
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        env:
+        - name: TZ
+          value: "Europe/Berlin"
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+
