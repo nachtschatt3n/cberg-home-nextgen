@@ -161,7 +161,6 @@ spec:
                   secretKeyRef:
                     name: k8s-ai-controller-api-key
                     key: github-token
-                    optional: true
               - name: KUBERNETES_SERVICE_HOST
                 value: "kubernetes.default.svc"
               - name: KUBERNETES_SERVICE_PORT
