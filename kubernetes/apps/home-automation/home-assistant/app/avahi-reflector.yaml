@@ -12,7 +12,7 @@ data:
     browse-domains=local
     use-ipv4=yes
     use-ipv6=yes
-    allow-interfaces=eth0,cilium_host
+    allow-interfaces=bond0,cilium_host
     deny-interfaces=lo
     ratelimit-interval-usec=1000000
     ratelimit-burst=1000
