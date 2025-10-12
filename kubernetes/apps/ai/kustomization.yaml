@@ -10,3 +10,4 @@ resources:
   - ./mcpo/ks.yaml
   - ./langfuse/ks.yaml
   - ./k8s-ai-controller/ks.yaml
+  - ./k8s-mcp-server/ks.yaml
