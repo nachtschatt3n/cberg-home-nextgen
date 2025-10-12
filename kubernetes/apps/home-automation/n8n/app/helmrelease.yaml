@@ -81,6 +81,8 @@ spec:
           value: "https://n8n.${SECRET_DOMAIN}"
         WEBHOOK_URL:
           value: "https://n8n.${SECRET_DOMAIN}"
+        N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:
+          value: "true"
       persistence:
         enabled: true
         type: existing
