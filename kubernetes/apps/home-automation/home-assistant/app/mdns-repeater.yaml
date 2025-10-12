@@ -31,14 +31,14 @@ spec:
           import struct
           import select
           import sys
-          
+
           MCAST_GRP = '224.0.0.251'
           MCAST_PORT = 5353
-          
+
           interfaces = ['enp86s0', 'cilium_host']
-          
+
           print(f"Starting mDNS repeater for interfaces: {', '.join(interfaces)}")
-          
+
           sockets = {}
           for iface in interfaces:
               sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -51,15 +51,15 @@ spec:
               sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
               sockets[iface] = sock
               print(f"✓ Listening on {iface}")
-          
+
           print("mDNS repeater running - forwarding packets between interfaces")
-          
+
           while True:
               readable, _, _ = select.select(list(sockets.values()), [], [])
               for sock in readable:
                   data, addr = sock.recvfrom(10240)
                   recv_iface = [k for k, v in sockets.items() if v == sock][0]
-                  
+
                   for iface, send_sock in sockets.items():
                       if iface != recv_iface:
                           try:
