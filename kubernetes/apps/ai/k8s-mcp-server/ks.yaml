@@ -36,6 +36,15 @@ spec:
       target:
         kind: ConfigMap
         name: k8s-mcp-server-config
+    # Add imagePullSecrets to deployment
+    - patch: |
+        - op: add
+          path: /spec/template/spec/imagePullSecrets
+          value:
+            - name: ghcr-k8s-self-ai-ops
+      target:
+        kind: Deployment
+        name: k8s-mcp-server
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
@@ -58,7 +67,6 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-    namespace: flux-system
   path: ./kubernetes/apps/ai/k8s-mcp-server/app
   decryption:
     provider: sops
