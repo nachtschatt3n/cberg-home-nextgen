@@ -45,6 +45,14 @@ spec:
       target:
         kind: Deployment
         name: k8s-mcp-server
+    # Update image tag to use specific version instead of latest
+    - patch: |
+        - op: replace
+          path: /spec/template/spec/containers/0/image
+          value: ghcr.io/nachtschatt3n/k8s-self-ai-ops:1.0.2
+      target:
+        kind: Deployment
+        name: k8s-mcp-server
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
