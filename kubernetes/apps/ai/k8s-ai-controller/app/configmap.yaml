@@ -1,0 +1,51 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-ai-controller-config
+  namespace: ai
+data:
+  config.json: |
+    {
+      "mcpServers": {
+        "kubernetes": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-kubernetes"
+          ],
+          "env": {
+            "KUBERNETES_SERVICE_HOST": "kubernetes.default.svc",
+            "KUBERNETES_SERVICE_PORT": "443"
+          }
+        },
+        "filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/workspace"
+          ]
+        },
+        "github": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-github"
+          ],
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+          }
+        },
+        "prometheus": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "prometheus-mcp"
+          ],
+          "env": {
+            "PROMETHEUS_URL": "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+          }
+        }
+      }
+    }
