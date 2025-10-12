@@ -36,6 +36,17 @@ spec:
       target:
         kind: ConfigMap
         name: k8s-mcp-server-config
+    # Enable GitOps repository access
+    - patch: |
+        - op: replace
+          path: /data/MCP_GITOPS_ENABLED
+          value: "true"
+        - op: add
+          path: /data/MCP_GITOPS_REPO_URL
+          value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+      target:
+        kind: ConfigMap
+        name: k8s-mcp-server-config
     # Add imagePullSecrets to deployment
     - patch: |
         - op: add
