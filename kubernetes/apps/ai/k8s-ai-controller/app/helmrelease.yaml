@@ -42,8 +42,11 @@ spec:
                 echo "===== Starting tool installation ====="
 
                 # Create shared directory structure
+                echo "Creating shared directories..."
                 mkdir -p /shared/bin
                 mkdir -p /shared/lib/node_modules
+                ls -la /shared/
+                ls -la /shared/bin || echo "/shared/bin does not exist"
 
                 # Update package lists
                 apt-get update
