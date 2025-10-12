@@ -8,17 +8,6 @@ data:
   config.json: |
     {
       "mcpServers": {
-        "kubernetes": {
-          "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-kubernetes"
-          ],
-          "env": {
-            "KUBERNETES_SERVICE_HOST": "kubernetes.default.svc",
-            "KUBERNETES_SERVICE_PORT": "443"
-          }
-        },
         "filesystem": {
           "command": "npx",
           "args": [
