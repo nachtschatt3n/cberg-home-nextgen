@@ -27,7 +27,8 @@ data:
         "prometheus": {
           "command": "/shared/bin/node",
           "args": [
-            "/shared/lib/node_modules/prometheus-mcp/dist/index.mjs"
+            "/shared/lib/node_modules/prometheus-mcp/dist/index.mjs",
+            "stdio"
           ],
           "env": {
             "PROMETHEUS_URL": "http://prometheus-operated.monitoring.svc.cluster.local:9090"
