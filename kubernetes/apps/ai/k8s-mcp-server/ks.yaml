@@ -44,6 +44,12 @@ spec:
         - op: add
           path: /data/MCP_GITOPS_REPO_URL
           value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+        - op: add
+          path: /data/GIT_CONFIG_GLOBAL
+          value: "/data/cache/gitconfig"
+        - op: add
+          path: /data/GIT_CONFIG_PARAMETERS
+          value: "'safe.directory=/data/gitops-repo'"
       target:
         kind: ConfigMap
         name: k8s-mcp-server-config
