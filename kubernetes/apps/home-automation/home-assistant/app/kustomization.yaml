@@ -4,4 +4,4 @@ kind: Kustomization
 namespace: home-automation
 resources:
   - ./helmrelease.yaml
-  - ./avahi-reflector.yaml
+  - ./mdns-repeater.yaml
