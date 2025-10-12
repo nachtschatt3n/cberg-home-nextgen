@@ -1,0 +1,65 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &name k8s-mcp-server
+  namespace: flux-system
+spec:
+  targetNamespace: ai
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *name
+  interval: 10m
+  timeout: 5m
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: k8s-self-ai-ops
+    namespace: flux-system
+  path: ./kubernetes
+  patches:
+    # Skip creating namespace (already exists)
+    - patch: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ai-system
+        $patch: delete
+      target:
+        kind: Namespace
+    # Update ConfigMap MCP_NAMESPACE value
+    - patch: |
+        - op: replace
+          path: /data/MCP_NAMESPACE
+          value: "ai"
+      target:
+        kind: ConfigMap
+        name: k8s-mcp-server-config
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: k8s-mcp-server
+      namespace: ai
+  dependsOn:
+    - name: k8s-mcp-server-secrets
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: k8s-mcp-server-secrets
+  namespace: flux-system
+spec:
+  targetNamespace: ai
+  interval: 10m
+  timeout: 5m
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./kubernetes/apps/ai/k8s-mcp-server/app
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
