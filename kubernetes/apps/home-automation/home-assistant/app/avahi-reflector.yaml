@@ -17,7 +17,6 @@ data:
     ratelimit-interval-usec=1000000
     ratelimit-burst=1000
     enable-reflector=yes
-    reflect-ipv=yes
     enable-dbus=no
     disallow-other-stacks=no
 
@@ -35,7 +34,6 @@ data:
     [reflector]
     enable-reflector=yes
     reflect-ipv=yes
-    reflect-filters=_airplay._tcp.local,_raop._tcp.local,_mediaremotetv._tcp.local,_companion-link._tcp.local,_airport._tcp.local,_sleep-proxy._udp.local,_touch-able._tcp.local,_appletv-v2._tcp.local,_hscp._tcp.local
 
     [rlimits]
     rlimit-core=0
