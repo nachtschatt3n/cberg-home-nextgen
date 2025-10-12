@@ -9,28 +9,25 @@ data:
     {
       "mcpServers": {
         "filesystem": {
-          "command": "npx",
+          "command": "/shared/bin/node",
           "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
+            "/shared/lib/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js",
             "/workspace"
           ]
         },
         "github": {
-          "command": "npx",
+          "command": "/shared/bin/node",
           "args": [
-            "-y",
-            "@modelcontextprotocol/server-github"
+            "/shared/lib/node_modules/@modelcontextprotocol/server-github/dist/index.js"
           ],
           "env": {
             "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
           }
         },
         "prometheus": {
-          "command": "npx",
+          "command": "/shared/bin/node",
           "args": [
-            "-y",
-            "prometheus-mcp"
+            "/shared/lib/node_modules/prometheus-mcp/dist/index.mjs"
           ],
           "env": {
             "PROMETHEUS_URL": "http://prometheus-operated.monitoring.svc.cluster.local:9090"
