@@ -1,0 +1,17 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: k8s-self-ai-ops
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/nachtschatt3n/k8s-self-ai-ops
+  ref:
+    tag: v1.0.1
+  ignore: |
+    # exclude all
+    /*
+    # include kubernetes directory
+    !/kubernetes
+
