@@ -8,7 +8,7 @@ spec:
   interval: 10m
   url: https://github.com/nachtschatt3n/k8s-self-ai-ops
   ref:
-    tag: v1.0.2
+    tag: v1.0.3
   secretRef:
     name: github-k8s-self-ai-ops
   ignore: |

@@ -6,11 +6,11 @@ The k8s-self-ai-ops MCP server is successfully deployed and running on your home
 
 ### Deployment Summary
 
-**Date**: October 12, 2025  
-**Version**: v1.0.2  
-**Namespace**: `ai`  
-**Status**: ✅ Running and Healthy  
-**Tools**: 26 MCP tools registered  
+**Date**: October 12, 2025
+**Version**: v1.0.2
+**Namespace**: `ai`
+**Status**: ✅ Running and Healthy
+**Tools**: 26 MCP tools registered
 
 ### Resources Deployed
 
@@ -242,8 +242,8 @@ git add -A && git commit -m "feat(ai): Upgrade k8s-self-ai-ops to v1.0.3" && git
 
 ---
 
-**Project**: k8s-self-ai-ops  
-**Repository**: https://github.com/nachtschatt3n/k8s-self-ai-ops  
-**Container**: ghcr.io/nachtschatt3n/k8s-self-ai-ops:1.0.2  
+**Project**: k8s-self-ai-ops
+**Repository**: https://github.com/nachtschatt3n/k8s-self-ai-ops
+**Container**: ghcr.io/nachtschatt3n/k8s-self-ai-ops:1.0.2
 **Status**: 🚀 PRODUCTION READY
 
