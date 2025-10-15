@@ -63,7 +63,7 @@ spec:
               - name: K8S_GIT_BRANCH
                 value: "main"
               - name: K8S_REPO_PATH
-                value: "/mnt/k8s-repo/repo"
+                value: "/app/k8s-repo"
               - name: GITHUB_USER
                 value: "AI-SRE"
               - name: GITHUB_EMAIL
@@ -185,16 +185,6 @@ spec:
               - ai-sre.${SECRET_DOMAIN}
 
     persistence:
-      k8s-repo:
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 5Gi
-        advancedMounts:
-          ai-sre:
-            app:
-              - path: /mnt/k8s-repo
-
       storage:
         type: persistentVolumeClaim
         storageClass: longhorn
