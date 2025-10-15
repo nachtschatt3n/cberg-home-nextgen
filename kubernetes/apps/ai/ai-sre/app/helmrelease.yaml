@@ -56,6 +56,13 @@ spec:
                   git clone https://github.com/nachtschatt3n/cberg-home-nextgen.git /app/k8s-repo
                 fi
                 echo "Repository cloned successfully to /app/k8s-repo"
+                
+                # Fix ownership for the main container user (1000)
+                chown -R 1000:1000 /app/k8s-repo
+                
+                # Configure git safe directory globally
+                git config --global --add safe.directory /app/k8s-repo
+                
                 ls -la /app/k8s-repo/
         containers:
           app:
@@ -105,6 +112,14 @@ spec:
             envFrom:
               - secretRef:
                   name: ai-sre-secrets
+            command:
+              - /bin/sh
+              - -c
+              - |
+                # Configure git safe directory for the ai-sre user
+                git config --global --add safe.directory /app/k8s-repo || true
+                # Start the main application
+                exec python /app/src/mcp_server.py
             probes:
               liveness:
                 enabled: true
