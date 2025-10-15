@@ -58,6 +58,7 @@ data:
     kubelet:
       enabled: true
       serviceMonitor:
+        interval: 30s
         metricRelabelings:
           # Remove duplicate labels provided by k3s
           - action: keep
