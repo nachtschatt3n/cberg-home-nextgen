@@ -79,11 +79,11 @@ spec:
               
               # Monitoring Endpoints
               - name: PROMETHEUS_URL
-                value: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+                value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
               - name: ALERTMANAGER_URL
                 value: "http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093"
               - name: GRAFANA_URL
-                value: "http://grafana.monitoring.svc.cluster.local:3000"
+                value: "http://grafana.monitoring.svc.cluster.local:80"
               
               # Security Configuration
               - name: REQUIRE_AUTH
