@@ -123,6 +123,11 @@ spec:
             env:
               - name: BYTEBOT_DESKTOP_BASE_URL
                 value: http://bytebot-desktop:9990
+              - name: OPENAI_BASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: bytebot-secrets
+                    key: OPENAI_BASE_URL
             envFrom:
               - secretRef:
                   name: bytebot-secrets
@@ -263,6 +268,7 @@ spec:
           postgres:
             postgres:
               - path: /var/lib/postgresql/data
+                subPath: pgdata
 
       desktop-data:
         type: persistentVolumeClaim
