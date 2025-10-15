@@ -1,0 +1,196 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: ai-sre
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    serviceAccount:
+      create: true
+      name: ai-sre
+
+    controllers:
+      ai-sre:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/ai-sre
+              tag: latest
+              pullPolicy: Always
+            env:
+              - name: MCP_SERVER_PORT
+                value: "8080"
+              - name: AGENT_LOG_LEVEL
+                value: "INFO"
+              - name: SOPS_ENABLED
+                value: "true"
+              - name: CONFIG_FILE
+                value: "/app/config/config.yaml"
+              - name: RUNBOOKS_PATH
+                value: "/app/runbooks"
+              - name: LOGS_PATH
+                value: "/app/logs"
+              - name: CACHE_PATH
+                value: "/app/cache"
+              - name: WORK_PATH
+                value: "/app/work"
+              # Service endpoints for monitoring integrations
+              - name: PROMETHEUS_URL
+                value: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+              - name: ALERTMANAGER_URL  
+                value: "http://prometheus-alertmanager.monitoring.svc.cluster.local:9093"
+              - name: GRAFANA_URL
+                value: "http://grafana.monitoring.svc.cluster.local:3000"
+            envFrom:
+              - secretRef:
+                  name: ai-sre-secrets
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 8080
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ready
+                    port: 8080
+                  initialDelaySeconds: 10
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 8080
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 60
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 1Gi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false  # ai-sre needs to write to /tmp for sops operations
+              capabilities:
+                drop:
+                  - ALL
+
+    service:
+      main:
+        controller: ai-sre
+        type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            port: 8080
+            targetPort: 8080
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "AI SRE"
+          gethomepage.dev/group: "AI & Automation"
+          gethomepage.dev/icon: "mdi:robot"
+          gethomepage.dev/description: "AI-powered Site Reliability Engineering toolkit"
+        hosts:
+          - host: ai-sre.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - ai-sre.${SECRET_DOMAIN}
+
+    persistence:
+      storage:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 10Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/storage
+                subPath: storage
+              - path: /app/runbooks
+                subPath: runbooks
+      
+      logs:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/logs
+
+      cache:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 2Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/cache
+
+      work:
+        type: emptyDir
+        sizeLimit: 1Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/work
+
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /tmp
