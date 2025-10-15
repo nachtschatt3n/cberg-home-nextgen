@@ -30,6 +30,10 @@ spec:
 
     controllers:
       ai-sre:
+        pod:
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
         containers:
           app:
             image:
