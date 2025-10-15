@@ -113,7 +113,8 @@ spec:
                 memory: 4Gi
             securityContext:
               privileged: true
-              # Required for desktop environment
+              runAsUser: 0  # Run as root for desktop environment
+              runAsGroup: 0
 
       # Bytebot Agent (AI coordination service)
       agent:
