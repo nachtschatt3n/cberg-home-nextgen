@@ -160,7 +160,7 @@ data:
               storageClassName: longhorn
               resources:
                 requests:
-                  storage: 25Gi
+                  storage: 35Gi
       additionalServiceMonitors:
         - name: longhorn
           namespaceSelector:
