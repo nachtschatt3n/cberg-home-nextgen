@@ -77,6 +77,21 @@ spec:
 
       # Bytebot Desktop (Virtual Desktop Environment)
       desktop:
+        initContainers:
+          fix-permissions:
+            image:
+              repository: busybox
+              tag: latest
+            command:
+              - sh
+              - -c
+              - |
+                chown -R 1000:1000 /home/user
+                chmod -R 755 /home/user
+                chmod 1777 /tmp
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
         containers:
           desktop:
             image:
@@ -113,8 +128,8 @@ spec:
                 memory: 4Gi
             securityContext:
               privileged: true
-              runAsUser: 0  # Run as root for desktop environment
-              runAsGroup: 0
+              runAsUser: 1000  # Run as user after permissions fixed by initContainer
+              runAsGroup: 1000
 
       # Bytebot Agent (AI coordination service)
       agent:
@@ -280,6 +295,11 @@ spec:
         advancedMounts:
           desktop:
             desktop:
+              - path: /home/user
+                subPath: home
+              - path: /tmp
+                subPath: tmp
+            fix-permissions:
               - path: /home/user
                 subPath: home
               - path: /tmp
