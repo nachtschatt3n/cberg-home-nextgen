@@ -52,9 +52,7 @@ spec:
               # Kubernetes Configuration
               - name: KUBE_NAMESPACE
                 value: "default"
-              - name: KUBECONFIG_PATH
-                value: "/root/.kube/config"
-              
+
               # Git Repository Configuration (handled internally by entrypoint)
               - name: K8S_GIT_REPO
                 value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
