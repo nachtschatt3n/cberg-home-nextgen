@@ -81,7 +81,7 @@ spec:
               - name: PROMETHEUS_URL
                 value: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
               - name: ALERTMANAGER_URL
-                value: "http://prometheus-alertmanager.monitoring.svc.cluster.local:9093"
+                value: "http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093"
               - name: GRAFANA_URL
                 value: "http://grafana.monitoring.svc.cluster.local:3000"
               
