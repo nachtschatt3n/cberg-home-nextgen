@@ -4,5 +4,5 @@ kind: Kustomization
 namespace: ai
 resources:
   - secret.sops.yaml
-  - ghcr-secret.sops.yaml
-
+  - rbac.yaml
+  - helmrelease.yaml
