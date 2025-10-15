@@ -1,0 +1,287 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: bytebot
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      # PostgreSQL Database
+      postgres:
+        containers:
+          postgres:
+            image:
+              repository: postgres
+              tag: 16-alpine
+            env:
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: bytebot-secrets
+                    key: POSTGRES_PASSWORD
+              - name: POSTGRES_USER
+                value: postgres
+              - name: POSTGRES_DB
+                value: bytebotdb
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - pg_isready
+                      - -U
+                      - postgres
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - pg_isready
+                      - -U
+                      - postgres
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+
+      # Bytebot Desktop (Virtual Desktop Environment)
+      desktop:
+        containers:
+          desktop:
+            image:
+              repository: ghcr.io/bytebot-ai/bytebot-desktop
+              tag: edge
+            env:
+              - name: DISPLAY
+                value: ":0"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9990
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9990
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 2
+                memory: 4Gi
+            securityContext:
+              privileged: true
+              # Required for desktop environment
+
+      # Bytebot Agent (AI coordination service)
+      agent:
+        containers:
+          agent:
+            image:
+              repository: ghcr.io/bytebot-ai/bytebot-agent
+              tag: edge
+            env:
+              - name: BYTEBOT_DESKTOP_BASE_URL
+                value: http://bytebot-desktop:9990
+            envFrom:
+              - secretRef:
+                  name: bytebot-secrets
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9991
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9991
+                  initialDelaySeconds: 10
+                  periodSeconds: 5
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 1
+                memory: 1Gi
+
+      # Bytebot UI (Web interface)
+      ui:
+        containers:
+          ui:
+            image:
+              repository: ghcr.io/bytebot-ai/bytebot-ui
+              tag: edge
+            env:
+              - name: NODE_ENV
+                value: production
+              - name: BYTEBOT_AGENT_BASE_URL
+                value: http://bytebot-agent:9991
+              - name: BYTEBOT_DESKTOP_VNC_URL
+                value: http://bytebot-desktop:9990/websockify
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9992
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 9992
+                  initialDelaySeconds: 10
+                  periodSeconds: 5
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+
+    service:
+      postgres:
+        controller: postgres
+        type: ClusterIP
+        ports:
+          postgres:
+            protocol: TCP
+            port: 5432
+            targetPort: 5432
+      
+      desktop:
+        controller: desktop
+        type: ClusterIP
+        ports:
+          desktop:
+            protocol: TCP
+            port: 9990
+            targetPort: 9990
+      
+      agent:
+        controller: agent
+        type: ClusterIP
+        ports:
+          agent:
+            protocol: TCP
+            port: 9991
+            targetPort: 9991
+      
+      main:
+        controller: ui
+        type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            port: 9992
+            targetPort: 9992
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Bytebot"
+          gethomepage.dev/group: "AI & Automation"
+          gethomepage.dev/icon: "mdi:robot"
+          gethomepage.dev/description: "AI Desktop Agent - Complete autonomous tasks"
+        hosts:
+          - host: bytebot.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - bytebot.${SECRET_DOMAIN}
+
+    persistence:
+      postgres-data:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 10Gi
+        advancedMounts:
+          postgres:
+            postgres:
+              - path: /var/lib/postgresql/data
+
+      desktop-data:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 20Gi
+        advancedMounts:
+          desktop:
+            desktop:
+              - path: /home/user
+                subPath: home
+              - path: /tmp
+                subPath: tmp
+
+      desktop-shm:
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 2Gi
+        advancedMounts:
+          desktop:
+            desktop:
+              - path: /dev/shm
