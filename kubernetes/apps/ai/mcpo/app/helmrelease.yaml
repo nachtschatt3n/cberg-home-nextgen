@@ -141,7 +141,7 @@ spec:
 
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: internal
         hosts:
           - host: mcpo.${SECRET_DOMAIN}

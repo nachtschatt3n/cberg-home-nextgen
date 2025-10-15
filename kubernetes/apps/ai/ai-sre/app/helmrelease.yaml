@@ -162,7 +162,7 @@ spec:
 
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
