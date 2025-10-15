@@ -116,7 +116,7 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /ready
+                    path: /health
                     port: 8080
                   initialDelaySeconds: 10
                   periodSeconds: 5
