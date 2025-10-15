@@ -41,6 +41,7 @@ operator:
     enabled: true
     serviceMonitor:
       enabled: true
+      interval: "30s"
   dashboards:
     enabled: true
 prometheus:
@@ -48,6 +49,7 @@ prometheus:
   serviceMonitor:
     enabled: true
     trustCRDsExist: true
+    interval: "30s"
 rollOutCiliumPods: true
 routingMode: native
 securityContext:
