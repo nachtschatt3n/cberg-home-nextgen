@@ -30,96 +30,75 @@ spec:
 
     controllers:
       ai-sre:
-        initContainers:
-          clone-repo:
-            image:
-              repository: alpine/git
-              tag: latest
-              pullPolicy: IfNotPresent
-            env:
-              - name: GITHUB_REPO
-                value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
-              - name: GITHUB_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: ai-sre-secrets
-                    key: GITHUB_TOKEN
-            command:
-              - /bin/sh
-              - -c
-              - |
-                set -e
-                echo "Cloning GitOps repository..."
-                if [ -n "$GITHUB_TOKEN" ] && [ "$GITHUB_TOKEN" != "" ]; then
-                  git clone https://oauth2:${GITHUB_TOKEN}@github.com/nachtschatt3n/cberg-home-nextgen.git /app/k8s-repo
-                else
-                  git clone https://github.com/nachtschatt3n/cberg-home-nextgen.git /app/k8s-repo
-                fi
-                echo "Repository cloned successfully to /app/k8s-repo"
-                
-                # Fix ownership for the main container user (1000)
-                chown -R 1000:1000 /app/k8s-repo
-                
-                # Configure git safe directory globally
-                git config --global --add safe.directory /app/k8s-repo
-                
-                ls -la /app/k8s-repo/
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ai-sre
-              tag: latest
+              tag: v2.0.2
               pullPolicy: Always
             env:
+              # MCP Server Configuration
               - name: MCP_SERVER_PORT
                 value: "8080"
               - name: AGENT_LOG_LEVEL
                 value: "INFO"
-              - name: SOPS_ENABLED
-                value: "true"
-              - name: CONFIG_FILE
-                value: "/app/config/config.yaml"
-              - name: RUNBOOKS_PATH
-                value: "/app/runbooks"
-              - name: LOGS_PATH
-                value: "/app/logs"
-              - name: CACHE_PATH
-                value: "/app/cache"
-              - name: WORK_PATH
-                value: "/app/work"
-              # Service endpoints for monitoring integrations
-              - name: PROMETHEUS_URL
-                value: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
-              - name: ALERTMANAGER_URL  
-                value: "http://prometheus-alertmanager.monitoring.svc.cluster.local:9093"
-              - name: GRAFANA_URL
-                value: "http://grafana.monitoring.svc.cluster.local:3000"
-              # Git and repository configuration
-              - name: LOCAL_REPO_PATH
-                value: "/app/k8s-repo"
-              - name: GITHUB_REPO
-                value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
-              # Kubernetes and Flux configuration
-              - name: KUBE_NAMESPACE
-                value: "default"
-              - name: FLUX_NAMESPACE
-                value: "flux-system"
-              # Command execution configuration
               - name: AGENT_WORKDIR
                 value: "/app/work"
               - name: COMMAND_TIMEOUT
                 value: "60"
+              - name: DRY_RUN
+                value: "false"
+              
+              # Kubernetes Configuration
+              - name: KUBE_NAMESPACE
+                value: "default"
+              - name: KUBECONFIG_PATH
+                value: "/root/.kube/config"
+              
+              # Git Repository Configuration (handled internally by entrypoint)
+              - name: K8S_GIT_REPO
+                value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+              - name: K8S_GIT_BRANCH
+                value: "main"
+              - name: K8S_REPO_PATH
+                value: "/app/k8s-repo"
+              - name: GITHUB_USER
+                value: "AI-SRE"
+              - name: GITHUB_EMAIL
+                value: "ai-sre@uhl.cool"
+              
+              # Flux Configuration
+              - name: FLUX_NAMESPACE
+                value: "flux-system"
+              
+              # SOPS Configuration
+              - name: SOPS_ENABLED
+                value: "true"
+              - name: AGE_KEY_PATH
+                value: "/app/secrets/age-key.txt"
+              
+              # Monitoring Endpoints
+              - name: PROMETHEUS_URL
+                value: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+              - name: ALERTMANAGER_URL
+                value: "http://prometheus-alertmanager.monitoring.svc.cluster.local:9093"
+              - name: GRAFANA_URL
+                value: "http://grafana.monitoring.svc.cluster.local:3000"
+              
+              # Security Configuration
+              - name: REQUIRE_AUTH
+                value: "false"
+              - name: BLOCKED_COMMANDS
+                value: "rm,dd,mkfs,fdisk,shutdown,reboot,halt"
+              
+              # Tool Configuration
+              - name: TOOLS_ENABLED_CATEGORIES
+                value: "all"
+              - name: TOOLS_DISABLED
+                value: "tcpdump,lsof"
             envFrom:
               - secretRef:
                   name: ai-sre-secrets
-            command:
-              - /bin/sh
-              - -c
-              - |
-                # Configure git safe directory for the ai-sre user
-                git config --global --add safe.directory /app/k8s-repo || true
-                # Start the main application
-                exec python /app/src/mcp_server.py
             probes:
               liveness:
                 enabled: true
@@ -252,12 +231,12 @@ spec:
             app:
               - path: /tmp
 
-      k8s-repo:
-        type: emptyDir
-        sizeLimit: 1Gi
+      age-key:
+        type: secret
+        name: ai-sre-secrets
         advancedMounts:
           ai-sre:
             app:
-              - path: /app/k8s-repo
-            clone-repo:
-              - path: /app/k8s-repo
+              - path: /app/secrets/age-key.txt
+                subPath: SOPS_AGE_KEY
+                readOnly: true
