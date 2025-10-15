@@ -30,6 +30,33 @@ spec:
 
     controllers:
       ai-sre:
+        initContainers:
+          clone-repo:
+            image:
+              repository: alpine/git
+              tag: latest
+              pullPolicy: IfNotPresent
+            env:
+              - name: GITHUB_REPO
+                value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+              - name: GITHUB_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: ai-sre-secrets
+                    key: GITHUB_TOKEN
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -e
+                echo "Cloning GitOps repository..."
+                if [ -n "$GITHUB_TOKEN" ] && [ "$GITHUB_TOKEN" != "" ]; then
+                  git clone https://oauth2:${GITHUB_TOKEN}@github.com/nachtschatt3n/cberg-home-nextgen.git /app/k8s-repo
+                else
+                  git clone https://github.com/nachtschatt3n/cberg-home-nextgen.git /app/k8s-repo
+                fi
+                echo "Repository cloned successfully to /app/k8s-repo"
+                ls -la /app/k8s-repo/
         containers:
           app:
             image:
@@ -60,6 +87,21 @@ spec:
                 value: "http://prometheus-alertmanager.monitoring.svc.cluster.local:9093"
               - name: GRAFANA_URL
                 value: "http://grafana.monitoring.svc.cluster.local:3000"
+              # Git and repository configuration
+              - name: LOCAL_REPO_PATH
+                value: "/app/k8s-repo"
+              - name: GITHUB_REPO
+                value: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
+              # Kubernetes and Flux configuration
+              - name: KUBE_NAMESPACE
+                value: "default"
+              - name: FLUX_NAMESPACE
+                value: "flux-system"
+              # Command execution configuration
+              - name: AGENT_WORKDIR
+                value: "/app/work"
+              - name: COMMAND_TIMEOUT
+                value: "60"
             envFrom:
               - secretRef:
                   name: ai-sre-secrets
@@ -194,3 +236,13 @@ spec:
           ai-sre:
             app:
               - path: /tmp
+
+      k8s-repo:
+        type: emptyDir
+        sizeLimit: 1Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/k8s-repo
+            clone-repo:
+              - path: /app/k8s-repo
