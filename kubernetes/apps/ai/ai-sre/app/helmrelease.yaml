@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ai-sre
-              tag: latest
+              tag: "latest@sha256:181274d928317cd09a3537a6265ee8eda9a119a0e60cdf57d1de28125264fe59"
               pullPolicy: Always
             env:
               # MCP Server Configuration
