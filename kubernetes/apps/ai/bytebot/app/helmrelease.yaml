@@ -42,6 +42,8 @@ spec:
                 value: postgres
               - name: POSTGRES_DB
                 value: bytebotdb
+              - name: PGDATA
+                value: /var/lib/postgresql/data/pgdata
             probes:
               liveness:
                 enabled: true
@@ -268,7 +270,6 @@ spec:
           postgres:
             postgres:
               - path: /var/lib/postgresql/data
-                subPath: pgdata
 
       desktop-data:
         type: persistentVolumeClaim
