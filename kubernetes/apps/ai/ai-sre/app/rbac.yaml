@@ -8,7 +8,7 @@ metadata:
 rules:
   # Read-only access to core resources for monitoring and diagnostics
   - apiGroups: [""]
-    resources: ["pods", "namespaces", "events", "configmaps", "secrets", "services", "endpoints", "persistentvolumeclaims"]
+    resources: ["pods", "nodes", "namespaces", "events", "configmaps", "secrets", "services", "endpoints", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
   
   # Read-only access to apps and extensions
