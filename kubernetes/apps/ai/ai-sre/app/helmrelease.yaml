@@ -32,9 +32,9 @@ spec:
       ai-sre:
         containers:
           app:
-            image:
-              repository: ghcr.io/nachtschatt3n/ai-sre
-              tag: v2.0.2
+        image:
+          repository: ghcr.io/nachtschatt3n/ai-sre
+          tag: latest
               pullPolicy: Always
             env:
               # MCP Server Configuration
