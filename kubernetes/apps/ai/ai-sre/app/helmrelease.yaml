@@ -34,8 +34,8 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ai-sre
-              tag: "latest@sha256:181274d928317cd09a3537a6265ee8eda9a119a0e60cdf57d1de28125264fe59"
-              pullPolicy: Always
+              tag: "v2.1.0"
+              pullPolicy: IfNotPresent
             env:
               # MCP Server Configuration
               - name: MCP_SERVER_PORT
@@ -183,6 +183,16 @@ spec:
               - ai-sre.${SECRET_DOMAIN}
 
     persistence:
+      k8s-repo:
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        advancedMounts:
+          ai-sre:
+            app:
+              - path: /app/k8s-repo
+
       storage:
         type: persistentVolumeClaim
         storageClass: longhorn
