@@ -31,6 +31,7 @@ spec:
       main:
         port: 80
         targetPort: 80
+        type: ClusterIP
     ingress:
       main:
         enabled: true
