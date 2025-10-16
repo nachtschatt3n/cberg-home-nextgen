@@ -61,18 +61,39 @@ spec:
         hosts:
           - "rybbit.${SECRET_DOMAIN}"
 
-    # Disable embedded databases - Bitnami images not available
-    # Backend still needs these values for environment variables
-    # TODO: Configure external PostgreSQL and ClickHouse endpoints
+    # PostgreSQL configuration - using bitnamisecure registry
     postgresql:
-      enabled: false
+      enabled: true
+      global:
+        imageRegistry: docker.io/bitnamisecure
+      image:
+        tag: latest
       auth:
         username: postgres
         password: rybbit-postgres-password
         database: analytics
+      primary:
+        persistence:
+          enabled: true
+          size: 10Gi
+          storageClass: longhorn
 
+    # ClickHouse configuration - using bitnamisecure registry
     clickhouse:
-      enabled: false
+      enabled: true
+      global:
+        imageRegistry: docker.io/bitnamisecure
+      image:
+        tag: latest
+      keeper:
+        image:
+          tag: latest
       auth:
         username: default
         password: rybbit-clickhouse-password
+      persistence:
+        enabled: true
+        size: 20Gi
+        storageClass: longhorn
+      shards: 1
+      replicaCount: 1
