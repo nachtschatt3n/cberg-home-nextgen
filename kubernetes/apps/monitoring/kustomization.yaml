@@ -6,3 +6,6 @@ components:
   - ../../flux/components/common
 resources:
   - ./rybbit/ks.yaml
+  - ./grafana/ks.yaml
+  - ./kube-prometheus-stack/ks.yaml
+  - ./uptime-kuma/ks.yaml
