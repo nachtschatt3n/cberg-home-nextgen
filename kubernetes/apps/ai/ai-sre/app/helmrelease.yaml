@@ -64,10 +64,6 @@ spec:
                 value: "main"
               - name: K8S_REPO_PATH
                 value: "/app/k8s-repo"
-              - name: GITHUB_USER
-                value: "AI-SRE"
-              - name: GITHUB_EMAIL
-                value: "ai-sre@uhl.cool"
               
               # Flux Configuration
               - name: FLUX_NAMESPACE
