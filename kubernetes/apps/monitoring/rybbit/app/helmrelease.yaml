@@ -1,4 +1,4 @@
----
+--- 
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
@@ -13,102 +13,38 @@ spec:
         kind: HelmRepository
         name: bjw-s
         namespace: flux-system
-  maxHistory: 2
-  install:
-    remediation:
-      retries: 3
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 3
-  uninstall:
-    keepHistory: false
-    values:
-      serviceAccount:
-        create: true
-        name: rybbit
-      controllers:
-        main:
-          pod:
-            securityContext:
-              fsGroup: 1000
-              fsGroupChangePolicy: OnRootMismatch
-          containers:
-            app:
-              image:
-                repository: rybbitio/rybbit
-                tag: 1.2.3
-                pullPolicy: IfNotPresent
-              env:
-                - name: PROMETHEUS_URL
-                  value: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
-              probes:
-                liveness:
-                  enabled: true
-                  custom: true
-                  spec:
-                    httpGet:
-                      path: /health
-                      port: 80
-                    initialDelaySeconds: 30
-                    periodSeconds: 10
-                    timeoutSeconds: 5
-                    failureThreshold: 3
-                readiness:
-                  enabled: true
-                  custom: true
-                  spec:
-                    httpGet:
-                      path: /health
-                      port: 80
-                    initialDelaySeconds: 10
-                    periodSeconds: 5
-                    timeoutSeconds: 5
-                    failureThreshold: 3
-                startup:
-                  enabled: true
-                  custom: true
-                  spec:
-                    httpGet:
-                      path: /health
-                      port: 80
-                    initialDelaySeconds: 5
-                    periodSeconds: 5
-                    timeoutSeconds: 5
-                    failureThreshold: 60
-              resources:
-                requests:
-                  cpu: 250m
-                  memory: 256Mi
-                limits:
-                  cpu: 500m
-                  memory: 512Mi
-              securityContext:
-                runAsNonRoot: true
-                runAsUser: 1000
-                runAsGroup: 1000
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                capabilities:
-                  drop:
-                    - ALL
-      service:
+  values:
+    serviceAccount:
+      create: true
+      name: rybbit
     controllers:
       main:
         containers:
           app:
             image:
               repository: rybbitio/rybbit
-              tag: latest
+              tag: 1.2.3
+            resources:
+              requests:
+                cpu: 250m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                  - ALL
     service:
       main:
-        controller: main
-        type: ClusterIP
         ports:
           http:
-            protocol: TCP
             port: 80
-            targetPort: 80
     ingress:
       main:
         enabled: true
@@ -118,6 +54,7 @@ spec:
             paths:
               - path: /
                 pathType: Prefix
+                service: main
         tls:
           - hosts:
               - "rybbit.${SECRET_DOMAIN}"
