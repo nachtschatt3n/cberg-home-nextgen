@@ -101,3 +101,17 @@ spec:
         tls:
           - hosts:
               - omni-tools.${SECRET_DOMAIN}
+
+    persistence:
+      cache:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /var/cache/nginx
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /tmp
