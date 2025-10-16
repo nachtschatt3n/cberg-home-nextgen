@@ -115,3 +115,9 @@ spec:
           main:
             main:
               - path: /tmp
+      run:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /run
