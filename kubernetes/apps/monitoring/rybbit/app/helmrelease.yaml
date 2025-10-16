@@ -44,3 +44,5 @@ spec:
         tls:
           - hosts:
               - "rybbit.${SECRET_DOMAIN}"
+    controller:
+      type: deployment
