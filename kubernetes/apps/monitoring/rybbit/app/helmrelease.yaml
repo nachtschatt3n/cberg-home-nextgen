@@ -74,6 +74,12 @@ spec:
         registry: docker.io
         repository: bitnamisecure/postgresql
         tag: latest
+      volumePermissions:
+        enabled: true
+        image:
+          registry: docker.io
+          repository: bitnamisecure/os-shell
+          tag: latest
       auth:
         username: postgres
         password: rybbit-postgres-password
