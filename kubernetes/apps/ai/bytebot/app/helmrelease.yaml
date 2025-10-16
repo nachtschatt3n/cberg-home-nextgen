@@ -102,23 +102,9 @@ spec:
                 value: ":0"
             probes:
               liveness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /
-                    port: 9990
-                  initialDelaySeconds: 60
-                  periodSeconds: 30
+                enabled: false
               readiness:
-                enabled: true
-                custom: true
-                spec:
-                  httpGet:
-                    path: /
-                    port: 9990
-                  initialDelaySeconds: 30
-                  periodSeconds: 10
+                enabled: false
             resources:
               requests:
                 cpu: 500m
