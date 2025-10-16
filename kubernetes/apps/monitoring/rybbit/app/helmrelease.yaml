@@ -20,6 +20,12 @@ spec:
     remediation:
       retries: 3
   values:
+    # Global configuration for bitnamisecure registry
+    global:
+      imageRegistry: docker.io
+      security:
+        allowInsecureImages: true
+
     # Backend configuration
     backend:
       replicaCount: 1
@@ -64,9 +70,9 @@ spec:
     # PostgreSQL configuration - using bitnamisecure registry
     postgresql:
       enabled: true
-      global:
-        imageRegistry: docker.io/bitnamisecure
       image:
+        registry: docker.io
+        repository: bitnamisecure/postgresql
         tag: latest
       auth:
         username: postgres
@@ -81,12 +87,14 @@ spec:
     # ClickHouse configuration - using bitnamisecure registry
     clickhouse:
       enabled: true
-      global:
-        imageRegistry: docker.io/bitnamisecure
       image:
+        registry: docker.io
+        repository: bitnamisecure/clickhouse
         tag: latest
       keeper:
         image:
+          registry: docker.io
+          repository: bitnamisecure/clickhouse-keeper
           tag: latest
       auth:
         username: default
