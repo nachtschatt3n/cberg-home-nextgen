@@ -64,6 +64,8 @@ spec:
     # PostgreSQL configuration
     postgresql:
       enabled: true
+      image:
+        tag: latest
       auth:
         username: postgres
         password: rybbit-postgres-password
@@ -77,6 +79,11 @@ spec:
     # ClickHouse configuration
     clickhouse:
       enabled: true
+      image:
+        tag: latest
+      keeper:
+        image:
+          tag: latest
       auth:
         username: default
         password: rybbit-clickhouse-password
