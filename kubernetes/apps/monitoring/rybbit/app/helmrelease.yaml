@@ -24,14 +24,22 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    image:
-      repository: rybbitio/rybbit
-      tag: latest
+    controllers:
+      main:
+        containers:
+          app:
+            image:
+              repository: rybbitio/rybbit
+              tag: latest
     service:
       main:
-        port: 80
-        targetPort: 80
+        controller: main
         type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            port: 80
+            targetPort: 80
     ingress:
       main:
         enabled: true
@@ -44,5 +52,3 @@ spec:
         tls:
           - hosts:
               - "rybbit.${SECRET_DOMAIN}"
-    controller:
-      type: deployment
