@@ -5,4 +5,5 @@ namespace: monitoring
 resources:
     - helmrelease.yaml
     - secret.sops.yaml
+    - ingress.yaml
   

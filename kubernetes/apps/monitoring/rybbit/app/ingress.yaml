@@ -1,0 +1,32 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rybbit
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+spec:
+  ingressClassName: internal
+  tls:
+    - hosts:
+        - "rybbit.${SECRET_DOMAIN}"
+      secretName: rybbit-tls
+  rules:
+    - host: "rybbit.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rybbit-client
+                port:
+                  number: 3000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: rybbit-backend
+                port:
+                  number: 3000
