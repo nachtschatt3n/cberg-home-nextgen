@@ -11,3 +11,4 @@ resources:
   - ./coredns.yaml
   - ./spegel.yaml
   - ./stakater.yaml
+  - ./rybbit.yaml
