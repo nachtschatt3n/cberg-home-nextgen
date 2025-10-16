@@ -61,35 +61,10 @@ spec:
         hosts:
           - "rybbit.${SECRET_DOMAIN}"
 
-    # PostgreSQL configuration
+    # Disable embedded databases - Bitnami images not available
+    # TODO: Configure external PostgreSQL and ClickHouse
     postgresql:
-      enabled: true
-      image:
-        tag: latest
-      auth:
-        username: postgres
-        password: rybbit-postgres-password
-        database: analytics
-      primary:
-        persistence:
-          enabled: true
-          size: 10Gi
-          storageClass: longhorn
+      enabled: false
 
-    # ClickHouse configuration
     clickhouse:
-      enabled: true
-      image:
-        tag: latest
-      keeper:
-        image:
-          tag: latest
-      auth:
-        username: default
-        password: rybbit-clickhouse-password
-      persistence:
-        enabled: true
-        size: 20Gi
-        storageClass: longhorn
-      shards: 1
-      replicaCount: 1
+      enabled: false
