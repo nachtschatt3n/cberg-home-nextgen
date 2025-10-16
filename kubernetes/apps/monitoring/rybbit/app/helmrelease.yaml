@@ -62,9 +62,17 @@ spec:
           - "rybbit.${SECRET_DOMAIN}"
 
     # Disable embedded databases - Bitnami images not available
-    # TODO: Configure external PostgreSQL and ClickHouse
+    # Backend still needs these values for environment variables
+    # TODO: Configure external PostgreSQL and ClickHouse endpoints
     postgresql:
       enabled: false
+      auth:
+        username: postgres
+        password: rybbit-postgres-password
+        database: analytics
 
     clickhouse:
       enabled: false
+      auth:
+        username: default
+        password: rybbit-clickhouse-password
