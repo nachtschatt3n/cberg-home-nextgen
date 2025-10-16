@@ -128,8 +128,7 @@ spec:
                 memory: 4Gi
             securityContext:
               privileged: true
-              runAsUser: 1000  # Run as user after permissions fixed by initContainer
-              runAsGroup: 1000
+              # Let supervisord handle user switching after initContainer fixes permissions
 
       # Bytebot Agent (AI coordination service)
       agent:
