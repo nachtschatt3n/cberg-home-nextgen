@@ -36,7 +36,7 @@ spec:
         secretName: rybbit-secrets
         key: BETTER_AUTH_SECRET
       env:
-        DISABLE_SIGNUP: "false"
+        DISABLE_SIGNUP: "true"
       resources:
         requests:
           cpu: 100m
