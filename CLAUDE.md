@@ -1,0 +1,1 @@
+- we only use the main branch and no PRs

@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rybbit
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: internal
+spec:
+  rules:
+  - host: rybbit.${SECRET_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: rybbit
+            port:
+              number: 80
