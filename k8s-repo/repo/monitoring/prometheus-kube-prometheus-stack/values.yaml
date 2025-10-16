@@ -1,3 +1,0 @@
-prometheus:
-  prometheusSpec:
-    retention: 30d

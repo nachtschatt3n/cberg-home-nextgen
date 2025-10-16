@@ -19,7 +19,8 @@
 ## GitOps Workflow
 - All changes must be made through the GitOps Flux workflow
 - Modify configuration in the git repository
-- Let Flux reconcile changes to the cluster automatically
+- Push changes to GitHub which triggers a webhook to reconcile the cluster
+- Monitor reconciliation events in the Flux system
 - Do not make direct modifications to the Kubernetes cluster
 
 ## SOPS Encryption Rules
