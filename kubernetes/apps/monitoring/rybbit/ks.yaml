@@ -36,8 +36,9 @@ spec:
     kind: GitRepository
     name: flux-system
     namespace: flux-system
-  dependsOn:
-    - name: rybbit-clickhouse
+  # Temporarily removed dependency to allow secret creation
+  # dependsOn:
+  #   - name: rybbit-clickhouse
   wait: false
   targetNamespace: *namespace
   interval: 30m
