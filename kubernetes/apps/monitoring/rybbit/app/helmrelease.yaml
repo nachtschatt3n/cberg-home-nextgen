@@ -84,24 +84,10 @@ spec:
           size: 10Gi
           storageClass: longhorn
 
-    # ClickHouse configuration - using bitnamisecure registry
+    # ClickHouse configuration - DISABLED (not available in bitnamisecure)
+    # The backend will need external ClickHouse or can operate without it
     clickhouse:
-      enabled: true
-      image:
-        registry: docker.io
-        repository: bitnamisecure/clickhouse
-        tag: latest
-      keeper:
-        image:
-          registry: docker.io
-          repository: bitnamisecure/clickhouse-keeper
-          tag: latest
+      enabled: false
       auth:
         username: default
         password: rybbit-clickhouse-password
-      persistence:
-        enabled: true
-        size: 20Gi
-        storageClass: longhorn
-      shards: 1
-      replicaCount: 1
