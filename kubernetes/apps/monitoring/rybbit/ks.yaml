@@ -3,6 +3,27 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: rybbit-clickhouse
+  namespace: monitoring
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: rybbit-clickhouse
+  path: ./kubernetes/apps/monitoring/rybbit/clickhouse
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  wait: true
+  targetNamespace: monitoring
+  interval: 30m
+  retryInterval: 1m
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: &app rybbit
   namespace: &namespace monitoring
 spec:
@@ -15,6 +36,8 @@ spec:
     kind: GitRepository
     name: flux-system
     namespace: flux-system
+  dependsOn:
+    - name: rybbit-clickhouse
   wait: false
   targetNamespace: *namespace
   interval: 30m
