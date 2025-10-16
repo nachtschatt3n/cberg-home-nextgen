@@ -146,6 +146,11 @@ spec:
                   secretKeyRef:
                     name: bytebot-secrets
                     key: OPENAI_BASE_URL
+              - name: OPENAI_MODEL
+                valueFrom:
+                  secretKeyRef:
+                    name: bytebot-secrets
+                    key: OPENAI_MODEL
             envFrom:
               - secretRef:
                   name: bytebot-secrets
