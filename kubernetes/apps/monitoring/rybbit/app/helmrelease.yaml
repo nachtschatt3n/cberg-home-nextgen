@@ -82,8 +82,10 @@ spec:
           tag: latest
       auth:
         username: postgres
-        password: rybbit-postgres-password
         database: analytics
+        existingSecret: rybbit-secrets
+        secretKeys:
+          adminPasswordKey: postgres-password
       primary:
         persistence:
           enabled: true
@@ -96,4 +98,5 @@ spec:
       enabled: false
       auth:
         username: default
-        password: rybbit-clickhouse-password
+        existingSecret: rybbit-secrets
+        existingSecretKey: clickhouse-password

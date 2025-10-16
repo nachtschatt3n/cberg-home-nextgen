@@ -44,7 +44,10 @@ spec:
             - name: CLICKHOUSE_USER
               value: "default"
             - name: CLICKHOUSE_PASSWORD
-              value: "rybbit-clickhouse-password"
+              valueFrom:
+                secretKeyRef:
+                  name: rybbit-secrets
+                  key: clickhouse-password
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
           volumeMounts:
