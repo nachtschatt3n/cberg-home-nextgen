@@ -40,7 +40,7 @@ spec:
         - botToken:
             name: alertmanager-telegram-secret
             key: bot-token
-          chatID: 671676995  # numeric chat ID (must be an integer)
+          chatID: -1003112342088  # home operation channel
           parseMode: HTML  # use HTML parsing to avoid escaping issues
           sendResolved: true
           message: |
