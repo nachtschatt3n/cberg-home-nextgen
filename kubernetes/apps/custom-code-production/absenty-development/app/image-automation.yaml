@@ -63,17 +63,17 @@ spec:
         Automation name: {{ .AutomationObject }}
 
         Files updated:
-        {{ range $filename, $_ := .Updated.Files -}}
+        {{ range $filename, $_ := .Changed.Files -}}
         - {{ $filename }}
         {{ end -}}
 
         Objects updated:
-        {{ range $resource, $_ := .Updated.Objects -}}
+        {{ range $resource, $_ := .Changed.Objects -}}
         - {{ $resource.Kind }} {{ $resource.Name }}
         {{ end -}}
 
         Images updated:
-        {{ range .Updated.Images -}}
+        {{ range .Changed.Images -}}
         - {{ .Name }}: {{ .OldTag }} -> {{ .NewTag }}
         {{ end -}}
     push:
