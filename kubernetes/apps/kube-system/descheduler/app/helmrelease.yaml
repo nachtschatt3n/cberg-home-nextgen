@@ -37,13 +37,13 @@ spec:
             - name: LowNodeUtilization
               args:
                 thresholds:
-                  cpu: 20
-                  memory: 20
-                  pods: 20
+                  cpu: 45
+                  memory: 40
+                  pods: 48
                 targetThresholds:
-                  cpu: 50
-                  memory: 50
-                  pods: 50
+                  cpu: 55
+                  memory: 55
+                  pods: 52
           plugins:
             balance:
               enabled:
