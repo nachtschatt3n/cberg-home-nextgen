@@ -19,7 +19,7 @@ spec:
       namespaceOverride: storage
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
-        replicaSoftAntiAffinity: false
+        replicaSoftAntiAffinity: true
         replicaAutoBalance: best-effort
         createDefaultDiskLabeledNodes: false
         defaultReplicaCount: 2
