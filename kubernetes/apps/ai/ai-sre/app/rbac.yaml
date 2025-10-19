@@ -10,7 +10,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "nodes", "namespaces", "events", "configmaps", "secrets", "services", "endpoints", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
-  
+
+  # Access to pod logs for debugging and diagnostics
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+
   # Read-only access to apps and extensions
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
@@ -52,6 +57,81 @@ rules:
   
   - apiGroups: ["source.toolkit.fluxcd.io"]
     resources: ["gitrepositories", "helmrepositories", "buckets"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to Flux image automation
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imagepolicies", "imagerepositories", "imageupdateautomations"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to Flux notifications
+  - apiGroups: ["notification.toolkit.fluxcd.io"]
+    resources: ["alerts", "providers", "receivers"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to storage resources
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "volumeattachments", "csidrivers", "csinodes"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots", "volumesnapshotcontents", "volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to Longhorn storage resources
+  - apiGroups: ["longhorn.io"]
+    resources:
+      - volumes
+      - replicas
+      - engines
+      - nodes
+      - backups
+      - backupvolumes
+      - backuptargets
+      - snapshots
+      - settings
+      - recurringjobs
+      - engineimages
+      - instancemanagers
+      - sharemanagers
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to cert-manager resources
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "certificaterequests", "issuers", "clusterissuers"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to additional core resources
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to coordination and scheduling
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list", "watch"]
+
+  # Read-only access to Prometheus monitoring resources
+  - apiGroups: ["monitoring.coreos.com"]
+    resources:
+      - prometheuses
+      - prometheusrules
+      - servicemonitors
+      - podmonitors
+      - alertmanagers
+      - alertmanagerconfigs
     verbs: ["get", "list", "watch"]
 
 ---
