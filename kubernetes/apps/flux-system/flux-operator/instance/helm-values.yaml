@@ -14,3 +14,5 @@ instance:
     url: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
     ref: "refs/heads/main"
     path: kubernetes/flux/cluster
+    secretRef:
+      name: flux-system-git-auth
