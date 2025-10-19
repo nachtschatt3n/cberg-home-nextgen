@@ -24,8 +24,8 @@ spec:
         createDefaultDiskLabeledNodes: false
         defaultReplicaCount: 2
         defaultDataLocality: best-effort
-        guaranteedEngineManagerCPU: 12
-        guaranteedReplicaManagerCPU: 12
+        guaranteedEngineManagerCPU: 500
+        guaranteedReplicaManagerCPU: 500
         defaultLonghornStaticStorageClass: longhorn-static
         backupTarget: "cifs://192.168.31.230/backups"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
@@ -37,7 +37,7 @@ spec:
         systemManagedComponentsNodeSelector: ""
         allowNodeDrainWithLastHealthyReplica: true
         nodeDrainPolicy: block-if-contains-last-replica
-        offlineReplicaRebuilding: enabled
+        offlineReplicaRebuilding: disabled
         disableSchedulingOnCordonedNode: true
         replicaZoneSoftAntiAffinity: true
         removeSnapshotsDuringFilesystemTrim: true
