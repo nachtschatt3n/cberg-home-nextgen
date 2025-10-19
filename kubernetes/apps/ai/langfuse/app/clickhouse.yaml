@@ -62,6 +62,8 @@ metadata:
   namespace: ai
 spec:
   replicas: 1
+  strategy:
+    type: Recreate  # Required for RWO volumes - terminates old pod before starting new one
   selector:
     matchLabels:
       app: langfuse-clickhouse
