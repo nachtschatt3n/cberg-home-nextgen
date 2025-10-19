@@ -21,7 +21,16 @@ spec:
         matchers:
           - name: alertname
             value: Watchdog
-      # Low-impact warning alerts - immediate first notification, then every 4 hours
+      # General warning alerts - immediate first notification, then every 4 hours
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: warning
+        groupWait: 1s
+        groupInterval: 15m  # Allow grouping similar alerts for 15 minutes
+        repeatInterval: 4h   # Repeat every 4 hours if still firing
+        continue: false
+      # Storage-specific warning alerts (more specific route, handled first if category=storage)
       - receiver: telegram
         matchers:
           - name: severity
