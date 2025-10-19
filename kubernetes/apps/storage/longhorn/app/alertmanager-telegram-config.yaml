@@ -12,8 +12,8 @@ spec:
     groupBy:
       - alertname
     groupWait: 1s
-    groupInterval: 86400s  # 24 hours - prevent frequent updates
-    repeatInterval: 86400s  # 24 hours
+    groupInterval: 15m  # Allow grouping similar alerts for 15 minutes
+    repeatInterval: 4h   # Repeat every 4 hours if still firing
     # Match all alerts from any namespace by not specifying namespace matchers
     matchers: []
     routes:
@@ -22,7 +22,7 @@ spec:
         matchers:
           - name: alertname
             value: Watchdog
-      # Storage warning alerts - once per day
+      # Storage warning alerts - immediate first notification, then every 4 hours
       - receiver: telegram
         matchers:
           - name: severity
@@ -30,8 +30,8 @@ spec:
           - name: category
             value: storage
         groupWait: 1s
-        groupInterval: 86400s  # 24 hours - prevent frequent updates
-        repeatInterval: 86400s  # 24 hours
+        groupInterval: 15m  # Allow grouping similar alerts for 15 minutes
+        repeatInterval: 4h   # Repeat every 4 hours if still firing
         continue: false
   receivers:
     # Null receiver for suppressed alerts (like Watchdog)
