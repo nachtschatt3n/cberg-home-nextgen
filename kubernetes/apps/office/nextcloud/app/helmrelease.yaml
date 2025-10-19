@@ -207,6 +207,10 @@ spec:
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
       ##
       primary:
+        # Pin to k8s-nuc14-02 for volume locality
+        nodeSelector:
+          kubernetes.io/hostname: k8s-nuc14-02
+
         persistence:
           enabled: true
           # Use an existing Persistent Volume Claim (must be created ahead of time)
