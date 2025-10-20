@@ -114,9 +114,7 @@ spec:
       consume:
         enabled: true
         mountPath: /usr/src/paperless/consume
-        type: emptyDir
-        # Temporarily disabled CIFS volume
-        # existingClaim: paperless-ngx-consume
+        existingClaim: paperless-ngx-consume
       prompts:
         enabled: true
         #type: configMap
