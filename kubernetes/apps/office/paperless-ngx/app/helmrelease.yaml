@@ -31,6 +31,12 @@ spec:
       pullPolicy: IfNotPresent
     env:
       TZ: UTC
+      # Reduce logging conflicts
+      PAPERLESS_LOGROTATE_MAX_SIZE: "1048576"
+      PAPERLESS_LOGROTATE_MAX_BACKUPS: "2"
+      # Celery logging configuration
+      CELERY_WORKER_HIJACK_ROOT_LOGGER: "false"
+      CELERY_WORKER_LOG_FORMAT: "[%(levelname)s] %(message)s"
       PAPERLESS_SECRET_KEY:
         valueFrom:
           secretKeyRef:
