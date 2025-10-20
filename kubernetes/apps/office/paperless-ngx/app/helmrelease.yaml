@@ -96,21 +96,15 @@ spec:
         existingClaim: paperless-data
       log:
         enabled: true
-        type: emptyDir
-        # Temporarily disabled CIFS volume
-        # existingClaim: paperless-ngx-log
+        existingClaim: paperless-ngx-log
       media:
         enabled: true
         mountPath: /usr/src/paperless/media
-        type: emptyDir
-        # Temporarily disabled CIFS volume
-        # existingClaim: paperless-ngx-media
+        existingClaim: paperless-ngx-media
       export:
         enabled: true
         mountPath: /usr/src/paperless/export
-        type: emptyDir
-        # Temporarily disabled CIFS volume  
-        # existingClaim: paperless-ngx-export
+        existingClaim: paperless-ngx-export
       consume:
         enabled: true
         mountPath: /usr/src/paperless/consume
