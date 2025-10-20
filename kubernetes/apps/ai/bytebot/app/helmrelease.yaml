@@ -168,6 +168,7 @@ spec:
 
       # Bytebot UI (Web interface)
       ui:
+        replicas: 1
         containers:
           ui:
             image:
