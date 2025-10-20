@@ -96,7 +96,9 @@ spec:
         existingClaim: paperless-data
       log:
         enabled: true
-        existingClaim: paperless-ngx-log
+        type: emptyDir
+        # Switched from CIFS to emptyDir to avoid concurrent log file locking issues
+        # CIFS doesn't handle multiple Celery workers writing to same log files well
       media:
         enabled: true
         mountPath: /usr/src/paperless/media
