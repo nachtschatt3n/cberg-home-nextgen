@@ -196,14 +196,32 @@ spec:
             description: "Longhorn instance manager on node {{ $labels.node }} appears inactive."
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
 
-        - alert: LonghornHighVolumeLatency
-          expr: longhorn_volume_read_latency > 200 or longhorn_volume_write_latency > 200
+        - alert: LonghornHighVolumeLatencyDaily
+          expr: |
+            (
+              max_over_time(longhorn_volume_read_latency[24h]) > 200
+              or
+              max_over_time(longhorn_volume_write_latency[24h]) > 200
+            )
+            and
+            hour() == 9 and minute() < 15
           for: 5m
           labels:
-            severity: warning
+            severity: info
             category: storage
             component: longhorn
           annotations:
-            summary: "High I/O latency on {{ $labels.pvc }}{{ if not $labels.pvc }}{{ $labels.volume }}{{ end }} ({{ $value | printf \"%.0f\"}}ms)"
-            description: "Volume {{ $labels.volume }}{{ if not $labels.volume }}{{ $labels.pvc }}{{ end }} (PVC: {{ $labels.pvc }}, namespace: {{ $labels.pvc_namespace }}) is experiencing high I/O latency of {{ $value }}ms on node {{ $labels.node }}. This may indicate storage performance issues or heavy I/O load."
+            summary: "Daily summary: High I/O latency on {{ $labels.pvc | default $labels.volume }}"
+            description: |
+              📊 Longhorn Daily Latency Report (Last 24h)
+              
+              Volume: {{ $labels.volume }}
+              PVC: {{ $labels.pvc }} ({{ $labels.pvc_namespace }} namespace)
+              Node: {{ $labels.node }}
+              Max Latency: {{ $value | printf "%.0f" }}ms (threshold: 200ms)
+              
+              Pod using this volume:
+              - Check with: kubectl get pods -n {{ $labels.pvc_namespace }} -o json | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName=="{{ $labels.pvc }}") | .metadata.name'
+              
+              💡 Investigation guide: /tmp/longhorn-latency-investigation.md
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
