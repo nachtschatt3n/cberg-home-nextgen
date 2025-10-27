@@ -127,6 +127,13 @@ spec:
               - "--config"
               - "/config/config.json"
               - "--hot-reload"
+            resources:
+              requests:
+                cpu: 50m
+                memory: 512Mi
+              limits:
+                cpu: 200m
+                memory: 1Gi
 
     service:
       main:
