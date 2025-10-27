@@ -47,6 +47,13 @@ spec:
         envFrom:
         - secretRef:
             name: langfuse-postgresql
+        resources:
+          requests:
+            cpu: 100m
+            memory: 200Mi
+          limits:
+            cpu: 200m
+            memory: 512Mi
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data

@@ -33,6 +33,13 @@ spec:
             env:
               - name: TZ
                 value: "Europe/Berlin"
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 200m
+                memory: 512Mi
     service:
       main:
         controller: esphome
