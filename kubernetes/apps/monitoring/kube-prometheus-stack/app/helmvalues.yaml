@@ -55,6 +55,13 @@ data:
               regex: ^(.*)$
               replacement: $1
               targetLabel: kubernetes_node
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
     kubelet:
       enabled: true
       serviceMonitor:
@@ -244,6 +251,14 @@ data:
             - port: metrics
               path: /metrics
               interval: 30s
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
     grafana:
       enabled: false
       forceDeployDashboards: true
