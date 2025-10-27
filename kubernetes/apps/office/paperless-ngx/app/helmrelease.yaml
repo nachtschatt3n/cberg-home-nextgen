@@ -149,6 +149,13 @@ spec:
           enabled: true
           existingClaim: paperless-mariadb
           size: 5Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
     redis:
       enabled: true
       auth:
@@ -159,9 +166,23 @@ spec:
           enabled: true
           existingClaim: paperless-redis
           size: 5Gi
-        replica:
-          enabled: false
-          replicaCount: 0
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      replica:
+        enabled: false
+        replicaCount: 0
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
     resources:
       requests:
         cpu: 1000m
