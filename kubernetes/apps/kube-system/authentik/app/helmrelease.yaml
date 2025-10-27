@@ -126,11 +126,25 @@ spec:
           enabled: true
           storageClass: longhorn
           size: 8Gi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
       replica:
         persistence:
           enabled: true
           storageClass: longhorn
           size: 8Gi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
 
     postgresql:
       # Use built-in PostgreSQL for compatibility
@@ -147,6 +161,13 @@ spec:
           enabled: true
           storageClass: longhorn
           size: 8Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
 
     geoip:
       enabled: false

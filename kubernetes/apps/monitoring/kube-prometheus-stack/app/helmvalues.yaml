@@ -41,6 +41,13 @@ data:
               resources:
                 requests:
                   storage: 1Gi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 512Mi
     kube-state-metrics:
       metricLabelsAllowlist:
         - "deployments=[*]"
@@ -169,6 +176,13 @@ data:
               resources:
                 requests:
                   storage: 60Gi
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
       additionalServiceMonitors:
         - name: longhorn
           namespaceSelector:
