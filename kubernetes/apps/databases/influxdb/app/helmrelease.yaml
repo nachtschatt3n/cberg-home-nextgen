@@ -124,8 +124,8 @@ spec:
         memory: 256Mi
         cpu: 0.1
       limits:
-        memory: 16Gi
-        cpu: 8
+        memory: 2Gi
+        cpu: 2
 
     # Annotations to be added to InfluxDB pods
     podAnnotations: {}
