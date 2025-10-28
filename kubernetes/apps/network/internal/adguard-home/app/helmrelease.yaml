@@ -95,10 +95,6 @@ spec:
           gethomepage.dev/description: "Network-wide ad blocking and DNS server"
           gethomepage.dev/group: "Network Services"
           gethomepage.dev/icon: "adguard-home.png"
-          gethomepage.dev/widget.type: "adguard"
-          gethomepage.dev/widget.url: "https://adguard.${SECRET_DOMAIN}"
-          gethomepage.dev/widget.username: "${ADMIN_USERNAME}"
-          gethomepage.dev/widget.password: "${ADMIN_PASSWORD}"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
