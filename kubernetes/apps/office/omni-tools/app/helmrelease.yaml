@@ -87,7 +87,7 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Omni Tools"
-          gethomepage.dev/group: "Office & Productivity"
+          gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "mdi:tools"
           gethomepage.dev/description: "Multi-purpose toolkit for PDF, text, date, math, and data tools"
         hosts:
