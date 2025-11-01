@@ -1,4 +1,3 @@
----
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
@@ -30,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: sha-eea1c21-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
+              tag: sha-ff3910e-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
               pullPolicy: Always
             command:
               - bash
