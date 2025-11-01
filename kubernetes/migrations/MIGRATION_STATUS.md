@@ -1,8 +1,8 @@
 # PV/PVC Migration Status
 
-**Last Updated**: 2025-11-01 17:15 UTC
-**Session**: Phase 2 completed
-**Status**: PHASE 2 COMPLETE ✅
+**Last Updated**: 2025-11-01 23:20 UTC
+**Session**: Phase 3 completed
+**Status**: PHASE 3 COMPLETE ✅
 
 ## Overview
 
@@ -11,8 +11,8 @@ Migrating Longhorn volumes from UUID-based PV names to clean naming standard.
 **Total volumes identified**: 23 with UUID PV names
 **Volumes to migrate**: 18 (Deployment-based only)
 **Volumes skipped**: 5 (StatefulSet-based - too complex)
-**Completed**: 9 ✅
-**In Progress**: Phase 2 complete, ready for Phase 3
+**Completed**: 14 ✅ (78% of target)
+**In Progress**: Phase 3 complete, ready for Phase 4
 **Failed**: 0
 
 ## Completed Migrations ✅
@@ -79,13 +79,55 @@ Migrating Longhorn volumes from UUID-based PV names to clean naming standard.
    - Status: Application running, old resources cleaned up
 
 **Phase 2 Total**: 5 volumes, 40Gi migrated, ~20 minutes elapsed
-**Combined Total**: 9 volumes, 51Gi migrated
+**Combined Phase 1+2 Total**: 9 volumes, 51Gi migrated
+
+### Phase 3: Databases (COMPLETE)
+
+10. ✅ **ai/bytebot-postgres-data** (10Gi)
+   - Old PV: `pvc-0763a3a5-047e-4037-bda3-7451c27ed4e8`
+   - New PV: `bytebot-postgres-data`
+   - Storage Class: `longhorn-static`
+   - Data migrated: 46.5M
+   - Status: Application running, database verified, old resources cleaned up
+
+11. ✅ **ai/langfuse-postgresql-pvc → langfuse-postgresql-data** (10Gi)
+   - Old PV: `pvc-df1999c2-c73c-4e54-a0a7-9f30571e8636`
+   - New PV: `langfuse-postgresql-data`
+   - Storage Class: `longhorn-static`
+   - Data migrated: 66.6M
+   - Status: Application running, database verified, old resources cleaned up
+   - Note: Volume renamed from langfuse-postgresql-pvc to langfuse-postgresql-data
+
+12. ✅ **ai/langfuse-minio-data** (10Gi)
+   - Old PV: `pvc-1ba140e7-9bc4-4b2e-84d7-7f59e5ae19a6`
+   - New PV: `langfuse-minio-data`
+   - Storage Class: `longhorn-static`
+   - Data migrated: 51.6M
+   - Status: Application running (minio sidecar in langfuse-web), old resources cleaned up
+   - Note: Required scaling down langfuse-web first (minio runs as sidecar)
+
+13. ✅ **download/tube-archivist-redis-data** (10Gi)
+   - Old PV: `pvc-d12e194c-93fa-4adb-a490-dd3baeb11e63`
+   - New PV: `tube-archivist-redis-data`
+   - Storage Class: `longhorn-static`
+   - Data migrated: 28K
+   - Status: Application running, Redis verified, old resources cleaned up
+
+14. ✅ **databases/mariadb-data** (20Gi)
+   - Old PV: `pvc-5a16b42b-dcbe-4201-b28b-b0fea61a7bbf`
+   - New PV: `mariadb-data`
+   - Storage Class: `longhorn-static`
+   - Data migrated: 112.8M
+   - Status: Application running, database verified, old resources cleaned up
+
+**Phase 3 Total**: 5 volumes, 60Gi migrated, ~2 hours elapsed
+**Combined Total**: 14 volumes, 111Gi migrated
 
 ## Current Task
 
-**Phase 2: COMPLETE** ✅
+**Phase 3: COMPLETE** ✅
 
-**Next: Phase 3 - Databases (5 volumes, 10-20Gi each)**
+**Next: Phase 4 - Large Databases (4 volumes, 20-50Gi each)**
 
 ## Volumes Queued for Migration
 
