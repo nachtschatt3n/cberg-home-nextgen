@@ -1,8 +1,8 @@
 # PV/PVC Migration Status
 
-**Last Updated**: 2025-11-01 16:50 UTC
-**Session**: Phase 1 completed
-**Status**: PHASE 1 COMPLETE ✅
+**Last Updated**: 2025-11-01 17:15 UTC
+**Session**: Phase 2 completed
+**Status**: PHASE 2 COMPLETE ✅
 
 ## Overview
 
@@ -11,8 +11,8 @@ Migrating Longhorn volumes from UUID-based PV names to clean naming standard.
 **Total volumes identified**: 23 with UUID PV names
 **Volumes to migrate**: 18 (Deployment-based only)
 **Volumes skipped**: 5 (StatefulSet-based - too complex)
-**Completed**: 4 ✅
-**In Progress**: Phase 1 complete, ready for Phase 2
+**Completed**: 9 ✅
+**In Progress**: Phase 2 complete, ready for Phase 3
 **Failed**: 0
 
 ## Completed Migrations ✅
@@ -45,11 +45,47 @@ Migrating Longhorn volumes from UUID-based PV names to clean naming standard.
 
 **Phase 1 Total**: 4 volumes, 11Gi migrated, ~90 minutes elapsed
 
+### Phase 2: Application Data (COMPLETE)
+
+5. ✅ **ai/ai-sre-storage** (10Gi)
+   - Old PV: `pvc-e61d2327-5207-4c77-83aa-90620762ff46`
+   - New PV: `ai-sre-storage`
+   - Storage Class: `longhorn-static`
+   - Status: Application running, old resources cleaned up
+
+6. ✅ **custom-code-production/absenty-development-data** (5Gi)
+   - Old PV: `pvc-21ce9616-5090-45c3-b361-5773b1541374`
+   - New PV: `absenty-development-data`
+   - Storage Class: `longhorn-static`
+   - Status: Fresh volume, old resources cleaned up
+   - Note: App needs bundle install (unrelated to migration)
+
+7. ✅ **custom-code-production/absenty-development-storage** (10Gi)
+   - Old PV: `pvc-9d2ccc74-d470-41bf-97da-f5b0b43feafa`
+   - New PV: `absenty-development-storage`
+   - Storage Class: `longhorn-static`
+   - Status: Fresh volume, old resources cleaned up
+
+8. ✅ **custom-code-production/absenty-production-data** (5Gi)
+   - Old PV: `pvc-dfc96bed-6efd-45cd-9dbd-4caf6f6b50e2`
+   - New PV: `absenty-production-data`
+   - Storage Class: `longhorn-static`
+   - Status: Application running, old resources cleaned up
+
+9. ✅ **custom-code-production/absenty-production-storage** (10Gi)
+   - Old PV: `pvc-9dabc41c-f75a-4064-a517-adae1a33addc`
+   - New PV: `absenty-production-storage`
+   - Storage Class: `longhorn-static`
+   - Status: Application running, old resources cleaned up
+
+**Phase 2 Total**: 5 volumes, 40Gi migrated, ~20 minutes elapsed
+**Combined Total**: 9 volumes, 51Gi migrated
+
 ## Current Task
 
-**Phase 1: COMPLETE** ✅
+**Phase 2: COMPLETE** ✅
 
-**Next: Phase 2 - Application Data (5 volumes, 10Gi each)**
+**Next: Phase 3 - Databases (5 volumes, 10-20Gi each)**
 
 ## Volumes Queued for Migration
 
