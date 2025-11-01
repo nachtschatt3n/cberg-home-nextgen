@@ -39,7 +39,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: tube-archivist-redis-data
+  name: tube-archivist-redis-data-new
   namespace: download
 spec:
   accessModes:
@@ -47,7 +47,8 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: tube-archivist-redis-data
 ---
 # Elasticsearch data volume on Longhorn
 apiVersion: v1
