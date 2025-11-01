@@ -270,9 +270,7 @@ spec:
     persistence:
       postgres-data:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 10Gi
+        existingClaim: bytebot-postgres-data-new
         advancedMounts:
           postgres:
             postgres:
