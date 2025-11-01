@@ -69,7 +69,7 @@ spec:
     persistence:
       config:
         enabled: true
-        existingClaim: makemkv-config
+        existingClaim: makemkv-config-new
       media:
         enabled: true
         existingClaim: makemkv-media
