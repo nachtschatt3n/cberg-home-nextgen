@@ -34,7 +34,7 @@ spec:
             command:
               - bash
               - -lc
-              - bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
+              - bundle install && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
