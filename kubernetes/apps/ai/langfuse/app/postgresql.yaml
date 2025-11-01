@@ -14,7 +14,7 @@ stringData:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: langfuse-postgresql-pvc
+  name: langfuse-postgresql-data-new
   namespace: ai
 spec:
   accessModes:
@@ -22,7 +22,8 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: langfuse-postgresql-data
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -77,7 +78,7 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: langfuse-postgresql-pvc
+          claimName: langfuse-postgresql-data-new
 ---
 apiVersion: v1
 kind: Service
