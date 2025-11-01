@@ -236,13 +236,13 @@ spec:
       volumes:
       - name: minio-data
         persistentVolumeClaim:
-          claimName: langfuse-minio-data
+          claimName: langfuse-minio-data-new
 ---
 # PersistentVolumeClaim for MinIO data storage
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: langfuse-minio-data
+  name: langfuse-minio-data-new
   namespace: ai
 spec:
   accessModes:
@@ -250,7 +250,8 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: langfuse-minio-data
 ---
 apiVersion: v1
 kind: Service
