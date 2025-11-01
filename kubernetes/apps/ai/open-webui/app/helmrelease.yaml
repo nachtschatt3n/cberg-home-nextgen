@@ -54,6 +54,9 @@ spec:
         value: "False"
       - name: LITELLM_LOCAL_MODEL_COST_MAP
         value: "True"
+      persistence:
+        enabled: true
+        existingClaim: open-webui-pipelines-new
       resources:
         requests:
           cpu: 50m
