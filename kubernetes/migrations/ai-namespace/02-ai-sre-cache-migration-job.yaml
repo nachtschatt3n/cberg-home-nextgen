@@ -1,0 +1,63 @@
+---
+# Data migration job for ai-sre-cache
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-ai-sre-cache
+  namespace: ai
+spec:
+  ttlSecondsAfterFinished: 3600  # Clean up after 1 hour
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: data-migration
+        image: busybox:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "=========================================="
+          echo "Starting data migration for ai-sre-cache"
+          echo "=========================================="
+          echo ""
+          echo "Source (old-data):"
+          du -sh /old-data
+          ls -lah /old-data
+          echo ""
+          echo "Destination (new-data) before copy:"
+          du -sh /new-data
+          ls -lah /new-data
+          echo ""
+          echo "Copying data..."
+          cp -av /old-data/. /new-data/
+          echo ""
+          echo "Migration complete!"
+          echo ""
+          echo "Source (old-data) final:"
+          du -sh /old-data
+          echo ""
+          echo "Destination (new-data) after copy:"
+          du -sh /new-data
+          ls -lah /new-data
+          echo ""
+          echo "Comparing directories..."
+          if diff -r /old-data /new-data; then
+            echo "SUCCESS: Data verified identical!"
+            exit 0
+          else
+            echo "WARNING: Some differences found!"
+            exit 1
+          fi
+        volumeMounts:
+        - name: old-data
+          mountPath: /old-data
+        - name: new-data
+          mountPath: /new-data
+      volumes:
+      - name: old-data
+        persistentVolumeClaim:
+          claimName: ai-sre-cache
+      - name: new-data
+        persistentVolumeClaim:
+          claimName: ai-sre-cache-new
