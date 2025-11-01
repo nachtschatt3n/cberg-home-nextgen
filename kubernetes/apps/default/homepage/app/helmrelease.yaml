@@ -199,7 +199,7 @@ spec:
         layout:
           AI:
             style: row
-            columns: 2
+            columns: 3
           Databases:
             style: row
             columns: 2
@@ -208,17 +208,20 @@ spec:
             columns: 1
           "Network Services":
             style: row
-            columns: 4
+            columns: 5
           "Home Automation":
             style: row
-            columns: 4
+            columns: 3
           Monitoring:
             style: row
             columns: 4
           Infrastructure:
             style: row
             columns: 3
-
+          Office:
+            style: row
+            columns: 3
+            
         # title: Homepage
         # headerStyle: boxed
         # layout:
