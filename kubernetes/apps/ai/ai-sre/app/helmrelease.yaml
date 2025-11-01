@@ -183,9 +183,7 @@ spec:
     persistence:
       storage:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 10Gi
+        existingClaim: ai-sre-storage-new
         advancedMounts:
           ai-sre:
             app:
