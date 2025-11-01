@@ -31,10 +31,6 @@ spec:
               repository: ghcr.io/nachtschatt3n/absenty
               tag: sha-ff3910e-dev # {"$imagepolicy": "custom-code-production:absenty-development:tag"}
               pullPolicy: Always
-            command:
-              - bash
-              - -lc
-              - bundle install && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -93,10 +89,10 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
-                  initialDelaySeconds: 120
+                  initialDelaySeconds: 5
                   periodSeconds: 10
                   timeoutSeconds: 10
-                  failureThreshold: 60
+                  failureThreshold: 30
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret
