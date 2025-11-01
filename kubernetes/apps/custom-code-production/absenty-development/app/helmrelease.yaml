@@ -93,10 +93,10 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
-                  initialDelaySeconds: 5
+                  initialDelaySeconds: 120
                   periodSeconds: 10
                   timeoutSeconds: 10
-                  failureThreshold: 30
+                  failureThreshold: 60
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret
