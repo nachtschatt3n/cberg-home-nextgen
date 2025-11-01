@@ -206,9 +206,7 @@ spec:
 
       cache:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 2Gi
+        existingClaim: ai-sre-cache-new
         advancedMounts:
           ai-sre:
             app:
