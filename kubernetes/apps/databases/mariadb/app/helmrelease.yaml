@@ -49,7 +49,7 @@ spec:
     primary:
       persistence:
         enabled: true
-        existingClaim: mariadb-data
+        existingClaim: mariadb-data-new
       resources:
         requests:
           cpu: 100m
