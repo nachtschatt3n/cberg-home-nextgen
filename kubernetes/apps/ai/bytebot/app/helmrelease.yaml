@@ -252,7 +252,7 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Bytebot"
-          gethomepage.dev/group: "AI & Automation"
+          gethomepage.dev/group: "AI"
           gethomepage.dev/icon: "mdi:robot"
           gethomepage.dev/description: "AI Desktop Agent - Complete autonomous tasks"
         hosts:
