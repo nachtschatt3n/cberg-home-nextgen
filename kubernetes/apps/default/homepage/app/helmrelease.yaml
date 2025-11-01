@@ -58,9 +58,9 @@ spec:
       main:
         enabled: true
         labels:
-          gethomepage.dev/enabled: "true"
+          gethomepage.dev/enabled: "false"
         annotations:
-          gethomepage.dev/enabled: "true"
+          gethomepage.dev/enabled: "false"
           gethomepage.dev/name: "Homepage"
           gethomepage.dev/description: "A modern, secure, application dashboard"
           gethomepage.dev/group: "System"
