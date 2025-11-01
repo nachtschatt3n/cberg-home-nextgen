@@ -140,16 +140,14 @@ spec:
       data:
         enabled: true
         type: persistentVolumeClaim
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        existingClaim: absenty-development-data-new
         globalMounts:
           - path: /data
         retain: true
       storage:
         enabled: true
         type: persistentVolumeClaim
-        accessMode: ReadWriteOnce
-        size: 10Gi
+        existingClaim: absenty-development-storage-new
         globalMounts:
           - path: /storage
         retain: true
