@@ -94,9 +94,10 @@ spec:
     persistence:
       data:
         enabled: true
-        size: 10Gi
-        storageClass: "longhorn"
-        accessMode: ReadWriteOnce
+        size: 5Gi
+        storageClass: "longhorn-static"
+        accessMode: ReadWriteMany
+        existingClaim: scrypted-data
       media:
         enabled: true
         existingClaim: scrypted-media
