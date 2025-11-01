@@ -143,14 +143,12 @@ spec:
         existingClaim: absenty-development-data-new
         globalMounts:
           - path: /data
-        retain: true
       storage:
         enabled: true
         type: persistentVolumeClaim
         existingClaim: absenty-development-storage-new
         globalMounts:
           - path: /storage
-        retain: true
       tmp:
         enabled: true
         type: emptyDir
