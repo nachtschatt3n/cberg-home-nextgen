@@ -196,9 +196,7 @@ spec:
       
       logs:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        existingClaim: ai-sre-logs-new
         advancedMounts:
           ai-sre:
             app:
