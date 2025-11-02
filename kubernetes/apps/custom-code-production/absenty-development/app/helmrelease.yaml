@@ -34,7 +34,7 @@ spec:
             command:
               - bash
               - -lc
-              - bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
+              - bundle config set --local path '/bundle' && bundle install && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -93,10 +93,10 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
-                  initialDelaySeconds: 5
+                  initialDelaySeconds: 180
                   periodSeconds: 10
                   timeoutSeconds: 10
-                  failureThreshold: 30
+                  failureThreshold: 90
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret
@@ -159,3 +159,9 @@ spec:
         type: emptyDir
         globalMounts:
           - path: /app/log
+      bundle:
+        enabled: true
+        type: emptyDir
+        sizeLimit: 2Gi
+        globalMounts:
+          - path: /bundle
