@@ -34,9 +34,6 @@ spec:
               - bash
               - -lc
               - bundle config set --local path '/bundle' && bundle install
-            volumeMounts:
-              - name: bundle
-                mountPath: /bundle
         containers:
           app:
             image:
