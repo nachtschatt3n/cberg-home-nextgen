@@ -5,3 +5,4 @@ namespace: home-automation
 resources:
   - ./helmrelease.yaml
   - ./pvc.yaml
+  - ./secret.sops.yaml

@@ -53,6 +53,31 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 1Gi
+          alexa-api:
+            image:
+              repository: ghcr.io/alams154/music-assistant-alexa-api
+              tag: latest
+            env:
+              - name: USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: music-assistant-alexa-secrets
+                    key: alexa_username
+              - name: PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: music-assistant-alexa-secrets
+                    key: alexa_password
+            ports:
+              - name: alexa-api
+                containerPort: 3000
+                protocol: TCP
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
     service:
       main:
         controller: music-assistant-server
@@ -72,6 +97,9 @@ spec:
           stream-alt:
             port: 8098
             targetPort: 8098
+          alexa-api:
+            port: 3000
+            targetPort: 3000
     ingress:
       main:
         enabled: true
