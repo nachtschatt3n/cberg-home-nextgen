@@ -42,19 +42,6 @@ type: Opaque
 stringData:
   password: clickhouse123
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: langfuse-clickhouse-pvc
-  namespace: ai
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
-  storageClassName: longhorn
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -119,7 +106,7 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: langfuse-clickhouse-pvc
+          claimName: langfuse-clickhouse-data-new
       - name: config
         configMap:
           name: langfuse-clickhouse-config
