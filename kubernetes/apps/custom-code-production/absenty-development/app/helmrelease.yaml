@@ -25,6 +25,18 @@ spec:
     controllers:
       absenty:
         strategy: Recreate
+        initContainers:
+          bundle-install:
+            image:
+              repository: ghcr.io/nachtschatt3n/absenty
+              tag: sha-ff3910e-dev
+            command:
+              - bash
+              - -lc
+              - bundle config set --local path '/bundle' && bundle install
+            volumeMounts:
+              - name: bundle
+                mountPath: /bundle
         containers:
           app:
             image:
@@ -34,7 +46,7 @@ spec:
             command:
               - bash
               - -lc
-              - bundle config set --local path '/bundle' && bundle install && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
+              - bundle config set --local path '/bundle' && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -93,10 +105,10 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
-                  initialDelaySeconds: 180
+                  initialDelaySeconds: 5
                   periodSeconds: 10
                   timeoutSeconds: 10
-                  failureThreshold: 90
+                  failureThreshold: 30
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret
