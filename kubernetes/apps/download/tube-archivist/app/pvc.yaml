@@ -17,36 +17,5 @@ spec:
     requests:
       storage: 1Ti
   storageClassName: cifs-tube-archivist-media
----
-# Cache volume on Longhorn
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tube-archivist-cache-new
-  namespace: download
-  labels:
-    app.kubernetes.io/name: tube-archivist
-    app.kubernetes.io/component: cache
-spec:
-  accessModes:
-    - ReadWriteMany
-  resources:
-    requests:
-      storage: 50Gi
-  storageClassName: longhorn-static
-  volumeName: tube-archivist-cache
----
-# Elasticsearch data volume on Longhorn
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: tube-archivist-elasticsearch-data-new
-  namespace: download
-spec:
-  accessModes:
-    - ReadWriteMany
-  resources:
-    requests:
-      storage: 20Gi
-  storageClassName: longhorn-static
-  volumeName: tube-archivist-elasticsearch-data
+# Cache and Elasticsearch PVCs already exist from migration
+# Removed from here to avoid immutable spec conflicts
