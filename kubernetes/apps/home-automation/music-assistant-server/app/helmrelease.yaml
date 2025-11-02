@@ -63,6 +63,9 @@ spec:
             port: 80
             targetPort: 8095
             primary: true
+          http-alt:
+            port: 8095
+            targetPort: 8095
           stream:
             port: 8097
             targetPort: 8097
