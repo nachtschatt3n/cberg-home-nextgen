@@ -22,7 +22,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: tube-archivist-cache
+  name: tube-archivist-cache-new
   namespace: download
   labels:
     app.kubernetes.io/name: tube-archivist
@@ -33,13 +33,14 @@ spec:
   resources:
     requests:
       storage: 50Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: tube-archivist-cache
 ---
 # Elasticsearch data volume on Longhorn
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: tube-archivist-elasticsearch-data
+  name: tube-archivist-elasticsearch-data-new
   namespace: download
 spec:
   accessModes:
@@ -47,4 +48,5 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: tube-archivist-elasticsearch-data
