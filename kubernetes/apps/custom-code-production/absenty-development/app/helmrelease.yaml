@@ -161,7 +161,7 @@ spec:
           - path: /app/log
       bundle:
         enabled: true
-        type: emptyDir
-        sizeLimit: 2Gi
+        type: persistentVolumeClaim
+        existingClaim: absenty-development-bundle
         globalMounts:
           - path: /bundle
