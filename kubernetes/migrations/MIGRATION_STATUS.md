@@ -1,8 +1,8 @@
 # PV/PVC Migration Status
 
-**Last Updated**: 2025-11-01 23:20 UTC
-**Session**: Phase 3 completed
-**Status**: PHASE 3 COMPLETE ✅
+**Last Updated**: 2025-11-02 10:05 UTC
+**Session**: Phase 3 completed, Phase 4 ready to start
+**Status**: PHASE 3 COMPLETE ✅ - Ready for Phase 4
 
 ## Overview
 
@@ -129,6 +129,12 @@ Migrating Longhorn volumes from UUID-based PV names to clean naming standard.
 
 **Next: Phase 4 - Large Databases (4 volumes, 20-50Gi each)**
 
+Ready to migrate:
+1. ai/bytebot-desktop-data (20Gi)
+2. ai/langfuse-clickhouse-pvc → langfuse-clickhouse-data (20Gi)
+3. download/tube-archivist-elasticsearch-data (20Gi)
+4. download/tube-archivist-cache (50Gi)
+
 ## Volumes Queued for Migration
 
 ### Phase 2: Application Data (5 volumes)
@@ -219,7 +225,12 @@ After each migration job completes:
 2. **alertmanager migration** - Attempted but rolled back due to StatefulSet complexity
 
 ### Active Issues:
-None currently.
+1. **absenty-development** - Container image missing pre-installed gems
+   - Migration successful (data intact: 147MB + 228MB)
+   - Application crashes due to image build issue (not migration issue)
+   - Scaled to 0 replicas temporarily
+   - Production instance working fine
+   - See: `ABSENTY_DEVELOPMENT_ISSUE.md` for details and solution
 
 ## Time Estimates
 
