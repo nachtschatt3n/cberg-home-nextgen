@@ -10,6 +10,7 @@ resources:
   - ./uptime-kuma/ks.yaml
   - ./eck-operator/ks.yaml
   - ./elasticsearch/ks.yaml
+  - ./elasticsearch-bootstrap/ks.yaml
   - ./kibana/ks.yaml
   - ./apm-server/ks.yaml
   - ./opentelemetry-operator/ks.yaml
