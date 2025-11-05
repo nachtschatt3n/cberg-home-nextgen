@@ -34,3 +34,5 @@ resources:
   - ./jameswynn.yaml
   - ./descheduler.yaml
   - ./authentik.yaml
+  - ./elastic.yaml
+  - ./opentelemetry.yaml
