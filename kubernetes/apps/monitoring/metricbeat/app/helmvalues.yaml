@@ -1,0 +1,76 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-values
+data:
+  values.yaml: |
+    daemonset:
+      enabled: false
+    
+    deployment:
+      enabled: true
+      replicas: 2
+    
+    image: "docker.elastic.co/beats/metricbeat"
+    imageTag: "8.15.3"
+    
+    metricbeatConfig:
+      metricbeat.yml: |
+        metricbeat.modules:
+        - module: prometheus
+          period: 30s
+          hosts: ["prometheus-kube-prometheus-stack.monitoring.svc:9090"]
+          metrics_path: /metrics
+          metricsets: ["collector"]
+          
+        - module: prometheus
+          period: 30s
+          hosts: ["prometheus-kube-prometheus-stack.monitoring.svc:9090"]
+          metrics_path: /federate
+          metricsets: ["query"]
+          query:
+            match[]:
+              - '{__name__=~"up|process_.*|go_.*|container_.*|node_.*|kube_.*|otelcol_.*|elasticsearch_.*|kibana_.*|apmserver_.*|uptime_kuma_.*|prometheus_.*|alertmanager_.*|longhorn_.*|nginx_.*|frigate_.*|adguard_.*|mosquitto_.*|influxdb_.*|nextcloud_.*"}'
+        
+        output.elasticsearch:
+          hosts: ["https://elasticsearch-es-http.monitoring.svc:9200"]
+          username: "elastic"
+          password: "${ELASTICSEARCH_PASSWORD}"
+          ssl.certificate_authorities: ["/usr/share/metricbeat/config/certs/tls.crt"]
+          index: "metrics-prometheus-%{+yyyy.MM.dd}"
+        
+        setup.ilm.enabled: true
+        setup.ilm.policy_name: "metrics-default"
+        setup.ilm.rollover_alias: "metrics-prometheus"
+        setup.ilm.pattern: "{now/d}-000001"
+        
+        setup.template.name: "metrics-prometheus"
+        setup.template.pattern: "metrics-prometheus-*"
+        
+        processors:
+          - add_cloud_metadata: ~
+          - add_kubernetes_metadata: ~
+    
+    extraEnvs:
+      - name: ELASTICSEARCH_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: elasticsearch-es-elastic-user
+            key: elastic
+    
+    secretMounts:
+      - name: elasticsearch-certs
+        secretName: elasticsearch-es-http-certs-public
+        path: /usr/share/metricbeat/config/certs
+    
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    
+    podAnnotations:
+      gethomepage.dev/enabled: "false"
