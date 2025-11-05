@@ -36,18 +36,6 @@ spec:
                   memory: "4Gi"
                 limits:
                   memory: "6Gi"
-              readinessProbe:
-                httpGet:
-                  scheme: HTTPS
-                  path: /_cluster/health?local=true
-                  port: 9200
-                initialDelaySeconds: 30
-                timeoutSeconds: 5
-              livenessProbe:
-                tcpSocket:
-                  port: 9300
-                initialDelaySeconds: 60
-                periodSeconds: 20
           securityContext:
             fsGroup: 1000
           nodeSelector: {}
