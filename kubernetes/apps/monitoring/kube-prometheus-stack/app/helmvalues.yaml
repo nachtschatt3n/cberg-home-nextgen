@@ -170,9 +170,6 @@ data:
         walCompression: true
         retention: 24h
         retentionSize: 8GB
-        secrets:
-          - elasticsearch-es-http-certs-public
-          - elastic-integration-secrets
         remoteWrite:
           - url: https://elasticsearch-es-http.monitoring.svc:9200/_prometheus/write
             basicAuth:
