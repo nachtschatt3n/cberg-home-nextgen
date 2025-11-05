@@ -174,11 +174,11 @@ data:
           - url: https://elasticsearch-es-http.monitoring.svc:9200/_prometheus/write
             basicAuth:
               username:
-                name: elasticsearch-es-elastic-user
-                key: elastic
+                name: elasticsearch-remote-write-auth
+                key: username
               password:
-                name: elasticsearch-es-elastic-user
-                key: elastic
+                name: elasticsearch-remote-write-auth
+                key: password
             tlsConfig:
               caFile: /etc/prometheus/secrets/elasticsearch-es-http-certs-public/tls.crt
             writeRelabelConfigs:
