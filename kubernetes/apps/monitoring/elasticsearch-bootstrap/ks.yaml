@@ -19,5 +19,3 @@ spec:
   targetNamespace: *namespace
   interval: 30m
   timeout: 5m
-  dependsOn:
-    - name: elasticsearch
