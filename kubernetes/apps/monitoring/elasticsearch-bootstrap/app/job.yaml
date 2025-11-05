@@ -58,7 +58,7 @@ spec:
               
               echo "Waiting for Elasticsearch to be ready..."
               for i in $(seq 1 30); do
-                if curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" "${ES_URL}/_cluster/health" > /dev/null 2>&1; then
+                if curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" "${ES_URL}/_cluster/health" > /dev/null 2>&1; then
                   echo "Elasticsearch is ready"
                   break
                 fi
@@ -67,7 +67,7 @@ spec:
               done
 
               echo "Creating ILM policy for metrics (15 day retention)..."
-              curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+              curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
                 -X PUT "${ES_URL}/_ilm/policy/metrics-default" \
                 -H 'Content-Type: application/json' \
                 -d '{
@@ -93,7 +93,7 @@ spec:
 
               echo ""
               echo "Creating ILM policy for APM traces (14 day retention)..."
-              curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+              curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
                 -X PUT "${ES_URL}/_ilm/policy/apm-default" \
                 -H 'Content-Type: application/json' \
                 -d '{
@@ -119,7 +119,7 @@ spec:
 
               echo ""
               echo "Creating API key for Prometheus remote_write..."
-              API_KEY_RESPONSE=$(curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+              API_KEY_RESPONSE=$(curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
                 -X POST "${ES_URL}/_security/api_key" \
                 -H 'Content-Type: application/json' \
                 -d '{
