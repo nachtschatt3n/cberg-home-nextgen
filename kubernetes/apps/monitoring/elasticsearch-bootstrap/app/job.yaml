@@ -1,0 +1,163 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: es-bootstrap
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: es-bootstrap
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: es-bootstrap
+  namespace: monitoring
+subjects:
+  - kind: ServiceAccount
+    name: es-bootstrap
+    namespace: monitoring
+roleRef:
+  kind: Role
+  name: es-bootstrap
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: es-bootstrap
+  namespace: monitoring
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: es-bootstrap
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: alpine/curl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache jq kubectl
+
+              ES_URL="https://elasticsearch-es-http.monitoring.svc:9200"
+              ES_USER="elastic"
+              ES_PASS=$(kubectl -n monitoring get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+              CA_FILE="/etc/ca/tls.crt"
+              
+              echo "Waiting for Elasticsearch to be ready..."
+              for i in $(seq 1 30); do
+                if curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" "${ES_URL}/_cluster/health" > /dev/null 2>&1; then
+                  echo "Elasticsearch is ready"
+                  break
+                fi
+                echo "Waiting... ($i/30)"
+                sleep 5
+              done
+
+              echo "Creating ILM policy for metrics (15 day retention)..."
+              curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+                -X PUT "${ES_URL}/_ilm/policy/metrics-default" \
+                -H 'Content-Type: application/json' \
+                -d '{
+                  "policy": {
+                    "phases": {
+                      "hot": {
+                        "actions": {
+                          "rollover": {
+                            "max_age": "1d",
+                            "max_size": "20gb"
+                          }
+                        }
+                      },
+                      "delete": {
+                        "min_age": "15d",
+                        "actions": {
+                          "delete": {}
+                        }
+                      }
+                    }
+                  }
+                }'
+
+              echo ""
+              echo "Creating ILM policy for APM traces (14 day retention)..."
+              curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+                -X PUT "${ES_URL}/_ilm/policy/apm-default" \
+                -H 'Content-Type: application/json' \
+                -d '{
+                  "policy": {
+                    "phases": {
+                      "hot": {
+                        "actions": {
+                          "rollover": {
+                            "max_age": "1d",
+                            "max_size": "50gb"
+                          }
+                        }
+                      },
+                      "delete": {
+                        "min_age": "14d",
+                        "actions": {
+                          "delete": {}
+                        }
+                      }
+                    }
+                  }
+                }'
+
+              echo ""
+              echo "Creating API key for Prometheus remote_write..."
+              API_KEY_RESPONSE=$(curl -s -k --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" \
+                -X POST "${ES_URL}/_security/api_key" \
+                -H 'Content-Type: application/json' \
+                -d '{
+                  "name": "prometheus-remote-write",
+                  "role_descriptors": {
+                    "prometheus_writer": {
+                      "cluster": ["monitor", "manage_ilm", "read_ilm"],
+                      "index": [
+                        {
+                          "names": ["metrics-*", "prometheus-*"],
+                          "privileges": ["create_doc", "create_index", "create", "write", "auto_configure"]
+                        }
+                      ]
+                    }
+                  }
+                }')
+
+              API_KEY=$(echo $API_KEY_RESPONSE | jq -r '.encoded')
+              
+              if [ "$API_KEY" = "null" ] || [ -z "$API_KEY" ]; then
+                echo "ERROR: Failed to create API key"
+                echo "Response: $API_KEY_RESPONSE"
+                exit 1
+              fi
+
+              echo "API key created successfully"
+              echo "Storing API key in Kubernetes secret..."
+              
+              kubectl -n monitoring create secret generic elastic-integration-secrets \
+                --from-literal=prom_remote_write_api_key="$API_KEY" \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo "Bootstrap completed successfully!"
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/ca
+              readOnly: true
+      volumes:
+        - name: ca
+          secret:
+            secretName: elasticsearch-es-http-certs-public
