@@ -13,3 +13,4 @@ resources:
   - ./kibana/ks.yaml
   - ./apm-server/ks.yaml
   - ./opentelemetry-operator/ks.yaml
+  - ./otel-collector/ks.yaml
