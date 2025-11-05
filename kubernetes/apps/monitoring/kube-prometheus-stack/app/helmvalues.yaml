@@ -182,7 +182,7 @@ data:
                 name: elasticsearch-remote-write-auth
                 key: password
             tlsConfig:
-              caFile: /etc/prometheus/secrets/elasticsearch-es-http-certs-public/tls.crt
+              insecureSkipVerify: true
             writeRelabelConfigs:
               - action: keep
                 sourceLabels: [__name__]
