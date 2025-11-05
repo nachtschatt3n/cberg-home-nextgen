@@ -120,6 +120,11 @@ spec:
                 enabled: true
               startup:
                 enabled: true
+                spec:
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 60
             args:
               - "--port"
               - "8000"
