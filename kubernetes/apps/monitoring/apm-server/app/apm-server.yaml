@@ -1,0 +1,42 @@
+---
+apiVersion: apm.k8s.elastic.co/v1
+kind: ApmServer
+metadata:
+  name: apm
+  namespace: monitoring
+spec:
+  version: 8.15.3
+  count: 2
+  elasticsearchRef:
+    name: elasticsearch
+  kibanaRef:
+    name: kibana
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: false
+  podTemplate:
+    spec:
+      containers:
+        - name: apm-server
+          env:
+            - name: APM_SECRET_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: apm-secrets
+                  key: apm_secret_token
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+  config:
+    apm-server:
+      auth:
+        secret_token: "${APM_SECRET_TOKEN}"
+      sampling:
+        tail:
+          enabled: true
+    output.elasticsearch:
+      compression_level: 5
