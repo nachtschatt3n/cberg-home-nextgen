@@ -58,11 +58,12 @@ spec:
               
               echo "Waiting for Elasticsearch to be ready..."
               for i in $(seq 1 30); do
-                if curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" "${ES_URL}/_cluster/health" > /dev/null 2>&1; then
+                RESPONSE=$(curl -s --cacert ${CA_FILE} -u "${ES_USER}:${ES_PASS}" "${ES_URL}/_cluster/health" 2>&1)
+                if echo "$RESPONSE" | grep -q '"status"'; then
                   echo "Elasticsearch is ready"
                   break
                 fi
-                echo "Waiting... ($i/30)"
+                echo "Waiting... ($i/30) - Error: $RESPONSE"
                 sleep 5
               done
 
