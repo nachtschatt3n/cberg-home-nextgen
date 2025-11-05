@@ -168,7 +168,22 @@ data:
         scrapeConfigSelectorNilUsesHelmValues: false
         enableAdminAPI: true
         walCompression: true
+        retention: 24h
         retentionSize: 8GB
+        secrets:
+          - elasticsearch-es-http-certs-public
+          - elastic-integration-secrets
+        remoteWrite:
+          - url: https://elasticsearch-es-http.monitoring.svc:9200/_prometheus/write
+            authorization:
+              type: Bearer
+              credentialsFile: /etc/prometheus/secrets/elastic-integration-secrets/prom_remote_write_api_key
+            tlsConfig:
+              caFile: /etc/prometheus/secrets/elasticsearch-es-http-certs-public/tls.crt
+            writeRelabelConfigs:
+              - action: keep
+                sourceLabels: [__name__]
+                regex: "^(up|process_.*|go_.*|container_.*|node_.*|kube_.*|otelcol_.*|elasticsearch_.*|kibana_.*|apmserver_.*|uptime_kuma_.*|prometheus_.*|alertmanager_.*|longhorn_.*|nginx_.*|frigate_.*|adguard_.*|mosquitto_.*|influxdb_.*|nextcloud_.*)$"
         storageSpec:
           volumeClaimTemplate:
             spec:
