@@ -1,0 +1,63 @@
+---
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch
+  namespace: monitoring
+spec:
+  version: 8.15.3
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: false
+  nodeSets:
+    - name: default
+      count: 3
+      config:
+        node.roles: ["master", "data", "ingest"]
+        node.store.allow_mmap: false
+        xpack.security.http.ssl.enabled: true
+        xpack.security.transport.ssl.enabled: true
+        xpack.security.enabled: true
+      podTemplate:
+        metadata:
+          labels:
+            app: elasticsearch
+        spec:
+          automountServiceAccountToken: false
+          containers:
+            - name: elasticsearch
+              env:
+                - name: ES_JAVA_OPTS
+                  value: "-Xms2g -Xmx2g"
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "4Gi"
+                limits:
+                  memory: "6Gi"
+              readinessProbe:
+                httpGet:
+                  scheme: HTTPS
+                  path: /_cluster/health?local=true
+                  port: 9200
+                initialDelaySeconds: 30
+                timeoutSeconds: 5
+              livenessProbe:
+                tcpSocket:
+                  port: 9300
+                initialDelaySeconds: 60
+                periodSeconds: 20
+          securityContext:
+            fsGroup: 1000
+          nodeSelector: {}
+          tolerations: []
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: longhorn
+            resources:
+              requests:
+                storage: 100Gi
