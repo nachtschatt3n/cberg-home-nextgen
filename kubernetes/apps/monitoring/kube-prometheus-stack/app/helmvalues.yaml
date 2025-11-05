@@ -175,8 +175,13 @@ data:
           - elastic-integration-secrets
         remoteWrite:
           - url: https://elasticsearch-es-http.monitoring.svc:9200/_prometheus/write
-            headers:
-              Authorization: "ApiKey dVJaSlZwb0IyOHhrQTg0WUhrLV86ZjZTYXlHTFVTM2VmRVNyQ1NqSmN2QQ=="
+            basicAuth:
+              username:
+                name: elasticsearch-es-elastic-user
+                key: elastic
+              password:
+                name: elasticsearch-es-elastic-user
+                key: elastic
             tlsConfig:
               caFile: /etc/prometheus/secrets/elasticsearch-es-http-certs-public/tls.crt
             writeRelabelConfigs:
