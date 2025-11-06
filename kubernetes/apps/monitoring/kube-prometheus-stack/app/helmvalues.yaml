@@ -170,23 +170,6 @@ data:
         walCompression: true
         retention: 24h
         retentionSize: 8GB
-        secrets:
-          - elasticsearch-es-http-certs-public
-        remoteWrite:
-          - url: https://elasticsearch-es-http.monitoring.svc:9200/_prometheus/write
-            basicAuth:
-              username:
-                name: elasticsearch-remote-write-auth
-                key: username
-              password:
-                name: elasticsearch-remote-write-auth
-                key: password
-            tlsConfig:
-              insecureSkipVerify: true
-            writeRelabelConfigs:
-              - action: keep
-                sourceLabels: [__name__]
-                regex: "^(up|process_.*|go_.*|container_.*|node_.*|kube_.*|otelcol_.*|elasticsearch_.*|kibana_.*|apmserver_.*|uptime_kuma_.*|prometheus_.*|alertmanager_.*|longhorn_.*|nginx_.*|frigate_.*|adguard_.*|mosquitto_.*|influxdb_.*|nextcloud_.*)$"
         storageSpec:
           volumeClaimTemplate:
             spec:
