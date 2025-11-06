@@ -39,5 +39,7 @@ data:
     http.host: "0.0.0.0"
     http.port: 5066
     
-    logging.level: info
+    logging.level: debug
     logging.to_stderr: true
+    logging.event_data.to_stderr: true
+    logging.event_data.to_files: false
