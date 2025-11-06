@@ -1,0 +1,111 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: filebeat
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      filebeat:
+        type: daemonset
+        containers:
+          app:
+            image:
+              repository: docker.elastic.co/beats/filebeat
+              tag: 8.15.3
+            args:
+              - "-c"
+              - "/etc/filebeat/filebeat.yml"
+              - "-e"
+            env:
+              - name: NODE_NAME
+                valueFrom:
+                  fieldRef:
+                    fieldPath: spec.nodeName
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5066
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 5066
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              runAsUser: 0
+              runAsNonRoot: false
+              privileged: true
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+
+    service:
+      main:
+        controller: filebeat
+        enabled: false
+
+    persistence:
+      config:
+        type: configMap
+        name: filebeat-config
+        globalMounts:
+          - path: /etc/filebeat/filebeat.yml
+            subPath: filebeat.yml
+            readOnly: true
+      elasticsearch-certs:
+        type: secret
+        name: elasticsearch-es-http-certs-public
+        globalMounts:
+          - path: /usr/share/filebeat/config/certs
+            readOnly: true
+      varlog:
+        type: hostPath
+        hostPath: /var/log
+        globalMounts:
+          - path: /var/log
+            readOnly: true
+      varlibdockercontainers:
+        type: hostPath
+        hostPath: /var/lib/docker/containers
+        globalMounts:
+          - path: /var/lib/docker/containers
+            readOnly: true
+      data:
+        type: emptyDir
+        globalMounts:
+          - path: /usr/share/filebeat/data
