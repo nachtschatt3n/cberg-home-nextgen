@@ -28,7 +28,7 @@ spec:
         initContainers:
           config-template:
             image:
-              repository: busybox
+              repository: alpine
               tag: latest
             command:
               - sh
