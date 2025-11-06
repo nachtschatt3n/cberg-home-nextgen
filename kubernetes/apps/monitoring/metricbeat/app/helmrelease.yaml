@@ -39,14 +39,10 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  exec:
-                    command:
-                      - sh
-                      - -c
-                      - |
-                        #!/usr/bin/env bash -e
-                        curl --fail 127.0.0.1:5066
-                  initialDelaySeconds: 60
+                  httpGet:
+                    path: /
+                    port: 5066
+                  initialDelaySeconds: 30
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 3
@@ -54,14 +50,10 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  exec:
-                    command:
-                      - sh
-                      - -c
-                      - |
-                        #!/usr/bin/env bash -e
-                        metricbeat test output
-                  initialDelaySeconds: 60
+                  httpGet:
+                    path: /
+                    port: 5066
+                  initialDelaySeconds: 30
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 3
