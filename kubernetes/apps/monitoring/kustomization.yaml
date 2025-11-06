@@ -14,5 +14,6 @@ resources:
   - ./kibana/ks.yaml
   - ./apm-server/ks.yaml
   - ./opentelemetry-operator/ks.yaml
+  - ./opentelemetry-operator/instrumentation-ks.yaml
   - ./otel-collector/ks.yaml
   - ./metricbeat/ks.yaml

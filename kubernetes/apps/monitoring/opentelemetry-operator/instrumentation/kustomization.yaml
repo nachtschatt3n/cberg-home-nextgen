@@ -4,4 +4,4 @@ kind: Kustomization
 components:
   - ../../../../flux/components/common
 resources:
-  - ./helmrelease.yaml
+  - ./instrumentation.yaml
