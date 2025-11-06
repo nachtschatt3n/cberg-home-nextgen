@@ -35,11 +35,7 @@ data:
     setup.template.settings:
       index.number_of_shards: 1
       index.number_of_replicas: 1
-    setup.template.append_fields:
-      - name: '@timestamp'
-        type: date
     setup.template.json.enabled: false
-    setup.template.type: legacy
 
     logging.level: info
     logging.to_stderr: true
