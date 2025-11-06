@@ -32,6 +32,8 @@ data:
     setup.template.name: "filebeat"
     setup.template.pattern: "filebeat-*"
 
+    output.elasticsearch.index: "filebeat-%{[agent.version]}-%{+yyyy.MM.dd}"
+
     logging.level: info
     logging.to_stderr: true
 
