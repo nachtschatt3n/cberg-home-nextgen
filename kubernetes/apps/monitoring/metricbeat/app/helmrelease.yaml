@@ -1,0 +1,103 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: metricbeat
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.6.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      metricbeat:
+        replicas: 2
+        containers:
+          app:
+            image:
+              repository: docker.elastic.co/beats/metricbeat
+              tag: 8.15.3
+            args:
+              - "-c"
+              - "/etc/metricbeat/metricbeat.yml"
+              - "-e"
+            env:
+              - name: ELASTICSEARCH_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: elasticsearch-es-elastic-user
+                    key: elastic
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        #!/usr/bin/env bash -e
+                        curl --fail 127.0.0.1:5066
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        #!/usr/bin/env bash -e
+                        metricbeat test output
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              runAsUser: 0
+              runAsNonRoot: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+    
+    service:
+      main:
+        controller: metricbeat
+        enabled: false
+    
+    persistence:
+      config:
+        type: configMap
+        name: metricbeat-config
+        globalMounts:
+          - path: /etc/metricbeat/metricbeat.yml
+            subPath: metricbeat.yml
+            readOnly: true
+      elasticsearch-certs:
+        type: secret
+        name: elasticsearch-es-http-certs-public
+        globalMounts:
+          - path: /usr/share/metricbeat/config/certs
+            readOnly: true
