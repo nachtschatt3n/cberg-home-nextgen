@@ -4,6 +4,8 @@ kind: ServiceMonitor
 metadata:
   name: uptime-kuma
   namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
 spec:
   selector:
     matchLabels:
@@ -12,3 +14,10 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+      basicAuth:
+        username:
+          name: uptime-kuma-metrics-auth
+          key: username
+        password:
+          name: uptime-kuma-metrics-auth
+          key: password
