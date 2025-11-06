@@ -30,12 +30,22 @@ spec:
             image:
               repository: alpine
               tag: latest
+            env:
+              - name: ELASTICSEARCH_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: metricbeat-es-credentials
+                    key: username
+              - name: ELASTICSEARCH_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: metricbeat-es-credentials
+                    key: password
             command:
               - sh
               - -c
               - |
                 apk add --no-cache gettext
-                export ELASTICSEARCH_USERNAME ELASTICSEARCH_PASSWORD
                 envsubst < /tmp/config-template/metricbeat.yml > /tmp/config-final/metricbeat.yml
         containers:
           app:
