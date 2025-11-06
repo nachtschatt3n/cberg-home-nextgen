@@ -17,4 +17,4 @@ resources:
   - ./opentelemetry-operator/instrumentation-ks.yaml
   - ./otel-collector/ks.yaml
   - ./metricbeat/ks.yaml
-  - ./filebeat/ks.yaml
+  - ./fluent-bit/ks.yaml
