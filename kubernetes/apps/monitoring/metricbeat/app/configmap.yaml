@@ -23,8 +23,8 @@ data:
     
     output.elasticsearch:
       hosts: ["https://elasticsearch-es-http.monitoring.svc:9200"]
-      username: "${ELASTICSEARCH_USERNAME}"
-      password: "${ELASTICSEARCH_PASSWORD}"
+      username: "elastic"
+      password: "MC3lY6PQ2lkhP2z70Q1pw373"
       ssl.certificate_authorities: ["/usr/share/metricbeat/config/certs/tls.crt"]
       index: "metrics-prometheus-%{+yyyy.MM.dd}"
     
