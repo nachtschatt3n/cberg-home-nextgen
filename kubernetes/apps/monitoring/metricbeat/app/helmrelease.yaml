@@ -25,6 +25,18 @@ spec:
     controllers:
       metricbeat:
         replicas: 2
+        initContainers:
+          config-template:
+            image:
+              repository: busybox
+              tag: latest
+            command:
+              - sh
+              - -c
+              - |
+                apk add --no-cache gettext
+                export ELASTICSEARCH_USERNAME ELASTICSEARCH_PASSWORD
+                envsubst < /tmp/config-template/metricbeat.yml > /tmp/config-final/metricbeat.yml
         containers:
           app:
             image:
@@ -93,13 +105,19 @@ spec:
         enabled: false
     
     persistence:
-      config:
+      config-template:
         type: configMap
         name: metricbeat-config
+        advancedMounts:
+          metricbeat:
+            config-template:
+              - path: /tmp/config-template/metricbeat.yml
+                subPath: metricbeat.yml
+                readOnly: true
+      config-final:
+        type: emptyDir
         globalMounts:
-          - path: /etc/metricbeat/metricbeat.yml
-            subPath: metricbeat.yml
-            readOnly: true
+          - path: /tmp/config-final
       elasticsearch-certs:
         type: secret
         name: elasticsearch-es-http-certs-public
