@@ -26,6 +26,7 @@ data:
       password: "MC3lY6PQ2lkhP2z70Q1pw373"
       ssl.certificate_authorities: ["/usr/share/filebeat/config/certs/tls.crt"]
       index: "filebeat-%{[agent.version]}-%{+yyyy.MM.dd}"
+      allow_older_versions: true
 
     setup.ilm.enabled: false
     setup.template.enabled: true
