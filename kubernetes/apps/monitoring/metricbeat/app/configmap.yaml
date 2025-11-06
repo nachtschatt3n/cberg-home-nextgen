@@ -26,15 +26,10 @@ data:
       username: "elastic"
       password: "MC3lY6PQ2lkhP2z70Q1pw373"
       ssl.certificate_authorities: ["/usr/share/metricbeat/config/certs/tls.crt"]
-      index: "metrics-prometheus-%{+yyyy.MM.dd}"
-    
-    setup.ilm.enabled: true
-    setup.ilm.policy_name: "metrics-default"
-    setup.ilm.rollover_alias: "metrics-prometheus"
-    setup.ilm.pattern: "{now/d}-000001"
-    
-    setup.template.name: "metrics-prometheus"
-    setup.template.pattern: "metrics-prometheus-*"
+
+    setup.ilm.enabled: false
+    setup.template.enabled: true
+    setup.template.overwrite: true
     
     processors:
       - add_cloud_metadata: ~
