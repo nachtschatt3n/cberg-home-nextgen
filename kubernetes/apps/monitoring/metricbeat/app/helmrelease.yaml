@@ -35,11 +35,16 @@ spec:
               - "/etc/metricbeat/metricbeat.yml"
               - "-e"
             env:
+              - name: ELASTICSEARCH_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: metricbeat-es-credentials
+                    key: username
               - name: ELASTICSEARCH_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: elasticsearch-es-elastic-user
-                    key: elastic
+                    name: metricbeat-es-credentials
+                    key: password
             probes:
               liveness:
                 enabled: true
