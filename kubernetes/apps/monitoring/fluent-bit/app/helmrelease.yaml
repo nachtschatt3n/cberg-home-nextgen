@@ -63,7 +63,7 @@ spec:
             Path /var/log/containers/*.log
             multiline.parser docker, cri
             Tag kube.*
-            Mem_Buf_Limit 5MB
+            Mem_Buf_Limit 10MB
             Skip_Long_Lines On
 
       filters: |
@@ -105,6 +105,7 @@ spec:
             tls.verify Off
             Retry_Limit 5
             Suppress_Type_Name On
+            Buffer_Size 128KB
 
       customParsers: |
         [PARSER]
