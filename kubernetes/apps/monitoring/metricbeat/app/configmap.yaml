@@ -8,13 +8,13 @@ data:
     metricbeat.modules:
     - module: prometheus
       period: 30s
-      hosts: ["prometheus-kube-prometheus-stack.monitoring.svc:9090"]
+      hosts: ["kube-prometheus-stack-prometheus.monitoring.svc:9090"]
       metrics_path: /metrics
       metricsets: ["collector"]
       
     - module: prometheus
       period: 30s
-      hosts: ["prometheus-kube-prometheus-stack.monitoring.svc:9090"]
+      hosts: ["kube-prometheus-stack-prometheus.monitoring.svc:9090"]
       metrics_path: /federate
       metricsets: ["query"]
       query:
