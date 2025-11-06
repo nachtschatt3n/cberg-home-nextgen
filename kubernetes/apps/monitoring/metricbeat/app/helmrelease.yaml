@@ -44,7 +44,7 @@ spec:
               tag: 8.15.3
             args:
               - "-c"
-              - "/etc/metricbeat/metricbeat.yml"
+              - "/tmp/config-final/metricbeat.yml"
               - "-e"
             env:
               - name: ELASTICSEARCH_USERNAME
