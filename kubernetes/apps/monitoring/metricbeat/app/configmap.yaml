@@ -26,10 +26,18 @@ data:
       username: "elastic"
       password: "MC3lY6PQ2lkhP2z70Q1pw373"
       ssl.certificate_authorities: ["/usr/share/metricbeat/config/certs/tls.crt"]
+      index: "metricbeat-%{[agent.version]}-%{+yyyy.MM.dd}"
+      allow_older_versions: true
 
     setup.ilm.enabled: false
     setup.template.enabled: true
     setup.template.overwrite: true
+    setup.template.name: "metricbeat"
+    setup.template.pattern: "metricbeat-*"
+    setup.template.settings:
+      index.number_of_shards: 1
+      index.number_of_replicas: 1
+    setup.template.json.enabled: false
     
     processors:
       - add_cloud_metadata: ~
@@ -39,7 +47,7 @@ data:
     http.host: "0.0.0.0"
     http.port: 5066
     
-    logging.level: debug
+    logging.level: info
     logging.to_stderr: true
     logging.event_data.to_stderr: true
     logging.event_data.to_files: false
