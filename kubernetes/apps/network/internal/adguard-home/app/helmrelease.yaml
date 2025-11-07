@@ -205,7 +205,7 @@ spec:
         statistics_interval: 90
         querylog_enabled: true
         querylog_file_enabled: true
-        querylog_interval: 300h
+        querylog_interval: 48h
         querylog_size_memory: 10000
         anonymize_client_ip: false
         protection_enabled: true
