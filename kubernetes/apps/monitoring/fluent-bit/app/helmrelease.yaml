@@ -56,6 +56,7 @@ spec:
             HTTP_Listen 0.0.0.0
             HTTP_Port 2020
             Health_Check On
+            HTTP_Buffer_Size 512KB
 
       inputs: |
         [INPUT]
