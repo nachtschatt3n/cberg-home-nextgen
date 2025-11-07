@@ -104,7 +104,7 @@ spec:
             tls.verify Off
             Retry_Limit 5
             Suppress_Type_Name On
-            Buffer_Size 128KB
+            Buffer_Size 512KB
 
       customParsers: |
         [PARSER]
