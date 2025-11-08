@@ -201,7 +201,7 @@ spec:
           gethomepage.dev/name: "IoBroker"
           gethomepage.dev/description: "IoBroker is an open-source home automation platform"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "iobroker.png"
+          gethomepage.dev/icon: "mdi:home-automation"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
