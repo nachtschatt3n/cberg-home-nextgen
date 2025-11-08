@@ -55,7 +55,7 @@ spec:
           gethomepage.dev/name: "ESPHome"
           gethomepage.dev/description: "ESPHome dashboard"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "mdi:chip"
+          gethomepage.dev/icon: "esphome.png"
           external-dns.alpha.kubernetes.io/hostname: "esphome.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"

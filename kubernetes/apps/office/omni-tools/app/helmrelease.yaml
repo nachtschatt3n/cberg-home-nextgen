@@ -88,7 +88,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Omni Tools"
           gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "mdi:tools"
+          gethomepage.dev/icon: "omni-tools.png"
           gethomepage.dev/description: "Multi-purpose toolkit for PDF, text, date, math, and data tools"
         hosts:
           - host: omni-tools.${SECRET_DOMAIN}

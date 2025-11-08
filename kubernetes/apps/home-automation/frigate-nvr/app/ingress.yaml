@@ -10,7 +10,7 @@ metadata:
     gethomepage.dev/name: "Frigate NVR"
     gethomepage.dev/description: "Frigate NVR is a home surveillance system"
     gethomepage.dev/group: "Home Automation"
-    gethomepage.dev/icon: "mdi:cctv"
+    gethomepage.dev/icon: "frigate.png"
   labels:
     gethomepage.dev/enabled: "true"
 spec:
