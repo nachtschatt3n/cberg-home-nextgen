@@ -12,6 +12,7 @@ metadata:
     gethomepage.dev/description: "Media streaming server"
     gethomepage.dev/group: "Media"
     gethomepage.dev/icon: "plex.png"
+    gethomepage.dev/pod-selector: app.kubernetes.io/instance=plex
     external-dns.alpha.kubernetes.io/target: &host "plex.${SECRET_DOMAIN}"
 spec:
   ingressClassName: "internal"
