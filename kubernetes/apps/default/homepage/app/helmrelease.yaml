@@ -91,48 +91,39 @@ spec:
                 href: https://unifi.${SECRET_DOMAIN}
                 icon: mdi:router-network
                 description: Unifi Controller
-                siteMonitor: https://unifi.${SECRET_DOMAIN}
             - Brother:
                 icon: mdi:printer
                 href: http://192.168.33.153
                 description: Brother HL 2360DW
-                siteMonitor: http://192.168.33.153
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
                 icon: mdi:solar-power
                 description: Solar Inverter Gateway
-                siteMonitor: http://192.168.33.220
             - Awtrix:
                 href: http://192.168.33.135
                 icon: mdi:led-strip
                 description: LED Matrix Display
-                siteMonitor: http://192.168.33.135
             - PiKVM:
                 href: http://192.168.30.154
                 icon: mdi:monitor
                 description: KVM over IP
-                siteMonitor: http://192.168.30.154
             - "Zigbee Router GF":
                 href: http://192.168.32.21
                 icon: mdi:router-wireless
                 description: SLZB-06 Zigbee Router Ground Floor
-                siteMonitor: http://192.168.32.21
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
                 icon: mdi:router-wireless
                 description: SLZB-06P10 Zigbee Coordinator
-                siteMonitor: http://192.168.32.20
             - "Unifi NAS Pro":
                 href: http://192.168.31.230
                 icon: mdi:nas
                 description: Network Attached Storage
-                siteMonitor: http://192.168.31.230
             - "Epson Scanner ES-580W":
                 icon: mdi:scanner
                 href: http://192.168.32.201
                 description: Epson ES-580W
-                siteMonitor: http://192.168.32.201
 
       widgets:
         - greeting:
@@ -203,7 +194,7 @@ spec:
         theme: dark
         color: slate
         headerStyle: boxed
-        useEqualHeights: true
+        useEqualHeights: false
         favicon: mdi:home
         hideVersion: false
         disableCollapse: false

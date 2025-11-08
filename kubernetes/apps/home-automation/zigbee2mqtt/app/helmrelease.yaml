@@ -67,7 +67,7 @@ spec:
           gethomepage.dev/name: "Zigbee2MQTT"
           gethomepage.dev/description: "Zigbee to MQTT bridge"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "zigbee2mqtt.png"
+          gethomepage.dev/icon: "mdi:zigbee"
           external-dns.alpha.kubernetes.io/hostname: zigbee2mqtt.${SECRET_DOMAIN}
         hosts:
           - host: "zigbee2mqtt.${SECRET_DOMAIN}"

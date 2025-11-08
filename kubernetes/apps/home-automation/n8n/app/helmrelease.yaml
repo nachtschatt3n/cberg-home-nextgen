@@ -41,7 +41,7 @@ spec:
         gethomepage.dev/name: "n8n"
         gethomepage.dev/description: "Workflow automation platform"
         gethomepage.dev/group: "Home Automation"
-        gethomepage.dev/icon: "n8n.png"
+        gethomepage.dev/icon: "mdi:workflow"
         hajimari.io/enable: "true"
         hajimari.io/appName: "n8n"
         hajimari.io.icon: "robot"
