@@ -95,6 +95,7 @@ spec:
           gethomepage.dev/description: "Network-wide ad blocking and DNS server"
           gethomepage.dev/group: "Network Services"
           gethomepage.dev/icon: "adguard-home.png"
+          gethomepage.dev/pod-selector: app.kubernetes.io/instance=adguard-home
         labels:
           gethomepage.dev/enabled: "true"
         hosts:

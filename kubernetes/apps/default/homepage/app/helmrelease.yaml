@@ -168,7 +168,6 @@ spec:
             cache: 5
             latitude: 52.5200
             longitude: 13.4050
-            showDetails: true
         - search:
             provider: [google, duckduckgo]
             focus: false
@@ -190,7 +189,8 @@ spec:
       # and loses and input ordering. Using a string is the best way around this.
       settingsString: |
         title: Home Dashboard
-        background: "https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80"
+        background:
+          image: https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80
         theme: dark
         color: slate
         headerStyle: boxed

@@ -40,6 +40,7 @@ metadata:
     gethomepage.dev/description: "Elastic Observability"
     gethomepage.dev/group: "Monitoring"
     gethomepage.dev/icon: "elastic"
+    gethomepage.dev/pod-selector: app.kubernetes.io/instance=kibana
     cert-manager.io/cluster-issuer: "letsencrypt-production"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
 spec:
