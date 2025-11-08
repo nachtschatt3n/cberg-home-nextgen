@@ -10,7 +10,7 @@ metadata:
     gethomepage.dev/name: "Langfuse"
     gethomepage.dev/description: "Open-source observability for LLM apps"
     gethomepage.dev/group: "AI"
-    gethomepage.dev/icon: "langfuse.png"
+    gethomepage.dev/icon: "invoke-ai.png"
 spec:
   ingressClassName: external
   tls:
