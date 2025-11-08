@@ -5,18 +5,21 @@
 ### Namespace Layout
 The cluster uses namespace-based organization for different service categories:
 
-- **monitoring**: Prometheus, Grafana, Alertmanager, fluent-bit, Elasticsearch, Kibana, etc.
+- **monitoring**: Prometheus, Grafana, Alertmanager, fluent-bit, Elasticsearch, Kibana, APM server, Metricbeat, OpenTelemetry
 - **storage**: Longhorn volumes and storage management
-- **ai**: AI/ML workloads (langfuse, open-webui, bytebot, etc.)
-- **network**: Ingress controllers (internal/external), external-dns, adguard-home
-- **kube-system**: Core cluster services (authentik, cilium, coredns, etc.)
-- **home-automation**: Home Assistant, ESPHome, Frigate, Zigbee2MQTT, etc.
+- **ai**: AI/ML workloads (langfuse, open-webui, bytebot, ai-sre, mcpo)
+- **network**: Ingress controllers (internal/external), external-dns, adguard-home, cloudflared
+- **kube-system**: Core cluster services (authentik, cilium, coredns, descheduler, spegel, node-feature-discovery)
+- **home-automation**: Home Assistant, ESPHome, Frigate, iobroker, mosquitto, music-assistant-server, n8n, mdns-repeater
 - **databases**: MariaDB, InfluxDB, phpMyAdmin
 - **media**: Jellyfin, Plex, MakeMKV
 - **office**: Nextcloud, Paperless-NGX, Omni-Tools
 - **download**: JDownloader, Tube-Archivist
+- **custom-code-production**: Custom applications (absenty-production, absenty-development)
 - **flux-system**: Flux GitOps controllers and sources
 - **cert-manager**: Certificate management
+- **backup**: Backup-related resources (currently empty)
+- **cilium-secrets**: Cilium secret storage
 - **default**: Homepage, echo-server
 
 ### Key Service Locations

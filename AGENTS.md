@@ -329,6 +329,10 @@ kubectl get helmrepository -n flux-system -o yaml | grep -A 5 "status:"
 
 ### Job and CronJob Monitoring
 
+**Active CronJobs in Cluster:**
+- `storage/backup-of-all-volumes`: Daily Longhorn volume backups at 3:00 AM
+- `kube-system/descheduler`: Pod rescheduling optimization
+
 ```bash
 # List all CronJobs
 kubectl get cronjobs -A
