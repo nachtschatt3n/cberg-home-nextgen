@@ -64,7 +64,7 @@ spec:
           gethomepage.dev/name: "Homepage"
           gethomepage.dev/description: "A modern, secure, application dashboard"
           gethomepage.dev/group: "System"
-          gethomepage.dev/icon: "homepage.png"
+          gethomepage.dev/icon: "mdi:home"
         ingressClassName: "internal"
         hosts:
           - host: &host "homepage.${SECRET_DOMAIN}"
@@ -89,55 +89,71 @@ spec:
         - "Network Services":
             - Unifi:
                 href: https://unifi.${SECRET_DOMAIN}
-                icon: unifi.png
+                icon: mdi:router-network
                 description: Unifi Controller
+                siteMonitor: https://unifi.${SECRET_DOMAIN}
             - Brother:
-                icon: brother.png
+                icon: mdi:printer
                 href: http://192.168.33.153
                 description: Brother HL 2360DW
                 siteMonitor: http://192.168.33.153
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
-                icon: mdi-solar-power
+                icon: mdi:solar-power
                 description: Solar Inverter Gateway
+                siteMonitor: http://192.168.33.220
             - Awtrix:
                 href: http://192.168.33.135
-                icon: matrix.png
+                icon: mdi:led-strip
                 description: LED Matrix Display
+                siteMonitor: http://192.168.33.135
             - PiKVM:
                 href: http://192.168.30.154
-                icon: pikvm.png
+                icon: mdi:monitor
                 description: KVM over IP
+                siteMonitor: http://192.168.30.154
             - "Zigbee Router GF":
                 href: http://192.168.32.21
-                icon: zigbee2mqtt.png
+                icon: mdi:router-wireless
                 description: SLZB-06 Zigbee Router Ground Floor
+                siteMonitor: http://192.168.32.21
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
-                icon: zigbee2mqtt.png
+                icon: mdi:router-wireless
                 description: SLZB-06P10 Zigbee Coordinator
+                siteMonitor: http://192.168.32.20
             - "Unifi NAS Pro":
                 href: http://192.168.31.230
-                icon: unifi.png
+                icon: mdi:nas
                 description: Network Attached Storage
+                siteMonitor: http://192.168.31.230
             - "Epson Scanner ES-580W":
-                icon: epson-iprint.png
+                icon: mdi:scanner
                 href: http://192.168.32.201
                 description: Epson ES-580W
                 siteMonitor: http://192.168.32.201
 
       widgets:
+        - greeting:
+            text: "Welcome back!"
+            text_size: xl
+        - datetime:
+            text_size: xl
+            format:
+              dateStyle: long
+              timeStyle: short
+              hourCycle: h23
+        - logo:
+            text: "Home Dashboard"
+            text_size: xl
         - resources:
             backend: kubernetes
             cpu: true
             expanded: true
             memory: true
             network: true
-        - search:
-            provider: [google, duckduckgo]
-            focus: false
-            target: _blank
+            storage: true
         - kubernetes:
             cluster:
               cpu: true
@@ -155,24 +171,17 @@ spec:
               show: true
               showLabel: true
         - openmeteo:
-            label: Home
+            label: Berlin
             timezone: Europe/Berlin
             units: metric
             cache: 5
             latitude: 52.5200
             longitude: 13.4050
-        - datetime:
-            text_size: l
-            format:
-              dateStyle: long
-              timeStyle: short
-              hourCycle: h23
-        - greeting:
-            text: "Welcome back!"
-            text_size: l
-        - logo:
-            text: "Home Dashboard"
-            text_size: l
+            showDetails: true
+        - search:
+            provider: [google, duckduckgo]
+            focus: false
+            target: _blank
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
@@ -189,38 +198,63 @@ spec:
       # for defining a stable ordering. Unfortunately Go's (and therefore Helm's) toYaml function sorts keys
       # and loses and input ordering. Using a string is the best way around this.
       settingsString: |
-        title: Dashboard
+        title: Home Dashboard
         background: https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80
         theme: dark
         color: slate
         headerStyle: boxed
-        useEqualHeights: false
+        useEqualHeights: true
+        favicon: mdi:home
+        hideVersion: false
+        disableCollapse: false
+        disableDrag: false
+        disableEdit: false
+        disableUpdateCheck: false
+        sidebar: true
+        sidebarOpen: true
+        sidebarStyle: modern
 
         layout:
           AI:
             style: row
             columns: 3
+            icon: mdi:robot
           Databases:
             style: row
             columns: 2
+            icon: mdi:database
           System:
             style: row
             columns: 1
+            icon: mdi:cog
           "Network Services":
             style: row
-            columns: 5
+            columns: 4
+            icon: mdi:network
           "Home Automation":
             style: row
             columns: 3
+            icon: mdi:home-automation
           Monitoring:
             style: row
             columns: 4
+            icon: mdi:chart-line
           Infrastructure:
             style: row
             columns: 3
+            icon: mdi:server
           Office:
             style: row
             columns: 3
+            icon: mdi:briefcase
+          Media:
+            style: row
+            columns: 3
+            icon: mdi:play-circle
+          Download:
+            style: row
+            columns: 2
+            icon: mdi:download
             
         # title: Homepage
         # headerStyle: boxed
