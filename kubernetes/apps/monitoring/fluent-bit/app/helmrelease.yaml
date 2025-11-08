@@ -103,7 +103,7 @@ spec:
             Tag_Key _fluentbit_tag
             tls On
             tls.verify Off
-            Retry_Limit 5
+            Retry_Limit 10
             Suppress_Type_Name On
             Buffer_Size 512KB
 
@@ -114,6 +114,15 @@ spec:
             Time_Keep Off
             Time_Key time
             Time_Format %Y-%m-%dT%H:%M:%S.%L
+
+    readinessProbe:
+      httpGet:
+        path: /api/v1/health
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
 
     tolerations:
       - effect: NoSchedule
