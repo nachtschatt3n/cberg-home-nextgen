@@ -80,7 +80,7 @@ spec:
           gethomepage.dev/name: "Scrypted"
           gethomepage.dev/description: "Scrypted is a home automation platform that supports various camera and device integrations"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "scrypted.png"
+          gethomepage.dev/icon: "mdi:video-input-hdmi"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
