@@ -181,6 +181,8 @@ spec:
         services: true
         pods: true
         nodes: true
+        # Disable service status checks to avoid 404 errors
+        serviceStatus: false
 
       docker:
       settings:
@@ -190,12 +192,11 @@ spec:
       # and loses and input ordering. Using a string is the best way around this.
       settingsString: |
         title: Home Dashboard
-        background: https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80
+        background: "https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80"
         theme: dark
         color: slate
         headerStyle: boxed
         useEqualHeights: false
-        favicon: mdi:home
         hideVersion: false
         disableCollapse: false
         disableDrag: false
