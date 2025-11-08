@@ -124,6 +124,21 @@ spec:
                 icon: epson-iprint.png
                 href: http://192.168.32.201
                 description: Epson ES-580W
+        - Monitoring:
+            - Alertmanager:
+                href: https://alertmanager.${SECRET_DOMAIN}
+                icon: alertmanager.png
+                description: Alertmanager is a tool that routes alerts to a set of receivers
+                namespace: monitoring
+                app: kube-prometheus-stack-alertmanager
+                podSelector: app=kube-prometheus-stack-alertmanager
+            - Prometheus:
+                href: https://prometheus.${SECRET_DOMAIN}
+                icon: prometheus.png
+                description: Prometheus is an open-source monitoring system with a time series database
+                namespace: monitoring
+                app: kube-prometheus-stack-prometheus
+                podSelector: app=kube-prometheus-stack-prometheus
 
       widgets:
         - greeting:
