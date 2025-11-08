@@ -1,5 +1,32 @@
 - we only use the main branch and no PRs
 
+## Cluster Organization
+
+### Namespace Layout
+The cluster uses namespace-based organization for different service categories:
+
+- **monitoring**: Prometheus, Grafana, Alertmanager, fluent-bit, Elasticsearch, Kibana, etc.
+- **storage**: Longhorn volumes and storage management
+- **ai**: AI/ML workloads (langfuse, open-webui, bytebot, etc.)
+- **network**: Ingress controllers (internal/external), external-dns, adguard-home
+- **kube-system**: Core cluster services (authentik, cilium, coredns, etc.)
+- **home-automation**: Home Assistant, ESPHome, Frigate, Zigbee2MQTT, etc.
+- **databases**: MariaDB, InfluxDB, phpMyAdmin
+- **media**: Jellyfin, Plex, MakeMKV
+- **office**: Nextcloud, Paperless-NGX, Omni-Tools
+- **download**: JDownloader, Tube-Archivist
+- **flux-system**: Flux GitOps controllers and sources
+- **cert-manager**: Certificate management
+- **default**: Homepage, echo-server
+
+### Key Service Locations
+- Prometheus: `monitoring/prometheus-kube-prometheus-stack-0`
+- Alertmanager: `monitoring/alertmanager-kube-prometheus-stack-0`
+- fluent-bit: DaemonSet in `monitoring` namespace
+- Elasticsearch: `monitoring/elasticsearch-es-*` pods
+- Longhorn Manager: DaemonSet in `storage` namespace
+- Flux controllers: `flux-system` namespace
+
 ## Longhorn Storage Standards
 
 ### Storage Class Usage
@@ -38,3 +65,42 @@ For new deployments:
   - Application data → `longhorn` (accept UUID PVs)
   - Config directories → `longhorn-static` (clean PVs)
 - Never mix concerns: one PVC per purpose (data, config, cache, logs separately)
+
+## Flux GitOps Workflow
+
+### Making Changes
+All cluster changes must go through Git:
+1. Modify YAML files in `kubernetes/apps/{namespace}/{app}/`
+2. Commit changes to main branch (no PRs)
+3. Push to GitHub - triggers webhook to Flux
+4. Monitor reconciliation: `flux get kustomizations -A`
+
+### Force Reconciliation
+When changes don't auto-apply:
+```bash
+# Reconcile Git source
+flux reconcile source git flux-system
+
+# Reconcile specific kustomization
+flux reconcile kustomization {name} -n {namespace}
+
+# Reconcile HelmRepository
+flux reconcile source helm {name} -n flux-system
+
+# Reconcile HelmRelease
+flux reconcile helmrelease {name} -n {namespace}
+```
+
+### Manual Apply (Emergency Only)
+Only use when Flux is stuck or for immediate testing:
+```bash
+kubectl apply -f kubernetes/apps/{namespace}/{app}/app/*.yaml
+```
+
+### Repository Structure
+- `kubernetes/flux/meta/repositories/helm/` - HelmRepository definitions
+- `kubernetes/apps/{namespace}/{app}/` - Application manifests
+  - `ks.yaml` - Kustomization definition
+  - `app/helmrelease.yaml` - Helm chart config
+  - `app/kustomization.yaml` - Kustomization resources
+  - `app/*.sops.yaml` - Encrypted secrets
