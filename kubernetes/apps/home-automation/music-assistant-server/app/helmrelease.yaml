@@ -109,7 +109,7 @@ spec:
           gethomepage.dev/name: "Music Assistant"
           gethomepage.dev/description: "Music for Home Assistant"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "music-assistant.png"
+          gethomepage.dev/icon: "mdi:music"
           hajimari.io/icon: mdi:music
         labels:
           gethomepage.dev/enabled: "true"
