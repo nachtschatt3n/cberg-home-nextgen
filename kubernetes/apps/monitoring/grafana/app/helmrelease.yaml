@@ -162,7 +162,6 @@ spec:
         gethomepage.dev/description: "Metrics visualization and analytics platform"
         gethomepage.dev/group: "Monitoring"
         gethomepage.dev/icon: "grafana.png"
-        hajimari.io/icon: simple-icons:grafana
       labels:
         gethomepage.dev/enabled: "true"
       hosts:

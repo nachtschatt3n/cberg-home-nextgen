@@ -13,7 +13,6 @@
 #     gethomepage.dev/description: "Kubernetes storage management UI"
 #     gethomepage.dev/group: "Storage"
 #     gethomepage.dev/icon: "longhorn.png"
-#     hajimari.io/icon: simple-icons:longhorn
 #     # Using Authentik Proxy mode - no nginx auth annotations needed
 # spec:
 #   ingressClassName: internal

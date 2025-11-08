@@ -83,7 +83,6 @@ spec:
           gethomepage.dev/description: "Document management system"
           gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "paperless.png"
-          hajimari.io/icon: mdi:file-document-multiple
           nginx.ingress.kubernetes.io/proxy-body-size: 64m
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:

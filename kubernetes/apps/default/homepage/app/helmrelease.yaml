@@ -64,7 +64,7 @@ spec:
           gethomepage.dev/name: "Homepage"
           gethomepage.dev/description: "A modern, secure, application dashboard"
           gethomepage.dev/group: "System"
-          gethomepage.dev/icon: "mdi:home"
+          gethomepage.dev/icon: "homepage.png"
         ingressClassName: "internal"
         hosts:
           - host: &host "homepage.${SECRET_DOMAIN}"
@@ -89,39 +89,39 @@ spec:
         - "Network Services":
             - Unifi:
                 href: https://unifi.${SECRET_DOMAIN}
-                icon: mdi:router-network
+                icon: unifi-controller.png
                 description: Unifi Controller
             - Brother:
-                icon: mdi:printer
+                icon: brother.png
                 href: http://192.168.33.153
                 description: Brother HL 2360DW
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
-                icon: mdi:solar-power
+                icon: sun-panel.png
                 description: Solar Inverter Gateway
             - Awtrix:
                 href: http://192.168.33.135
-                icon: mdi:led-strip
+                icon: awtrix.png
                 description: LED Matrix Display
             - PiKVM:
                 href: http://192.168.30.154
-                icon: mdi:monitor
+                icon: pikvm.png
                 description: KVM over IP
             - "Zigbee Router GF":
                 href: http://192.168.32.21
-                icon: mdi:router-wireless
+                icon: zigbee2mqtt-light.png
                 description: SLZB-06 Zigbee Router Ground Floor
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
-                icon: mdi:router-wireless
+                icon: zigbee2mqtt.png
                 description: SLZB-06P10 Zigbee Coordinator
             - "Unifi NAS Pro":
                 href: http://192.168.31.230
-                icon: mdi:nas
+                icon: unifi-drive.png
                 description: Network Attached Storage
             - "Epson Scanner ES-580W":
-                icon: mdi:scanner
+                icon: epson-iprint.png
                 href: http://192.168.32.201
                 description: Epson ES-580W
 
@@ -181,8 +181,6 @@ spec:
         services: true
         pods: true
         nodes: true
-        # Disable service status checks to avoid 404 errors
-        serviceStatus: false
 
       docker:
       settings:
@@ -210,43 +208,43 @@ spec:
           AI:
             style: row
             columns: 3
-            icon: mdi:robot
+            icon: openai.png
           Databases:
             style: row
             columns: 2
-            icon: mdi:database
+            icon: postgresql.png
           System:
             style: row
             columns: 1
-            icon: mdi:cog
+            icon: proxmox.png
           "Network Services":
             style: row
             columns: 4
-            icon: mdi:network
+            icon: router.png
           "Home Automation":
             style: row
             columns: 3
-            icon: mdi:home-automation
+            icon: home-assistant.png
           Monitoring:
             style: row
             columns: 4
-            icon: mdi:chart-line
+            icon: grafana.png
           Infrastructure:
             style: row
             columns: 3
-            icon: mdi:server
+            icon: docker.png
           Office:
             style: row
             columns: 3
-            icon: mdi:briefcase
+            icon: microsoft-office.png
           Media:
             style: row
             columns: 3
-            icon: mdi:play-circle
+            icon: plex.png
           Download:
             style: row
             columns: 2
-            icon: mdi:download
+            icon: jdownloader.png
             
         # title: Homepage
         # headerStyle: boxed

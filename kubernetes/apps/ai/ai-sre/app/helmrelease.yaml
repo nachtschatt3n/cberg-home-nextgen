@@ -166,7 +166,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "AI SRE"
           gethomepage.dev/group: "AI & Automation"
-          gethomepage.dev/icon: "mdi:robot"
+          gethomepage.dev/icon: "openai.png"
           gethomepage.dev/description: "AI-powered Site Reliability Engineering toolkit"
         hosts:
           - host: ai-sre.${SECRET_DOMAIN}
