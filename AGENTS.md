@@ -204,6 +204,193 @@ kubectl get events -n {namespace} --field-selector type=Warning
 kubectl describe pod {pod-name} -n {namespace} | grep -A 10 "Volumes:"
 ```
 
+## Monitoring & Debugging
+
+### Prometheus Access Patterns
+
+#### Port-Forward to Prometheus
+```bash
+# Start port-forward (use background if needed for long sessions)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+
+# Alternative port to avoid conflicts
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090 &
+
+# Kill all port-forwards when done
+killall kubectl
+```
+
+#### Query Prometheus API
+```bash
+# Get all firing alerts (avoid jq shell escaping issues)
+curl -s 'http://localhost:9090/api/v1/alerts' | grep -o '"alertname":"[^"]*"' | sort -u
+
+# Get specific metrics
+curl -s 'http://localhost:9090/api/v1/query?query=up' | python3 -c "import sys, json; print(json.load(sys.stdin))"
+
+# Parse JSON with Python (more reliable than jq for complex queries)
+curl -s 'http://localhost:9090/api/v1/targets' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for target in data['data']['activeTargets']:
+    print(f\"{target['labels']['job']}: {target['health']}\")
+"
+```
+
+#### Common Prometheus Queries
+```bash
+# Check scrape target health
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+curl -s 'http://localhost:9090/api/v1/targets' | python3 -c "
+import sys, json;
+targets = json.load(sys.stdin)['data']['activeTargets']
+print(f'Total: {len(targets)}, Up: {sum(1 for t in targets if t[\"health\"] == \"up\")}')
+"
+
+# Get firing alerts (excluding Watchdog/InfoInhibitor)
+curl -s 'http://localhost:9090/api/v1/alerts' | grep -o '"alertname":"[^"]*"' | grep -v Watchdog | grep -v InfoInhibitor | sort -u
+```
+
+### Event Log Patterns
+
+```bash
+# Get recent cluster events (all namespaces)
+kubectl get events -A --sort-by='.lastTimestamp' | tail -50
+
+# Get warning events only
+kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | tail -30
+
+# Get events for specific object
+kubectl get events -n {namespace} --field-selector involvedObject.name={name},involvedObject.kind={kind} --sort-by='.lastTimestamp'
+
+# Example: Check HelmRepository events
+kubectl get events -n flux-system --field-selector involvedObject.name=external-dns,involvedObject.kind=HelmRepository --sort-by='.lastTimestamp'
+```
+
+### Pod and DaemonSet Debugging
+
+```bash
+# Check DaemonSet status with Python parsing
+kubectl get daemonset {name} -n {namespace} -o json | python3 -c "
+import sys, json
+s = json.load(sys.stdin)['status']
+print(f\"Desired: {s['desiredNumberScheduled']}, Ready: {s['numberReady']}, Available: {s['numberAvailable']}\")
+"
+
+# Check pod logs for errors
+kubectl logs -n {namespace} {pod-name} --tail=100 | grep -i "warn\|error\|fail"
+
+# Check pod events
+kubectl describe pod -n {namespace} {pod-name} | grep -A 10 "Events:"
+
+# Check pods on specific node
+kubectl get pods -A --field-selector spec.nodeName={node-name}
+
+# Count pods per node
+kubectl get pods -A --field-selector spec.nodeName={node-name} --no-headers | wc -l
+```
+
+### Flux Debugging
+
+```bash
+# Check kustomization status
+kubectl get kustomization {name} -n {namespace} -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+
+# Check HelmRepository status
+kubectl get helmrepository {name} -n flux-system -o jsonpath='{.spec.url}'
+kubectl get helmrepository {name} -n flux-system -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+
+# List all kustomizations and their status
+flux get kustomizations -A
+
+# Check source-controller logs for repository issues
+kubectl logs -n flux-system deployment/source-controller --tail=50 | grep -i {repo-name}
+```
+
+### JSON Parsing Patterns
+
+When dealing with kubectl JSON output, prefer Python over jq to avoid shell escaping issues:
+
+```bash
+# AVOID: jq with complex queries (shell escaping issues)
+kubectl get pod {name} -o json | jq '.status.conditions[] | select(.type == "Ready")'
+
+# PREFER: Python for complex parsing
+kubectl get pod {name} -o json | python3 -c "
+import sys, json
+pod = json.load(sys.stdin)
+ready = next((c for c in pod['status']['conditions'] if c['type'] == 'Ready'), None)
+print(f\"Ready: {ready['status']}\")
+"
+
+# Simple grep patterns for quick checks
+kubectl get helmrepository -n flux-system -o yaml | grep -A 5 "status:"
+```
+
+### Job and CronJob Monitoring
+
+```bash
+# List all CronJobs
+kubectl get cronjobs -A
+
+# List recent jobs
+kubectl get jobs -A --sort-by='.status.startTime' | tail -20
+
+# Check job logs
+kubectl logs -n {namespace} job/{job-name} --tail=50
+
+# Delete failed jobs
+kubectl delete job {job-name} -n {namespace}
+```
+
+### Longhorn Backup Verification
+
+```bash
+# Check Longhorn backup CronJob
+kubectl get cronjob backup-of-all-volumes -n storage
+
+# Check last backup job
+kubectl get jobs -n storage | grep backup-of-all-volumes
+
+# View backup job logs
+kubectl logs -n storage job/{job-name} --tail=100
+
+# Check volume backup status
+kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,SIZE:.spec.size,LAST_BACKUP:.status.lastBackupAt,BACKUP:.status.lastBackup --no-headers
+```
+
+### Resource Usage Checks
+
+```bash
+# Node resource usage
+kubectl top node {node-name}
+kubectl top nodes
+
+# Pod resource usage
+kubectl top pod -n {namespace} -l app={label}
+
+# Check actual vs requested resources
+kubectl get deployment {name} -n {namespace} -o jsonpath='{.spec.template.spec.containers[0].resources}' | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(f\"CPU: {r['requests']['cpu']} / {r['limits']['cpu']}, Memory: {r['requests']['memory']} / {r['limits']['memory']}\")
+"
+```
+
+### Container Debugging Limitations
+
+fluent-bit and other minimal containers don't have common utilities:
+```bash
+# These will FAIL in fluent-bit pods:
+kubectl exec -n monitoring fluent-bit-xxx -- cat /file  # No cat
+kubectl exec -n monitoring fluent-bit-xxx -- curl url   # No curl
+kubectl exec -n monitoring fluent-bit-xxx -- wget url   # No wget
+
+# Use port-forward instead for HTTP endpoints:
+kubectl port-forward -n monitoring {pod-name} 2020:2020 &
+curl http://localhost:2020/api/v1/health
+```
+
 ## Special Notes
 - Cursor rules: Environment configurations from .cursor/rules/env.mdc
 - Copilot instructions: Not found - follow general GitHub guidelines
