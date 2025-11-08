@@ -18,7 +18,7 @@ data:
           gethomepage.dev/description: "Alertmanager is a tool that routes alerts to a set of receivers"
           gethomepage.dev/group: "Monitoring"
           gethomepage.dev/icon: "alertmanager.png"
-          gethomepage.dev/pod-selector: app=alertmanager
+          gethomepage.dev/pod-selector: app=kube-prometheus-stack-alertmanager
         labels:
           gethomepage.dev/enabled: "true"
         pathType: Prefix
@@ -147,7 +147,7 @@ data:
           gethomepage.dev/description: "Prometheus is an open-source monitoring system with a time series database"
           gethomepage.dev/group: "Monitoring"
           gethomepage.dev/icon: "prometheus.png"
-          gethomepage.dev/pod-selector: app=prometheus
+          gethomepage.dev/pod-selector: app=kube-prometheus-stack-prometheus
         labels:
           gethomepage.dev/enabled: "true"
         pathType: Prefix
