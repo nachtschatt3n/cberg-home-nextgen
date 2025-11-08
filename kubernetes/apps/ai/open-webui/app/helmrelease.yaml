@@ -120,6 +120,7 @@ spec:
         gethomepage.dev/description: "Web UI for Ollama"
         gethomepage.dev/group: "AI"
         gethomepage.dev/icon: "open-webui.png"
+        gethomepage.dev/pod-selector: app.kubernetes.io/instance=open-webui
       labels:
         gethomepage.dev/enabled: "true"
     persistence:

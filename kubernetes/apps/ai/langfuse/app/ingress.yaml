@@ -11,6 +11,7 @@ metadata:
     gethomepage.dev/description: "Open-source observability for LLM apps"
     gethomepage.dev/group: "AI"
     gethomepage.dev/icon: "invoke-ai.png"
+    gethomepage.dev/pod-selector: app=langfuse-web
 spec:
   ingressClassName: external
   tls:
