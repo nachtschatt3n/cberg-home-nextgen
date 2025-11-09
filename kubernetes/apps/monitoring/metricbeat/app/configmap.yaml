@@ -36,8 +36,8 @@ data:
       index.mapping.total_fields.limit: 50000
     setup.template.json.enabled: false
 
-    # Explicitly disable data streams - use traditional indices
-    setup.data_stream.enabled: false
+    # Disable data streams completely - use legacy templates
+    setup.template.type: legacy
 
     processors:
       - drop_fields:
