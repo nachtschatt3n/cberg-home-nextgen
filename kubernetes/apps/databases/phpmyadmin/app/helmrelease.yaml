@@ -37,6 +37,19 @@ spec:
         user: root
         password: "${MARIADB_ROOT_PASSWORD}"
         database: ""
+    
+    # Configure phpMyAdmin to auto-login with root credentials
+    configuration: |
+      <?php
+      /* Authentication type */
+      $cfg['Servers'][$i]['auth_type'] = 'config';
+      /* Server parameters */
+      $cfg['Servers'][$i]['host'] = 'mariadb.databases.svc.cluster.local';
+      $cfg['Servers'][$i]['port'] = 3306;
+      $cfg['Servers'][$i]['user'] = 'root';
+      $cfg['Servers'][$i]['password'] = getenv('MARIADB_ROOT_PASSWORD');
+      $cfg['Servers'][$i]['compress'] = false;
+      $cfg['Servers'][$i]['AllowNoPassword'] = false;
 
     ingress:
       enabled: true
