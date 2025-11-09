@@ -16,7 +16,7 @@ metadata:
 spec:
   ingressClassName: internal
   rules:
-  - host: pgadmin.uhl.cool
+  - host: pgadmin.${SECRET_DOMAIN}
     http:
       paths:
       - path: /
@@ -28,5 +28,5 @@ spec:
               number: 80
   tls:
   - hosts:
-    - pgadmin.uhl.cool
+    - pgadmin.${SECRET_DOMAIN}
     secretName: pgadmin-tls
