@@ -6,3 +6,4 @@ components:
 resources:
   - ./helmrelease.yaml
   - ./servicemonitor.yaml
+  - ./clusterrole.yaml

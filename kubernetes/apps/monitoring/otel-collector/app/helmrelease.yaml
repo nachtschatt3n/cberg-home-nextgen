@@ -28,17 +28,6 @@ spec:
     replicaCount: 2
     image:
       repository: otel/opentelemetry-collector-contrib
-    rbac:
-      create: true
-    clusterRole:
-      create: true
-      rules:
-        - apiGroups: [""]
-          resources: ["pods", "namespaces", "nodes"]
-          verbs: ["get", "list", "watch"]
-        - apiGroups: ["apps"]
-          resources: ["replicasets", "deployments", "daemonsets", "statefulsets"]
-          verbs: ["get", "list", "watch"]
     resources:
       requests:
         cpu: 200m
