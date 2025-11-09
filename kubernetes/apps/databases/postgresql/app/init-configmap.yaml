@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-init
+  namespace: databases
+data:
+  init-pgvector.sql: |
+    -- Enable pgvector extension
+    CREATE EXTENSION IF NOT EXISTS vector;

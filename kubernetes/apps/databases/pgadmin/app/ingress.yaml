@@ -1,0 +1,32 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pgadmin
+  namespace: databases
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "pgAdmin"
+    gethomepage.dev/description: "Web-based PostgreSQL administration tool"
+    gethomepage.dev/group: "Databases"
+    gethomepage.dev/icon: "pgadmin.png"
+  labels:
+    gethomepage.dev/enabled: "true"
+spec:
+  ingressClassName: internal
+  rules:
+  - host: pgadmin.${SECRET_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pgadmin
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - pgadmin.${SECRET_DOMAIN}
+    secretName: pgadmin-tls
