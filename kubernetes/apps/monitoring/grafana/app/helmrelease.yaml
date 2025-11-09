@@ -156,14 +156,7 @@ spec:
     ingress:
       enabled: true
       ingressClassName: internal
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Grafana"
-        gethomepage.dev/description: "Metrics visualization and analytics platform"
-        gethomepage.dev/group: "Monitoring"
-        gethomepage.dev/icon: "grafana.png"
-      labels:
-        gethomepage.dev/enabled: "true"
+      annotations: {}
       hosts:
         - &host "grafana.${SECRET_DOMAIN}"
       tls:
