@@ -31,8 +31,6 @@ spec:
           value: "True"
         - name: PGADMIN_CONFIG_WTF_CSRF_ENABLED
           value: "True"
-        - name: PGADMIN_CONFIG_OAUTH_ALLOWED_DOMAINS
-          value: "*"
         resources:
           requests:
             cpu: 100m
