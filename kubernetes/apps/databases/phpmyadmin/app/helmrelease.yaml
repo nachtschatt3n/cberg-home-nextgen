@@ -59,7 +59,7 @@ spec:
           name: phpmyadmin-config
     extraVolumeMounts:
       - name: custom-config
-        mountPath: /opt/bitnami/phpmyadmin/config.user.inc.php
+        mountPath: /etc/phpmyadmin/config.user.inc.php
         subPath: config.user.inc.php
 
     ingress:
