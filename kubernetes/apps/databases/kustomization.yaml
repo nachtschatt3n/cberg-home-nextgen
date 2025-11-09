@@ -8,6 +8,8 @@ resources:
   - ./influxdb/ks.yaml
   - ./mariadb/ks.yaml
   - ./phpmyadmin/ks.yaml
+  - ./postgresql/ks.yaml
+  - ./pgadmin/ks.yaml
 
 ---
 apiVersion: v1

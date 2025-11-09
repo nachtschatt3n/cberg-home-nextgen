@@ -1,0 +1,76 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  namespace: databases
+  labels:
+    app: pgadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgadmin
+  template:
+    metadata:
+      labels:
+        app: pgadmin
+    spec:
+      containers:
+      - name: pgadmin
+        image: dpage/pgadmin4:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          name: http
+        envFrom:
+        - secretRef:
+            name: pgadmin
+        env:
+        - name: PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION
+          value: "True"
+        - name: PGADMIN_CONFIG_WTF_CSRF_ENABLED
+          value: "True"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: pgadmin-data
+          mountPath: /var/lib/pgadmin
+        readinessProbe:
+          httpGet:
+            path: /misc/ping
+            port: 80
+          initialDelaySeconds: 15
+          timeoutSeconds: 2
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /misc/ping
+            port: 80
+          initialDelaySeconds: 30
+          timeoutSeconds: 2
+          periodSeconds: 10
+      volumes:
+      - name: pgadmin-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+  namespace: databases
+  labels:
+    app: pgadmin
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: pgadmin
