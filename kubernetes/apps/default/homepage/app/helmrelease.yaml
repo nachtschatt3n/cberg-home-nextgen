@@ -225,7 +225,7 @@ spec:
             icon: openai.png
           Databases:
             style: row
-            columns: 2
+            columns: 3
             icon: postgresql.png
           System:
             style: row
