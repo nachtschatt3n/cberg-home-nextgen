@@ -155,18 +155,12 @@ spec:
                 podSelector: prometheus=kube-prometheus-stack-prometheus
 
       widgets:
-        - greeting:
-            text: "Welcome back!"
-            text_size: xl
         - datetime:
-            text_size: xl
+            text_size: lg
             format:
-              dateStyle: long
+              dateStyle: short
               timeStyle: short
               hourCycle: h23
-        - logo:
-            text: "Home Dashboard"
-            text_size: xl
         - resources:
             backend: kubernetes
             cpu: true
