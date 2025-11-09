@@ -16,6 +16,16 @@ spec:
       labels:
         app: pgadmin
     spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox:latest
+        command:
+          - sh
+          - -c
+          - chown -R 5050:0 /var/lib/pgadmin && chmod -R 775 /var/lib/pgadmin
+        volumeMounts:
+        - name: pgadmin-data
+          mountPath: /var/lib/pgadmin
       containers:
       - name: pgadmin
         image: dpage/pgadmin4:latest
@@ -56,7 +66,8 @@ spec:
           periodSeconds: 10
       volumes:
       - name: pgadmin-data
-        emptyDir: {}
+        persistentVolumeClaim:
+          claimName: pgadmin-data
 ---
 apiVersion: v1
 kind: Service
