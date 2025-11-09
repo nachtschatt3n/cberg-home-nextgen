@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: phpmyadmin-config
+  namespace: databases
+data:
+  config.user.inc.php: |
+    <?php
+    /* Override authentication to use config mode with root credentials */
+    $cfg['Servers'][$i]['auth_type'] = 'config';
+    $cfg['Servers'][$i]['user'] = getenv('PMA_USER');
+    $cfg['Servers'][$i]['password'] = getenv('PMA_PASSWORD');
+
