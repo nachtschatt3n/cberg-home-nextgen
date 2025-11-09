@@ -168,6 +168,16 @@ spec:
             memory: true
             network: true
             storage: true
+        - kubernetes:
+            cluster:
+              show: false
+            nodes:
+              show: true
+              showLabel: false
+              cpu: true
+              memory: true
+            pods:
+              show: false
         - openmeteo:
             timezone: Europe/Berlin
             units: metric
