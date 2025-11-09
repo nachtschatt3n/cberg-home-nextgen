@@ -34,10 +34,10 @@ data:
       index.number_of_shards: 1
       index.number_of_replicas: 1
       index.mapping.total_fields.limit: 50000
-    setup.template.json.enabled: false
 
-    # Disable data streams completely - use legacy templates
-    setup.template.type: legacy
+    # Disable data streams - this is critical for Metricbeat 8.x
+    setup.template.json.enabled: true
+    setup.template.json.data_stream: false
 
     processors:
       - drop_fields:
