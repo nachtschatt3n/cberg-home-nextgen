@@ -1,0 +1,14 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: postgresql-data
+  namespace: storage
+spec:
+  size: "21474836480"  # 20Gi in bytes
+  numberOfReplicas: 3
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
