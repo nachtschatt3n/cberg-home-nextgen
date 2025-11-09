@@ -131,7 +131,7 @@ spec:
                 description: Alertmanager is a tool that routes alerts to a set of receivers
                 namespace: monitoring
                 app: kube-prometheus-stack-alertmanager
-                podSelector: alertmanager=kube-prometheus-stack-alertmanager
+                podSelector: alertmanager=kube-prometheus-stack
             - Grafana:
                 href: https://grafana.${SECRET_DOMAIN}
                 icon: grafana.png
@@ -152,7 +152,7 @@ spec:
                 description: Prometheus is an open-source monitoring system with a time series database
                 namespace: monitoring
                 app: kube-prometheus-stack-prometheus
-                podSelector: prometheus=kube-prometheus-stack-prometheus
+                podSelector: prometheus=kube-prometheus-stack
 
       widgets:
         - datetime:
@@ -168,22 +168,6 @@ spec:
             memory: true
             network: true
             storage: true
-        - kubernetes:
-            cluster:
-              cpu: true
-              memory: true
-              show: true
-              showLabel: true
-            nodes:
-              cpu: true
-              memory: true
-              show: true
-              showLabel: true
-            pods:
-              cpu: true
-              memory: true
-              show: true
-              showLabel: true
         - openmeteo:
             timezone: Europe/Berlin
             units: metric
