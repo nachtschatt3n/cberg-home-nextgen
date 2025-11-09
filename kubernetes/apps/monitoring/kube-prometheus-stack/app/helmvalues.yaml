@@ -13,8 +13,7 @@ data:
         enabled: true
         ingressClassName: internal
         annotations: {}
-        labels:
-          gethomepage.dev/enabled: "true"
+        labels: {}
         pathType: Prefix
         hosts:
           - "alertmanager.${SECRET_DOMAIN}"
@@ -136,8 +135,7 @@ data:
         enabled: true
         ingressClassName: internal
         annotations: {}
-        labels:
-          gethomepage.dev/enabled: "true"
+        labels: {}
         pathType: Prefix
         hosts:
           - "prometheus.${SECRET_DOMAIN}"
