@@ -36,6 +36,9 @@ data:
       index.mapping.total_fields.limit: 50000
     setup.template.json.enabled: false
 
+    # Explicitly disable data streams - use traditional indices
+    setup.data_stream.enabled: false
+
     processors:
       - drop_fields:
           fields: ["prometheus.labels.le", "prometheus.labels.quantile", "prometheus.labels.code", "prometheus.labels.handler", "prometheus.labels.endpoint", "prometheus.labels.dialer_name", "prometheus.labels.event", "prometheus.labels.role", "prometheus.labels.rule_group", "prometheus.labels.scrape_job"]
