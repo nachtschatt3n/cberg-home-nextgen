@@ -26,18 +26,8 @@ data:
       allow_older_versions: true
 
     setup.ilm.enabled: false
-    setup.template.enabled: true
-    setup.template.overwrite: true
-    setup.template.name: "metricbeat"
-    setup.template.pattern: "metricbeat-*"
-    setup.template.settings:
-      index.number_of_shards: 1
-      index.number_of_replicas: 1
-      index.mapping.total_fields.limit: 50000
-
-    # Disable data streams - this is critical for Metricbeat 8.x
-    setup.template.json.enabled: true
-    setup.template.json.data_stream: false
+    # Disable automatic template management to avoid data stream conflicts
+    setup.template.enabled: false
 
     processors:
       - drop_fields:
