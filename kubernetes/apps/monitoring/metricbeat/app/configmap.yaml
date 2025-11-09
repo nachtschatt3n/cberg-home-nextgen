@@ -9,18 +9,12 @@ data:
     - module: prometheus
       period: 30s
       hosts: ["kube-prometheus-stack-prometheus.monitoring.svc:9090"]
-      metrics_path: /metrics
-      metricsets: ["collector"]
-      
-    - module: prometheus
-      period: 30s
-      hosts: ["kube-prometheus-stack-prometheus.monitoring.svc:9090"]
       metrics_path: /federate
       metricsets: ["query"]
       query:
         match[]:
-          - '{__name__=~"up|process_.*|go_.*|container_.*|node_.*|kube_.*|prometheus_.*|alertmanager_.*"}'
-    
+          - '{__name__=~"up|node_cpu_seconds_total|node_memory_.*|node_filesystem_.*|container_cpu_usage_seconds_total|container_memory_.*|kube_pod_status_phase|kube_deployment_.*|kube_node_.*|prometheus_tsdb_.*"}'
+
     output.elasticsearch:
       hosts: ["https://elasticsearch-es-http.monitoring.svc:9200"]
       username: "elastic"
@@ -37,9 +31,13 @@ data:
     setup.template.settings:
       index.number_of_shards: 1
       index.number_of_replicas: 1
+      index.mapping.total_fields.limit: 50000
     setup.template.json.enabled: false
-    
+
     processors:
+      - drop_fields:
+          fields: ["prometheus.labels.le", "prometheus.labels.quantile", "prometheus.labels.code", "prometheus.labels.handler", "prometheus.labels.endpoint", "prometheus.labels.dialer_name", "prometheus.labels.event", "prometheus.labels.role", "prometheus.labels.rule_group", "prometheus.labels.scrape_job"]
+          ignore_missing: true
       - add_cloud_metadata: ~
       - add_kubernetes_metadata: ~
     
