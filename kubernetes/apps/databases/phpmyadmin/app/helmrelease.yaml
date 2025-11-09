@@ -51,6 +51,16 @@ spec:
           secretKeyRef:
             name: phpmyadmin
             key: MARIADB_ROOT_PASSWORD
+    
+    # Mount custom config to enable auto-login
+    extraVolumes:
+      - name: custom-config
+        configMap:
+          name: phpmyadmin-config
+    extraVolumeMounts:
+      - name: custom-config
+        mountPath: /opt/bitnami/phpmyadmin/config.user.inc.php
+        subPath: config.user.inc.php
 
     ingress:
       enabled: true
