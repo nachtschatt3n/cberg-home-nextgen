@@ -35,12 +35,6 @@ metadata:
   name: kibana
   namespace: monitoring
   annotations:
-    gethomepage.dev/enabled: "true"
-    gethomepage.dev/name: "Kibana"
-    gethomepage.dev/description: "Elastic Observability"
-    gethomepage.dev/group: "Monitoring"
-    gethomepage.dev/icon: "elastic"
-    gethomepage.dev/pod-selector: kibana.k8s.elastic.co/name=kibana
     cert-manager.io/cluster-issuer: "letsencrypt-production"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
 spec:
