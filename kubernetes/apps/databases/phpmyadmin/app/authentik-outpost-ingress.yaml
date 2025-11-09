@@ -1,0 +1,23 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: phpmyadmin-authentik-outpost
+  namespace: databases
+spec:
+  ingressClassName: internal
+  rules:
+    - host: "phpmyadmin.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /outpost.goauthentik.io
+            pathType: Prefix
+            backend:
+              service:
+                name: ak-outpost-phpmyadmin-forward-auth
+                port:
+                  number: 9000
+  tls:
+    - hosts:
+        - "phpmyadmin.${SECRET_DOMAIN}"
+
