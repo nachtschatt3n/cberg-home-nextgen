@@ -36,6 +36,14 @@ spec:
         memory: 1Gi
     service:
       type: ClusterIP
+    extraVolumes:
+      - name: apm-certs
+        secret:
+          secretName: apm-apm-http-certs-public
+    extraVolumeMounts:
+      - name: apm-certs
+        mountPath: /etc/otel/certs
+        readOnly: true
     ports:
       otlp:
         enabled: true
@@ -96,7 +104,7 @@ spec:
             Authorization: "Bearer HEoBOZQ5jI0+bedwwffXb0G4rAZpm/w+v7ncaSeSqIk="
           tls:
             insecure_skip_verify: false
-            ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            ca_file: /etc/otel/certs/tls.crt
         logging:
           loglevel: info
       service:
