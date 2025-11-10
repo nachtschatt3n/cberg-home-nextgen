@@ -6,16 +6,24 @@ metadata:
 data:
   metricbeat.yml: |
     metricbeat.modules:
+    # Collect only highly aggregated cluster-level metrics every 5 minutes
     - module: prometheus
-      period: 30s
+      period: 5m
       metricsets: ["collector"]
       hosts: ["kube-prometheus-stack-prometheus.monitoring.svc:9090"]
       metrics_path: /federate
-      metrics_filters:
-        include: ["up", "node_cpu_seconds_total", "node_memory_.*", "node_filesystem_.*", "container_cpu_usage_seconds_total", "container_memory_.*", "kube_pod_status_phase", "kube_deployment_.*", "kube_node_.*", "prometheus_tsdb_.*", "alertmanager_.*", "apiserver_.*", "etcd_.*"]
+      # Only collect cluster-level aggregates and node-level metrics (not per-pod!)
       query:
         'match[]':
-          - '{__name__=~"up|node_cpu_seconds_total|node_memory_.*|node_filesystem_.*|container_cpu_usage_seconds_total|container_memory_.*|kube_pod_status_phase|kube_deployment_.*|kube_node_.*|prometheus_tsdb_.*|alertmanager_.*|apiserver_.*|etcd_.*"}'
+          # Cluster health - control plane
+          - '{job="apiserver",__name__=~"apiserver_request_total|apiserver_request_duration_seconds_sum"}'
+          - '{job="kube-controller-manager",__name__=~"workqueue_depth|workqueue_queue_duration_seconds_sum"}'
+          # Node-level resource usage (3 nodes, not per-container)
+          - '{job="node-exporter",__name__=~"node_cpu_seconds_total|node_memory_MemTotal_bytes|node_memory_MemAvailable_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes",mountpoint="/"}'
+          # Cluster-wide pod counts and deployment status
+          - '{__name__=~"kube_pod_status_phase|kube_deployment_status_replicas.*|kube_node_status_condition"}'
+          # Critical etcd metrics
+          - '{job="etcd",__name__=~"etcd_server_has_leader|etcd_disk_wal_fsync_duration_seconds_sum"}'
 
     output.elasticsearch:
       hosts: ["https://elasticsearch-es-http.monitoring.svc:9200"]
@@ -25,21 +33,60 @@ data:
       index: "metricbeat-%{[agent.version]}-%{+yyyy.MM.dd}"
       allow_older_versions: true
 
-    setup.ilm.enabled: false
-    # Disable automatic template management to avoid data stream conflicts
-    setup.template.enabled: false
+    # Enable ILM with 5-day retention
+    setup.ilm.enabled: true
+    setup.ilm.rollover_alias: "metricbeat"
+    setup.ilm.pattern: "{now/d}-000001"
+    setup.ilm.policy_name: "metricbeat-5day"
+    setup.ilm.overwrite: true
+
+    # Create index template for ILM
+    setup.template.enabled: true
+    setup.template.name: "metricbeat"
+    setup.template.pattern: "metricbeat-*"
+    setup.template.overwrite: true
 
     processors:
+      # Drop all high-cardinality labels to reduce document size
       - drop_fields:
-          fields: ["prometheus.labels.le", "prometheus.labels.quantile", "prometheus.labels.code", "prometheus.labels.handler", "prometheus.labels.endpoint", "prometheus.labels.dialer_name", "prometheus.labels.event", "prometheus.labels.role", "prometheus.labels.rule_group", "prometheus.labels.scrape_job"]
+          fields:
+            - "prometheus.labels.le"
+            - "prometheus.labels.quantile"
+            - "prometheus.labels.code"
+            - "prometheus.labels.handler"
+            - "prometheus.labels.endpoint"
+            - "prometheus.labels.dialer_name"
+            - "prometheus.labels.event"
+            - "prometheus.labels.role"
+            - "prometheus.labels.rule_group"
+            - "prometheus.labels.scrape_job"
+            - "prometheus.labels.container"
+            - "prometheus.labels.pod"
+            - "prometheus.labels.namespace"
+            - "prometheus.labels.uid"
+            - "prometheus.labels.image"
           ignore_missing: true
-      - add_cloud_metadata: ~
-      - add_kubernetes_metadata: ~
-    
+      # Aggregate metrics at collection time to reduce documents
+      - script:
+          lang: javascript
+          source: >
+            function process(event) {
+              // Only keep essential labels for cluster-level analysis
+              if (event.Get("prometheus.labels")) {
+                var labels = event.Get("prometheus.labels");
+                var keep = ["job", "instance", "node", "phase", "condition"];
+                for (var key in labels) {
+                  if (keep.indexOf(key) === -1) {
+                    event.Delete("prometheus.labels." + key);
+                  }
+                }
+              }
+            }
+
     http.enabled: true
     http.host: "0.0.0.0"
     http.port: 5066
-    
+
     logging.level: info
     logging.to_stderr: true
     logging.event_data.to_stderr: true
