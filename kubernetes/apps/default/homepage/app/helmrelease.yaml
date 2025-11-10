@@ -277,7 +277,7 @@ spec:
             icon: home-assistant.png
           Monitoring:
             style: row
-            columns: 4
+            columns: 2
             icon: grafana.png
           Infrastructure:
             style: row
