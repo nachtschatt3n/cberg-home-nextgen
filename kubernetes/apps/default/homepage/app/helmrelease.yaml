@@ -160,6 +160,7 @@ spec:
                 description: Kubernetes storage management UI
                 namespace: storage
                 podSelector: app=longhorn-ui
+                app: longhorn-ui
 
       widgets:
         - datetime:
