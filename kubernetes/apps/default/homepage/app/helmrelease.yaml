@@ -95,35 +95,43 @@ spec:
                 icon: brother.png
                 href: http://192.168.33.153
                 description: Brother HL 2360DW
+                ping: 192.168.33.153
         - Infrastructure:
             - openDTU:
                 href: http://192.168.33.220
                 icon: sun-panel.png
                 description: Solar Inverter Gateway
+                ping: 192.168.33.220
             - Awtrix:
                 href: http://192.168.33.135
                 icon: awtrix.png
                 description: LED Matrix Display
+                ping: 192.168.33.135
             - PiKVM:
                 href: http://192.168.30.154
                 icon: pikvm.png
                 description: KVM over IP
+                ping: 192.168.30.154
             - "Zigbee Router GF":
                 href: http://192.168.32.21
                 icon: zigbee2mqtt-light.png
                 description: SLZB-06 Zigbee Router Ground Floor
+                ping: 192.168.32.21
             - "Zigbee Coordinator":
                 href: http://192.168.32.20
                 icon: zigbee2mqtt.png
                 description: SLZB-06P10 Zigbee Coordinator
+                ping: 192.168.32.20
             - "Unifi NAS Pro":
                 href: http://192.168.31.230
                 icon: unifi-drive.png
                 description: Network Attached Storage
+                ping: 192.168.31.230
             - "Epson Scanner ES-580W":
                 icon: epson-iprint.png
                 href: http://192.168.32.201
                 description: Epson ES-580W
+                ping: 192.168.32.201
             - Longhorn:
                 href: https://longhorn.${SECRET_DOMAIN}
                 icon: longhorn.png
@@ -131,6 +139,22 @@ spec:
                 namespace: storage
                 podSelector: app=longhorn-ui
                 app: longhorn-ui
+            - "Kubernetes Nodes":
+                - "k8s-nuc14-01":
+                    href: http://192.168.55.11
+                    icon: kubernetes.png
+                    description: Kubernetes Node 1
+                    ping: 192.168.55.11
+                - "k8s-nuc14-02":
+                    href: http://192.168.55.12
+                    icon: kubernetes.png
+                    description: Kubernetes Node 2
+                    ping: 192.168.55.12
+                - "k8s-nuc14-03":
+                    href: http://192.168.55.13
+                    icon: kubernetes.png
+                    description: Kubernetes Node 3
+                    ping: 192.168.55.13
         - Monitoring:
             - Alertmanager:
                 href: https://alertmanager.${SECRET_DOMAIN}
@@ -175,7 +199,7 @@ spec:
                         options:
                           maximumFractionDigits: 1
                     - label: Cluster Memory Usage
-                      query: (sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""})) * 100
+                      query: sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""}) * 100
                       format:
                         type: number
                         suffix: "%"
