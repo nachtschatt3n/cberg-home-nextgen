@@ -164,7 +164,7 @@ data:
               storageClassName: longhorn
               resources:
                 requests:
-                  storage: 60Gi
+                  storage: 100Gi
         resources:
           requests:
             cpu: 500m
