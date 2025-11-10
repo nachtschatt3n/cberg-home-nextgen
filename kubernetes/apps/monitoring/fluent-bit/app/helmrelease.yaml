@@ -106,7 +106,6 @@ spec:
             Retry_Limit 10
             Suppress_Type_Name On
             Buffer_Size 512KB
-            HTTP_Buffer_Size 512KB
 
       customParsers: |
         [PARSER]
