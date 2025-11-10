@@ -16,9 +16,6 @@ spec:
       config:
         node.roles: ["master", "data", "ingest"]
         node.store.allow_mmap: false
-        xpack.security.http.ssl.enabled: true
-        xpack.security.transport.ssl.enabled: true
-        xpack.security.enabled: true
       podTemplate:
         metadata:
           labels:
@@ -35,7 +32,7 @@ spec:
                   cpu: "500m"
                   memory: "4Gi"
                 limits:
-                  memory: "6Gi"
+                  memory: "4Gi"
           securityContext:
             fsGroup: 1000
           nodeSelector: {}

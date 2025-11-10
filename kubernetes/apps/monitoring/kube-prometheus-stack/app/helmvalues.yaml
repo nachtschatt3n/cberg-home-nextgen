@@ -156,8 +156,8 @@ data:
         scrapeConfigSelectorNilUsesHelmValues: false
         enableAdminAPI: true
         walCompression: true
-        retention: 24h
-        retentionSize: 8GB
+        retention: 12h
+        retentionSize: 4GB
         storageSpec:
           volumeClaimTemplate:
             spec:
