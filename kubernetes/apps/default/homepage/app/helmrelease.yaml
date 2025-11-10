@@ -183,7 +183,7 @@ spec:
                         options:
                           maximumFractionDigits: 1
                     - label: Cluster Memory Usage
-                      query: sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""}) * 100
+                      query: (sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(node_memory_MemTotal_bytes)) * 100
                       format:
                         type: number
                         suffix: "%"
@@ -192,7 +192,7 @@ spec:
                     - label: Total Pods
                       query: count(kube_pod_info)
                     - label: Running Pods
-                      query: sum(kube_pod_status_phase{phase="Running"})
+                      query: count(kube_pod_status_phase{phase="Running"})
                     - label: Longhorn Volumes
                       query: count(longhorn_volume_state)
                     - label: Node Count
