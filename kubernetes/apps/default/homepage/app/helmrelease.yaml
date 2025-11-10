@@ -199,7 +199,7 @@ spec:
             refreshInterval: 10000
             metrics:
               - label: Active Alerts
-                query: count(alertmanager_alerts{state="active"})
+                query: count(alertmanager_alerts{state=~"active|firing"})
               - label: Cluster CPU Usage
                 query: avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 100
                 format:
