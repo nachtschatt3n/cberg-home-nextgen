@@ -31,6 +31,7 @@ data:
       password: "MC3lY6PQ2lkhP2z70Q1pw373"
       ssl.certificate_authorities: ["/usr/share/metricbeat/config/certs/tls.crt"]
       allow_older_versions: true
+      index: "metricbeat-%{[agent.version]}"
 
     # Enable ILM with 5-day retention - use legacy index management (not data streams)
     setup.ilm.enabled: true
@@ -38,6 +39,7 @@ data:
     setup.ilm.pattern: "%{now/d}-000001"
     setup.ilm.policy_name: "metricbeat-5day"
     setup.ilm.overwrite: true
+    setup.ilm.check_exists: false
 
     # Create index template for ILM
     setup.template.enabled: true
