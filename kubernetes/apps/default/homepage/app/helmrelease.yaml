@@ -153,6 +153,13 @@ spec:
                 namespace: monitoring
                 app: kube-prometheus-stack-prometheus
                 podSelector: prometheus=kube-prometheus-stack
+        - System:
+            - Longhorn:
+                href: https://longhorn.${SECRET_DOMAIN}
+                icon: longhorn.png
+                description: Kubernetes storage management UI
+                namespace: storage
+                podSelector: app=longhorn-ui
 
       widgets:
         - datetime:
