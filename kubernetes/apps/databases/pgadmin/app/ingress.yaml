@@ -11,6 +11,7 @@ metadata:
     gethomepage.dev/description: "Web-based PostgreSQL administration tool"
     gethomepage.dev/group: "Databases"
     gethomepage.dev/icon: "pgadmin.png"
+    gethomepage.dev/pod-selector: "app=pgadmin"
   labels:
     gethomepage.dev/enabled: "true"
 spec:
