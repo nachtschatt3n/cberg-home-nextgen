@@ -153,7 +153,35 @@ spec:
                 namespace: monitoring
                 app: kube-prometheus-stack-prometheus
                 podSelector: prometheus=kube-prometheus-stack
-        - System:
+        - Infrastructure:
+            - openDTU:
+                href: http://192.168.33.220
+                icon: sun-panel.png
+                description: Solar Inverter Gateway
+            - Awtrix:
+                href: http://192.168.33.135
+                icon: awtrix.png
+                description: LED Matrix Display
+            - PiKVM:
+                href: http://192.168.30.154
+                icon: pikvm.png
+                description: KVM over IP
+            - "Zigbee Router GF":
+                href: http://192.168.32.21
+                icon: zigbee2mqtt-light.png
+                description: SLZB-06 Zigbee Router Ground Floor
+            - "Zigbee Coordinator":
+                href: http://192.168.32.20
+                icon: zigbee2mqtt.png
+                description: SLZB-06P10 Zigbee Coordinator
+            - "Unifi NAS Pro":
+                href: http://192.168.31.230
+                icon: unifi-drive.png
+                description: Network Attached Storage
+            - "Epson Scanner ES-580W":
+                icon: epson-iprint.png
+                href: http://192.168.32.201
+                description: Epson ES-580W
             - Longhorn:
                 href: https://longhorn.${SECRET_DOMAIN}
                 icon: longhorn.png
@@ -199,7 +227,7 @@ spec:
             refreshInterval: 10000
             metrics:
               - label: Active Alerts
-                query: count(alertmanager_alerts{state=~"active|firing"})
+                query: count(ALERTS{alertstate="firing"})
               - label: Cluster CPU Usage
                 query: avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 100
                 format:
