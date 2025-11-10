@@ -194,6 +194,34 @@ spec:
             longitude: 13.4050
             format:
               maximumFractionDigits: 0
+        - prometheusmetric:
+            url: https://prometheus.${SECRET_DOMAIN}
+            refreshInterval: 10000
+            metrics:
+              - label: Active Alerts
+                query: count(alertmanager_alerts{state="active"})
+              - label: Cluster CPU Usage
+                query: avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 100
+                format:
+                  type: number
+                  suffix: "%"
+                  options:
+                    maximumFractionDigits: 1
+              - label: Cluster Memory Usage
+                query: (sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""})) * 100
+                format:
+                  type: number
+                  suffix: "%"
+                  options:
+                    maximumFractionDigits: 1
+              - label: Total Pods
+                query: count(kube_pod_info)
+              - label: Running Pods
+                query: count(kube_pod_status_phase{phase="Running"})
+              - label: Longhorn Volumes
+                query: count(longhorn_volume_state)
+              - label: Node Count
+                query: count(kube_node_info)
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
