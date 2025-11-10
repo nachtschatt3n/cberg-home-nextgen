@@ -132,6 +132,63 @@ spec:
                 podSelector: app=longhorn-ui
                 app: longhorn-ui
         - Monitoring:
+            - Alertmanager:
+                href: https://alertmanager.${SECRET_DOMAIN}
+                icon: alertmanager.png
+                description: Alertmanager is a tool that routes alerts to a set of receivers
+                namespace: monitoring
+                app: kube-prometheus-stack-alertmanager
+                podSelector: alertmanager=kube-prometheus-stack
+            - Grafana:
+                href: https://grafana.${SECRET_DOMAIN}
+                icon: grafana.png
+                description: Metrics visualization and analytics platform
+                namespace: monitoring
+                app: grafana
+                podSelector: app.kubernetes.io/instance=grafana
+            - Kibana:
+                href: https://kibana.${SECRET_DOMAIN}
+                icon: elastic
+                description: Elastic Observability
+                namespace: monitoring
+                app: kibana
+                podSelector: kibana.k8s.elastic.co/name=kibana
+            - Prometheus:
+                href: https://prometheus.${SECRET_DOMAIN}
+                icon: prometheus.png
+                description: Prometheus is an open-source monitoring system with a time series database
+                namespace: monitoring
+                app: kube-prometheus-stack-prometheus
+                podSelector: prometheus=kube-prometheus-stack
+                widget:
+                  type: prometheusmetric
+                  url: https://prometheus.${SECRET_DOMAIN}
+                  refreshInterval: 10000
+                  metrics:
+                    - label: Active Alerts
+                      query: count(ALERTS{alertstate="firing"})
+                    - label: Cluster CPU Usage
+                      query: avg(rate(container_cpu_usage_seconds_total{container!="POD",container!=""}[5m])) * 100
+                      format:
+                        type: number
+                        suffix: "%"
+                        options:
+                          maximumFractionDigits: 1
+                    - label: Cluster Memory Usage
+                      query: (sum(container_memory_usage_bytes{container!="POD",container!=""}) / sum(container_spec_memory_limit_bytes{container!="POD",container!=""})) * 100
+                      format:
+                        type: number
+                        suffix: "%"
+                        options:
+                          maximumFractionDigits: 1
+                    - label: Total Pods
+                      query: count(kube_pod_info)
+                    - label: Running Pods
+                      query: count(kube_pod_status_phase{phase="Running"})
+                    - label: Longhorn Volumes
+                      query: count(longhorn_volume_state)
+                    - label: Node Count
+                      query: count(kube_node_info)
 
       widgets:
         - datetime:
