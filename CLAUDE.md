@@ -44,22 +44,8 @@ The cluster uses namespace-based organization for different service categories:
   - Requires pre-existing Longhorn volume
   - Best for: Fixed-size config directories, volumes needing manual control
 
-### Important: UUID PV Names Are Normal
-- When using `longhorn` storage class, PV names will be UUIDs like `pvc-4b56f40c-...`
-- This is **standard Kubernetes behavior**, not a misconfiguration
-- Do NOT attempt to migrate these to clean names - it's costly, risky, and unnecessary
-- PVC names are what users interact with - those should be clean
-- See `/docs/migration/pv-pvc-migration-lessons-learned.md` for detailed explanation
-
-### PV/PVC Migration Warning
-- **DO NOT** attempt to migrate existing dynamically provisioned volumes to longhorn-static
-- Migration requires:
-  - Application downtime (30-45 min per volume)
-  - Complex Longhorn volume pre-creation
-  - Data migration with risk of data loss
-  - Manual cleanup
-- Cost-benefit analysis: Purely cosmetic, not worth the effort/risk
-- Only migrate if volume is truly static config data
+### Important: do not use UUID PV Names Are Normal
+- you should not use  `longhorn` storage class, PV names will be UUIDs like `pvc-4b56f40c-...`
 
 ### Storage Naming Convention
 For new deployments:

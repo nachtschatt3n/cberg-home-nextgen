@@ -8,12 +8,12 @@ resources:
   - ./grafana/ks.yaml
   - ./kube-prometheus-stack/ks.yaml
   - ./uptime-kuma/ks.yaml
-  - ./eck-operator/ks.yaml
-  - ./elasticsearch/ks.yaml
-  - ./kibana/ks.yaml
-  - ./apm-server/ks.yaml
-  - ./opentelemetry-operator/ks.yaml
-  - ./opentelemetry-operator/instrumentation-ks.yaml
-  - ./otel-collector/ks.yaml
-  - ./metricbeat/ks.yaml
-  - ./fluent-bit/ks.yaml
+#  - ./eck-operator/ks.yaml
+#  - ./elasticsearch/ks.yaml
+#  - ./kibana/ks.yaml
+#  - ./apm-server/ks.yaml
+#  - ./opentelemetry-operator/ks.yaml
+#  - ./opentelemetry-operator/instrumentation-ks.yaml
+#  - ./otel-collector/ks.yaml
+#  - ./metricbeat/ks.yaml
+#  - ./fluent-bit/ks.yaml

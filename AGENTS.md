@@ -53,7 +53,7 @@
 **Expected Behavior:**
 - PVC Name: Clean, descriptive (e.g., `langfuse-postgresql-data`)
 - PV Name: Auto-generated UUID (e.g., `pvc-df1999c2-c73c-4e54-a0a7-9f30571e8636`)
-- **IMPORTANT**: UUID PV names are NORMAL and CORRECT - do not attempt to "fix" them
+- **IMPORTANT**: do not use UUID PV names use the longhorn-static class
 
 #### Use `longhorn-static` For:
 - Configuration directories with fixed size
@@ -84,29 +84,6 @@ spec:
 - `langfuse-postgresql-data` (using longhorn) → PV: `pvc-df1999c2...` ✅
 - `home-assistant-config` (using longhorn-static) → PV: `home-assistant-config` ✅
 - `bytebot-cache` (using longhorn) → PV: `pvc-4b56f40c...` ✅
-
-### PV/PVC Migration - DO NOT DO IT
-
-**Critical Warning**: Do NOT attempt to migrate existing dynamically provisioned volumes to have "clean" PV names.
-
-**Why?**
-1. UUID PV names are standard Kubernetes practice for dynamic provisioning
-2. Migration requires 30-45 minutes downtime per volume
-3. Requires complex Longhorn volume pre-creation
-4. Risk of data loss during migration
-5. Benefit is purely cosmetic (PV names are mostly hidden)
-6. Effort: 20+ volumes × 45 min = 15+ hours of work
-
-**When Migration Might Be Justified:**
-- Volume is < 5Gi and low-risk (cache, logs)
-- You're already planning maintenance for other reasons
-- Volume is truly static configuration data
-- You need longhorn-static's manual control features
-
-**Detailed Documentation:**
-- Migration guide: `/docs/migration/pv-pvc-naming-migration.md`
-- Lessons learned: `/docs/migration/pv-pvc-migration-lessons-learned.md`
-- Example migration: `/kubernetes/migrations/ai-namespace/`
 
 ### Longhorn Volume Creation for longhorn-static
 
