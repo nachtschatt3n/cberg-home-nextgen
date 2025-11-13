@@ -98,7 +98,7 @@ spec:
     persistence:
       data:
         enabled: true
-        existingClaim: paperless-data
+        existingClaim: paperless-data-5g
       log:
         enabled: true
         type: emptyDir
