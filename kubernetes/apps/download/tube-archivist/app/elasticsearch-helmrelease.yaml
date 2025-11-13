@@ -118,6 +118,6 @@ spec:
     persistence:
       elasticsearch-data:
         enabled: true
-        existingClaim: tube-archivist-elasticsearch-data-new
+        existingClaim: tube-archivist-elasticsearch-data
         globalMounts:
           - path: /usr/share/elasticsearch/data
