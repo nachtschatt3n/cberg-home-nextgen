@@ -99,7 +99,7 @@ spec:
     persistence:
       enabled: true
       useExisting: true
-      name: influxdb2-data
+      name: influxdb2-data-10g
 
     setDefaultUser:
       enabled: true
