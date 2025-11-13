@@ -279,9 +279,7 @@ spec:
 
       desktop-data:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 20Gi
+        existingClaim: bytebot-desktop-data-5g
         advancedMounts:
           desktop:
             desktop:
