@@ -141,6 +141,6 @@ spec:
           - path: /youtube
       cache:
         enabled: true
-        existingClaim: tube-archivist-cache-new
+        existingClaim: tube-archivist-cache-15g
         globalMounts:
           - path: /cache
