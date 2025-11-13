@@ -2,10 +2,10 @@
 apiVersion: longhorn.io/v1beta2
 kind: Volume
 metadata:
-  name: postgresql-data
+  name: postgresql-data-5g
   namespace: storage
 spec:
-  size: "21474836480"  # 20Gi in bytes
+  size: "5368709120"  # 5Gi in bytes
   numberOfReplicas: 3
   dataEngine: v1
   accessMode: rwo
