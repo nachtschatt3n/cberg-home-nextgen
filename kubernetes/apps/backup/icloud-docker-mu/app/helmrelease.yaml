@@ -92,6 +92,6 @@ spec:
             readOnly: false
       session:
         enabled: true
-        type: emptyDir
+        existingClaim: icloud-docker-mu-session
         globalMounts:
           - path: /config/session_data
