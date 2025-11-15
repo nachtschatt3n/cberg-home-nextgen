@@ -5,7 +5,7 @@ metadata:
   name: pgadmin
   namespace: databases
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt-production
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: "pgAdmin"
     gethomepage.dev/description: "Web-based PostgreSQL administration tool"
