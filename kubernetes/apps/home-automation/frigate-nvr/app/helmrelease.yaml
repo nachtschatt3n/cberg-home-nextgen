@@ -31,17 +31,9 @@ spec:
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "iHD"
-      # RTSP credentials from Secret
-      FRIGATE_RTSP_USER:
-        valueFrom:
-          secretKeyRef:
-            name: frigate-rtsp-credentials
-            key: FRIGATE_RTSP_USER
-      FRIGATE_RTSP_PASSWORD:
-        valueFrom:
-          secretKeyRef:
-            name: frigate-rtsp-credentials
-            key: FRIGATE_RTSP_PASSWORD
+    envFrom:
+      - secretRef:
+          name: frigate-rtsp-credentials
 
     # Frigate configuration is now in ConfigMap (frigate-config)
     # Mount the ConfigMap as a volume to /config/config.yml
