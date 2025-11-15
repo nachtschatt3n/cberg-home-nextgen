@@ -1,0 +1,15 @@
+---
+# PVC for iCloud authentication session data persistence
+# Uses longhorn storage class (dynamic provisioning) - UUID PV names are expected
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: icloud-docker-mu-session
+  namespace: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: longhorn
