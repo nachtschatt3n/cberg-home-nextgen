@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: frigate
-      version: 7.3.0
+      version: 7.8.0
       sourceRef:
         kind: HelmRepository
         name: blakeblackshear
@@ -27,182 +27,24 @@ spec:
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate
-      tag: 0.15.1
+      tag: 0.16.2
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "iHD"
+      # RTSP credentials from Secret
+      FRIGATE_RTSP_USER:
+        valueFrom:
+          secretKeyRef:
+            name: frigate-rtsp-credentials
+            key: FRIGATE_RTSP_USER
+      FRIGATE_RTSP_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: frigate-rtsp-credentials
+            key: FRIGATE_RTSP_PASSWORD
 
-    # Frigate configuration
-    config: |
-      mqtt:
-        host: "mosquitto.home-automation.svc.cluster.local"
-        port: 1883
-        # Update with your actual MQTT credentials if needed
-        # user: admin
-        # password: ""
-      detectors:
-        ov:
-          type: openvino
-          device: GPU
-      model:
-        width: 300
-        height: 300
-        input_tensor: nhwc
-        input_pixel_format: bgr
-        path: /openvino-model/ssdlite_mobilenet_v2.xml
-        labelmap_path: /openvino-model/coco_91cl_bkgr.txt
-      semantic_search:
-        enabled: True
-        model_size: large
-        reindex: False
-      ffmpeg:
-        hwaccel_args: preset-intel-qsv-h264
-      genai:
-        enabled: false
-        provider: ollama
-        base_url: http://ollama-ipex.ai.svc.cluster.local:11434
-        model: llava:7b
-      record:
-        enabled: True
-        retain:
-          days: 3
-          mode: all
-        alerts:
-          retain:
-            days: 30
-            mode: motion
-        detections:
-          retain:
-            days: 30
-            mode: motion
-      birdseye:
-        enabled: True
-        mode: continuous
-      cameras:
-        kids:
-          enabled: true
-          genai:
-            use_snapshot: false
-            prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
-            object_prompts:
-              person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
-            objects:
-              - person
-          ffmpeg:
-              inputs:
-                - path: rtsp://camac:Ja3YP@192.168.33.91/live
-                  roles:
-                    - audio
-                    - detect
-                    - record
-          audio:
-            enabled: true
-            listen:
-              - bark
-              - fire_alarm
-              - scream
-              - speech
-              - yell
-
-        entry:
-          enabled: true
-          genai:
-            use_snapshot: false
-            prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
-            object_prompts:
-              person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
-            objects:
-              - person
-              - bicycle
-              - bird
-              - cat
-              - dog
-              - hat
-              - backpack
-              - umbrella
-              - shoe
-              - eye glasses
-              - handbag
-              - tie
-              - suitcase
-              - frisbee
-              - teddy bear
-              - hair drier
-              - toothbrush
-              - hair brush
-          ffmpeg:
-            inputs:
-              - path: rtsp://camac:Ja3YP@192.168.33.92/live
-                roles:
-                  - detect
-                  - record
-                  - audio
-        heater:
-          enabled: true
-          genai:
-            use_snapshot: false
-            prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
-            object_prompts:
-              person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
-            objects:
-              - person
-              - bicycle
-              - bird
-              - cat
-              - dog
-              - hat
-              - backpack
-              - umbrella
-              - shoe
-              - eye glasses
-              - handbag
-              - tie
-              - suitcase
-              - frisbee
-              - teddy bear
-              - hair drier
-              - toothbrush
-              - hair brush
-          ffmpeg:
-            inputs:
-              - path: rtsp://camac:Ja3YP@192.168.33.93/live
-                roles:
-                  - detect
-                  - record
-                  - audio
-        guest_room:
-          enabled: true
-          genai:
-            use_snapshot: false
-            prompt: "Analyze the {label} in these images from the {camera} security camera at the front door. Focus on the actions and potential intent of the {label}."
-            object_prompts:
-              person: "Examine the person in these images. What are they doing, and how might their actions suggest their purpose (e.g., delivering something, approaching, leaving)? If they are carrying or interacting with a package, include details about its source or destination."
-            objects:
-              - person
-              - bicycle
-              - bird
-              - cat
-              - dog
-              - hat
-              - backpack
-              - umbrella
-              - shoe
-              - eye glasses
-              - handbag
-              - tie
-              - suitcase
-              - frisbee
-              - teddy bear
-              - hair drier
-              - toothbrush
-              - hair brush
-          ffmpeg:
-            inputs:
-              - path: rtsp://camac:Ja3YP@192.168.33.94/live
-                roles:
-                  - detect
-                  - record
-                  - audio
+    # Frigate configuration is now in ConfigMap (frigate-config)
+    # Mount the ConfigMap as a volume to /config/config.yml
 
     # Configure persistence for recordings, database, etc.
     persistence:
@@ -255,7 +97,14 @@ spec:
         hostPath:
           path: /dev/dri
           type: Directory
+      - name: frigate-config-map
+        configMap:
+          name: frigate-config
 
     extraVolumeMounts:
       - name: dev-dri
         mountPath: /dev/dri
+      - name: frigate-config-map
+        mountPath: /config/config.yml
+        subPath: config.yml
+        readOnly: true

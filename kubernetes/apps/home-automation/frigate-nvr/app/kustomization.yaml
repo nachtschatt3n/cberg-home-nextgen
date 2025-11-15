@@ -6,3 +6,5 @@ resources:
   - ./storageclass.yaml
   - ./helmrelease.yaml
   - ./ingress.yaml
+  - ./configmap.sops.yaml
+  - ./secret.sops.yaml
