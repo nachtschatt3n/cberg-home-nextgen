@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icloud-docker-mu-config
+  namespace: backup
+data:
+  config.yaml: ENC[AES256_GCM,data:vlOv1DRZrBS6parSgw6aPRISPupl7m6N/LEuG6mDL2GSu6bVuWnToDk5TVR6nE1IGfclR1/NIs4vvSeOcZhxpVmb6K6dep5fwbVJ07LZr7WV2XSApozsu5DkZD5z3rxnpK32kh41QzgtH+WbzQ1d+QUuoayv9jYKa5sIWuFPqzk8lPSL7Ooyi63R7E6pm2NwAoNK20eurvFTrD7IiSn3bQwS9QHHzgII+Ck4rSyaH90/DD7FQBkQ585wlLCDuraBNrBDHkxXErBNhHO7B6FoCFx7OIagVN9GX7xT2Q8qiZDfeBm3A3Zq0zdkaKXaRJWlgaCGLqFRj+RAAZB+p3tDa8WKLA0RplEg5d4shLgEvhU8nYIefaZFvjF2ZJxWI98oCG85nhQa4YfaxnAr/tWBYFTRZy9ptEFwpP9i7niRmzdJGW+vbS5x0hCUYJvbyZRbtMX3msh4f8+nclQ6IIfPjSJ74Eas5zYG/Z9Vg9+AcTHxll6mVHyytRAmm7jW7aRO6ZExbaAld5tfwOElgnvjjyaKSugBDBGPn+OJH8eRo7LDAuxUMhJ3uFBFuaU4lHBLSrf4,iv:LwSShFxvdsynZUaGesm/16Jrjwz8AXQXaM1eAWS4M1o=,tag:Y/l8V43pWDID3LbbZGJBCQ==,type:str]
+sops:
+  kms: []
+  gcp_kms: []
+  azure_kv: []
+  hc_vault: []
+  age:
+    - recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+      enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBBWCtvUERWRE0xaDFwMlZS
+        bFFyU0NUMDhCNkZ4UEZrZnB6OG40cHNqWkVnCmlYVzJ1TkM2UnFnTytLRE1xdVpJ
+        YWVjcy8yN3FXbHBWQ3hIb09OaWhLZ00KLS0tIElUVWJpUFlldTZSbWtzVktTeEV6
+        Q2Q4dFZybStUajB3V2p1VERVbUd0K3cKq3Uj+hcmylRX/qidOrU97jTW3B+RyTwE
+        rpQ77CBSLkLfnOvloQsGSQpMW2gIFtXfKTYqHCnSg5mh2vNSusJVOA==
+        -----END AGE ENCRYPTED FILE-----
+  lastmodified: "2025-11-15T15:50:23Z"
+  mac: ENC[AES256_GCM,data:Zc3Fb0k8y9AGWYv+x2Q67wVVfJyfjNxEPzeqqktUCLtoRHUzkU73d4JM984TM8jDkiikB0Yqiki3elvrUqC/CxdRuwsL9mIN8llbVSUIH8UVSxmfJRG2kjbNP8EjrJmd2w/cmAFmhAm6UMyekDINCpsWZ9aOJVrqXl15Sy627bA=,iv:xXIqKYt0t37AKhDZdZGAbdbRgDoNzBZHTDWDYMDQM+Y=,tag:SSg81TvHozT3rO4tLUPA1g==,type:str]
+  pgp: []
+  encrypted_regex: ^(data)$
+  mac_only_encrypted: true
+  version: 3.9.4
