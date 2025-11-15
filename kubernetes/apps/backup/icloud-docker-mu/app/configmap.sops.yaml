@@ -1,0 +1,21 @@
+{
+	"data": "ENC[AES256_GCM,data:J0hDD+BVW+iN0pqFqi0ZbFo2IY7Ravs1BPrExSI/EyFS3LVcVj+jRw7KYWsA0XWmHPRUGc6Epx4G2drsInfvA4YOtinHRHlezMKNmwuJGg0+uCcGB2LQZf/HHsKjonNhOlXkBCLKh6ECqG4CXoPibcJ/4FPnajIpMxx1VnL4+O1cHvTo+NNTQ84uclFRTNqs2HSdFgcBuzx188KzcjC9dIW6kCpebajnJ7RuaUvm+/e+BsfBShRWoU0AJq6c4Q2fabiy+35AI+SsOq01InoNAi2RwQNvFF3cIWDIUlpCiAsskTOWHiH5J+nTY6CDLNDvILdqcUsc3Cmy5bENdngBgpurZWPYXBvdsh3G9d1UTq1pqELVUt8/6IdA0z/CLuRa20b6HBPDhiYyFTF6rQ8rCupaxoHclYqnKuecRGJImcJEZ3Ug88Z7rUnQj+Igjwbva4NDqTnc5CJ1C7MUsbYmau8tJHiXaMzXl4uIN3rCcBAab/0ZX6XJ7+2yCbNAXZG9Qm+PUE9ENcGDbbNVUQN+s9RezWy3BqllJEGn7yno3QYehEero28FQOPtNh2Ylss9Re1fsK0OUz9+KjRWHU5BpP72a/V2RSEKPdEeW7NF1g60SfR6YP0RFKtGi93F0vXUSbkjHgqVLg7clfHi/u1W7V8JAa4aieuX57AYpBr6DxVNULvy5k/99rtPlpzLTIUrZF4DFYLSG6iQSZheLYjwfMlDenhnwrv4Fwfa5+f2fj+lBnd4yABTQc2IqTLSuHxDu7ujkCIdRQ7FXUeoUKnLVaHiQOhuM87W6Iy7ADF6MsKfEc2JXI6pTQZTceW8ZinCXRCaOuMWG3lvqnNvh8B2J4myNrAT2ksV58Qpsf3fQpiu/VRFrA/PTICnUlIUkXPMwP+FraDTLB5/YpwMhlh1TBo8qcisFd7JTMkD+roIknvXCS2fQxu3Aw91nerCrGLQsTiI1QxGfPE6qYAL+Cfsl14JXck7eAs3,iv:wHR1Wn+loF6HRV/O5QQH+TPOFyBjVymbRtUbX05bOHU=,tag:iCAH+c4pMuDagFQbt70B4Q==,type:str]",
+	"sops": {
+		"kms": null,
+		"gcp_kms": null,
+		"azure_kv": null,
+		"hc_vault": null,
+		"age": [
+			{
+				"recipient": "age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvMFpwQTNDTkcrcFBwOE9I\nU00ydU1STXZ3Uzd3YTVBTHkwWExLaURqQTBvCkZUY0J0ampubVNLa2dMSUZnMHhj\ndVlxUkY5VDRqUkIvYUxZRFpSTlkvZmsKLS0tIHgvcHM2eVZGR2d1NjZ2YkY4a1Nk\nQjhWdGFjWEkvNTRqMk95RTVwbWpVZ2MK29ZUIk9dX5rxPc5yER1Z/TLoJMHWXHT6\nxT5yb/mbdH8Bo4fRMA0NFPEJPHnbrXeyns6JQl6OXYSM0nmoP0Y5SQ==\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2025-11-15T16:44:38Z",
+		"mac": "ENC[AES256_GCM,data:8V5BUs7lwLf0CZilVCLEex3LGmgTHeWD94rXoVG/TVBglEwLzpKpkKOA+ez+fzQueaBlpLnm1jul4CwywJrN595kmE8v9L8DJtUXfjsH/AnG7IQUi4uVulOS21bw+B/wdInsb+PvPBmSSDF3dHkZZHx8cfzRlEfw+pN+otGbjZM=,iv:0bMNfwSyanMsH2dGdW0h+nrFVrXw+g4gKdkt8DL/9Sc=,tag:HbPka1AownjFyT/9WjUV1A==,type:str]",
+		"pgp": null,
+		"encrypted_regex": "^(data)$",
+		"mac_only_encrypted": true,
+		"version": "3.9.4"
+	}
+}
