@@ -6,12 +6,20 @@ metadata:
   name: &app icloud-docker-mu
   namespace: &namespace backup
 spec:
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
   interval: 30m
   path: ./kubernetes/apps/backup/icloud-docker-mu/app
   prune: true
+  postBuild:
+    substituteFrom:
+      - kind: Secret
+        name: icloud-docker-mu-secrets
   sourceRef:
     kind: GitRepository
     name: flux-system
