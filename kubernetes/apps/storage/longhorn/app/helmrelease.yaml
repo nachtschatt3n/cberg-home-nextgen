@@ -63,7 +63,7 @@ spec:
         autoCleanupSystemGeneratedSnapshot: true
         recurringSuccessfulJobsHistoryLimit: 1
         recurringFailedJobsHistoryLimit: 1
-        recurringJobMaxRetention: 3
+        recurringJobMaxRetention: 2
         restoreVolumeRecurringJobs: false
         orphanAutoDeletion: false
         detachManuallyAttachedVolumesWhenCordoned: false
