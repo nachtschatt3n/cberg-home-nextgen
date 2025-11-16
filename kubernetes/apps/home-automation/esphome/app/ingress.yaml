@@ -1,0 +1,39 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: esphome
+  namespace: home-automation
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "ESPHome"
+    gethomepage.dev/description: "ESPHome dashboard"
+    gethomepage.dev/group: "Home Automation"
+    gethomepage.dev/icon: "esphome.png"
+    external-dns.alpha.kubernetes.io/hostname: "esphome.${SECRET_DOMAIN}"
+    # Authentik forward auth annotations
+    nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-esphome-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
+    nginx.ingress.kubernetes.io/auth-signin: "https://esphome.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      proxy_set_header X-Forwarded-Host $http_host;
+      proxy_set_header X-Proxy-Secret 256bc2442db37f82cc474c85d265f6aa61114be4a45b0711e5a6c9c91499fc2653fcd93bcaa9676b1ad3d7b06a93d616436565a774116119cabbfd1f00949976;
+  labels:
+    gethomepage.dev/enabled: "true"
+spec:
+  ingressClassName: internal
+  tls:
+    - hosts:
+        - "esphome.${SECRET_DOMAIN}"
+  rules:
+    - host: "esphome.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: esphome
+                port:
+                  number: 6052
+

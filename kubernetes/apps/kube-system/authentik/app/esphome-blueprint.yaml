@@ -1,0 +1,60 @@
+version: 1
+entries:
+  # ESPHome Forward Auth Integration
+  # Note: Using UUIDs directly for flows since they already exist
+  # Authorization flow UUID: 0cdf1b8c-88f9-4b90-a063-a14e18192f74 (default-provider-authorization-implicit-consent)
+  # Invalidation flow UUID: b8a97e00-f02f-48d9-b854-b26bf837779c (default-provider-invalidation-flow)
+  # Service Connection UUID: 162f6c4f-053d-4a1a-9aa6-d8e590c49d70 (Local Kubernetes Cluster)
+  - id: esphome-forward-auth-provider
+    model: authentik_providers_proxy.proxyprovider
+    state: present
+    identifiers:
+      name: esphome-forward-auth
+    attrs:
+      name: esphome-forward-auth
+      mode: forward_single
+      external_host: "https://esphome.example.com"
+      internal_host: "http://esphome.home-automation.svc.cluster.local:6052"
+      skip_path_regex: ""
+      authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+      invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
+
+  - id: esphome-application
+    model: authentik_core.application
+    state: present
+    identifiers:
+      slug: esphome
+    attrs:
+      name: ESPHome
+      slug: esphome
+      provider: !KeyOf esphome-forward-auth-provider
+      meta_launch_url: "https://esphome.example.com"
+      meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/esphome.png"
+      meta_description: "ESPHome dashboard for managing ESP8266/ESP32 devices"
+
+  - id: esphome-outpost
+    model: authentik_outposts.outpost
+    state: present
+    identifiers:
+      name: esphome-forward-auth
+    attrs:
+      name: esphome-forward-auth
+      type: proxy
+      providers:
+        - !KeyOf esphome-forward-auth-provider
+      service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
+      config:
+        authentik_host: "https://auth.example.com"
+        docker_network: null
+        docker_map_ports: true
+        docker_labels: {}
+        kubernetes_namespace: kube-system
+        kubernetes_replicas: 1
+        kubernetes_ingress_class_name: ""
+        kubernetes_ingress_secret_name: ""
+        kubernetes_ingress_annotations: {}
+        kubernetes_service_type: "ClusterIP"
+        kubernetes_service_annotations: {}
+        kubernetes_disabled_components: []
+        container_network: null
+

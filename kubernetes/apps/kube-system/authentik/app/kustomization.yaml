@@ -17,6 +17,7 @@ configMapGenerator:
       - frigate-blueprint.yaml
       - phpmyadmin-blueprint.yaml
       - longhorn-blueprint.yaml
+      - esphome-blueprint.yaml
 generatorOptions:
   disableNameSuffixHash: true
 

@@ -48,25 +48,7 @@ spec:
             port: 6052
     ingress:
       main:
-        enabled: true
-        className: internal
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "ESPHome"
-          gethomepage.dev/description: "ESPHome dashboard"
-          gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "esphome.png"
-          external-dns.alpha.kubernetes.io/hostname: "esphome.${SECRET_DOMAIN}"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "esphome.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: esphome
-                  port: 6052
+        enabled: false  # Using separate ingress.yaml for Authentik integration
     persistence:
       config:
         enabled: true
