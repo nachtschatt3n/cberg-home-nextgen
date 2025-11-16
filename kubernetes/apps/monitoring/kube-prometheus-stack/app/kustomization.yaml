@@ -7,3 +7,7 @@ resources:
   - ./helmrelease.yaml
   - ./alertmanager-telegram-config.yaml
   - ./longhorn-alerts.yaml
+  - ./prometheus-ingress.yaml
+  - ./prometheus-outpost-ingress.yaml
+  - ./alertmanager-ingress.yaml
+  - ./alertmanager-outpost-ingress.yaml
