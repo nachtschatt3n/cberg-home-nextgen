@@ -8,21 +8,10 @@ data:
   frigate-blueprint.yaml: |
     version: 1
     entries:
-      # Reference default authorization flow (must exist)
-      - id: frigate-authorization-flow
-        model: authentik_flows.flow
-        state: present
-        identifiers:
-          slug: default-provider-authorization-implicit-consent
-
-      # Reference default invalidation flow (must exist)
-      - id: frigate-invalidation-flow
-        model: authentik_flows.flow
-        state: present
-        identifiers:
-          slug: default-provider-invalidation
-
       # Frigate Forward Auth Provider
+      # Note: Using UUIDs directly for flows since they already exist
+      # Authorization flow UUID: 0cdf1b8c-88f9-4b90-a063-a14e18192f74 (default-provider-authorization-implicit-consent)
+      # Invalidation flow UUID: b8a97e00-f02f-48d9-b854-b26bf837779c (default-provider-invalidation-flow)
       - id: frigate-forward-auth-provider
         model: authentik_providers_proxy.proxyprovider
         state: present
@@ -34,8 +23,8 @@ data:
           external_host: "https://frigate.example.com"
           internal_host: "http://frigate-auth.home-automation.svc.cluster.local:8971"
           skip_path_regex: ""
-          authorization_flow: !KeyOf frigate-authorization-flow
-          invalidation_flow: !KeyOf frigate-invalidation-flow
+          authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+          invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
 
       # Frigate Application
       - id: frigate-application
