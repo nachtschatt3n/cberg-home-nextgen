@@ -20,7 +20,6 @@ configMapGenerator:
       - esphome-blueprint.yaml
       - langfuse-blueprint.yaml
       - uptime-kuma-blueprint.yaml
-      - grafana-blueprint.yaml
       - homepage-blueprint.yaml
       - prometheus-alertmanager-blueprint.yaml
 generatorOptions:
