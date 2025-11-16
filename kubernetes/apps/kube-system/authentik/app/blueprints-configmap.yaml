@@ -8,6 +8,20 @@ data:
   frigate-blueprint.yaml: |
     version: 1
     entries:
+      # Default Authorization Flow (reference existing)
+      - id: frigate-authorization-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: default-provider-authorization-implicit-consent
+
+      # Default Invalidation Flow (reference existing)
+      - id: frigate-invalidation-flow
+        model: authentik_flows.flow
+        state: present
+        identifiers:
+          slug: default-provider-invalidation
+
       # Frigate Forward Auth Provider
       - id: frigate-forward-auth-provider
         model: authentik_providers_proxy.proxyprovider
@@ -22,20 +36,6 @@ data:
           skip_path_regex: ""
           authorization_flow: !KeyOf frigate-authorization-flow
           invalidation_flow: !KeyOf frigate-invalidation-flow
-
-      # Default Authorization Flow (if not exists, create or reference existing)
-      - id: frigate-authorization-flow
-        model: authentik_flows.flow
-        state: present
-        identifiers:
-          slug: default-provider-authorization-implicit-consent
-
-      # Default Invalidation Flow (if not exists, create or reference existing)
-      - id: frigate-invalidation-flow
-        model: authentik_flows.flow
-        state: present
-        identifiers:
-          slug: default-provider-invalidation
 
       # Frigate Application
       - id: frigate-application
