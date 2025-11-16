@@ -18,6 +18,7 @@ configMapGenerator:
       - phpmyadmin-blueprint.yaml
       - longhorn-blueprint.yaml
       - esphome-blueprint.yaml
+      - langfuse-blueprint.yaml
 generatorOptions:
   disableNameSuffixHash: true
 
