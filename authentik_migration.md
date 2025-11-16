@@ -124,12 +124,12 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [x] | **pgAdmin** | `databases` | Native OIDC | **Medium** |
 | [x] | **phpMyAdmin** | `databases` | Forward Auth | **Medium** |
 | [ ] | **Open WebUI** | `ai` | Native OIDC | **Easy** |
-| [ ] | **Langfuse** | `ai` | Native OIDC | **Easy** |
+| [~] | **Langfuse** | `ai` | Native OIDC | **Easy** |
 | [ ] | **InfluxDB** | `databases` | Native OIDC | **Easy** |
-| [ ] | **Homepage** | `default` | Forward Auth | **Easy** |
+| [x] | **Homepage** | `default` | Forward Auth | **Easy** |
 | [ ] | **JDownloader** | `download` | Forward Auth | **Medium** |
 | [ ] | **Tube Archivist** | `download` | Forward Auth | **Medium** |
-| [ ] | **ESPHome** | `home-automation` | Forward Auth | **Easy** |
+| [x] | **ESPHome** | `home-automation` | Forward Auth | **Easy** |
 | [x] | **Frigate NVR** | `home-automation` | Forward Auth | **Easy** |
 | [ ] | **Home Assistant** | `home-automation` | Native OIDC | **Easy** |
 | [ ] | **n8n** | `home-automation` | Native OIDC (Paid) / Forward Auth | **Medium** |
@@ -138,10 +138,12 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [ ] | **Zigbee2MQTT** | `home-automation` | Forward Auth | **Easy** |
 | [ ] | **Jellyfin** | `media` | Forward Auth (with caveats) | **Medium** |
 | [ ] | **Plex** | `media` | Not Recommended | **Hard** |
-| [ ] | **Grafana** | `monitoring` | Native OIDC | **Easy** |
+| [!] | **Grafana** | `monitoring` | ~~Native OIDC~~ Postponed | **Hard** |
 | [ ] | **Kibana** | `monitoring` | Native OIDC (Paid) / Forward Auth | **Medium** |
 | [ ] | **Kubernetes Dashboard** | `monitoring` | Native OIDC | **Medium** |
-| [ ] | **Uptime Kuma** | `monitoring` | Forward Auth | **Easy** |
+| [x] | **Uptime Kuma** | `monitoring` | Proxy Mode | **Medium** |
+| [x] | **Prometheus** | `monitoring` | Forward Auth | **Easy** |
+| [x] | **Alertmanager** | `monitoring` | Forward Auth | **Easy** |
 | [ ] | **Nextcloud** | `office` | Native OIDC | **Easy** |
 | [ ] | **Paperless-ngx** | `office` | Native OIDC | **Easy** |
 | [x] | **Longhorn** | `storage` | Proxy Mode | **Easy** |
