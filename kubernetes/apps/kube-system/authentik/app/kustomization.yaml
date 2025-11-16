@@ -6,15 +6,17 @@ resources:
   - ./helmrelease.yaml
 
 # Combine all Authentik blueprint files from app directories into single ConfigMap
-# Each app manages its own blueprint file, which is included here
-# When an app is removed, its blueprint is automatically removed too
+# Each app manages its own blueprint file in its directory
+# Symlinks in this directory reference the actual blueprint files
+# When an app is removed, its blueprint file is removed, and the symlink here breaks
+# This ensures no orphaned authentication config is left behind
 configMapGenerator:
   - name: authentik-blueprints
     namespace: kube-system
     files:
-      - ../../home-automation/frigate-nvr/app/authentik-blueprint.yaml=frigate-blueprint.yaml
-      - ../../databases/phpmyadmin/app/authentik-blueprint.yaml=phpmyadmin-blueprint.yaml
-      - ../../storage/longhorn/app/authentik-blueprint.yaml=longhorn-blueprint.yaml
+      - frigate-blueprint.yaml
+      - phpmyadmin-blueprint.yaml
+      - longhorn-blueprint.yaml
 
 # Note: Volume mounts are manually patched using kubectl since Kustomize patches
 # don't work on Helm-generated resources. Run:
