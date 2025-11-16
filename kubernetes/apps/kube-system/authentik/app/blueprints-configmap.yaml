@@ -35,14 +35,14 @@ data:
           meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/frigate.png"
           meta_description: "Frigate NVR - Home surveillance system with AI object detection"
 
-      # Bind Application to Outpost (embedded outpost)
-      - id: frigate-outpost-binding
+      # Create Frigate Outpost
+      - id: frigate-outpost
         model: authentik_outposts.outpost
         state: present
         identifiers:
-          managed: "goauthentik.io/outposts/embedded"
+          name: frigate-forward-auth
         attrs:
-          name: embedded-outpost
+          name: frigate-forward-auth
           type: proxy
           providers:
             - frigate-forward-auth-provider
