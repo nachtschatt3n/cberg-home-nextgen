@@ -21,6 +21,7 @@ configMapGenerator:
       - langfuse-blueprint.yaml
       - uptime-kuma-blueprint.yaml
       - grafana-blueprint.yaml
+      - homepage-blueprint.yaml
 generatorOptions:
   disableNameSuffixHash: true
 
