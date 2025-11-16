@@ -1,10 +1,9 @@
 ---
-# Kustomize patch to add blueprints volume mounts to Authentik server deployment
-# This is needed because the Helm chart doesn't properly support extraVolumes/extraVolumeMounts
+# Kustomize patch to add blueprints volume mounts to Authentik worker deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: authentik-server
+  name: authentik-worker
   namespace: kube-system
 spec:
   template:
