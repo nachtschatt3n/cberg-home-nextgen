@@ -1,0 +1,38 @@
+version: 1
+entries:
+  # Grafana OIDC Integration
+  # Note: Using UUIDs directly for flows since they already exist
+  # Authorization flow UUID: 0cdf1b8c-88f9-4b90-a063-a14e18192f74 (default-provider-authorization-implicit-consent)
+  # Invalidation flow UUID: b8a97e00-f02f-48d9-b854-b26bf837779c (default-provider-invalidation-flow)
+  - id: grafana-oidc-provider
+    model: authentik_providers_oauth2.oauth2provider
+    state: present
+    identifiers:
+      name: grafana-oidc
+    attrs:
+      name: grafana-oidc
+      client_type: confidential
+      redirect_uris: |
+        https://grafana.example.com/login/generic_oauth
+      authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+      sub_mode: user_username
+      issuer_mode: per_provider
+      jwks_sources: []
+      property_mappings: []
+      access_code_validity: "minutes=1"
+      access_token_validity: "minutes=5"
+      refresh_token_validity: "days=30"
+
+  - id: grafana-application
+    model: authentik_core.application
+    state: present
+    identifiers:
+      slug: grafana
+    attrs:
+      name: Grafana
+      slug: grafana
+      provider: !KeyOf grafana-oidc-provider
+      meta_launch_url: "https://grafana.example.com"
+      meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/grafana.png"
+      meta_description: "Metrics visualization and analytics platform"
+
