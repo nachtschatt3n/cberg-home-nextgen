@@ -35,7 +35,7 @@ data:
         attrs:
           name: Frigate NVR
           slug: frigate
-          provider: frigate-forward-auth-provider
+          provider: !KeyOf frigate-forward-auth-provider
           meta_launch_url: "https://frigate.example.com"
           meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/frigate.png"
           meta_description: "Frigate NVR - Home surveillance system with AI object detection"
@@ -50,7 +50,7 @@ data:
           name: frigate-forward-auth
           type: proxy
           providers:
-            - frigate-forward-auth-provider
+            - !KeyOf frigate-forward-auth-provider
           service_connection: null
           config:
             authentik_host: "https://auth.example.com"
