@@ -20,8 +20,8 @@ data:
           external_host: "https://frigate.example.com"
           internal_host: "http://frigate-auth.home-automation.svc.cluster.local:8971"
           skip_path_regex: ""
-          authorization_flow: !FindObj authentik_flows.flow default-provider-authorization-implicit-consent
-          invalidation_flow: !FindObj authentik_flows.flow default-provider-invalidation
+          authorization_flow: default-provider-authorization-implicit-consent
+          invalidation_flow: default-provider-invalidation
 
       # Frigate Application
       - id: frigate-application
