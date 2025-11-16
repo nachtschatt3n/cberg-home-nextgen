@@ -3,8 +3,19 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./secret.sops.yaml
-  - ./blueprints-configmap.yaml
   - ./helmrelease.yaml
+
+# Combine all Authentik blueprint files from app directories into single ConfigMap
+# Each app manages its own blueprint file, which is included here
+# When an app is removed, its blueprint is automatically removed too
+configMapGenerator:
+  - name: authentik-blueprints
+    namespace: kube-system
+    files:
+      - ../../home-automation/frigate-nvr/app/authentik-blueprint.yaml=frigate-blueprint.yaml
+      - ../../databases/phpmyadmin/app/authentik-blueprint.yaml=phpmyadmin-blueprint.yaml
+      - ../../storage/longhorn/app/authentik-blueprint.yaml=longhorn-blueprint.yaml
+
 # Note: Volume mounts are manually patched using kubectl since Kustomize patches
 # don't work on Helm-generated resources. Run:
 # kubectl patch deployment authentik-server -n kube-system --type='strategic' -p='{"spec":{"template":{"spec":{"volumes":[{"name":"blueprints","configMap":{"name":"authentik-blueprints","defaultMode":420}}],"containers":[{"name":"server","volumeMounts":[{"name":"blueprints","mountPath":"/blueprints","readOnly":true}]}]}}}}'
