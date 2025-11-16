@@ -33,6 +33,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: frigate-auth
+                name: frigate
                 port:
-                  number: 8971
+                  number: 5000
