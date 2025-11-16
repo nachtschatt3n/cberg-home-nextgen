@@ -5,6 +5,7 @@ resources:
   - ./secret.sops.yaml
   - ./blueprints-configmap.yaml
   - ./helmrelease.yaml
-patches:
-  - path: ./patch-blueprints-volumes.yaml
-  - path: ./patch-blueprints-volumes-worker.yaml
+# Note: Volume mounts are manually patched using kubectl since Kustomize patches
+# don't work on Helm-generated resources. Run:
+# kubectl patch deployment authentik-server -n kube-system --type='strategic' -p='{"spec":{"template":{"spec":{"volumes":[{"name":"blueprints","configMap":{"name":"authentik-blueprints","defaultMode":420}}],"containers":[{"name":"server","volumeMounts":[{"name":"blueprints","mountPath":"/blueprints","readOnly":true}]}]}}}}'
+# kubectl patch deployment authentik-worker -n kube-system --type='strategic' -p='{"spec":{"template":{"spec":{"volumes":[{"name":"blueprints","configMap":{"name":"authentik-blueprints","defaultMode":420}}],"containers":[{"name":"worker","volumeMounts":[{"name":"blueprints","mountPath":"/blueprints","readOnly":true}]}]}}}}'
