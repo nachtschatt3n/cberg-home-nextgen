@@ -72,7 +72,7 @@ spec:
               key: oidcClientSecret
               optional: true
         - name: AUTH_CUSTOM_ISSUER
-          value: "https://auth.example.com/application/o/langfuse-oidc"
+          value: "https://auth.example.com"
         - name: AUTH_CUSTOM_NAME
           value: "Authentik"
         - name: AUTH_CUSTOM_SCOPE
