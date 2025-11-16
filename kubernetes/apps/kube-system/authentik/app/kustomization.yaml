@@ -19,6 +19,7 @@ configMapGenerator:
       - longhorn-blueprint.yaml
       - esphome-blueprint.yaml
       - langfuse-blueprint.yaml
+      - uptime-kuma-blueprint.yaml
 generatorOptions:
   disableNameSuffixHash: true
 
