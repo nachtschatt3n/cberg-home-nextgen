@@ -58,6 +58,9 @@ spec:
               optional: true
         - name: NEXTAUTH_OIDC_ISSUER
           value: "https://auth.example.com/application/o/langfuse-oidc"
+        # Enable OIDC provider for NextAuth.js
+        - name: AUTH_PROVIDER
+          value: "oidc"
         - name: SALT
           valueFrom:
             secretKeyRef:
