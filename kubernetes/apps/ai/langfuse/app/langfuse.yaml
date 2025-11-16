@@ -58,22 +58,22 @@ spec:
               optional: true
         - name: NEXTAUTH_OIDC_ISSUER
           value: "https://auth.example.com/application/o/langfuse-oidc"
-        # Langfuse-specific OIDC env vars (may be required in addition to NEXTAUTH_* vars)
+        # Langfuse-specific OIDC env vars (provider-specific format like AUTH_ONELOGIN_*)
         - name: AUTH_PROVIDER
           value: "oidc"
-        - name: AUTH_CLIENT_ID
+        - name: AUTH_OIDC_CLIENT_ID
           valueFrom:
             secretKeyRef:
               name: langfuse-secret
               key: oidcClientId
               optional: true
-        - name: AUTH_CLIENT_SECRET
+        - name: AUTH_OIDC_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
               name: langfuse-secret
               key: oidcClientSecret
               optional: true
-        - name: AUTH_ISSUER
+        - name: AUTH_OIDC_ISSUER
           value: "https://auth.example.com/application/o/langfuse-oidc"
         - name: SALT
           valueFrom:
