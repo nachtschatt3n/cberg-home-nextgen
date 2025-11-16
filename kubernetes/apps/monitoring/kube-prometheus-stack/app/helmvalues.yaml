@@ -10,16 +10,7 @@ data:
     alertmanager:
       enabled: true
       ingress:
-        enabled: true
-        ingressClassName: internal
-        annotations: {}
-        labels: {}
-        pathType: Prefix
-        hosts:
-          - "alertmanager.${SECRET_DOMAIN}"
-        tls:
-          - hosts:
-              - "alertmanager.${SECRET_DOMAIN}"
+        enabled: false  # Using separate alertmanager-ingress.yaml for Authentik integration
       alertmanagerConfigSelector:
         matchLabels:
           alertmanager-config: telegram
@@ -132,16 +123,7 @@ data:
       enabled: false # Disabled due to eBPF
     prometheus:
       ingress:
-        enabled: true
-        ingressClassName: internal
-        annotations: {}
-        labels: {}
-        pathType: Prefix
-        hosts:
-          - "prometheus.${SECRET_DOMAIN}"
-        tls:
-          - hosts:
-              - "prometheus.${SECRET_DOMAIN}"
+        enabled: false  # Using separate prometheus-ingress.yaml for Authentik integration
       prometheusSpec:
         ruleSelectorNilUsesHelmValues: false
         ruleSelector:
