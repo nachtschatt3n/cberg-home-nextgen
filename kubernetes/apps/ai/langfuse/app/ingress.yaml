@@ -12,6 +12,9 @@ metadata:
     gethomepage.dev/group: "AI"
     gethomepage.dev/icon: "invoke-ai.png"
     gethomepage.dev/pod-selector: app=langfuse-web
+    # Cookie forwarding for NextAuth.js session management
+    nginx.ingress.kubernetes.io/proxy-cookie-domain: ".example.com langfuse.example.com"
+    nginx.ingress.kubernetes.io/proxy-cookie-path: "/ /"
 spec:
   ingressClassName: external
   tls:
