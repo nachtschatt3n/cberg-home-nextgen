@@ -5,3 +5,5 @@ kind: Kustomization
 resources:
   - ./helmrelease.yaml
   - ./servicemonitor.yaml
+  - ./ingress.yaml
+  - ./authentik-outpost-ingress.yaml

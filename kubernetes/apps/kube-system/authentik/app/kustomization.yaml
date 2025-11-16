@@ -20,6 +20,7 @@ configMapGenerator:
       - esphome-blueprint.yaml
       - langfuse-blueprint.yaml
       - uptime-kuma-blueprint.yaml
+      - grafana-blueprint.yaml
 generatorOptions:
   disableNameSuffixHash: true
 
