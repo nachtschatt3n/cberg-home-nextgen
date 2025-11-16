@@ -17,6 +17,8 @@ configMapGenerator:
       - frigate-blueprint.yaml
       - phpmyadmin-blueprint.yaml
       - longhorn-blueprint.yaml
+generatorOptions:
+  disableNameSuffixHash: true
 
 # Note: Volume mounts are manually patched using kubectl since Kustomize patches
 # don't work on Helm-generated resources. Run:
