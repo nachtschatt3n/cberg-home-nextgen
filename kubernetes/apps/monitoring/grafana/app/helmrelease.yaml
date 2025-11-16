@@ -30,16 +30,8 @@ spec:
       existingSecret: grafana-admin-secret
     env:
       GF_EXPLORE_ENABLED: true
-      GF_AUTH_GENERIC_OAUTH_CLIENT_ID:
-        valueFrom:
-          secretKeyRef:
-            name: grafana-admin-secret
-            key: GF_AUTH_GENERIC_OAUTH_CLIENT_ID
-      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
-        valueFrom:
-          secretKeyRef:
-            name: grafana-admin-secret
-            key: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+    envFromSecrets:
+      - name: grafana-admin-secret
     grafana.ini:
       server:
         root_url: "https://grafana.${SECRET_DOMAIN}"
@@ -47,8 +39,8 @@ spec:
         enabled: true
         name: Authentik
         allow_sign_up: true
-        client_id: $__file{/run/secrets/grafana-admin-secret/GF_AUTH_GENERIC_OAUTH_CLIENT_ID}
-        client_secret: $__file{/run/secrets/grafana-admin-secret/GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
+        client_id: ${GF_AUTH_GENERIC_OAUTH_CLIENT_ID}
+        client_secret: ${GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET}
         scopes: openid email profile
         auth_url: https://auth.example.com/application/o/grafana-oidc/authorize/
         token_url: https://auth.example.com/application/o/grafana-oidc/token/
@@ -56,12 +48,6 @@ spec:
         allowed_domains: example.com
         role_attribute_path: contains(groups[*], 'admin') && 'Admin' || contains(groups[*], 'editor') && 'Editor' || 'Viewer'
         auto_login: false
-    extraSecretMounts:
-      - name: grafana-admin-secret
-        secretName: grafana-admin-secret
-        defaultMode: 0440
-        mountPath: /run/secrets/grafana-admin-secret
-        readOnly: true
       analytics:
         check_for_updates: false
         check_for_plugin_updates: false
