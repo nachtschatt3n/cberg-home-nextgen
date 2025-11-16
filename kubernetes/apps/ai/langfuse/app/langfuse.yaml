@@ -43,6 +43,21 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: nextauthSecret
+        # OIDC Configuration (will be populated after blueprint creates provider)
+        - name: NEXTAUTH_OIDC_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: oidcClientId
+              optional: true
+        - name: NEXTAUTH_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: langfuse-secret
+              key: oidcClientSecret
+              optional: true
+        - name: NEXTAUTH_OIDC_ISSUER
+          value: "https://auth.example.com/application/o/langfuse-oidc/"
         - name: SALT
           valueFrom:
             secretKeyRef:
