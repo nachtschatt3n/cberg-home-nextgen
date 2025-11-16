@@ -45,6 +45,7 @@ entries:
       service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
       config:
         authentik_host: "http://authentik-server.kube-system.svc.cluster.local"
+        authentik_host_browser: "https://auth.example.com"
         docker_network: null
         docker_map_ports: true
         docker_labels: {}
