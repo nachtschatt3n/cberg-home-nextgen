@@ -1,0 +1,23 @@
+---
+# Additional service for authenticated port 8971
+# Port 5000 is exposed by Helm chart for unauthenticated access (Home Assistant)
+# Port 8971 is for authenticated web UI access via ingress
+apiVersion: v1
+kind: Service
+metadata:
+  name: frigate-auth
+  namespace: home-automation
+  labels:
+    app.kubernetes.io/name: frigate
+    app.kubernetes.io/instance: frigate
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-auth
+      port: 8971
+      targetPort: 8971
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: frigate
+    app.kubernetes.io/instance: frigate
+
