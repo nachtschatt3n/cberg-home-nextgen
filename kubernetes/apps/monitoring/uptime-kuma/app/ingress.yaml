@@ -28,7 +28,7 @@ metadata:
   labels:
     gethomepage.dev/enabled: "true"
 spec:
-  ingressClassName: external
+  ingressClassName: internal
   tls:
     - hosts:
         - "kuma.${SECRET_DOMAIN}"
