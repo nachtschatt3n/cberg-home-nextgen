@@ -43,6 +43,12 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: nextauthSecret
+        # Trust host when behind proxy (required for NextAuth.js state management)
+        - name: AUTH_TRUST_HOST
+          value: "true"
+        # Use secure cookies (required for HTTPS)
+        - name: AUTH_URL
+          value: "https://langfuse.${SECRET_DOMAIN}"
         # Langfuse OIDC configuration (uses AUTH_CUSTOM_* format)
         # Note: Removed NEXTAUTH_OIDC_* variables to avoid conflicts with AUTH_CUSTOM_*
         - name: AUTH_CUSTOM_CLIENT_ID
