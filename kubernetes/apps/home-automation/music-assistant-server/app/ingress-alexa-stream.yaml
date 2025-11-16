@@ -1,0 +1,24 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: music-assistant-alexa-stream
+  namespace: home-automation
+  annotations:
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+spec:
+  ingressClassName: external
+  tls:
+    - hosts:
+        - "music-stream.${SECRET_DOMAIN}"
+  rules:
+    - host: "music-stream.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: music-assistant-server
+                port:
+                  number: 8097
