@@ -34,40 +34,7 @@ spec:
       - name: TZ
         value: "Europe/Berlin"
     ingress:
-      enabled: true
-      className: external
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Uptime Kuma"
-        gethomepage.dev/description: "Uptime monitoring tool"
-        gethomepage.dev/group: "Monitoring"
-        gethomepage.dev/icon: "uptime-kuma.png"
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-        nginx.ingress.kubernetes.io/server-snippets: |
-          location / {
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_http_version 1.1;
-            proxy_set_header X-Forwarded-Host $http_host;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-For $remote_addr;
-            proxy_set_header Host $host;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_cache_bypass $http_upgrade;
-          }
-      labels:
-        gethomepage.dev/enabled: "true"
-      hosts:
-        - host: &host "kuma.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - *host
+      enabled: false  # Using separate ingress.yaml for Authentik integration
     persistence:
       enabled: true
     volume:
