@@ -73,6 +73,12 @@ spec:
               optional: true
         - name: AUTH_CUSTOM_ISSUER
           value: "https://auth.example.com"
+        - name: AUTH_CUSTOM_AUTH_URL
+          value: "https://auth.example.com/application/o/langfuse-oidc/authorize/"
+        - name: AUTH_CUSTOM_TOKEN_URL
+          value: "https://auth.example.com/application/o/langfuse-oidc/token/"
+        - name: AUTH_CUSTOM_USERINFO_URL
+          value: "https://auth.example.com/application/o/langfuse-oidc/userinfo/"
         - name: AUTH_CUSTOM_NAME
           value: "Authentik"
         - name: AUTH_CUSTOM_SCOPE
