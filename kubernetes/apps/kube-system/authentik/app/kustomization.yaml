@@ -6,9 +6,9 @@ resources:
   - ./helmrelease.yaml
 
 # Combine all Authentik blueprint files from app directories into single ConfigMap
-# Each app manages its own blueprint file in its directory
-# Symlinks in this directory reference the actual blueprint files
-# When an app is removed, its blueprint file is removed, and the symlink here breaks
+# Each app manages its own blueprint file in its directory (source of truth)
+# Copies in this directory are used by Kustomize (symlinks don't work in Flux's temp checkout)
+# When an app is removed, its blueprint file is removed, and the copy here should be removed too
 # This ensures no orphaned authentication config is left behind
 configMapGenerator:
   - name: authentik-blueprints
