@@ -159,7 +159,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Zigbee2MQTT:** The web UI has basic auth; disable it and protect the service with a forward auth proxy.
 -   **Jellyfin:** Use forward auth for the web UI. API access for mobile/TV clients may require custom Authentik rules or be bypassed.
 -   **Plex:** Plex is tightly integrated with its own cloud authentication (plex.tv), making standard SSO integration very difficult and unreliable.
--   **Grafana:** Excellent OIDC support. Configure the `[auth.generic_oauth]` section in the `grafana.ini` file.
+-   **Grafana:** Excellent OIDC support. Configure the `[auth.generic_oauth]` section in the `grafana.ini` file. **NOTE:** Grafana OIDC integration attempted but postponed due to Helm chart limitations with secret handling. The chart's `env` map doesn't properly support Kubernetes `valueFrom` syntax, and alternative approaches (envFromSecrets, extraConfigmapMounts) also had issues. A security incident occurred where OIDC credentials were accidentally committed unencrypted to the public repository (commit c85f058). Credentials were deleted and the integration rolled back. **Recommendation:** Use Grafana's built-in admin authentication for now, or wait for better Helm chart support for secret management.
 -   **Kibana:** OIDC is a paid feature in the Elastic Stack. For the open-source version, use a forward auth proxy.
 -   **Kubernetes Dashboard:** Requires passing specific OIDC flags to the dashboard's deployment arguments, which is slightly more complex than environment variables.
 -   **Uptime Kuma:** Has no multi-user login. Protect the entire application with a forward auth proxy.
