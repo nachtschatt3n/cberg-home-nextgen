@@ -18,7 +18,10 @@ entries:
       sub_mode: user_username
       issuer_mode: per_provider
       jwks_sources: []
-      property_mappings: []
+      property_mappings:
+        - "72b89159-7f15-43e2-8360-8c88b3e63db9"  # authentik default OAuth Mapping: OpenID 'openid'
+        - "677aa3e9-edc2-4905-a522-4f254c90e9bf"  # authentik default OAuth Mapping: OpenID 'email'
+        - "de728b00-3ecb-4346-b780-5c68948b2877"  # authentik default OAuth Mapping: OpenID 'profile'
       access_code_validity: "minutes=1"
       access_token_validity: "minutes=5"
       refresh_token_validity: "days=30"
