@@ -57,7 +57,7 @@ spec:
               key: oidcClientSecret
               optional: true
         - name: NEXTAUTH_OIDC_ISSUER
-          value: "https://auth.example.com/application/o/langfuse-oidc/"
+          value: "https://auth.example.com/application/o/langfuse-oidc"
         - name: SALT
           valueFrom:
             secretKeyRef:
