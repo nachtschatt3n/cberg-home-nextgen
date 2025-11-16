@@ -55,14 +55,31 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+      extraInitContainers:
+        - name: copy-blueprints
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
+              echo "Blueprint copied successfully"
+          volumeMounts:
+            - name: blueprints-source
+              mountPath: /blueprints-source
+              readOnly: true
+            - name: blueprints
+              mountPath: /blueprints
       extraVolumes:
         - name: blueprints
+          emptyDir: {}
+        - name: blueprints-source
           configMap:
             name: authentik-blueprints
       extraVolumeMounts:
         - name: blueprints
           mountPath: /blueprints
-          readOnly: true
+          readOnly: false
       ingress:
         enabled: true
         ingressClassName: external
@@ -119,14 +136,31 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+      extraInitContainers:
+        - name: copy-blueprints
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
+              echo "Blueprint copied successfully"
+          volumeMounts:
+            - name: blueprints-source
+              mountPath: /blueprints-source
+              readOnly: true
+            - name: blueprints
+              mountPath: /blueprints
       extraVolumes:
         - name: blueprints
+          emptyDir: {}
+        - name: blueprints-source
           configMap:
             name: authentik-blueprints
       extraVolumeMounts:
         - name: blueprints
           mountPath: /blueprints
-          readOnly: true
+          readOnly: false
       resources:
         requests:
           cpu: 100m
