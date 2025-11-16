@@ -45,6 +45,8 @@ spec:
         existingClaim: frigate-media
 
     # Service configuration
+    # Port 5000: Unauthenticated internal access (Home Assistant)
+    # Port 8971: Authenticated web UI (external via ingress) - exposed via separate service-auth.yaml
     service:
       type: ClusterIP
       port: 5000

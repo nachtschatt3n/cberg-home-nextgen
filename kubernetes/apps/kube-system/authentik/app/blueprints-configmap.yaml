@@ -1,0 +1,64 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprints
+  namespace: kube-system
+data:
+  frigate-blueprint.yaml: |
+    version: 1
+    entries:
+      # Frigate Forward Auth Provider
+      - id: frigate-forward-auth-provider
+        model: authentik_providers_proxy.proxyprovider
+        state: present
+        identifiers:
+          name: frigate-forward-auth
+        attrs:
+          name: frigate-forward-auth
+          mode: forward_single
+          external_host: "https://frigate.${SECRET_DOMAIN}"
+          internal_host: "http://frigate-auth.home-automation.svc.cluster.local:8971"
+          skip_path_regex: ""
+
+      # Frigate Application
+      - id: frigate-application
+        model: authentik_core.application
+        state: present
+        identifiers:
+          slug: frigate
+        attrs:
+          name: Frigate NVR
+          slug: frigate
+          provider: frigate-forward-auth-provider
+          meta_launch_url: "https://frigate.${SECRET_DOMAIN}"
+          meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/frigate.png"
+          meta_description: "Frigate NVR - Home surveillance system with AI object detection"
+
+      # Bind Application to Outpost (embedded outpost)
+      - id: frigate-outpost-binding
+        model: authentik_outposts.outpost
+        state: present
+        identifiers:
+          managed: "goauthentik.io/outposts/embedded"
+        attrs:
+          name: embedded-outpost
+          type: proxy
+          providers:
+            - frigate-forward-auth-provider
+          service_connection: null
+          config:
+            authentik_host: "https://auth.${SECRET_DOMAIN}"
+            docker_network: null
+            docker_map_ports: true
+            docker_labels: {}
+            kubernetes_namespace: kube-system
+            kubernetes_replicas: 1
+            kubernetes_ingress_class_name: ""
+            kubernetes_ingress_secret_name: ""
+            kubernetes_ingress_annotations: {}
+            kubernetes_service_type: "ClusterIP"
+            kubernetes_service_annotations: {}
+            kubernetes_disabled_components: []
+            container_network: null
+

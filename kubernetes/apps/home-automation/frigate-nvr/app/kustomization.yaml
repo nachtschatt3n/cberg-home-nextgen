@@ -5,6 +5,8 @@ resources:
   - ./pvc.yaml
   - ./storageclass.yaml
   - ./helmrelease.yaml
+  - ./service-auth.yaml
   - ./ingress.yaml
+  - ./authentik-outpost-ingress.yaml
   - ./configmap.sops.yaml
   - ./secret.sops.yaml

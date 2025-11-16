@@ -55,6 +55,14 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+      extraVolumes:
+        - name: blueprints
+          configMap:
+            name: authentik-blueprints
+      extraVolumeMounts:
+        - name: blueprints
+          mountPath: /blueprints
+          readOnly: true
       ingress:
         enabled: true
         ingressClassName: external
@@ -111,6 +119,14 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+      extraVolumes:
+        - name: blueprints
+          configMap:
+            name: authentik-blueprints
+      extraVolumeMounts:
+        - name: blueprints
+          mountPath: /blueprints
+          readOnly: true
       resources:
         requests:
           cpu: 100m
