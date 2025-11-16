@@ -12,9 +12,10 @@ entries:
     attrs:
       name: grafana-oidc
       client_type: confidential
-      redirect_uris: |
-        https://grafana.example.com/login/generic_oauth
+      redirect_uris:
+        - "https://grafana.example.com/login/generic_oauth"
       authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+      invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
       sub_mode: user_username
       issuer_mode: per_provider
       jwks_sources: []
