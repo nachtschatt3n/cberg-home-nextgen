@@ -5,3 +5,5 @@ resources:
   - ./helmrelease.yaml
   - ./servicemonitor.yaml
   - ./metrics-secret.sops.yaml
+  - ./ingress.yaml
+  - ./authentik-outpost-ingress.yaml
