@@ -18,6 +18,8 @@ kind: Ingress
 metadata:
   name: uptime-kuma-authentik-outpost
   namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/priority: "100"
 spec:
   ingressClassName: external
   rules:
