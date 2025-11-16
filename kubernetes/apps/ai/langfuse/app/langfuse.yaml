@@ -71,16 +71,17 @@ spec:
               name: langfuse-secret
               key: oidcClientSecret
               optional: true
-        # Using provider-specific issuer (required for button to appear)
-        # Explicit endpoints should bypass NextAuth.js discovery
+        # Using application slug for issuer (per_provider issuer mode uses app slug, not client_id)
+        # Well-known endpoint works: https://auth.example.com/application/o/langfuse/.well-known/openid-configuration
         - name: AUTH_CUSTOM_ISSUER
-          value: "https://auth.example.com/application/o/langfuse-oidc"
+          value: "https://auth.example.com/application/o/langfuse"
+        # Endpoints from well-known discovery (base URLs, not slug-specific)
         - name: AUTH_CUSTOM_AUTHORIZATION_URL
-          value: "https://auth.example.com/application/o/craZ83DXa2psFuxCnmVkwILoCBjh8VwrCoSQOcB5/authorize/"
+          value: "https://auth.example.com/application/o/authorize/"
         - name: AUTH_CUSTOM_TOKEN_URL
-          value: "https://auth.example.com/application/o/craZ83DXa2psFuxCnmVkwILoCBjh8VwrCoSQOcB5/token/"
+          value: "https://auth.example.com/application/o/token/"
         - name: AUTH_CUSTOM_USERINFO_URL
-          value: "https://auth.example.com/application/o/craZ83DXa2psFuxCnmVkwILoCBjh8VwrCoSQOcB5/userinfo/"
+          value: "https://auth.example.com/application/o/userinfo/"
         - name: AUTH_CUSTOM_NAME
           value: "Authentik"
         - name: AUTH_CUSTOM_SCOPE
