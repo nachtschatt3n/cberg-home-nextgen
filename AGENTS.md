@@ -372,6 +372,243 @@ kubectl port-forward -n monitoring {pod-name} 2020:2020 &
 curl http://localhost:2020/api/v1/health
 ```
 
+## Authentik Blueprint Management
+
+### Default Approach: Blueprints, Not UI
+**ALWAYS use blueprints for Authentik configuration, never the UI.** This ensures:
+- Version-controlled authentication configuration
+- GitOps-compatible deployment
+- Reproducible authentication setup across environments
+- No manual UI configuration that can drift
+
+### Blueprint File Location
+Blueprints are stored in:
+- **File**: `kubernetes/apps/kube-system/authentik/app/blueprints-configmap.yaml`
+- **ConfigMap**: `authentik-blueprints` in `kube-system` namespace
+- **Mount path**: `/blueprints` (automatically loaded by Authentik)
+
+### DO's: Blueprint Best Practices
+
+#### ✅ Use Blueprints for All Authentik Resources
+```yaml
+# DO: Define all resources in blueprint
+version: 1
+entries:
+  - id: my-app-provider
+    model: authentik_providers_proxy.proxyprovider
+    state: present
+    # ... configuration
+```
+
+#### ✅ Use UUIDs for Flow References
+```yaml
+# DO: Use hardcoded UUIDs for default flows
+attrs:
+  authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"  # default-provider-authorization-implicit-consent
+  invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"   # default-provider-invalidation-flow
+```
+
+#### ✅ Use !KeyOf for Cross-References
+```yaml
+# DO: Reference other blueprint entries using !KeyOf
+- id: my-app-application
+  attrs:
+    provider: !KeyOf my-app-provider  # Resolves to UUID at runtime
+
+- id: my-app-outpost
+  attrs:
+    providers:
+      - !KeyOf my-app-provider  # List of provider UUIDs
+```
+
+#### ✅ Hardcode Domains in ConfigMaps
+```yaml
+# DO: Hardcode domains since Flux substitution doesn't work in ConfigMap data
+data:
+  my-blueprint.yaml: |
+    entries:
+      - attrs:
+          external_host: "https://myapp.example.com"  # Hardcoded domain
+```
+
+#### ✅ Include Service Connection for Kubernetes Outposts
+```yaml
+# DO: Always include service_connection for Kubernetes outposts
+- id: my-app-outpost
+  attrs:
+    service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"  # Local Kubernetes Cluster
+    config:
+      kubernetes_namespace: kube-system
+```
+
+#### ✅ Use Separate Outposts (Not Embedded)
+```yaml
+# DO: Create dedicated outpost for each application
+- id: my-app-outpost
+  model: authentik_outposts.outpost
+  attrs:
+    name: my-app-forward-auth
+    type: proxy
+    providers:
+      - !KeyOf my-app-provider
+```
+
+#### ✅ Verify Backend Service Ports
+```yaml
+# DO: Use actual service port in internal_host
+attrs:
+  internal_host: "http://myapp.namespace.svc.cluster.local:5000"  # Use actual port
+```
+
+#### ✅ Test Blueprint Loading
+```bash
+# DO: Verify blueprints are loaded after ConfigMap update
+kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints
+```
+
+### DON'Ts: Common Pitfalls
+
+#### ❌ DON'T Use UI for Configuration
+```yaml
+# DON'T: Manually configure Authentik via UI
+# This creates drift and is not version-controlled
+```
+
+#### ❌ DON'T Use Slugs for Flow References
+```yaml
+# DON'T: Use slug names for flows
+attrs:
+  authorization_flow: "default-provider-authorization-implicit-consent"  # ❌ Will fail
+
+# DO: Use UUIDs instead
+attrs:
+  authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"  # ✅ Correct
+```
+
+#### ❌ DON'T Use String Names for Provider References
+```yaml
+# DON'T: Reference providers by name
+attrs:
+  provider: "my-app-provider"  # ❌ Will fail with type error
+
+# DO: Use !KeyOf instead
+attrs:
+  provider: !KeyOf my-app-provider  # ✅ Correct
+```
+
+#### ❌ DON'T Use Flux Substitution in ConfigMap Data
+```yaml
+# DON'T: Flux substitution doesn't work in ConfigMap data fields
+data:
+  blueprint.yaml: |
+    external_host: "https://app.${SECRET_DOMAIN}"  # ❌ Won't be substituted
+
+# DO: Hardcode the domain
+data:
+  blueprint.yaml: |
+    external_host: "https://app.example.com"  # ✅ Correct
+```
+
+#### ❌ DON'T Omit Service Connection for Kubernetes Outposts
+```yaml
+# DON'T: Missing service_connection prevents Kubernetes resource creation
+- id: my-app-outpost
+  attrs:
+    service_connection: null  # ❌ Outpost won't create K8s resources
+
+# DO: Include service connection UUID
+- id: my-app-outpost
+  attrs:
+    service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"  # ✅ Correct
+```
+
+#### ❌ DON'T Bind to Embedded Outpost
+```yaml
+# DON'T: Binding to embedded outpost doesn't create separate service
+# (This creates confusion when ingress expects dedicated outpost service)
+
+# DO: Create dedicated outpost for each application
+```
+
+#### ❌ DON'T Use Non-Existent Ports
+```yaml
+# DON'T: Reference ports that don't exist
+attrs:
+  internal_host: "http://myapp.namespace.svc.cluster.local:8971"  # ❌ If port 8971 doesn't exist
+
+# DO: Use actual service port
+attrs:
+  internal_host: "http://myapp.namespace.svc.cluster.local:5000"  # ✅ Actual port
+```
+
+#### ❌ DON'T Forget Outpost Ingress
+```yaml
+# DON'T: Missing outpost ingress causes auth signin redirects to fail
+# The /outpost.goauthentik.io/* paths need to be exposed via ingress
+
+# DO: Create separate ingress for outpost paths (see pattern below)
+```
+
+### Blueprint Entry Pattern Checklist
+
+When creating a new Authentik integration, ensure:
+
+1. **Proxy Provider Entry**
+   - [ ] Uses hardcoded flow UUIDs (not slugs)
+   - [ ] `external_host` uses hardcoded domain (not Flux substitution)
+   - [ ] `internal_host` uses correct service name and port
+
+2. **Application Entry**
+   - [ ] Uses `!KeyOf` to reference provider (not string)
+   - [ ] `meta_launch_url` uses hardcoded domain
+
+3. **Outpost Entry**
+   - [ ] Uses `!KeyOf` to reference provider in `providers` list
+   - [ ] Includes `service_connection` UUID for Kubernetes deployments
+   - [ ] `config.authentik_host` uses hardcoded domain
+   - [ ] `config.kubernetes_namespace` is set (usually `kube-system`)
+
+4. **Ingress Configuration**
+   - [ ] Auth annotations point to correct outpost service name
+   - [ ] Auth signin URL uses correct domain
+   - [ ] Separate ingress created for `/outpost.goauthentik.io/*` paths
+   - [ ] Outpost service (ExternalName) references outpost service in `kube-system`
+
+5. **Testing**
+   - [ ] Blueprint loads successfully (`show_blueprints` command)
+   - [ ] Outpost deployment created in `kube-system`
+   - [ ] Outpost service created (`ak-outpost-{app}-forward-auth`)
+   - [ ] Login flow works end-to-end
+
+### Blueprint Debugging Commands
+
+```bash
+# Check if blueprints are loaded
+kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints
+
+# Check outpost deployment status
+kubectl get deployment -n kube-system ak-outpost-{app}-forward-auth
+
+# Check outpost service
+kubectl get svc -n kube-system ak-outpost-{app}-forward-auth
+
+# Check blueprint application logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | grep -i blueprint
+
+# Check outpost controller logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | grep -i outpost
+
+# Verify outpost is creating resources
+kubectl get all -n kube-system -l goauthentik.io/outpost-name={app}-forward-auth
+```
+
+### Example: Complete Application Integration
+
+Reference implementation: `kubernetes/apps/home-automation/frigate-nvr/`
+- Blueprint: `kubernetes/apps/kube-system/authentik/app/blueprints-configmap.yaml`
+- Ingress: `kubernetes/apps/home-automation/frigate-nvr/app/ingress.yaml`
+- Outpost Ingress: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-outpost-ingress.yaml`
+
 ## Special Notes
 - Cursor rules: Environment configurations from .cursor/rules/env.mdc
 - Copilot instructions: Not found - follow general GitHub guidelines
