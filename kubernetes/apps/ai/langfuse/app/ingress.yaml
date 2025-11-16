@@ -13,8 +13,6 @@ metadata:
     gethomepage.dev/icon: "invoke-ai.png"
     gethomepage.dev/pod-selector: app=langfuse-web
     # Cookie forwarding for NextAuth.js session management
-    # Use only one domain (dot prefix works for all subdomains)
-    nginx.ingress.kubernetes.io/proxy-cookie-domain: ".example.com"
     nginx.ingress.kubernetes.io/proxy-cookie-path: "/ /"
     # Ensure proper headers for NextAuth.js behind proxy
     nginx.ingress.kubernetes.io/configuration-snippet: |
