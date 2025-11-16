@@ -61,8 +61,12 @@ This method is used for applications that do not support modern authentication. 
 -   ✅ **DO** migrate applications one by one to isolate any potential issues.
 -   ✅ **DO** use UUIDs for flow references (not slugs) and `!KeyOf` for cross-references in blueprints.
 -   ✅ **DO** hardcode domains in blueprints (Flux substitution doesn't work in ConfigMap `data` fields).
+-   ✅ **DO** use proxy mode (`mode: proxy`) for applications with native login pages that can't be bypassed (e.g., Uptime Kuma).
+-   ✅ **DO** prefer `internal` ingress class for forward auth integrations when external access isn't required.
+-   ✅ **DO** ensure all secrets (OIDC client secrets, credentials) are SOPS-encrypted before committing to the public repository.
 
 -   ❌ **DON'T** use the Authentik UI for configuration. Always use blueprints for GitOps compatibility.
+-   ❌ **DON'T** use forward auth mode for applications with native login screens - use proxy mode instead to avoid double login.
 -   ❌ **DON'T** use slugs for flow references. Use hardcoded UUIDs for default flows.
 -   ❌ **DON'T** use string names for provider references. Use `!KeyOf` syntax instead.
 -   ❌ **DON'T** attempt to integrate Plex. Its reliance on its own cloud authentication makes standard SSO integration extremely difficult and brittle.
@@ -79,22 +83,24 @@ This method is used for applications that do not support modern authentication. 
     -   **Frigate NVR:** ✅ Secured with Forward Auth blueprint
     -   **phpMyAdmin:** ✅ Secured with Forward Auth blueprint
 
-2.  **Priority 2 (Easy Wins - Native OIDC):**
-    -   Integrate applications with native OIDC support to build momentum and familiarity. Recommended next candidates:
-        -   `Grafana` (monitoring dashboard - high visibility)
+2.  **Priority 2 (Easy Wins - Native OIDC):** 🔄 **IN PROGRESS**
+    -   Integrate applications with native OIDC support to build momentum and familiarity:
+        -   `Grafana` ❌ (postponed - see security incident note below)
+        -   `Langfuse` 🔄 (deployed, OIDC investigation pending)
+        -   `pgAdmin` ✅ (completed; see case study below)
         -   `Home Assistant` (home automation - commonly accessed)
         -   `Nextcloud` (file sharing - high value)
         -   `Paperless-ngx` (document management)
         -   `Open WebUI` (AI interface - simple OIDC)
-        -   `Langfuse` (AI observability - simple OIDC)
-        -   `pgAdmin` ✅ (completed; see case study below)
 
-3.  **Priority 3 (Standard Forward Auth):**
+3.  **Priority 3 (Standard Forward Auth):** ✅ **PARTIALLY COMPLETED**
     -   Work through applications that require forward authentication:
-        -   `ESPHome` (home automation - no auth)
+        -   `ESPHome` ✅ (completed - forward auth)
+        -   `Uptime Kuma` ✅ (completed - proxy mode, see notes below)
+        -   `Homepage` ✅ (completed - forward auth)
+        -   `Prometheus` ✅ (completed - forward auth)
+        -   `Alertmanager` ✅ (completed - forward auth)
         -   `Zigbee2MQTT` (home automation - basic auth to replace)
-        -   `Uptime Kuma` (monitoring - no multi-user)
-        -   `Homepage` (dashboard - no auth)
         -   `JDownloader` (download manager)
 
 4.  **Priority 4 (Complex Integrations):**
@@ -150,7 +156,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Homepage:** As a static dashboard, it has no built-in authentication. Use a forward auth proxy to protect it.
 -   **JDownloader:** The MyJDownloader web interface can be secured with a forward auth proxy.
 -   **Tube Archivist:** Has its own user system. Use forward auth to protect the entire application.
--   **ESPHome:** The UI has no authentication. Use a forward auth proxy to secure it.
+-   **ESPHome:** ✅ Secured with Authentik forward auth via blueprint. The UI has no authentication, so forward auth proxy is required. See `kubernetes/apps/home-automation/esphome/app/authentik-blueprint.yaml` for reference.
 -   **Frigate NVR:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/home-automation/frigate-nvr/app/authentik-blueprint.yaml` for reference.
 -   **Home Assistant:** Configure the `oidc` integration in Home Assistant's `configuration.yaml` with details from Authentik.
 -   **n8n:** The community version requires forward auth. Native OIDC is available on paid/enterprise tiers.
@@ -162,7 +168,11 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Grafana:** Excellent OIDC support. Configure the `[auth.generic_oauth]` section in the `grafana.ini` file. **NOTE:** Grafana OIDC integration attempted but postponed due to Helm chart limitations with secret handling. The chart's `env` map doesn't properly support Kubernetes `valueFrom` syntax, and alternative approaches (envFromSecrets, extraConfigmapMounts) also had issues. A security incident occurred where OIDC credentials were accidentally committed unencrypted to the public repository (commit c85f058). Credentials were deleted and the integration rolled back. **Recommendation:** Use Grafana's built-in admin authentication for now, or wait for better Helm chart support for secret management.
 -   **Kibana:** OIDC is a paid feature in the Elastic Stack. For the open-source version, use a forward auth proxy.
 -   **Kubernetes Dashboard:** Requires passing specific OIDC flags to the dashboard's deployment arguments, which is slightly more complex than environment variables.
--   **Uptime Kuma:** Has no multi-user login. Protect the entire application with a forward auth proxy.
+-   **Uptime Kuma:** ✅ Secured with Authentik proxy mode via blueprint. Has no multi-user login, and forward auth mode causes double login (Authentik + Uptime Kuma native). **Important:** Must use `mode: proxy` (not `forward_single`) to eliminate the double login issue. The ingress routes directly to the Authentik outpost, which then proxies to Uptime Kuma. See `kubernetes/apps/monitoring/uptime-kuma/app/authentik-blueprint.yaml` for reference.
+-   **Prometheus:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheus-ingress.yaml` for reference.
+-   **Alertmanager:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/alertmanager-ingress.yaml` for reference.
+-   **Homepage:** ✅ Secured with Authentik forward auth via blueprint. As a static dashboard, it has no built-in authentication, so forward auth proxy is required. See `kubernetes/apps/default/homepage/app/authentik-blueprint.yaml` for reference.
+-   **Langfuse:** 🔄 Authentik OIDC blueprint deployed, OIDC environment variables configured. OIDC button not appearing on login page - pending investigation. See `kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml` for reference.
 -   **Nextcloud:** Install the "Social Login" app from the Nextcloud app store and configure it for OIDC.
 -   **Paperless-ngx:** Natively supports OIDC by configuring the `PAPERLESS_OIDC_*` environment variables.
 -   **Longhorn:** ✅ Secured with Authentik proxy mode via blueprint. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` for reference. The outpost creates its own ingress for the application.
@@ -211,15 +221,20 @@ Each app that uses Authentik should have an `authentik-blueprint.yaml` file in i
 
 ### Key Blueprint Patterns
 
-**Forward Auth Pattern** (see Frigate or phpMyAdmin):
+**Forward Auth Pattern** (see Frigate, phpMyAdmin, ESPHome, Homepage, Prometheus, Alertmanager):
 - Provider mode: `forward_single`
 - Requires ingress annotations and separate outpost ingress
-- Uses NGINX auth annotations
+- Uses NGINX auth annotations (`auth-url`, `auth-signin`, `auth-response-headers`, `auth-snippet`)
+- Works best with `internal` ingress class
+- Application handles its own authentication after Authentik authorization
 
-**Proxy Mode Pattern** (see Longhorn):
+**Proxy Mode Pattern** (see Longhorn, Uptime Kuma):
 - Provider mode: `proxy`
-- Outpost creates its own ingress
+- Authentik outpost acts as a full reverse proxy
+- Ingress routes directly to outpost service (not the app)
 - No NGINX auth annotations needed
+- **Use when:** Application has its own login that can't be bypassed with headers (e.g., Uptime Kuma)
+- **Eliminates double login:** Authentik handles the session, app sees authenticated proxy requests
 
 **OIDC Pattern** (see pgAdmin case study):
 - OAuth2/OIDC provider
