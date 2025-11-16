@@ -21,7 +21,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/priority: "100"
 spec:
-  ingressClassName: internal
+  ingressClassName: external
   rules:
     - host: "kuma.${SECRET_DOMAIN}"
       http:
