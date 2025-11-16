@@ -15,6 +15,13 @@ metadata:
     # Cookie forwarding for NextAuth.js session management
     nginx.ingress.kubernetes.io/proxy-cookie-domain: ".example.com langfuse.example.com"
     nginx.ingress.kubernetes.io/proxy-cookie-path: "/ /"
+    # Ensure proper headers for NextAuth.js behind proxy
+    nginx.ingress.kubernetes.io/proxy-set-headers: "ingress-nginx-custom-headers"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_cookie_path / "/; Secure; SameSite=None";
 spec:
   ingressClassName: external
   tls:
