@@ -88,63 +88,39 @@ spec:
               #  value: "false"
 
             probes:
-              # -- Liveness probe configuration
-              # @default -- See below
+              # Use port 8081 (admin UI) for all probes as other ports bind to localhost only
               liveness:
-                # -- Enable the liveness probe
                 enabled: true
-                # -- Set this to `true` if you wish to specify your own livenessProbe
-                custom: false
-                # -- sets the probe type when not using a custom probe
-                # @default -- "TCP"
-                type: TCP
-                # -- The spec field contains the values for the default livenessProbe.
-                # If you selected `custom: true`, this field holds the definition of the livenessProbe.
-                # @default -- See below
+                custom: true
                 spec:
-                  initialDelaySeconds: 20
+                  tcpSocket:
+                    port: 8081
+                  initialDelaySeconds: 60
                   periodSeconds: 30
-                  timeoutSeconds: 1
+                  timeoutSeconds: 5
                   failureThreshold: 3
 
-              # -- Redainess probe configuration
-              # @default -- See below
               readiness:
-                # -- Enable the readiness probe
                 enabled: true
-                # -- Set this to `true` if you wish to specify your own readinessProbe
-                custom: false
-                # -- sets the probe type when not using a custom probe
-                # @default -- "TCP"
-                type: TCP
-                # -- The spec field contains the values for the default readinessProbe.
-                # If you selected `custom: true`, this field holds the definition of the readinessProbe.
-                # @default -- See below
+                custom: true
                 spec:
-                  initialDelaySeconds: 0
+                  tcpSocket:
+                    port: 8081
+                  initialDelaySeconds: 30
                   periodSeconds: 10
-                  timeoutSeconds: 1
+                  timeoutSeconds: 5
                   failureThreshold: 3
 
-              # -- Startup probe configuration
-              # @default -- See below
               startup:
-                # -- Enable the startup probe
                 enabled: true
-                # -- Set this to `true` if you wish to specify your own startupProbe
-                custom: false
-                # -- sets the probe type when not using a custom probe
-                # @default -- "TCP"
-                type: TCP
-                # -- The spec field contains the values for the default startupProbe.
-                # If you selected `custom: true`, this field holds the definition of the startupProbe.
-                # @default -- See below
+                custom: true
                 spec:
+                  tcpSocket:
+                    port: 8081
                   initialDelaySeconds: 0
-                  timeoutSeconds: 1
-                  ## This means it has a maximum of 5*30=150 seconds to start up before it fails
                   periodSeconds: 15
-                  failureThreshold: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 60
     service:
       main:
         controller: main
