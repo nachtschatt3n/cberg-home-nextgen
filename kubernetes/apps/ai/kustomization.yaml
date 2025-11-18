@@ -6,7 +6,6 @@ components:
   - ../../flux/components/common
 resources:
   - ./open-webui/ks.yaml
-#  - ./ollama/ks.yaml
   - ./mcpo/ks.yaml
   - ./langfuse/ks.yaml
   - ./ai-sre/ks.yaml

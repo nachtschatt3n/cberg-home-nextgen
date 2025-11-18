@@ -7,4 +7,3 @@ components:
 resources:
   - ./jdownloader/ks.yaml
   - ./tube-archivist/ks.yaml
-#  - ./icloud-docker/ks.yaml
