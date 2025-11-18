@@ -42,8 +42,8 @@ This method is used for applications that do not support modern authentication. 
 8.  **Test:** Access the application URL and verify Authentik login flow.
 
 **Reference Implementations:**
-- Forward Auth: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-blueprint.yaml`
-- Proxy Mode: `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml`
+- Forward Auth: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-blueprint.yaml`, `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml`
+- Proxy Mode: `kubernetes/apps/monitoring/uptime-kuma/app/authentik-blueprint.yaml`
 
 **See Also:** `AGENTS.md` and `CLAUDE.md` for detailed blueprint documentation and best practices.
 
@@ -79,7 +79,7 @@ This method is used for applications that do not support modern authentication. 
 ## Recommended Migration Strategy
 
 1.  **Priority 1 (Critical Security):** ✅ **COMPLETED**
-    -   **Longhorn:** ✅ Secured with Proxy Mode blueprint
+    -   **Longhorn:** ✅ Secured with Forward Auth blueprint (converted from proxy mode for reliability)
     -   **Frigate NVR:** ✅ Secured with Forward Auth blueprint
     -   **phpMyAdmin:** ✅ Secured with Forward Auth blueprint
 
@@ -124,7 +124,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [x] | **pgAdmin** | `databases` | Native OIDC | **Medium** |
 | [x] | **phpMyAdmin** | `databases` | Forward Auth | **Medium** |
 | [ ] | **Open WebUI** | `ai` | Native OIDC | **Easy** |
-| [~] | **Langfuse** | `ai` | Native OIDC | **Easy** |
+| [❌] | **Langfuse** | `ai` | Native OIDC | **Easy** |
 | [ ] | **InfluxDB** | `databases` | Native OIDC | **Easy** |
 | [x] | **Homepage** | `default` | Forward Auth | **Easy** |
 | [ ] | **JDownloader** | `download` | Forward Auth | **Medium** |
@@ -146,7 +146,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [x] | **Alertmanager** | `monitoring` | Forward Auth | **Easy** |
 | [ ] | **Nextcloud** | `office` | Native OIDC | **Easy** |
 | [ ] | **Paperless-ngx** | `office` | Native OIDC | **Easy** |
-| [x] | **Longhorn** | `storage` | Proxy Mode | **Easy** |
+| [❌] | **Longhorn** | `storage` | Forward Auth | **Easy** |
 
 ### Application Details
 
@@ -174,10 +174,10 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Prometheus:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheus-ingress.yaml` for reference.
 -   **Alertmanager:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/alertmanager-ingress.yaml` for reference.
 -   **Homepage:** ✅ Secured with Authentik forward auth via blueprint. As a static dashboard, it has no built-in authentication, so forward auth proxy is required. See `kubernetes/apps/default/homepage/app/authentik-blueprint.yaml` for reference.
--   **Langfuse:** 🔄 Authentik OIDC blueprint deployed, OIDC environment variables configured. OIDC button not appearing on login page - pending investigation. See `kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml` for reference.
+-   **Langfuse:** ❌ Authentik OIDC blueprint deployed, OIDC environment variables configured. **Issue**: Internal server error when clicking Authentik button - OIDC callback not working. Pending investigation. See `kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml` for reference.
 -   **Nextcloud:** Install the "Social Login" app from the Nextcloud app store and configure it for OIDC.
 -   **Paperless-ngx:** Natively supports OIDC by configuring the `PAPERLESS_OIDC_*` environment variables.
--   **Longhorn:** ✅ Secured with Authentik proxy mode via blueprint. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` for reference. The outpost creates its own ingress for the application.
+-   **Longhorn:** ❌ Secured with Authentik forward auth via blueprint. **Issue**: Ingress not working after conversion from proxy mode to forward auth. Pending investigation. Uses `forward_single` mode with manual ingress. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` and `kubernetes/apps/storage/longhorn/app/ingress.yaml` for reference.
 
 ## Case Study: pgAdmin Native OIDC
 
@@ -202,26 +202,43 @@ Follow the same pattern for future native OIDC integrations to minimize guesswor
 
 ### Blueprint File Structure
 
-Each app that uses Authentik should have an `authentik-blueprint.yaml` file in its `app/` directory:
-- **Location**: `kubernetes/apps/{namespace}/{app}/app/authentik-blueprint.yaml`
-- **Source of Truth**: This file in the app directory
-- **Copy for Kustomize**: Also copied to `kubernetes/apps/kube-system/authentik/app/{app-name}-blueprint.yaml`
+**Important**: All blueprints are stored in a **SOPS-encrypted ConfigMap** (`configmap.sops.yaml`), which is the **source of truth** that Authentik loads.
+
+- **Source of Truth**: `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (SOPS-encrypted, contains all blueprints)
+- **Deployment**: Flux decrypts and applies the ConfigMap, init containers copy blueprints to `/blueprints` for Authentik to load
 
 ### When Adding a New App
 
-1. Create `authentik-blueprint.yaml` in your app's `app/` directory
-2. Copy it to `kubernetes/apps/kube-system/authentik/app/{app-name}-blueprint.yaml`
-3. Add it to `kubernetes/apps/kube-system/authentik/app/kustomization.yaml` in the `configMapGenerator.files` list
-4. Commit and push - Flux will reconcile and Authentik will load the blueprint
+1. Decrypt the ConfigMap: `sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml`
+2. Add your blueprint to the `data` section in `/tmp/configmap.yaml`:
+   ```yaml
+   data:
+     your-app-blueprint.yaml: |
+       version: 1
+       entries:
+         # ... your blueprint content ...
+   ```
+3. Re-encrypt: `sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`
+4. Update `helmrelease.yaml` to copy your blueprint in the init containers (both server and worker sections)
+5. Commit and push - Flux will decrypt and apply automatically
 
 ### When Removing an App
 
-1. Remove the blueprint file from the app directory
-2. Remove the copy from `kubernetes/apps/kube-system/authentik/app/`
-3. Remove the reference from `kustomization.yaml`
-4. The blueprint will be automatically removed from the ConfigMap
+1. Decrypt the ConfigMap: `sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml`
+2. Remove the blueprint entry from the `data` section
+3. Re-encrypt: `sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`
+4. Update `helmrelease.yaml` to remove the blueprint copy command from init containers
+5. Commit and push
 
 ### Key Blueprint Patterns
+
+### Important Note About Blueprint Files
+
+The **SOPS-encrypted ConfigMap** (`configmap.sops.yaml`) is the **source of truth** - it's what Authentik loads and uses at runtime. All blueprints are stored directly in this ConfigMap, eliminating the need for duplicate files in app directories.
+
+- **Security**: Actual domains (not placeholders) are stored safely in the encrypted ConfigMap
+- **Simplicity**: Single source of truth, no manual syncing required
+- **Version Control**: All blueprints tracked in Git via the encrypted ConfigMap
 
 **Forward Auth Pattern** (see Frigate, phpMyAdmin, ESPHome, Homepage, Prometheus, Alertmanager):
 - Provider mode: `forward_single`
@@ -230,13 +247,15 @@ Each app that uses Authentik should have an `authentik-blueprint.yaml` file in i
 - Works best with `internal` ingress class
 - Application handles its own authentication after Authentik authorization
 
-**Proxy Mode Pattern** (see Longhorn, Uptime Kuma):
+**Proxy Mode Pattern** (see Uptime Kuma):
 - Provider mode: `proxy`
 - Authentik outpost acts as a full reverse proxy
 - Ingress routes directly to outpost service (not the app)
 - No NGINX auth annotations needed
 - **Use when:** Application has its own login that can't be bypassed with headers (e.g., Uptime Kuma)
 - **Eliminates double login:** Authentik handles the session, app sees authenticated proxy requests
+
+**Note:** Longhorn was previously using proxy mode with auto-ingress creation (`kubernetes_ingress_class_name: "internal"`), but this was unreliable. It has been converted to forward auth mode with manual ingress for better maintainability. See `kubernetes/apps/storage/longhorn/app/ingress.yaml` for the current implementation.
 
 **OIDC Pattern** (see pgAdmin case study):
 - OAuth2/OIDC provider
