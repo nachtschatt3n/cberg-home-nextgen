@@ -5,6 +5,7 @@ resources:
   - ./secret.sops.yaml
   - ./configmap.sops.yaml
   - ./helmrelease.yaml
+  - ./metrics-service.yaml
 
 # Authentik blueprints are now SOPS-encrypted in configmap.sops.yaml
 # This provides security for sensitive domain information in a public repository

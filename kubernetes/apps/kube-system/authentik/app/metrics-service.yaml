@@ -1,0 +1,41 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-server-metrics
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: authentik
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: authentik
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9300
+      targetPort: 9300
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/instance: authentik
+    app.kubernetes.io/name: authentik
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: authentik-server
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: authentik
+    app.kubernetes.io/component: server
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: authentik
+      app.kubernetes.io/component: server
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      path: /metrics

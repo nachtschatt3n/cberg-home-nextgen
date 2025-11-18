@@ -37,21 +37,6 @@ spec:
 
     server:
       replicas: 3
-      service:
-        # Add metrics port to server service for Prometheus scraping
-        annotations:
-          prometheus.io/scrape: "true"
-          prometheus.io/port: "9300"
-        ports:
-          - name: http
-            port: 80
-            targetPort: 9000
-          - name: https
-            port: 443
-            targetPort: 9443
-          - name: metrics
-            port: 9300
-            targetPort: 9300
       env:
         - name: AUTHENTIK_SECRET_KEY
           valueFrom:
@@ -117,17 +102,10 @@ spec:
           - hosts:
               - "auth.${SECRET_DOMAIN}"
 
-      metrics:
-        prometheus:
-          serviceMonitor:
-            enabled: true
-            interval: 30s
-            scrapeTimeout: 3s
-            # Add labels so Prometheus can discover this ServiceMonitor
-            labels:
-              release: kube-prometheus-stack
-            # Configure which port to scrape
-            port: metrics
+      # Metrics scraping is handled by a manually created ServiceMonitor
+      # See: kubernetes/apps/kube-system/authentik/app/metrics-service.yaml
+      # This allows us to scrape metrics from the server pods without relying on
+      # the Helm chart's ServiceMonitor implementation which has limited configuration
 
       resources:
         requests:
