@@ -177,7 +177,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Langfuse:** ❌ Authentik OIDC blueprint deployed, OIDC environment variables configured. **Issue**: Internal server error when clicking Authentik button - OIDC callback not working. Pending investigation. See `kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml` for reference.
 -   **Nextcloud:** Install the "Social Login" app from the Nextcloud app store and configure it for OIDC.
 -   **Paperless-ngx:** Natively supports OIDC by configuring the `PAPERLESS_OIDC_*` environment variables.
--   **Longhorn:** ❌ Secured with Authentik forward auth via blueprint. **Issue**: Ingress not working after conversion from proxy mode to forward auth. Pending investigation. Uses `forward_single` mode with manual ingress. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` and `kubernetes/apps/storage/longhorn/app/ingress.yaml` for reference.
+-   **Longhorn:** ✅ Secured with Authentik forward auth via blueprint. Converted from proxy mode to forward auth mode for better maintainability. Uses `forward_single` mode with manual ingress configuration matching the Frigate pattern. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` and `kubernetes/apps/storage/longhorn/app/ingress.yaml` for reference.
 
 ## Case Study: pgAdmin Native OIDC
 
