@@ -424,14 +424,16 @@ attrs:
       - !KeyOf my-app-provider  # List of provider UUIDs
 ```
 
-#### ✅ Hardcode Domains in ConfigMaps
+#### ✅ Use SOPS-Encrypted ConfigMap for Blueprints
 ```yaml
-# DO: Hardcode domains since Flux substitution doesn't work in ConfigMap data
-data:
-  my-blueprint.yaml: |
-    entries:
-      - attrs:
-          external_host: "https://myapp.example.com"  # Hardcoded domain
+# DO: Blueprints are stored in SOPS-encrypted configmap.sops.yaml
+# This securely stores the actual domain in a public repository
+# Flux automatically decrypts the ConfigMap on deployment
+#
+# To update: decrypt -> edit -> re-encrypt
+# sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
+# # Edit the file
+# sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
 ```
 
 #### ✅ Include Service Connection for Kubernetes Outposts
@@ -506,10 +508,9 @@ data:
   blueprint.yaml: |
     external_host: "https://app.${SECRET_DOMAIN}"  # ❌ Won't be substituted
 
-# DO: Hardcode the domain
-data:
-  blueprint.yaml: |
-    external_host: "https://app.example.com"  # ✅ Correct
+# DO: Use SOPS-encrypted ConfigMap with actual domain
+# The encrypted ConfigMap is safe to commit to public repositories
+# See kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
 ```
 
 #### ❌ DON'T Omit Service Connection for Kubernetes Outposts
@@ -558,18 +559,19 @@ When creating a new Authentik integration, ensure:
 
 1. **Proxy Provider Entry**
    - [ ] Uses hardcoded flow UUIDs (not slugs)
-   - [ ] `external_host` uses hardcoded domain (not Flux substitution)
+   - [ ] `external_host` uses actual domain (stored in SOPS-encrypted ConfigMap)
    - [ ] `internal_host` uses correct service name and port
 
 2. **Application Entry**
    - [ ] Uses `!KeyOf` to reference provider (not string)
-   - [ ] `meta_launch_url` uses hardcoded domain
+   - [ ] `meta_launch_url` uses actual domain (stored in SOPS-encrypted ConfigMap)
 
 3. **Outpost Entry**
    - [ ] Uses `!KeyOf` to reference provider in `providers` list
    - [ ] Includes `service_connection` UUID for Kubernetes deployments
-   - [ ] `config.authentik_host` uses hardcoded domain
+   - [ ] `config.authentik_host` uses actual domain (stored in SOPS-encrypted ConfigMap)
    - [ ] `config.kubernetes_namespace` is set (usually `kube-system`)
+   - [ ] Blueprint added to SOPS-encrypted configmap.sops.yaml
 
 4. **Ingress Configuration**
    - [ ] Auth annotations point to correct outpost service name
@@ -613,28 +615,28 @@ When adding a new app with Authentik:
    - Location: `kubernetes/apps/{namespace}/{app}/app/authentik-blueprint.yaml`
    - This is the source of truth
 
-2. **Copy for Kustomize**: Copy the blueprint to the authentik directory
-   - Location: `kubernetes/apps/kube-system/authentik/app/{app-name}-blueprint.yaml`
-   - Kustomize needs files in its directory to generate the ConfigMap
+2. **Update Encrypted ConfigMap**: Add your blueprint to the SOPS-encrypted ConfigMap
+   ```bash
+   # Decrypt the ConfigMap
+   sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
 
-3. **Update Kustomization**: Add the file to `kubernetes/apps/kube-system/authentik/app/kustomization.yaml`
-   ```yaml
-   configMapGenerator:
-     - name: authentik-blueprints
-       namespace: kube-system
-       files:
-         - {app-name}-blueprint.yaml
+   # Edit the ConfigMap and add your blueprint as a new data entry
+   # data:
+   #   {app-name}-blueprint.yaml: |
+   #     <your blueprint content>
+
+   # Re-encrypt and save
+   sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
    ```
 
-4. **Configure App**: Update ingress, secrets, and deployment as needed
+3. **Configure App**: Update ingress, secrets, and deployment as needed
 
-5. **Deploy**: Commit and push - Flux will reconcile and Authentik will load the blueprint
+4. **Deploy**: Commit and push - Flux will decrypt and apply, Authentik will load the blueprint
 
 When removing an app:
 1. Remove the blueprint from the app directory
-2. Remove the copy from the authentik directory
-3. Remove the reference from `kustomization.yaml`
-4. The blueprint will be automatically removed from the ConfigMap
+2. Decrypt the ConfigMap, remove the blueprint entry, re-encrypt
+3. Commit and push - the blueprint will be automatically removed
 
 ### Example: Complete Application Integration
 
