@@ -190,18 +190,18 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  identifier: main
-                  port: 8081
+                  name: main
+                  port: http
               - path: /nodered
                 pathType: Prefix
                 service:
-                  identifier: main
-                  port: 1880
+                  name: main
+                  port: nodered
               - path: /vis
                 pathType: Prefix
                 service:
-                  identifier: main
-                  port: 8082
+                  name: main
+                  port: vis
 
           # - host: "nodered.${SECRET_DOMAIN}"
           #   paths:
