@@ -18,7 +18,7 @@ spec:
     spec:
       initContainers:
       - name: fix-permissions
-        image: busybox:latest
+        image: busybox:1.37.0
         command:
           - sh
           - -c
@@ -28,7 +28,7 @@ spec:
           mountPath: /var/lib/pgadmin
       containers:
       - name: pgadmin
-        image: dpage/pgadmin4:latest
+        image: dpage/pgadmin4:9.10.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80
