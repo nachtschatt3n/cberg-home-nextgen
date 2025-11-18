@@ -21,14 +21,14 @@
 - **Breaking Changes**: Check v1.18 release notes for CRD updates
 
 #### 2. cert-manager - Certificate Management
-- **Current**: v1.17.1
+- **Current**: v1.19.1 ✅
 - **Latest**: v1.19.1
-- **Status**: ✅ Safe to update
+- **Status**: ✅ Up to date
 - **Check URL**: https://github.com/cert-manager/cert-manager/releases
 - **Helm Chart**: https://cert-manager.io/docs/installation/helm/
 - **Docs**: https://cert-manager.io/docs/installation/upgrading/
 - **Risk**: Low
-- **Action**: Update chart version in helmrelease.yaml
+- **Action**: ✅ Already updated
 
 #### 3. kube-prometheus-stack - Monitoring
 - **Current**: 68.4.4
@@ -78,12 +78,12 @@
 ### 🟡 Recommended Updates
 
 #### 6. Open WebUI
-- **Current**: v0.6.34
+- **Current**: v0.6.36 ✅
 - **Latest**: v0.6.36
-- **Status**: ✅ Safe to update
+- **Status**: ✅ Up to date
 - **Check URL**: https://github.com/open-webui/open-webui/releases
 - **Container**: ghcr.io/open-webui/open-webui
-- **Action**: Update image tag in helmrelease.yaml
+- **Action**: ✅ Already updated
 
 #### 7. Grafana
 - **Current**: 10.2.2
@@ -97,43 +97,43 @@
 - **Action**: Test dashboard compatibility, review plugin support
 
 #### 8. ESPHome
-- **Current**: 2025.8.3
+- **Current**: 2025.10.5 ✅
 - **Latest**: 2025.10.5
-- **Status**: ✅ Safe to update
+- **Status**: ✅ Up to date
 - **Check URL**: https://github.com/esphome/esphome/releases
 - **Container**: ghcr.io/esphome/esphome
-- **Action**: Update image tag
+- **Action**: ✅ Already updated
 
 #### 9. Jellyfin
-- **Current**: 10.11.0-rc2 (Release Candidate)
+- **Current**: 10.11.3 (Stable) ✅
 - **Latest**: v10.11.3 (Stable)
-- **Status**: ✅ Update to stable
+- **Status**: ✅ Up to date
 - **Check URL**: https://github.com/jellyfin/jellyfin/releases
 - **Container**: docker.io/jellyfin/jellyfin
-- **Action**: Update from RC to stable release
+- **Action**: ✅ Already updated to stable
 
 #### 10. metrics-server
-- **Current**: v0.7.2
-- **Latest**: v0.8.0
-- **Status**: ✅ Safe to update
+- **Current**: Chart 3.13.0 ✅ (Updated 2025-11-18)
+- **Latest**: Chart 3.13.0
+- **Status**: ✅ Updated
 - **Check URL**: https://github.com/kubernetes-sigs/metrics-server/releases
 - **Helm Chart**: https://github.com/kubernetes-sigs/metrics-server
-- **Action**: Update chart version
+- **Action**: ✅ Updated from 3.12.2 → 3.13.0
 
 ---
 
 ### 🟢 Maintenance Tasks
 
 #### 11. Pin `:latest` Container Tags
-**Status**: ⏳ In Progress
+**Status**: ✅ Mostly Complete
 
 Images to pin:
-- [ ] dpage/pgadmin4:latest → Find specific version
-- [ ] iib0011/omni-tools:latest → Find specific version
-- [ ] ghcr.io/alams154/music-assistant-alexa-api:latest → Find specific version
-- [ ] ghcr.io/open-webui/pipelines:main → Use version tags
-- [ ] bbilly1/tubearchivist:latest → Find specific version
-- [ ] bbilly1/tubearchivist-es:latest → Find specific version
+- [x] **dpage/pgadmin4:latest** ✅ **ALREADY PINNED** (using 9.10.0)
+- [x] **iib0011/omni-tools:latest** ✅ **PINNED 2025-11-18** (→ 0.6.0)
+- [ ] **ghcr.io/alams154/music-assistant-alexa-api:latest** ⚠️ **NO VERSION INFO AVAILABLE** (no GitHub releases/tags found, leaving as :latest for now)
+- [ ] **ghcr.io/open-webui/pipelines:main** ⚠️ **MANAGED BY HELM CHART** (pipelines is a subchart dependency of open-webui, image tag controlled by chart)
+- [x] **bbilly1/tubearchivist:latest** ✅ **ALREADY PINNED** (using v0.5.8)
+- [x] **bbilly1/tubearchivist-es:latest** ✅ **ALREADY PINNED** (using 8.18.2)
 
 **Check Commands**:
 ```bash
@@ -173,6 +173,28 @@ Current distribution:
 ---
 
 ## Update Execution Log
+
+### 2025-11-18 - Safe Updates Batch
+**Completed Updates:**
+- [x] **metrics-server**: Chart 3.12.2 → 3.13.0
+  - Updated helmrelease.yaml
+  - File: `kubernetes/apps/kube-system/metrics-server/app/helmrelease.yaml`
+- [x] **omni-tools**: Image tag `latest` → `0.6.0`
+  - Pinned to specific version for reproducibility
+  - File: `kubernetes/apps/office/omni-tools/app/helmrelease.yaml`
+
+**Verified Already Updated:**
+- [x] **cert-manager**: Already at v1.19.1 (no action needed)
+- [x] **Jellyfin**: Already at 10.11.3 (no action needed)
+- [x] **Open WebUI**: Already at v0.6.36 (no action needed)
+- [x] **ESPHome**: Already at 2025.10.5 (no action needed)
+- [x] **pgadmin4**: Already pinned to 9.10.0 (no action needed)
+- [x] **tubearchivist**: Already pinned to v0.5.8 (no action needed)
+- [x] **tubearchivist-es**: Already pinned to 8.18.2 (no action needed)
+
+**Pending/Notes:**
+- [ ] **music-assistant-alexa-api**: No version tags found in GitHub/Docker Hub, leaving as `:latest`
+- [ ] **open-webui/pipelines**: Managed by Helm chart subchart, cannot pin directly
 
 ### 2025-11-18 - Authentik 2025.10.1 Upgrade & iobroker Fixes
 **Completed Updates:**
@@ -215,13 +237,13 @@ Current distribution:
 - [x] Created update plan
 
 ### Safe Updates (Week 1)
-- [ ] cert-manager: v1.17.1 → v1.19.1
+- [x] **cert-manager: v1.17.1 → v1.19.1** ✅ **ALREADY UPDATED** (helmrelease.yaml shows v1.19.1)
 - [x] **Authentik: 2025.8.4 → 2025.10.1** ✅ **COMPLETED 2025-11-18**
-- [ ] Jellyfin: 10.11.0-rc2 → 10.11.3 (stable)
-- [ ] metrics-server: v0.7.2 → v0.8.0
-- [ ] Open WebUI: v0.6.34 → v0.6.36
-- [ ] ESPHome: 2025.8.3 → 2025.10.5
-- [ ] Pin all `:latest` tags
+- [x] **Jellyfin: 10.11.0-rc2 → 10.11.3 (stable)** ✅ **ALREADY UPDATED** (helmrelease.yaml shows 10.11.3)
+- [x] **metrics-server: v0.7.2 → v0.8.0** ✅ **UPDATED 2025-11-18** (chart 3.12.2 → 3.13.0)
+- [x] **Open WebUI: v0.6.34 → v0.6.36** ✅ **ALREADY UPDATED** (helmrelease.yaml shows v0.6.36)
+- [x] **ESPHome: 2025.8.3 → 2025.10.5** ✅ **ALREADY UPDATED** (helmrelease.yaml shows 2025.10.5)
+- [x] **Pin all `:latest` tags** ✅ **PARTIAL** (see details below)
 - [x] ~~Standardize app-template to 3.7.1~~ (Partial - iobroker incompatible)
 
 ### Medium-Risk Updates (Week 2-3)
