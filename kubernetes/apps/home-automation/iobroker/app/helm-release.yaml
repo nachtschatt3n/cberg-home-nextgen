@@ -6,6 +6,7 @@ metadata:
   namespace: default
 spec:
   interval: 15m
+  timeout: 20m
   chart:
     spec:
       chart: app-template
@@ -19,6 +20,7 @@ spec:
     remediation:
       retries: 1
   upgrade:
+    timeout: 20m
     cleanupOnFail: true
     remediation:
       retries: 1
