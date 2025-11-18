@@ -193,6 +193,15 @@ Current distribution:
   - File: `kubernetes/apps/home-automation/iobroker/app/helm-release.yaml`
   - Commit: `57e417f`
 
+- [x] **Longhorn Authentication**: Blueprint reload issue after Authentik upgrade
+  - Longhorn outpost showed "No providers assigned" after Authentik 2025.10.1 upgrade
+  - Blueprint wasn't automatically reloaded, causing "no app for hostname" errors
+  - Manually applied blueprint: `kubectl exec authentik-server -- ak apply_blueprint /blueprints/longhorn-blueprint.yaml`
+  - Outpost pod recreated and now properly serving requests for Longhorn domain
+  - Outpost: 1/1 Running, HTTP 302 redirects working correctly
+  - File: `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (blueprint already present)
+  - Issue: Blueprint auto-reload during Authentik upgrade needs investigation
+
 **Research Findings:**
 - Worker probes were intentionally added in PR #255 (April 2024)
 - 2025.10.1 has confirmed bug (Issue #17923) where worker healthcheck tries port 9000
