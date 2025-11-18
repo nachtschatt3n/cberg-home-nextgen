@@ -145,6 +145,7 @@ spec:
                   failureThreshold: 30
     service:
       main:
+        controller: main
         type: LoadBalancer
         ports:
           http:
@@ -195,7 +196,7 @@ spec:
     ingress:
       main:
         enabled: true
-        ingressClassName: "external"
+        className: "external"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "IoBroker"
@@ -211,18 +212,18 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
-                  port: http
-              - path: /
+                  identifier: main
+                  port: 8081
+              - path: /nodered
                 pathType: Prefix
                 service:
-                  name: main
-                  port: nodered
-              - path: /
+                  identifier: main
+                  port: 1880
+              - path: /vis
                 pathType: Prefix
                 service:
-                  name: main
-                  port: vis
+                  identifier: main
+                  port: 8082
 
           # - host: "nodered.${SECRET_DOMAIN}"
           #   paths:
