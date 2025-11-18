@@ -152,8 +152,10 @@ Each blueprint file contains:
 
 #### Domain Configuration
 - **Flux substitution (`${SECRET_DOMAIN}`) does NOT work** inside ConfigMap `data` fields
-- **MUST hardcode domains** in blueprint ConfigMaps
-- Example: Use `frigate.example.com` instead of `frigate.${SECRET_DOMAIN}`
+- **Blueprints are SOPS-encrypted** to securely store the actual domain in a public repository
+- The encrypted ConfigMap (`configmap.sops.yaml`) contains all blueprints with the real domain
+- Flux automatically decrypts the ConfigMap on deployment
+- To update blueprints: decrypt, edit, re-encrypt (see kustomization.yaml for instructions)
 
 ### Typical Application Integration Pattern
 
@@ -209,18 +211,21 @@ For a new application requiring Authentik authentication:
          kubernetes_service_type: "ClusterIP"
    ```
 
-4. **Copy Blueprint** - Copy the blueprint file to `kubernetes/apps/kube-system/authentik/app/{app-name}-blueprint.yaml`
+4. **Update Encrypted ConfigMap** - Add your blueprint to the SOPS-encrypted ConfigMap:
+   ```bash
+   # Decrypt the ConfigMap
+   sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
 
-5. **Update Kustomization** - Add the blueprint file to `kubernetes/apps/kube-system/authentik/app/kustomization.yaml`:
-   ```yaml
-   configMapGenerator:
-     - name: authentik-blueprints
-       namespace: kube-system
-       files:
-         - {app-name}-blueprint.yaml
-   generatorOptions:
-     disableNameSuffixHash: true
+   # Edit the ConfigMap and add your blueprint as a new data entry
+   # data:
+   #   {app-name}-blueprint.yaml: |
+   #     <your blueprint content here>
+
+   # Re-encrypt and save
+   sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
    ```
+
+5. **Commit and Push** - The encrypted ConfigMap is safe to commit to the public repository
 
 6. **Configure Ingress** - Add Authentik forward auth annotations (for forward auth mode)
    ```yaml
@@ -303,10 +308,9 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | gre
 
 ### Common Issues and Solutions
 
-1. **Blueprint not loading**: Check ConfigMap mount in Authentik pods, verify blueprint YAML syntax, ensure blueprint file is copied to authentik directory
+1. **Blueprint not loading**: Check ConfigMap mount in Authentik pods, verify blueprint YAML syntax, ensure SOPS-encrypted ConfigMap is properly decrypted by Flux
 2. **Outpost not created**: Verify `service_connection` UUID is correct, check outpost controller logs
 3. **Flow reference errors**: Ensure flow UUIDs are correct, use hardcoded UUIDs for default flows
 4. **Provider reference errors**: Use `!KeyOf` syntax, verify entry `id` matches exactly
-5. **Domain substitution not working**: Hardcode domains in blueprint files (Flux substitution doesn't work in ConfigMap `data` fields)
-6. **Kustomize build fails**: Ensure blueprint file is copied to `kube-system/authentik/app/` directory (Kustomize can't reference files outside its directory)
-7. **ConfigMap has hash suffix**: Add `generatorOptions.disableNameSuffixHash: true` to prevent hash suffixes that break volume mounts
+5. **ConfigMap decryption failed**: Verify SOPS encryption keys are correctly configured in `.sops.yaml` and Flux has access to the age key
+6. **Blueprint update not applied**: After editing the encrypted ConfigMap, ensure you re-encrypted it properly and committed the changes
