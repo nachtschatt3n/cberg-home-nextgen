@@ -146,7 +146,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [x] | **Alertmanager** | `monitoring` | Forward Auth | **Easy** |
 | [ ] | **Nextcloud** | `office` | Native OIDC | **Easy** |
 | [ ] | **Paperless-ngx** | `office` | Native OIDC | **Easy** |
-| [❌] | **Longhorn** | `storage` | Forward Auth | **Easy** |
+| [x] | **Longhorn** | `storage` | Forward Auth | **Easy** |
 
 ### Application Details
 
