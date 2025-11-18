@@ -42,14 +42,25 @@
 - **Notes**: Includes Prometheus Operator updates, may require CRD updates
 
 #### 4. Authentik - Authentication
-- **Current**: 2025.8.4
+- **Current**: 2025.10.1 ✅ **UPDATED 2025-11-18**
 - **Latest**: 2025.10.1
-- **Status**: ✅ Safe to update
+- **Status**: ✅ Updated and running
 - **Check URL**: https://github.com/goauthentik/authentik/releases
 - **Helm Chart**: https://charts.goauthentik.io
 - **Docs**: https://docs.goauthentik.io/docs/installation/kubernetes
 - **Risk**: Low-Medium
-- **Action**: Update chart version, monitor auth system after update
+- **Action**: ✅ Completed
+- **Update Details**:
+  - Upgraded from 2025.8.4 → 2025.10.1
+  - **Breaking Change**: Redis completely removed, migrated to PostgreSQL for caching/WebSockets/scheduling
+  - Disabled Redis in helmrelease.yaml (`enabled: false`)
+  - **Worker Probe Workaround**: Set worker probes to `null` due to bug in 2025.10.1
+    - Issue: Workers try to connect to port 9000 (server port) instead of checking heartbeat file
+    - Official fix in PR #18090 scheduled for 2025.10.2 (not yet released)
+    - Our Helm override pre-implements the official fix
+  - Increased upgrade timeout to 30m for migration
+  - All 3 server pods + 3 worker pods running healthy
+- **Next Action**: Update to 2025.10.2 when released, may be able to remove worker probe workaround
 
 #### 5. Nextcloud Helm Chart
 - **Current**: 6.6.4
@@ -143,10 +154,13 @@ Current distribution:
 - 3.7.1: 12 apps ✅ (target version)
 - 3.6.1: 1 app (makemkv)
 - 3.6.0: 6 apps (ai-sre, bytebot, mcpo, mosquitto, scrypted, omni-tools)
-- 2.4.0: 1 app (iobroker) ⚠️
+- 2.4.0: 1 app (iobroker) ⚠️ **Staying on 2.4.0** (see notes)
 
 **Action Items**:
-- [ ] Update iobroker: 2.4.0 → 3.7.1
+- [x] ~~Update iobroker: 2.4.0 → 3.7.1~~ **NOT COMPATIBLE** - Keeping on 2.4.0
+  - **Reason**: Ingress schema incompatible between versions, 3.7.1 requires different service reference format
+  - **Fixed on 2.4.0**: Updated probe configuration to use port 8081, added 20m timeout
+  - **Status**: Running stable on 2.4.0, no issues
 - [ ] Update makemkv: 3.6.1 → 3.7.1
 - [ ] Update ai-sre, bytebot, mcpo: 3.6.0 → 3.7.1
 - [ ] Update mosquitto: 3.6.0 → 3.7.1
@@ -160,21 +174,46 @@ Current distribution:
 
 ## Update Execution Log
 
+### 2025-11-18 - Authentik 2025.10.1 Upgrade & iobroker Fixes
+**Completed Updates:**
+- [x] **Authentik**: 2025.8.4 → 2025.10.1
+  - Disabled Redis (removed in 2025.10.x)
+  - Migrated to PostgreSQL for all caching/scheduling
+  - Applied worker probe workaround for 2025.10.1 bug (pre-implements 2025.10.2 fix)
+  - All 3 server + 3 worker pods healthy
+  - Files: `kubernetes/apps/kube-system/authentik/app/helmrelease.yaml`
+  - Commits: `1ca9015`, `15db185`
+
+**Completed Fixes:**
+- [x] **iobroker**: Health check and timeout issues
+  - Fixed probes to use port 8081 (admin UI) instead of localhost-only ports
+  - Added 20m timeout for slow StatefulSet startup
+  - Stays on app-template 2.4.0 due to 3.7.1 incompatibility
+  - Pod: 1/1 Running (Ready)
+  - File: `kubernetes/apps/home-automation/iobroker/app/helm-release.yaml`
+  - Commit: `57e417f`
+
+**Research Findings:**
+- Worker probes were intentionally added in PR #255 (April 2024)
+- 2025.10.1 has confirmed bug (Issue #17923) where worker healthcheck tries port 9000
+- Official fix in PR #18090 removes worker HTTP healthcheck (scheduled for 2025.10.2)
+- Our solution pre-implements the official fix via Helm value override
+
 ### 2025-11-18 - Initial Assessment
 - [x] Completed version audit
 - [x] Identified 15+ components with updates available
 - [x] Prioritized updates by risk and impact
-- [ ] Created update plan
+- [x] Created update plan
 
 ### Safe Updates (Week 1)
 - [ ] cert-manager: v1.17.1 → v1.19.1
-- [ ] Authentik: 2025.8.4 → 2025.10.1
+- [x] **Authentik: 2025.8.4 → 2025.10.1** ✅ **COMPLETED 2025-11-18**
 - [ ] Jellyfin: 10.11.0-rc2 → 10.11.3 (stable)
 - [ ] metrics-server: v0.7.2 → v0.8.0
 - [ ] Open WebUI: v0.6.34 → v0.6.36
 - [ ] ESPHome: 2025.8.3 → 2025.10.5
 - [ ] Pin all `:latest` tags
-- [ ] Standardize app-template to 3.7.1
+- [x] ~~Standardize app-template to 3.7.1~~ (Partial - iobroker incompatible)
 
 ### Medium-Risk Updates (Week 2-3)
 - [ ] Cilium: v1.17.1 → v1.18.4 (TEST FIRST)
