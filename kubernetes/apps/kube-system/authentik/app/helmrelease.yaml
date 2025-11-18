@@ -138,9 +138,12 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
-      # Disable probes for workers - they don't expose HTTP endpoints
-      # Workers process background tasks via PostgreSQL scheduler
-      # The ak healthcheck command tries to connect to port 9000 which doesn't exist on workers
+      # WORKAROUND for Authentik 2025.10.1 bug - Remove when upgrading to 2025.10.2+
+      # Issue: Workers try to connect to port 9000 (server port) instead of checking heartbeat file
+      # Upstream: https://github.com/goauthentik/authentik/issues/17923
+      # Fix: https://github.com/goauthentik/authentik/pull/18090 (scheduled for 2025.10.2)
+      # This override pre-implements the official fix by disabling worker HTTP healthchecks
+      # Workers don't expose HTTP endpoints, they only process background tasks via PostgreSQL
       livenessProbe: null
       readinessProbe: null
       startupProbe: null
