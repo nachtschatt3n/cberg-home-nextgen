@@ -138,6 +138,14 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+      # Disable readiness probe for workers - they don't expose HTTP endpoints
+      # Workers process background tasks via PostgreSQL scheduler
+      livenessProbe:
+        enabled: false
+      readinessProbe:
+        enabled: false
+      startupProbe:
+        enabled: false
       extraInitContainers:
         - name: copy-blueprints
           image: busybox:1.36
