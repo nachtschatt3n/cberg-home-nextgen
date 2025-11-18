@@ -7,17 +7,17 @@ resources:
   - ./helmrelease.yaml
   - ./metrics-service.yaml
 
-# Authentik blueprints are now SOPS-encrypted in configmap.sops.yaml
+# Authentik blueprints are stored in SOPS-encrypted configmap.sops.yaml
 # This provides security for sensitive domain information in a public repository
-# Each app still manages its own blueprint file in its directory (source of truth)
+# The ConfigMap is the source of truth - what Authentik loads at runtime
 # To update blueprints:
-# 1. Edit the blueprint file in the app's directory (e.g., kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml)
-# 2. Run: sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
-# 3. Update the corresponding entry in /tmp/configmap.yaml with your changes
-# 4. Re-encrypt: sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-# 5. Commit and push - Flux will decrypt and apply automatically
+# 1. Decrypt: sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
+# 2. Edit the blueprint entry in /tmp/configmap.yaml
+# 3. Re-encrypt: sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
+# 4. Commit and push - Flux will decrypt and apply automatically
 
-# Note: Volume mounts are manually patched using kubectl since Kustomize patches
-# don't work on Helm-generated resources. Run:
-# kubectl patch deployment authentik-server -n kube-system --type='strategic' -p='{"spec":{"template":{"spec":{"volumes":[{"name":"blueprints","configMap":{"name":"authentik-blueprints","defaultMode":420}}],"containers":[{"name":"server","volumeMounts":[{"name":"blueprints","mountPath":"/blueprints","readOnly":true}]}]}}}}'
-# kubectl patch deployment authentik-worker -n kube-system --type='strategic' -p='{"spec":{"template":{"spec":{"volumes":[{"name":"blueprints","configMap":{"name":"authentik-blueprints","defaultMode":420}}],"containers":[{"name":"worker","volumeMounts":[{"name":"blueprints","mountPath":"/blueprints","readOnly":true}]}]}}}}'
+# Note: Blueprints are loaded via init containers in helmrelease.yaml:
+# - ConfigMap (authentik-blueprints) is mounted as a volume (blueprints-source)
+# - Init containers copy all blueprints from blueprints-source to /blueprints (emptyDir volume)
+# - Authentik server/worker containers mount /blueprints as read-only
+# Volume mounts are configured via extraVolumes/extraVolumeMounts in helmrelease.yaml
