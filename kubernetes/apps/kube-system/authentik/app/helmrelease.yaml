@@ -18,6 +18,7 @@ spec:
     remediation:
       retries: 3
   upgrade:
+    timeout: 15m
     cleanupOnFail: true
     remediation:
       retries: 3
@@ -30,8 +31,9 @@ spec:
       # The error reporting is fully anonymous and helps developers
       error_reporting:
         enabled: true
-      redis:
-        host: "authentik-redis-master"
+      # Redis removed in 2025.10 - migrated to PostgreSQL
+      # redis:
+      #   host: "authentik-redis-master"
 
     server:
       replicas: 3
@@ -169,7 +171,8 @@ spec:
           memory: 2Gi
 
     redis:
-      enabled: true
+      # Disabled in 2025.10 - Redis support completely removed, migrated to PostgreSQL
+      enabled: false
       auth:
         enabled: false
       master:
