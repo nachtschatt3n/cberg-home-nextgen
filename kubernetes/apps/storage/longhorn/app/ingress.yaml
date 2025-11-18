@@ -17,8 +17,7 @@ metadata:
     nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
     nginx.ingress.kubernetes.io/auth-snippet: |
       proxy_set_header X-Forwarded-Host $http_host;
-      proxy_set_header X-Forwarded-Proto $scheme;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Original-URI $request_uri;
       proxy_set_header X-Proxy-Secret 56915e032a849697664f1ee8567e8ffe134c7e2dd19b3d2ce16b42c7a487799cb232e4c69878081ea6e265d22693c1283e20c2fe2c06fff5ef986080e78d0263;
 spec:
   ingressClassName: internal
