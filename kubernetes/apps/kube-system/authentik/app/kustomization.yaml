@@ -3,27 +3,18 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./secret.sops.yaml
+  - ./configmap.sops.yaml
   - ./helmrelease.yaml
 
-# Combine all Authentik blueprint files from app directories into single ConfigMap
-# Each app manages its own blueprint file in its directory (source of truth)
-# Copies in this directory are used by Kustomize (symlinks don't work in Flux's temp checkout)
-# When an app is removed, its blueprint file is removed, and the copy here should be removed too
-# This ensures no orphaned authentication config is left behind
-configMapGenerator:
-  - name: authentik-blueprints
-    namespace: kube-system
-    files:
-      - frigate-blueprint.yaml
-      - phpmyadmin-blueprint.yaml
-      - longhorn-blueprint.yaml
-      - esphome-blueprint.yaml
-      - langfuse-blueprint.yaml
-      - uptime-kuma-blueprint.yaml
-      - homepage-blueprint.yaml
-      - prometheus-alertmanager-blueprint.yaml
-generatorOptions:
-  disableNameSuffixHash: true
+# Authentik blueprints are now SOPS-encrypted in configmap.sops.yaml
+# This provides security for sensitive domain information in a public repository
+# Each app still manages its own blueprint file in its directory (source of truth)
+# To update blueprints:
+# 1. Edit the blueprint file in the app's directory (e.g., kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml)
+# 2. Run: sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
+# 3. Update the corresponding entry in /tmp/configmap.yaml with your changes
+# 4. Re-encrypt: sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
+# 5. Commit and push - Flux will decrypt and apply automatically
 
 # Note: Volume mounts are manually patched using kubectl since Kustomize patches
 # don't work on Helm-generated resources. Run:
