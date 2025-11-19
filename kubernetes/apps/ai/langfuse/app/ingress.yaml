@@ -14,12 +14,15 @@ metadata:
     gethomepage.dev/pod-selector: app=langfuse-web
     # Cookie forwarding for NextAuth.js session management
     nginx.ingress.kubernetes.io/proxy-cookie-path: "/ /"
-    # Ensure proper headers for NextAuth.js behind proxy
+    # Ensure proper headers for NextAuth.js behind proxy (critical for OAuth state management)
     nginx.ingress.kubernetes.io/configuration-snippet: |
       proxy_set_header X-Forwarded-Proto $scheme;
       proxy_set_header X-Forwarded-Host $host;
+      proxy_set_header Host $host;
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      # Ensure cookies are preserved for OAuth state management
+      proxy_cookie_path / "/; Secure; SameSite=None";
     # Increase timeouts for slow-starting Next.js app
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "60"

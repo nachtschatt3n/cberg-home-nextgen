@@ -86,7 +86,7 @@ This method is used for applications that do not support modern authentication. 
 2.  **Priority 2 (Easy Wins - Native OIDC):** 🔄 **IN PROGRESS**
     -   Integrate applications with native OIDC support to build momentum and familiarity:
         -   `Grafana` ❌ (postponed - see security incident note below)
-        -   `Langfuse` 🔄 (deployed, OIDC investigation pending)
+        -   `Langfuse` ⏸ (disabled: NextAuth state cookie bug, waiting for upstream fix)
         -   `pgAdmin` ✅ (completed; see case study below)
         -   `Home Assistant` (home automation - commonly accessed)
         -   `Nextcloud` (file sharing - high value)
@@ -124,7 +124,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 | [x] | **pgAdmin** | `databases` | Native OIDC | **Medium** |
 | [x] | **phpMyAdmin** | `databases` | Forward Auth | **Medium** |
 | [ ] | **Open WebUI** | `ai` | Native OIDC | **Easy** |
-| [❌] | **Langfuse** | `ai` | Native OIDC | **Easy** |
+| [ ] | **Langfuse** | `ai` | Native OIDC (paused) | **Easy** |
 | [ ] | **InfluxDB** | `databases` | Native OIDC | **Easy** |
 | [x] | **Homepage** | `default` | Forward Auth | **Easy** |
 | [ ] | **JDownloader** | `download` | Forward Auth | **Medium** |
@@ -151,7 +151,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 ### Application Details
 
 -   **Open WebUI:** Configure OIDC via environment variables (`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`, etc.) in the deployment.
--   **Langfuse:** Enable SSO by configuring the `LANGFUSE_OIDC_*` environment variables.
+-   **Langfuse:** **Paused.** Upstream NextAuth state-cookie bug breaks OAuth callbacks behind the ingress proxy. Authentik integration removed until Langfuse ships a version that supports proxy-friendly session handling. Continue using local accounts.
 -   **pgAdmin:** Configure `PGADMIN_CONFIG_AUTHENTICATION_SOURCES`/`PGADMIN_CONFIG_OAUTH2_CONFIG` in the secret; see the pgAdmin case study.
 -   **phpMyAdmin:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/databases/phpmyadmin/app/authentik-blueprint.yaml` for reference.
 -   **InfluxDB:** Configure the InfluxDB instance to use OIDC for authenticating users to the UI.
@@ -174,7 +174,7 @@ Here is a detailed breakdown of your user-facing applications and the recommende
 -   **Prometheus:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheus-ingress.yaml` for reference.
 -   **Alertmanager:** ✅ Secured with Authentik forward auth via blueprint. See `kubernetes/apps/monitoring/kube-prometheus-stack/app/alertmanager-ingress.yaml` for reference.
 -   **Homepage:** ✅ Secured with Authentik forward auth via blueprint. As a static dashboard, it has no built-in authentication, so forward auth proxy is required. See `kubernetes/apps/default/homepage/app/authentik-blueprint.yaml` for reference.
--   **Langfuse:** ❌ Authentik OIDC blueprint deployed, OIDC environment variables configured. **Issue**: Internal server error when clicking Authentik button - OIDC callback not working. Pending investigation. See `kubernetes/apps/ai/langfuse/app/authentik-blueprint.yaml` for reference.
+-   **Langfuse:** Integration removed. NextAuth can’t preserve the OAuth `state` cookie when running behind this ingress, so the callback always fails. Waiting on an upstream fix before re-attempting Authentik OIDC.
 -   **Nextcloud:** Install the "Social Login" app from the Nextcloud app store and configure it for OIDC.
 -   **Paperless-ngx:** Natively supports OIDC by configuring the `PAPERLESS_OIDC_*` environment variables.
 -   **Longhorn:** ✅ Secured with Authentik forward auth via blueprint. Converted from proxy mode to forward auth mode for better maintainability. Uses `forward_single` mode with manual ingress configuration matching the Frigate pattern. See `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml` and `kubernetes/apps/storage/longhorn/app/ingress.yaml` for reference.

@@ -43,38 +43,6 @@ spec:
             secretKeyRef:
               name: langfuse-secret
               key: nextauthSecret
-        # Trust host when behind proxy (required for NextAuth.js state management)
-        - name: AUTH_TRUST_HOST
-          value: "true"
-        # Langfuse OIDC configuration (uses AUTH_CUSTOM_* format)
-        # Note: Removed NEXTAUTH_OIDC_* variables to avoid conflicts with AUTH_CUSTOM_*
-        - name: AUTH_CUSTOM_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-secret
-              key: oidcClientId
-              optional: true
-        - name: AUTH_CUSTOM_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-secret
-              key: oidcClientSecret
-              optional: true
-        # Using application slug for issuer (per_provider issuer mode uses app slug, not client_id)
-        # Well-known endpoint works: https://auth.example.com/application/o/langfuse/.well-known/openid-configuration
-        - name: AUTH_CUSTOM_ISSUER
-          value: "https://auth.example.com/application/o/langfuse"
-        # Endpoints from well-known discovery (base URLs, not slug-specific)
-        - name: AUTH_CUSTOM_AUTHORIZATION_URL
-          value: "https://auth.example.com/application/o/authorize/"
-        - name: AUTH_CUSTOM_TOKEN_URL
-          value: "https://auth.example.com/application/o/token/"
-        - name: AUTH_CUSTOM_USERINFO_URL
-          value: "https://auth.example.com/application/o/userinfo/"
-        - name: AUTH_CUSTOM_NAME
-          value: "Authentik"
-        - name: AUTH_CUSTOM_SCOPE
-          value: "openid profile email"
         - name: SALT
           valueFrom:
             secretKeyRef:
