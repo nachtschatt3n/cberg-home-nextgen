@@ -15,7 +15,7 @@ spec:
       rules:
         - alert: AuthentikPodNotReady
           expr: |
-            kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*"} == 0
+            sum by (namespace, pod) (kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*", condition="true"}) == 0
           for: 5m
           labels:
             severity: warning
@@ -96,7 +96,7 @@ spec:
 
         - alert: AuthentikOutpostPodDown
           expr: |
-            kube_pod_status_phase{namespace="kube-system", pod=~"ak-outpost-.*", phase="Running"} == 0
+            count(kube_pod_status_phase{namespace="kube-system", pod=~"ak-outpost-.*", phase="Running"} == 1) == 0
           for: 2m
           labels:
             severity: critical
@@ -151,20 +151,22 @@ spec:
             description: "Ingress for {{ $labels.host }} is experiencing {{ $value | printf \"%.2f\" }} backend errors per second. Authentik service may be down or misconfigured."
             runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
 
-        - alert: AuthentikOutpostIngressDown
-          expr: |
-            kube_ingress_created{namespace="kube-system", ingress=~"ak-outpost-.*"}
-            unless on(ingress)
-            nginx_ingress_controller_config_hash{controller_namespace="network", controller_class="external"}
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: ingress
-          annotations:
-            summary: "Authentik outpost ingress {{ $labels.ingress }} not configured in NGINX"
-            description: "Ingress {{ $labels.ingress }} exists but is not configured in the NGINX controller. Applications may be inaccessible."
-            runbook_url: "https://docs.goauthentik.io/docs/outposts/"
+        # Disabled: This alert was checking the wrong ingress controller (external vs internal)
+        # Outpost ingresses use the internal controller. Consider re-implementing if needed.
+        # - alert: AuthentikOutpostIngressDown
+        #   expr: |
+        #     kube_ingress_created{namespace="kube-system", ingress=~"ak-outpost-.*"}
+        #     unless on(ingress)
+        #     nginx_ingress_controller_config_hash{controller_namespace="network", controller_class="internal"}
+        #   for: 5m
+        #   labels:
+        #     severity: warning
+        #     category: authentication
+        #     component: ingress
+        #   annotations:
+        #     summary: "Authentik outpost ingress {{ $labels.ingress }} not configured in NGINX"
+        #     description: "Ingress {{ $labels.ingress }} exists but is not configured in the NGINX controller. Applications may be inaccessible."
+        #     runbook_url: "https://docs.goauthentik.io/docs/outposts/"
 
     - name: authentik.database
       interval: 30s
