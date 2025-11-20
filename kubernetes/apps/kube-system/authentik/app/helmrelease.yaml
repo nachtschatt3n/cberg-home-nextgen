@@ -206,7 +206,7 @@ spec:
       primary:
         persistence:
           enabled: true
-          name: data-authentik-postgresql-0
+          name: authentik-postgresql-0
           size: 8Gi
         resources:
           requests:
