@@ -6,6 +6,6 @@ namespace: office
 components:
   - ../../flux/components/common
 resources:
-  - ./nextcloud/ks.yaml
+ # - ./nextcloud/ks.yaml
   - ./omni-tools/ks.yaml
   - ./paperless-ngx/ks.yaml
