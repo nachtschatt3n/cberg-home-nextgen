@@ -10,6 +10,9 @@ spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
+  dependsOn:
+    - name: longhorn
+      namespace: storage
   path: ./kubernetes/apps/office/paperless-ngx/app
   prune: true
   sourceRef:

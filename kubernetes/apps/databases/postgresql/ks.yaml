@@ -9,6 +9,9 @@ spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
+  dependsOn:
+    - name: longhorn
+      namespace: storage
   path: ./kubernetes/apps/databases/postgresql/app
   prune: true
   sourceRef:
