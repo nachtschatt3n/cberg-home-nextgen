@@ -54,7 +54,7 @@ spec:
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: true
         replicaReplenishmentWaitInterval: 600
-        concurrentReplicaRebuildPerNodeLimit: 5
+        concurrentReplicaRebuildPerNodeLimit: 8
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
         mkfsExt4Parameters: ""

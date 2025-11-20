@@ -10,6 +10,9 @@ spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
+  dependsOn:
+    - name: intel-device-plugin-gpu
+      namespace: kube-system
   path: ./kubernetes/apps/home-automation/scrypted-nvr/app
   prune: true
   sourceRef:
