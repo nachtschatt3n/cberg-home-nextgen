@@ -17,9 +17,14 @@ mountOptions:
   - noatime
   - rsize=1048576
   - wsize=1048576
-  - cache=loose
-  - actimeo=30
+  - cache=strict
+  - actimeo=60
   - serverino
+  - nounix
+  - mapposix
+  - echo_interval=60
+  - max_credits=65536
+  - nobrl
 
 parameters:
   source: "//${NAS_HOSTNAME}/nextcloud"
