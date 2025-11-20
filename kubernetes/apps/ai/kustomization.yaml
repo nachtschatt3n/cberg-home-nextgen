@@ -6,7 +6,7 @@ components:
   - ../../flux/components/common
 resources:
   - ./open-webui/ks.yaml
-  - ./mcpo/ks.yaml
-  - ./langfuse/ks.yaml
-  - ./ai-sre/ks.yaml
-  - ./bytebot/ks.yaml
+ # - ./mcpo/ks.yaml
+ # - ./langfuse/ks.yaml
+ # - ./ai-sre/ks.yaml
+ # - ./bytebot/ks.yaml
