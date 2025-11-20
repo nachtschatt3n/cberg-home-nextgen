@@ -192,33 +192,7 @@ spec:
     redis:
       # Disabled in 2025.10 - Redis support completely removed, migrated to PostgreSQL
       enabled: false
-      auth:
-        enabled: false
-      master:
-        persistence:
-          enabled: true
-          storageClass: longhorn
-          size: 8Gi
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
-      replica:
-        persistence:
-          enabled: true
-          storageClass: longhorn
-          size: 8Gi
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
-
+ 
     postgresql:
       # Use built-in PostgreSQL for compatibility
       enabled: true
@@ -232,7 +206,7 @@ spec:
       primary:
         persistence:
           enabled: true
-          storageClass: longhorn
+          name: data-authentik-postgresql-0
           size: 8Gi
         resources:
           requests:
