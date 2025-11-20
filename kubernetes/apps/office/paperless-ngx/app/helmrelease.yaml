@@ -68,11 +68,6 @@ spec:
         ports:
           http:
             port: 8000
-      paperless-gpt:
-        controller: paperless-gpt
-        ports:
-          gpt:
-            port: 8080
     ingress:
       main:
         enabled: true
@@ -98,7 +93,7 @@ spec:
     persistence:
       data:
         enabled: true
-        existingClaim: paperless-data-5g
+        existingClaim: paperless-data
       log:
         enabled: true
         type: emptyDir
