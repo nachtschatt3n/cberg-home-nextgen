@@ -239,6 +239,14 @@ spec:
         username: nextcloud
 
       architecture: standalone
+      
+      ## Override default bind-address to allow external connections
+      ## Bitnami MariaDB uses MARIADB_BIND_ADDRESS env var
+      extraEnvVars:
+        - name: MARIADB_BIND_ADDRESS
+          value: "0.0.0.0"
+        - name: MARIADB_EXTRA_FLAGS
+          value: "--bind-address=0.0.0.0"
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
