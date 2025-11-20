@@ -239,17 +239,15 @@ spec:
         username: nextcloud
 
       architecture: standalone
-      
-      ## Use headless service for direct pod access (bypasses bind-address issue)
-      primary:
-        service:
-          type: ClusterIP
-          headless: true
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
       ##
       primary:
+        ## Use headless service for direct pod access (bypasses bind-address issue)
+        service:
+          type: ClusterIP
+          headless: true
         persistence:
           enabled: true
           # Use an existing Persistent Volume Claim (must be created ahead of time)
