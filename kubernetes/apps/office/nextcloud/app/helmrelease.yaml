@@ -42,9 +42,11 @@ spec:
           gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "nextcloud.png"
           nginx.ingress.kubernetes.io/proxy-body-size: "4G"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+          nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+          nginx.ingress.kubernetes.io/proxy-buffering: "off"
+          nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
           nginx.ingress.kubernetes.io/websocket-services: "nextcloud"
           nginx.ingress.kubernetes.io/ssl-redirect: "true"
           nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
@@ -252,10 +254,26 @@ spec:
 
         resources:
           requests:
-            cpu: 100m
-            memory: 334M
+            cpu: 200m
+            memory: 512Mi
           limits:
-            memory: 1Gi
+            memory: 2Gi
+        configuration: |-
+          [mysqld]
+          innodb_buffer_pool_size=768M
+          innodb_log_file_size=128M
+          innodb_flush_log_at_trx_commit=2
+          innodb_flush_method=O_DIRECT
+          max_connections=200
+          query_cache_type=0
+          query_cache_size=0
+          tmp_table_size=64M
+          max_heap_table_size=64M
+          table_open_cache=2000
+          thread_cache_size=50
+          sort_buffer_size=2M
+          read_buffer_size=1M
+          read_rnd_buffer_size=2M
 
     cronjob:
       enabled: true
