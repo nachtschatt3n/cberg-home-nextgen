@@ -15,17 +15,3 @@ spec:
     requests:
       storage: 500Gi
   storageClassName: cifs-makemkv-media
-
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: makemkv-config-new
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
-  storageClassName: longhorn-static
-  volumeName: makemkv-config
