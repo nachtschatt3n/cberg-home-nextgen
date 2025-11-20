@@ -22,8 +22,6 @@ mountOptions:
   - serverino
   - nounix
   - mapposix
-  - echo_interval=60
-  - max_credits=65536
   - nobrl
 
 parameters:
