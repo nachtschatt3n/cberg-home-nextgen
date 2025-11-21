@@ -195,19 +195,19 @@ spec:
       ## Supported database engines: mysql or postgresql
       type: mysql
 
-      ## Database host - use pod hostname for direct connection
-      host: nextcloud-mariadb-0.nextcloud-mariadb.office.svc.cluster.local
+      ## Database host
+      # host:
 
       ## Database name
       database: nextcloud
 
       ## Use a existing secret
-        existingSecret:
-          enabled: true
-          secretName: nextcloud-config
-          usernameKey: db-username
-          passwordKey: db-password
-          hostKey: db-hostname-or-ip
+      existingSecret:
+        enabled: true
+        secretName: nextcloud-config
+        usernameKey: db-username
+        passwordKey: db-password
+        # hostKey: db-hostname-or-ip
         # databaseKey: db-name
         mariadb:
           enabled: true
@@ -244,9 +244,6 @@ spec:
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
       ##
       primary:
-        ## Create headless service for direct pod access (required for standalone)
-        service:
-          headless: true
         persistence:
           enabled: true
           # Use an existing Persistent Volume Claim (must be created ahead of time)
