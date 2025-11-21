@@ -34,4 +34,5 @@ spec:
   tls:
     - hosts:
         - "longhorn.${SECRET_DOMAIN}"
+      secretName: longhorn-tls
 

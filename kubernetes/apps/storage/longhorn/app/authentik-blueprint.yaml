@@ -1,5 +1,70 @@
 version: 1
 entries:
+  # Longhorn Proxy Integration (existing outpost)
+  # Note: Using UUIDs directly for flows since they already exist
+  # Authorization flow UUID: 0cdf1b8c-88f9-4b90-a063-a14e18192f74 (default-provider-authorization-implicit-consent)
+  # Invalidation flow UUID: b8a97e00-f02f-48d9-b854-b26bf837779c (default-provider-invalidation-flow)
+  # Service Connection UUID: 162f6c4f-053d-4a1a-9aa6-d8e590c49d70 (Local Kubernetes Cluster)
+  - id: longhorn-proxy-provider
+    model: authentik_providers_proxy.proxyprovider
+    state: present
+    identifiers:
+      name: longhorn-proxy
+    attrs:
+      name: longhorn-proxy
+      mode: proxy
+      external_host: "https://longhorn.${SECRET_DOMAIN}"
+      internal_host: "http://longhorn-frontend.storage.svc.cluster.local:80"
+      skip_path_regex: ""
+      authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+      invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
+
+  - id: longhorn-proxy-application
+    model: authentik_core.application
+    state: present
+    identifiers:
+      slug: longhorn-proxy
+    attrs:
+      name: Longhorn Proxy
+      slug: longhorn-proxy
+      provider: !KeyOf longhorn-proxy-provider
+      meta_launch_url: "https://longhorn.${SECRET_DOMAIN}"
+      meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/longhorn.png"
+      meta_description: "Kubernetes storage management UI"
+
+  - id: longhorn-proxy-outpost
+    model: authentik_outposts.outpost
+    state: present
+    identifiers:
+      name: longhorn-proxy-outpost
+    attrs:
+      name: longhorn-proxy-outpost
+      type: proxy
+      providers:
+        - !KeyOf longhorn-proxy-provider
+      service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
+      config:
+        authentik_host: "http://authentik-server.kube-system.svc.cluster.local"
+        authentik_host_browser: "https://auth.${SECRET_DOMAIN}"
+        docker_network: null
+        docker_map_ports: true
+        docker_labels: {}
+        kubernetes_namespace: kube-system
+        kubernetes_replicas: 1
+        kubernetes_ingress_class_name: "internal"
+        kubernetes_ingress_secret_name: ""
+        kubernetes_ingress_annotations:
+          nginx.ingress.kubernetes.io/affinity: cookie
+          nginx.ingress.kubernetes.io/proxy-buffer-size: 16k
+          nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
+          nginx.ingress.kubernetes.io/proxy-busy-buffers-size: 32k
+          traefik.ingress.kubernetes.io/affinity: "true"
+          traefik.ingress.kubernetes.io/router.tls: "true"
+        kubernetes_service_type: "ClusterIP"
+        kubernetes_service_annotations: {}
+        kubernetes_disabled_components: []
+        container_network: null
+
   # Longhorn Forward Auth Integration
   # Note: Using UUIDs directly for flows since they already exist
   # Authorization flow UUID: 0cdf1b8c-88f9-4b90-a063-a14e18192f74 (default-provider-authorization-implicit-consent)
@@ -13,26 +78,26 @@ entries:
     attrs:
       name: longhorn-forward-auth
       mode: forward_single
-      external_host: "https://longhorn.uhl.cool"
+      external_host: "https://longhorn.${SECRET_DOMAIN}"
       internal_host: "http://longhorn-frontend.storage.svc.cluster.local:80"
       skip_path_regex: ""
       authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
       invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
 
-  - id: longhorn-application
+  - id: longhorn-forward-auth-application
     model: authentik_core.application
     state: present
     identifiers:
-      slug: longhorn
+      slug: longhorn-forward-auth
     attrs:
       name: Longhorn
       slug: longhorn
       provider: !KeyOf longhorn-forward-auth-provider
-      meta_launch_url: "https://longhorn.uhl.cool"
+      meta_launch_url: "https://longhorn.${SECRET_DOMAIN}"
       meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/longhorn.png"
       meta_description: "Kubernetes storage management UI"
 
-  - id: longhorn-outpost
+  - id: longhorn-forward-auth-outpost
     model: authentik_outposts.outpost
     state: present
     identifiers:
@@ -44,7 +109,7 @@ entries:
         - !KeyOf longhorn-forward-auth-provider
       service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
       config:
-        authentik_host: "https://auth.uhl.cool"
+        authentik_host: "https://auth.${SECRET_DOMAIN}"
         docker_network: null
         docker_map_ports: true
         docker_labels: {}
@@ -57,4 +122,3 @@ entries:
         kubernetes_service_annotations: {}
         kubernetes_disabled_components: []
         container_network: null
-
