@@ -239,16 +239,14 @@ spec:
         username: nextcloud
 
       architecture: standalone
-      
-      ## Create headless service for direct pod access (required for standalone)
-      primary:
-        service:
-          headless: true
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
       ##
       primary:
+        ## Create headless service for direct pod access (required for standalone)
+        service:
+          headless: true
         persistence:
           enabled: true
           # Use an existing Persistent Volume Claim (must be created ahead of time)
