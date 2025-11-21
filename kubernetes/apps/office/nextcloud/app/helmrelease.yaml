@@ -129,6 +129,11 @@ spec:
             'filesystem_check_changes' => 0,
             'skeletondirectory' => '',
             'tempdirectory' => '/tmp',
+            'filelocking.enabled' => true,
+            'filelocking.ttl' => 3600,
+            'memcache.local' => '\\OC\\Memcache\\APCu',
+            'memcache.distributed' => '\\OC\\Memcache\\Redis',
+            'memcache.locking' => '\\OC\\Memcache\\Redis',
             'blacklisted_files' => 
               [
                 '.htaccess',

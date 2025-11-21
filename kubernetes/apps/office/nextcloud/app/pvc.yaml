@@ -18,11 +18,12 @@ mountOptions:
   - rsize=1048576
   - wsize=1048576
   - cache=strict
-  - actimeo=60
+  - actimeo=30
   - serverino
   - nounix
   - mapposix
   - nobrl
+  - fsc
 
 parameters:
   source: "//${NAS_HOSTNAME}/nextcloud"
