@@ -28,7 +28,7 @@ spec:
         - name: JWT_SECRET_KEY
           value: "a68fdf7688d44d432ca8c2b5e6fc1fdbef2427dffe91e4a2f382080454449fbe"
         - name: NEXTCLOUD_URL
-          value: "https://drive.example.com"
+          value: "https://drive.${SECRET_DOMAIN}"
         - name: STORAGE_STRATEGY
           value: "lru"
         - name: PORT
@@ -77,11 +77,11 @@ metadata:
       add_header X-Frame-Options "SAMEORIGIN" always;
       add_header X-XSS-Protection "1; mode=block" always;
       add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    external-dns.alpha.kubernetes.io/target: "external.example.com"
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 spec:
   ingressClassName: external
   rules:
-  - host: whiteboard.example.com
+  - host: whiteboard.${SECRET_DOMAIN}
     http:
       paths:
       - path: /
