@@ -202,12 +202,12 @@ spec:
       database: nextcloud
 
       ## Use a existing secret
-      existingSecret:
-        enabled: true
-        secretName: nextcloud-config
-        usernameKey: db-username
-        passwordKey: db-password
-        # hostKey: db-hostname-or-ip
+        existingSecret:
+          enabled: true
+          secretName: nextcloud-config
+          usernameKey: db-username
+          passwordKey: db-password
+          hostKey: db-hostname-or-ip
         # databaseKey: db-name
         mariadb:
           enabled: true
