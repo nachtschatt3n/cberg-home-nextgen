@@ -195,8 +195,8 @@ spec:
       ## Supported database engines: mysql or postgresql
       type: mysql
 
-      ## Database host
-      # host:
+      ## Database host - use pod hostname for direct connection
+      host: nextcloud-mariadb-0.nextcloud-mariadb.office.svc.cluster.local
 
       ## Database name
       database: nextcloud
