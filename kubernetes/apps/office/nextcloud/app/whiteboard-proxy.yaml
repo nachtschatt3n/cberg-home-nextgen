@@ -93,5 +93,5 @@ spec:
               number: 3002
   tls:
   - hosts:
-    - whiteboard.example.com
+    - whiteboard.${SECRET_DOMAIN}
     secretName: nextcloud-tls
