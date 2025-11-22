@@ -10,4 +10,5 @@ spec:
   resources:
     requests:
       storage: 2Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: absenty-development-bundle-new
