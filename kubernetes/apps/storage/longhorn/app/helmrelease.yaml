@@ -50,6 +50,7 @@ spec:
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
         engineReplicaTimeout: 8
+        instanceManagerPodLivenessProbeTimeout: 30
         replicaFileSyncHttpClientTimeout: 30
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: true
