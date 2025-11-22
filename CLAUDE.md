@@ -5,13 +5,13 @@
 ### Namespace Layout
 The cluster uses namespace-based organization for different service categories:
 
-- **monitoring**: Prometheus, Grafana, Alertmanager, fluent-bit, Elasticsearch, Kibana, APM server, Metricbeat, OpenTelemetry
+- **monitoring**: Prometheus, Grafana, Alertmanager
 - **storage**: Longhorn volumes and storage management
 - **ai**: AI/ML workloads (langfuse, open-webui, bytebot, ai-sre, mcpo)
 - **network**: Ingress controllers (internal/external), external-dns, adguard-home, cloudflared
 - **kube-system**: Core cluster services (authentik, cilium, coredns, descheduler, spegel, node-feature-discovery)
 - **home-automation**: Home Assistant, ESPHome, Frigate, iobroker, mosquitto, music-assistant-server, n8n, mdns-repeater
-- **databases**: MariaDB, InfluxDB, phpMyAdmin
+- **databases**: MariaDB, InfluxDB, phpMyAdmin, pgadmin, postgresql 
 - **media**: Jellyfin, Plex, MakeMKV
 - **office**: Nextcloud, Paperless-NGX, Omni-Tools
 - **download**: JDownloader, Tube-Archivist
@@ -25,8 +25,6 @@ The cluster uses namespace-based organization for different service categories:
 ### Key Service Locations
 - Prometheus: `monitoring/prometheus-kube-prometheus-stack-0`
 - Alertmanager: `monitoring/alertmanager-kube-prometheus-stack-0`
-- fluent-bit: DaemonSet in `monitoring` namespace
-- Elasticsearch: `monitoring/elasticsearch-es-*` pods
 - Longhorn Manager: DaemonSet in `storage` namespace
 - Flux controllers: `flux-system` namespace
 
@@ -85,6 +83,7 @@ Only use when Flux is stuck or for immediate testing:
 ```bash
 kubectl apply -f kubernetes/apps/{namespace}/{app}/app/*.yaml
 ```
+! after the use of kubectl apply or patch make sure the change is refected in the flux git code 
 
 ### Repository Structure
 - `kubernetes/flux/meta/repositories/helm/` - HelmRepository definitions
