@@ -4,7 +4,7 @@ kind: StorageClass
 metadata:
   name: "cifs-frigate-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
