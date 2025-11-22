@@ -1,12 +1,12 @@
 ---
 # StorageClass for iCloud backup data on CIFS share
-# reclaimPolicy: Retain ensures data on NAS is preserved when PVC/PV is deleted
+# reclaimPolicy: Delete ensures PV is cleaned up when PVC is deleted
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: "cifs-icloud-docker-mu"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
