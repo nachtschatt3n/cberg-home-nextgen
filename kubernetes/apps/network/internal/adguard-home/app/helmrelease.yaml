@@ -109,18 +109,7 @@ spec:
           port: 80
 
       https:
-        enabled: true
-        className: "internal"
-        annotations: {}
-        hosts:
-          - host: &host adguard.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: ImplementationSpecific
-        tls: []
-        service:
-          name: adguard-home-https
-          port: 443
+        enabled: false
 
     resources:
       requests:
