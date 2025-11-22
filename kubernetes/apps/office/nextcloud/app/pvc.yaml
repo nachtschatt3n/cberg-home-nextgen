@@ -3,7 +3,7 @@ kind: StorageClass
 metadata:
   name: "cifs-nextcloud-data"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Retain
+reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -23,7 +23,6 @@ mountOptions:
   - nounix
   - mapposix
   - nobrl
-  - fsc
 
 parameters:
   source: "//${NAS_HOSTNAME}/nextcloud"
