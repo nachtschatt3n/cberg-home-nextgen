@@ -5,7 +5,7 @@ kind: Kustomization
 namespace: office
 components:
   - ../../flux/components/common
-resources:
-  - ./nextcloud/ks.yaml
-  - ./omni-tools/ks.yaml
-  - ./paperless-ngx/ks.yaml
+#resources:
+ # - ./nextcloud/ks.yaml
+ # - ./omni-tools/ks.yaml
+ # - ./paperless-ngx/ks.yaml
