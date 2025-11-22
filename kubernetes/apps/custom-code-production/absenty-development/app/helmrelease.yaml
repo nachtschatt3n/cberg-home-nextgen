@@ -151,13 +151,13 @@ spec:
       data:
         enabled: true
         type: persistentVolumeClaim
-        existingClaim: absenty-development-data-new
+        existingClaim: absenty-development-data
         globalMounts:
           - path: /data
       storage:
         enabled: true
         type: persistentVolumeClaim
-        existingClaim: absenty-development-storage-new
+        existingClaim: absenty-development-storage
         globalMounts:
           - path: /storage
       tmp:
@@ -173,6 +173,6 @@ spec:
       bundle:
         enabled: true
         type: persistentVolumeClaim
-        existingClaim: absenty-development-bundle-new
+        existingClaim: absenty-development-bundle
         globalMounts:
           - path: /bundle
