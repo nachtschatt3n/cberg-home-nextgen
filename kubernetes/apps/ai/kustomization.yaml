@@ -4,9 +4,9 @@ kind: Kustomization
 namespace: ai
 components:
   - ../../flux/components/common
-#resources:
-#  - ./open-webui/ks.yaml
-#  - ./mcpo/ks.yaml
-# - ./langfuse/ks.yaml
-#  - ./ai-sre/ks.yaml
-#  - ./bytebot/ks.yaml
+resources:
+  - ./open-webui/ks.yaml
+  - ./mcpo/ks.yaml
+  - ./langfuse/ks.yaml
+  - ./ai-sre/ks.yaml
+  - ./bytebot/ks.yaml
