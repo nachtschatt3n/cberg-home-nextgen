@@ -3,15 +3,15 @@ kind: Kustomization
 namespace: home-automation
 components:
   - ../../flux/components/common
-#resources:
-#  - ./home-assistant/ks.yaml
-#  - ./iobroker/ks.yaml
-#  - ./n8n/ks.yaml
-#  - ./zigbee2mqtt/ks.yaml
-#  - ./mosquitto/ks.yaml
-#  - ./frigate-nvr/ks.yaml
-#  - ./node-red/ks.yaml
-#  - ./scrypted-nvr/ks.yaml
-#  - ./music-assistant-server/ks.yaml
-#  - ./esphome/ks.yaml
+resources:
+  - ./home-assistant/ks.yaml
+  - ./iobroker/ks.yaml
+  - ./n8n/ks.yaml
+  - ./zigbee2mqtt/ks.yaml
+  - ./mosquitto/ks.yaml
+  - ./frigate-nvr/ks.yaml
+  - ./node-red/ks.yaml
+  - ./scrypted-nvr/ks.yaml
+  - ./music-assistant-server/ks.yaml
+  - ./esphome/ks.yaml
 
