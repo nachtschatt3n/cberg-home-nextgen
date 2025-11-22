@@ -4,12 +4,12 @@ kind: Kustomization
 namespace: databases
 components:
   - ../../flux/components/common
-resources:
-  - ./influxdb/ks.yaml
-  - ./mariadb/ks.yaml
-  - ./phpmyadmin/ks.yaml
-  - ./postgresql/ks.yaml
-  - ./pgadmin/ks.yaml
+#resources:
+#  - ./influxdb/ks.yaml
+#  - ./mariadb/ks.yaml
+#  - ./phpmyadmin/ks.yaml
+#  - ./postgresql/ks.yaml
+#  - ./pgadmin/ks.yaml
 
 ---
 apiVersion: v1

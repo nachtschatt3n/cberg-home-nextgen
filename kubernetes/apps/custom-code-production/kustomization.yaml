@@ -4,6 +4,6 @@ kind: Kustomization
 namespace: custom-code-production
 components:
   - ../../flux/components/common
-resources:
-  - ./absenty-production/ks.yaml
-  - ./absenty-development/ks.yaml
+#resources:
+#  - ./absenty-production/ks.yaml
+#  - ./absenty-development/ks.yaml
