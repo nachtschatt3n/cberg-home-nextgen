@@ -137,13 +137,6 @@ spec:
                 namespace: monitoring
                 app: grafana
                 podSelector: app.kubernetes.io/instance=grafana
-            - Kibana:
-                href: https://kibana.${SECRET_DOMAIN}
-                icon: elastic
-                description: Elastic Observability
-                namespace: monitoring
-                app: kibana
-                podSelector: kibana.k8s.elastic.co/name=kibana
             - Prometheus:
                 href: https://prometheus.${SECRET_DOMAIN}
                 icon: prometheus.png
