@@ -7,4 +7,3 @@ resources:
   - secret.sops.yaml
   - ghcr-secret.sops.yaml
   - image-automation.yaml
-  - pvc.yaml
