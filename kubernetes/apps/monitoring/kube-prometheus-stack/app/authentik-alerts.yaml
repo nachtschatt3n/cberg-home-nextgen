@@ -207,7 +207,7 @@ spec:
       expr: |
         count(kube_pod_info{namespace="kube-system", pod=~"ak-outpost-.*"})
         !=
-        count(authentik_outpost_info{outpost_name!="authentik Embedded Outpost"})
+        count(authentik_outposts_connected{outpost_name!="authentik Embedded Outpost"})
       for: 10m
       labels:
         category: authentication
