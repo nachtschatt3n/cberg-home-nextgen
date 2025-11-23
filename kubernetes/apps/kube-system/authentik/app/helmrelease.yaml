@@ -68,7 +68,6 @@ spec:
               cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
               cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
               cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
-              cp /blueprints-source/longhorn-blueprint.yaml /blueprints/longhorn-blueprint.yaml
               cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
               cp /blueprints-source/phpmyadmin-blueprint.yaml /blueprints/phpmyadmin-blueprint.yaml
               cp /blueprints-source/prometheus-alertmanager-blueprint.yaml /blueprints/prometheus-alertmanager-blueprint.yaml
@@ -163,7 +162,6 @@ spec:
               cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
               cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
               cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
-              cp /blueprints-source/longhorn-blueprint.yaml /blueprints/longhorn-blueprint.yaml
               cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
               cp /blueprints-source/phpmyadmin-blueprint.yaml /blueprints/phpmyadmin-blueprint.yaml
               cp /blueprints-source/prometheus-alertmanager-blueprint.yaml /blueprints/prometheus-alertmanager-blueprint.yaml
