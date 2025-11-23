@@ -1,216 +1,215 @@
----
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  name: authentik-alerts
-  namespace: monitoring
+  annotations:
+    prometheus-operator-validated: "true"
+  creationTimestamp: "2025-11-22T21:02:08Z"
+  generation: 1
   labels:
     app.kubernetes.io/name: kube-prometheus-stack
     app.kubernetes.io/part-of: kube-prometheus-stack
+    kustomize.toolkit.fluxcd.io/name: kube-prometheus-stack
+    kustomize.toolkit.fluxcd.io/namespace: monitoring
     release: kube-prometheus-stack
+  name: authentik-alerts
+  namespace: monitoring
+  resourceVersion: "103725691"
+  uid: 95449906-f937-4292-8ade-9c7d09c30798
 spec:
   groups:
-    - name: authentik.pods.health
-      interval: 30s
-      rules:
-        - alert: AuthentikPodNotReady
-          expr: |
-            sum by (namespace, pod) (kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*", condition="true"}) == 0
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik
-          annotations:
-            summary: "Authentik pod {{ $labels.pod }} is not ready"
-            description: "Authentik pod {{ $labels.pod }} has been not ready for more than 5 minutes. This may affect authentication for protected applications."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        - alert: AuthentikPodCrashLooping
-          expr: |
-            rate(kube_pod_container_status_restarts_total{namespace="kube-system", pod=~"authentik-.*"}[15m]) > 0
-          for: 5m
-          labels:
-            severity: critical
-            category: authentication
-            component: authentik
-          annotations:
-            summary: "Authentik pod {{ $labels.pod }} is crash looping"
-            description: "Authentik pod {{ $labels.pod }} has restarted {{ $value | printf \"%.0f\" }} times in the last 15 minutes. Authentication services may be unstable."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        - alert: AuthentikServerDown
-          expr: |
-            count(kube_pod_status_phase{namespace="kube-system", pod=~"authentik-server-.*", phase="Running"}) < 2
-          for: 2m
-          labels:
-            severity: critical
-            category: authentication
-            component: authentik
-          annotations:
-            summary: "Authentik server replicas critically low"
-            description: "Only {{ $value }} Authentik server pods are running (expected: 3). Authentication services are degraded."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        - alert: AuthentikWorkerDown
-          expr: |
-            count(kube_pod_status_phase{namespace="kube-system", pod=~"authentik-worker-.*", phase="Running"}) < 2
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik
-          annotations:
-            summary: "Authentik worker replicas low"
-            description: "Only {{ $value }} Authentik worker pods are running (expected: 3). Background tasks may be delayed."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-    - name: authentik.outposts.health
-      interval: 30s
-      rules:
-        - alert: AuthentikOutpostDisconnected
-          expr: |
-            authentik_outpost_connection == 0
-          for: 2m
-          labels:
-            severity: critical
-            category: authentication
-            component: authentik-outpost
-          annotations:
-            summary: "Authentik outpost {{ $labels.outpost_name }} is disconnected"
-            description: "Authentik outpost {{ $labels.outpost_name }} (type: {{ $labels.outpost_type }}) has been disconnected from the server for more than 2 minutes. Applications protected by this outpost may be inaccessible."
-            runbook_url: "https://docs.goauthentik.io/docs/outposts/"
-
-        - alert: AuthentikOutpostNotUpdated
-          expr: |
-            (time() - authentik_outpost_last_update) > 600
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik-outpost
-          annotations:
-            summary: "Authentik outpost {{ $labels.outpost_name }} not receiving updates"
-            description: "Authentik outpost {{ $labels.outpost_name }} (type: {{ $labels.outpost_type }}) hasn't received configuration updates in {{ $value | humanizeDuration }}. Outpost may be using stale configuration."
-            runbook_url: "https://docs.goauthentik.io/docs/outposts/"
-
-        - alert: AuthentikOutpostPodDown
-          expr: |
-            count(kube_pod_status_phase{namespace="kube-system", pod=~"ak-outpost-.*", phase="Running"} == 1) == 0
-          for: 2m
-          labels:
-            severity: critical
-            category: authentication
-            component: authentik-outpost
-          annotations:
-            summary: "Authentik outpost pod {{ $labels.pod }} is down"
-            description: "Authentik outpost pod {{ $labels.pod }} is not running. Applications protected by this outpost may be inaccessible."
-            runbook_url: "https://docs.goauthentik.io/docs/outposts/"
-
-        - alert: AuthentikOutpostHighLatency
-          expr: |
-            histogram_quantile(0.95,
-              rate(authentik_outpost_proxy_request_duration_seconds_bucket[5m])
-            ) > 1
-          for: 10m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik-outpost
-          annotations:
-            summary: "Authentik outpost {{ $labels.outpost_name }} has high latency"
-            description: "Authentik outpost {{ $labels.outpost_name }} is experiencing high request latency (p95: {{ $value | printf \"%.2f\" }}s) for host {{ $labels.host }}. Users may experience slow authentication."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-    - name: authentik.ingress.auth
-      interval: 30s
-      rules:
-        - alert: AuthentikIngressAuthFailures
-          expr: |
-            rate(nginx_ingress_controller_requests{status=~"401|403", exported_service=~".*authentik.*"}[5m]) > 0.1
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: ingress
-          annotations:
-            summary: "High authentication failures on {{ $labels.host }}"
-            description: "Ingress for {{ $labels.host }} is experiencing {{ $value | printf \"%.2f\" }} authentication failures per second. This may indicate an authentication issue or an attack."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        - alert: AuthentikIngressAuthBackendError
-          expr: |
-            rate(nginx_ingress_controller_requests{status=~"5..", exported_service=~".*authentik.*"}[5m]) > 0.05
-          for: 3m
-          labels:
-            severity: critical
-            category: authentication
-            component: ingress
-          annotations:
-            summary: "Authentication backend errors on {{ $labels.host }}"
-            description: "Ingress for {{ $labels.host }} is experiencing {{ $value | printf \"%.2f\" }} backend errors per second. Authentik service may be down or misconfigured."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        # Disabled: This alert was checking the wrong ingress controller (external vs internal)
-        # Outpost ingresses use the internal controller. Consider re-implementing if needed.
-        # - alert: AuthentikOutpostIngressDown
-        #   expr: |
-        #     kube_ingress_created{namespace="kube-system", ingress=~"ak-outpost-.*"}
-        #     unless on(ingress)
-        #     nginx_ingress_controller_config_hash{controller_namespace="network", controller_class="internal"}
-        #   for: 5m
-        #   labels:
-        #     severity: warning
-        #     category: authentication
-        #     component: ingress
-        #   annotations:
-        #     summary: "Authentik outpost ingress {{ $labels.ingress }} not configured in NGINX"
-        #     description: "Ingress {{ $labels.ingress }} exists but is not configured in the NGINX controller. Applications may be inaccessible."
-        #     runbook_url: "https://docs.goauthentik.io/docs/outposts/"
-
-    - name: authentik.database
-      interval: 30s
-      rules:
-        - alert: AuthentikPostgresDown
-          expr: |
-            up{job="authentik-postgresql"} == 0
-          for: 2m
-          labels:
-            severity: critical
-            category: authentication
-            component: authentik-database
-          annotations:
-            summary: "Authentik PostgreSQL database is down"
-            description: "Authentik's PostgreSQL database has been down for more than 2 minutes. All authentication services will fail."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-        - alert: AuthentikPostgresConnectionsHigh
-          expr: |
-            pg_stat_activity_count{datname="authentik"} / pg_settings_max_connections > 0.8
-          for: 5m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik-database
-          annotations:
-            summary: "Authentik PostgreSQL connection usage is high"
-            description: "Authentik database is using {{ $value | printf \"%.0f\" }}% of available connections. Consider increasing max_connections or investigating connection leaks."
-            runbook_url: "https://docs.goauthentik.io/docs/troubleshooting/"
-
-    - name: authentik.blueprint.sync
-      interval: 1h
-      rules:
-        - alert: AuthentikBlueprintOutpostMismatch
-          expr: |
-            count(kube_pod_info{namespace="kube-system", pod=~"ak-outpost-.*"})
-            != ignoring(pod, uid, created_by_kind, created_by_name, host_ip, node, pod_ip, priority_class)
-            count(authentik_outpost_info)
-          for: 10m
-          labels:
-            severity: warning
-            category: authentication
-            component: authentik-blueprint
-          annotations:
-            summary: "Authentik outpost count mismatch detected"
-            description: "The number of outpost pods ({{ query \"count(kube_pod_info{namespace='kube-system', pod=~'ak-outpost-.*'})\" | first | value }}) doesn't match the number of configured outposts ({{ query \"count(authentik_outpost_info)\" | first | value }}). Blueprint configuration may not be loaded. Review: kubectl exec -n kube-system deployment/authentik-server -- ak apply_blueprint /blueprints/"
-            runbook_url: "https://docs.goauthentik.io/docs/blueprints/"
+  - interval: 30s
+    name: authentik.pods.health
+    rules:
+    - alert: AuthentikPodNotReady
+      annotations:
+        description: Authentik pod {{ $labels.pod }} has been not ready for more than
+          5 minutes. This may affect authentication for protected applications.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*", condition="true"}) == 0
+      for: 5m
+      labels:
+        category: authentication
+        component: authentik
+        severity: warning
+    - alert: AuthentikPodCrashLooping
+      annotations:
+        description: Authentik pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Authentication services may be unstable.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="kube-system", pod=~"authentik-.*"}[15m]) > 0
+      for: 5m
+      labels:
+        category: authentication
+        component: authentik
+        severity: critical
+    - alert: AuthentikServerDown
+      annotations:
+        description: 'Only {{ $value }} Authentik server pods are running (expected:
+          3). Authentication services are degraded.'
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik server replicas critically low
+      expr: |
+        count(kube_pod_status_phase{namespace="kube-system", pod=~"authentik-server-.*", phase="Running"}) < 2
+      for: 2m
+      labels:
+        category: authentication
+        component: authentik
+        severity: critical
+    - alert: AuthentikWorkerDown
+      annotations:
+        description: 'Only {{ $value }} Authentik worker pods are running (expected:
+          3). Background tasks may be delayed.'
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik worker replicas low
+      expr: |
+        count(kube_pod_status_phase{namespace="kube-system", pod=~"authentik-worker-.*", phase="Running"}) < 2
+      for: 5m
+      labels:
+        category: authentication
+        component: authentik
+        severity: warning
+  - interval: 30s
+    name: authentik.outposts.health
+    rules:
+    - alert: AuthentikOutpostDisconnected
+      annotations:
+        description: 'Authentik outpost {{ $labels.outpost_name }} (type: {{ $labels.outpost_type
+          }}) has been disconnected from the server for more than 2 minutes. Applications
+          protected by this outpost may be inaccessible.'
+        runbook_url: https://docs.goauthentik.io/docs/outposts/
+        summary: Authentik outpost {{ $labels.outpost_name }} is disconnected
+      expr: |
+        authentik_outpost_connection == 0
+      for: 2m
+      labels:
+        category: authentication
+        component: authentik-outpost
+        severity: critical
+    - alert: AuthentikOutpostNotUpdated
+      annotations:
+        description: 'Authentik outpost {{ $labels.outpost_name }} (type: {{ $labels.outpost_type
+          }}) hasn''t received configuration updates in {{ $value | humanizeDuration
+          }}. Outpost may be using stale configuration.'
+        runbook_url: https://docs.goauthentik.io/docs/outposts/
+        summary: Authentik outpost {{ $labels.outpost_name }} not receiving updates
+      expr: |
+        (time() - authentik_outpost_last_update) > 600
+      for: 5m
+      labels:
+        category: authentication
+        component: authentik-outpost
+        severity: warning
+    - alert: AuthentikOutpostPodDown
+      annotations:
+        description: Authentik outpost pod {{ $labels.pod }} is not running. Applications
+          protected by this outpost may be inaccessible.
+        runbook_url: https://docs.goauthentik.io/docs/outposts/
+        summary: Authentik outpost pod {{ $labels.pod }} is down
+      expr: |
+        count(kube_pod_status_phase{namespace="kube-system", pod=~"ak-outpost-.*", phase="Running"} == 1) == 0
+      for: 2m
+      labels:
+        category: authentication
+        component: authentik-outpost
+        severity: critical
+    - alert: AuthentikOutpostHighLatency
+      annotations:
+        description: 'Authentik outpost {{ $labels.outpost_name }} is experiencing
+          high request latency (p95: {{ $value | printf "%.2f" }}s) for host {{ $labels.host
+          }}. Users may experience slow authentication.'
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik outpost {{ $labels.outpost_name }} has high latency
+      expr: |
+        histogram_quantile(0.95,
+          rate(authentik_outpost_proxy_request_duration_seconds_bucket[5m])
+        ) > 1
+      for: 10m
+      labels:
+        category: authentication
+        component: authentik-outpost
+        severity: warning
+  - interval: 30s
+    name: authentik.ingress.auth
+    rules:
+    - alert: AuthentikIngressAuthFailures
+      annotations:
+        description: Ingress for {{ $labels.host }} is experiencing {{ $value | printf
+          "%.2f" }} authentication failures per second. This may indicate an authentication
+          issue or an attack.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: High authentication failures on {{ $labels.host }}
+      expr: |
+        rate(nginx_ingress_controller_requests{status=~"401|403", exported_service=~".*authentik.*"}[5m]) > 0.1
+      for: 5m
+      labels:
+        category: authentication
+        component: ingress
+        severity: warning
+    - alert: AuthentikIngressAuthBackendError
+      annotations:
+        description: Ingress for {{ $labels.host }} is experiencing {{ $value | printf
+          "%.2f" }} backend errors per second. Authentik service may be down or misconfigured.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentication backend errors on {{ $labels.host }}
+      expr: |
+        rate(nginx_ingress_controller_requests{status=~"5..", exported_service=~".*authentik.*"}[5m]) > 0.05
+      for: 3m
+      labels:
+        category: authentication
+        component: ingress
+        severity: critical
+  - interval: 30s
+    name: authentik.database
+    rules:
+    - alert: AuthentikPostgresDown
+      annotations:
+        description: Authentik's PostgreSQL database has been down for more than 2
+          minutes. All authentication services will fail.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik PostgreSQL database is down
+      expr: |
+        up{job="authentik-postgresql"} == 0
+      for: 2m
+      labels:
+        category: authentication
+        component: authentik-database
+        severity: critical
+    - alert: AuthentikPostgresConnectionsHigh
+      annotations:
+        description: Authentik database is using {{ $value | printf "%.0f" }}% of
+          available connections. Consider increasing max_connections or investigating
+          connection leaks.
+        runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
+        summary: Authentik PostgreSQL connection usage is high
+      expr: |
+        pg_stat_activity_count{datname="authentik"} / pg_settings_max_connections > 0.8
+      for: 5m
+      labels:
+        category: authentication
+        component: authentik-database
+        severity: warning
+  - interval: 1h
+    name: authentik.blueprint.sync
+    rules:
+    - alert: AuthentikBlueprintOutpostMismatch
+      annotations:
+        description: 'The number of outpost pods ({{ query "count(kube_pod_info{namespace=''kube-system'',
+          pod=~''ak-outpost-.*''})" | first | value }}) doesn''t match the number
+          of configured outposts ({{ query "count(authentik_outpost_info)" | first
+          | value }}). Blueprint configuration may not be loaded. Review: kubectl
+          exec -n kube-system deployment/authentik-server -- ak apply_blueprint /blueprints/'
+        runbook_url: https://docs.goauthentik.io/docs/blueprints/
+        summary: Authentik outpost count mismatch detected
+      expr: |
+        count(kube_pod_info{namespace="kube-system", pod=~"ak-outpost-.*"})
+        !=
+        count(authentik_outpost_info{outpost_name!="authentik Embedded Outpost"})
+      for: 10m
+      labels:
+        category: authentication
+        component: authentik-blueprint
+        severity: warning
