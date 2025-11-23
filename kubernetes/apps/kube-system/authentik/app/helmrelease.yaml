@@ -188,7 +188,7 @@ spec:
           cpu: 100m
           memory: 512Mi
         limits:
-          memory: 2Gi
+          memory: 4Gi
 
     redis:
       # Disabled in 2025.10 - Redis support completely removed, migrated to PostgreSQL
@@ -208,7 +208,7 @@ spec:
         persistence:
           enabled: true
           name: data-authentik-postgresql-0
-          size: 8Gi
+          size: 10Gi
         resources:
           requests:
             cpu: 100m
