@@ -188,7 +188,7 @@ spec:
           cpu: 100m
           memory: 512Mi
         limits:
-          memory: 4Gi
+          memory: 8Gi
 
     redis:
       # Disabled in 2025.10 - Redis support completely removed, migrated to PostgreSQL
