@@ -208,7 +208,7 @@ spec:
         persistence:
           enabled: true
           name: data-authentik-postgresql-0
-          size: 20Gi
+          size: 10Gi  # Manually expanded to 20Gi via kubectl patch
         resources:
           requests:
             cpu: 100m
