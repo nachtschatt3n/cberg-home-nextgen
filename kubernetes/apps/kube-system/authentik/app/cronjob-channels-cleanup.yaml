@@ -1,0 +1,108 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: authentik-channels-cleanup
+  namespace: kube-system
+spec:
+  # Run every 6 hours
+  schedule: "0 */6 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400  # Keep job for 24h for debugging
+      template:
+        metadata:
+          labels:
+            app: authentik-channels-cleanup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: cleanup
+              image: bitnami/postgresql:17
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  echo "Starting Django Channels message cleanup..."
+
+                  # Connect to PostgreSQL and check message count
+                  MESSAGE_COUNT=$(PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -t -c \
+                    "SELECT COUNT(*) FROM django_channels_postgres_message WHERE expires < NOW();")
+
+                  echo "Found $MESSAGE_COUNT expired messages"
+
+                  if [ "$MESSAGE_COUNT" -eq 0 ]; then
+                    echo "No expired messages to clean up"
+                    exit 0
+                  fi
+
+                  # If more than 1M messages, use TRUNCATE (faster)
+                  if [ "$MESSAGE_COUNT" -gt 1000000 ]; then
+                    echo "Message count >1M, using TRUNCATE for efficiency..."
+                    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c \
+                      "TRUNCATE TABLE django_channels_postgres_message;"
+                    echo "Table truncated successfully"
+                  else
+                    # Delete in batches to avoid overwhelming the database
+                    echo "Deleting expired messages in batches..."
+                    while true; do
+                      DELETED=$(PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -t -c \
+                        "WITH deleted AS (
+                          DELETE FROM django_channels_postgres_message
+                          WHERE id IN (
+                            SELECT id FROM django_channels_postgres_message
+                            WHERE expires < NOW()
+                            LIMIT 100000
+                          )
+                          RETURNING *
+                        ) SELECT COUNT(*) FROM deleted;")
+
+                      echo "Deleted $DELETED messages"
+
+                      if [ "$DELETED" -eq 0 ]; then
+                        break
+                      fi
+
+                      # Small pause between batches
+                      sleep 2
+                    done
+                  fi
+
+                  # Reclaim disk space
+                  echo "Running VACUUM to reclaim disk space..."
+                  PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c \
+                    "VACUUM django_channels_postgres_message;"
+
+                  # Show final stats
+                  REMAINING=$(PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -t -c \
+                    "SELECT COUNT(*) FROM django_channels_postgres_message;")
+                  TABLE_SIZE=$(PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -t -c \
+                    "SELECT pg_size_pretty(pg_total_relation_size('django_channels_postgres_message'));")
+
+                  echo "Cleanup complete!"
+                  echo "Remaining messages: $REMAINING"
+                  echo "Table size: $TABLE_SIZE"
+              env:
+                - name: DB_HOST
+                  value: "authentik-postgresql"
+                - name: DB_USER
+                  value: "authentik"
+                - name: DB_NAME
+                  value: "authentik"
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: authentik-secret
+                      key: SECRET_AUTHENTIK_DB_PASSWORD
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi

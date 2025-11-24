@@ -1,0 +1,52 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: authentik-alerts
+  namespace: kube-system
+spec:
+  groups:
+    - name: authentik.postgresql
+      interval: 5m
+      rules:
+        - alert: AuthentikPostgreSQLRapidGrowth
+          expr: |
+            (
+              longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}
+              /
+              longhorn_volume_size_bytes{volume="data-authentik-postgresql-0"}
+            ) > 0.5
+            and
+            increase(longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}[6h]) > 1073741824
+          for: 10m
+          labels:
+            severity: warning
+            component: authentik
+            namespace: kube-system
+          annotations:
+            summary: "Authentik PostgreSQL volume growing rapidly"
+            description: |
+              Authentik PostgreSQL volume is {{ printf "%.0f" $value }}% full and has grown by >1GB in the last 6 hours.
+              This may indicate the django_channels_postgres_message table is accumulating expired messages.
+              Check table size: kubectl exec -n kube-system authentik-postgresql-0 -- sh -c 'PGPASSWORD=$(cat /opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD) psql -U authentik -d authentik -c "SELECT pg_size_pretty(pg_total_relation_size('"'"'django_channels_postgres_message'"'"'));"'
+
+        - alert: AuthentikPostgreSQLHighUsageAfterCleanup
+          expr: |
+            (
+              longhorn_volume_actual_size_bytes{volume="data-authentik-postgresql-0"}
+              /
+              longhorn_volume_size_bytes{volume="data-authentik-postgresql-0"}
+            ) > 0.4
+          for: 24h
+          labels:
+            severity: info
+            component: authentik
+            namespace: kube-system
+          annotations:
+            summary: "Authentik PostgreSQL volume usage remains high"
+            description: |
+              Authentik PostgreSQL volume is {{ printf "%.0f" $value }}% full for >24h.
+              The cleanup CronJob should keep usage low. If usage is persistently high, investigate:
+              - Check if CronJob is running: kubectl get cronjob -n kube-system authentik-channels-cleanup
+              - Check CronJob logs: kubectl logs -n kube-system -l job-name=<job-name>
+              - Manually check table size for accumulation

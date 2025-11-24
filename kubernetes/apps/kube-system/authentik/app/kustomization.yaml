@@ -6,6 +6,8 @@ resources:
   - ./configmap.sops.yaml
   - ./helmrelease.yaml
   - ./metrics-service.yaml
+  - ./prometheusrule.yaml
+  - ./cronjob-channels-cleanup.yaml
 
 # Authentik blueprints are stored in SOPS-encrypted configmap.sops.yaml
 # This provides security for sensitive domain information in a public repository
