@@ -208,7 +208,7 @@ spec:
         persistence:
           enabled: true
           name: data-authentik-postgresql-0
-          size: 10Gi
+          size: 20Gi
         resources:
           requests:
             cpu: 100m
