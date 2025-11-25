@@ -1,20 +1,12 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
-  annotations:
-    prometheus-operator-validated: "true"
-  creationTimestamp: "2025-11-22T21:02:08Z"
-  generation: 1
   labels:
     app.kubernetes.io/name: kube-prometheus-stack
     app.kubernetes.io/part-of: kube-prometheus-stack
-    kustomize.toolkit.fluxcd.io/name: kube-prometheus-stack
-    kustomize.toolkit.fluxcd.io/namespace: monitoring
     release: kube-prometheus-stack
   name: authentik-alerts
   namespace: monitoring
-  resourceVersion: "103725691"
-  uid: 95449906-f937-4292-8ade-9c7d09c30798
 spec:
   groups:
   - interval: 30s
