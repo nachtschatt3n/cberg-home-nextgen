@@ -1,0 +1,109 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tube-archivist-nfo-sync
+  namespace: download
+data:
+  sync_nfo.py: |
+    import os
+    import json
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    
+    ES_URL = os.environ.get("ES_URL", "http://tube-archivist-elasticsearch:9200")
+    VIDEO_ROOT = "/youtube"
+    
+    def get_all_videos():
+        # Fetching a large batch. For >10k videos, scrolling is needed, but this suffices for most.
+        url = f"{ES_URL}/ta_video/_search?size=10000"
+        try:
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req) as response:
+                data = json.load(response)
+                return data['hits']['hits']
+        except Exception as e:
+            print(f"Error fetching from ES: {e}")
+            return []
+    
+    def build_file_map(root_dir):
+        file_map = {}
+        print(f"Scanning {root_dir}...")
+        for root, dirs, files in os.walk(root_dir):
+            for file in files:
+                if file.endswith(('.mp4', '.mkv', '.webm')):
+                    base_name = os.path.splitext(file)[0]
+                    # Strategy 1: Check if filename ends with -[ID] (default TA behavior)
+                    if '-' in base_name:
+                        possible_id = base_name.split('-')[-1]
+                        if len(possible_id) == 11:
+                             file_map[possible_id] = os.path.join(root, file)
+                             continue
+                    
+                    # Strategy 2: Check for [ID] brackets
+                    if '[' in base_name and ']' in base_name:
+                        possible_id = base_name.split('[')[-1].split(']')[0]
+                        if len(possible_id) == 11:
+                            file_map[possible_id] = os.path.join(root, file)
+                            continue
+        
+        print(f"Found {len(file_map)} video files candidates.")
+        return file_map
+    
+    def create_nfo(video_data, file_path):
+        source = video_data['_source']
+        
+        root = ET.Element("movie")
+        
+        title = source.get('title', 'Unknown')
+        ET.SubElement(root, "title").text = title
+        ET.SubElement(root, "originaltitle").text = title
+        ET.SubElement(root, "sorttitle").text = title
+        
+        desc = source.get('description', '')
+        ET.SubElement(root, "plot").text = desc
+        ET.SubElement(root, "outline").text = desc
+        
+        published = source.get('published', '')
+        if published:
+            ET.SubElement(root, "premiered").text = published
+            ET.SubElement(root, "year").text = published[:4]
+            
+        ET.SubElement(root, "studio").text = source.get('channel_name', '')
+        ET.SubElement(root, "id").text = video_data['_id']
+        ET.SubElement(root, "genre").text = "YouTube"
+        
+        # Write NFO
+        tree = ET.ElementTree(root)
+        if hasattr(ET, 'indent'):
+            ET.indent(tree, space="  ", level=0)
+        
+        nfo_path = os.path.splitext(file_path)[0] + ".nfo"
+        
+        # Check if update is needed could be added here, but overwriting ensures freshness
+        try:
+            tree.write(nfo_path, encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"Failed to write NFO {nfo_path}: {e}")
+    
+    def main():
+        print("Starting NFO sync...")
+        videos = get_all_videos()
+        print(f"Retrieved {len(videos)} videos from Elasticsearch.")
+        
+        if not videos:
+            return
+    
+        file_map = build_file_map(VIDEO_ROOT)
+        
+        count = 0
+        for video in videos:
+            vid_id = video['_id']
+            if vid_id in file_map:
+                create_nfo(video, file_map[vid_id])
+                count += 1
+        
+        print(f"Sync completed. Processed {count} videos.")
+    
+    if __name__ == "__main__":
+        main()

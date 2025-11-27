@@ -9,3 +9,5 @@ resources:
   - ./storageclass.yaml
   - ./pvc.yaml
   - ./secret.sops.yaml
+  - ./metadata-sync-configmap.yaml
+  - ./metadata-sync-cronjob.yaml

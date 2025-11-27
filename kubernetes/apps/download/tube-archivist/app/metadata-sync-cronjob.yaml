@@ -1,0 +1,38 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tube-archivist-nfo-sync
+  namespace: download
+spec:
+  schedule: "0 * * * *" # Run every hour
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+            - name: sync-nfo
+              image: python:3.11-slim
+              command: ["python", "/app/sync_nfo.py"]
+              env:
+                - name: ES_URL
+                  value: "http://tube-archivist-elasticsearch:9200"
+              volumeMounts:
+                - name: script-volume
+                  mountPath: /app/sync_nfo.py
+                  subPath: sync_nfo.py
+                - name: media
+                  mountPath: /youtube
+          restartPolicy: OnFailure
+          volumes:
+            - name: script-volume
+              configMap:
+                name: tube-archivist-nfo-sync
+            - name: media
+              persistentVolumeClaim:
+                claimName: tube-archivist-youtube
