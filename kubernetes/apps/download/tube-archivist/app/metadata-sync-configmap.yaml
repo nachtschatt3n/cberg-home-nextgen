@@ -93,7 +93,7 @@ data:
         ET.SubElement(root, "plot").text = desc
         ET.SubElement(root, "outline").text = desc
         
-        published = source.get('published', '')
+        published = str(source.get('published', ''))
         if published:
             ET.SubElement(root, "premiered").text = published
             ET.SubElement(root, "year").text = published[:4]
