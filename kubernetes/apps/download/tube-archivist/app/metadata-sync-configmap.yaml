@@ -69,8 +69,18 @@ data:
             ET.SubElement(root, "premiered").text = published
             ET.SubElement(root, "year").text = published[:4]
             
-        ET.SubElement(root, "studio").text = source.get('channel_name', '')
-        ET.SubElement(root, "id").text = video_data['_id']
+        channel = source.get('channel_name', '')
+        ET.SubElement(root, "studio").text = channel
+        ET.SubElement(root, "director").text = channel
+        
+        vid_id = video_data['_id']
+        # uniqueid is preferred by modern Kodi/Jellyfin
+        uid = ET.SubElement(root, "uniqueid", type="youtube", default="true")
+        uid.text = vid_id
+        
+        # Legacy ID tag
+        ET.SubElement(root, "id").text = vid_id
+        
         ET.SubElement(root, "genre").text = "YouTube"
         
         # Write NFO
