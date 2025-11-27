@@ -114,6 +114,7 @@ spec:
         enabled: true
         className: "external"
         annotations:
+          external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Tube Archivist"
           gethomepage.dev/description: "Tube Archivist is a self-hosted YouTube media server"
