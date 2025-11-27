@@ -18,10 +18,8 @@ kind: Ingress
 metadata:
   name: frigate-authentik-outpost
   namespace: home-automation
-  annotations:
-    external-dns.alpha.kubernetes.io/exclude: "true"
 spec:
-  ingressClassName: external
+  ingressClassName: internal
   rules:
     - host: "frigate.${SECRET_DOMAIN}"
       http:
