@@ -193,17 +193,15 @@ spec:
     rules:
     - alert: AuthentikBlueprintOutpostMismatch
       annotations:
-        description: 'The number of outpost pods ({{ query "count(kube_pod_info{namespace=''kube-system'',
-          pod=~''ak-outpost-.*''})" | first | value }}) doesn''t match the number
-          of configured outposts ({{ query "count(authentik_outpost_info)" | first
-          | value }}). Blueprint configuration may not be loaded. Review: kubectl
-          exec -n kube-system deployment/authentik-server -- ak apply_blueprint /blueprints/'
+        description: 'The number of running outpost pods ({{ $value }}) doesn''t match
+          the number of outpost deployments. This may indicate an outpost deployment
+          issue. Check: kubectl get deployments -n kube-system -l app.kubernetes.io/name=authentik-proxy'
         runbook_url: https://docs.goauthentik.io/docs/blueprints/
-        summary: Authentik outpost count mismatch detected
+        summary: Authentik outpost pod count mismatch detected
       expr: |
-        count(kube_pod_info{namespace="kube-system", pod=~"ak-outpost-.*"})
+        count(kube_pod_status_phase{namespace="kube-system", pod=~"ak-outpost-.*", phase="Running"})
         !=
-        count(authentik_outposts_connected{outpost_name!="authentik Embedded Outpost"})
+        count(kube_deployment_labels{namespace="kube-system", deployment=~"ak-outpost-.*"})
       for: 10m
       labels:
         category: authentication
