@@ -11,6 +11,7 @@ data:
     import urllib.request
     import base64
     import xml.etree.ElementTree as ET
+    from datetime import datetime
     
     ES_URL = os.environ.get("ES_URL", "http://tube-archivist-elasticsearch:9200")
     ES_USER = os.environ.get("ELASTIC_USER", "elastic")
@@ -79,6 +80,28 @@ data:
         print(f"Found {len(file_map)} video files candidates.")
         return file_map
     
+    def format_date(published_val):
+        if not published_val:
+            return "", ""
+            
+        # Check if it's a timestamp (int or string looking like int)
+        try:
+            ts = float(published_val)
+            # Simple heuristic: if it's huge, it's a timestamp. 
+            # Year 3000 is 32503680000. Year 1970 is 0.
+            # If it's just "2023", float("2023") is 2023.
+            # Timestamps are usually > 1000000000 (since 2001).
+            if ts > 1000000000:
+                dt = datetime.fromtimestamp(ts)
+                return dt.strftime("%Y-%m-%d"), str(dt.year)
+        except ValueError:
+            pass
+            
+        # Fallback: assume it's already a string like YYYY-MM-DD or similar
+        pub_str = str(published_val)
+        year = pub_str[:4]
+        return pub_str, year
+
     def create_nfo(video_data, file_path):
         source = video_data['_source']
         
@@ -93,10 +116,12 @@ data:
         ET.SubElement(root, "plot").text = desc
         ET.SubElement(root, "outline").text = desc
         
-        published = str(source.get('published', ''))
-        if published:
-            ET.SubElement(root, "premiered").text = published
-            ET.SubElement(root, "year").text = published[:4]
+        published_raw = source.get('published', '')
+        date_str, year_str = format_date(published_raw)
+        
+        if date_str:
+            ET.SubElement(root, "premiered").text = date_str
+            ET.SubElement(root, "year").text = year_str
             
         channel = source.get('channel_name', '')
         ET.SubElement(root, "studio").text = channel
