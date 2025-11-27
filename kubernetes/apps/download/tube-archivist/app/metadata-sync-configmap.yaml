@@ -9,9 +9,12 @@ data:
     import os
     import json
     import urllib.request
+    import base64
     import xml.etree.ElementTree as ET
     
     ES_URL = os.environ.get("ES_URL", "http://tube-archivist-elasticsearch:9200")
+    ES_USER = os.environ.get("ELASTIC_USER", "elastic")
+    ES_PASSWORD = os.environ.get("ELASTIC_PASSWORD", "")
     VIDEO_ROOT = "/youtube"
     
     def get_all_videos():
@@ -19,6 +22,11 @@ data:
         url = f"{ES_URL}/ta_video/_search?size=10000"
         try:
             req = urllib.request.Request(url)
+            if ES_PASSWORD:
+                auth_str = f"{ES_USER}:{ES_PASSWORD}"
+                b64_auth = base64.b64encode(auth_str.encode()).decode()
+                req.add_header("Authorization", f"Basic {b64_auth}")
+            
             with urllib.request.urlopen(req) as response:
                 data = json.load(response)
                 return data['hits']['hits']
