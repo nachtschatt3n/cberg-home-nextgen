@@ -19,7 +19,11 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: Authentik pod {{ $labels.pod }} is not ready
       expr: |
-        sum by (namespace, pod) (kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*", condition="true"}) == 0
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="kube-system", pod=~"authentik-.*", condition="true"}
+          unless on(namespace, pod)
+          kube_pod_owner{owner_kind="Job"}
+        ) == 0
       for: 5m
       labels:
         category: authentication
