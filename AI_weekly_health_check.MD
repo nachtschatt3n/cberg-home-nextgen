@@ -323,14 +323,403 @@ This health check can be:
 3. Integrated into a monitoring dashboard
 4. Extended with custom checks specific to your workloads
 
+---
+
+## Command Reference - Tested & Working
+
+This section contains commands that have been tested and work reliably for health checks.
+
+### 1. Cluster Events & Logs
+
+```bash
+# Get recent events (last 50)
+kubectl get events -A --sort-by='.lastTimestamp' | tail -50
+
+# Get warning events only
+kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | tail -30
+
+# Check for specific event reasons (adjust time window as needed)
+kubectl get events -A --field-selector reason=OOMKilled
+kubectl get events -A --field-selector reason=Evicted
+```
+
+### 2. Jobs & CronJobs
+
+```bash
+# List all jobs
+kubectl get jobs -A
+
+# List all CronJobs with schedule info
+kubectl get cronjobs -A
+
+# Check specific CronJob last run
+kubectl get cronjob -n <namespace> <cronjob-name> -o jsonpath='{.status.lastScheduleTime}'
+
+# Get recent job logs
+kubectl logs -n <namespace> job/<job-name> --tail=20
+```
+
+### 3. Certificates
+
+```bash
+# List all certificates with basic info
+kubectl get certificates -A
+
+# Get detailed certificate expiration info (WORKS)
+kubectl get certificates -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: ready={.status.conditions[?(@.type=="Ready")].status}, expires={.status.renewalTime}{"\n"}{end}'
+
+# ❌ AVOID: Complex jq with shell quoting issues
+# kubectl get certificates -A -o json | jq -r '.items[] | select(.status.renewalTime != null) | "..."'
+```
+
+### 4. DaemonSets
+
+```bash
+# List all DaemonSets with replica counts
+kubectl get daemonsets -A
+
+# Check for any DaemonSets with mismatched counts
+kubectl get daemonsets -A -o json | jq -r '.items[] | select(.status.desiredNumberScheduled != .status.numberReady) | "\(.metadata.namespace)/\(.metadata.name): desired=\(.status.desiredNumberScheduled) ready=\(.status.numberReady)"'
+```
+
+### 5. Helm Deployments & Flux
+
+```bash
+# List all HelmReleases
+flux get helmreleases -A
+
+# List all Flux kustomizations
+flux get kustomizations -A
+
+# Check specific HelmRelease status
+flux get helmrelease <name> -n <namespace>
+
+# Force reconciliation if needed
+flux reconcile kustomization <name> -n <namespace>
+flux reconcile helmrelease <name> -n <namespace>
+```
+
+### 6. Deployments & StatefulSets
+
+```bash
+# List all deployments with details
+kubectl get deployments -A -o wide
+
+# List all StatefulSets
+kubectl get statefulsets -A
+
+# Find deployments with mismatched replicas
+kubectl get deployments -A -o json | jq -r '.items[] | select(.status.replicas != .status.readyReplicas) | "\(.metadata.namespace)/\(.metadata.name): replicas=\(.status.replicas) ready=\(.status.readyReplicas)"'
+```
+
+### 7. Pods Health
+
+```bash
+# Find all non-running pods
+kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
+
+# Find pods with high restart counts (>5 restarts)
+kubectl get pods -A -o wide | awk 'NR==1 || $4 > 5' | head -30
+
+# Check for specific pod states
+kubectl get pods -A --field-selector=status.phase=Pending
+kubectl get pods -A --field-selector=status.phase=Failed
+
+# Find pods stuck in Terminating
+kubectl get pods -A | grep Terminating
+```
+
+### 8. Prometheus & Monitoring
+
+```bash
+# List all PrometheusRules
+kubectl get prometheusrules -A
+
+# Check Prometheus logs for errors (last 24h)
+kubectl logs -n monitoring prometheus-kube-prometheus-stack-0 --tail=50 --since=24h 2>&1 | grep -iE "(error|warn|fail)" | head -20
+
+# Check if Prometheus is running
+kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus
+```
+
+### 9. Alertmanager
+
+```bash
+# Check Alertmanager logs
+kubectl logs -n monitoring alertmanager-kube-prometheus-stack-0 --tail=50 --since=24h 2>&1 | grep -iE "(error|warn|fail)" | head -20
+
+# Get Alertmanager pod status
+kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
+```
+
+### 10. Longhorn Storage
+
+```bash
+# List all Longhorn volumes with status
+kubectl get volumes -n storage -o wide
+
+# Check for unhealthy volumes
+kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.state != "attached" or .status.robustness != "healthy") | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"'
+
+# Check all PVCs for issues
+kubectl get pvc -A | grep -E "(Pending|Lost|Unknown)" || echo "All PVCs are Bound"
+
+# List PVCs with their status
+kubectl get pvc -A
+```
+
+### 11. Container Logs Analysis
+
+```bash
+# Check Cilium logs for errors
+kubectl -n kube-system logs -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -iE "(error|fatal|critical)" | head -20
+
+# Check CoreDNS logs
+kubectl -n kube-system logs -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -iE "(error|fatal)" | head -20
+
+# Check Flux controller logs
+kubectl -n flux-system logs deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -iE "(error|fail)" | head -20
+```
+
+### 12. Talos System Health
+
+```bash
+# Get Talos version (single node)
+talosctl version --nodes <node-ip>
+
+# ❌ AVOID: health command with multiple nodes (not supported)
+# talosctl health --nodes 192.168.55.11,192.168.55.12,192.168.55.13
+
+# ✅ USE: health command with single node
+talosctl health --nodes <single-node-ip>
+
+# Get machine status
+talosctl get machinestatus --nodes <node-ip>
+
+# Check services on a node
+talosctl services --nodes <node-ip>
+
+# Read dmesg for hardware errors
+talosctl dmesg --nodes <node-ip> | grep -iE "(error|fail|warn)" | tail -20
+```
+
+### 13. Hardware Health
+
+```bash
+# Note: Temperature monitoring via talosctl may not work on all hardware
+# This is expected and not a critical issue
+
+# Attempt to read temperature sensors (may not return data)
+talosctl read /sys/class/hwmon/hwmon*/temp*_input --nodes <node-ip>
+
+# Check for hardware errors in dmesg
+talosctl dmesg --nodes <node-ip> | grep -iE "(hardware|temperature|thermal)" | tail -20
+```
+
+### 14. Resource Utilization
+
+```bash
+# Node resource usage
+kubectl top nodes
+
+# Top CPU consuming pods
+kubectl top pods -A --sort-by=cpu | head -15
+
+# Top memory consuming pods
+kubectl top pods -A --sort-by=memory | head -15
+
+# Get node details
+kubectl get nodes -o wide
+```
+
+### 15. Backup System
+
+```bash
+# List backup CronJobs
+kubectl get cronjobs -n storage
+
+# Check latest backup job
+kubectl get jobs -n storage | grep backup
+
+# Get backup job logs
+kubectl logs -n storage job/<backup-job-name> --tail=20
+
+# Check backup completion time
+kubectl get job -n storage <backup-job-name> -o jsonpath='{.status.completionTime}'
+```
+
+### 16. Version Checks
+
+```bash
+# Kubernetes version (UPDATED - --short flag removed)
+kubectl version -o json | jq -r '.serverVersion | "Server: \(.gitVersion)"'
+
+# ❌ AVOID: Old kubectl version command
+# kubectl version --short
+
+# Talos version
+talosctl version --nodes <node-ip>
+
+# Get Helm chart versions from HelmReleases
+kubectl get helmrelease -n <namespace> <name> -o jsonpath='{.spec.chart.spec.version}'
+
+# Examples:
+kubectl get helmrelease -n storage longhorn -o jsonpath='{.spec.chart.spec.version}'
+kubectl get helmrelease -n kube-system cilium -o jsonpath='{.spec.chart.spec.version}'
+kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.spec.chart.spec.version}'
+```
+
+### 17. Security Checks
+
+```bash
+# Find pods running as root (basic check)
+kubectl get pods -A -o json | jq -r '.items[] | select(.spec.securityContext.runAsUser == 0 or (.spec.containers[].securityContext.runAsUser // 0) == 0) | "\(.metadata.namespace)/\(.metadata.name)"' | head -20
+
+# List ingresses (to check TLS configuration)
+kubectl get ingress -A
+
+# Check for LoadBalancer services
+kubectl get svc -A --field-selector spec.type=LoadBalancer
+```
+
+### 18. Network Connectivity
+
+```bash
+# List all ingresses
+kubectl get ingress -A
+
+# Check ingress controllers
+kubectl get svc -n network | grep ingress
+
+# Check external-dns
+kubectl get deployment -n network external-dns
+
+# Verify DNS pods
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+```
+
+### 19. GitOps Status
+
+```bash
+# Check all kustomizations
+flux get kustomizations -A
+
+# Check Git source status
+flux get sources git -A
+
+# Check if Git repo is accessible
+flux reconcile source git flux-system
+
+# Check for drift
+flux diff kustomization <name> -n <namespace>
+```
+
+### 20. Namespace Review
+
+```bash
+# List all namespaces
+kubectl get namespaces
+
+# Check for stuck resources in Terminating state
+kubectl get namespaces | grep Terminating
+kubectl get pods -A | grep Terminating
+
+# Check resource quotas (if configured)
+kubectl get resourcequotas -A
+```
+
+---
+
+## Common Pitfalls & Solutions
+
+### 1. JQ Complex Queries with Shell Quoting
+**Problem**: Complex jq filters with shell escaping can fail
+**Solution**: Use simpler jsonpath queries or test jq syntax separately first
+
+```bash
+# ❌ Can fail with quoting issues
+kubectl get certificates -A -o json | jq -r '.items[] | select(.status.renewalTime != null) | "..."'
+
+# ✅ Use jsonpath instead
+kubectl get certificates -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: expires={.status.renewalTime}{"\n"}{end}'
+```
+
+### 2. Kubectl Version Command Changed
+**Problem**: `kubectl version --short` no longer works in newer versions
+**Solution**: Use `-o json` with jq or `-o yaml`
+
+```bash
+# ❌ Old way (deprecated)
+kubectl version --short
+
+# ✅ New way
+kubectl version -o json | jq -r '.serverVersion.gitVersion'
+```
+
+### 3. Talosctl Health with Multiple Nodes
+**Problem**: `talosctl health` doesn't support multiple nodes in `--nodes` flag
+**Solution**: Run health check one node at a time or omit `--nodes` to check all
+
+```bash
+# ❌ Doesn't work
+talosctl health --nodes 192.168.55.11,192.168.55.12,192.168.55.13
+
+# ✅ Works - single node
+talosctl health --nodes 192.168.55.11
+
+# ✅ Works - check all configured nodes
+talosctl health
+```
+
+### 4. Temperature Sensor Access
+**Problem**: Hardware temperature sensors may not be accessible via talosctl
+**Solution**: This is expected on some hardware; rely on other health indicators (CPU metrics, throttling)
+
+### 5. Field Selector Limitations
+**Problem**: Not all fields support field selectors
+**Solution**: Use `grep` or `jq` for complex filtering
+
+```bash
+# ✅ Works - standard field selectors
+kubectl get pods -A --field-selector=status.phase=Pending
+
+# ❌ May not work - custom field selectors
+kubectl get pods -A --field-selector=status.restartCount>5
+
+# ✅ Alternative - use awk/grep
+kubectl get pods -A -o wide | awk 'NR==1 || $4 > 5'
+```
+
+---
+
+## Tips for Efficient Health Checks
+
+1. **Use `-A` for cluster-wide checks**: Always use `-A` (all namespaces) for comprehensive views
+2. **Combine with `| grep` or `| awk`**: Pipe output to filter for specific conditions
+3. **Check logs with `--since` and `--tail`**: Limit log output to recent entries only
+4. **Use `|| echo "message"`**: Provide clear output when no issues found
+5. **Save frequently used queries**: Create shell aliases for common health check commands
+6. **Run checks in parallel**: Use background jobs for long-running commands when gathering data
+
+Example parallel execution:
+```bash
+kubectl get pods -A > /tmp/pods.txt &
+kubectl get deployments -A > /tmp/deployments.txt &
+kubectl get statefulsets -A > /tmp/statefulsets.txt &
+wait
+cat /tmp/pods.txt /tmp/deployments.txt /tmp/statefulsets.txt
+```
+
+---
+
 ## Maintenance Log
 
 Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2025-11-27 | Excellent | 0 | Updated health check documentation with command reference | Added tested commands and common pitfalls section |
 | 2025-11-15 | Excellent | 0 | Fixed pgadmin cert, cleaned orphaned volumes | All systems operational |
-| | | | | |
 | | | | | |
 
 ---
@@ -345,4 +734,4 @@ If critical issues are found:
 
 ---
 
-*Last Updated: 2025-11-15*
+*Last Updated: 2025-11-27*

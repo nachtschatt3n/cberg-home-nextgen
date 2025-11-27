@@ -142,7 +142,7 @@ spec:
     # -- Ingress configuration. See: https://kubernetes.io/docs/concepts/services-networking/ingress/
     ingress:
       enabled: true
-      className: "internal"
+      className: "external"
       annotations:
         gethomepage.dev/enabled: "true"
         gethomepage.dev/name: "Jellyfin"
