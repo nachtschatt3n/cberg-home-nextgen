@@ -110,7 +110,7 @@ spec:
             port: 8000
 
     ingress:
-      external:
+      main:
         enabled: true
         className: "external"
         annotations:
@@ -124,20 +124,6 @@ spec:
             gethomepage.dev/enabled: "true"
         hosts:
           - host: &host "tube-archivist.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: tube-archivist
-                  port: 8000
-        tls:
-          - hosts:
-              - *host
-      internal:
-        enabled: true
-        className: "internal"
-        hosts:
-          - host: *host
             paths:
               - path: /
                 pathType: Prefix
