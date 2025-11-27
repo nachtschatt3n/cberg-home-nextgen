@@ -149,7 +149,6 @@ spec:
         gethomepage.dev/description: "Media streaming server"
         gethomepage.dev/group: "Media"
         gethomepage.dev/icon: "jellyfin.png"
-        external-dns.alpha.kubernetes.io/target: "jellyfin.${SECRET_DOMAIN}"
         nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
         nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
         nginx.ingress.kubernetes.io/proxy-buffering: "off"
