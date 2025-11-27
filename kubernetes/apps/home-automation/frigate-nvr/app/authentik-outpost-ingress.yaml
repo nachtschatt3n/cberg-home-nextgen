@@ -19,7 +19,7 @@ metadata:
   name: frigate-authentik-outpost
   namespace: home-automation
 spec:
-  ingressClassName: internal
+  ingressClassName: external
   rules:
     - host: "frigate.${SECRET_DOMAIN}"
       http:
