@@ -22,6 +22,11 @@ spec:
               env:
                 - name: ES_URL
                   value: "http://tube-archivist-elasticsearch:9200"
+                - name: ELASTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tube-archivist-secrets
+                      key: TUBE_ARCHIVIST_ELASTIC_PASSWORD
               volumeMounts:
                 - name: script-volume
                   mountPath: /app/sync_nfo.py
