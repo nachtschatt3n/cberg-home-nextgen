@@ -4,6 +4,7 @@ metadata:
   name: frigate
   namespace: home-automation
   annotations:
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
     meta.helm.sh/release-name: frigate
     meta.helm.sh/release-namespace: home-automation
     gethomepage.dev/enabled: "true"
@@ -21,7 +22,7 @@ metadata:
   labels:
     gethomepage.dev/enabled: "true"
 spec:
-  ingressClassName: internal
+  ingressClassName: external
   tls:
     - hosts:
         - "frigate.${SECRET_DOMAIN}"
