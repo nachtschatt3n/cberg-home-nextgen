@@ -41,19 +41,40 @@ data:
             for file in files:
                 if file.endswith(('.mp4', '.mkv', '.webm')):
                     base_name = os.path.splitext(file)[0]
+                    
+                    # Strategy 0: Exact 11-char ID match (files named [ID].mp4)
+                    if len(base_name) == 11:
+                        file_map[base_name] = os.path.join(root, file)
+                        continue
+
                     # Strategy 1: Check if filename ends with -[ID] (default TA behavior)
+                    # Note: IDs can contain dashes, so we look at the last 11 chars if preceded by a dash?
+                    # Or simply split. TA default is Title-ID.
                     if '-' in base_name:
-                        possible_id = base_name.split('-')[-1]
+                        # Try the last part first
+                        parts = base_name.split('-')
+                        possible_id = parts[-1]
                         if len(possible_id) == 11:
+                             file_map[possible_id] = os.path.join(root, file)
+                             continue
+                        
+                        # Special handling if ID contains dashes (less common in this format but possible if simplistic split used)
+                        # But TA usually cleans title.
+                        # Let's try checking the last 11 characters if they look like an ID
+                        if len(base_name) > 12 and base_name[-12] == '-':
+                             possible_id = base_name[-11:]
                              file_map[possible_id] = os.path.join(root, file)
                              continue
                     
                     # Strategy 2: Check for [ID] brackets
                     if '[' in base_name and ']' in base_name:
-                        possible_id = base_name.split('[')[-1].split(']')[0]
-                        if len(possible_id) == 11:
-                            file_map[possible_id] = os.path.join(root, file)
-                            continue
+                        try:
+                            possible_id = base_name.split('[')[-1].split(']')[0]
+                            if len(possible_id) == 11:
+                                file_map[possible_id] = os.path.join(root, file)
+                                continue
+                        except IndexError:
+                            pass
         
         print(f"Found {len(file_map)} video files candidates.")
         return file_map
