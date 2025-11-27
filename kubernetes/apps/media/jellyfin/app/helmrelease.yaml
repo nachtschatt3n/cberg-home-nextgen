@@ -144,7 +144,7 @@ spec:
       enabled: true
       className: "external"
       annotations:
-        external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         gethomepage.dev/enabled: "true"
         gethomepage.dev/name: "Jellyfin"
         gethomepage.dev/description: "Media streaming server"
