@@ -124,7 +124,9 @@ data:
             ET.SubElement(root, "premiered").text = date_str
             ET.SubElement(root, "year").text = year_str
             
-        channel = source.get('channel_name', '')
+        channel_data = source.get('channel', {})
+        channel = channel_data.get('channel_name', '') if isinstance(channel_data, dict) else ''
+        
         ET.SubElement(root, "studio").text = channel
         ET.SubElement(root, "director").text = channel
         
@@ -192,11 +194,6 @@ data:
         
         if not videos:
             return
-            
-        # Debug: Print keys of the first video to verify field names
-        if len(videos) > 0:
-            print(f"Sample video keys: {list(videos[0]['_source'].keys())}")
-            print(f"Sample channel field: {videos[0]['_source'].get('channel')}")
     
         file_map = build_file_map(VIDEO_ROOT)
         
@@ -211,10 +208,12 @@ data:
                 
                 # Handle Channel NFO
                 folder_path = os.path.dirname(file_path)
-                channel_name = video['_source'].get('channel_name')
+                
+                # Extract channel name from nested dictionary
+                channel_data = video['_source'].get('channel', {})
+                channel_name = channel_data.get('channel_name') if isinstance(channel_data, dict) else None
                 
                 if channel_name and folder_path not in processed_channels:
-                    print(f"Creating show NFO for channel '{channel_name}' in '{folder_path}'")
                     create_show_nfo(folder_path, channel_name)
                     processed_channels.add(folder_path)
 
