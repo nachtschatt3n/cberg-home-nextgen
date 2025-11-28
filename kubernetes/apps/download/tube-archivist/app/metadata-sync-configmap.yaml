@@ -115,6 +115,7 @@ data:
         desc = source.get('description', '')
         ET.SubElement(root, "plot").text = desc
         ET.SubElement(root, "outline").text = desc
+        ET.SubElement(root, "lockdata").text = "true"
         
         published_raw = source.get('published', '')
         date_str, year_str = format_date(published_raw)
@@ -149,6 +150,40 @@ data:
             tree.write(nfo_path, encoding="utf-8", xml_declaration=True)
         except Exception as e:
             print(f"Failed to write NFO {nfo_path}: {e}")
+
+    def create_show_nfo(folder_path, channel_name):
+        if not channel_name:
+            return
+
+        # Create tvshow.nfo
+        root = ET.Element("tvshow")
+        ET.SubElement(root, "title").text = channel_name
+        ET.SubElement(root, "plot").text = f"Videos from {channel_name}"
+        ET.SubElement(root, "lockdata").text = "true"
+        
+        tree = ET.ElementTree(root)
+        if hasattr(ET, 'indent'):
+            ET.indent(tree, space="  ", level=0)
+            
+        try:
+            tree.write(os.path.join(folder_path, "tvshow.nfo"), encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"Failed to write tvshow.nfo: {e}")
+
+        # Create artist.nfo (for Music Videos)
+        root = ET.Element("artist")
+        ET.SubElement(root, "name").text = channel_name
+        ET.SubElement(root, "biography").text = f"Videos from {channel_name}"
+        ET.SubElement(root, "lockdata").text = "true"
+        
+        tree = ET.ElementTree(root)
+        if hasattr(ET, 'indent'):
+            ET.indent(tree, space="  ", level=0)
+            
+        try:
+            tree.write(os.path.join(folder_path, "artist.nfo"), encoding="utf-8", xml_declaration=True)
+        except Exception as e:
+            print(f"Failed to write artist.nfo: {e}")
     
     def main():
         print("Starting NFO sync...")
@@ -161,10 +196,22 @@ data:
         file_map = build_file_map(VIDEO_ROOT)
         
         count = 0
+        processed_channels = set()
+
         for video in videos:
             vid_id = video['_id']
             if vid_id in file_map:
-                create_nfo(video, file_map[vid_id])
+                file_path = file_map[vid_id]
+                create_nfo(video, file_path)
+                
+                # Handle Channel NFO
+                folder_path = os.path.dirname(file_path)
+                channel_name = video['_source'].get('channel_name')
+                
+                if channel_name and folder_path not in processed_channels:
+                    create_show_nfo(folder_path, channel_name)
+                    processed_channels.add(folder_path)
+
                 count += 1
         
         print(f"Sync completed. Processed {count} videos.")
