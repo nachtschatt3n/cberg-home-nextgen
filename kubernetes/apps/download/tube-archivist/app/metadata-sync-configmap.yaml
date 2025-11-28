@@ -196,7 +196,7 @@ data:
         # Debug: Print keys of the first video to verify field names
         if len(videos) > 0:
             print(f"Sample video keys: {list(videos[0]['_source'].keys())}")
-            print(f"Sample channel_name: {videos[0]['_source'].get('channel_name')}")
+            print(f"Sample channel field: {videos[0]['_source'].get('channel')}")
     
         file_map = build_file_map(VIDEO_ROOT)
         
