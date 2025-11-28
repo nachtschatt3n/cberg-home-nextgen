@@ -124,11 +124,15 @@ data:
             ET.SubElement(root, "premiered").text = date_str
             ET.SubElement(root, "year").text = year_str
             
-        channel_data = source.get('channel', {})
-        channel = channel_data.get('channel_name', '') if isinstance(channel_data, dict) else ''
+        channel_name = None
+        channel_data = source.get('channel')
+        if isinstance(channel_data, dict):
+            channel_name = channel_data.get('channel_name')
+        if not channel_name:
+            channel_name = source.get('channel_name', '')
         
-        ET.SubElement(root, "studio").text = channel
-        ET.SubElement(root, "director").text = channel
+        ET.SubElement(root, "studio").text = channel_name
+        ET.SubElement(root, "director").text = channel_name
         
         vid_id = video_data['_id']
         # uniqueid is preferred by modern Kodi/Jellyfin
@@ -209,9 +213,15 @@ data:
                 # Handle Channel NFO
                 folder_path = os.path.dirname(file_path)
                 
-                # Extract channel name from nested dictionary
-                channel_data = video['_source'].get('channel', {})
-                channel_name = channel_data.get('channel_name') if isinstance(channel_data, dict) else None
+                # Extract channel name from nested dictionary or root
+                channel_name = None
+                channel_data = video['_source'].get('channel')
+                
+                if isinstance(channel_data, dict):
+                    channel_name = channel_data.get('channel_name')
+                
+                if not channel_name:
+                    channel_name = video['_source'].get('channel_name')
                 
                 if channel_name and folder_path not in processed_channels:
                     create_show_nfo(folder_path, channel_name)
