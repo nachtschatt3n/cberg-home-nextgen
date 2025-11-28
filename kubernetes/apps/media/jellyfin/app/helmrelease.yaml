@@ -168,10 +168,10 @@ spec:
     resources:
       requests:
         cpu: 100m
-        memory: 250Mi
+        memory: 4Gi
         gpu.intel.com/i915: 1
       limits:
-        memory: 2Gi
+        memory: 8Gi
         gpu.intel.com/i915: 1
 
     # -- Configure liveness probe for Jellyfin.
