@@ -138,10 +138,14 @@ data:
         scrapeConfigSelectorNilUsesHelmValues: false
         enableAdminAPI: true
         walCompression: true
-        retention: 12h
-        retentionSize: 4GB
+        retention: 7d
+        retentionSize: 20GB
         storageSpec:
           volumeClaimTemplate:
+            metadata:
+              annotations:
+                # Prometheus data is ephemeral - use single replica to save space
+                longhorn.io/number-of-replicas: "1"
             spec:
               storageClassName: longhorn
               resources:
