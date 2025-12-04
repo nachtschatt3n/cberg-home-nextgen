@@ -147,7 +147,9 @@ spec:
             'trusted_domains' =>
               [
                 'drive',
-                'drive.${SECRET_DOMAIN}'
+                'drive.${SECRET_DOMAIN}',
+                'nextcloud',
+                'nextcloud.office.svc.cluster.local'
               ],
             'trusted_proxies' =>
               [
