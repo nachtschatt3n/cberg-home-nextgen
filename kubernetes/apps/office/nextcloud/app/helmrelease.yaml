@@ -268,6 +268,7 @@ spec:
 
     cronjob:
       enabled: true
+      schedule: "* * * * *"
       resources:
         limits:
           memory: 1024M
