@@ -194,7 +194,7 @@ spec:
       #        key: secret_key
 
       ## Sidecar containers for notify_push
-      extraSidecars:
+      extraSidecarContainers:
         - name: notify-push
           image: nextcloud:32.0.2
           command:
