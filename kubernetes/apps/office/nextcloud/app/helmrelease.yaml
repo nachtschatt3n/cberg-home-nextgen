@@ -62,6 +62,13 @@ spec:
         hosts:
           - host: "drive.${SECRET_DOMAIN}"
             paths:
+              - path: /push
+                pathType: Prefix
+                backend:
+                  service:
+                    name: main
+                    port:
+                      number: 7867
               - path: /
                 pathType: Prefix
                 backend:
@@ -186,6 +193,45 @@ spec:
       #        name: nextcloud
       #        key: secret_key
 
+      ## Sidecar containers for notify_push
+      extraSidecars:
+        - name: notify-push
+          image: nextcloud:32.0.2
+          command:
+            - /var/www/html/custom_apps/notify_push/bin/x86_64/notify_push
+            - /var/www/html/config/config.php
+          ports:
+            - containerPort: 7867
+              name: notify-push
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "7867"
+            - name: NEXTCLOUD_URL
+              value: "http://localhost:8080"
+          volumeMounts:
+            - name: nextcloud-main
+              mountPath: /var/www/
+              subPath: root
+            - name: nextcloud-main
+              mountPath: /var/www/html
+              subPath: html
+            - name: nextcloud-data
+              mountPath: /var/www/html/data
+              subPath: data
+            - name: nextcloud-main
+              mountPath: /var/www/html/config
+              subPath: config
+            - name: nextcloud-main
+              mountPath: /var/www/html/custom_apps
+              subPath: custom_apps
+            - name: nextcloud-main
+              mountPath: /var/www/tmp
+              subPath: tmp
+            - name: nextcloud-main
+              mountPath: /var/www/html/themes
+              subPath: themes
+
     nginx:
       enabled: false
 
@@ -276,6 +322,12 @@ spec:
     service:
       type: ClusterIP
       port: 8080
+      ## Additional ports for notify_push sidecar
+      additionalPorts:
+        - name: notify-push
+          port: 7867
+          targetPort: 7867
+          protocol: TCP
 
     persistence:
       enabled: true
