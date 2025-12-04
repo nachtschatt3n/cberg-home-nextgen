@@ -6,4 +6,5 @@ resources:
   - ./pvc.yaml
   - ./helmrelease.yaml
   - ./whiteboard-proxy.yaml
+  - ./notify-push.yaml
 

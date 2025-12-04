@@ -1,0 +1,108 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextcloud-notify-push
+  namespace: office
+spec:
+  type: ClusterIP
+  ports:
+    - name: notify-push
+      port: 7867
+      targetPort: 7867
+      protocol: TCP
+  selector:
+    app: nextcloud-notify-push
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud-notify-push
+  namespace: office
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud-notify-push
+  template:
+    metadata:
+      labels:
+        app: nextcloud-notify-push
+    spec:
+      containers:
+        - name: notify-push
+          image: nextcloud:32.0.2
+          command:
+            - /var/www/html/custom_apps/notify_push/bin/x86_64/notify_push
+            - /var/www/html/config/config.php
+          ports:
+            - containerPort: 7867
+              name: notify-push
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "7867"
+            - name: NEXTCLOUD_URL
+              value: "http://nextcloud:8080"
+          volumeMounts:
+            - name: nextcloud-main
+              mountPath: /var/www/
+              subPath: root
+            - name: nextcloud-main
+              mountPath: /var/www/html
+              subPath: html
+            - name: nextcloud-data
+              mountPath: /var/www/html/data
+              subPath: data
+            - name: nextcloud-main
+              mountPath: /var/www/html/config
+              subPath: config
+            - name: nextcloud-main
+              mountPath: /var/www/html/custom_apps
+              subPath: custom_apps
+            - name: nextcloud-main
+              mountPath: /var/www/tmp
+              subPath: tmp
+            - name: nextcloud-main
+              mountPath: /var/www/html/themes
+              subPath: themes
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: nextcloud-main
+          persistentVolumeClaim:
+            claimName: nextcloud-config
+        - name: nextcloud-data
+          persistentVolumeClaim:
+            claimName: nextcloud-data
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextcloud-notify-push
+  namespace: office
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+spec:
+  ingressClassName: external
+  rules:
+    - host: "drive.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /push
+            pathType: Prefix
+            backend:
+              service:
+                name: nextcloud-notify-push
+                port:
+                  number: 7867
+  tls:
+    - secretName: nextcloud-tls
+      hosts:
+        - "drive.${SECRET_DOMAIN}"
