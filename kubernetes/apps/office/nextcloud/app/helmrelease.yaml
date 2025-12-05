@@ -187,6 +187,41 @@ spec:
       #      secretKeyRef:
       #        name: nextcloud
       #        key: secret_key
+      extraSidecarContainers:
+        - name: worker
+          image: nextcloud:32.0.2
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              while true; do
+                php /var/www/html/occ background-job:worker "OC\TaskProcessing\SynchronousBackgroundJob"
+                sleep 1
+              done
+          volumeMounts:
+            - name: nextcloud-main
+              mountPath: /var/www/html
+              subPath: html
+            - name: nextcloud-data
+              mountPath: /var/www/html/data
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/custom.config.php
+              subPath: custom.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/redis.config.php
+              subPath: redis.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/reverse-proxy.config.php
+              subPath: reverse-proxy.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/apps.config.php
+              subPath: apps.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/apcu.config.php
+              subPath: apcu.config.php
+            - name: nextcloud-config
+              mountPath: /var/www/html/config/smtp.config.php
+              subPath: smtp.config.php
 
     nginx:
       enabled: false
@@ -230,41 +265,6 @@ spec:
     ## MariaDB chart configuration
     ## ref: https://github.com/bitnami/charts/tree/main/bitnami/mariadb
     ##
-    extraSidecarContainers:
-      - name: worker
-        image: nextcloud:32.0.2
-        imagePullPolicy: IfNotPresent
-        command: ["/bin/bash", "-c"]
-        args:
-          - |
-            while true; do
-              php /var/www/html/occ background-job:worker "OC\TaskProcessing\SynchronousBackgroundJob"
-              sleep 1
-            done
-        volumeMounts:
-          - name: nextcloud-main
-            mountPath: /var/www/html
-            subPath: html
-          - name: nextcloud-data
-            mountPath: /var/www/html/data
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/custom.config.php
-            subPath: custom.config.php
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/redis.config.php
-            subPath: redis.config.php
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/reverse-proxy.config.php
-            subPath: reverse-proxy.config.php
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/apps.config.php
-            subPath: apps.config.php
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/apcu.config.php
-            subPath: apcu.config.php
-          - name: nextcloud-config
-            mountPath: /var/www/html/config/smtp.config.php
-            subPath: smtp.config.php
     mariadb:
       ## Whether to deploy a mariadb server from the bitnami mariab db helm chart
       # to satisfy the applications database requirements. if you want to deploy this bitnami mariadb, set this and externalDatabase to true
