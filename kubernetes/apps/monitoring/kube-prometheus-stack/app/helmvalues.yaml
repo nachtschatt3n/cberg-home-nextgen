@@ -140,22 +140,6 @@ data:
         walCompression: true
         retention: 7d
         retentionSize: 20GB
-        # Enable automatic TRIM/discard for storage efficiency
-        initContainers:
-          - name: enable-discard
-            image: alpine:latest
-            command:
-              - /bin/sh
-              - -c
-              - |
-                # Remount /prometheus with discard option for automatic TRIM
-                mount -o remount,discard /prometheus
-                echo "✓ Enabled discard mount option on /prometheus"
-            volumeMounts:
-              - name: prometheus-kube-prometheus-stack-db
-                mountPath: /prometheus
-            securityContext:
-              privileged: true
         storageSpec:
           volumeClaimTemplate:
             metadata:
