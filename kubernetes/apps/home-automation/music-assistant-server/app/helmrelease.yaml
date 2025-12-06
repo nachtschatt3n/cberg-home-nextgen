@@ -25,6 +25,9 @@ spec:
   values:
     controllers:
       music-assistant-server:
+        pod:
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
         containers:
           app:
             image:
