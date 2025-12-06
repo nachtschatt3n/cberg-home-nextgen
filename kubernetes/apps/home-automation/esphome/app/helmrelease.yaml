@@ -25,6 +25,9 @@ spec:
   values:
     controllers:
       esphome:
+        pod:
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
         containers:
           app:
             image:
