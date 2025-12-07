@@ -39,6 +39,298 @@
 - Follow kebab-case naming for files and directories, snake_case for variables/functions
 - Use task commands for common operations like validating templates or running tests
 
+## Network Architecture
+
+### Physical Topology
+
+**Internet Connection:**
+- ISP: Deutsche Glasfaser (fiber)
+- WAN1: 84.143.63.97 (Telekom) - Port 9
+- WAN2: 100.93.84.20 (Glasfaser) - IPv6: 2a00:6020:1000:6c::5253 - Port 8
+
+**Core Network Infrastructure:**
+- **DMP-CBERG**: Main router/gateway (192.168.30.1, GbE uplink)
+  - Connected to: Basement-SW-48 PoE via 10 GbE SFP+
+
+**Switching Infrastructure:**
+- **Basement-SW-48 PoE** (192.168.30.118) - 10 GbE SFP+ uplink
+  - Provides PoE to access points and connects downstream switches
+  - Connected devices:
+    - Upstairs-AP-UAP AC LR (192.168.30.200)
+    - Hallway-AP-U6 Pro (192.168.30.205)
+    - Guest Room USW SW-8 (192.168.30.165, GbE)
+    - Basement-SW-24-PoE (192.168.30.220, 10 GbE SFP+)
+    - Basement-AP-U6+ (192.168.30.212)
+    - U7 Pro (192.168.30.148)
+    - Living Room-01-SW-5 (192.168.30.115, GbE)
+    - Living Room-02-SW-5 (192.168.30.100, GbE)
+
+- **Basement-SW-24-PoE** (192.168.30.220) - 10 GbE SFP+ uplink
+  - Connected Kubernetes cluster nodes:
+    - K8s-nuc14-01
+    - K8s-nuc14-02
+    - K8s-nuc14-03
+
+**Storage:**
+- **UNAS-CBERG** (192.168.31.230) - 10 GbE SFP+ connection, Servers VLAN
+
+### VLAN and Network Segmentation
+
+| VLAN ID | Network Name | Subnet | IPv6 Subnet | DHCP Range | Purpose |
+|---------|--------------|--------|-------------|------------|---------|
+| 1 | Trusted | 192.168.30.0/24 | 2a00:6020:ad52:4300::/64 | 14/101 leases | Network infrastructure, trusted admin devices |
+| 2 | USA-Peer | 192.168.60.0/24 | - | 1/249 leases | VPN/peering connections |
+| 10 | Servers | 192.168.31.0/24 | 2a00:6020:ad52:4301::/64 | 10/249 leases | NAS, server infrastructure |
+| 20 | Trusted-Devices | 192.168.50.0/24 | 2a00:6020:ad52:4302::/64 | 7/101 leases | Trusted client devices |
+| 30 | IoT | 192.168.32.0/23 | 2a00:6020:ad52:4303::/64 | 102/499 leases | IoT devices, smart home |
+| 40 | Clients-Guests-Untrusted | 192.168.34.0/24 | - | 1/191 leases | Guest and untrusted devices |
+| 55 | k8s-network | 192.168.55.0/24 | 2a00:6020:ad52:4304::/64 | 0/11 leases | Kubernetes cluster nodes |
+
+### WiFi Networks
+
+| SSID | Network (VLAN) | Bands | Clients | Security |
+|------|----------------|-------|---------|----------|
+| cberg-trusted-clients | Trusted-Devices (20) | 2.4 GHz, 5 GHz, 6 GHz | 6 | WPA2/WPA3 |
+| cberg-guests | Clients-Guests-Untrusted (40) | 2.4 GHz, 5 GHz | 1 | WPA2 |
+| cberg-iot | IoT (30) | 2.4 GHz | 74 | WPA2 |
+| Cberg-usa | USA-Peer (2) | 2.4 GHz, 5 GHz, 6 GHz | 1 | WPA2/WPA3 |
+
+**Access Points:**
+- Upstairs-AP-UAP AC LR (192.168.30.200) - GbE, legacy AC
+- Hallway-AP-U6 Pro (192.168.30.205) - GbE, WiFi 6
+- Basement-AP-U6+ (192.168.30.212) - GbE, WiFi 6
+- U7 Pro (192.168.30.148) - GbE, WiFi 7
+
+### mDNS Configuration
+
+**Gateway mDNS Proxy:** Custom scope enabled for cross-VLAN mDNS resolution
+
+**VLAN Scope (mDNS bridging enabled):**
+- Trusted (1)
+- Servers (10)
+- Trusted-Devices (20)
+- IoT (30)
+- k8s-network (55)
+- USA-Peer (2)
+
+**Excluded from mDNS:**
+- Clients-Guests-Untrusted (40) - isolated guest network
+
+### Kubernetes Cluster Network
+
+**Cluster Nodes:**
+- All three nodes connected to Basement-SW-24-PoE via GbE
+- Node IPs assigned from k8s-network (192.168.55.0/24, VLAN 55)
+- Dedicated network segment isolated from other VLANs
+
+**Inter-VLAN Access:**
+- Kubernetes services can access:
+  - Servers VLAN (10) - for NAS storage at 192.168.31.230
+  - IoT VLAN (30) - for home automation integrations
+  - Trusted VLAN (1) - for network management
+- Gateway routing and firewall rules control cross-VLAN access
+
+### Network Security Posture
+
+**Default Security:** Allow All (permissive internal routing)
+
+**Network Isolation:**
+- Guest network (VLAN 40) isolated from internal networks
+- IoT devices (VLAN 30) segmented but accessible for integrations
+- Kubernetes cluster (VLAN 55) on dedicated segment with controlled access
+- Server infrastructure (VLAN 10) on separate segment
+
+**IPv6:**
+- Dual-stack enabled on most networks (Trusted, Servers, IoT, Trusted-Devices, k8s-network)
+- Guest and USA-Peer networks IPv4-only
+
+### Network Debugging Commands
+
+#### Basic Network Connectivity
+```bash
+# Check UniFi controller connectivity
+ping 192.168.30.1
+
+# Check Kubernetes node connectivity
+ping 192.168.55.{node-ip}
+
+# Check NAS connectivity
+ping 192.168.31.230
+
+# Verify cross-VLAN routing
+traceroute {destination-ip}
+
+# Check DNS resolution
+nslookup {hostname}
+dig {hostname}
+
+# Check network interfaces on nodes (via kubectl exec or talosctl)
+kubectl exec -n {namespace} {pod} -- ip addr
+kubectl exec -n {namespace} {pod} -- ip route
+```
+
+#### UniFi Network Diagnostics (unifictl)
+
+**Prerequisites:**
+```bash
+# Configure unifictl for local controller access (run once)
+cd /home/mu/code/unifictl
+unifictl local configure \
+  --url https://192.168.30.1:8443 \
+  --username admin \
+  --password '<PASSWORD>' \
+  --site default \
+  --scope local \
+  --verify-tls false
+```
+
+**Network Health & Status:**
+```bash
+# Overall network health
+unifictl local health
+
+# WAN connectivity status
+unifictl local wan
+
+# Network events (alerts, warnings)
+unifictl local events
+
+# Recent events filtered
+unifictl local events -o json | jq '.[] | select(.key | contains("EVT_"))'
+```
+
+**Device Monitoring:**
+```bash
+# List all network devices (switches, APs, gateway)
+unifictl local devices
+
+# Filter by device type
+unifictl local devices --filter "SW"      # Switches
+unifictl local devices --filter "AP"      # Access Points
+unifictl local devices --filter "UDM"     # Gateway
+
+# Show unadopted/pending devices
+unifictl local devices --unadopted
+
+# Watch devices in real-time (refresh every 5s)
+unifictl local devices --watch 5
+
+# Export device inventory to CSV
+unifictl local devices -o csv > /tmp/devices.csv
+```
+
+**Client Connectivity:**
+```bash
+# List all connected clients
+unifictl local clients
+
+# Filter by connection type
+unifictl local clients --wired
+unifictl local clients --wireless
+
+# Show blocked clients
+unifictl local clients --blocked
+
+# Watch clients in real-time
+unifictl local clients --watch 5
+
+# Top bandwidth consumers
+unifictl local top-clients --limit 20
+unifictl local top-devices --limit 10
+```
+
+**Network Configuration:**
+```bash
+# List VLANs/networks
+unifictl local networks
+
+# List WiFi networks (SSIDs)
+unifictl local wlans
+
+# List firewall rules
+unifictl local firewall-rules
+
+# List firewall groups
+unifictl local firewall-groups
+
+# Port profiles (switch port configurations)
+unifictl local port-profiles
+```
+
+**Traffic Analysis:**
+```bash
+# DPI (Deep Packet Inspection) summary
+unifictl local dpi
+
+# Traffic statistics
+unifictl local traffic
+
+# Top clients by traffic
+unifictl local top-clients --limit 10 -o json
+```
+
+**Device Management:**
+```bash
+# Get specific device details
+unifictl local device <MAC> --ports
+
+# Restart a device
+unifictl local device <MAC> --restart
+
+# Adopt an unadopted device
+unifictl local device <MAC> --adopt
+
+# Upgrade device firmware
+unifictl local device <MAC> --upgrade
+
+# Bulk adopt all unadopted devices
+unifictl local devices --adopt-all
+```
+
+**Client Management:**
+```bash
+# Block a client
+unifictl local client <MAC> --block
+
+# Unblock a client
+unifictl local client <MAC> --unblock
+
+# Force reconnect a client
+unifictl local client <MAC> --reconnect
+```
+
+**Troubleshooting Workflows:**
+```bash
+# Check for network issues
+unifictl local health -o json | jq '.subsystems[] | select(.status != "ok")'
+
+# Find offline devices
+unifictl local devices -o json | jq -r '.[] | select(.state != 1) | "\(.name): \(.state_txt)"'
+
+# Check for high client count on specific AP
+unifictl local devices --filter "Hallway-AP" -o json | jq '.[].num_sta'
+
+# Export all configuration for backup
+unifictl local networks -o csv > /tmp/networks-backup.csv
+unifictl local wlans -o csv > /tmp/wlans-backup.csv
+unifictl local firewall-rules -o csv > /tmp/firewall-backup.csv
+```
+
+**Output Formats:**
+```bash
+# Pretty table (default, human-readable)
+unifictl local devices
+
+# JSON (for scripting and jq processing)
+unifictl local devices -o json
+
+# CSV (for spreadsheets and reporting)
+unifictl local devices -o csv
+
+# Raw API response
+unifictl local devices -o raw
+```
+
 ## Longhorn Storage Management
 
 ### Storage Class Guidelines

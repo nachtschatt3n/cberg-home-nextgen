@@ -200,20 +200,33 @@ For critical applications, check:
 - Check for exposed services without authentication
 - Verify TLS/SSL certificate validity across ingresses
 
-## 18. Network Connectivity
+## 18. Network Infrastructure (UniFi)
+- Check UniFi gateway health and WAN status
+- Verify all network devices are online (switches, APs, gateway)
+- Check for unadopted or offline devices
+- Review network events and alerts
+- Verify VLAN connectivity (especially k8s-network VLAN 55)
+- Check switch uplinks and port status
+- Monitor WiFi AP status and client distribution
+- Review firewall rules for any blocks or denies
+- Check top bandwidth consumers
+- Verify mDNS bridging for cross-VLAN discovery
+
+## 19. Network Connectivity (Kubernetes)
 - Verify DNS resolution is working
 - Check ingress controller health
 - Verify external-dns is updating records
 - Check Cloudflare tunnel status (if applicable)
 - Test internal service discovery
+- Verify cross-VLAN routing from k8s to other VLANs
 
-## 19. GitOps Status
+## 20. GitOps Status
 - Check Flux reconciliation status
 - Verify Git repository connectivity
 - Check for any drift between Git and cluster state
 - Review webhook receiver status
 
-## 20. Namespace Review
+## 21. Namespace Review
 - List all namespaces
 - Check for any orphaned namespaces
 - Verify resource quotas (if set)
@@ -233,7 +246,7 @@ Provide the report in the following structure:
 - Recommended actions (prioritized)
 
 ### Detailed Findings
-For each section above:
+For each of the 21 sections above:
 - ✅ Status: OK/Warning/Critical
 - Metrics/counts
 - Specific issues found (if any)
@@ -284,7 +297,7 @@ The health check should produce a report similar to this structure:
 - **Uptime**: 77 days
 
 ## Detailed Findings
-[Comprehensive details for each of the 20 sections]
+[Comprehensive details for each of the 21 sections]
 
 ## Version Report
 | Component | Current | Latest | Status | Priority |
@@ -582,7 +595,112 @@ kubectl get ingress -A
 kubectl get svc -A --field-selector spec.type=LoadBalancer
 ```
 
-### 18. Network Connectivity
+### 18. Network Infrastructure (UniFi)
+
+**Prerequisites:**
+```bash
+# Configure unifictl once (if not already configured)
+cd /home/mu/code/unifictl
+unifictl local configure \
+  --url https://192.168.30.1:8443 \
+  --username admin \
+  --password '<PASSWORD>' \
+  --site default \
+  --scope local \
+  --verify-tls false
+```
+
+**Network Health:**
+```bash
+# Overall network health
+cd /home/mu/code/unifictl && unifictl local health
+
+# WAN status and uptime
+cd /home/mu/code/unifictl && unifictl local wan
+
+# Network events (last 50)
+cd /home/mu/code/unifictl && unifictl local events -o json | jq -r '.[] | "\(.datetime) [\(.key)]: \(.msg)"' | tail -50
+
+# Check for any subsystem issues
+cd /home/mu/code/unifictl && unifictl local health -o json | jq '.subsystems[] | select(.status != "ok")'
+```
+
+**Device Status:**
+```bash
+# List all network devices
+cd /home/mu/code/unifictl && unifictl local devices
+
+# Find offline devices
+cd /home/mu/code/unifictl && unifictl local devices -o json | jq -r '.[] | select(.state != 1) | "\(.name) (\(.type)): \(.state_txt)"'
+
+# Check unadopted devices
+cd /home/mu/code/unifictl && unifictl local devices --unadopted
+
+# Check specific device types
+cd /home/mu/code/unifictl && unifictl local devices --filter "SW"    # Switches
+cd /home/mu/code/unifictl && unifictl local devices --filter "AP"    # Access Points
+cd /home/mu/code/unifictl && unifictl local devices --filter "UDM"   # Gateway
+```
+
+**WiFi and Clients:**
+```bash
+# List all connected clients
+cd /home/mu/code/unifictl && unifictl local clients
+
+# Wired vs wireless breakdown
+cd /home/mu/code/unifictl && unifictl local clients --wired | wc -l
+cd /home/mu/code/unifictl && unifictl local clients --wireless | wc -l
+
+# Check for blocked clients
+cd /home/mu/code/unifictl && unifictl local clients --blocked
+
+# Top bandwidth consumers
+cd /home/mu/code/unifictl && unifictl local top-clients --limit 20
+
+# Top devices by traffic
+cd /home/mu/code/unifictl && unifictl local top-devices --limit 10
+```
+
+**Network Configuration:**
+```bash
+# List VLANs/networks (verify k8s-network VLAN 55)
+cd /home/mu/code/unifictl && unifictl local networks
+
+# Check k8s-network specifically
+cd /home/mu/code/unifictl && unifictl local networks -o json | jq '.[] | select(.vlan == 55)'
+
+# List WiFi networks
+cd /home/mu/code/unifictl && unifictl local wlans
+
+# Check firewall rules
+cd /home/mu/code/unifictl && unifictl local firewall-rules
+
+# Check for any deny/drop rules
+cd /home/mu/code/unifictl && unifictl local firewall-rules -o json | jq '.[] | select(.action == "drop" or .action == "reject")'
+```
+
+**Traffic Analysis:**
+```bash
+# DPI summary
+cd /home/mu/code/unifictl && unifictl local dpi
+
+# Overall traffic stats
+cd /home/mu/code/unifictl && unifictl local traffic
+```
+
+**Export for Reporting:**
+```bash
+# Export device inventory
+cd /home/mu/code/unifictl && unifictl local devices -o csv > /tmp/unifi-devices.csv
+
+# Export client list
+cd /home/mu/code/unifictl && unifictl local clients -o csv > /tmp/unifi-clients.csv
+
+# Export network configuration
+cd /home/mu/code/unifictl && unifictl local networks -o csv > /tmp/unifi-networks.csv
+```
+
+### 19. Network Connectivity (Kubernetes)
 
 ```bash
 # List all ingresses
@@ -596,9 +714,15 @@ kubectl get deployment -n network external-dns
 
 # Verify DNS pods
 kubectl get pods -n kube-system -l k8s-app=kube-dns
+
+# Test cross-VLAN routing from k8s to NAS
+kubectl run test-network --rm -it --image=busybox --restart=Never -- ping -c 3 192.168.31.230
+
+# Test DNS resolution from pod
+kubectl run test-dns --rm -it --image=busybox --restart=Never -- nslookup google.com
 ```
 
-### 19. GitOps Status
+### 20. GitOps Status
 
 ```bash
 # Check all kustomizations
@@ -614,7 +738,7 @@ flux reconcile source git flux-system
 flux diff kustomization <name> -n <namespace>
 ```
 
-### 20. Namespace Review
+### 21. Namespace Review
 
 ```bash
 # List all namespaces
