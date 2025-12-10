@@ -201,16 +201,60 @@ For critical applications, check:
 - Verify TLS/SSL certificate validity across ingresses
 
 ## 18. Network Infrastructure (UniFi)
+
+### Overall Network Health
+- Run comprehensive network diagnostics with AI analysis
 - Check UniFi gateway health and WAN status
-- Verify all network devices are online (switches, APs, gateway)
+- Verify system subsystem status (routing, WiFi, switching)
+
+### Device Health & Inventory
+- List all network devices (switches, APs, gateway) with status
 - Check for unadopted or offline devices
-- Review network events and alerts
+- Verify device firmware versions and uptime
+- Check for pending upgrades
+- Monitor device-specific issues (port anomalies, spectrum scan results)
+
+### WiFi Infrastructure
+- Check all WiFi access points status and health
+- Monitor AP client distribution and load balancing
+- Verify WiFi connectivity metrics and satisfaction scores
+- Check channel utilization and Radio AI isolation
+- Review WiFi management settings
+
+### Network Configuration & Security
 - Verify VLAN connectivity (especially k8s-network VLAN 55)
+- Check network/subnet configurations
+- Review firewall rules for blocks or denies
+- Verify firewall groups and policies
+- Check security status and threat detection
+- Review mDNS bridging configuration for cross-VLAN discovery
+
+### Client Connectivity & Performance
+- Monitor total client count (wired vs wireless)
+- Check for blocked or problematic clients
+- Identify top bandwidth consumers
+- Review client connection history and events
+- Check for client roaming issues
+
+### Traffic Analysis
+- Monitor overall traffic statistics
+- Check DPI (Deep Packet Inspection) data for application usage
+- Review traffic routing and flow rules
+- Analyze bandwidth usage patterns
+- Check for traffic anomalies or unexpected flows
+
+### Network Events & Logs
+- Review recent network events (last 50-100)
+- Check for critical alerts and warnings
+- Filter events by subsystem (WAN, LAN, WLAN)
+- Identify recurring issues or patterns
+- Check system logs for errors
+
+### Uplinks & Connectivity
 - Check switch uplinks and port status
-- Monitor WiFi AP status and client distribution
-- Review firewall rules for any blocks or denies
-- Check top bandwidth consumers
-- Verify mDNS bridging for cross-VLAN discovery
+- Verify WAN connectivity and uptime
+- Check for interface errors or drops
+- Monitor uplink utilization
 
 ## 19. Network Connectivity (Kubernetes)
 - Verify DNS resolution is working
@@ -600,7 +644,6 @@ kubectl get svc -A --field-selector spec.type=LoadBalancer
 **Prerequisites:**
 ```bash
 # Configure unifictl once (if not already configured)
-cd /home/mu/code/unifictl
 unifictl local configure \
   --url https://192.168.30.1:8443 \
   --username admin \
@@ -608,96 +651,310 @@ unifictl local configure \
   --site default \
   --scope local \
   --verify-tls false
+
+# Validate configuration
+unifictl validate --local-only
 ```
 
-**Network Health:**
+**🤖 AI-Optimized Diagnostics (Recommended):**
+```bash
+# Comprehensive network diagnostics with AI analysis
+unifictl local diagnose network -o llm
+
+# WiFi-specific diagnostics
+unifictl local diagnose wifi -o llm
+
+# Client overview diagnostics
+unifictl local diagnose client -o llm
+
+# Troubleshoot specific client (requires MAC address)
+unifictl local diagnose client <MAC> -o llm
+```
+
+**Overall Network Health:**
 ```bash
 # Overall network health
-cd /home/mu/code/unifictl && unifictl local health
+unifictl local health get
 
 # WAN status and uptime
-cd /home/mu/code/unifictl && unifictl local wan
+unifictl local wan get
 
-# Network events (last 50)
-cd /home/mu/code/unifictl && unifictl local events -o json | jq -r '.[] | "\(.datetime) [\(.key)]: \(.msg)"' | tail -50
+# Security status
+unifictl local security get
 
-# Check for any subsystem issues
-cd /home/mu/code/unifictl && unifictl local health -o json | jq '.subsystems[] | select(.status != "ok")'
+# Check for subsystem issues (using Python for reliable parsing)
+unifictl local health get -o json | python3 -c "
+import sys, json
+health = json.load(sys.stdin)
+if 'subsystems' in health:
+    issues = [s for s in health['subsystems'] if s.get('status') != 'ok']
+    if issues:
+        print('Subsystem issues found:')
+        for s in issues:
+            print(f\"  - {s.get('subsystem', 'Unknown')}: {s.get('status', 'N/A')}\")
+    else:
+        print('All subsystems OK')
+"
 ```
 
-**Device Status:**
+**Device Status & Management:**
 ```bash
-# List all network devices
-cd /home/mu/code/unifictl && unifictl local devices
+# List all network devices with AI-optimized output
+unifictl local device list -o llm
+
+# List all devices (table view)
+unifictl local device list
 
 # Find offline devices
-cd /home/mu/code/unifictl && unifictl local devices -o json | jq -r '.[] | select(.state != 1) | "\(.name) (\(.type)): \(.state_txt)"'
+unifictl local device list -o json | python3 -c "
+import sys, json
+devices = json.load(sys.stdin).get('data', [])
+offline = [d for d in devices if d.get('state') != 1]
+if offline:
+    print(f'Offline devices ({len(offline)}):')
+    for d in offline:
+        print(f\"  - {d.get('name', 'Unknown')} ({d.get('model', 'N/A')}): {d.get('state_txt', 'Unknown state')}\")
+else:
+    print('All devices online')
+"
 
 # Check unadopted devices
-cd /home/mu/code/unifictl && unifictl local devices --unadopted
+unifictl local device list --unadopted
 
-# Check specific device types
-cd /home/mu/code/unifictl && unifictl local devices --filter "SW"    # Switches
-cd /home/mu/code/unifictl && unifictl local devices --filter "AP"    # Access Points
-cd /home/mu/code/unifictl && unifictl local devices --filter "UDM"   # Gateway
+# Adopt all unadopted devices (if any found)
+unifictl local device adopt-all
+
+# Filter by device type
+unifictl local device list --filter "SW"     # Switches
+unifictl local device list --filter "AP"     # Access Points
+unifictl local device list --filter-regex "^U(AP|SW)" # Regex filter
+
+# Get specific device details with correlation
+unifictl local correlate device <MAC> --include-clients -o llm
+
+# Check for port anomalies
+unifictl local device port-anomalies
 ```
 
-**WiFi and Clients:**
+**WiFi Infrastructure:**
 ```bash
-# List all connected clients
-cd /home/mu/code/unifictl && unifictl local clients
+# WiFi connectivity metrics
+unifictl local wifi connectivity
+
+# WiFi management settings
+unifictl local wifi management
+
+# WiFi configuration
+unifictl local wifi config
+
+# Radio AI isolation matrix
+unifictl local wifi radio-ai
+
+# WiFi stats (last 24 hours) - requires timestamp in milliseconds
+START=$(python3 -c "import time; print(int((time.time() - 86400) * 1000))")
+END=$(python3 -c "import time; print(int(time.time() * 1000))")
+unifictl local wifi stats --start $START --end $END
+
+# WiFi stats for specific AP
+unifictl local wifi stats --start $START --end $END --ap-mac <MAC>
+
+# Radio-level statistics
+unifictl local wifi stats --radios --start $START --end $END
+```
+
+**Client Connectivity & Performance:**
+```bash
+# List all connected clients with AI optimization
+unifictl local client list -o llm
 
 # Wired vs wireless breakdown
-cd /home/mu/code/unifictl && unifictl local clients --wired | wc -l
-cd /home/mu/code/unifictl && unifictl local clients --wireless | wc -l
+unifictl local client list --wired -o json | python3 -c "import sys, json; print(f\"Wired: {len(json.load(sys.stdin).get('data', []))}\")"
+unifictl local client list --wireless -o json | python3 -c "import sys, json; print(f\"Wireless: {len(json.load(sys.stdin).get('data', []))}\")"
 
 # Check for blocked clients
-cd /home/mu/code/unifictl && unifictl local clients --blocked
+unifictl local client list --blocked
+
+# Active clients (v2 API)
+unifictl local client active
+
+# Client connection history
+unifictl local client history --limit 50
 
 # Top bandwidth consumers
-cd /home/mu/code/unifictl && unifictl local top-clients --limit 20
+unifictl local top-client list --limit 20 -o llm
 
 # Top devices by traffic
-cd /home/mu/code/unifictl && unifictl local top-devices --limit 10
+unifictl local top-device list --limit 10
+
+# Troubleshoot specific client with correlation
+unifictl local correlate client <MAC> --include-events -o llm
 ```
 
 **Network Configuration:**
 ```bash
 # List VLANs/networks (verify k8s-network VLAN 55)
-cd /home/mu/code/unifictl && unifictl local networks
+unifictl local network list
 
-# Check k8s-network specifically
-cd /home/mu/code/unifictl && unifictl local networks -o json | jq '.[] | select(.vlan == 55)'
+# Check k8s-network specifically (VLAN 55)
+unifictl local network list -o json | python3 -c "
+import sys, json
+networks = json.load(sys.stdin).get('data', [])
+k8s_net = next((n for n in networks if n.get('vlan') == 55), None)
+if k8s_net:
+    print(f\"k8s-network (VLAN 55): {k8s_net.get('name', 'N/A')}\")
+    print(f\"  Subnet: {k8s_net.get('ip_subnet', 'N/A')}\")
+    print(f\"  DHCP: {k8s_net.get('dhcp_enabled', False)}\")
+else:
+    print('k8s-network (VLAN 55) not found!')
+"
 
-# List WiFi networks
-cd /home/mu/code/unifictl && unifictl local wlans
+# List WiFi networks (SSIDs)
+unifictl local wlan list
 
 # Check firewall rules
-cd /home/mu/code/unifictl && unifictl local firewall-rules
+unifictl local firewall-rule list
 
-# Check for any deny/drop rules
-cd /home/mu/code/unifictl && unifictl local firewall-rules -o json | jq '.[] | select(.action == "drop" or .action == "reject")'
+# Check for deny/drop rules
+unifictl local firewall-rule list -o json | python3 -c "
+import sys, json
+rules = json.load(sys.stdin).get('data', [])
+deny_rules = [r for r in rules if r.get('action') in ['drop', 'reject']]
+if deny_rules:
+    print(f'Deny/Drop rules ({len(deny_rules)}):')
+    for r in deny_rules:
+        print(f\"  - {r.get('name', 'Unnamed')}: action={r.get('action')}, enabled={r.get('enabled')}\")
+else:
+    print('No deny/drop rules configured')
+"
+
+# List firewall groups
+unifictl local firewall-group list
+
+# List port profiles
+unifictl local port-profile list
 ```
 
 **Traffic Analysis:**
 ```bash
-# DPI summary
-cd /home/mu/code/unifictl && unifictl local dpi
+# DPI summary (Deep Packet Inspection)
+unifictl local dpi get
 
-# Overall traffic stats
-cd /home/mu/code/unifictl && unifictl local traffic
+# Traffic statistics (last 24 hours)
+START=$(python3 -c "import time; print(int((time.time() - 86400) * 1000))")
+END=$(python3 -c "import time; print(int(time.time() * 1000))")
+unifictl local traffic stats --start $START --end $END --include-unidentified true
+
+# Traffic flow latest (daily top 30)
+unifictl local traffic flow-latest --period day --top 30
+
+# Application traffic rate
+unifictl local traffic app-rate --start $START --end $END --include-unidentified true
+
+# Traffic routing rules
+unifictl local traffic routes
+
+# Traffic filter metadata
+unifictl local traffic filter-data
+```
+
+**Network Events & Logs:**
+```bash
+# Network events (last 50)
+unifictl local event list --limit 50
+
+# Format events with Python
+unifictl local event list --limit 50 -o json | python3 -c "
+import sys, json
+events = json.load(sys.stdin).get('data', [])
+for e in events:
+    print(f\"{e.get('datetime', 'N/A')} [{e.get('key', 'N/A')}]: {e.get('msg', 'N/A')}\")
+"
+
+# System logs - critical
+unifictl local log critical --limit 50
+
+# System logs - all
+unifictl local log all --limit 100
+
+# Device alert logs
+unifictl local log device-alert --limit 20
+
+# Time-series event export (last 100 events as CSV)
+unifictl local time-series events --limit 100 --format csv > /tmp/network-events.csv
+```
+
+**Time-Series Data Export (for trending):**
+```bash
+# Calculate timestamps (last 7 days)
+START=$(python3 -c "import time; print(int((time.time() - 604800) * 1000))")
+END=$(python3 -c "import time; print(int(time.time() * 1000))")
+
+# Export traffic time-series (CSV for analysis)
+unifictl local time-series traffic --start $START --end $END --format csv > /tmp/traffic-7days.csv
+
+# Export WiFi time-series (all APs)
+unifictl local time-series wifi --start $START --end $END --format csv > /tmp/wifi-7days.csv
+
+# Export WiFi time-series (specific AP)
+unifictl local time-series wifi --start $START --end $END --ap-mac <MAC> --format csv > /tmp/wifi-ap-7days.csv
+
+# Export events for analysis
+unifictl local time-series events --limit 200 --format json -o llm > /tmp/network-events-analysis.json
 ```
 
 **Export for Reporting:**
 ```bash
 # Export device inventory
-cd /home/mu/code/unifictl && unifictl local devices -o csv > /tmp/unifi-devices.csv
+unifictl local device list -o csv > /tmp/unifi-devices.csv
+
+# Export switches only
+unifictl local device list --filter-regex "^SW" -o csv > /tmp/unifi-switches.csv
+
+# Export APs only
+unifictl local device list --filter-regex "^U(AP|6|7)" -o csv > /tmp/unifi-aps.csv
 
 # Export client list
-cd /home/mu/code/unifictl && unifictl local clients -o csv > /tmp/unifi-clients.csv
+unifictl local client list -o csv > /tmp/unifi-clients.csv
+
+# Export wired clients only
+unifictl local client list --wired -o csv > /tmp/unifi-wired-clients.csv
+
+# Export wireless clients only
+unifictl local client list --wireless -o csv > /tmp/unifi-wireless-clients.csv
 
 # Export network configuration
-cd /home/mu/code/unifictl && unifictl local networks -o csv > /tmp/unifi-networks.csv
+unifictl local network list -o csv > /tmp/unifi-networks.csv
+
+# Export WLAN configuration
+unifictl local wlan list -o csv > /tmp/unifi-wlans.csv
+
+# Export firewall rules
+unifictl local firewall-rule list -o csv > /tmp/unifi-firewall-rules.csv
+
+# Export top clients
+unifictl local top-client list --limit 50 -o csv > /tmp/unifi-top-clients.csv
+```
+
+**Troubleshooting Workflows:**
+```bash
+# Workflow 1: Diagnose client connectivity issue
+CLIENT_MAC="<client-mac>"
+unifictl local correlate client $CLIENT_MAC --include-events -o llm
+
+# Workflow 2: Check AP health and connected clients
+AP_MAC="<ap-mac>"
+unifictl local correlate ap $AP_MAC -o llm
+
+# Workflow 3: Network capacity planning
+unifictl local device list -o llm
+unifictl local client list -o llm
+unifictl local top-client list --limit 20 -o llm
+unifictl local top-device list --limit 20 -o llm
+
+# Workflow 4: Security monitoring
+unifictl local security get -o llm
+unifictl local event list --limit 100 -o llm
+unifictl local firewall-rule list -o llm
 ```
 
 ### 19. Network Connectivity (Kubernetes)
