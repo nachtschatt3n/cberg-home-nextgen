@@ -39,6 +39,74 @@
 - Follow kebab-case naming for files and directories, snake_case for variables/functions
 - Use task commands for common operations like validating templates or running tests
 
+## Homepage Integration
+
+### Automatic Service Discovery
+
+The cluster uses [Homepage](https://gethomepage.dev/) as a dashboard that automatically discovers services via Kubernetes integration. When deploying new applications with a web UI, **always** register them with Homepage.
+
+### Required Configuration
+
+For a service to appear in Homepage, you must add **both annotations AND labels** to the ingress:
+
+```yaml
+ingress:
+  main:
+    enabled: true
+    className: internal  # or external
+    annotations:
+      gethomepage.dev/enabled: "true"
+      gethomepage.dev/name: "My App Name"
+      gethomepage.dev/group: "Group Name"  # e.g., "Office", "Media", "AI", "Monitoring"
+      gethomepage.dev/icon: "app-icon.png"
+      gethomepage.dev/description: "Brief description of the app"
+    labels:
+      gethomepage.dev/enabled: "true"  # REQUIRED - enables discovery
+    hosts:
+      - host: myapp.${SECRET_DOMAIN}
+        # ... rest of config
+```
+
+### Homepage Groups
+
+Available groups (defined in homepage helmrelease kubernetes/apps/default/homepage/app/helmrelease.yaml):
+- **AI**: AI/ML applications and services
+- **Databases**: Database management UIs
+- **System**: System administration tools
+- **Network Services**: Network infrastructure UIs
+- **Home Automation**: Smart home and IoT services
+- **Monitoring**: Observability and monitoring tools
+- **Infrastructure**: Core infrastructure services
+- **Office**: Productivity and office applications
+- **Media**: Media servers and streaming services
+- **Download**: Download managers and archivers
+
+### Icon Selection
+
+Homepage supports icons from:
+- **Dashboard Icons**: https://github.com/walkxcode/dashboard-icons
+- **Material Design Icons**: Use format `mdi-icon-name`
+- **Simple Icons**: Use format `si-brand-name`
+- **Custom icons**: Place in homepage config volume
+
+### Checklist for New Deployments
+
+When deploying a new application with a web UI:
+- [ ] Add `gethomepage.dev/enabled: "true"` to both annotations AND labels
+- [ ] Set descriptive `gethomepage.dev/name`
+- [ ] Choose appropriate `gethomepage.dev/group`
+- [ ] Select matching `gethomepage.dev/icon`
+- [ ] Write clear `gethomepage.dev/description`
+- [ ] Verify service appears in Homepage after deployment
+
+### Troubleshooting
+
+If a service doesn't appear in Homepage:
+1. Check that both annotations AND labels include `gethomepage.dev/enabled: "true"`
+2. Verify the ingress is created: `kubectl get ingress -n {namespace}`
+3. Check Homepage logs: `kubectl logs -n default -l app.kubernetes.io/name=homepage`
+4. Ensure the group name matches one defined in the homepage layout configuration
+
 ## Network Architecture
 
 ### Physical Topology
