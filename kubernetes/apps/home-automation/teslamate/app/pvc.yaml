@@ -6,7 +6,7 @@ metadata:
   name: teslamate-import
   namespace: storage
 spec:
-  size: "1073741824"  # 1Gi in bytes
+  size: "5368709120"  # 5Gi in bytes
   numberOfReplicas: 2
   dataEngine: v1
   accessMode: rwo
@@ -21,7 +21,7 @@ metadata:
   name: teslamate-import
 spec:
   capacity:
-    storage: 1Gi
+    storage: 5Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
@@ -46,6 +46,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 5Gi
   storageClassName: longhorn-static
   volumeName: teslamate-import
