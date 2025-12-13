@@ -4,5 +4,6 @@ kind: Kustomization
 resources:
   - secret.sops.yaml
   - pvc.yaml
+  - postgres-volume.yaml
   - postgres-helmrelease.yaml
   - helmrelease.yaml
