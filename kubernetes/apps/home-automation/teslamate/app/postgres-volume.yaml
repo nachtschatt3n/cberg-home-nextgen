@@ -1,0 +1,51 @@
+---
+# Longhorn Volume
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: teslamate-postgres-data
+  namespace: storage
+spec:
+  size: "10737418240"  # 10Gi in bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
+---
+# PersistentVolume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: teslamate-postgres-data
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "20"
+    volumeHandle: teslamate-postgres-data
+---
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: teslamate-postgres-data
+  namespace: home-automation
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn-static
+  volumeName: teslamate-postgres-data
