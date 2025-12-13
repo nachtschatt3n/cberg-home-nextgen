@@ -26,35 +26,37 @@ spec:
   values:
     controllers:
       main:
+        nodeSelector:
+          kubernetes.io/hostname: k8s-nuc14-03
         containers:
-          main:
-            image:
-              repository: postgres
-              tag: "18-alpine"
-            env:
-              - name: POSTGRES_USER
-                valueFrom:
-                  secretKeyRef:
-                    name: teslamate-secret
-                    key: DATABASE_USER
-              - name: POSTGRES_PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: teslamate-secret
-                    key: DATABASE_PASS
-              - name: POSTGRES_DB
-                valueFrom:
-                  secretKeyRef:
-                    name: teslamate-secret
-                    key: DATABASE_NAME
-              - name: PGDATA
-                value: "/var/lib/postgresql/data/pgdata"
-            resources:
-              requests:
-                cpu: 100m
-                memory: 256Mi
-              limits:
-                memory: 1Gi
+           main:
+             image:
+               repository: postgres
+               tag: "18-alpine"
+             env:
+               - name: POSTGRES_USER
+                 valueFrom:
+                   secretKeyRef:
+                     name: teslamate-secret
+                     key: DATABASE_USER
+               - name: POSTGRES_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: teslamate-secret
+                     key: DATABASE_PASS
+               - name: POSTGRES_DB
+                 valueFrom:
+                   secretKeyRef:
+                     name: teslamate-secret
+                     key: DATABASE_NAME
+               - name: PGDATA
+                 value: "/var/lib/postgresql/data/pgdata"
+             resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
 
     service:
       main:
@@ -67,7 +69,7 @@ spec:
     persistence:
       data:
         type: persistentVolumeClaim
-        existingClaim: teslamate-postgres-data
+        existingClaim: teslamate-db
         advancedMounts:
           main:
             main:
