@@ -70,8 +70,6 @@ spec:
       data:
         type: persistentVolumeClaim
         existingClaim: teslamate-db
-        advancedMounts:
-          main:
-            main:
-              - path: /var/lib/postgresql/data
-                subPath: postgres
+        globalMounts:
+          - path: /var/lib/postgresql/data
+            subPath: postgres
