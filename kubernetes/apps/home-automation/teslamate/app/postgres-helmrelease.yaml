@@ -71,4 +71,4 @@ spec:
         type: persistentVolumeClaim
         existingClaim: teslamate-db
         globalMounts:
-          - path: /var/lib/postgresql/data
+          - path: /var/lib/postgresql
