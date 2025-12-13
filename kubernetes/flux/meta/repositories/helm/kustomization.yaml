@@ -11,8 +11,9 @@ resources:
   - ./external-dns.yaml
   - ./external-secrets.yaml
   - ./fluent.yaml
-  - ./gabe565.yaml
-  - ./grafana.yaml
+   - ./gabe565.yaml
+   - ./grafana.yaml
+   - ./guerzon.yaml
   - ./ingress-nginx.yaml
   - ./intel.yaml
   - ./influxdata.yaml

@@ -10,3 +10,4 @@ resources:
  - ./nextcloud/ks.yaml
  - ./omni-tools/ks.yaml
  - ./paperless-ngx/ks.yaml
+ - ./vaultwarden/ks.yaml
