@@ -2021,11 +2021,18 @@ kubectl exec -n home-automation deployment/mosquitto -- mosquitto_sub -t '$SYS/b
 kubectl logs -n home-automation deployment/zigbee2mqtt --tail=20 | grep -i "coordinator\|connected\|error"
 kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 | grep -i "device.*joined\|device.*left\|interview\|failed" | tail -10
 
+# Check total configured devices vs active devices
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/configuration.yaml | grep -c "friendly_name:"
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq 'length'
+
+# Check Zigbee device last seen timestamps (identify offline devices)
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | "\(.key): \(.value.last_seen)"' | while read line; do device=$(echo $line | cut -d: -f1); timestamp=$(echo $line | cut -d: -f2-); days_diff=$(( ($(date +%s) - $(date -d "$timestamp" +%s)) / 86400 )); if [ $days_diff -gt 1 ]; then echo "$device: $days_diff days ago ($timestamp)"; fi; done
+
 # Check Zigbee2MQTT device count and battery levels
-kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 | grep -o '"battery":[0-9]*' | sort | uniq -c | sort -nr | head -5
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=200 | grep -o '"battery":[0-9]*' | sort | uniq -c | sort -nr | head -5
 
 # Check Zigbee2MQTT network health and LQI (Link Quality Indicator)
-kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 | grep -i "lqi\|link.*quality\|signal" | tail -5
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 | grep -o '"linkquality":[0-9]*' | sort | uniq -c | sort -nr | head -5
 
 # Check ESPHome devices and firmware versions
 kubectl get pods -n home-automation -l app.kubernetes.io/name=esphome -o jsonpath='{.items[*].status.phase}'
