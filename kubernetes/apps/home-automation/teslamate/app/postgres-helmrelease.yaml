@@ -48,7 +48,7 @@ spec:
                     name: teslamate-secret
                     key: DATABASE_NAME
               - name: PGDATA
-                value: "/var/lib/postgresql/pgdata"
+                value: "/var/lib/postgresql/data/pgdata"
             resources:
               requests:
                 cpu: 100m
@@ -76,5 +76,7 @@ spec:
       data:
         enabled: true
         existingClaim: teslamate-db
-        globalMounts:
-          - path: /var/lib/postgresql
+        advancedMounts:
+          main:
+            main:
+              - path: /var/lib/postgresql/data
