@@ -74,7 +74,5 @@ spec:
       data:
         enabled: true
         existingClaim: teslamate-db
-        advancedMounts:
-          main:
-            main:
-              - path: /var/lib/postgresql/data
+        globalMounts:
+          - path: /var/lib/postgresql/data
