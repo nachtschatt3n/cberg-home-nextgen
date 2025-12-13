@@ -81,4 +81,3 @@ spec:
           main:
             main:
               - path: /var/lib/postgresql/data
-                subPath: data
