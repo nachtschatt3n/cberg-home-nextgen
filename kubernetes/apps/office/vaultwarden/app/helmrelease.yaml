@@ -69,9 +69,6 @@ spec:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: false
               capabilities: { drop: ["ALL"] }
-            volumeMounts:
-              - name: data
-                mountPath: /data
         pod:
           securityContext:
             runAsUser: 1000
@@ -116,7 +113,3 @@ spec:
       data:
         enabled: true
         existingClaim: vaultwarden-data
-        advancedMounts:
-          main:
-            main:
-              - path: /data
