@@ -420,83 +420,426 @@ End of health check. Provide comprehensive output for all sections.
 
 ---
 
+## Standardized Health Check Output Schema
+
+### Output Format Specification
+
+The health check must produce output in the following standardized format:
+
+```markdown
+# Kubernetes Cluster Health Check Report
+**Date**: YYYY-MM-DD
+**Cluster**: cluster-name
+**Nodes**: X (node1, node2, node3)
+**Duration**: XmYs (time taken to run checks)
+
+## Executive Summary
+- **Overall Health**: [✅ Excellent|🟡 Good|🟠 Warning|🔴 Critical]
+- **Critical Issues**: X (issues requiring immediate attention)
+- **Warnings**: X (issues requiring attention this week)
+- **Service Availability**: XX% (healthy/total services)
+- **Uptime**: [All systems operational|Partial issues|Major outages]
+
+## Service Availability Matrix
+| Service | Internal | External | Health | Response | Status Notes |
+|---------|----------|----------|--------|----------|--------------|
+| ServiceName | ✅/❌/⚠️ | ✅/❌/⚠️ | [Healthy/Degraded/Failed] | [Time/N/A] | [Brief status] |
+
+## Detailed Findings
+
+### 1. Cluster Events & Logs
+✅ **Status: [OK|Warning|Critical]** - Brief description
+- Metric: X events in last 7 days
+- Issues: [List any issues found]
+- Recommendation: [Action if needed]
+
+### 2. Jobs & CronJobs
+✅ **Status: [OK|Warning|Critical]** - Brief description
+- Active CronJobs: X (list names)
+- Last backup: YYYY-MM-DD HH:MM:SS
+- Failed jobs: X in last 7 days
+
+[... continue for all 30 sections with consistent format ...]
+
+## Performance Metrics
+- **Average Response Times**: X.XXs across Y tested services
+- **Resource Utilization**: CPU X%, Memory Y% average across Z nodes
+- **Network Performance**: X clients, Y packet loss, Z Mbps throughput
+- **Database Load**: PostgreSQL X connections, MariaDB Y queries/sec
+- **Error Rate**: [Low/Medium/High] (X errors in last 24h)
+
+## Version Report
+| Component | Current | Latest | Status | Priority | Notes |
+|-----------|---------|--------|--------|--------|----------|
+| ComponentName | vX.Y.Z | vA.B.C | [Up-to-date|Update Available|Critical] | [High/Med/Low] | [Additional info] |
+
+## Action Items
+
+### Critical (🔴 Do Immediately - Risk of Data Loss/Service Outage)
+- Issue 1: Description and impact
+- Issue 2: Description and impact
+
+### Important (🟡 Do This Week - Service Degradation Risk)
+- Issue 1: Description and timeline
+- Issue 2: Description and timeline
+
+### Maintenance (🔵 Next Window - Performance/Security Improvements)
+- Task 1: Description and benefit
+- Task 2: Description and benefit
+
+### Long-term (📅 Future Planning - Capacity/Scalability)
+- Improvement 1: Description and rationale
+- Improvement 2: Description and rationale
+
+## Trends & Observations
+- **Resource Usage**: [Stable/Increasing/Decreasing] - current levels and trends
+- **Performance**: [Consistent/Degrading/Improving] - key metrics and changes
+- **Reliability**: [Excellent/Good/Fair/Poor] - uptime and error rates
+- **Capacity**: [Good/Monitor/At Risk] - current usage vs limits
+- **Security**: [Clean/Suspicious Issues] - authentication and access patterns
+
+---
+**Report Generated**: YYYY-MM-DD HH:MM:SS
+**Health Check Version**: v2.0 (30 sections)
+**Next Scheduled Check**: YYYY-MM-DD (weekly)
+```
+
+### Status Indicator Standards
+
+#### Overall Health Levels:
+- **✅ Excellent**: 0 critical issues, 0-1 warnings, 100% service availability
+- **🟡 Good**: 0 critical issues, 2-5 warnings, 95-99% service availability
+- **🟠 Warning**: 1-2 critical issues, 6+ warnings, 90-94% service availability
+- **🔴 Critical**: 3+ critical issues, major service outages, <90% availability
+
+#### Section Status Indicators:
+- **✅ OK**: No issues, all metrics within acceptable ranges
+- **⚠️ Warning**: Issues detected but not critical, monitoring recommended
+- **❌ Critical**: Immediate action required, potential data loss or service impact
+
+#### Service Health Status:
+- **Healthy**: Service responding normally, all checks passed
+- **Degraded**: Service operational but with performance issues
+- **Failed**: Service not responding or critical functionality broken
+- **Unknown**: Unable to determine status (check failed)
+
+### Metric Standards
+
+#### Response Times:
+- **Excellent**: <0.1s
+- **Good**: 0.1-0.5s
+- **Slow**: 0.5-2.0s
+- **Poor**: >2.0s
+
+#### Resource Utilization:
+- **Low**: <50% (good headroom)
+- **Moderate**: 50-75% (monitor trends)
+- **High**: 75-90% (capacity planning needed)
+- **Critical**: >90% (immediate action needed)
+
+#### Error Rates:
+- **Low**: <1% or <10 errors/day
+- **Medium**: 1-5% or 10-100 errors/day
+- **High**: >5% or >100 errors/day
+
 ## Expected Output Example
 
-The health check should produce a report similar to this structure:
+The health check should produce output exactly matching this standardized format:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
 **Date**: 2025-12-13
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
+**Duration**: 2m30s
 
 ## Executive Summary
 - **Overall Health**: ✅ Excellent
 - **Critical Issues**: 0
-- **Warnings**: 1 (security-related)
-- **Outdated Components**: 0 (versions current)
-- **Service Availability**: 100% (10/10 services healthy)
+- **Warnings**: 1
+- **Service Availability**: 95% (19/20 services healthy)
 - **Uptime**: All systems operational
 
 ## Service Availability Matrix
-| Service | Internal Access | External Access | Health Status | Response Time |
-|---------|----------------|-----------------|---------------|---------------|
-| Authentik | ✅ | ✅ | Healthy | 0.2s |
-| Home Assistant | ✅ | ✅ | Healthy | 0.8s |
-| Nextcloud | ✅ | ✅ | Healthy | 0.3s |
-| Jellyfin | ✅ | ✅ | Healthy | 0.1s |
-| Grafana | ✅ | ✅ | Healthy | 0.1s |
-| Prometheus | ✅ | ✅ | Healthy | 0.1s |
-| Longhorn UI | ✅ | ✅ | Healthy | 0.2s |
-| phpMyAdmin | ✅ | ✅ | Healthy | 0.3s |
-| Uptime Kuma | ✅ | ✅ | Healthy | 0.2s |
-| Paperless-NGX | ✅ | ✅ | Healthy | 0.4s |
+| Service | Internal | External | Health | Response | Status Notes |
+|---------|----------|----------|--------|----------|--------------|
+| Authentik | ✅ | ✅ | Healthy | 0.053s | API running |
+| Home Assistant | ✅ | ❌ | Healthy | N/A | API not accessible externally |
+| Nextcloud | ✅ | ✅ | Healthy | 0.179s | Good response time |
+| Jellyfin | ✅ | ❌ | Degraded | N/A | Health endpoint failing |
+| Grafana | ✅ | ✅ | Healthy | N/A | Monitoring functional |
+| Prometheus | ✅ | ✅ | Healthy | N/A | No alerts firing |
+| Longhorn UI | ✅ | ✅ | Healthy | N/A | UI accessible |
+| phpMyAdmin | ✅ | ✅ | Healthy | N/A | Database access working |
+| Uptime Kuma | ✅ | ✅ | Healthy | N/A | Monitoring dashboard |
+| Tube Archivist | ✅ | ✅ | Healthy | N/A | Media processing active |
+| PostgreSQL | ✅ | N/A | Healthy | N/A | 6 active connections |
+| MariaDB | ✅ | N/A | Healthy | N/A | Operational |
+| Zigbee2MQTT | ✅ | N/A | Healthy | N/A | Coordinator connected |
+| ESPHome | ✅ | N/A | Healthy | N/A | Running |
+| Node-RED | ✅ | N/A | Healthy | N/A | Flows operational |
+| Scrypted | ✅ | N/A | Healthy | N/A | Cameras functional |
+| JDownloader | ✅ | N/A | Healthy | N/A | Download manager active |
+| Mosquitto | ✅ | N/A | Healthy | N/A | MQTT broker running |
+| Music Assistant | ✅ | ✅ | Healthy | N/A | Alexa API responding |
+| Frigate | ✅ | N/A | Healthy | N/A | NVR operational |
 
 ## Detailed Findings
-[Comprehensive details for each of the 30 sections]
+
+### 1. Cluster Events & Logs
+✅ **Status: OK** - No warning events detected
+- Metric: 0 warning events in last 7 days
+- Issues: None
+- Recommendation: None
+
+### 2. Jobs & CronJobs
+✅ **Status: OK** - All jobs completed successfully
+- Active CronJobs: 4 (tube-archivist-nfo-sync, authentik-channels-cleanup, descheduler, backup-of-all-volumes)
+- Last backup: 2025-12-13 03:22:57Z
+- Failed jobs: 0 in last 7 days
+
+### 3. Certificates
+✅ **Status: OK** - All certificates valid
+- Valid certificates: 6/6
+- Expiring soon: 0 (<30 days)
+- Issues: None
+
+### 4. DaemonSets
+✅ **Status: OK** - All daemonsets healthy
+- Healthy daemonsets: 11/11
+- Desired/Current/Ready: All matched
+- Issues: None
+
+### 5. Helm Deployments
+✅ **Status: OK** - All releases reconciled
+- HelmReleases: 54 ready
+- Flux kustomizations: 59 applied
+- Issues: None
+
+### 6. Deployments & StatefulSets
+✅ **Status: OK** - All workloads healthy
+- Deployments: All ready
+- StatefulSets: 10/10 healthy
+- Issues: None
+
+### 7. Pods Health
+✅ **Status: OK** - No unhealthy pods
+- Running pods: All phases normal
+- Restart counts: Low (max 5 on one pod)
+- Issues: None
+
+### 8. Prometheus & Monitoring
+✅ **Status: OK** - Monitoring operational
+- Prometheus: 2/2 containers running
+- Alertmanager: 2/2 containers running
+- Issues: Only INFO deprecation warnings
+
+### 9. Alertmanager
+✅ **Status: OK** - No active alerts
+- Active alerts: 0
+- Alertmanager: Operational
+- Issues: None
+
+### 10. Longhorn Storage
+✅ **Status: OK** - All volumes healthy
+- Total volumes: 49
+- Healthy volumes: 49/49 (100%)
+- Degraded volumes: 0
+- Issues: None (previously resolved)
+
+### 11. Container Logs Analysis
+✅ **Status: OK** - No critical errors
+- Infrastructure logs: Clean
+- Application logs: Normal operation
+- Issues: None
+
+### 12. Talos System Health
+✅ **Status: OK** - All nodes healthy
+- Node status: 3/3 Ready
+- System services: All operational
+- Issues: None
+
+### 13. Hardware Health
+✅ **Status: OK** - Hardware operational
+- Node health: All nodes responsive
+- Temperature sensors: Not accessible (expected)
+- Issues: None
+
+### 14. Resource Utilization
+✅ **Status: OK** - Resources well-utilized
+- CPU usage: 7% average across nodes
+- Memory usage: 26-36% across nodes
+- Top consumers: Frigate, kube-apiserver
+- Issues: None
+
+### 15. Backup System
+✅ **Status: OK** - Backups successful
+- Backup schedule: Daily at 03:00
+- Last success: 2025-12-13 03:22:57Z
+- Retention: Active
+- Issues: None
+
+### 16. Version Checks
+✅ **Status: OK** - All components current
+- Kubernetes: v1.34.0 (latest)
+- Talos: v1.11.0 (latest)
+- Longhorn: v1.10.1 (latest)
+- Issues: None
+
+### 17. Security Checks
+⚠️ **Status: Warning** - Root pods detected
+- Root pods: Multiple (expected for some workloads)
+- TLS coverage: Good (most services)
+- Issues: Documented for awareness
+
+### 18. Network Infrastructure (UniFi)
+✅ **Status: OK** - Network healthy
+- Devices: All online (switches, APs)
+- k8s-network VLAN: Properly configured
+- Clients: 48 connected (18 wired, 30 wireless)
+- Issues: None
+
+### 19. Network Connectivity (Kubernetes)
+✅ **Status: OK** - Internal networking healthy
+- DNS resolution: Working
+- Ingress controllers: Operational
+- Cross-VLAN routing: Functional
+- Issues: None
+
+### 20. GitOps Status
+✅ **Status: OK** - Repository synchronized
+- Flux sources: All reconciled
+- Git connectivity: Working
+- Drift: None detected
+- Issues: None
+
+### 21. Namespace Review
+✅ **Status: OK** - All namespaces healthy
+- Active namespaces: 19/19
+- Stuck resources: 0
+- Issues: None
+
+### 22. Home Automation Health
+✅ **Status: OK** - All services operational
+- Home Assistant: Running (4 restarts, acceptable)
+- Zigbee2MQTT: Coordinator connected
+- MQTT broker: Port 1883 listening
+- ESPHome: Running
+- Node-RED: Operational
+- Scrypted: Functional
+- Issues: None
+
+### 23. Media Services Health
+⚠️ **Status: Warning** - One service health check failing
+- Jellyfin: Running but health endpoint failing
+- Tube Archivist: Indexing active
+- JDownloader: Operational
+- Plex: StatefulSet healthy
+- Issues: Jellyfin health check needs investigation
+
+### 24. Database Health
+✅ **Status: OK** - Databases operational
+- PostgreSQL: 6 active connections, 7.7MB size
+- MariaDB: Running (connection check failed but pod healthy)
+- Issues: None
+
+### 25. External Services & Connectivity
+✅ **Status: OK** - External access working
+- DNS resolution: Successful
+- SSL certificates: Valid
+- Response times: 0.03-0.18s (excellent)
+- Cloudflare tunnel: Operational
+- Issues: None
+
+### 26. Security & Access Monitoring
+✅ **Status: OK** - No security issues detected
+- Authentication failures: 0 in 24h
+- Unusual traffic: None detected
+- Firewall: Operational
+- Issues: None
+
+### 27. Performance & Trends
+✅ **Status: OK** - Performance stable
+- Response times: Consistent
+- Resource usage: Stable
+- Memory leaks: None detected
+- Issues: None
+
+### 28. Backup & Recovery Verification
+✅ **Status: OK** - Backup integrity maintained
+- Backup completion: Successful
+- Data integrity: Verified
+- Retention policies: Active
+- Issues: None
+
+### 29. Environmental & Power Monitoring
+✅ **Status: OK** - Systems stable
+- Node temperatures: Not accessible (expected)
+- System load: Normal
+- Thermal throttling: None detected
+- Issues: None
+
+### 30. Application-Specific Checks
+⚠️ **Status: Warning** - One application issue
+- Authentik: SECRET_KEY warning (security)
+- Prometheus: Healthy
+- Grafana: Accessible
+- Longhorn: Fully operational
+- Issues: Authentik security hardening needed
 
 ## Performance Metrics
-- **Average Response Times**: 0.25s across all services
-- **Resource Utilization**: CPU 3-6%, Memory 26-36%
-- **Network Performance**: 48 clients, 0 packet loss
-- **Database Connections**: PostgreSQL: 12 active, MariaDB: 8 active
-- **Error Rate**: 0% across monitored services
+- **Average Response Times**: 0.085s across 10 tested services
+- **Resource Utilization**: CPU 7%, Memory 29% average across 3 nodes
+- **Network Performance**: 48 clients connected, 0 packet loss detected
+- **Database Load**: PostgreSQL 6 connections, MariaDB operational
+- **Error Rate**: Low (0 authentication failures, minimal log errors)
 
 ## Version Report
-| Component | Current | Latest | Status | Priority |
-|-----------|---------|--------|--------|----------|
-| Kubernetes | v1.34.0 | Current | Up-to-date | N/A |
-| Talos | v1.11.0 | Current | Up-to-date | N/A |
-| Longhorn | 1.10.1 | Current | Up-to-date | N/A |
-| Cilium | 1.17.1 | Current | Up-to-date | N/A |
-| Prometheus Stack | 68.4.4 | Current | Up-to-date | N/A |
-| Home Assistant | 2025.12.1 | Current | Up-to-date | N/A |
-| Authentik | 2025.10.2 | Current | Up-to-date | N/A |
+| Component | Current | Latest | Status | Priority | Notes |
+|-----------|---------|--------|--------|----------|-------|
+| Kubernetes | v1.34.0 | v1.34.0 | Up-to-date | N/A | Latest stable |
+| Talos | v1.11.0 | v1.11.0 | Up-to-date | N/A | Latest stable |
+| Longhorn | v1.10.1 | v1.10.1 | Up-to-date | N/A | Latest stable |
+| Cilium | v1.17.1 | v1.17.1 | Up-to-date | N/A | Latest stable |
+| Prometheus Stack | v68.4.4 | v68.4.4 | Up-to-date | N/A | Latest stable |
+| Authentik | 2025.10.2 | 2025.10.2 | Up-to-date | N/A | Latest stable |
+| Home Assistant | 2025.12.1 | 2025.12.1 | Up-to-date | N/A | Latest stable |
+| Nextcloud | v6.6.4 | v6.6.4 | Up-to-date | N/A | Latest stable |
+| Jellyfin | v10.11.3 | v10.11.3 | Up-to-date | N/A | Latest stable |
 
 ## Action Items
-### Critical (Do Immediately)
+
+### Critical (🔴 Do Immediately - Risk of Data Loss/Service Outage)
 - None
 
-### Important (This Week)
-- Review pods running as root (documented for awareness)
+### Important (🟡 Do This Week - Service Degradation Risk)
+- Investigate Jellyfin health endpoint failure
+- Address Authentik SECRET_KEY security warning
 
-### Maintenance (Next Window)
-- None required
+### Maintenance (🔵 Next Window - Performance/Security Improvements)
+- Review root pod usage and implement security hardening where possible
+- Consider adding environmental monitoring sensors
 
-### Long-term Improvements
+### Long-term (📅 Future Planning - Capacity/Scalability)
 - Implement automated backup restoration testing
-- Add environmental monitoring sensors
-- Enhance security monitoring with intrusion detection
+- Add intrusion detection monitoring
+- Consider increasing replica rebuild concurrency if more volumes added
 
 ## Trends & Observations
-- **Resource Usage**: Stable at optimal levels
-- **Performance**: Consistent response times, no degradation
-- **Backup Success**: 100% success rate (last: 2025-12-13T03:22:57Z)
-- **Network**: 48 clients connected, all devices online
-- **Storage**: All volumes healthy, 47 volumes backed up
-- **Home Automation**: All 15 devices connected, MQTT stable
-- **Media Services**: Libraries up-to-date, transcoding functional
-- **Environmental**: Temperatures within normal range
+- **Resource Usage**: Stable at optimal levels across all nodes
+- **Performance**: Consistent response times with no degradation trends
+- **Reliability**: Excellent uptime with automatic recovery from temporary issues
+- **Capacity**: Good headroom with room for growth
+- **Security**: Clean authentication logs with no suspicious activity
+- **Storage**: Self-healing working perfectly (resolved 25 degraded volumes automatically)
+- **Network**: Stable with expected client load and good external connectivity
+- **Home Automation**: All services operational with good integration health
+- **Media Services**: Mostly healthy with one minor health check issue to investigate
+
+---
+**Report Generated**: 2025-12-13 11:30:00
+**Health Check Version**: v2.0 (30 sections)
+**Next Scheduled Check**: 2025-12-20 (weekly)
 ```
 
 ---
