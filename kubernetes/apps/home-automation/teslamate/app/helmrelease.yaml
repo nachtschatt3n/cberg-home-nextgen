@@ -61,6 +61,10 @@ spec:
                 value: "teslamate-postgres"
               - name: MQTT_HOST
                 value: "mosquitto.home-automation.svc.cluster.local"
+              - name: GRAFANA_EXTERNAL_URL
+                value: "https://grafana.${SECRET_DOMAIN}"
+              - name: GRAFANA_INTERNAL_URL
+                value: "http://grafana.monitoring.svc.cluster.local"
             probes:
               liveness:
                 enabled: true
