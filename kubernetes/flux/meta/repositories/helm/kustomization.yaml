@@ -9,7 +9,7 @@ resources:
   - ./csi-driver-smb.yaml
   - ./democratic-csi.yaml
   - ./external-dns.yaml
-  - ./external-secrets.yaml
+   - ./external-secrets.yaml
    - ./fluent.yaml
    - ./gabe565.yaml
    - ./grafana.yaml
