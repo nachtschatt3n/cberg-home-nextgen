@@ -721,16 +721,19 @@ The health check should produce output exactly matching this standardized format
 - Issues: None
 
 ### 22. Home Automation Health
-✅ **Status: OK** - All services operational, Zigbee network healthy
-- Home Assistant: Running (5 recent restarts, monitoring recommended)
-- Zigbee2MQTT: Coordinator connected, 6+ active devices, good link quality
+🟠 **Status: Warning** - Zigbee network has offline devices
+- Home Assistant: Running (5 recent restarts, monitor pattern)
+- Zigbee2MQTT: Coordinator connected, 13 active devices, 8 offline devices detected
 - MQTT broker: Port 1883 listening, 45 active clients, message flow active
 - ESPHome: 1 device running, stable operation
 - Node-RED: Operational, flow status normal
 - Scrypted: Functional, plugin updates working
-- Zigbee Network: Active messaging, battery levels excellent (100%: 21 devices, 97%: 9 devices, 90%: 3 devices)
-- Link Quality: Variable (4-153), most devices have good connectivity
-- Issues: Monitor Home Assistant restart pattern
+- **Zigbee Issues:**
+  - **Offline devices (5+ days):** Entry Door, Living Room Window, Entry Temp Sensor, Guest toilet Temp sensor, SLZB-06 Router
+  - **Never seen devices (3):** Yard Soil Sensor Roses, Yard Soil Sensor 2, Yard Soil Sensor 3
+  - **Battery levels:** Excellent (100%: 21 devices, 97%: 9 devices, 90%: 3 devices)
+  - **Link Quality:** Variable (4-153), some devices may need repositioning
+- **Recommendations:** Check battery levels, reposition weak signal devices, investigate never-seen sensors
 
 ### 23. Media Services Health
 ⚠️ **Status: Warning** - One service health check failing
@@ -795,8 +798,8 @@ The health check should produce output exactly matching this standardized format
 - **Resource Utilization**: CPU 7%, Memory 29% average across 3 nodes
 - **Network Performance**: 49 clients connected, 0 packet loss detected
 - **Database Load**: PostgreSQL 6 connections, MariaDB operational
-- **MQTT Performance**: 45 active clients, active Zigbee message publishing
-- **Zigbee Performance**: 6+ active devices, link quality 4-153, battery levels 90-100%
+- **MQTT Performance**: 45 active clients, active message publishing
+- **Zigbee Performance**: 13 active devices, 8 offline devices, link quality 4-153, battery levels 90-100%
 - **Error Rate**: Low (0 authentication failures, minimal log errors)
 
 ## Version Report
@@ -820,6 +823,10 @@ The health check should produce output exactly matching this standardized format
 ### Important (🟡 Do This Week - Service Degradation Risk)
 - Investigate Jellyfin health endpoint failure
 - Address Authentik SECRET_KEY security warning
+- **Troubleshoot 8 offline Zigbee devices:**
+  - Check battery levels on Entry Door, Living Room Window, Entry Temp Sensor, Guest toilet Temp sensor
+  - Reposition SLZB-06 Router for better connectivity
+  - Investigate 3 soil sensors that have never connected
 
 ### Maintenance (🔵 Next Window - Performance/Security Improvements)
 - Review root pod usage and implement security hardening where possible
@@ -2026,7 +2033,18 @@ kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/configuratio
 kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq 'length'
 
 # Check Zigbee device last seen timestamps (identify offline devices)
-kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | "\(.key): \(.value.last_seen)"' | while read line; do device=$(echo $line | cut -d: -f1); timestamp=$(echo $line | cut -d: -f2-); days_diff=$(( ($(date +%s) - $(date -d "$timestamp" +%s)) / 86400 )); if [ $days_diff -gt 1 ]; then echo "$device: $days_diff days ago ($timestamp)"; fi; done
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | "\(.key): \(.value.last_seen)"' | while read line; do device=$(echo "$line" | cut -d: -f1); timestamp=$(echo "$line" | cut -d: -f2- | sed 's/^ *//'); days_diff=$(( ($(date +%s) - $(date -d "$timestamp" +%s)) / 86400 )); if [ $days_diff -gt 1 ]; then friendly_name=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- grep -A1 "$device" /data/configuration.yaml | grep "friendly_name" | cut -d: -f2 | sed 's/^ *//'); echo "$friendly_name ($device): $days_diff days ago"; fi; done
+
+# Check for devices configured but never seen
+kubectl exec -n home-automation deployment/zigbee2mqtt -- sh -c "
+echo 'Devices configured but never seen:'
+for device in \$(grep '0x' /data/configuration.yaml | grep -v friendly_name | cut -d: -f1 | sed \"s/ *'//;s/'.*//\"); do
+  if ! grep -q \"\$device\" /data/state.json 2>/dev/null; then
+    friendly_name=\$(grep -A1 \"\$device\" /data/configuration.yaml | grep friendly_name | cut -d: -f2 | sed 's/^ *//')
+    echo \"\$friendly_name (\$device)\"
+  fi
+done
+"
 
 # Check Zigbee2MQTT device count and battery levels
 kubectl logs -n home-automation deployment/zigbee2mqtt --tail=200 | grep -o '"battery":[0-9]*' | sort | uniq -c | sort -nr | head -5
