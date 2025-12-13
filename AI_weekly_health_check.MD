@@ -3,6 +3,14 @@
 ## Purpose
 This document contains a comprehensive health check prompt designed to be run weekly to ensure the cluster is operating optimally and all components are up-to-date.
 
+## Domain Configuration
+**IMPORTANT**: Replace `secret-domain` in all commands with your actual domain name. Your domain can be found in:
+- `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (SOPS encrypted)
+- `kubernetes/apps/network/external-dns/app/secret.sops.yaml` (SOPS encrypted)
+- Or check your DNS provider for the configured domain
+
+Example: If your domain is `mydomain.com`, replace `secret-domain` with `mydomain.com` in all commands.
+
 ## Frequency
 **Run this check once per week** (recommended: Sunday evenings or Monday mornings)
 
@@ -1706,7 +1714,7 @@ kubectl exec -n databases deployment/postgresql -- psql -U postgres -c "SELECT n
 
 ```bash
 # Test external DNS resolution
-for domain in "auth.example.com" "hass.example.com" "drive.example.com"; do
+for domain in "auth.secret-domain" "hass.secret-domain" "drive.secret-domain"; do
   echo "Testing $domain:"
   dig +short $domain | head -1
   curl -s -I https://$domain | head -1
@@ -1716,8 +1724,8 @@ done
 kubectl get pods -n network -l app=cloudflared
 
 # Test external service response times
-curl -s -w "Time: %{time_total}s\n" -o /dev/null https://auth.example.com
-curl -s -w "Time: %{time_total}s\n" -o /dev/null https://hass.example.com
+curl -s -w "Time: %{time_total}s\n" -o /dev/null https://auth.secret-domain
+curl -s -w "Time: %{time_total}s\n" -o /dev/null https://hass.secret-domain
 ```
 
 ### 26. Security & Access Monitoring
@@ -1937,7 +1945,7 @@ Set up alerts for critical conditions:
 # Example: Alert if any pod is not running
 NON_RUNNING=$(kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded | wc -l)
 if [ $NON_RUNNING -gt 0 ]; then
-    echo "ALERT: $NON_RUNNING pods not in running state" | mail -s "Cluster Health Alert" admin@example.com
+    echo "ALERT: $NON_RUNNING pods not in running state" | mail -s "Cluster Health Alert" admin@secret-domain
 fi
 ```
 
