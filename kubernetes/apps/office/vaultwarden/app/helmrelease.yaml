@@ -39,7 +39,20 @@ spec:
                   name: vaultwarden-secret
                   key: admin-token
               DOMAIN: "https://vaultwarden.${SECRET_DOMAIN}"
-              PORT: "8080"
+              PORT: "80"
+              SMTP_HOST: "mail.gmx.net"
+              SMTP_FROM: "mathiasuhl-doc@gmx.de"
+              SMTP_FROM_NAME: "Vaultwarden"
+              SMTP_SECURITY: "starttls"
+              SMTP_PORT: "587"
+              SMTP_USERNAME:
+                secretKeyRef:
+                  name: vaultwarden-secret
+                  key: smtp-username
+              SMTP_PASSWORD:
+                secretKeyRef:
+                  name: vaultwarden-secret
+                  key: smtp-password
             probes:
               liveness:
                 enabled: true
