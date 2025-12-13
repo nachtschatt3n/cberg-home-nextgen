@@ -16,3 +16,4 @@ spec:
     volumeAttributes:
       numberOfReplicas: "3"
       staleReplicaTimeout: "30"
+    volumeHandle: vaultwarden-data
