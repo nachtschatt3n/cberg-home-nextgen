@@ -66,9 +66,12 @@ spec:
             - vaultwarden.${SECRET_DOMAIN}
 
     storage:
-      enabled: true
-      size: 10Gi
-      class: longhorn
+      enabled: false
+
+    persistence:
+      data:
+        enabled: true
+        existingClaim: vaultwarden-data
 
     podSecurityContext:
       runAsUser: 1000
