@@ -39,6 +39,7 @@ spec:
                   name: vaultwarden-secret
                   key: admin-token
               DOMAIN: "https://vaultwarden.${SECRET_DOMAIN}"
+              ROCKET_PORT: "8080"
             probes:
               liveness:
                 enabled: true
