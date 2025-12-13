@@ -41,7 +41,10 @@ spec:
               DOMAIN: "https://vaultwarden.${SECRET_DOMAIN}"
               PORT: "80"
               SMTP_HOST: "mail.gmx.net"
-              SMTP_FROM: "mathiasuhl-doc@gmx.de"
+              SMTP_FROM:
+                secretKeyRef:
+                  name: vaultwarden-secret
+                  key: smtp-from
               SMTP_FROM_NAME: "Vaultwarden"
               SMTP_SECURITY: "starttls"
               SMTP_PORT: "587"
