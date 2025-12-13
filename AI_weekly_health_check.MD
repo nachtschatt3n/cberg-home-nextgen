@@ -296,11 +296,12 @@ For critical applications, check:
 
 ## 22. Home Automation Health
 - Check Home Assistant system health and integrations
-- Verify Zigbee2MQTT coordinator connectivity
-- Monitor MQTT broker status and client connections
-- Check ESPHome device connectivity and updates
-- Review Node-RED flows for errors
+- Verify Zigbee2MQTT coordinator connectivity and device health
+- Monitor MQTT broker status, client connections, and message flow
+- Check ESPHome device connectivity and firmware updates
+- Review Node-RED flows for errors and performance
 - Verify Scrypted camera feeds and motion detection
+- Assess Zigbee network health, device battery levels, and message routing
 
 ## 23. Media Services Health
 - Check Jellyfin/Plex library scans and transcoding
@@ -720,14 +721,16 @@ The health check should produce output exactly matching this standardized format
 - Issues: None
 
 ### 22. Home Automation Health
-✅ **Status: OK** - All services operational
-- Home Assistant: Running (4 restarts, acceptable)
-- Zigbee2MQTT: Coordinator connected
-- MQTT broker: Port 1883 listening
-- ESPHome: Running
-- Node-RED: Operational
-- Scrypted: Functional
-- Issues: None
+✅ **Status: OK** - All services operational, Zigbee network healthy
+- Home Assistant: Running (5 recent restarts, monitoring recommended)
+- Zigbee2MQTT: Coordinator connected, 6+ active devices, good link quality
+- MQTT broker: Port 1883 listening, 45 active clients, message flow active
+- ESPHome: 1 device running, stable operation
+- Node-RED: Operational, flow status normal
+- Scrypted: Functional, plugin updates working
+- Zigbee Network: Active messaging, battery levels excellent (100%: 21 devices, 97%: 9 devices, 90%: 3 devices)
+- Link Quality: Variable (4-153), most devices have good connectivity
+- Issues: Monitor Home Assistant restart pattern
 
 ### 23. Media Services Health
 ⚠️ **Status: Warning** - One service health check failing
@@ -790,8 +793,10 @@ The health check should produce output exactly matching this standardized format
 ## Performance Metrics
 - **Average Response Times**: 0.085s across 10 tested services
 - **Resource Utilization**: CPU 7%, Memory 29% average across 3 nodes
-- **Network Performance**: 48 clients connected, 0 packet loss detected
+- **Network Performance**: 49 clients connected, 0 packet loss detected
 - **Database Load**: PostgreSQL 6 connections, MariaDB operational
+- **MQTT Performance**: 45 active clients, active Zigbee message publishing
+- **Zigbee Performance**: 6+ active devices, link quality 4-153, battery levels 90-100%
 - **Error Rate**: Low (0 authentication failures, minimal log errors)
 
 ## Version Report
@@ -833,7 +838,7 @@ The health check should produce output exactly matching this standardized format
 - **Security**: Clean authentication logs with no suspicious activity
 - **Storage**: Self-healing working perfectly (resolved 25 degraded volumes automatically)
 - **Network**: Stable with expected client load and good external connectivity
-- **Home Automation**: All services operational with good integration health
+- **Home Automation**: All services operational, Zigbee network healthy with good battery levels, MQTT messaging active
 - **Media Services**: Mostly healthy with one minor health check issue to investigate
 
 ---
@@ -2008,17 +2013,33 @@ kubectl get resourcequotas -A
 # Check Home Assistant health endpoint
 curl -s http://home-assistant.home-automation.svc.cluster.local:8123/api/ | jq -r '.message' 2>/dev/null || echo "Home Assistant API not accessible"
 
-# Check MQTT broker connections
+# Check MQTT broker connections and status
 kubectl exec -n home-automation deployment/mosquitto -- netstat -tlnp | grep :1883
+kubectl exec -n home-automation deployment/mosquitto -- mosquitto_sub -t '$SYS/broker/clients/connected' -C 1 -W 2 2>/dev/null || echo "MQTT client count check failed"
 
-# Check Zigbee2MQTT coordinator status
+# Check Zigbee2MQTT coordinator status and device health
 kubectl logs -n home-automation deployment/zigbee2mqtt --tail=20 | grep -i "coordinator\|connected\|error"
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 | grep -i "device.*joined\|device.*left\|interview\|failed" | tail -10
 
-# Check ESPHome devices
+# Check Zigbee2MQTT device count and battery levels
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 | grep -o '"battery":[0-9]*' | sort | uniq -c | sort -nr | head -5
+
+# Check Zigbee2MQTT network health and LQI (Link Quality Indicator)
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 | grep -i "lqi\|link.*quality\|signal" | tail -5
+
+# Check ESPHome devices and firmware versions
 kubectl get pods -n home-automation -l app.kubernetes.io/name=esphome -o jsonpath='{.items[*].status.phase}'
+kubectl logs -n home-automation -l app.kubernetes.io/name=esphome --tail=20 | grep -i "version\|update\|firmware" | tail -5
 
-# Check Node-RED flows
-kubectl logs -n home-automation deployment/node-red --tail=10 | grep -i "error\|started\|stopped"
+# Check Node-RED flows and performance
+kubectl logs -n home-automation deployment/node-red --tail=10 | grep -i "error\|started\|stopped\|deployed"
+kubectl exec -n home-automation deployment/node-red -- node-red-admin list 2>/dev/null | wc -l 2>/dev/null || echo "Node-RED flow count check failed"
+
+# Check Scrypted camera status
+kubectl logs -n home-automation deployment/scrypted --tail=10 | grep -i "camera\|motion\|recording\|error" | tail -5
+
+# Monitor MQTT message flow (subscribe to test topic)
+kubectl run mqtt-test --rm -it --image=alpine --restart=Never -- apk add mosquitto-clients && mosquitto_sub -h mosquitto.home-automation.svc.cluster.local -t 'zigbee2mqtt/#' -C 3 -W 5 2>/dev/null | wc -l | xargs echo "MQTT messages received:" || echo "MQTT message flow test failed"
 ```
 
 ### 23. Media Services Health
