@@ -4,16 +4,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./backube.yaml
-   - ./blakeblackshear.yaml
-   - ./cilium.yaml
-   - ./csi-driver-smb.yaml
-   - ./democratic-csi.yaml
-   - ./external-dns.yaml
-   - ./external-secrets.yaml
-   - ./fluent.yaml
-   - ./gabe565.yaml
-   - ./grafana.yaml
-   - ./guerzon.yaml
+  - ./blakeblackshear.yaml
+  - ./cilium.yaml
+  - ./csi-driver-smb.yaml
+  - ./democratic-csi.yaml
+  - ./external-dns.yaml
+  - ./external-secrets.yaml
+  - ./fluent.yaml
+  - ./gabe565.yaml
+  - ./grafana.yaml
+  - ./guerzon.yaml
   - ./ingress-nginx.yaml
   - ./intel.yaml
   - ./influxdata.yaml
