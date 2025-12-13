@@ -6,8 +6,8 @@ resources:
   - ./backube.yaml
   - ./blakeblackshear.yaml
   - ./cilium.yaml
-  - ./csi-driver-smb.yaml
-  - ./democratic-csi.yaml
+   - ./csi-driver-smb.yaml
+   - ./democratic-csi.yaml
    - ./external-dns.yaml
    - ./external-secrets.yaml
    - ./fluent.yaml
