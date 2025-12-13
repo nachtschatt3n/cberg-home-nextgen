@@ -26,6 +26,7 @@ spec:
   values:
     controllers:
       main:
+        type: statefulset
         containers:
           main:
             image:
@@ -75,7 +76,11 @@ spec:
     persistence:
       data:
         enabled: true
-        existingClaim: teslamate-db
+        type: persistentVolumeClaim
+        accessMode: ReadWriteOnce
+        size: 10Gi
+        storageClass: longhorn
+        retain: true
         advancedMounts:
           main:
             main:
