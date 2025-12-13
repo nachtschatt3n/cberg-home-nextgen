@@ -34,7 +34,7 @@ spec:
            main:
              image:
                repository: postgres
-               tag: "18-alpine"
+               tag: "18"
              env:
                - name: POSTGRES_USER
                  valueFrom:
