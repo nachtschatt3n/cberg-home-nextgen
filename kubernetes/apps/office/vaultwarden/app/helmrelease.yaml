@@ -28,6 +28,18 @@ spec:
     controllerType: deployment
     controllers:
       main:
+        initContainers:
+          - name: init-data
+            image:
+              repository: busybox
+              tag: latest
+            command:
+              - sh
+              - -c
+              - mkdir -p /data
+            volumeMounts:
+              - name: data
+                mountPath: /data
         containers:
           main:
             image:
