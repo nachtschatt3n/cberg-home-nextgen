@@ -1,17 +1,41 @@
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
+# Longhorn Volume for Import
+apiVersion: longhorn.io/v1beta2
+kind: Volume
 metadata:
-  name: teslamate-db
-  namespace: home-automation
+  name: teslamate-import
+  namespace: storage
 spec:
+  size: "1073741824"  # 1Gi in bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
+---
+# PersistentVolume for Import
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: teslamate-import
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: longhorn
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "20"
+    volumeHandle: teslamate-import
 ---
+# PersistentVolumeClaim for Import
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -23,4 +47,5 @@ spec:
   resources:
     requests:
       storage: 1Gi
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: teslamate-import
