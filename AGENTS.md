@@ -1013,3 +1013,4 @@ Other examples:
 ## Special Notes
 - Cursor rules: Environment configurations from .cursor/rules/env.mdc
 - Copilot instructions: Not found - follow general GitHub guidelines
+- always generate strong passwords when you setup secrets
