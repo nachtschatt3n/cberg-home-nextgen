@@ -28,6 +28,7 @@ spec:
       type: Recreate
     admin:
       existingSecret: grafana-admin-secret
+    envFromSecret: grafana-admin-secret
     env:
       GF_EXPLORE_ENABLED: true
     grafana.ini:
@@ -103,7 +104,7 @@ spec:
             database: teslamate
             user: teslamate
             secureJsonData:
-              password: ${TESLAMATE_DB_PASSWORD}
+              password: $__env{TESLAMATE_DB_PASSWORD}
             jsonData:
               sslmode: disable
               postgresVersion: 1800
