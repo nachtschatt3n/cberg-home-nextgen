@@ -56,13 +56,10 @@ spec:
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: false
-              capabilities: { drop: ["ALL"] }
         pod:
           securityContext:
-            runAsUser: 70
-            runAsGroup: 70
-            runAsNonRoot: true
-            fsGroup: 70
+            runAsNonRoot: false
+            fsGroup: 999
             fsGroupChangePolicy: OnRootMismatch
 
     service:
