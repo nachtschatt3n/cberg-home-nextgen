@@ -72,4 +72,3 @@ spec:
         existingClaim: teslamate-db
         globalMounts:
           - path: /var/lib/postgresql/data
-            subPath: postgres
