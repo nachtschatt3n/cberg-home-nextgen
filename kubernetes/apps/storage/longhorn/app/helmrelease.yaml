@@ -53,7 +53,7 @@ spec:
         instanceManagerPodLivenessProbeTimeout: 30
         replicaFileSyncHttpClientTimeout: 30
         replicaDiskSoftAntiAffinity: true
-        autoDeletePodWhenVolumeDetachedUnexpectedly: true
+        autoDeletePodWhenVolumeDetachedUnexpectedly: false
         replicaReplenishmentWaitInterval: 600
         concurrentReplicaRebuildPerNodeLimit: 8
         systemManagedPodsImagePullPolicy: if-not-present
