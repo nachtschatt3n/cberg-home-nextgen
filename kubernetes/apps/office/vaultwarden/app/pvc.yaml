@@ -5,9 +5,10 @@ metadata:
   name: vaultwarden-data
   namespace: office
 spec:
-   accessModes:
-     - ReadWriteOnce
-   resources:
-     requests:
-       storage: 10Gi
-   storageClassName: longhorn-static
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn-static
+  volumeName: vaultwarden-data
