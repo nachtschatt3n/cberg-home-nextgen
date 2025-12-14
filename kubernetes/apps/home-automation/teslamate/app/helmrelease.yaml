@@ -138,13 +138,13 @@ spec:
               - teslamate.${SECRET_DOMAIN}
 
     persistence:
-      import:
-        enabled: true
-        existingClaim: teslamate-import
-        advancedMounts:
-          main:
-            main:
-              - path: /opt/app/import
+      # import:
+      #   enabled: true
+      #   existingClaim: teslamate-import
+      #   advancedMounts:
+      #     main:
+      #       main:
+      #         - path: /opt/app/import
       tmp:
         type: emptyDir
         advancedMounts:
