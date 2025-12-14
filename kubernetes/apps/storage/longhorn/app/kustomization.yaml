@@ -10,3 +10,5 @@ resources:
   - secret.sops.yaml
   - alertmanager-telegram-config.yaml
   - backup-credentials.sops.yaml
+patchesStrategicMerge:
+  - kustomization-patch.yaml

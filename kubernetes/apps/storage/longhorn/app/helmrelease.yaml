@@ -17,10 +17,6 @@ spec:
   values:
     longhorn:
       namespaceOverride: storage
-      image:
-        longhorn:
-          manager:
-            tag: v1.10.1-hotfix-1
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
         replicaSoftAntiAffinity: true
