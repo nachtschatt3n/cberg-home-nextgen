@@ -1,0 +1,14 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: vaultwarden-data
+  namespace: storage
+spec:
+  size: "10737418240"  # 10Gi in bytes (10 * 1024^3)
+  numberOfReplicas: 3
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
