@@ -17,6 +17,10 @@ spec:
   values:
     longhorn:
       namespaceOverride: storage
+      image:
+        longhorn:
+          manager:
+            tag: v1.10.1-hotfix-1
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
         replicaSoftAntiAffinity: true
@@ -74,7 +78,7 @@ spec:
         allowCollectingLonghornUsageMetrics: true
         kubernetesClusterAutoscalerEnabled: false
         logLevel: Info
-        upgradeChecker: true
+        upgradeChecker: false
         v1DataEngine: true
         v2DataEngine: false
         v2DataEngineGuaranteedInstanceManagerCPU: 1250
