@@ -255,7 +255,7 @@ kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmana
 ## 10. Longhorn Storage
 
 **Objective**: Verify storage system health
-**Success Criteria**: All volumes healthy, no degraded storage
+**Success Criteria**: All volumes healthy, no degraded storage, no recent detachment events
 
 **Commands to Execute:**
 ```bash
@@ -270,9 +270,47 @@ kubectl get pvc -A | grep -E "(Pending|Lost|Unknown)" | wc -l
 
 # Check Longhorn node status
 kubectl get nodes -n storage
+
+# CRITICAL: Check autoDeletePodWhenVolumeDetachedUnexpectedly setting
+# This should be "false" to prevent conflicts with Flux reconciliation
+kubectl get settings.longhorn.io auto-delete-pod-when-volume-detached-unexpectedly -n storage -o jsonpath='{.value}' && echo
+echo "Expected: false (prevents GitOps conflicts)"
+
+# Check for recent volume detachment events (last 24 hours)
+kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "DetachedUnexpectedly" | tail -20
+
+# Count recent engine failures
+kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "engine.*dead unexpectedly" | wc -l
+
+# Check for Flux reconciliation conflicts with Longhorn admission webhook
+kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "admission webhook.*longhorn.*denied" | tail -10
+
+# Check Longhorn manager logs for detachment warnings
+kubectl logs -n storage daemonset/longhorn-manager --tail=100 --since=24h | grep -i "detach\|degrad" | wc -l
+
+# Verify replica counts match expected (should not be 0/2)
+kubectl get volumes -n storage -o json | python3 -c "
+import sys, json
+volumes = json.load(sys.stdin)['items']
+mismatched = 0
+for vol in volumes:
+    name = vol['metadata']['name']
+    status = vol.get('status', {})
+    current = status.get('currentNumberOfReplicas', 0)
+    desired = vol['spec'].get('numberOfReplicas', 0)
+    if current != desired:
+        print(f'{name}: {current}/{desired} replicas')
+        mismatched += 1
+print(f'\nTotal volumes with replica mismatch: {mismatched}')
+"
 ```
 
-**AI Analysis**: Identify any storage issues, check volume health.
+**AI Analysis**:
+- Identify any storage issues, check volume health
+- **CRITICAL**: Verify `autoDeletePodWhenVolumeDetachedUnexpectedly` is `false` (issue from 2025-12-14)
+- Check for mass detachment events indicating cluster-wide issues
+- Monitor for Flux/Longhorn admission webhook conflicts
+- Flag any replica count mismatches that could indicate underlying problems
 
 ---
 
