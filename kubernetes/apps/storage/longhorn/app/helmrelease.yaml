@@ -31,13 +31,6 @@ spec:
               - op: replace
                 path: /spec/template/spec/containers/0/image
                 value: longhornio/longhorn-manager:v1.10.1-hotfix-1
-          - target:
-              kind: Deployment
-              name: longhorn-ui
-            patch: |
-              - op: replace
-                path: /spec/template/spec/initContainers/0/image
-                value: longhornio/longhorn-manager:v1.10.1-hotfix-1
   values:
     longhorn:
       namespaceOverride: storage
