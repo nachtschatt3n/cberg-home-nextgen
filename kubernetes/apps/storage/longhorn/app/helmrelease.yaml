@@ -14,23 +14,6 @@ spec:
         kind: HelmRepository
         name: longhorn
         namespace: flux-system
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: DaemonSet
-              name: longhorn-manager
-            patch: |
-              - op: replace
-                path: /spec/template/spec/containers/0/image
-                value: longhornio/longhorn-manager:v1.10.1-hotfix-1
-          - target:
-              kind: Deployment
-              name: longhorn-driver-deployer
-            patch: |
-              - op: replace
-                path: /spec/template/spec/containers/0/image
-                value: longhornio/longhorn-manager:v1.10.1-hotfix-1
   values:
     longhorn:
       namespaceOverride: storage
