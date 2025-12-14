@@ -24,8 +24,8 @@ spec:
         createDefaultDiskLabeledNodes: false
         defaultReplicaCount: 2
         defaultDataLocality: best-effort
-        guaranteedEngineManagerCPU: 500
-        guaranteedReplicaManagerCPU: 500
+        guaranteedEngineManagerCPU: 1000
+        guaranteedReplicaManagerCPU: 1000
         defaultLonghornStaticStorageClass: longhorn-static
         backupTarget: "cifs://192.168.31.230/backups"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
@@ -37,24 +37,24 @@ spec:
         systemManagedComponentsNodeSelector: ""
         allowNodeDrainWithLastHealthyReplica: true
         nodeDrainPolicy: block-if-contains-last-replica
-        offlineReplicaRebuilding: disabled
+        offlineReplicaRebuilding: enabled
         disableSchedulingOnCordonedNode: true
         replicaZoneSoftAntiAffinity: true
         removeSnapshotsDuringFilesystemTrim: true
         snapshotDataIntegrity: fast-check
-        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
+        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: true
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
         backupConcurrentLimit: 2
         restoreConcurrentLimit: 2
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
-        engineReplicaTimeout: 8
+        engineReplicaTimeout: 12
         instanceManagerPodLivenessProbeTimeout: 30
         replicaFileSyncHttpClientTimeout: 30
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: false
-        replicaReplenishmentWaitInterval: 600
+        replicaReplenishmentWaitInterval: 300
         concurrentReplicaRebuildPerNodeLimit: 8
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
