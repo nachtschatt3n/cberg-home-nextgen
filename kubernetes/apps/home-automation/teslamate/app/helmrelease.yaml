@@ -140,7 +140,7 @@ spec:
     persistence:
       import:
         enabled: true
-        existingClaim: teslamate-import-new
+        existingClaim: teslamate-import
         advancedMounts:
           main:
             main:
