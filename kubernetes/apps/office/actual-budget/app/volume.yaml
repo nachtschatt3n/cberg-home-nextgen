@@ -1,5 +1,6 @@
 ---
 # Longhorn Volume for Actual Budget
+# Note: Longhorn volumes must be created in the storage namespace
 apiVersion: longhorn.io/v1beta2
 kind: Volume
 metadata:
