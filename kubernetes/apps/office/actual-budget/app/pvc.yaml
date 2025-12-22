@@ -5,9 +5,10 @@ metadata:
   name: actual-budget-data
   namespace: office
 spec:
-   accessModes:
-     - ReadWriteOnce
-   resources:
-     requests:
-       storage: 5Gi
-   storageClassName: longhorn-static
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn-static
+  volumeName: actual-budget-data

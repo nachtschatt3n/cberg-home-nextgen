@@ -1,0 +1,15 @@
+---
+# Longhorn Volume for Actual Budget
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: actual-budget-data
+  namespace: storage
+spec:
+  size: "5368709120"  # 5Gi in bytes
+  numberOfReplicas: 3
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
