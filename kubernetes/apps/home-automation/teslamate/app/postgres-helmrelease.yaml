@@ -24,9 +24,7 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    defaultPodOptions:
-      nodeSelector:
-        kubernetes.io/hostname: k8s-nuc14-03
+    defaultPodOptions: {}
 
     controllers:
       main:
