@@ -2,7 +2,11 @@
 
 **Date:** 2025-12-22
 **Node:** k8s-nuc14-03 (192.168.55.13)
-**Status:** ✅ SSD Hardware Healthy - Monitoring Enabled
+**Status:** ✅ SSD Hardware Healthy - Active Monitoring & Stress Testing Enabled
+
+> **⚠️ IMPORTANT FOR NEXT HEALTH CHECK (2025-12-29):**
+> This node is under 7-day monitoring with continuous I/O stress testing.
+> Check the "Health Check Validation" section below for required status checks.
 
 ---
 
@@ -174,6 +178,57 @@ kubectl create job -n kube-system nvme-smart-manual-check-$(date +%s) \
   --from=cronjob/nvme-smart-monitor-node3
 ```
 
+### I/O Stress Testing
+
+Created: `kube-system/io-stress-test-node3`
+
+**Purpose:** Active load testing to verify SSD stability under real I/O workload
+
+**Configuration:**
+- **Storage:** Direct hostPath to `/var/lib/io-stress-test` on node 3's SSD
+- **Test Patterns:** Sequential write/read (10GB), Random write/read (4GB, 4K blocks, 4 jobs)
+- **Frequency:** Continuous testing with 30-minute intervals between iterations
+- **SMART Checks:** Every 12 iterations (~6 hours)
+- **Duration:** 7 days continuous
+
+**Test Patterns Per Iteration:**
+1. Sequential write (10GB) - Simulates database writes
+2. Sequential read (10GB) - Simulates large file operations
+3. Random write (4GB, 4K blocks, 4 jobs) - Simulates heavy application load
+4. Random read (4GB, 4K blocks, 4 jobs) - Simulates concurrent database queries
+
+**Initial Results (2025-12-22 21:42 UTC):**
+- ✅ Iteration 1 completed successfully
+- ✅ All 4 test patterns passed
+- ✅ No I/O errors detected
+- ✅ SMART health: PASSED
+- ✅ Temperature: 35°C
+
+**View Stress Test Status:**
+```bash
+# Check if stress test is running
+kubectl get pod -n kube-system -l app=io-stress-test
+
+# View current test logs
+kubectl logs -n kube-system -l app=io-stress-test --tail=100
+
+# Check for any I/O errors reported
+kubectl logs -n kube-system -l app=io-stress-test | grep -i "error"
+
+# View latest iteration results
+kubectl logs -n kube-system -l app=io-stress-test | grep "Iteration.*completed"
+```
+
+**Stop Stress Test (if needed):**
+```bash
+# Delete the stress test deployment
+kubectl delete deployment io-stress-test-node3 -n kube-system
+
+# Clean up test data on node (optional)
+kubectl run cleanup-io-test --image=alpine --restart=Never -n kube-system \
+  --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"k8s-nuc14-03"},"hostPID":true,"containers":[{"name":"cleanup","image":"alpine","command":["rm","-rf","/host/var/lib/io-stress-test"],"volumeMounts":[{"name":"host","mountPath":"/host"}],"securityContext":{"privileged":true}}],"volumes":[{"name":"host","hostPath":{"path":"/"}}],"tolerations":[{"key":"node.kubernetes.io/unschedulable","operator":"Exists","effect":"NoSchedule"}]}}'
+```
+
 ---
 
 ## Next Steps & Recommendations
@@ -183,7 +238,8 @@ kubectl create job -n kube-system nvme-smart-manual-check-$(date +%s) \
 1. **Node Rebooted** - Clean filesystem remount
 2. **SMART Diagnostics** - Comprehensive health check passed
 3. **Automated Monitoring** - Daily SMART checks enabled
-4. **Documentation** - This report created
+4. **I/O Stress Testing** - Continuous active load testing deployed
+5. **Documentation** - This report created
 
 ### 📋 7-Day Monitoring Period (2025-12-22 to 2025-12-29)
 
@@ -194,9 +250,11 @@ kubectl create job -n kube-system nvme-smart-manual-check-$(date +%s) \
 2. ✅ Monitor daily SMART reports
 3. ✅ Watch for new I/O errors in kernel logs
 4. ✅ Track unsafe shutdown count
+5. ✅ Continuous I/O stress testing active
 
 **Success Criteria:**
-- No new I/O errors
+- No new I/O errors (kernel logs)
+- I/O stress test passes all iterations
 - SMART health remains PASSED
 - Unsafe shutdown count stays at 35
 - No new filesystem corruption
@@ -204,8 +262,20 @@ kubectl create job -n kube-system nvme-smart-manual-check-$(date +%s) \
 
 **Monitoring Commands:**
 ```bash
-# Check for new I/O errors
+# Check I/O stress test status
+kubectl get pod -n kube-system -l app=io-stress-test
+
+# View stress test progress
+kubectl logs -n kube-system -l app=io-stress-test --tail=100
+
+# Count successful iterations
+kubectl logs -n kube-system -l app=io-stress-test | grep -c "completed successfully"
+
+# Check for new I/O errors (kernel logs)
 talosctl dmesg --nodes 192.168.55.13 -f | grep -i "I/O error"
+
+# Check for stress test errors
+kubectl logs -n kube-system -l app=io-stress-test | grep -i "WARNING\|ERROR\|FAILED"
 
 # Check unsafe shutdown count
 kubectl logs -n kube-system -l app=nvme-smart-monitor | grep "Unsafe Shutdowns"
@@ -216,19 +286,104 @@ kubectl get events -A --field-selector involvedObject.name=k8s-nuc14-03 --sort-b
 
 ### 🔄 After 7 Days (2025-12-29)
 
+---
+
+## 📋 Health Check Validation (For Next Weekly Health Check)
+
+**⚠️ REQUIRED CHECKS when running the next health check:**
+
+### 1. I/O Stress Test Status
+```bash
+# Verify stress test is still running
+kubectl get pod -n kube-system -l app=io-stress-test
+# Expected: 1/1 Running
+
+# Check total iterations completed (should be ~300+ after 7 days)
+kubectl logs -n kube-system -l app=io-stress-test | grep -c "completed successfully"
+
+# Verify NO errors detected
+kubectl logs -n kube-system -l app=io-stress-test | grep -i "WARNING\|ERROR\|FAILED"
+# Expected: No output (clean)
+
+# Check latest SMART status from stress test
+kubectl logs -n kube-system -l app=io-stress-test | grep "SMART overall-health" | tail -1
+# Expected: PASSED
+```
+
+### 2. Daily SMART Monitor Status
+```bash
+# Check last 7 SMART monitor jobs
+kubectl get jobs -n kube-system -l app=nvme-smart-monitor --sort-by=.metadata.creationTimestamp | tail -7
+
+# Verify all passed (should see 7 successful jobs)
+kubectl get jobs -n kube-system -l app=nvme-smart-monitor -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.succeeded}{"\n"}{end}' | grep "1$" | wc -l
+# Expected: 7
+
+# Check unsafe shutdown count hasn't increased
+kubectl logs -n kube-system -l app=nvme-smart-monitor | grep "Unsafe Shutdowns" | tail -1
+# Expected: 35 (no increase from baseline)
+```
+
+### 3. Kernel I/O Error Check
+```bash
+# Check for any new I/O errors in last 7 days
+talosctl dmesg --nodes 192.168.55.13 | grep -i "I/O error" | grep -i "nvme\|sdi\|sector"
+# Expected: No new errors (only historical Dec 21 entries if any)
+```
+
+### 4. Node Health Check
+```bash
+# Verify node is still Ready (cordoned)
+kubectl get node k8s-nuc14-03
+# Expected: Ready,SchedulingDisabled
+
+# Check for node events
+kubectl get events -A --field-selector involvedObject.name=k8s-nuc14-03 --sort-by='.lastTimestamp' | tail -20
+# Expected: No storage-related warnings
+```
+
+### 5. Decision Matrix
+
+| Check | Status | Action |
+|-------|--------|--------|
+| I/O stress test running | ✅ Pass | Continue to next check |
+| I/O stress test running | ❌ Fail | Investigate pod crash/restart |
+| 300+ iterations completed | ✅ Pass | Continue to next check |
+| <300 iterations | ⚠️ Warning | Check if pod was restarted |
+| Zero I/O errors in stress test | ✅ Pass | Continue to next check |
+| I/O errors detected | ❌ Fail | SSD still unstable - DO NOT uncordon |
+| 7 successful SMART jobs | ✅ Pass | Continue to next check |
+| Failed SMART jobs | ❌ Fail | Review job logs for failures |
+| Unsafe shutdowns = 35 | ✅ Pass | No new power issues |
+| Unsafe shutdowns > 35 | ❌ Fail | New power event - investigate |
+| No new kernel I/O errors | ✅ Pass | Continue to next check |
+| New kernel I/O errors | ❌ Fail | SSD still failing - DO NOT uncordon |
+
+**✅ ALL CHECKS PASS → Safe to uncordon node**
+**❌ ANY CHECK FAILS → Keep node cordoned, extend monitoring**
+
+---
+
+### 🔄 Return to Service (If All Checks Pass)
+
 **If Stable (No New Issues):**
 
-1. **Consider Re-enabling Scheduling:**
+1. **Stop I/O Stress Test:**
+   ```bash
+   kubectl delete deployment io-stress-test-node3 -n kube-system
+   ```
+
+2. **Consider Re-enabling Scheduling:**
    ```bash
    kubectl uncordon k8s-nuc14-03
    ```
 
-2. **Gradual Return to Service:**
+3. **Gradual Return to Service:**
    - Allow non-critical workloads first
    - Monitor for 48 hours
    - If stable, allow critical workloads
 
-3. **Continue Monthly SMART Checks:**
+4. **Continue Monthly SMART Checks:**
    - Keep CronJob enabled
    - Review monthly for trends
 
@@ -353,16 +508,25 @@ Power States: 5 (currently in state 0)
 
 The Samsung SSD 990 PRO 1TB on node k8s-nuc14-03 is **hardware-healthy** based on comprehensive SMART diagnostics. The December 21st incident was a **filesystem corruption from unsafe shutdown**, not drive failure.
 
-**Recommendation:** Monitor for 7 days. If stable, the drive can safely return to production service.
+**Recommendation:** Monitor for 7 days with active I/O stress testing. If stable, the drive can safely return to production service.
+
+**Active Monitoring:**
+1. **Daily SMART checks** (CronJob at 06:00 UTC)
+2. **Continuous I/O stress testing** (30-min intervals, 7 days)
+3. **Kernel log monitoring** for I/O errors
 
 **Key Metrics to Watch:**
-- Unsafe shutdown count (currently 35)
-- Media errors (currently 0)
-- Temperature (currently 36°C)
-- SMART health (currently PASSED)
+- I/O stress test iterations (target: 300+ successful)
+- Unsafe shutdown count (baseline: 35, no increase expected)
+- Media errors (baseline: 0, must stay 0)
+- Temperature (baseline: 35-36°C, must stay <60°C)
+- SMART health (baseline: PASSED, must stay PASSED)
+
+**Next Action:** Run health check on 2025-12-29 following the "Health Check Validation" section above.
 
 ---
 
 **Report Generated:** 2025-12-22 21:35 UTC
+**Report Updated:** 2025-12-22 21:45 UTC (added I/O stress testing)
 **Next Update:** 2025-12-29 (after monitoring period)
-**Automated Monitoring:** ✅ Enabled (daily at 06:00 UTC)
+**Automated Monitoring:** ✅ Enabled (daily SMART + continuous I/O stress)
