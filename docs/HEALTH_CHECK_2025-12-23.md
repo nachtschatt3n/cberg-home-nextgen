@@ -337,7 +337,7 @@ NVMe Error Log: 0 entries (clean)
 
 ## Decision Matrix: Node 3 Return to Service
 
-### Validation Scorecard
+### Validation Scorecard (Day 1 of 7)
 
 | Requirement | Target | Actual | Pass/Fail |
 |-------------|--------|--------|-----------|
@@ -350,49 +350,79 @@ NVMe Error Log: 0 entries (clean)
 | Kernel I/O errors | 0 | 0 | ✅ PASS |
 | Node responsiveness | Ready | Ready | ✅ PASS |
 
-**Overall Assessment:** ✅ **8/8 CHECKS PASSED - NODE READY FOR SERVICE**
+**Overall Assessment:** ✅ **8/8 CHECKS PASSED - CONTINUE MONITORING**
+
+**Status:** Day 1 of 7-day monitoring period complete. All metrics healthy. Continue stress testing through 2025-12-29.
 
 ---
 
 ## Recommendations
 
-### 🎯 Immediate Actions
+### 🎯 Current Status: Day 1 of 7-Day Monitoring Period
 
-#### 1. Node 3 Return to Service ✅ **APPROVED**
+**Monitoring Period:** 2025-12-22 21:42 UTC → 2025-12-29 21:42 UTC
 
-The SSD has proven stable under 17 hours of continuous stress testing. All metrics indicate the December 21st incident was a one-time filesystem corruption from unsafe shutdown, not ongoing hardware failure.
+#### Critical Decision Point
 
-**Recommended Steps:**
+The node has passed **Day 1 of 7** successfully. However, we must **continue the full 7-day monitoring period** before returning to service.
+
+**Why Continue?** If the SSD passes the full week of raw I/O stress testing but then fails when Longhorn workloads are restored, this would indicate:
+- ❌ Not a raw SSD hardware failure
+- ⚠️ Potentially a **Longhorn-specific issue** (volume operations, replication, etc.)
+- ⚠️ Potentially an interaction between Longhorn and the SSD under specific load patterns
+
+This is a **critical diagnostic opportunity** to isolate whether:
+1. The SSD itself is failing (would fail stress test)
+2. Longhorn operations are triggering the issue (would pass stress test, fail with Longhorn)
+
+### 📋 Actions: Continue Monitoring (No Changes)
+
+#### 1. Keep I/O Stress Test Running ✅
+
+**Status:** Running, 33/~336 iterations complete (10% of 7-day target)
+
+**Do NOT stop the test.** Let it run through 2025-12-29.
+
+Expected by end of monitoring period:
+- **~336 total iterations** (48 iterations/day × 7 days)
+- **~3.3 TB of data** written and read
+- **~168 hours** of continuous operation
+
+#### 2. Daily Monitoring Checklist
+
+Run these checks daily (or use next weekly health check):
 
 ```bash
-# 1. Stop I/O stress test
-kubectl delete deployment io-stress-test-node3 -n kube-system
+# Check stress test status
+kubectl get pod -n kube-system -l app=io-stress-test
+kubectl logs -n kube-system -l app=io-stress-test | grep "Iteration.*completed" | tail -1
 
-# 2. Uncordon node 3
-kubectl uncordon k8s-nuc14-03
+# Check for errors
+kubectl logs -n kube-system -l app=io-stress-test | grep -i "WARNING\|ERROR\|FAILED"
 
-# 3. Gradual return to service
-# Allow non-critical workloads first, monitor for 48h
-# If stable, allow all workloads
+# Check SMART status (after 06:00 UTC daily job)
+kubectl logs -n kube-system -l app=nvme-smart-monitor | grep "SMART Health" | tail -1
+kubectl logs -n kube-system -l app=nvme-smart-monitor | grep "Unsafe Shutdowns" | tail -1
 
-# 4. Keep SMART monitoring enabled
-# CronJob will continue daily checks at 06:00 UTC
+# Check for kernel I/O errors
+talosctl dmesg --nodes 192.168.55.13 | grep -i "I/O error" | tail -10
 ```
 
-**Monitoring Post-Return:**
-- Continue daily SMART checks (already configured)
-- Monitor unsafe shutdown count for next 30 days
-- Watch for any I/O errors in kernel logs
-- Track temperature trends
+#### 3. Monitor for Anomalies
 
-#### 2. Cleanup Test Resources
+**Alert immediately if:**
+- ❌ Stress test pod crashes or restarts
+- ❌ I/O errors appear in stress test logs
+- ❌ SMART health changes from PASSED to FAILED
+- ❌ Unsafe shutdown count increases above 35
+- ❌ Media errors appear (currently 0)
+- ❌ Temperature exceeds 60°C
 
-After uncordoning node 3:
-```bash
-# Clean up test data on node (optional)
-kubectl run cleanup-io-test --image=alpine --restart=Never -n kube-system \
-  --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"k8s-nuc14-03"},"hostPID":true,"containers":[{"name":"cleanup","image":"alpine","command":["rm","-rf","/host/var/lib/io-stress-test"],"volumeMounts":[{"name":"host","mountPath":"/host"}],"securityContext":{"privileged":true}}],"volumes":[{"name":"host","hostPath":{"path":"/"}}]}}'
-```
+**Current baselines (must remain stable):**
+- Unsafe shutdowns: 35
+- Media errors: 0
+- Temperature: ~36°C
+- SMART health: PASSED
 
 ### 🔄 Ongoing Maintenance
 
@@ -484,28 +514,39 @@ kubectl run cleanup-io-test --image=alpine --restart=Never -n kube-system \
 
 ## Action Items
 
-### High Priority
+### 🔴 Critical (Monitoring Period: Days 1-7)
 
-- [ ] **Uncordon Node 3** - SSD proven stable, safe to return to service
-- [ ] **Stop I/O Stress Test** - Testing complete, cleanup resources
-- [ ] **Monitor Node 3 Post-Return** - Watch for 48 hours after uncordoning
+- [x] **Day 1 Health Check Complete** - All metrics passing
+- [ ] **Continue I/O Stress Test** - Do NOT stop until 2025-12-29
+- [ ] **Daily SMART Monitoring** - Review automated job logs at 06:00 UTC
+- [ ] **Daily Iteration Check** - Verify stress test progressing (~48 iterations/day)
+- [ ] **Watch for Anomalies** - Pod crashes, I/O errors, SMART failures
+- [ ] **Final Assessment 2025-12-29** - Review full 7-day results
 
-### Medium Priority
+### 🟡 High Priority (After Monitoring Period)
+
+- [ ] **Decision: Uncordon or Investigate** - Based on 7-day test results
+  - If stress test passes: Uncordon and monitor for Longhorn-specific issues
+  - If stress test fails: Replace SSD
+- [ ] **Document Final Results** - Update diagnostics report with 7-day findings
+- [ ] **Cleanup Test Resources** - Remove stress test deployment and data (after decision)
+
+### 🟢 Medium Priority
 
 - [ ] **Investigate Power Infrastructure** - 35 unsafe shutdowns warrants investigation
 - [ ] **Test Backup Restoration** - Quarterly verification recommended
 - [ ] **Review Pod Restart Patterns** - teslamate (6) and cloudflared (13)
 
-### Low Priority
+### 🔵 Low Priority
 
-- [ ] **Capacity Planning** - With all 3 nodes active, review resource distribution
-- [ ] **Update Documentation** - Document Node 3 SSD incident and resolution
+- [ ] **Capacity Planning** - With all 3 nodes active, review resource distribution (after uncordon)
+- [ ] **Long-term SSD Monitoring** - Continue monthly SMART trend analysis
 
 ---
 
 ## Conclusion
 
-The cluster is in **excellent health** with a **100% operational score** across all critical systems. The primary focus of this health check—Node 3 SSD stability—has been **conclusively validated**:
+The cluster is in **excellent health** with a **100% operational score** across all critical systems. The primary focus of this health check—Node 3 SSD stability—shows **positive Day 1 results**:
 
 - ✅ **33 successful stress test iterations over 17 hours**
 - ✅ **Zero I/O errors under sustained load**
@@ -513,9 +554,32 @@ The cluster is in **excellent health** with a **100% operational score** across 
 - ✅ **No unsafe shutdown increase (stable at baseline 35)**
 - ✅ **Temperature normal (36°C)**
 
-**Verdict:** The December 21st incident was a **one-time filesystem corruption from unsafe shutdown**, not progressive SSD failure. The drive is **hardware-healthy** and **safe to return to production service**.
+### Current Assessment (Day 1 of 7)
 
-**Recommended Action:** Uncordon k8s-nuc14-03 and gradually restore workloads.
+**Progress:** 10% of monitoring period complete (17h / 168h)
+
+**Status:** All metrics healthy, no anomalies detected.
+
+### Critical Decision Point
+
+**We must continue the full 7-day monitoring period.** This is a diagnostic opportunity:
+
+**Scenario 1:** SSD fails during stress testing
+- **Conclusion:** Raw SSD hardware failure
+- **Action:** Replace drive
+
+**Scenario 2:** SSD passes all 7 days of stress testing, then fails when Longhorn workloads return
+- **Conclusion:** NOT a raw SSD failure
+- **Indication:** Longhorn-specific issue (volume operations, replication patterns, or interaction with SSD)
+- **Action:** Investigate Longhorn configuration, replica counts, or volume operation patterns
+
+### Next Steps
+
+1. **Continue stress testing through 2025-12-29** (6 days remaining)
+2. **Daily monitoring** via automated SMART checks + manual validation
+3. **Decision on 2025-12-29:** Based on full 7-day results
+
+**Recommended Action:** Continue monitoring. Do NOT uncordon node until full 7-day period completes.
 
 ---
 
