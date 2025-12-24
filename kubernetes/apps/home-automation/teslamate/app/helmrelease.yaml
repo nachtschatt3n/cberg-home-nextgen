@@ -121,7 +121,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "TeslaMate"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "tesla.png"
+          gethomepage.dev/icon: "mdi-car"
           gethomepage.dev/description: "Tesla vehicle data logger and analytics"
         labels:
           gethomepage.dev/enabled: "true"
