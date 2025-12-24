@@ -88,7 +88,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Actual Budget"
           gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "actual.png"
+          gethomepage.dev/icon: "mdi-wallet"
           gethomepage.dev/description: "Privacy-focused budgeting with envelope system"
         labels:
           gethomepage.dev/enabled: "true"
