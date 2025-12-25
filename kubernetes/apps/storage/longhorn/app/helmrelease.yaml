@@ -45,7 +45,8 @@ spec:
         snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: true
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
-        backupConcurrentLimit: 2
+        backupConcurrentLimit: 25
+        concurrentVolumeBackupRestorePerNodeLimit: 10
         restoreConcurrentLimit: 2
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
