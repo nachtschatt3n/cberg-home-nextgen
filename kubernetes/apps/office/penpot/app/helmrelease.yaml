@@ -31,7 +31,7 @@ spec:
       publicUri: "https://penpot.${SECRET_DOMAIN}"
 
       # Feature flags
-      flags: "enable-registration enable-login-with-password disable-email-verification"
+      flags: "disable-registration enable-login-with-password disable-email-verification"
 
       # Secret key for session encryption
       secretKey:
