@@ -46,11 +46,6 @@ spec:
         host: ""  # Use dependency
         port: 5432
         username: penpot
-        password:
-          valueFrom:
-            secretKeyRef:
-              name: penpot-secret
-              key: PENPOT_POSTGRESQL_PASSWORD
         database: penpot
 
       # Valkey (Redis alternative) configuration
@@ -114,7 +109,10 @@ spec:
       enabled: true
       auth:
         username: penpot
-        password: JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA
+        existingSecret: penpot-secret
+        secretKeys:
+          adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
+          userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
         database: penpot
       primary:
         persistence:
