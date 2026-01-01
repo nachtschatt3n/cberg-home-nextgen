@@ -1,0 +1,170 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2beta2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: penpot
+  namespace: office
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: penpot
+      version: 0.32.0
+      sourceRef:
+        kind: HelmRepository
+        name: penpot
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    # Global configuration
+    global:
+      publicUri: "https://penpot.${SECRET_DOMAIN}"
+
+      # Feature flags
+      flags: "enable-registration enable-login-with-password disable-email-verification"
+
+      # Secret key for session encryption
+      secretKey:
+        valueFrom:
+          secretKeyRef:
+            name: penpot-secret
+            key: PENPOT_SECRET_KEY
+
+      # PostgreSQL configuration
+      postgresqlEnabled: true
+      postgresql:
+        host: ""  # Use dependency
+        port: 5432
+        username: penpot
+        password:
+          valueFrom:
+            secretKeyRef:
+              name: penpot-secret
+              key: PENPOT_POSTGRESQL_PASSWORD
+        database: penpot
+
+      # Valkey (Redis alternative) configuration
+      valkeyEnabled: true
+      valkey:
+        host: ""  # Use dependency
+        port: 6379
+        database: 0
+
+    # Backend service configuration
+    backend:
+      replicaCount: 1
+      service:
+        type: ClusterIP
+        port: 6060
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 2000m
+          memory: 2Gi
+
+    # Frontend service configuration
+    frontend:
+      replicaCount: 1
+      service:
+        type: ClusterIP
+        port: 8080
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+    # Exporter service configuration
+    exporter:
+      replicaCount: 1
+      service:
+        type: ClusterIP
+        port: 6061
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+    # Persistence for assets
+    persistence:
+      assets:
+        enabled: true
+        existingClaim: penpot-assets
+        size: 20Gi
+
+    # PostgreSQL subchart configuration
+    postgresql:
+      enabled: true
+      auth:
+        username: penpot
+        password: JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA
+        database: penpot
+      primary:
+        persistence:
+          enabled: true
+          existingClaim: penpot-postgresql
+          size: 10Gi
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+
+    # Valkey subchart configuration
+    valkey:
+      enabled: true
+      master:
+        persistence:
+          enabled: true
+          existingClaim: penpot-valkey
+          size: 5Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      replica:
+        enabled: false
+        replicaCount: 0
+
+    # Ingress configuration
+    ingress:
+      enabled: true
+      className: internal
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Penpot"
+        gethomepage.dev/description: "Open-source design and prototyping platform"
+        gethomepage.dev/group: "Office"
+        gethomepage.dev/icon: "penpot.png"
+      labels:
+        gethomepage.dev/enabled: "true"
+      hosts:
+        - host: penpot.${SECRET_DOMAIN}
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - penpot.${SECRET_DOMAIN}
