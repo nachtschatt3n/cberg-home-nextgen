@@ -58,7 +58,9 @@ spec:
     # Application configuration
     config:
       postgresql:
-        password: "JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA"
+        existingSecret: penpot-secret
+        secretKeys:
+          passwordKey: PENPOT_POSTGRESQL_PASSWORD
 
     # Backend service configuration
     backend:
@@ -114,7 +116,10 @@ spec:
       enabled: true
       auth:
         username: penpot
-        password: "JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA"
+        existingSecret: penpot-secret
+        secretKeys:
+          adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
+          userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
         database: penpot
       primary:
         persistence:
