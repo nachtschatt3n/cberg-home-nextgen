@@ -6,7 +6,7 @@ metadata:
   namespace: office
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 20Gi
