@@ -55,6 +55,11 @@ spec:
         port: 6379
         database: 0
 
+    # Application configuration
+    config:
+      postgresql:
+        password: "JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA"
+
     # Backend service configuration
     backend:
       replicaCount: 1
