@@ -134,9 +134,7 @@ spec:
       enabled: true
       master:
         persistence:
-          enabled: true
-          existingClaim: penpot-valkey
-          size: 5Gi
+          enabled: false  # Cache only - no persistence needed
         resources:
           requests:
             cpu: 100m
