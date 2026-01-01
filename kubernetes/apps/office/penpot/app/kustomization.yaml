@@ -6,3 +6,8 @@ resources:
   - pvc.yaml
   - secret.sops.yaml
   - helmrelease.yaml
+patches:
+  - path: ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: penpot
