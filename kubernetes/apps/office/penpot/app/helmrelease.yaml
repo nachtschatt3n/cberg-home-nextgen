@@ -158,13 +158,9 @@ spec:
         gethomepage.dev/description: "Open-source design and prototyping platform"
         gethomepage.dev/group: "Office"
         gethomepage.dev/icon: "penpot.png"
-      labels:
-        gethomepage.dev/enabled: "true"
       hosts:
-        - host: penpot.${SECRET_DOMAIN}
-          paths:
-            - path: /
-              pathType: Prefix
+        - penpot.${SECRET_DOMAIN}
       tls:
-        - hosts:
+        - secretName: penpot-tls
+          hosts:
             - penpot.${SECRET_DOMAIN}
