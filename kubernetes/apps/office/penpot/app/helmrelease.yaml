@@ -171,6 +171,7 @@ spec:
         gethomepage.dev/description: "Open-source design and prototyping platform"
         gethomepage.dev/group: "Office"
         gethomepage.dev/icon: "penpot.png"
+        gethomepage.dev/pod-selector: "app.kubernetes.io/instance=penpot,app.kubernetes.io/name=penpot-backend"
       hosts:
         - penpot.${SECRET_DOMAIN}
       tls:
