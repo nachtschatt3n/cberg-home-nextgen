@@ -109,10 +109,7 @@ spec:
       enabled: true
       auth:
         username: penpot
-        existingSecret: penpot-secret
-        secretKeys:
-          adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
-          userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
+        password: "JTKQ8Qu69KNu1lWrs9tzMa75Vup45VaID97afBdYaFA"
         database: penpot
       primary:
         persistence:
