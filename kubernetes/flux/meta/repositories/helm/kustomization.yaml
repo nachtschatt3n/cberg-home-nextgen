@@ -32,6 +32,7 @@ resources:
   - ./rm3l.yaml
   - ./dirsigler.yaml
   - ./pajikos.yaml
+  - ./penpot.yaml
   - ./prometheus-community.yaml
   - ./jameswynn.yaml
   - ./descheduler.yaml
