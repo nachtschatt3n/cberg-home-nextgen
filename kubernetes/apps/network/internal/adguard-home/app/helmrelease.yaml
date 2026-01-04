@@ -126,7 +126,8 @@ spec:
       targetCPUUtilizationPercentage: 80
       # targetMemoryUtilizationPercentage: 80
 
-    nodeSelector: {}
+    nodeSelector:
+      kubernetes.io/hostname: k8s-nuc14-01
 
     tolerations: []
 
