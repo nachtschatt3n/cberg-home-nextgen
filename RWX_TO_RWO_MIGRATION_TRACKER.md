@@ -14,7 +14,7 @@
 | **Total PVCs to Migrate** | 13 | 1 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
 | **PVCs Migrated to RWO** | 13 | 1 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 0 | 🟡 Pending Cleanup |
+| **Share Managers Removed** | 13 | 1 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -100,13 +100,14 @@
 **Mosquitto Migration Notes (2026-01-03)**:
 - ✅ PVC accessMode = ReadWriteOnce
 - ✅ PVC Status = Bound
-- ✅ Pod running and healthy (mosquitto-5cdd4f987-86gw2)
-- ⚠️ Share manager cleanup pending (Longhorn will remove automatically)
-- ℹ️ Manual steps required: Delete pod/PVC, patch PV accessModes (not fully GitOps-compliant but necessary for existing volumes)
+- ✅ Pod running and healthy (mosquitto-5cdd4f987-97wzd, 12h uptime)
+- ✅ Share manager removed (13 share managers remaining, down from 14)
+- ℹ️ Manual steps required: Deactivate in Flux, detach volume in Longhorn UI, delete PVC, patch PV/Volume, reactivate (not fully GitOps-compliant but necessary for existing volumes)
+- 📚 Documented correct procedure in AGENTS.md (commit: 6ce1f55)
 
 **Verification Checklist per App**:
 - [x] PVC accessMode = ReadWriteOnce
-- [ ] Share manager pod removed from storage namespace
+- [x] Share manager pod removed from storage namespace
 - [x] App pod running and healthy
 - [ ] Web UI accessible and functional
 
