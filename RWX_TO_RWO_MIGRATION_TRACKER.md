@@ -11,10 +11,10 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| **Total PVCs to Migrate** | 13 | 6 | 🟡 In Progress |
+| **Total PVCs to Migrate** | 13 | 7 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
-| **PVCs Migrated to RWO** | 13 | 6 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 7 | 🟡 In Progress |
+| **PVCs Migrated to RWO** | 13 | 7 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 6 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -149,7 +149,7 @@
 
 | # | App | PVC Name | Size | File Path | Migration Status | Verification |
 |---|---|-----|----------|------|-----------|------------------|--------------|
-| 7 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 7 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/config-pvc.yaml` | ✅ Migrated | ✅ Verified |
 | 8 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ⏸️ **READY** | Volume restored from backup-a0e326d5fe644f42 (2026-01-01) |
 | 9 | scrypted | scrypted-data | 5Gi | `kubernetes/apps/home-automation/scrypted-nvr/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 
