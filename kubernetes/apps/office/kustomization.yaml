@@ -5,10 +5,10 @@ kind: Kustomization
 namespace: office
 components:
   - ../../flux/components/common
-resources:
- - ./actual-budget/ks.yaml
- - ./nextcloud/ks.yaml
- - ./omni-tools/ks.yaml
- - ./paperless-ngx/ks.yaml
- - ./penpot/ks.yaml
- - ./vaultwarden/ks.yaml
+#resources:
+# - ./actual-budget/ks.yaml
+# - ./nextcloud/ks.yaml
+# - ./omni-tools/ks.yaml#
+# - ./paperless-ngx/ks.yaml
+# - ./penpot/ks.yaml
+# - ./vaultwarden/ks.yaml
