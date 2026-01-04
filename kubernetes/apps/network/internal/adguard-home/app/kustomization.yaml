@@ -6,6 +6,3 @@ resources:
   - ./helmrelease.yaml
   - ./certificate.yaml
   - ./secret.sops.yaml
-  # PV and PVC managed via Longhorn API
-  # - ./pv.yaml
-  # - ./pvc.yaml
