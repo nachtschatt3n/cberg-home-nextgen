@@ -13,8 +13,8 @@
 |--------|--------|---------|--------|
 | **Total PVCs to Migrate** | 13 | 1 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
-| **PVCs Migrated to RWO** | 13 | 1 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 1 | 🟡 In Progress |
+| **PVCs Migrated to RWO** | 13 | 2 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 2 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -93,7 +93,7 @@
 | # | App | PVC Name | Size | File Path | Migration Status | Verification |
 |---|-----|----------|------|-----------|------------------|--------------|
 | 1 | mosquitto | mosquitto-config | 5Gi | `kubernetes/apps/home-automation/mosquitto/app/pvc.yaml` | ✅ Migrated (commit: 4ec2a4c) | ✅ Verified |
-| 2 | node-red | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 2 | node-red | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 | 3 | n8n | n8n-config | 5Gi | `kubernetes/apps/home-automation/n8n/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 | 4 | esphome | esphome-config | 8Gi | `kubernetes/apps/home-automation/esphome/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 
@@ -110,6 +110,14 @@
 - Prevents Flux from interfering with manual PVC deletion
 - Must re-add PVC to kustomization BEFORE reactivation (Step 7)
 - See AGENTS.md for complete 9-step procedure
+
+**Node-Red Migration Notes (2026-01-04)**:
+- ✅ PVC accessMode = ReadWriteOnce
+- ✅ PVC Status = Bound
+- ✅ Pod running and healthy (node-red-6dcf4f6c4f-6zcxz, 1m uptime)
+- ✅ Share manager removed (12 share managers remaining, down from 13)
+- ✅ Used updated 9-step procedure (successful!)
+- 📊 Migration commits: 4066c52, 2657e64, c3615bd, 3bc6f70, 8fd7761
 
 **Verification Checklist per App**:
 - [x] PVC accessMode = ReadWriteOnce
