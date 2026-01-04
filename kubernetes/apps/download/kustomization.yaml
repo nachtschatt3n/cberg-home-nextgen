@@ -5,5 +5,5 @@ namespace: download
 components:
   - ../../flux/components/common
 resources:
-  - ./jdownloader/ks.yaml
+  # - ./jdownloader/ks.yaml  # Deactivated for PVC migration
   - ./tube-archivist/ks.yaml
