@@ -5,7 +5,7 @@ metadata:
   name: adguard-home-config
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 15Gi
