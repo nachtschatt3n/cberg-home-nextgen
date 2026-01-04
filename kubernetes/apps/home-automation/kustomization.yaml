@@ -11,7 +11,7 @@ resources:
   - ./mosquitto/ks.yaml
   - ./music-assistant-server/ks.yaml
   - ./n8n/ks.yaml
-  # - ./node-red/ks.yaml  # Deactivated for PVC migration
+  - ./node-red/ks.yaml
   - ./scrypted-nvr/ks.yaml
   - ./teslamate/ks.yaml
   - ./zigbee2mqtt/ks.yaml
