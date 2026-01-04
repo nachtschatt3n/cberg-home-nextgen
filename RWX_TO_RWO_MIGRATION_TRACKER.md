@@ -2,7 +2,7 @@
 
 **Started**: 2026-01-03
 **Timeline**: 2-3 days (aggressive)
-**Status**: 🔴 BLOCKED - AdGuard Home migration failed, DNS service impacted
+**Status**: 🟡 IN PROGRESS - AdGuard Home restored, continuing migration
 **Plan File**: `/home/mu/.claude/plans/woolly-giggling-quilt.md`
 
 ---
@@ -11,10 +11,10 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| **Total PVCs to Migrate** | 13 | 1 | 🟡 In Progress |
+| **Total PVCs to Migrate** | 13 | 4 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
 | **PVCs Migrated to RWO** | 13 | 4 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 4 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 10 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -30,7 +30,8 @@
 - [x] Day 2 Phase 1: Migrated mosquitto-config to RWO
 
 ### 🟡 In Progress
-- [ ] Day 2 Phase 1: Migrate remaining 3 low-risk apps
+- [ ] Day 2 Phase 1: Migrate remaining 2 low-risk apps (grafana, jdownloader)
+- [ ] Day 2 Phase 2: Continue with medium-risk apps
 
 ### ⏳ Pending
 - [ ] Day 2 Phase 2: Medium-risk apps (5 apps)
@@ -281,7 +282,7 @@ Actual savings: _____ m
 - **Memory**: _____ GB
 - **CPU**: _____ m
 
-**Overall Status**: ⏳ In Progress / ✅ Complete / 🔴 Failed
+**Overall Status**: 🟡 In Progress
 
 ---
 
@@ -327,6 +328,6 @@ git push
 
 ---
 
-**Last Updated**: 2026-01-03 (creation)
+**Last Updated**: 2026-01-04 (AdGuard Home restored)
 **Updated By**: Claude Code
-**Next Review**: After Day 1 completion
+**Next Review**: Continue with remaining migrations
