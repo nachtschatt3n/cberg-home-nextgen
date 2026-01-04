@@ -30,7 +30,8 @@
 - [x] Day 2 Phase 1: Migrated mosquitto-config to RWO
 
 ### 🟡 In Progress
-- [ ] Day 2 Phase 2: Migrate remaining medium-risk apps (jdownloader, adguard-home, scrypted)
+- [ ] Day 2 Phase 2: Migrate remaining medium-risk apps (scrypted)
+- [ ] AdGuard Home: Temporarily reverted to RWX for DNS service continuity
 - [ ] Day 2 Phase 3: High-risk apps (home-assistant, paperless, jellyfin, plex)
 
 ### ⏳ Pending
@@ -150,7 +151,7 @@
 | # | App | PVC Name | Size | File Path | Migration Status | Verification |
 |---|---|-----|----------|------|-----------|------------------|--------------|
 | 7 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/config-pvc.yaml` | ✅ Migrated | ✅ Verified |
-| 8 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ⏸️ **READY** | Volume restored from backup-a0e326d5fe644f42 (2026-01-01) |
+| 8 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ⏸️ **REVERTED** | Temporarily using dynamic RWX provisioning for DNS service |
 | 9 | scrypted | scrypted-data | 5Gi | `kubernetes/apps/home-automation/scrypted-nvr/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 
 **Verification Checklist per App**:
