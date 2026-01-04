@@ -1,0 +1,296 @@
+# RWX to RWO PVC Migration - Progress Tracker
+
+**Started**: 2026-01-03
+**Timeline**: 2-3 days (aggressive)
+**Status**: 🟡 IN PROGRESS - Day 2 Phase 1
+**Plan File**: `/home/mu/.claude/plans/woolly-giggling-quilt.md`
+
+---
+
+## Quick Stats
+
+| Metric | Target | Current | Status |
+|--------|--------|---------|--------|
+| **Total PVCs to Migrate** | 13 | 1 | 🟡 In Progress |
+| **PVC Manifests Created** | 7 | 7 | ✅ Complete |
+| **PVCs Migrated to RWO** | 13 | 1 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 0 | 🟡 Pending Cleanup |
+| **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
+| **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
+
+---
+
+## Current Task Status
+
+### ✅ Completed
+- [x] Day 1: Created PVC manifests for 7 apps
+- [x] Day 1: Updated kustomization.yaml files
+- [x] Day 1: Committed and pushed to git (commit: 38ec02c)
+- [x] Day 1: Verified Flux reconciliation
+- [x] Day 2 Phase 1: Migrated mosquitto-config to RWO
+
+### 🟡 In Progress
+- [ ] Day 2 Phase 1: Migrate remaining 3 low-risk apps
+
+### ⏳ Pending
+- [ ] Day 2 Phase 2: Medium-risk apps (5 apps)
+- [ ] Day 2 Phase 3: High-risk apps (4 apps)
+- [ ] Day 3: Final validation and documentation
+
+---
+
+## Day 1: Preparation & Documentation (4-6 hours)
+
+**Goal**: Create PVC manifests for GitOps compliance without changing cluster state
+
+### Step 1: Create PVC Manifest Files (7 apps)
+
+| # | App | Namespace | PVC Name | Size | File Path | Status |
+|---|-----|-----------|----------|------|-----------|--------|
+| 1 | home-assistant | home-automation | home-assistant-config | 40Gi | `kubernetes/apps/home-automation/home-assistant/app/pvc.yaml` | ✅ Created |
+| 2 | mosquitto | home-automation | mosquitto-config | 5Gi | `kubernetes/apps/home-automation/mosquitto/app/pvc.yaml` | ✅ Created |
+| 3 | n8n | home-automation | n8n-config | 5Gi | `kubernetes/apps/home-automation/n8n/app/pvc.yaml` | ✅ Created |
+| 4 | node-red | home-automation | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ✅ Created |
+| 5 | grafana | monitoring | grafana-config | 1Gi | `kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-pvc.yaml` | ✅ Created |
+| 6 | adguard-home | network | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ✅ Created |
+| 7 | paperless | office | paperless-data | 20Gi | `kubernetes/apps/office/paperless-ngx/app/paperless-data-pvc.yaml` | ✅ Created |
+
+### Step 2: Update Kustomization Files (7 apps)
+
+| # | Kustomization File | PVC Reference Added | Status |
+|---|-------------------|---------------------|--------|
+| 1 | `kubernetes/apps/home-automation/home-assistant/app/kustomization.yaml` | `./pvc.yaml` | ⏳ Pending |
+| 2 | `kubernetes/apps/home-automation/mosquitto/app/kustomization.yaml` | `./pvc.yaml` | ⏳ Pending |
+| 3 | `kubernetes/apps/home-automation/n8n/app/kustomization.yaml` | `./pvc.yaml` | ⏳ Pending |
+| 4 | `kubernetes/apps/home-automation/node-red/app/kustomization.yaml` | `./pvc.yaml` | ⏳ Pending |
+| 5 | `kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml` | `./grafana-pvc.yaml` | ⏳ Pending |
+| 6 | `kubernetes/apps/network/internal/adguard-home/app/kustomization.yaml` | `./pvc.yaml` | ⏳ Pending |
+| 7 | `kubernetes/apps/office/paperless-ngx/app/kustomization.yaml` | `./paperless-data-pvc.yaml` | ⏳ Pending |
+
+### Step 3: Git Commit & Push
+
+- [ ] All files staged (`git add kubernetes/apps/`)
+- [ ] Commit created with message: "docs(storage): add PVC manifests for GitOps compliance"
+- [ ] Pushed to GitHub (`git push`)
+
+### Step 4: Flux Reconciliation Verification
+
+- [ ] Flux kustomizations reconciled successfully
+- [ ] No pod restarts occurred
+- [ ] All 13 PVCs still bound with ReadWriteMany
+- [ ] No warning events generated
+
+**Day 1 Success Criteria**: ✅ All 13 apps have PVC manifests in git, no cluster changes
+
+---
+
+## Day 2: Migration Execution (6-8 hours)
+
+**Goal**: Migrate all 13 PVCs from RWX to RWO in three phases
+
+### Phase 1: Low-Risk Apps (2 hours)
+
+| # | App | PVC Name | Size | File Path | Migration Status | Verification |
+|---|-----|----------|------|-----------|------------------|--------------|
+| 1 | mosquitto | mosquitto-config | 5Gi | `kubernetes/apps/home-automation/mosquitto/app/pvc.yaml` | ✅ Migrated (commit: 4ec2a4c) | ✅ Verified |
+| 2 | node-red | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 3 | n8n | n8n-config | 5Gi | `kubernetes/apps/home-automation/n8n/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 4 | esphome | esphome-config | 8Gi | `kubernetes/apps/home-automation/esphome/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+
+**Mosquitto Migration Notes (2026-01-03)**:
+- ✅ PVC accessMode = ReadWriteOnce
+- ✅ PVC Status = Bound
+- ✅ Pod running and healthy (mosquitto-5cdd4f987-86gw2)
+- ⚠️ Share manager cleanup pending (Longhorn will remove automatically)
+- ℹ️ Manual steps required: Delete pod/PVC, patch PV accessModes (not fully GitOps-compliant but necessary for existing volumes)
+
+**Verification Checklist per App**:
+- [x] PVC accessMode = ReadWriteOnce
+- [ ] Share manager pod removed from storage namespace
+- [x] App pod running and healthy
+- [ ] Web UI accessible and functional
+
+### Phase 2: Medium-Risk Apps (3 hours)
+
+| # | App | PVC Name | Size | File Path | Migration Status | Verification |
+|---|-----|----------|------|-----------|------------------|--------------|
+| 5 | grafana | grafana-config | 1Gi | `kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-pvc.yaml` | ⏳ Not Started | ⏳ |
+| 6 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 7 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 8 | music-assistant | music-assistant-config | 5Gi | `kubernetes/apps/home-automation/music-assistant-server/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 9 | scrypted | scrypted-data | 5Gi | `kubernetes/apps/home-automation/scrypted-nvr/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+
+**Verification Checklist per App**:
+- [ ] PVC accessMode = ReadWriteOnce
+- [ ] Share manager pod removed from storage namespace
+- [ ] App pod running and healthy
+- [ ] Web UI accessible and functional
+
+### Phase 3: High-Risk Apps (3 hours)
+
+| # | App | PVC Name | Size | File Path | Migration Status | Verification |
+|---|-----|----------|------|-----------|------------------|--------------|
+| 10 | jellyfin | jellyfin-config | 25Gi | `kubernetes/apps/media/jellyfin/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 11 | plex | plex-config | 10Gi | `kubernetes/apps/media/plex/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 12 | paperless | paperless-data | 20Gi | `kubernetes/apps/office/paperless-ngx/app/paperless-data-pvc.yaml` | ⏳ Not Started | ⏳ |
+| 13 | home-assistant | home-assistant-config | 40Gi | `kubernetes/apps/home-automation/home-assistant/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+
+**Enhanced Verification Checklist**:
+- [ ] **Paperless**: Document upload, search, OCR, mail fetching work
+- [ ] **Paperless**: Share manager CPU drops from 1008m → 0m
+- [ ] **Home Assistant**: All automations working
+- [ ] **Home Assistant**: All 22 Zigbee devices connected
+- [ ] **Plex**: Library access, metadata, transcoding functional
+- [ ] **Jellyfin**: Library access, playback functional
+
+**Day 2 Success Criteria**: ✅ All 13 PVCs migrated to RWO, apps functional
+
+---
+
+## Day 3: Validation & Monitoring (2-4 hours)
+
+### Cluster-Wide Validation
+
+**PVC Status**:
+- [ ] All 13 PVCs show `accessModes: [ReadWriteOnce]`
+- [ ] All 13 PVCs remain bound to PVs
+- [ ] Storage class still `longhorn-static`
+
+**Share Manager Cleanup**:
+- [ ] Only 1 share manager remains (nextcloud-config)
+- [ ] 13 share managers successfully removed
+- [ ] No orphaned share manager pods
+
+**Pod Health**:
+- [ ] All 13 app pods running and ready
+- [ ] No CrashLoopBackOff or Pending pods
+- [ ] No storage-related warning events
+
+**Resource Savings Verification**:
+```bash
+# Memory freed (target: ~6.5GB)
+kubectl top pods -n storage
+Actual savings: _____ GB
+
+# CPU freed (target: 325-13,000m)
+kubectl top pods -n storage
+Actual savings: _____ m
+```
+
+### Application Functional Testing
+
+| App | Test Performed | Status | Notes |
+|-----|----------------|--------|-------|
+| home-assistant | Automations, Zigbee devices | ⏳ | 22 devices expected |
+| paperless | Document upload, search, mail | ⏳ | |
+| plex | Library, metadata, transcoding | ⏳ | |
+| jellyfin | Library, playback | ⏳ | |
+| grafana | Dashboards, queries | ⏳ | |
+| mosquitto | MQTT connectivity | ⏳ | |
+| node-red | Flows execution | ⏳ | |
+| n8n | Workflows execution | ⏳ | |
+| esphome | Config editor | ⏳ | |
+| music-assistant | Music playback | ⏳ | |
+| scrypted | Video streaming | ⏳ | |
+| jdownloader | Download functionality | ⏳ | |
+| adguard-home | DNS filtering | ⏳ | |
+
+### Documentation Updates
+
+- [ ] Update `AI_weekly_health_check_current.md` with migration completion
+- [ ] Add resource savings to maintenance log
+- [ ] Document any issues encountered and resolutions
+
+**Day 3 Success Criteria**: ✅ All apps functional, resource savings confirmed
+
+---
+
+## Rollback Log
+
+| Date/Time | App | Reason | Rollback Method | Outcome |
+|-----------|-----|--------|-----------------|---------|
+| - | - | - | - | - |
+
+---
+
+## Notes & Observations
+
+### Issues Encountered
+
+1. **Issue**: [Description]
+   - **Resolution**: [How it was fixed]
+   - **Impact**: [Apps/services affected]
+
+### Performance Improvements Observed
+
+- **App**: [Name]
+  - **Before**: [Metrics]
+  - **After**: [Metrics]
+  - **Improvement**: [Percentage/value]
+
+### Lessons Learned
+
+- [Learning point 1]
+- [Learning point 2]
+
+---
+
+## Final Migration Summary
+
+**Completion Date**: _____________
+**Total Duration**: _____________
+**Apps Successfully Migrated**: _____ / 13
+**Rollbacks Required**: _____
+**Total Resource Savings**:
+- **Memory**: _____ GB
+- **CPU**: _____ m
+
+**Overall Status**: ⏳ In Progress / ✅ Complete / 🔴 Failed
+
+---
+
+## Reference Commands
+
+### Quick Status Check
+```bash
+# Check all 13 PVC access modes
+kubectl get pvc -A -o custom-columns=NAME:.metadata.name,NAMESPACE:.metadata.namespace,ACCESS:.spec.accessModes | grep -E "home-assistant|mosquitto|n8n|node-red|grafana|adguard-home|paperless-data|jdownloader|esphome|music-assistant|scrypted|jellyfin|plex"
+
+# Count share managers
+kubectl get pods -n storage | grep share-manager | wc -l
+# Expected after migration: 1 (nextcloud only)
+
+# Check app pod health
+kubectl get pods -A | grep -E "home-assistant|mosquitto|n8n|node-red|grafana|adguard-home|paperless|jdownloader|esphome|music-assistant|scrypted|jellyfin|plex"
+```
+
+### Monitor During Migration
+```bash
+# Terminal 1: Watch pods
+watch "kubectl get pods -A | grep -E 'home-assistant|mosquitto|n8n|node-red|grafana|adguard-home|paperless|jdownloader|esphome|music-assistant|scrypted|jellyfin|plex'"
+
+# Terminal 2: Watch events
+kubectl get events -A --watch
+
+# Terminal 3: Watch share managers
+watch "kubectl get pods -n storage | grep share-manager"
+
+# Terminal 4: Watch Flux
+flux get kustomizations --watch
+```
+
+### Rollback Single App
+```bash
+# Find migration commit
+git log --oneline kubernetes/apps/{namespace}/{app}/app/pvc.yaml
+
+# Revert
+git revert <commit-hash>
+git push
+```
+
+---
+
+**Last Updated**: 2026-01-03 (creation)
+**Updated By**: Claude Code
+**Next Review**: After Day 1 completion

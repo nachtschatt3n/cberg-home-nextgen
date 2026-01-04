@@ -623,7 +623,7 @@ kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json |
 **Commands to Execute:**
 ```bash
 # Check Jellyfin health
-curl -s http://jellyfin.media.svc.cluster.local:8096/health | jq -r '.status' 2>/dev/null || echo "Jellyfin health check failed"
+curl -s http://jellyfin.media.svc.cluster.local:8096/health | grep -q "Healthy" && echo "Healthy" || echo "Jellyfin health check failed"
 
 # Check Tube Archivist
 kubectl logs -n download deployment/tube-archivist --tail=10 | grep -i error | wc -l
@@ -797,20 +797,166 @@ curl -s -H "Authorization: Bearer YOUR_TOKEN" http://home-assistant.home-automat
 
 ---
 
+## 31. Home Assistant Integration Health
+
+**Objective**: Check Home Assistant integrations and error patterns
+**Success Criteria**: No critical integration failures, services operational
+
+**Commands to Execute:**
+```bash
+# Check Home Assistant logs for integration errors (last 50 lines)
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -E "(ERROR|error|failed|Failed)" | wc -l
+
+# Check for Tesla Wall Connector timeouts
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -i "tesla_wall_connector" | grep -i "timeout" | wc -l
+
+# Check Amazon Alexa integration issues
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -i "aioamazondevices" | grep -i "failed" | wc -l
+
+# Check ResMed MyAir integration errors
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -i "resmed" | grep -i "missing" | wc -l
+
+# Check IKEA Dirigera hub connection issues
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -i "dirigera" | grep -i "disconnected" | wc -l
+
+# Check Chromecast connection errors
+kubectl logs -n home-automation deployment/home-assistant --tail=50 | grep -i "chromecast" | grep -i "reset by peer" | wc -l
+
+# List active Home Assistant integrations count
+kubectl exec -n home-automation deployment/home-assistant -- curl -s http://localhost:8123/api/config | jq -r '.components | length' 2>/dev/null || echo "Cannot check integrations"
+```
+
+**AI Analysis**: Identify problematic integrations and categorize by severity. Flag integrations with persistent connectivity issues.
+
+---
+
+## 32. Zigbee2MQTT Device Monitoring
+
+**Objective**: Monitor Zigbee device connectivity and battery health
+**Success Criteria**: All critical devices online, battery levels acceptable
+
+**Commands to Execute:**
+```bash
+# Get total device count
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq 'keys | length' 2>/dev/null || echo "Cannot check device count"
+
+# Check for devices offline >5 days
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) | "\(.key): \(.value.last_seen)"' 2>/dev/null || echo "Cannot check offline devices"
+
+# Check battery levels <30%
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 30)) | "\(.key): \(.value.battery)%"' 2>/dev/null || echo "Cannot check battery levels"
+
+# Get device friendly names and status summary
+kubectl exec -n home-automation deployment/zigbee2mqtt -- bash -c "
+cat /data/configuration.yaml | grep -A 100 'devices:' | grep -E 'friendly_name|0x[0-9a-f]+' | paste - - | head -20
+echo '--- Device Status Summary ---'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime(\"%Y-%m-%dT%H:%M:%S.%fZ\") | mktime)) < 86400) | \"\(.key): OK\"' | wc -l | xargs echo 'Devices seen today:'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime(\"%Y-%m-%dT%H:%M:%S.%fZ\") | mktime)) > 86400*7) | \"\(.key): OLD\"' | wc -l | xargs echo 'Devices offline >7 days:'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 50)) | \"\(.key): \(.value.battery)%\"' | wc -l | xargs echo 'Devices with low battery (<50%):'
+"
+
+# Check Zigbee2MQTT coordinator logs for errors
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=20 | grep -i error | wc -l
+```
+
+**AI Analysis**: Analyze device connectivity patterns, identify offline devices requiring attention, and flag low battery levels. Categorize issues by priority (critical sensors vs decorative devices).
+
+---
+
+## 33. Battery Health Monitoring
+
+**Objective**: Unified battery status across all smart home devices and systems
+**Success Criteria**: No devices with critically low batteries, battery levels monitored
+
+**Commands to Execute:**
+```bash
+# Zigbee2MQTT Battery Check
+echo "=== Zigbee2MQTT Battery Status ==="
+kubectl exec -n home-automation deployment/zigbee2mqtt -- bash -c "
+echo 'Devices with battery < 30% (CRITICAL):'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 30)) | \"\(.key): \(.value.battery)%\"' 2>/dev/null || echo 'None'
+
+echo ''
+echo 'Devices with battery 30-50% (WARNING):'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery >= 30 and .value.battery < 50)) | \"\(.key): \(.value.battery)%\"' 2>/dev/null || echo 'None'
+
+echo ''
+echo 'Devices with battery 50-70% (MONITOR):'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery >= 50 and .value.battery < 70)) | \"\(.key): \(.value.battery)%\"' 2>/dev/null || echo 'None'
+
+echo ''
+echo 'Battery Summary:'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery) | .value.battery' 2>/dev/null | wc -l | xargs echo 'Total battery-powered devices:'
+cat /data/state.json | jq -r 'to_entries[] | select(.value.battery) | .value.battery' 2>/dev/null | awk '{sum+=$1; count++} END {if(count>0) print \"Average battery level: \" int(sum/count) \"%\"; else print \"No battery data\"}' 2>/dev/null || echo 'No battery data'
+"
+
+# Ring Camera Battery Check
+echo ""
+echo "=== Ring Camera Batteries ==="
+kubectl exec -n home-automation deployment/home-assistant -- bash -c "
+echo 'Ring camera battery levels (if available):'
+curl -s -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:8123/api/states | jq -r '.[] | select(.entity_id | contains(\"ring\")) | select(.attributes.battery_level != null) | \"\(.entity_id): \(.attributes.battery_level)%\"' 2>/dev/null || echo 'No Ring battery data available - check Ring app or HA entities'
+echo 'Ring doorbell/camera entities:'
+curl -s -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:8123/api/states | jq -r '.[] | select(.entity_id | contains(\"ring\")) | \"\(.entity_id): \(.state)\"' 2>/dev/null | head -5 || echo 'Cannot access Ring entities'
+" 2>/dev/null || echo "Ring battery check unavailable"
+
+# Home Assistant Battery Sensors Check
+echo ""
+echo "=== Home Assistant Battery Sensors ==="
+kubectl exec -n home-automation deployment/home-assistant -- bash -c "
+# Get battery sensor states (this is approximate - actual HA API would be better)
+echo 'Home Assistant battery sensors (if available):'
+curl -s -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:8123/api/states | jq -r '.[] | select(.entity_id | contains(\"battery\")) | \"\(.entity_id): \(.state)%\"' 2>/dev/null || echo 'Cannot access Home Assistant API'
+" 2>/dev/null || echo "Home Assistant battery check unavailable"
+
+# ESPHome Devices Battery Check (if any)
+echo ""
+echo "=== ESPHome Device Batteries ==="
+kubectl get pods -n home-automation -l app.kubernetes.io/name=esphome -o name | head -3 | while read pod; do
+  echo "Checking $pod..."
+  kubectl logs -n home-automation $pod --tail=10 | grep -i battery || echo "No battery info in logs"
+done
+
+# Summary Report
+echo ""
+echo "=== BATTERY REPLACEMENT PRIORITIES ==="
+echo "🔴 CRITICAL (Replace Immediately - <30%):"
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 30)) | "- \(.key): \(.value.battery)%"' 2>/dev/null || echo "None"
+
+echo ""
+echo "🟡 HIGH PRIORITY (Replace Soon - 30-50%):"
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery >= 30 and .value.battery < 50)) | "- \(.key): \(.value.battery)%"' 2>/dev/null || echo "None"
+
+echo ""
+echo "🔵 MONITOR (Watch Closely - 50-70%):"
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery >= 50 and .value.battery < 70)) | "- \(.key): \(.value.battery)%"' 2>/dev/null || echo "None"
+
+echo ""
+echo "📋 MAINTENANCE SCHEDULE:"
+echo "- Check batteries monthly for devices 50-70%"
+echo "- Replace batteries for devices 30-50% within 2 weeks"
+echo "- Replace batteries immediately for devices <30%"
+echo "- Keep battery stock: CR123A, CR2032, AA, AAA batteries"
+```
+
+**AI Analysis**: Aggregate battery data across all systems, prioritize replacements by battery level and device criticality, and provide maintenance recommendations.
+
+---
+
 ## Report Generation Instructions
 
-After executing all 30 sections, compile the results into the standardized format:
+After executing all 33 sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
-3. **Detailed Findings**: Document results from each section
+3. **Detailed Findings**: Document results from each section including integration health and device status
 4. **Performance Metrics**: Aggregate resource usage data
 5. **Version Report**: Compile version information
-6. **Action Items**: Prioritize issues found
-7. **Trends & Observations**: Note any patterns or concerns
+6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
+7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation:**
-- **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥95% services healthy
-- **🟡 Good**: 0 critical issues, 3-5 warnings, 90-94% services healthy
-- **🟠 Warning**: 1-2 critical issues, 6-10 warnings, 85-89% services healthy
-- **🔴 Critical**: ≥3 critical issues, ≥11 warnings, <85% services healthy
+**Final Health Score Calculation (33 sections):**
+- **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries
+- **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery
+- **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries
+- **🔴 Critical**: ≥3 critical issues, ≥9 warnings, <90% services healthy, >30% devices offline, >5 critical batteries

@@ -522,6 +522,139 @@ spec:
    - Error: StatefulSets require dynamic provisioning
    - Fix: Don't migrate StatefulSet volumes, use longhorn storage class
 
+### Migrating Existing longhorn-static Volumes from RWX to RWO
+
+**IMPORTANT**: Changing accessModes on existing bound PVCs requires manual intervention and cannot be done purely through GitOps.
+
+#### Correct Migration Procedure
+
+Based on real-world experience (mosquitto-config migration, Jan 2026), use this procedure:
+
+**Prerequisites:**
+- Backup the application data
+- Ensure no active writes to the volume
+- Have Longhorn UI access ready
+
+**Step 1: Update Git Manifests**
+```bash
+# Edit PVC manifest: Change ReadWriteMany → ReadWriteOnce
+# File: kubernetes/apps/{namespace}/{app}/app/pvc.yaml
+git add kubernetes/apps/{namespace}/{app}/app/pvc.yaml
+git commit -m "feat({app}): migrate PVC to ReadWriteOnce"
+git push
+```
+
+**Step 2: Deactivate App in Flux**
+```bash
+# Comment out app in parent kustomization to stop Flux managing it
+# File: kubernetes/apps/{namespace}/kustomization.yaml
+# Change:  - ./{app}/ks.yaml
+# To:     # - ./{app}/ks.yaml
+
+git add kubernetes/apps/{namespace}/kustomization.yaml
+git commit -m "deactivate {app}"
+git push
+
+# Wait for Flux to reconcile and remove the app
+flux reconcile kustomization cluster-apps --with-source
+```
+
+**Step 3: Manual Longhorn UI Operations**
+1. Open Longhorn UI
+2. Find the volume (e.g., `mosquitto-config`)
+3. **Detach** the volume from all nodes
+4. **Delete** the PVC via kubectl: `kubectl delete pvc {pvc-name} -n {namespace}`
+5. Wait for PVC deletion to complete
+6. In Longhorn UI, verify volume shows as "Detached"
+7. Delete the volume's **finalizers** if it's stuck:
+   ```bash
+   kubectl patch pvc {pvc-name} -n {namespace} -p '{"metadata":{"finalizers":null}}' --type=merge
+   ```
+
+**Step 4: Update PV accessModes**
+```bash
+# Patch the PV to match new RWO mode
+kubectl patch pv {pv-name} --type='json' -p='[{"op": "replace", "path": "/spec/accessModes", "value": ["ReadWriteOnce"]}]'
+
+# Remove PV claimRef so it can rebind
+kubectl patch pv {pv-name} -p '{"spec":{"claimRef":null}}' --type=merge
+```
+
+**Step 5: Update Longhorn Volume CRD**
+```bash
+# Update Longhorn volume accessMode
+kubectl patch volume {volume-name} -n storage --type='json' -p='[{"op": "replace", "path": "/spec/accessMode", "value": "rwo"}]'
+```
+
+**Step 6: Reactivate App in Flux**
+```bash
+# Uncomment app in parent kustomization
+# File: kubernetes/apps/{namespace}/kustomization.yaml
+# Change:     # - ./{app}/ks.yaml
+# To:  - ./{app}/ks.yaml
+
+git add kubernetes/apps/{namespace}/kustomization.yaml
+git commit -m "activate {app}"
+git push
+
+# Trigger Flux reconciliation
+flux reconcile kustomization cluster-apps --with-source
+```
+
+**Step 7: Verify Migration**
+```bash
+# Check PVC bound with RWO
+kubectl get pvc {pvc-name} -n {namespace}
+
+# Check pod running
+kubectl get pods -n {namespace} | grep {app}
+
+# Verify volume attached to correct node
+kubectl get volume {volume-name} -n storage -o jsonpath='{.status.currentNodeID}'
+
+# Check share manager removed
+kubectl get pods -n storage | grep share-manager-{pvc-name}
+# Should return nothing
+
+# Test application functionality
+```
+
+**Common Issues & Solutions:**
+
+1. **PVC stuck in "Pending" state**
+   - Cause: PV and PVC accessModes don't match
+   - Fix: Ensure PV accessModes updated to RWO before reactivating app
+
+2. **Volume attached to wrong node**
+   - Cause: Pod scheduled on different node than volume
+   - Fix: Manually detach volume in Longhorn UI, let Kubernetes reschedule
+
+3. **Share manager still running**
+   - Cause: Longhorn hasn't detected accessMode change yet
+   - Fix: Wait 5-10 minutes, or restart longhorn-manager deployment
+
+4. **"Volume not found" error**
+   - Cause: PV volumeHandle doesn't match Longhorn volume name
+   - Fix: Check `kubectl get pv {pv-name} -o yaml` and verify volumeHandle
+
+**Why This Procedure is Necessary:**
+
+Kubernetes does NOT allow changing `accessModes` on an existing bound PVC. You cannot simply edit the PVC spec. The PVC must be:
+1. Deleted (which releases the PV)
+2. Recreated with new accessModes
+3. Rebound to the (now-updated) PV
+
+Since we use `longhorn-static` with `Retain` reclaim policy, the PV and underlying Longhorn volume persist through this process, ensuring no data loss.
+
+**GitOps Compliance Note:**
+
+This procedure is NOT fully GitOps-compliant because it requires manual kubectl operations and Longhorn UI interactions. A fully compliant approach would require:
+- PV manifests in git
+- Longhorn Volume CRD manifests in git
+- Automated tooling to handle the delete/recreate cycle
+
+However, for existing volumes, the manual approach is currently necessary due to Kubernetes API limitations.
+
 ### Storage Debugging Commands
 
 ```bash
@@ -539,6 +672,15 @@ kubectl get events -n {namespace} --field-selector type=Warning
 
 # Verify volume attachment
 kubectl describe pod {pod-name} -n {namespace} | grep -A 10 "Volumes:"
+
+# Check Longhorn volume accessMode
+kubectl get volume {volume-name} -n storage -o jsonpath='{.spec.accessMode}'
+
+# Check PV accessModes
+kubectl get pv {pv-name} -o jsonpath='{.spec.accessModes}'
+
+# Check PVC accessModes
+kubectl get pvc {pvc-name} -n {namespace} -o jsonpath='{.spec.accessModes}'
 ```
 
 ## Monitoring & Debugging
