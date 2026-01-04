@@ -9,5 +9,4 @@ spec:
   resources:
     requests:
       storage: 15Gi
-  storageClassName: longhorn-static
-  volumeName: adguard-home-config
+  storageClassName: longhorn
