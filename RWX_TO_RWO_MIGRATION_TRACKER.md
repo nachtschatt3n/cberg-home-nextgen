@@ -102,8 +102,14 @@
 - ✅ PVC Status = Bound
 - ✅ Pod running and healthy (mosquitto-5cdd4f987-97wzd, 12h uptime)
 - ✅ Share manager removed (13 share managers remaining, down from 14)
-- ℹ️ Manual steps required: Deactivate in Flux, detach volume in Longhorn UI, delete PVC, patch PV/Volume, reactivate (not fully GitOps-compliant but necessary for existing volumes)
-- 📚 Documented correct procedure in AGENTS.md (commit: 6ce1f55)
+- ⚠️ **PROCEDURE UPDATED**: Migration now requires 9 steps (was 7)
+- 📚 Updated procedure in AGENTS.md (commit: a147d0c)
+
+**CRITICAL CHANGE (applies to ALL remaining apps)**:
+- Must remove PVC from kustomization BEFORE migration (Step 1)
+- Prevents Flux from interfering with manual PVC deletion
+- Must re-add PVC to kustomization BEFORE reactivation (Step 7)
+- See AGENTS.md for complete 9-step procedure
 
 **Verification Checklist per App**:
 - [x] PVC accessMode = ReadWriteOnce
