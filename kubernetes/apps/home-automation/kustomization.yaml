@@ -10,7 +10,7 @@ resources:
  # - ./iobroker/ks.yaml
   - ./mosquitto/ks.yaml
   - ./music-assistant-server/ks.yaml
-  # - ./n8n/ks.yaml  # Deactivated for PVC migration
+  - ./n8n/ks.yaml
   - ./node-red/ks.yaml
   - ./scrypted-nvr/ks.yaml
   - ./teslamate/ks.yaml
