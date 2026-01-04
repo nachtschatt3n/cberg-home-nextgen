@@ -11,10 +11,10 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| **Total PVCs to Migrate** | 13 | 4 | 🟡 In Progress |
+| **Total PVCs to Migrate** | 13 | 6 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
-| **PVCs Migrated to RWO** | 13 | 4 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 10 | 🟡 In Progress |
+| **PVCs Migrated to RWO** | 13 | 6 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 7 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -30,8 +30,8 @@
 - [x] Day 2 Phase 1: Migrated mosquitto-config to RWO
 
 ### 🟡 In Progress
-- [ ] Day 2 Phase 1: Migrate remaining 2 low-risk apps (grafana, jdownloader)
-- [ ] Day 2 Phase 2: Continue with medium-risk apps
+- [ ] Day 2 Phase 2: Migrate remaining medium-risk apps (jdownloader, adguard-home, scrypted)
+- [ ] Day 2 Phase 3: High-risk apps (home-assistant, paperless, jellyfin, plex)
 
 ### ⏳ Pending
 - [ ] Day 2 Phase 2: Medium-risk apps (5 apps)
@@ -97,6 +97,8 @@
 | 2 | node-red | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 | 3 | n8n | n8n-config | 5Gi | `kubernetes/apps/home-automation/n8n/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 | 4 | esphome | esphome-config | 8Gi | `kubernetes/apps/home-automation/esphome/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
+| 5 | grafana | grafana-config | 1Gi | `kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-pvc.yaml` | ✅ Migrated | ✅ Verified |
+| 6 | music-assistant | music-assistant-config | 5Gi | `kubernetes/apps/home-automation/music-assistant-server/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 
 **Mosquitto Migration Notes (2026-01-03)**:
 - ✅ PVC accessMode = ReadWriteOnce
@@ -146,11 +148,9 @@
 ### Phase 2: Medium-Risk Apps (3 hours)
 
 | # | App | PVC Name | Size | File Path | Migration Status | Verification |
-|---|-----|----------|------|-----------|------------------|--------------|
-| 5 | grafana | grafana-config | 1Gi | `kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-pvc.yaml` | ⏳ Not Started | ⏳ |
-| 6 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/pvc.yaml` | ⏳ Not Started | ⏳ |
-| 7 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ✅ **RESTORED** | Volume restored from backup-a0e326d5fe644f42 (2026-01-01) |
-| 8 | music-assistant | music-assistant-config | 5Gi | `kubernetes/apps/home-automation/music-assistant-server/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+|---|---|-----|----------|------|-----------|------------------|--------------|
+| 7 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 8 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ⏸️ **READY** | Volume restored from backup-a0e326d5fe644f42 (2026-01-01) |
 | 9 | scrypted | scrypted-data | 5Gi | `kubernetes/apps/home-automation/scrypted-nvr/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 
 **Verification Checklist per App**:
