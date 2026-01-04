@@ -13,8 +13,8 @@
 |--------|--------|---------|--------|
 | **Total PVCs to Migrate** | 13 | 1 | 🟡 In Progress |
 | **PVC Manifests Created** | 7 | 7 | ✅ Complete |
-| **PVCs Migrated to RWO** | 13 | 3 | 🟡 In Progress |
-| **Share Managers Removed** | 13 | 3 | 🟡 In Progress |
+| **PVCs Migrated to RWO** | 13 | 4 | 🟡 In Progress |
+| **Share Managers Removed** | 13 | 4 | 🟡 In Progress |
 | **Expected CPU Savings** | 325-13,000m | ~25-500m | 🟡 In Progress |
 | **Expected Memory Savings** | ~6.5GB | ~500Mi | 🟡 In Progress |
 
@@ -95,7 +95,7 @@
 | 1 | mosquitto | mosquitto-config | 5Gi | `kubernetes/apps/home-automation/mosquitto/app/pvc.yaml` | ✅ Migrated (commit: 4ec2a4c) | ✅ Verified |
 | 2 | node-red | node-red-data | 2Gi | `kubernetes/apps/home-automation/node-red/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 | 3 | n8n | n8n-config | 5Gi | `kubernetes/apps/home-automation/n8n/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
-| 4 | esphome | esphome-config | 8Gi | `kubernetes/apps/home-automation/esphome/app/pvc.yaml` | ⏳ Not Started | ⏳ |
+| 4 | esphome | esphome-config | 8Gi | `kubernetes/apps/home-automation/esphome/app/pvc.yaml` | ✅ Migrated | ✅ Verified |
 
 **Mosquitto Migration Notes (2026-01-03)**:
 - ✅ PVC accessMode = ReadWriteOnce
@@ -126,6 +126,15 @@
 - ✅ Share manager removed (11 share managers remaining, down from 12)
 - ✅ 9-step procedure continues to work perfectly
 - 📊 Migration commits: 5e70302, a3cbf31, 3dd9358, b1c2b7f, db564d5
+
+**ESPHome Migration Notes (2026-01-04)**:
+- ✅ PVC accessMode = ReadWriteOnce
+- ✅ PVC Status = Bound
+- ✅ Pod running and healthy (esphome-699b5cf9c5-brrns)
+- ✅ Share manager removed (10 share managers remaining, down from 11)
+- ✅ 9-step procedure proven reliable across 4 apps
+- 📊 Migration commits: 5e0ee22, 2accad5, 2c558b4, 16bd116, e16e3b1
+- 🎉 **PHASE 1 COMPLETE** - All 4 low-risk apps migrated successfully
 
 **Verification Checklist per App**:
 - [x] PVC accessMode = ReadWriteOnce
