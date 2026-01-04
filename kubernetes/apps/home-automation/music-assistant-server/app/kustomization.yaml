@@ -4,7 +4,7 @@ kind: Kustomization
 namespace: home-automation
 resources:
   - ./helmrelease.yaml
-  # - ./pvc.yaml  # RWX→RWO migration
+  - ./pvc.yaml
   - ./secret.sops.yaml
   - ./ingress-alexa-api.yaml
   - ./ingress-alexa-stream.yaml
