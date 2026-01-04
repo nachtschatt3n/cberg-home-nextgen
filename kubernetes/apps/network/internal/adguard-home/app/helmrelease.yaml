@@ -109,7 +109,18 @@ spec:
           port: 80
 
       https:
-        enabled: false
+        enabled: true
+        className: "internal"
+        annotations: {}
+        hosts:
+          - host: &host adguard.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: ImplementationSpecific
+        tls: []
+        service:
+          name: adguard-home-https
+          port: 443
 
     resources:
       requests:
@@ -126,8 +137,7 @@ spec:
       targetCPUUtilizationPercentage: 80
       # targetMemoryUtilizationPercentage: 80
 
-    nodeSelector:
-      kubernetes.io/hostname: k8s-nuc14-01
+    nodeSelector: {}
 
     tolerations: []
 
