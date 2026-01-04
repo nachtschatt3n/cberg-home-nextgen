@@ -528,6 +528,8 @@ spec:
 
 #### Correct Migration Procedure
 
+**CRITICAL**: This procedure must be followed for EVERY deployment to prevent Flux from interfering with manual PVC operations.
+
 Based on real-world experience (mosquitto-config migration, Jan 2026), use this procedure:
 
 **Prerequisites:**
@@ -535,16 +537,49 @@ Based on real-world experience (mosquitto-config migration, Jan 2026), use this 
 - Ensure no active writes to the volume
 - Have Longhorn UI access ready
 
-**Step 1: Update Git Manifests**
+**Step 1: Remove PVC from Flux Management**
+```bash
+# CRITICAL: Remove PVC reference from app kustomization to prevent Flux interference
+# File: kubernetes/apps/{namespace}/{app}/app/kustomization.yaml
+# Remove or comment out: - ./pvc.yaml
+
+# Example for mosquitto:
+# Before:
+# resources:
+#   - ./helmrelease.yaml
+#   - ./pvc.yaml
+# After:
+# resources:
+#   - ./helmrelease.yaml
+#   # - ./pvc.yaml  # Temporarily removed for RWX→RWO migration
+
+git add kubernetes/apps/{namespace}/{app}/app/kustomization.yaml
+git commit -m "chore({app}): remove PVC from Flux management for migration"
+git push
+
+# Wait for Flux to reconcile (PVC remains in cluster but is now unmanaged)
+flux reconcile kustomization cluster-apps --with-source
+```
+
+**Step 2: Update PVC Manifest (Prepare for RWO)**
 ```bash
 # Edit PVC manifest: Change ReadWriteMany → ReadWriteOnce
 # File: kubernetes/apps/{namespace}/{app}/app/pvc.yaml
+# Change:
+#   accessModes:
+#     - ReadWriteMany
+# To:
+#   accessModes:
+#     - ReadWriteOnce
+
 git add kubernetes/apps/{namespace}/{app}/app/pvc.yaml
-git commit -m "feat({app}): migrate PVC to ReadWriteOnce"
+git commit -m "feat({app}): prepare PVC manifest for ReadWriteOnce"
 git push
+
+# NOTE: This commit does NOT affect the cluster since PVC is not in kustomization
 ```
 
-**Step 2: Deactivate App in Flux**
+**Step 3: Deactivate App in Flux**
 ```bash
 # Comment out app in parent kustomization to stop Flux managing it
 # File: kubernetes/apps/{namespace}/kustomization.yaml
@@ -552,41 +587,69 @@ git push
 # To:     # - ./{app}/ks.yaml
 
 git add kubernetes/apps/{namespace}/kustomization.yaml
-git commit -m "deactivate {app}"
+git commit -m "chore({app}): deactivate for PVC migration"
 git push
 
 # Wait for Flux to reconcile and remove the app
 flux reconcile kustomization cluster-apps --with-source
 ```
 
-**Step 3: Manual Longhorn UI Operations**
-1. Open Longhorn UI
-2. Find the volume (e.g., `mosquitto-config`)
-3. **Detach** the volume from all nodes
-4. **Delete** the PVC via kubectl: `kubectl delete pvc {pvc-name} -n {namespace}`
-5. Wait for PVC deletion to complete
-6. In Longhorn UI, verify volume shows as "Detached"
-7. Delete the volume's **finalizers** if it's stuck:
-   ```bash
-   kubectl patch pvc {pvc-name} -n {namespace} -p '{"metadata":{"finalizers":null}}' --type=merge
-   ```
+**Step 4: Manual Longhorn UI Operations**
+```bash
+# CRITICAL: Volume must be detached so new pod can attach to any node
 
-**Step 4: Update PV accessModes**
+# 1. Open Longhorn UI (http://{longhorn-ui-url})
+# 2. Navigate to Volume → Find {app}-config volume
+# 3. Click "Detach" to detach from all nodes
+# 4. Wait for volume state to show "Detached"
+
+# 5. Delete the PVC (Longhorn volume will remain due to Retain policy)
+kubectl delete pvc {pvc-name} -n {namespace}
+
+# 6. If PVC is stuck in Terminating, remove finalizers:
+kubectl patch pvc {pvc-name} -n {namespace} -p '{"metadata":{"finalizers":null}}' --type=merge
+
+# 7. Verify PVC is deleted:
+kubectl get pvc {pvc-name} -n {namespace}
+# Should return: Error from server (NotFound)
+```
+
+**Step 5: Update PV accessModes**
 ```bash
 # Patch the PV to match new RWO mode
 kubectl patch pv {pv-name} --type='json' -p='[{"op": "replace", "path": "/spec/accessModes", "value": ["ReadWriteOnce"]}]'
 
-# Remove PV claimRef so it can rebind
+# Remove PV claimRef so it can rebind to new PVC
 kubectl patch pv {pv-name} -p '{"spec":{"claimRef":null}}' --type=merge
+
+# Verify PV is now Available:
+kubectl get pv {pv-name}
+# STATUS should be: Available
 ```
 
-**Step 5: Update Longhorn Volume CRD**
+**Step 6: Update Longhorn Volume CRD**
 ```bash
-# Update Longhorn volume accessMode
+# Update Longhorn volume accessMode to match PV
 kubectl patch volume {volume-name} -n storage --type='json' -p='[{"op": "replace", "path": "/spec/accessMode", "value": "rwo"}]'
+
+# Verify in Longhorn UI:
+# Access Mode should now show: RWO (not RWX)
 ```
 
-**Step 6: Reactivate App in Flux**
+**Step 7: Re-add PVC to Flux Management**
+```bash
+# Add PVC reference back to app kustomization
+# File: kubernetes/apps/{namespace}/{app}/app/kustomization.yaml
+# Uncomment: - ./pvc.yaml
+
+git add kubernetes/apps/{namespace}/{app}/app/kustomization.yaml
+git commit -m "chore({app}): restore PVC to Flux management (RWO)"
+git push
+
+# Do NOT reconcile yet - wait for app reactivation
+```
+
+**Step 8: Reactivate App in Flux**
 ```bash
 # Uncomment app in parent kustomization
 # File: kubernetes/apps/{namespace}/kustomization.yaml
@@ -594,14 +657,20 @@ kubectl patch volume {volume-name} -n storage --type='json' -p='[{"op": "replace
 # To:  - ./{app}/ks.yaml
 
 git add kubernetes/apps/{namespace}/kustomization.yaml
-git commit -m "activate {app}"
+git commit -m "chore({app}): activate after PVC migration"
 git push
 
 # Trigger Flux reconciliation
 flux reconcile kustomization cluster-apps --with-source
+
+# Flux will now:
+# 1. Create new PVC with ReadWriteOnce (from updated manifest)
+# 2. PVC binds to the Available PV (which has RWO accessModes)
+# 3. Deploy the app HelmRelease
+# 4. Pod attaches the volume to its node
 ```
 
-**Step 7: Verify Migration**
+**Step 9: Verify Migration**
 ```bash
 # Check PVC bound with RWO
 kubectl get pvc {pvc-name} -n {namespace}
