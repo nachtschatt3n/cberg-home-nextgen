@@ -5,14 +5,14 @@ kind: Kustomization
 namespace: kube-system
 components:
   - ../../flux/components/common
-#resources:
-#  - ./cilium/ks.yaml
-#  - ./coredns/ks.yaml
-#  - ./metrics-server/ks.yaml
-#  - ./reloader/ks.yaml
-#  - ./spegel/ks.yaml
-#  - ./csi-driver-smb/ks.yaml
-#  - ./intel-device-plugin/ks.yaml
-#  - ./node-feature-discovery/ks.yaml
+resources:
+  - ./cilium/ks.yaml
+  - ./coredns/ks.yaml
+  - ./metrics-server/ks.yaml
+  - ./reloader/ks.yaml
+  - ./spegel/ks.yaml
+  - ./csi-driver-smb/ks.yaml
+  - ./intel-device-plugin/ks.yaml
+  - ./node-feature-discovery/ks.yaml
 #  - ./descheduler/ks.yaml
 #  - ./authentik/ks.yaml
