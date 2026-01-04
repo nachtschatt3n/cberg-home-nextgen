@@ -149,7 +149,7 @@
 |---|-----|----------|------|-----------|------------------|--------------|
 | 5 | grafana | grafana-config | 1Gi | `kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-pvc.yaml` | ⏳ Not Started | ⏳ |
 | 6 | jdownloader | jdownloader-config | 2Gi | `kubernetes/apps/download/jdownloader/app/pvc.yaml` | ⏳ Not Started | ⏳ |
-| 7 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ✅ **RESTORED** | Volume restored from backup bc2645ea701c4ecb |
+| 7 | adguard-home | adguard-home-config | 15Gi | `kubernetes/apps/network/internal/adguard-home/app/pvc.yaml` | ✅ **RESTORED** | Volume restored from backup-a0e326d5fe644f42 (2026-01-01) |
 | 8 | music-assistant | music-assistant-config | 5Gi | `kubernetes/apps/home-automation/music-assistant-server/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 | 9 | scrypted | scrypted-data | 5Gi | `kubernetes/apps/home-automation/scrypted-nvr/app/pvc.yaml` | ⏳ Not Started | ⏳ |
 
@@ -253,9 +253,9 @@ Actual savings: _____ m
 1. **Issue**: AdGuard Home PVC migration failed - volume stuck in inconsistent RWX/RWO state
     - **Root Cause**: Migration was partially started but not completed, leaving volume with `shareState: running` but `accessMode: rwo`
     - **Complication**: Accidental deletion of volume CRD during troubleshooting caused PVC/PV deletion
-    - **Resolution**: Successfully restored volume from backup `backup-bc2645ea701c4ecb` (2026-01-04T11:31:30Z)
-    - **Current Status**: ✅ DNS server running with restored configuration, volume properly configured for RWX
-    - **Impact**: DNS service fully restored with all previous configuration
+    - **Resolution**: Successfully restored volume from backup `backup-a0e326d5fe644f42` (2026-01-01T03:10:38Z) - the latest backup was corrupted
+    - **Current Status**: ✅ DNS server running with fully restored configuration, volume properly configured for RWX
+    - **Impact**: DNS service fully restored with all previous configuration (users, upstream servers, filters)
     - **Next Steps**: Ready for proper RWX→RWO migration attempt following the 9-step procedure
 
 ### Performance Improvements Observed
