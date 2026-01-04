@@ -9,7 +9,7 @@ resources:
   - ./home-assistant/ks.yaml
  # - ./iobroker/ks.yaml
   - ./mosquitto/ks.yaml
-  - ./music-assistant-server/ks.yaml
+  # - ./music-assistant-server/ks.yaml  # Deactivated
   - ./n8n/ks.yaml
   - ./node-red/ks.yaml
   - ./scrypted-nvr/ks.yaml
