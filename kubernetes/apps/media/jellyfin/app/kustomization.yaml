@@ -4,5 +4,6 @@ kind: Kustomization
 resources:
   - storageclass.yaml
   - pvc.yaml
+  - config-pv.yaml
   - config-pvc.yaml
   - helmrelease.yaml
