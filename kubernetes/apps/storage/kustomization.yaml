@@ -5,5 +5,5 @@ kind: Kustomization
 namespace: storage
 components:
   - ../../flux/components/common
-#resources:
-#  - ./longhorn/ks.yaml
+resources:
+  - ./longhorn/ks.yaml
