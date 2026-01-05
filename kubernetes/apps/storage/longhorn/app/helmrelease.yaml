@@ -42,7 +42,7 @@ spec:
         replicaZoneSoftAntiAffinity: true
         removeSnapshotsDuringFilesystemTrim: true
         snapshotDataIntegrity: fast-check
-        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: true
+        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
         backupConcurrentLimit: 25
@@ -56,7 +56,7 @@ spec:
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: false
         replicaReplenishmentWaitInterval: 300
-        concurrentReplicaRebuildPerNodeLimit: 8
+        concurrentReplicaRebuildPerNodeLimit: 5
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
         mkfsExt4Parameters: ""
