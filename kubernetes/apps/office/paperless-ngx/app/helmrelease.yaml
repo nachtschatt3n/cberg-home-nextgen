@@ -133,6 +133,11 @@ spec:
       enabled: false
     mariadb:
       enabled: true
+      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/mariadb
+        tag: latest
       # auth:
       #   database: paperless
       #   username: paperless
@@ -152,6 +157,11 @@ spec:
             memory: 1Gi
     redis:
       enabled: true
+      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/redis
+        tag: latest
       auth:
       #  password: changeme
         enabled: true
