@@ -119,20 +119,17 @@ spec:
 
     persistence:
       config:
-        enabled: false
+        enabled: true
+        existingClaim: jdownloader-config
         globalMounts:
           - path: /config
-            existingClaim: jdownloader-config
-            subPath: config
       downloads:
         enabled: true
         existingClaim: jdownloader-downloads
         globalMounts:
           - path: /output
-            subPath: downloads
       watch:
         enabled: true
         existingClaim: jdownloader-watch
         globalMounts:
           - path: /watch
-            subPath: watch
