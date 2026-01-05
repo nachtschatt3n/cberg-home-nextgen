@@ -138,8 +138,6 @@ spec:
               - teslamate.${SECRET_DOMAIN}
 
     persistence:
-      import:
-        enabled: false
       tmp:
         type: emptyDir
         advancedMounts:
