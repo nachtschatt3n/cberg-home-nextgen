@@ -41,7 +41,7 @@ spec:
         disableSchedulingOnCordonedNode: true
         replicaZoneSoftAntiAffinity: true
         removeSnapshotsDuringFilesystemTrim: true
-        snapshotDataIntegrity: fast-check
+        snapshotDataIntegrity: disabled
         snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
@@ -51,12 +51,12 @@ spec:
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
         engineReplicaTimeout: 12
-        instanceManagerPodLivenessProbeTimeout: 30
+        instanceManagerPodLivenessProbeTimeout: 60
         replicaFileSyncHttpClientTimeout: 30
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: false
         replicaReplenishmentWaitInterval: 300
-        concurrentReplicaRebuildPerNodeLimit: 5
+        concurrentReplicaRebuildPerNodeLimit: 2
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
         mkfsExt4Parameters: ""
