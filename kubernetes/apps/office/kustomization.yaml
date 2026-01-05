@@ -10,5 +10,5 @@ resources:
  - ./nextcloud/ks.yaml
  - ./omni-tools/ks.yaml
  - ./paperless-ngx/ks.yaml
-# - ./penpot/ks.yaml
-# - ./vaultwarden/ks.yaml
+ - ./penpot/ks.yaml
+ - ./vaultwarden/ks.yaml
