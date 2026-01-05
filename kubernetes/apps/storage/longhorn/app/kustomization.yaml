@@ -10,3 +10,4 @@ resources:
   - secret.sops.yaml
   - alertmanager-telegram-config.yaml
   - backup-credentials.sops.yaml
+  - recurring-backup-job.yaml
