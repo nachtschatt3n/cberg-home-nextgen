@@ -1,0 +1,14 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: jdownloader-config
+  namespace: storage
+spec:
+  size: "2147483648"  # 2Gi in bytes
+  numberOfReplicas: 3
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
