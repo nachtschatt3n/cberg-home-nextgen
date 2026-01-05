@@ -1,0 +1,23 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: daily-backup-all-volumes
+  namespace: storage
+spec:
+  # Backup task type
+  task: backup
+  # Run at 3:00 AM daily (UTC)
+  cron: "0 3 * * *"
+  # Keep last 7 daily backups
+  retain: 7
+  # Default concurrency (2 volumes at a time)
+  concurrency: 2
+  # Apply to all volumes with this label
+  # If empty, applies to all volumes by default via group "default"
+  groups:
+    - default
+  # Optional: Add labels to identify backups created by this job
+  labels:
+    backup-type: daily
+    managed-by: recurring-job
