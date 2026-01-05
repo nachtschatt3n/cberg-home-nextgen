@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - secret.sops.yaml
   - pvc.yaml
-  - paperless-data-pvc.yaml
   - storageclass.yaml
   - helmrelease.yaml
 
