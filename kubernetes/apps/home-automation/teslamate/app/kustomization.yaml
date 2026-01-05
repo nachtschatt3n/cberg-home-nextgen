@@ -3,7 +3,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - secret.sops.yaml
-  - pvc.yaml
-  - postgres-volume.yaml
   - postgres-helmrelease.yaml
   - helmrelease.yaml

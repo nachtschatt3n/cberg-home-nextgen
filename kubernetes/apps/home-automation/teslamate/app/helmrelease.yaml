@@ -139,12 +139,7 @@ spec:
 
     persistence:
       import:
-        enabled: true
-        existingClaim: teslamate-import-cifs
-        advancedMounts:
-          main:
-            main:
-              - path: /opt/app/import
+        enabled: false
       tmp:
         type: emptyDir
         advancedMounts:
