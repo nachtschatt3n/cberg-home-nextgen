@@ -4,10 +4,10 @@ kind: Kustomization
 namespace: monitoring
 components:
   - ../../flux/components/common
-#resources:
-#  - ./grafana/ks.yaml
-#  - ./kube-prometheus-stack/ks.yaml
-#  - ./uptime-kuma/ks.yaml
+resources:
+  - ./grafana/ks.yaml
+  - ./kube-prometheus-stack/ks.yaml
+  - ./uptime-kuma/ks.yaml
 #  - ./eck-operator/ks.yaml
 #  - ./elasticsearch/ks.yaml
 #  - ./kibana/ks.yaml
