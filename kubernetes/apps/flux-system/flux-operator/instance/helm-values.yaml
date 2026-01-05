@@ -2,6 +2,8 @@
 instance:
   cluster:
     networkPolicy: false
+  distribution:
+    version: v2.5.0
   components:
     - source-controller
     - kustomize-controller
