@@ -1,0 +1,46 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: tube-archivist-elasticsearch-data-5g
+  namespace: storage
+spec:
+  size: "5368709120"  # 5Gi
+  numberOfReplicas: 3
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: tube-archivist-elasticsearch-data-5g
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "3"
+      staleReplicaTimeout: "30"
+    volumeHandle: tube-archivist-elasticsearch-data-5g
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tube-archivist-elasticsearch-data-5g
+  namespace: download
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn-static
+  volumeName: tube-archivist-elasticsearch-data-5g
