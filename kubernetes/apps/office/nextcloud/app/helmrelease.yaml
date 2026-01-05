@@ -349,11 +349,11 @@ spec:
 
       architecture: standalone
 
-      # Override image to use official MariaDB instead of deprecated Bitnami
+      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
       image:
         registry: docker.io
-        repository: mariadb
-        tag: "11.3.2"
+        repository: bitnamilegacy/mariadb
+        tag: latest
 
       ## Enable persistence using Persistent Volume Claims
       ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
@@ -458,11 +458,11 @@ spec:
       architecture: standalone
       auth:
         enabled: false
-      # Override image to use official Redis instead of deprecated Bitnami
+      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
       image:
         registry: docker.io
-        repository: redis
-        tag: "7.2.5-alpine"
+        repository: bitnamilegacy/redis
+        tag: latest
       primary:
         persistence:
           enabled: true
