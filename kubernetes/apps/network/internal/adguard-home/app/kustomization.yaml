@@ -6,3 +6,6 @@ resources:
   - ./helmrelease.yaml
   - ./certificate.yaml
   - ./secret.sops.yaml
+  - ./longhorn-volume.yaml
+  - ./pv.yaml
+  - ./pvc.yaml
