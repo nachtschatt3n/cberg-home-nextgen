@@ -2,10 +2,10 @@
 apiVersion: longhorn.io/v1beta2
 kind: Volume
 metadata:
-  name: tube-archivist-redis-data-new
+  name: tube-archivist-redis-data
   namespace: storage
 spec:
-  size: "2147483648"  # 2Gi
+  size: "10737418240"  # 10Gi
   numberOfReplicas: 3
   dataEngine: v1
   accessMode: rwo
@@ -14,10 +14,10 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: tube-archivist-redis-data-new
+  name: tube-archivist-redis-data
 spec:
   capacity:
-    storage: 2Gi
+    storage: 10Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
@@ -29,18 +29,18 @@ spec:
     volumeAttributes:
       numberOfReplicas: "3"
       staleReplicaTimeout: "30"
-    volumeHandle: tube-archivist-redis-data-new
+    volumeHandle: tube-archivist-redis-data
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: tube-archivist-redis-data-new
+  name: tube-archivist-redis-data
   namespace: download
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
+      storage: 10Gi
   storageClassName: longhorn-static
-  volumeName: tube-archivist-redis-data-new
+  volumeName: tube-archivist-redis-data
