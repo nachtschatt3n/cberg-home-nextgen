@@ -6,7 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
-| 2026-01-03 | Excellent | 0 | 2 | Node 3 SSD failure investigation and cleanup; Zigbee battery monitoring | Node 3: SSD detected and operational after Jan 1 failure (failed when uncordoned under load); Removed IO stress test and SMART monitoring (replacement SSD ordered, arrives in 2 days); Node remains cordoned; Zigbee devices: 22 total (up from 18), 18 battery-powered; Battery average: 81% (down from 82%); 2 critical batteries: 15%, 20% (URGENT replacement needed); Home Assistant errors: 93/100 lines (up from 55); Amazon Alexa: 10 failures (improved from 40); Tesla Wall Connector: 0 timeouts (resolved); All infrastructure perfect: 0 events, 0 crashes, 53/53 volumes healthy, backup system stable |
+| 2026-01-06 | Warning | 2 | 6 | CRITICAL: Backup system completely broken (0 backup jobs, 0 volumes backed up); Zigbee battery crisis (2 devices <20%, 14% and 20%); Home Assistant integration issues (15 errors, 6 Amazon Alexa failures); Jellyfin health check failed; Database connectivity issues | Node 3: SSD detected but DEFECTIVE - cordoned, monitoring removed, replacement ordered (arrives in 2 days); 33 hardware errors on node 11 (investigation needed); Zigbee devices: 22 total, 17 battery-powered; Battery average: 81%; 2 CRITICAL batteries: 14%, 20% (immediate replacement required); Home Assistant: 15 errors/100 lines; Amazon Alexa: 6 failures; Tesla Wall Connector: 0 timeouts (resolved); All infrastructure stable: 0 events, 0 crashes, 53/53 volumes healthy; GitOps perfect; Network healthy; DNS working; External access functional |
 | 2026-01-01 | Excellent | 0 | 2 | Prometheus volume alerts resolved with filesystem trim; recurring trim job configured | Resolved Longhorn actualSize metric false positives (100.1% → 6.5%); Created prometheus-filesystem-trim recurring job (daily 2 AM); Manual trim reclaimed 93.6 GiB; All 3 alerts cleared; Samsung 990 PRO SSD warranty claim package prepared (Node 3 defective drive); Trim job should be monitored for effectiveness |
 | 2025-12-31 PM | Good | 0 | 4 | MAJOR: Backup failure investigation and resolution (149 alerts cleared) | Investigated massive backup failure (147 failed backups); Root cause: Network/CIFS performance bottleneck (NAS healthy, 30 MB/s observed vs 200+ MB/s expected on 10 GbE); Cleared 147 failed backup CRs; Backup speeds varied 10x (5.6-57.5 GB/min); 51 backups successful; Network path investigation needed |
 | 2025-12-31 AM | Good | 0 | 1 | Node 3 uncordoned after successful validation; Prometheus volume fix applied | Node 3 uncordoned (8+ days stable); Prometheus alerts firing (false positive - snapshot deletion in progress); Battery health unchanged (2 critical: 15%, 21%); All applications healthy; Flux reconciled |
@@ -26,35 +26,35 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-01-03
+**Date**: 2026-01-06
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
-**Duration**: 20m
+**Duration**: 25m
 
 ## Executive Summary
-- **Overall Health**: ✅ Excellent
-- **Critical Issues**: 0
-- **Warnings**: 2 (2 critical Zigbee batteries, Amazon Alexa integration)
-- **Service Availability**: 100% (all critical services healthy)
-- **Uptime**: All systems operational
-- **Node 3 Status**: ⚠️ SSD detected but DEFECTIVE - cordoned, monitoring removed, replacement ordered
+- **Overall Health**: 🟠 Warning
+- **Critical Issues**: 2 (2 critical Zigbee batteries, backup system broken)
+- **Warnings**: 5 (Home Assistant integrations, Jellyfin health, database issues, hardware errors)
+- **Service Availability**: 95% (most services healthy, some integration issues)
+- **Uptime**: All systems operational except backup system
+- **Node 3 Status**: ⚠️ SSD detected but DEFECTIVE - cordoned, replacement ordered (arrives in 2 days)
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Response | Status Notes |
 |---------|----------|----------|--------|----------|--------------|
 | Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational |
-| Home Assistant | ✅ | ❌ | Degraded | N/A | 93 errors/100 lines, integration issues |
+| Home Assistant | ✅ | ❌ | Degraded | N/A | 15 errors/100 lines, integration issues |
 | Nextcloud | ✅ | ✅ | Healthy | N/A | Operational |
-| Jellyfin | ✅ | ✅ | Healthy | N/A | Media server functional |
+| Jellyfin | ✅ | ✅ | Warning | N/A | Health check failed |
 | Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working |
 | Prometheus | ✅ | ✅ | Healthy | N/A | Metrics collection active |
 | Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible |
 | phpMyAdmin | ✅ | ✅ | Healthy | N/A | Database admin working |
 | Uptime Kuma | ✅ | ✅ | Healthy | N/A | Monitoring dashboard active |
 | Tube Archivist | ✅ | ✅ | Healthy | N/A | Archival jobs running |
-| PostgreSQL | ✅ | N/A | Healthy | N/A | Database operational |
-| MariaDB | ✅ | N/A | Healthy | N/A | Database operational |
-| Zigbee2MQTT | ✅ | N/A | Healthy | N/A | 22 devices total, 18 battery-powered |
+| PostgreSQL | ❌ | N/A | Error | N/A | Database connectivity failed |
+| MariaDB | ❌ | N/A | Error | N/A | Database connectivity failed |
+| Zigbee2MQTT | ✅ | N/A | Healthy | N/A | 22 devices total, 17 battery-powered |
 | ESPHome | ✅ | N/A | Healthy | N/A | Running |
 | Node-RED | ✅ | N/A | Healthy | N/A | Automation flows active |
 | Scrypted | ✅ | N/A | Healthy | N/A | Camera integration working |
@@ -62,6 +62,7 @@ Keep a log of when this check was run and major findings:
 | Mosquitto | ✅ | N/A | Healthy | N/A | MQTT broker operational |
 | Music Assistant | ✅ | ✅ | Healthy | N/A | Media management working |
 | Frigate | ✅ | N/A | Healthy | N/A | NVR operational, high CPU/memory usage |
+| Backup System | ❌ | N/A | Critical | N/A | No backup jobs running, 0 volumes backed up |
 
 ## Detailed Findings
 
@@ -338,43 +339,36 @@ Keep a log of when this check was run and major findings:
 **Analysis**: Device count increased from 18 to 22 total devices. All battery-powered devices reporting successfully.
 
 ### 33. Battery Health Monitoring
-🟠 **STATUS: WARNING** - 2 devices critically low
+🟠 **STATUS: WARNING** - 2 devices critically low, immediate action required
 
 **Battery Statistics**:
-- **Total Battery-Powered Devices**: **18**
-- **Average Battery Level**: **81%** (DOWN from 82% on Jan 1)
-- **Battery Range**: 15% - 100%
+- **Total Battery-Powered Devices**: **17**
+- **Average Battery Level**: **81%** (stable)
+- **Battery Range**: 14% - 100%
 
 **Battery Distribution**:
-- Excellent (90-100%): 11 devices (61%)
-- Good (70-89%): 3 devices (17%)
-- Monitor (50-69%): 2 devices (11%)
-- Warning (30-49%): 0 devices (0%)
-- **Critical (<30%)**: **2 devices** (11%) ⚠️
+- Excellent (90-100%): ~11 devices
+- Good (70-89%): ~4 devices
+- Monitor (50-69%): ~2 devices
+- Warning (30-49%): 0 devices
+- **Critical (<30%)**: **2 devices** ⚠️
 
 **🔴 CRITICAL - Replace Immediately (<30%)**:
-- **0xa4c1385405b16ed5**: **15%** (STABLE at 15% from Jan 1) ⚠️ **URGENT**
-- **0xa4c138101f51cc54**: **20%** (DOWN from 21% on Jan 1) ⚠️ **URGENT**
-- **Estimated time to failure**: 1-3 weeks
-
-**🔵 MONITOR (Watch Closely - 50-70%)**:
-- **0x00158d0008cb1fdc**: 70% (UP from 63%, improved)
-- **0x00158d000a964f4b**: 70%
-- **0x00158d000898dc60**: 63% (stable)
+- **0xa4c1385405b16ed5**: **14%** ⚠️ **URGENT**
+- **0xa4c138101f51cc54**: **20%** ⚠️ **URGENT**
+- **Estimated time to failure**: 1-2 weeks
 
 **📊 Battery Health Trend**:
-- Overall average declining slightly (82% → 81%)
-- 2 critical devices stable/declining slowly
-- Some devices showing improvement (70% up from 63%)
-- **ACTION**: Identify and replace batteries in 2 critical devices
+- Overall average stable at 81%
+- 2 critical devices deteriorating (from 15%/21% to 14%/20%)
+- **CRITICAL ACTION REQUIRED**: Replace batteries immediately
 
 **🛠️ Maintenance Required**:
-1. **URGENT**: Identify devices 0xa4c1385405b16ed5 and 0xa4c138101f51cc54 in Zigbee2MQTT configuration
-2. Replace batteries immediately (likely CR2032 or CR2450 coin cells)
-3. Monitor devices at 63% for battery replacement in 4-6 weeks
-4. Stock: Maintain inventory of CR2032, CR2450, AA, AAA batteries
+1. **URGENT**: Identify devices in Zigbee2MQTT configuration and replace batteries
+2. Monitor remaining devices for battery replacement planning
+3. Stock: CR2032, CR2450 coin cell batteries needed
 
-**🏠 Home Assistant Battery Sensors**: Not accessible via API for detailed monitoring
+**🏠 Home Assistant Battery Sensors**: Not accessible via API
 **🛠️ ESPHome Devices**: No battery-powered devices detected
 **📹 Ring Cameras**: Not checked this cycle
 
@@ -464,37 +458,58 @@ Keep a log of when this check was run and major findings:
 
 ### Critical (🔴 Do Immediately - Risk of Data Loss/Service Outage)
 
-1. **🔴 URGENT: Replace Zigbee batteries** - 2 devices critically low:
-   - Device 0xa4c1385405b16ed5: 15% (stable but critical)
-   - Device 0xa4c138101f51cc54: 20% (declining)
-   - **Action**:
-     1. Identify devices in `/data/configuration.yaml` on zigbee2mqtt pod
-     2. Replace batteries ASAP (estimated 1-3 weeks to failure)
-     3. Likely CR2032 or CR2450 coin cell batteries
+1. **🔴 URGENT: Fix Backup System** - No backups running at all:
+    - **Critical Issue**: 0 backup jobs found, 0 volumes backed up
+    - **Risk**: Complete data loss if any volumes fail
+    - **Action**:
+      1. Check backup CronJob configuration
+      2. Verify backup target (192.168.31.230) accessibility
+      3. Investigate why jobs aren't being created
+      4. Restore backup functionality immediately
 
-2. **🔴 Node 3 SSD Replacement** - Defective drive, replacement ordered:
-   - **Status**: SSD operational but fails under production load
-   - **Timeline**: Replacement arrives in 2 days
-   - **Current state**: Node cordoned, running only system pods (13 pods)
-   - **Action**: Keep node cordoned until SSD replacement complete
+2. **🔴 URGENT: Replace Zigbee batteries** - 2 devices critically low:
+    - Device 0xa4c1385405b16ed5: 14% (deteriorating)
+    - Device 0xa4c138101f51cc54: 20% (deteriorating)
+    - **Action**:
+      1. Identify devices in Zigbee2MQTT configuration
+      2. Replace batteries immediately (CR2032/CR2450)
+      3. Estimated 1-2 weeks until failure
+
+3. **🔴 Node 3 SSD Replacement** - Defective drive, replacement ordered:
+    - **Status**: SSD operational but fails under production load
+    - **Timeline**: Replacement arrives in 2 days
+    - **Current state**: Node cordoned, running only system pods
+    - **Action**: Keep node cordoned until SSD replacement complete
 
 ### Important (🟡 Do This Week - Service Degradation Risk)
 
-3. **🟡 Install Node 3 replacement SSD** (when it arrives):
-   - Power off Node 3
-   - Replace Samsung 990 PRO with new SSD
-   - Boot and verify detection
-   - Run SMART checks
-   - Uncordon and monitor for 24-48 hours
+3. **🟡 Investigate Hardware Errors on Node 11**:
+    - 33 hardware errors detected (investigation needed)
+    - Check dmesg logs for specific error types
+    - Verify no disk/memory/network issues
 
-4. **🟡 Investigate Home Assistant error increase**:
-   - Error count: 93/100 lines (up from 55)
-   - Amazon Alexa: 10 failures (improved but still degraded)
-   - Need deeper log analysis to identify new error sources
+4. **🟡 Install Node 3 replacement SSD** (when it arrives):
+    - Power off Node 3
+    - Replace Samsung 990 PRO SSD with new SSD
+    - Boot and verify detection
+    - Run SMART checks
+    - Uncordon and monitor for 24-48 hours
 
-5. **🟡 Fix Amazon Alexa integration** (Medium Priority):
-   - 10 failures in last 100 lines (down from 40, improving)
-   - Consider re-authentication if errors persist
+5. **🟡 Fix Home Assistant Integration Issues**:
+    - 15 errors in last 100 lines
+    - Amazon Alexa: 6 failures (ongoing integration problems)
+    - Check HA logs for specific error patterns
+    - Consider re-authentication for Amazon Alexa
+
+6. **🟡 Fix Jellyfin Health Check**:
+    - Health endpoint returning errors
+    - Verify Jellyfin service configuration
+    - Check logs for underlying issues
+
+7. **🟡 Fix Database Connectivity**:
+    - PostgreSQL and MariaDB health checks failing
+    - Verify database pod status and logs
+    - Check connection credentials
 
 ### Maintenance (🔵 Next Window - Performance/Security Improvements)
 - **Battery replacements (planned)**:
@@ -523,14 +538,18 @@ Keep a log of when this check was run and major findings:
 - **Amazon Alexa**: Improving (10 failures, down from 40)
 
 ### Areas of Concern ⚠️
+- **Backup System Failure**: Complete breakdown - no jobs running, no backups
+  - Critical risk to data integrity
+  - Immediate investigation required
 - **Node 3 SSD**: Defective - works at low load, fails under production stress
-  - Jan 1: Failed when uncordoned
-  - Currently: Operational but cordoned (13 system pods only)
+  - Currently: Operational but cordoned
   - Replacement: Ordered, arrives in 2 days
-- **Home Assistant errors increased**: 93 errors (up from 55)
-- **2 critical Zigbee batteries**: 15%, 20% - urgent replacement needed
-- **Battery health trend**: Overall average declining slightly (82% → 81%)
-- **VPN subsystem error**: Persistent but expected/minor
+- **Hardware Errors on Node 11**: 33 errors detected - investigation needed
+- **Home Assistant Integration Issues**: 15 errors, Amazon Alexa failures
+- **2 Critical Zigbee Batteries**: 14%, 20% - immediate replacement needed
+- **Battery Health**: Stable at 81% average but critical devices deteriorating
+- **Service Health Checks**: Jellyfin, PostgreSQL, MariaDB failing
+- **VPN Subsystem Error**: Persistent but expected/minor
 
 ### Recommendations
 1. **Immediate**: Replace 2 critical Zigbee batteries
@@ -556,22 +575,26 @@ Keep a log of when this check was run and major findings:
 - 🟡 Monitor 3 battery devices at 63-70% for future replacement
 
 ---
-**Report Generated**: 2026-01-03 15:45:00 UTC
+**Report Generated**: 2026-01-06 16:30:00 UTC
 **Health Check Version**: v2.2 (33 sections)
-**Next Scheduled Check**: 2026-01-10 (weekly)
-**Overall Health Score**: ✅ **Excellent** (0 critical issues, 2 warnings, 100% services healthy)
+**Next Scheduled Check**: 2026-01-13 (weekly)
+**Overall Health Score**: 🟠 **Warning** (2 critical issues, 5 warnings, 96% services healthy)
 
 **Node 3 Status**: ⚠️ **CORDONED** - SSD detected but DEFECTIVE | Replacement ordered (arrives in 2 days)
 - SSD failed under load on Jan 1, operational at low load (13 system pods)
 - IO stress test and monitoring removed
 - Keep cordoned until replacement complete
 
-**Backup Status**: ✅ **STABLE** - 252 backups, last backup successful (9h ago)
+**Backup Status**: ❌ **CRITICAL FAILURE** - 0 backup jobs running, 0 volumes backed up
 **Storage Status**: ✅ **PERFECT** - 53/53 volumes healthy
 **GitOps Status**: ✅ **SYNCHRONIZED** - All kustomizations applied
+**Hardware Status**: ⚠️ **Node 11: 33 hardware errors** - Investigation needed
+**Cloudflare Tunnel**: ✅ **OPERATIONAL** - External access working
 
 **Critical Actions**:
-  1. 🔴 Replace 2 Zigbee batteries URGENT (15%, 20%)
-  2. 🔴 Install Node 3 replacement SSD (arrives in 2 days)
-  3. 🟡 Investigate Home Assistant error increase (93 errors)
+   1. 🔴 Fix backup system immediately (0 backups running)
+   2. 🔴 Replace 2 Zigbee batteries URGENT (14%, 20%)
+   3. 🔴 Install Node 3 replacement SSD (arrives in 2 days)
+   4. 🟡 Investigate Node 11 hardware errors (33 errors)
+   5. 🟡 Fix Home Assistant integrations (15 errors, Amazon Alexa)
 ```
