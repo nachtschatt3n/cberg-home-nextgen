@@ -86,13 +86,6 @@ spec:
               readOnlyRootFilesystem: false
               capabilities: { drop: ["ALL"] }
 
-        initContainers:
-          - name: init-config
-            image: busybox:1.36
-            command: ['sh', '-c', 'mkdir -p /app/config']
-            volumeMounts:
-              - name: config
-                mountPath: /app
         pod:
           securityContext:
             runAsUser: 1000
@@ -107,7 +100,7 @@ spec:
         type: ClusterIP
         ports:
           http:
-            port: *port
+            port: 8080
 
     ingress:
       main:
@@ -147,4 +140,4 @@ spec:
         advancedMounts:
           main:
             main:
-              - path: /app
+              - path: /app/config
