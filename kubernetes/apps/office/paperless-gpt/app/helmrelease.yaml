@@ -114,6 +114,8 @@ spec:
           gethomepage.dev/icon: "paperless.png"
           gethomepage.dev/description: "AI-powered document processing for paperless-ngx"
           nginx.ingress.kubernetes.io/proxy-body-size: 64m
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "600"          
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
