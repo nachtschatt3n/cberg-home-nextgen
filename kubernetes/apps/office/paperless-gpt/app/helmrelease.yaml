@@ -51,7 +51,7 @@ spec:
                     name: paperless-gpt-secret
                     key: OPENAI_API_KEY
               VISION_LLM_PROVIDER: "openai"
-              VISION_LLM_MODEL: "ministral-3-3b"
+              VISION_LLM_MODEL: "qwen2-vl-7b-instruct"
               OPENAI_BASE_URL: "http://192.168.30.111:1234"
               OCR_PROVIDER: "llm"
               LOG_LEVEL: "info"
