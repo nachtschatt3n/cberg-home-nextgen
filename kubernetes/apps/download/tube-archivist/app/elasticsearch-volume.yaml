@@ -1,16 +1,6 @@
 ---
-apiVersion: longhorn.io/v1beta2
-kind: Volume
-metadata:
-  name: tube-archivist-elasticsearch-data-5g
-  namespace: storage
-spec:
-  size: "5368709120"  # 5Gi
-  numberOfReplicas: 3
-  dataEngine: v1
-  accessMode: rwo
-  frontend: blockdev
----
+# Longhorn volume already exists from backup restore
+# Removed Volume CRD to avoid conflicts
 apiVersion: v1
 kind: PersistentVolume
 metadata:

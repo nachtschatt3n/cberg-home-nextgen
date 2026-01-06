@@ -1,16 +1,6 @@
 ---
-apiVersion: longhorn.io/v1beta2
-kind: Volume
-metadata:
-  name: tube-archivist-cache-2g
-  namespace: storage
-spec:
-  size: "10737418240"  # 10Gi
-  numberOfReplicas: 3
-  dataEngine: v1
-  accessMode: rwo
-  frontend: blockdev
----
+# Longhorn volume already exists from backup restore
+# Removed Volume CRD to avoid conflicts
 apiVersion: v1
 kind: PersistentVolume
 metadata:
