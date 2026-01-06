@@ -150,3 +150,9 @@ spec:
           main:
             main:
               - path: /app/logs
+      openapi:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /app/OPENAPI
