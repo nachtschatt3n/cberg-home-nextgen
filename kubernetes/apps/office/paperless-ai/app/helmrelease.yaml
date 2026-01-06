@@ -64,7 +64,7 @@ spec:
                   secretKeyRef:
                     name: paperless-ai-secret
                     key: API_KEY
-              RAG_SERVICE_ENABLED: "false"
+              RAG_SERVICE_ENABLED: "true"
             probes:
               liveness:
                 enabled: true
