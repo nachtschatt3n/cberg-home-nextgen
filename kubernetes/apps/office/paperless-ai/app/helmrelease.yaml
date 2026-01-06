@@ -114,7 +114,7 @@ spec:
     ingress:
       main:
         enabled: true
-        className: external
+        className: internal
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Paperless-AI"
@@ -122,7 +122,6 @@ spec:
           gethomepage.dev/icon: "robot.png"
           gethomepage.dev/description: "AI-powered document processing with semantic search"
           nginx.ingress.kubernetes.io/proxy-body-size: 64m
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
