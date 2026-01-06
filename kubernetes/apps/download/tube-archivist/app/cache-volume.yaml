@@ -5,7 +5,7 @@ metadata:
   name: tube-archivist-cache-2g
   namespace: storage
 spec:
-  size: "2147483648"  # 2Gi
+  size: "10737418240"  # 10Gi
   numberOfReplicas: 3
   dataEngine: v1
   accessMode: rwo
@@ -17,7 +17,7 @@ metadata:
   name: tube-archivist-cache-2g
 spec:
   capacity:
-    storage: 2Gi
+    storage: 10Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
@@ -41,6 +41,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
+      storage: 10Gi
   storageClassName: longhorn-static
   volumeName: tube-archivist-cache-2g

@@ -86,6 +86,6 @@ spec:
     persistence:
       redis-data:
         enabled: true
-        existingClaim: tube-archivist-redis-data-new
+        existingClaim: tube-archivist-redis-data
         globalMounts:
           - path: /data
