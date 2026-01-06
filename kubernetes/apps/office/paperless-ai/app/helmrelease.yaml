@@ -43,7 +43,7 @@ spec:
                   secretKeyRef:
                     name: paperless-ai-secret
                     key: PAPERLESS_API_TOKEN
-              PAPERLESS_USERNAME: "admin"
+              PAPERLESS_USERNAME: "mathiasuhl"
               AI_PROVIDER: "custom"
               CUSTOM_BASE_URL: "http://192.168.30.111:1234"
               CUSTOM_MODEL: "gpt-oss-20b"
