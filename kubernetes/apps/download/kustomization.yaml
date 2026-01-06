@@ -6,4 +6,4 @@ components:
   - ../../flux/components/common
 resources:
   - ./jdownloader/ks.yaml
-#  - ./tube-archivist/ks.yaml
+  - ./tube-archivist/ks.yaml
