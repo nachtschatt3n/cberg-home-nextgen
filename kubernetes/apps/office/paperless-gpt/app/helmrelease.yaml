@@ -44,14 +44,14 @@ spec:
               MANUAL_TAG: "paperless-gpt"
               AUTO_TAG: "paperless-gpt-auto"
               LLM_PROVIDER: "openai"
-              LLM_MODEL: "gpt-oss-20b"
+              LLM_MODEL: "openai/gpt-oss-20b"
               OPENAI_API_KEY:
                 valueFrom:
                   secretKeyRef:
                     name: paperless-gpt-secret
                     key: OPENAI_API_KEY
               VISION_LLM_PROVIDER: "openai"
-              VISION_LLM_MODEL: "qwen3-vl-8b"
+              VISION_LLM_MODEL: "qwen/qwen3-vl-8b"
               OPENAI_BASE_URL: "http://192.168.30.111:1234/v1"
               OCR_PROVIDER: "llm"
               LOG_LEVEL: "info"
