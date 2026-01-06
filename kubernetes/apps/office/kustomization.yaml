@@ -11,5 +11,6 @@ resources:
  - ./omni-tools/ks.yaml
  - ./paperless-ngx/ks.yaml
  - ./paperless-gpt/ks.yaml
+ - ./paperless-ai/ks.yaml
  - ./penpot/ks.yaml
  - ./vaultwarden/ks.yaml
