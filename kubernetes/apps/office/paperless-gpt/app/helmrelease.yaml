@@ -43,6 +43,7 @@ spec:
               PAPERLESS_PUBLIC_URL: "https://paperless-gpt.${SECRET_DOMAIN}"
               MANUAL_TAG: "paperless-gpt"
               AUTO_TAG: "paperless-gpt-auto"
+              TOKEN_LIMIT: "262144"
               LLM_PROVIDER: "openai"
               LLM_MODEL: "openai/gpt-oss-20b"
               OPENAI_API_KEY:
