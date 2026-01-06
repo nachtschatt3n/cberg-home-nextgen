@@ -56,6 +56,9 @@ spec:
               OPENAI_BASE_URL: "http://192.168.30.111:1234/v1"
               OCR_PROVIDER: "llm"
               LOG_LEVEL: "info"
+              LLM_REQUESTS_PER_MINUTE: "10"
+              LLM_REQUEST_TIMEOUT: "600"
+              LLM_REQUEST_MAX_RETRIES: "3"
             probes:
               liveness:
                 enabled: true
