@@ -1,0 +1,147 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2beta2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: paperless-ai
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        containers:
+          main:
+            image:
+              repository: clusterzx/paperless-ai
+              tag: "latest"
+            env:
+              TZ: ${TIMEZONE}
+              PUID: "1000"
+              PGID: "1000"
+              PAPERLESS_AI_PORT: "3000"
+              PAPERLESS_API_URL: "http://paperless-ngx.office.svc.cluster.local:8000/api"
+              PAPERLESS_API_TOKEN:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-ai-secret
+                    key: PAPERLESS_API_TOKEN
+              PAPERLESS_USERNAME: "admin"
+              AI_PROVIDER: "custom"
+              CUSTOM_BASE_URL: "http://192.168.30.111:1234"
+              CUSTOM_MODEL: "gpt-oss-20b"
+              OPENAI_API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-ai-secret
+                    key: OPENAI_API_KEY
+              SCAN_INTERVAL: "*/30 * * * *"
+              PROCESS_PREDEFINED_DOCUMENTS: "yes"
+              TAGS: "ai-process"
+              ADD_AI_PROCESSED_TAG: "yes"
+              AI_PROCESSED_TAG_NAME: "ai-processed"
+              USE_PROMPT_TAGS: "no"
+              USE_EXISTING_DATA: "yes"
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-ai-secret
+                    key: API_KEY
+              RAG_SERVICE_ENABLED: "false"  # Disable for now, requires separate RAG service
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &port 3000
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: *port
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 1000m
+                memory: 1Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities: { drop: ["ALL"] }
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Paperless-AI"
+          gethomepage.dev/group: "Office"
+          gethomepage.dev/icon: "robot.png"
+          gethomepage.dev/description: "AI-powered document processing with semantic search"
+          nginx.ingress.kubernetes.io/proxy-body-size: 64m
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: paperless-ai.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+            - paperless-ai.${SECRET_DOMAIN}
+
+    persistence:
+      data:
+        enabled: true
+        existingClaim: paperless-ai-data
+        advancedMounts:
+          main:
+            main:
+              - path: /app/data
