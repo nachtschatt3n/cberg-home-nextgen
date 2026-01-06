@@ -50,7 +50,7 @@ spec:
                     key: PAPERLESS_USERNAME
               AI_PROVIDER: "custom"
               CUSTOM_BASE_URL: "http://192.168.30.111:1234/v1"
-              CUSTOM_MODEL: "gpt-oss-20b"
+              CUSTOM_MODEL: "google/gemma-3-12b"
               OPENAI_API_KEY:
                 valueFrom:
                   secretKeyRef:
