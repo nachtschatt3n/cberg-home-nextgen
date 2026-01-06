@@ -1,0 +1,136 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2beta2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: paperless-gpt
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        containers:
+          main:
+            image:
+              repository: icereed/paperless-gpt
+              tag: "latest"
+            env:
+              TZ: ${TIMEZONE}
+              PAPERLESS_BASE_URL: "http://paperless-ngx.office.svc.cluster.local:8000"
+              PAPERLESS_API_TOKEN:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-gpt-secret
+                    key: PAPERLESS_API_TOKEN
+              PAPERLESS_PUBLIC_URL: "https://paperless-gpt.${SECRET_DOMAIN}"
+              MANUAL_TAG: "paperless-gpt"
+              AUTO_TAG: "paperless-gpt-auto"
+              LLM_PROVIDER: "openai"
+              LLM_MODEL: "gpt-oss-20b"
+              OPENAI_API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: paperless-gpt-secret
+                    key: OPENAI_API_KEY
+              VISION_LLM_PROVIDER: "openai"
+              VISION_LLM_MODEL: "minicpm-v-4_5"
+              OPENAI_BASE_URL: "http://192.168.30.111:1234"
+              OCR_PROVIDER: "llm"
+              LOG_LEVEL: "info"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &port 8080
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: *port
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 1000m
+                memory: 1Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities: { drop: ["ALL"] }
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Paperless-GPT"
+          gethomepage.dev/group: "Office"
+          gethomepage.dev/icon: "paperless.png"
+          gethomepage.dev/description: "AI-powered document processing for paperless-ngx"
+          nginx.ingress.kubernetes.io/proxy-body-size: 64m
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: paperless-gpt.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+            - paperless-gpt.${SECRET_DOMAIN}
+
+    persistence:
+      prompts:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /app/prompts
