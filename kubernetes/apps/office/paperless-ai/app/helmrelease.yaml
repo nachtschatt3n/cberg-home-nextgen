@@ -140,7 +140,6 @@ spec:
       data:
         enabled: true
         existingClaim: paperless-ai-data
-        storageClass: longhorn-static
         advancedMounts:
           main:
             main:
