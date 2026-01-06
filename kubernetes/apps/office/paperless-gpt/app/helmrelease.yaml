@@ -141,3 +141,9 @@ spec:
           main:
             main:
               - path: /app/config
+      db:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /app/db
