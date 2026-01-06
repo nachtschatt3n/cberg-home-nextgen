@@ -52,7 +52,7 @@ spec:
                     key: OPENAI_API_KEY
               VISION_LLM_PROVIDER: "openai"
               VISION_LLM_MODEL: "qwen3-vl-8b"
-              OPENAI_BASE_URL: "http://192.168.30.111:1234"
+              OPENAI_BASE_URL: "http://192.168.30.111:1234/v1"
               OCR_PROVIDER: "llm"
               LOG_LEVEL: "info"
             probes:
