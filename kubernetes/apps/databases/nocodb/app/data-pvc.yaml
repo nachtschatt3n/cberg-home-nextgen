@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nocodb-data
+  namespace: databases
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-static
+  volumeName: nocodb-data
+  resources:
+    requests:
+      storage: 10Gi
