@@ -76,27 +76,6 @@ spec:
                 fi
 
             env:
-              # Anthropic API credentials
-              - name: ANTHROPIC_API_KEY
-                valueFrom:
-                  secretKeyRef:
-                    name: clawd-bot-secrets
-                    key: ANTHROPIC_API_KEY
-
-              # Telegram configuration
-              - name: TELEGRAM_BOT_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: clawd-bot-secrets
-                    key: TELEGRAM_BOT_TOKEN
-
-              - name: TELEGRAM_CHAT_ID
-                valueFrom:
-                  secretKeyRef:
-                    name: clawd-bot-secrets
-                    key: TELEGRAM_CHAT_ID
-                    optional: true
-
               # Node configuration
               - name: NODE_ENV
                 value: "production"
