@@ -1,0 +1,201 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: clawd-bot
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      clawd-bot:
+        pod:
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+        initContainers:
+          install-clawdbot:
+            image:
+              repository: node
+              tag: 22-alpine
+            command:
+              - sh
+              - -c
+              - |
+                echo "Installing clawdbot CLI..."
+                npm install -g clawdbot@latest
+                echo "Clawdbot installed at: $(which clawdbot)"
+                clawdbot --version
+            securityContext:
+              runAsUser: 1000
+              runAsGroup: 1000
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+
+        containers:
+          app:
+            image:
+              repository: node
+              tag: 22-alpine
+              pullPolicy: IfNotPresent
+
+            command:
+              - sh
+              - -c
+              - |
+                if [ ! -f /root/.clawdbot/clawdbot.json ]; then
+                  echo "Configuration not found. Please run onboarding wizard:"
+                  echo "  kubectl exec -it -n ai deployment/clawd-bot -- /bin/sh"
+                  echo "  Then run: clawdbot onboard"
+                  echo ""
+                  echo "Sleeping indefinitely until configured..."
+                  sleep infinity
+                else
+                  echo "Starting Clawd Bot Gateway..."
+                  exec clawdbot gateway --port 18789 --verbose
+                fi
+
+            env:
+              # Anthropic API credentials
+              - name: ANTHROPIC_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: clawd-bot-secrets
+                    key: ANTHROPIC_API_KEY
+
+              # Telegram configuration
+              - name: TELEGRAM_BOT_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: clawd-bot-secrets
+                    key: TELEGRAM_BOT_TOKEN
+
+              - name: TELEGRAM_CHAT_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: clawd-bot-secrets
+                    key: TELEGRAM_CHAT_ID
+                    optional: true
+
+              # Node configuration
+              - name: NODE_ENV
+                value: "production"
+
+              # Gateway port
+              - name: GATEWAY_PORT
+                value: "18789"
+
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 18789
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 5
+
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 18789
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 18789
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 1
+                memory: 1Gi
+
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                  - ALL
+
+    service:
+      main:
+        controller: clawd-bot
+        type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            port: 18789
+            targetPort: 18789
+
+    ingress:
+      main:
+        enabled: false
+
+    persistence:
+      config:
+        type: persistentVolumeClaim
+        existingClaim: clawd-bot-data
+        advancedMounts:
+          clawd-bot:
+            app:
+              - path: /root/.clawdbot
+            install-clawdbot:
+              - path: /root/.clawdbot
+
+      npm-cache:
+        type: emptyDir
+        sizeLimit: 500Mi
+        advancedMounts:
+          clawd-bot:
+            install-clawdbot:
+              - path: /root/.npm
+
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          clawd-bot:
+            app:
+              - path: /tmp
