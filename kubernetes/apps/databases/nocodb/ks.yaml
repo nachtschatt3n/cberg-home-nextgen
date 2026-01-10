@@ -10,8 +10,9 @@ spec:
     labels:
       app.kubernetes.io/name: *app
   dependsOn:
-    - name: cluster-apps-longhorn
-    - name: cluster-apps-postgresql
+    - name: longhorn
+      namespace: storage
+    - name: postgresql
   path: ./kubernetes/apps/databases/nocodb/app
   prune: true
   sourceRef:
