@@ -4,4 +4,3 @@ kind: Kustomization
 namespace: ai
 resources:
   - ./helmrelease.yaml
-  - ./ingress.yaml
