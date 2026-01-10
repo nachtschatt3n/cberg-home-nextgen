@@ -40,17 +40,17 @@ spec:
               - sh
               - -c
               - |
+                echo "Installing git and build dependencies..."
+                apk add --no-cache git python3 make g++
                 echo "Installing clawdbot CLI..."
                 npm install -g clawdbot@latest
                 echo "Clawdbot installed at: $(which clawdbot)"
                 clawdbot --version
+                echo "Fixing permissions..."
+                chown -R 1000:1000 /root/.clawdbot
             securityContext:
-              runAsUser: 1000
-              runAsGroup: 1000
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                  - ALL
+              runAsUser: 0
+              runAsGroup: 0
 
         containers:
           app:
