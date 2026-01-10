@@ -76,6 +76,7 @@ spec:
                   sleep infinity
                 else
                   echo "Starting Clawd Bot Gateway..."
+                  cd /home/node/clawd
                   exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
                 fi
 
