@@ -42,10 +42,13 @@ spec:
               - |
                 echo "Installing git and build dependencies..."
                 apk add --no-cache git python3 make g++
-                echo "Installing clawdbot CLI..."
-                npm install -g clawdbot@latest
-                echo "Clawdbot installed at: $(which clawdbot)"
-                clawdbot --version
+                echo "Installing clawdbot CLI to shared volume..."
+                mkdir -p /root/.clawdbot/bin
+                npm install -g --prefix /root/.clawdbot clawdbot@latest
+                echo "Creating symlink..."
+                ln -sf /root/.clawdbot/bin/clawdbot /root/.clawdbot/clawdbot
+                echo "Clawdbot installed at: /root/.clawdbot/bin/clawdbot"
+                /root/.clawdbot/bin/clawdbot --version
                 echo "Fixing permissions..."
                 chown -R 1000:1000 /root/.clawdbot
             securityContext:
@@ -63,16 +66,17 @@ spec:
               - sh
               - -c
               - |
+                export PATH="/root/.clawdbot/bin:$PATH"
                 if [ ! -f /root/.clawdbot/clawdbot.json ]; then
                   echo "Configuration not found. Please run onboarding wizard:"
                   echo "  kubectl exec -it -n ai deployment/clawd-bot -- /bin/sh"
-                  echo "  Then run: clawdbot onboard"
+                  echo "  Then run: /root/.clawdbot/bin/clawdbot onboard"
                   echo ""
                   echo "Sleeping indefinitely until configured..."
                   sleep infinity
                 else
                   echo "Starting Clawd Bot Gateway..."
-                  exec clawdbot gateway --port 18789 --verbose
+                  exec /root/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
                 fi
 
             env:
