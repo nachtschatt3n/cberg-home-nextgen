@@ -1,0 +1,40 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nocodb
+  namespace: databases
+  annotations:
+    # Authentik forward-auth
+    nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-nocodb-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
+    nginx.ingress.kubernetes.io/auth-signin: "https://nocodb.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      proxy_set_header X-Forwarded-Host $http_host;
+
+    # Homepage integration
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "NocoDB"
+    gethomepage.dev/description: "Smart spreadsheet - Open source Airtable alternative"
+    gethomepage.dev/group: "Databases"
+    gethomepage.dev/icon: "nocodb.png"
+
+  labels:
+    gethomepage.dev/enabled: "true"
+
+spec:
+  ingressClassName: internal
+  rules:
+    - host: "nocodb.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nocodb
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - "nocodb.${SECRET_DOMAIN}"

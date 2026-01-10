@@ -1,0 +1,91 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nocodb
+  namespace: databases
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+
+  values:
+    controllers:
+      nocodb:
+        replicas: 1
+        containers:
+          app:
+            image:
+              repository: nocodb/nocodb
+              tag: latest
+              pullPolicy: IfNotPresent
+
+            envFrom:
+              - secretRef:
+                  name: nocodb
+
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 8080
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 1000m
+                memory: 1Gi
+
+    service:
+      main:
+        controller: nocodb
+        type: ClusterIP
+        ports:
+          http:
+            protocol: TCP
+            port: 8080
+            targetPort: 8080
+
+    persistence:
+      data:
+        type: persistentVolumeClaim
+        existingClaim: nocodb-data
+        globalMounts:
+          - path: /usr/app/data
