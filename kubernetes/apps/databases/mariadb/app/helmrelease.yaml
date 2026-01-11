@@ -41,7 +41,7 @@ spec:
       targetPath: auth.database
   values:
     image:
-      tag: 11.2.2
+      tag: 10.6.12
     primary:
       persistence:
         enabled: true
