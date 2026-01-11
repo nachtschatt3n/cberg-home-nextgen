@@ -23,6 +23,9 @@ spec:
     remediation:
       retries: 3
   values:
+    image:
+      tag: latest
+
     db:
       host: mariadb.databases.svc.cluster.local
       port: 3306
