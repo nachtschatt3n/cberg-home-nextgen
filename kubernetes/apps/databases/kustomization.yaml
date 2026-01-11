@@ -12,6 +12,7 @@ resources:
   - ./influxdb/ks.yaml
   - ./phpmyadmin/ks.yaml
   - ./pgadmin/ks.yaml
+  - ./redisinsight/ks.yaml
 
 ---
 apiVersion: v1
