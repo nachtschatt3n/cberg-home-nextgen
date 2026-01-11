@@ -40,11 +40,12 @@ spec:
               PMA_HOST: mariadb.databases.svc.cluster.local
               PMA_PORT: "3306"
               PMA_USER: root
+              PMA_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: mariadb
+                    key: mariadb-root-password
               UPLOAD_LIMIT: 300M
-
-            envFrom:
-              - secretRef:
-                  name: mariadb
 
             probes:
               liveness:
