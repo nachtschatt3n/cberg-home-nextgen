@@ -31,6 +31,14 @@ spec:
     ingress:
       enabled: true
       className: internal
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Kubernetes Dashboard"
+        gethomepage.dev/group: "Monitoring"
+        gethomepage.dev/icon: "kubernetes.png"
+        gethomepage.dev/description: "Kubernetes web UI"
+      labels:
+        gethomepage.dev/enabled: "true"
       hosts:
         - &host "kubernetes.${SECRET_DOMAIN}"
       tls:
