@@ -23,12 +23,6 @@ spec:
     remediation:
       retries: 3
   values:
-    image:
-      registry: docker.io
-      repository: bitnami/phpmyadmin
-      tag: 5.2.1
-      pullPolicy: IfNotPresent
-
     mariadb:
       enabled: false
       externalDatabase:
