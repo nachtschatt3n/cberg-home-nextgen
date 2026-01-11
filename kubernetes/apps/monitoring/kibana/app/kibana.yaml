@@ -37,6 +37,13 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-production"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Kibana"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "kibana.png"
+    gethomepage.dev/description: "Elastic log search and dashboards"
+  labels:
+    gethomepage.dev/enabled: "true"
 spec:
   ingressClassName: internal
   rules:

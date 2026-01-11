@@ -44,6 +44,13 @@ spec:
         cpu: 200m
         memory: 256Mi
 
+    env:
+      - name: ELASTIC_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: elasticsearch-es-elastic-user
+            key: elastic
+
     config:
       service: |
         [SERVICE]
@@ -95,7 +102,7 @@ spec:
             Host elasticsearch-es-http.monitoring.svc
             Port 9200
             HTTP_User elastic
-            HTTP_Passwd MC3lY6PQ2lkhP2z70Q1pw373
+            HTTP_Passwd ${ELASTIC_PASSWORD}
             Logstash_Format On
             Logstash_Prefix fluent-bit
             Logstash_DateFormat %Y.%m.%d
