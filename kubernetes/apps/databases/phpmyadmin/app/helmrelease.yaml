@@ -24,7 +24,7 @@ spec:
       retries: 3
   values:
     image:
-      tag: latest
+      tag: 5.2.1
 
     db:
       host: mariadb.databases.svc.cluster.local
