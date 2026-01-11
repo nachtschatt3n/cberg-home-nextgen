@@ -24,12 +24,6 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    api:
-      containers:
-        args:
-          - --enable-insecure-login
-          - --enable-skip-login
-          - --disable-settings-authorizer
     app:
       ingress:
         enabled: true
