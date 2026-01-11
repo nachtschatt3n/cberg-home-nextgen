@@ -40,6 +40,8 @@ spec:
       valuesKey: mariadb-database
       targetPath: auth.database
   values:
+    image:
+      tag: 11.2.2
     primary:
       persistence:
         enabled: true
