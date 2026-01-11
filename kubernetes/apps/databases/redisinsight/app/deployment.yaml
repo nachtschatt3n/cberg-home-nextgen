@@ -22,7 +22,7 @@ spec:
         command:
           - sh
           - -c
-          - chown -R 1001:0 /data && chmod -R 775 /data
+          - chmod -R 777 /data
         volumeMounts:
         - name: redisinsight-data
           mountPath: /data
