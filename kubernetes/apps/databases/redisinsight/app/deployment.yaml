@@ -16,6 +16,16 @@ spec:
       labels:
         app: redisinsight
     spec:
+      initContainers:
+      - name: fix-permissions
+        image: busybox:1.37.0
+        command:
+          - sh
+          - -c
+          - chown -R 1001:0 /data && chmod -R 775 /data
+        volumeMounts:
+        - name: redisinsight-data
+          mountPath: /data
       containers:
       - name: redisinsight
         image: redis/redisinsight:2.58.0
