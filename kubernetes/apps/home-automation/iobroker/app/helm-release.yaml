@@ -36,8 +36,8 @@ spec:
             nameOverride: iobroker
             image:
               repository: buanet/iobroker
-              #tag: v9.1.2
-              tag: v10.0.0
+              tag: v9.1.2
+              #tag: v10.0.0
               pullPolicy: IfNotPresent
 
             # -- environment variables.
