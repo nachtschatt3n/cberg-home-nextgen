@@ -27,6 +27,7 @@ spec:
     global:
       deploymentAnnotations:
         secret.reloader.stakater.com/reload: authentik-secret
+        configmap.reloader.stakater.com/reload: authentik-blueprints
 
     authentik:
       # The error reporting is fully anonymous and helps developers
