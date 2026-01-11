@@ -20,6 +20,7 @@ resources:
   - ./jellyfin.yaml
   - ./jetstack.yaml
   - ./k8s-gateway.yaml
+  - ./kubernetes-dashboard.yaml
   - ./metrics-server.yaml
   - ./nextcloud.yaml
   - ./node-feature-discovery.yaml
