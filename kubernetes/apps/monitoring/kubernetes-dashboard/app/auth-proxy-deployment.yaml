@@ -27,7 +27,7 @@ spec:
               k8s_token="$(tr -d '\n' < /var/run/secrets/dashboard/token)"
               csrf_token=""
               for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-                csrf_token="$(curl -s -c /tmp/cookies.txt http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/csrftoken/login | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+                csrf_token="$(curl -s -c /tmp/cookies.txt http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/csrftoken/login | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
                 if [ -n "$csrf_token" ]; then
                   break
                 fi
@@ -39,7 +39,7 @@ spec:
               fi
               dash_token=""
               for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-                dash_token="$(curl -s -b /tmp/cookies.txt -H \"X-CSRF-Token: $csrf_token\" -H \"Content-Type: application/json\" -X POST http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/login --data \"{\\\"token\\\":\\\"$k8s_token\\\"}\" | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+                dash_token="$(curl -s -b /tmp/cookies.txt -H \"X-CSRF-Token: $csrf_token\" -H \"Content-Type: application/json\" -X POST http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/login --data \"{\\\"token\\\":\\\"$k8s_token\\\"}\" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
                 if [ -n "$dash_token" ]; then
                   break
                 fi
