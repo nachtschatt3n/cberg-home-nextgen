@@ -26,6 +26,10 @@ spec:
     image:
       repository: phpmyadmin
       tag: latest
+
+    containerPorts:
+      http: 80
+
     mariadb:
       enabled: false
       externalDatabase:
