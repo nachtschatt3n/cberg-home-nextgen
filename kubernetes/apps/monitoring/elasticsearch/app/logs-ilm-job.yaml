@@ -39,7 +39,7 @@ spec:
                 fi
                 sleep 5
               done
-              if [ "${ready}" != "true" ]; then
+              if [ "$ready" != "true" ]; then
                 echo "Elasticsearch did not become ready in time." >&2
                 exit 1
               fi
