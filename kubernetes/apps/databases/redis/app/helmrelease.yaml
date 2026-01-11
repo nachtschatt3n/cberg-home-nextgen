@@ -8,11 +8,11 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: redis
-      version: 20.5.0
+      chart: app-template
+      version: 3.7.1
       sourceRef:
         kind: HelmRepository
-        name: bitnami
+        name: bjw-s
         namespace: flux-system
   install:
     remediation:
@@ -22,40 +22,60 @@ spec:
     remediation:
       retries: 3
   values:
-    global:
+    controllers:
       redis:
-        password: ""  # No password for easier integration
-
-    architecture: standalone
-
-    auth:
-      enabled: false
-
-    master:
-      persistence:
-        enabled: true
-        storageClass: longhorn
-        size: 10Gi
-
-      resources:
-        requests:
-          cpu: 100m
-          memory: 128Mi
-        limits:
-          memory: 512Mi
-
-      service:
-        type: ClusterIP
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: redis
+              tag: 7-alpine
+              pullPolicy: IfNotPresent
+            command:
+              - redis-server
+              - --appendonly
+              - "yes"
+              - --save
+              - ""
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - redis-cli
+                      - ping
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - redis-cli
+                      - ping
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+    service:
+      app:
+        controller: redis
         ports:
-          redis: 6379
-
-    metrics:
-      enabled: true
-      serviceMonitor:
-        enabled: false
-
-    commonConfiguration: |-
-      # Enable AOF persistence
-      appendonly yes
-      # Disable RDB snapshotting
-      save ""
+          redis:
+            port: 6379
+    persistence:
+      data:
+        existingClaim: redis-data
+        globalMounts:
+          - path: /data
