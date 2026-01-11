@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubernetes-dashboard-auth-proxy
+  namespace: monitoring
+data:
+  nginx.conf: |
+    worker_processes 1;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      server {
+        listen 8080;
+
+        location / {
+          proxy_pass https://kubernetes-dashboard-kong-proxy.monitoring.svc.cluster.local:443;
+          proxy_set_header Host $host;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Host $host;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_set_header Authorization "Bearer __TOKEN__";
+          proxy_ssl_server_name on;
+          proxy_ssl_verify off;
+        }
+      }
+    }
