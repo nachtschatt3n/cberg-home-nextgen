@@ -23,24 +23,10 @@ spec:
     remediation:
       retries: 3
   values:
-    image:
-      repository: phpmyadmin
-      tag: latest
-
-    containerPorts:
-      http: 80
-
-    mariadb:
-      enabled: false
-
-    # Environment variables for phpMyAdmin configuration
-    extraEnvVars:
-      - name: PMA_HOST
-        value: "mariadb.databases.svc.cluster.local"
-      - name: PMA_PORT
-        value: "3306"
-      - name: PMA_ARBITRARY
-        value: "1"
+    db:
+      host: mariadb.databases.svc.cluster.local
+      port: 3306
+      allowArbitraryServer: true
 
     ingress:
       enabled: true
