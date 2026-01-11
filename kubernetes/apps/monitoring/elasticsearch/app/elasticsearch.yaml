@@ -16,7 +16,6 @@ spec:
       config:
         node.roles: ["master", "data", "ingest"]
         node.store.allow_mmap: false
-        index.number_of_replicas: 0
       podTemplate:
         metadata:
           labels:
