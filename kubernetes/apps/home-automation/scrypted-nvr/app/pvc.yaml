@@ -9,8 +9,7 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: longhorn-static
-  volumeName: scrypted-data
+  storageClassName: longhorn
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
