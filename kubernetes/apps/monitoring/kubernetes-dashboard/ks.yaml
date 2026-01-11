@@ -11,7 +11,9 @@ spec:
       app.kubernetes.io/name: *app
   dependsOn:
     - name: cert-manager
+      namespace: cert-manager
     - name: metrics-server
+      namespace: kube-system
   path: ./kubernetes/apps/monitoring/kubernetes-dashboard/app
   prune: true
   sourceRef:
