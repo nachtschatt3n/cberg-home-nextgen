@@ -24,31 +24,33 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    extraArgs:
-      - --enable-insecure-login
-      - --enable-skip-login
-      - --disable-settings-authorizer
-    ingress:
-      enabled: true
-      className: internal
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Kubernetes Dashboard"
-        gethomepage.dev/group: "Monitoring"
-        gethomepage.dev/icon: "kubernetes.png"
-        gethomepage.dev/description: "Kubernetes web UI"
-        # Authentik forward auth annotations
-        nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-kubernetes-dashboard-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
-        nginx.ingress.kubernetes.io/auth-signin: "https://kubernetes.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
-        nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
-        nginx.ingress.kubernetes.io/auth-snippet: |
-          proxy_set_header X-Forwarded-Host $http_host;
-      labels:
-        gethomepage.dev/enabled: "true"
-      hosts:
-        - &host "kubernetes.${SECRET_DOMAIN}"
-      tls:
-        - hosts:
-            - *host
+    api:
+      containers:
+        args:
+          - --enable-insecure-login
+          - --enable-skip-login
+          - --disable-settings-authorizer
+    app:
+      ingress:
+        enabled: true
+        ingressClassName: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Kubernetes Dashboard"
+          gethomepage.dev/group: "Monitoring"
+          gethomepage.dev/icon: "kubernetes.png"
+          gethomepage.dev/description: "Kubernetes web UI"
+          # Authentik forward auth annotations
+          nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-kubernetes-dashboard-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
+          nginx.ingress.kubernetes.io/auth-signin: "https://kubernetes.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
+          nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
+          nginx.ingress.kubernetes.io/auth-snippet: |
+            proxy_set_header X-Forwarded-Host $http_host;
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - "kubernetes.${SECRET_DOMAIN}"
+        tls:
+          enabled: true
     metricsScraper:
       enabled: true
