@@ -12,10 +12,11 @@ spec:
         disabled: false
   nodeSets:
     - name: default
-      count: 3
+      count: 1
       config:
         node.roles: ["master", "data", "ingest"]
         node.store.allow_mmap: false
+        index.number_of_replicas: 0
       podTemplate:
         metadata:
           labels:
@@ -42,7 +43,7 @@ spec:
             name: elasticsearch-data
           spec:
             accessModes: ["ReadWriteOnce"]
-            storageClassName: longhorn-static
+            storageClassName: longhorn
             resources:
               requests:
-                storage: 150Gi
+                storage: 50Gi

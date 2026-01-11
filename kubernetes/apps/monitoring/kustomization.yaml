@@ -9,12 +9,12 @@ resources:
   - ./kube-prometheus-stack/ks.yaml
   - ./uptime-kuma/ks.yaml
   - ./kubernetes-dashboard/ks.yaml
-#  - ./eck-operator/ks.yaml
-#  - ./elasticsearch/ks.yaml
-#  - ./kibana/ks.yaml
+  - ./eck-operator/ks.yaml
+  - ./elasticsearch/ks.yaml
+  - ./kibana/ks.yaml
+  - ./fluent-bit/ks.yaml
 #  - ./apm-server/ks.yaml
 #  - ./opentelemetry-operator/ks.yaml
 #  - ./opentelemetry-operator/instrumentation-ks.yaml
 #  - ./otel-collector/ks.yaml
 #  - ./metricbeat/ks.yaml
-#  - ./fluent-bit/ks.yaml

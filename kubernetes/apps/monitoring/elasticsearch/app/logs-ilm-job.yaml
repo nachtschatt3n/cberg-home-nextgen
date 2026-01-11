@@ -1,0 +1,63 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elasticsearch-logs-ilm-bootstrap
+  namespace: monitoring
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: curlimages/curl:8.9.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-es-elastic-user
+                  key: elastic
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: es-certs
+              mountPath: /certs
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              ready=false
+              for i in $(seq 1 60); do
+                if curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" https://elasticsearch-es-http.monitoring.svc:9200 >/dev/null; then
+                  ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [ "${ready}" != "true" ]; then
+                echo "Elasticsearch did not become ready in time." >&2
+                exit 1
+              fi
+              curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" \
+                -H 'Content-Type: application/json' \
+                -X PUT https://elasticsearch-es-http.monitoring.svc:9200/_ilm/policy/fluent-bit-logs \
+                --data-binary @/config/ilm-policy.json
+              curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" \
+                -H 'Content-Type: application/json' \
+                -X PUT https://elasticsearch-es-http.monitoring.svc:9200/_index_template/fluent-bit-logs \
+                --data-binary @/config/index-template.json
+      volumes:
+        - name: config
+          configMap:
+            name: elasticsearch-logs-ilm
+        - name: es-certs
+          secret:
+            secretName: elasticsearch-es-http-certs-public
+            items:
+              - key: tls.crt
+                path: ca.crt

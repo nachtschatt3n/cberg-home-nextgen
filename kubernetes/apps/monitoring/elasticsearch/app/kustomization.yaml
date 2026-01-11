@@ -6,3 +6,5 @@ components:
 resources:
   - ./secret.sops.yaml
   - ./elasticsearch.yaml
+  - ./logs-ilm-configmap.yaml
+  - ./logs-ilm-job.yaml
