@@ -102,7 +102,7 @@ spec:
             Host elasticsearch-es-http.monitoring.svc
             Port 9200
             HTTP_User elastic
-            HTTP_Passwd $ELASTIC_PASSWORD
+            HTTP_Passwd $${ELASTIC_PASSWORD}
             Logstash_Format On
             Logstash_Prefix fluent-bit
             Logstash_DateFormat %Y.%m.%d
