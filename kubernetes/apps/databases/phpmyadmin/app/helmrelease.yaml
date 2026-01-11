@@ -23,6 +23,9 @@ spec:
     remediation:
       retries: 3
   values:
+    image:
+      repository: phpmyadmin
+      tag: latest
     mariadb:
       enabled: false
       externalDatabase:
