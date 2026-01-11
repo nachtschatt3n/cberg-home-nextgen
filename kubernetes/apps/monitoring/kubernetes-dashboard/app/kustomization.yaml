@@ -4,8 +4,4 @@ kind: Kustomization
 resources:
   - ./rbac.yaml
   - ./helmrelease.yaml
-  - ./auth-proxy-configmap.yaml
-  - ./auth-proxy-deployment.yaml
-  - ./auth-proxy-service.yaml
-  - ./auth-proxy-ingress.yaml
   - ./authentik-outpost-ingress.yaml
