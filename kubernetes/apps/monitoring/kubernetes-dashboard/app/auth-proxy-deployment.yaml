@@ -24,7 +24,7 @@ spec:
             - -c
             - |
               set -eu
-              token="$(cat /var/run/secrets/dashboard/token)"
+              token="$(tr -d '\n' < /var/run/secrets/dashboard/token)"
               sed "s|__TOKEN__|${token}|g" /config-template/nginx.conf > /config/nginx.conf
           volumeMounts:
             - name: config-template
