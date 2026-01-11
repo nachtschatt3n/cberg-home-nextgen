@@ -33,7 +33,7 @@ spec:
               set -euo pipefail
               ready=false
               for i in $(seq 1 60); do
-                if curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" https://elasticsearch-es-http.monitoring.svc:9200 >/dev/null; then
+                if curl -sSf --cacert /certs/ca.crt -u "elastic:$ELASTIC_PASSWORD" https://elasticsearch-es-http.monitoring.svc:9200 >/dev/null; then
                   ready=true
                   break
                 fi
@@ -43,11 +43,11 @@ spec:
                 echo "Elasticsearch did not become ready in time." >&2
                 exit 1
               fi
-              curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" \
+              curl -sSf --cacert /certs/ca.crt -u "elastic:$ELASTIC_PASSWORD" \
                 -H 'Content-Type: application/json' \
                 -X PUT https://elasticsearch-es-http.monitoring.svc:9200/_ilm/policy/fluent-bit-logs \
                 --data-binary @/config/ilm-policy.json
-              curl -sSf --cacert /certs/ca.crt -u "elastic:${ELASTIC_PASSWORD}" \
+              curl -sSf --cacert /certs/ca.crt -u "elastic:$ELASTIC_PASSWORD" \
                 -H 'Content-Type: application/json' \
                 -X PUT https://elasticsearch-es-http.monitoring.svc:9200/_index_template/fluent-bit-logs \
                 --data-binary @/config/index-template.json
