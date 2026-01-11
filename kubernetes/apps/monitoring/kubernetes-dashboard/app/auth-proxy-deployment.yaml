@@ -25,12 +25,30 @@ spec:
             - |
               set -eu
               k8s_token="$(tr -d '\n' < /var/run/secrets/dashboard/token)"
-              csrf_token="$(curl -s -c /tmp/cookies.txt http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/csrftoken/login | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+              csrf_token=""
+              attempt=0
+              while [ "${attempt}" -lt 30 ]; do
+                csrf_token="$(curl -s -c /tmp/cookies.txt http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/csrftoken/login | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+                if [ -n "${csrf_token}" ]; then
+                  break
+                fi
+                attempt=$((attempt + 1))
+                sleep 2
+              done
               if [ -z "${csrf_token}" ]; then
                 echo "csrf token missing" >&2
                 exit 1
               fi
-              dash_token="$(curl -s -b /tmp/cookies.txt -H \"X-CSRF-Token: ${csrf_token}\" -H \"Content-Type: application/json\" -X POST http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/login --data \"{\\\"token\\\":\\\"${k8s_token}\\\"}\" | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+              dash_token=""
+              attempt=0
+              while [ "${attempt}" -lt 30 ]; do
+                dash_token="$(curl -s -b /tmp/cookies.txt -H \"X-CSRF-Token: ${csrf_token}\" -H \"Content-Type: application/json\" -X POST http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/login --data \"{\\\"token\\\":\\\"${k8s_token}\\\"}\" | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+                if [ -n "${dash_token}" ]; then
+                  break
+                fi
+                attempt=$((attempt + 1))
+                sleep 2
+              done
               if [ -z "${dash_token}" ]; then
                 echo "dashboard token missing" >&2
                 exit 1
