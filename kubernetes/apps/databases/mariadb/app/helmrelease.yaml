@@ -41,7 +41,8 @@ spec:
       targetPath: auth.database
   values:
     image:
-      tag: 10.6.12
+      repository: bitnamilegacy/mariadb
+      tag: latest
     primary:
       persistence:
         enabled: true
