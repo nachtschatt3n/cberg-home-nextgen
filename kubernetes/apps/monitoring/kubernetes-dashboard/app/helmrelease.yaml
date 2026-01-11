@@ -35,6 +35,7 @@ spec:
           gethomepage.dev/group: "Monitoring"
           gethomepage.dev/icon: "kubernetes.png"
           gethomepage.dev/description: "Kubernetes web UI"
+          gethomepage.dev/status-disabled: "true"
           nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
           nginx.ingress.kubernetes.io/ssl-redirect: "true"
           # Authentik forward auth annotations
