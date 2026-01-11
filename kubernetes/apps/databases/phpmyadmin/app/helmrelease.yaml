@@ -24,12 +24,21 @@ spec:
       retries: 3
   values:
     image:
-      tag: 5.2.1
+      repository: phpmyadmin
+      tag: latest
 
-    db:
-      host: mariadb.databases.svc.cluster.local
-      port: 3306
-      allowArbitraryServer: true
+    containerPorts:
+      http: 80
+
+    extraEnvVars:
+      - name: PMA_HOST
+        value: "mariadb.databases.svc.cluster.local"
+      - name: PMA_PORT
+        value: "3306"
+      - name: PMA_ARBITRARY
+        value: "1"
+      - name: UPLOAD_LIMIT
+        value: "300M"
 
     ingress:
       enabled: true
