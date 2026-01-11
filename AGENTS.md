@@ -24,9 +24,105 @@
 - Do not make direct modifications to the Kubernetes cluster
 
 ## SOPS Encryption Rules
+
+### File Naming Convention
 - When encrypting files with sops, filenames must end with `.sops` extension
 - Example: `config.sops.yaml`, `secret.sops.json`
 - Never commit unencrypted secrets to the repository
+
+### SOPS Configuration Overview
+The repository uses path-based encryption rules defined in `.sops.yaml`:
+- **Kubernetes secrets**: `kubernetes/**/*.sops.yaml` - encrypts only `data` and `stringData` fields
+- **Talos configs**: `talos/**/*.sops.yaml` - encrypts entire file
+- **Age key**: `age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6`
+
+### Correct Workflow for Encrypting Secrets
+
+**CRITICAL**: SOPS creation rules are path-based. You MUST encrypt files that are already in the correct repository path.
+
+#### ❌ WRONG: Encrypting from /tmp
+```bash
+# DON'T: This will fail with "error loading config: no matching creation rules found"
+sops -d kubernetes/apps/namespace/app/secret.sops.yaml > /tmp/secret.yaml
+# Edit /tmp/secret.yaml
+sops -e /tmp/secret.yaml > kubernetes/apps/namespace/app/secret.sops.yaml
+# ❌ FAILS: /tmp/secret.yaml doesn't match any path_regex rules
+```
+
+#### ✅ CORRECT: Encrypt in Repository Path
+```bash
+# Method 1: Edit encrypted file directly (preferred for small changes)
+sops kubernetes/apps/namespace/app/secret.sops.yaml
+# Opens in $EDITOR, auto-encrypts on save
+
+# Method 2: Decrypt, copy to repo path, encrypt in place (for complex edits)
+sops -d kubernetes/apps/namespace/app/secret.sops.yaml > /tmp/secret.yaml
+# Edit /tmp/secret.yaml with your changes
+cp /tmp/secret.yaml kubernetes/apps/namespace/app/secret-new.sops.yaml
+sops -e -i kubernetes/apps/namespace/app/secret-new.sops.yaml
+mv kubernetes/apps/namespace/app/secret-new.sops.yaml kubernetes/apps/namespace/app/secret.sops.yaml
+rm /tmp/secret.yaml  # Clean up
+```
+
+#### Example: Updating pgAdmin Secret
+```bash
+# Step 1: Decrypt to temporary location for editing
+sops -d kubernetes/apps/databases/pgadmin/app/secret.sops.yaml > /tmp/pgadmin-secret.yaml
+
+# Step 2: Edit the decrypted file
+# (Make your changes to /tmp/pgadmin-secret.yaml)
+
+# Step 3: Copy to repository path with .sops.yaml extension
+cp /tmp/pgadmin-secret.yaml kubernetes/apps/databases/pgadmin/app/secret-new.sops.yaml
+
+# Step 4: Encrypt in place (file must be in kubernetes/ path)
+sops -e -i kubernetes/apps/databases/pgadmin/app/secret-new.sops.yaml
+
+# Step 5: Replace old encrypted file
+mv kubernetes/apps/databases/pgadmin/app/secret-new.sops.yaml kubernetes/apps/databases/pgadmin/app/secret.sops.yaml
+
+# Step 6: Clean up temporary files
+rm -f /tmp/pgadmin-secret.yaml
+```
+
+### Common SOPS Errors and Solutions
+
+#### Error: "error loading config: no matching creation rules found"
+**Cause**: Trying to encrypt a file outside the `kubernetes/` or `talos/` directory paths.
+
+**Solution**: Copy the file to the correct repository path before encrypting:
+```bash
+# Wrong: sops -e /tmp/file.yaml > kubernetes/apps/...
+# Right: cp /tmp/file.yaml kubernetes/apps/... && sops -e -i kubernetes/apps/...
+```
+
+#### Error: "sops metadata not found"
+**Cause**: Trying to use `sops --set` on a file that isn't encrypted yet.
+
+**Solution**: Use direct editing or the encrypt-in-place workflow above.
+
+#### Error: File encrypted but Flux can't decrypt
+**Cause**: Age key not available in Flux namespace or incorrect encryption regex.
+
+**Solution**:
+- Verify age key secret exists: `kubectl get secret sops-age -n flux-system`
+- Check encryption regex matches: Kubernetes secrets should only encrypt `data` and `stringData` fields
+
+### Quick Reference Commands
+
+```bash
+# Edit encrypted file directly (opens in editor)
+sops kubernetes/apps/namespace/app/secret.sops.yaml
+
+# View encrypted file contents without editing
+sops -d kubernetes/apps/namespace/app/secret.sops.yaml
+
+# Verify file is properly encrypted
+head -20 kubernetes/apps/namespace/app/secret.sops.yaml | grep "sops:"
+
+# Re-encrypt file with updated keys (if age key changes)
+sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
+```
 
 ## Information Security
 - This repository is public, so never commit secret domains, URLs, or other sensitive information
