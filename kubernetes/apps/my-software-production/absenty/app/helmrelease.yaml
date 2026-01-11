@@ -1,0 +1,158 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: &app absenty
+  namespace: my-software-production
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.1
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      absenty:
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/absenty
+              tag: sha-ffa072a # {"$imagepolicy": "my-software-production:absenty:tag"}
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: RAILS_ENV
+                value: "production"
+              - name: RACK_ENV
+                value: "production"
+              - name: PORT
+                value: "3000"
+              - name: RAILS_LOG_TO_STDOUT
+                value: "1"
+              - name: RAILS_SERVE_STATIC_FILES
+                value: "1"
+              - name: DATABASE_URL
+                value: "sqlite3:///data/absenty.sqlite3"
+            envFrom:
+              - secretRef:
+                  name: absenty-secrets
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health/liveness
+                    port: 3000
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health/readiness
+                    port: 3000
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health/startup
+                    port: 3000
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 30
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-secret
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+        fsGroupChangePolicy: "OnRootMismatch"
+    service:
+      main:
+        controller: absenty
+        ports:
+          http:
+            port: 3000
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Absenty"
+          gethomepage.dev/description: "Employee management system"
+          gethomepage.dev/group: "Software Development"
+          gethomepage.dev/icon: "rails.png"
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host "absenty.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+    persistence:
+      data:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        size: 5Gi
+        accessMode: ReadWriteOnce
+        globalMounts:
+          - path: /data
+      storage:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        size: 10Gi
+        accessMode: ReadWriteOnce
+        globalMounts:
+          - path: /storage
+      tmp:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /app/tmp
+      log:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /app/log
