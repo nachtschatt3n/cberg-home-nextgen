@@ -1,0 +1,61 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app redis
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: redis
+      version: 20.5.0
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    global:
+      redis:
+        password: ""  # No password for easier integration
+
+    architecture: standalone
+
+    auth:
+      enabled: false
+
+    master:
+      persistence:
+        enabled: true
+        storageClass: longhorn
+        size: 10Gi
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+
+      service:
+        type: ClusterIP
+        ports:
+          redis: 6379
+
+    metrics:
+      enabled: true
+      serviceMonitor:
+        enabled: false
+
+    commonConfiguration: |-
+      # Enable AOF persistence
+      appendonly yes
+      # Disable RDB snapshotting
+      save ""
