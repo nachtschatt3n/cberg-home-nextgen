@@ -1,0 +1,36 @@
+---
+# ExternalName service to reference the outpost service in kube-system
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-dashboard-authentik-outpost
+  namespace: monitoring
+spec:
+  type: ExternalName
+  externalName: ak-outpost-kubernetes-dashboard-forward-auth.kube-system.svc.cluster.local
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard-authentik-outpost
+  namespace: monitoring
+spec:
+  ingressClassName: internal
+  rules:
+    - host: "kubernetes.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /outpost.goauthentik.io
+            pathType: Prefix
+            backend:
+              service:
+                name: kubernetes-dashboard-authentik-outpost
+                port:
+                  number: 9000
+  tls:
+    - hosts:
+        - "kubernetes.${SECRET_DOMAIN}"
