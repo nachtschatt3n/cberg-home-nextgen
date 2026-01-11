@@ -18,14 +18,24 @@ spec:
     spec:
       initContainers:
         - name: config-init
-          image: busybox:1.36
+          image: curlimages/curl:8.6.0
           command:
             - sh
             - -c
             - |
               set -eu
-              token="$(tr -d '\n' < /var/run/secrets/dashboard/token)"
-              sed "s|__TOKEN__|${token}|g" /config-template/nginx.conf > /config/nginx.conf
+              k8s_token="$(tr -d '\n' < /var/run/secrets/dashboard/token)"
+              csrf_token="$(curl -s -c /tmp/cookies.txt http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/csrftoken/login | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+              if [ -z "${csrf_token}" ]; then
+                echo "csrf token missing" >&2
+                exit 1
+              fi
+              dash_token="$(curl -s -b /tmp/cookies.txt -H \"X-CSRF-Token: ${csrf_token}\" -H \"Content-Type: application/json\" -X POST http://kubernetes-dashboard-auth.monitoring.svc.cluster.local:8000/api/v1/login --data \"{\\\"token\\\":\\\"${k8s_token}\\\"}\" | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')"
+              if [ -z "${dash_token}" ]; then
+                echo "dashboard token missing" >&2
+                exit 1
+              fi
+              sed "s|__TOKEN__|${dash_token}|g" /config-template/nginx.conf > /config/nginx.conf
           volumeMounts:
             - name: config-template
               mountPath: /config-template
