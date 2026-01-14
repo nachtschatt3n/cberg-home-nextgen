@@ -35,6 +35,9 @@ spec:
     config:
       baseURL: ""
       watchPlugins: true
+      inCluster: true
+
+    clusterName: "main"
 
     pluginsManager:
       enabled: true
