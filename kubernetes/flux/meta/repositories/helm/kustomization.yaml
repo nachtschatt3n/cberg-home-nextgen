@@ -14,6 +14,7 @@ resources:
   - ./gabe565.yaml
   - ./grafana.yaml
   - ./guerzon.yaml
+  - ./headlamp.yaml
   - ./ingress-nginx.yaml
   - ./intel.yaml
   - ./influxdata.yaml

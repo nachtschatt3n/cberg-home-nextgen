@@ -1,0 +1,80 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: headlamp
+      version: 0.28.1
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+        namespace: flux-system
+  maxHistory: 2
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+
+  values:
+    replicaCount: 1
+
+    serviceAccount:
+      create: false
+      name: headlamp
+
+    config:
+      baseURL: ""
+      watchPlugins: true
+
+    pluginsManager:
+      enabled: true
+      configContent: |
+        plugins:
+          - name: flux
+            url: https://github.com/headlamp-k8s/plugins/releases/download/flux-0.3.0/headlamp_flux-0.3.0.tar.gz
+          - name: cert-manager
+            url: https://github.com/headlamp-k8s/plugins/releases/download/cert-manager-0.1.0/headlamp_cert-manager-0.1.0.tar.gz
+          - name: ai-assistant
+            url: https://github.com/headlamp-k8s/plugins/releases/download/ai-assistant-0.1.0-alpha/headlamp_ai_assistant-0.1.0-alpha.tar.gz
+
+    ingress:
+      enabled: true
+      ingressClassName: internal
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Headlamp"
+        gethomepage.dev/group: "Monitoring"
+        gethomepage.dev/icon: "headlamp.png"
+        gethomepage.dev/description: "Kubernetes cluster dashboard"
+        nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-headlamp-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
+        nginx.ingress.kubernetes.io/auth-signin: "https://headlamp.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
+        nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
+        nginx.ingress.kubernetes.io/auth-snippet: |
+          proxy_set_header X-Forwarded-Host $http_host;
+      labels:
+        gethomepage.dev/enabled: "true"
+      hosts:
+        - host: "headlamp.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              type: Prefix
+      tls:
+        - hosts:
+            - "headlamp.${SECRET_DOMAIN}"
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 768Mi
