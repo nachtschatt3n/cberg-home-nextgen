@@ -50,14 +50,14 @@ spec:
             TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
             CA_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
             CLUSTER_URL=https://kubernetes.default.svc
-            cat <<EOF > /headlamp-config/kubeconfigs/config
+            cat > /headlamp-config/kubeconfigs/config <<EOF
             apiVersion: v1
             kind: Config
             clusters:
             - name: main
               cluster:
-                certificate-authority: ${CA_CERT}
-                server: ${CLUSTER_URL}
+                certificate-authority: $CA_CERT
+                server: $CLUSTER_URL
             contexts:
             - name: main
               context:
@@ -67,7 +67,7 @@ spec:
             users:
             - name: headlamp
               user:
-                token: ${TOKEN}
+                token: $TOKEN
             EOF
             echo "Kubeconfig created successfully"
         volumeMounts:
