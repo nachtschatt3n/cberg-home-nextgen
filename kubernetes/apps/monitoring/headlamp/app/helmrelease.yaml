@@ -36,7 +36,7 @@ spec:
       baseURL: ""
       watchPlugins: true
       inCluster: true
-      enableDynamicClusters: true
+      enableDynamicClusters: false
       # Disable OIDC since we're using Authentik for web auth
       # This makes Headlamp use the service account token for all API calls
       oidc:
