@@ -41,11 +41,11 @@ spec:
       configContent: |
         plugins:
           - name: flux
-            url: https://github.com/headlamp-k8s/plugins/releases/download/flux-0.3.0/headlamp_flux-0.3.0.tar.gz
+            source: https://github.com/headlamp-k8s/plugins/releases/download/flux-0.3.0/headlamp_flux-0.3.0.tar.gz
           - name: cert-manager
-            url: https://github.com/headlamp-k8s/plugins/releases/download/cert-manager-0.1.0/headlamp_cert-manager-0.1.0.tar.gz
+            source: https://github.com/headlamp-k8s/plugins/releases/download/cert-manager-0.1.0/headlamp_cert-manager-0.1.0.tar.gz
           - name: ai-assistant
-            url: https://github.com/headlamp-k8s/plugins/releases/download/ai-assistant-0.1.0-alpha/headlamp_ai_assistant-0.1.0-alpha.tar.gz
+            source: https://github.com/headlamp-k8s/plugins/releases/download/ai-assistant-0.1.0-alpha/headlamp_ai_assistant-0.1.0-alpha.tar.gz
 
     ingress:
       enabled: true
