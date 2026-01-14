@@ -9,7 +9,6 @@ resources:
   - ./headlamp/ks.yaml
   - ./kube-prometheus-stack/ks.yaml
   - ./uptime-kuma/ks.yaml
-  - ./kubernetes-dashboard/ks.yaml
   - ./eck-operator/ks.yaml
   - ./elasticsearch/ks.yaml
   - ./kibana/ks.yaml

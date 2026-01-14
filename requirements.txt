@@ -1,0 +1,4 @@
+# Python dependencies for version checking tools
+pyyaml>=6.0.0
+requests>=2.31.0
+packaging>=23.0
