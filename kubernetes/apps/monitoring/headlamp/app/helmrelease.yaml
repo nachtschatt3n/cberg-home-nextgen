@@ -36,6 +36,7 @@ spec:
       baseURL: ""
       watchPlugins: true
       inCluster: true
+      enableDynamicClusters: true
 
     clusterName: "main"
 
