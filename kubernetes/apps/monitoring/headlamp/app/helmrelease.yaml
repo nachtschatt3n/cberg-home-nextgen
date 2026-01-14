@@ -39,6 +39,49 @@ spec:
 
     clusterName: "main"
 
+    initContainers:
+      - name: create-kubeconfig
+        image: busybox:1.36
+        command:
+          - sh
+          - -c
+          - |
+            mkdir -p /headlamp-config/kubeconfigs
+            TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+            CA_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+            CLUSTER_URL=https://kubernetes.default.svc
+            cat <<EOF > /headlamp-config/kubeconfigs/config
+            apiVersion: v1
+            kind: Config
+            clusters:
+            - name: main
+              cluster:
+                certificate-authority: ${CA_CERT}
+                server: ${CLUSTER_URL}
+            contexts:
+            - name: main
+              context:
+                cluster: main
+                user: headlamp
+            current-context: main
+            users:
+            - name: headlamp
+              user:
+                token: ${TOKEN}
+            EOF
+            echo "Kubeconfig created successfully"
+        volumeMounts:
+          - name: headlamp-config
+            mountPath: /headlamp-config
+
+    volumes:
+      - name: headlamp-config
+        emptyDir: {}
+
+    volumeMounts:
+      - name: headlamp-config
+        mountPath: /home/headlamp/.config/Headlamp
+
     pluginsManager:
       enabled: true
       configContent: |
