@@ -70,6 +70,7 @@ spec:
             - |
               cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
               cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
+              cp /blueprints-source/headlamp-blueprint.yaml /blueprints/headlamp-blueprint.yaml
               cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
               cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
               cp /blueprints-source/kubernetes-dashboard-blueprint.yaml /blueprints/kubernetes-dashboard-blueprint.yaml
@@ -166,6 +167,7 @@ spec:
             - |
               cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
               cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
+              cp /blueprints-source/headlamp-blueprint.yaml /blueprints/headlamp-blueprint.yaml
               cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
               cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
               cp /blueprints-source/kubernetes-dashboard-blueprint.yaml /blueprints/kubernetes-dashboard-blueprint.yaml
