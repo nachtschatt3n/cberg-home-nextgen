@@ -57,7 +57,12 @@ spec:
       buffer = 50
 
       [influxdb]
-      disable = true
+      url = "http://influxdb-influxdb2.databases.svc.cluster.local:80"
+      organization = "primary"
+      bucket = "primary"
+      token = "PC2kxlwtIRDd3teGNUKVm8H8u2HMXZ0U"
+      interval = "30s"
+      disable = false
 
     # Service configuration
     service:
