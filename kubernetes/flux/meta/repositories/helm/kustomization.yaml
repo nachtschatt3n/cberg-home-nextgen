@@ -36,6 +36,7 @@ resources:
   - ./pajikos.yaml
   - ./penpot.yaml
   - ./prometheus-community.yaml
+  - ./unpoller.yaml
   - ./jameswynn.yaml
   - ./descheduler.yaml
   - ./authentik.yaml
