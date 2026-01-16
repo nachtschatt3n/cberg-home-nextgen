@@ -58,7 +58,7 @@ spec:
 
       [influxdb]
       url = "http://influxdb-influxdb2.databases.svc.cluster.local:80"
-      organization = "influxdata"
+      org = "influxdata"
       bucket = "default"
       token = "PC2kxlwtIRDd3teGNUKVm8H8u2HMXZ0U"
       interval = "30s"
