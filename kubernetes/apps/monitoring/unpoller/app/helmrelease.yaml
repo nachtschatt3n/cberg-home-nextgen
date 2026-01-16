@@ -61,6 +61,7 @@ spec:
       org = "influxdata"
       bucket = "default"
       token = "Mmih1SVbxAJMQY36zknZN-p09CRDZbtDNzS2wO22o7Ni6luHYFU3Qeq3C0iKr81Mk5uONPFwhFuSyrcw_d7yYw=="
+      version = 2
       interval = "30s"
       disable = false
 
