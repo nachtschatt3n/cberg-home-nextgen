@@ -51,7 +51,7 @@ spec:
 
       [prometheus]
       http_listen = "0.0.0.0:9130"
-      namespace = "unifipoller"
+      namespace = "unpoller"
       interval = "30s"
       disable = false
       buffer = 50
