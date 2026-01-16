@@ -89,13 +89,16 @@ spec:
               #  value: "false"
 
             probes:
-              # Use port 8081 (admin UI) for all probes as other ports bind to localhost only
+              # Check controller health without depending on admin UI port (can be disabled)
               liveness:
                 enabled: true
                 custom: true
                 spec:
-                  tcpSocket:
-                    port: 8081
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - iobroker status | grep -q "is running"
                   initialDelaySeconds: 60
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -105,8 +108,11 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  tcpSocket:
-                    port: 8081
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - iobroker status | grep -q "is running"
                   initialDelaySeconds: 30
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -116,8 +122,11 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  tcpSocket:
-                    port: 8081
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - iobroker status | grep -q "is running"
                   initialDelaySeconds: 0
                   periodSeconds: 15
                   timeoutSeconds: 5

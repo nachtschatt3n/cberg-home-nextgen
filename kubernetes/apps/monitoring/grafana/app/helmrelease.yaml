@@ -89,7 +89,7 @@ spec:
             disableDeletion: false
             editable: true
             options:
-              path: /var/lib/grafana/dashboards/unifi
+              path: /var/lib/grafana/dashboards/UniFi
     datasources:
       datasources.yaml:
         apiVersion: 1
@@ -208,6 +208,8 @@ spec:
         labelValue: ""
         label: grafana_dashboard
         folderAnnotation: grafana_folder
+        folder: /var/lib/grafana/dashboards
+        defaultFolderName: default
         provider:
           disableDelete: true
           foldersFromFilesStructure: true
