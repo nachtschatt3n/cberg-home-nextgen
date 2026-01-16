@@ -75,11 +75,9 @@ spec:
 
     # Grafana dashboards
     dashboards:
-      create: true
+      create: false
       grafana:
-        create: true
-        labels:
-          grafana_dashboard: "1"
+        create: false
 
     # Resources
     resources:
