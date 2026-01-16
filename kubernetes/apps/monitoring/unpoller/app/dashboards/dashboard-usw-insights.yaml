@@ -3,12 +3,14 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   annotations:
+    grafana_folder: UniFi
     kustomize.toolkit.fluxcd.io/substitute: disabled
   name: unpoller-dashboard-usw-insights
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
   annotations:
+    grafana_folder: UniFi
     grafana.com/dashboard-id: "11314"
 data:
   dashboard.json: |
@@ -131,7 +133,7 @@ data:
       "panels": [
         {
           "content": "<br>\n<br>\n<center><b><font size=\"6px\">Unifi UAP</font></b></center>\n",
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {
             "defaults": {
               "custom": {}
@@ -163,7 +165,7 @@ data:
             "label": "Others",
             "threshold": 0
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Visualize wireless channel usage w/ wired client counts.",
           "fieldConfig": {
@@ -224,7 +226,7 @@ data:
             "label": "Others",
             "threshold": 0
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Visualize how many clients are connected to which radios/APs.",
           "fieldConfig": {
@@ -281,7 +283,7 @@ data:
             "label": "Others",
             "threshold": "0.01"
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "This shows an OUI breakdown from Unifi's perspective.",
           "fieldConfig": {
@@ -339,7 +341,7 @@ data:
             "rgba(237, 129, 40, 0.89)",
             "rgba(50, 172, 45, 0.97)"
           ],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "",
           "editable": true,
           "error": false,
@@ -423,7 +425,7 @@ data:
             "rgba(237, 129, 40, 0.89)",
             "rgba(50, 172, 45, 0.97)"
           ],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "",
           "editable": true,
           "error": false,
@@ -506,7 +508,7 @@ data:
             "endCountdownTime": "2018-04-29T21:47:00.000Z",
             "endText": "00:00:00"
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "dateSettings": {
             "dateFormat": "YYYY-MM-DD",
             "fontSize": "12px",
@@ -576,7 +578,7 @@ data:
         },
         {
           "columns": [],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editable": true,
           "error": false,
           "fieldConfig": {
@@ -870,7 +872,7 @@ data:
         },
         {
           "columns": [],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "The counters in this table represent uptime totals and do not change with the time range selector. ",
           "editable": true,
           "error": false,
@@ -1424,7 +1426,7 @@ data:
           "cacheTimeout": null,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "",
           "fieldConfig": {
             "defaults": {
@@ -1527,7 +1529,7 @@ data:
           "cacheTimeout": null,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "",
           "fieldConfig": {
             "defaults": {
@@ -1631,7 +1633,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editable": true,
           "error": false,
           "fieldConfig": {
@@ -1756,7 +1758,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "editable": true,
           "error": false,
@@ -1863,7 +1865,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Devices TX / RX bytes per second grouped by OUI. RX on negative axis.",
           "fieldConfig": {
             "defaults": {
@@ -1975,7 +1977,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "editable": true,
           "error": false,
@@ -2100,7 +2102,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2204,7 +2206,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2308,7 +2310,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editable": true,
           "error": false,
           "fieldConfig": {
@@ -2411,7 +2413,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "editable": true,
           "error": false,
           "fieldConfig": {
@@ -2515,7 +2517,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "editable": true,
           "error": false,
@@ -2631,7 +2633,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Displays 2.4GHz usage.",
           "editable": true,
@@ -2746,7 +2748,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "RX is on the negative Axis.",
           "editable": true,
           "error": false,
@@ -2865,7 +2867,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "RX is on the negative Axis.",
           "editable": true,
           "error": false,
@@ -2982,7 +2984,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "PPS on the na band. In is on the negative Axis.",
           "editable": true,
@@ -3099,7 +3101,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "PPS on the ng band calculated in 30 second buckets. In is on the negative Axis.",
           "editable": true,
@@ -3217,7 +3219,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Visualize packet errors (several types)  per second in the 5GHz band.",
           "editable": true,
@@ -3372,7 +3374,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "In is on the negative axis.",
           "editable": true,
@@ -3536,7 +3538,7 @@ data:
           {
             "allValue": ".*",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_device_info{type=\"uap\"},source)",
             "hide": 2,
             "includeAll": true,
@@ -3558,7 +3560,7 @@ data:
           {
             "allValue": "",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_device_info{source=~\"$Controller\", type=\"uap\"},site_name)",
             "hide": 0,
             "includeAll": true,
@@ -3580,7 +3582,7 @@ data:
           {
             "allValue": "",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_device_info{site_name=~\"$Site\", type=~\"uap|udm\",model!=\"UDMPRO\"},name)",
             "hide": 0,
             "includeAll": true,
@@ -3692,3 +3694,4 @@ data:
       "uid": "g5wFWqxZk",
       "version": 24
     }
+
