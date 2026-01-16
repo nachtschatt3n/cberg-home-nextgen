@@ -55,6 +55,8 @@ spec:
         apiVersion: 1
         deleteDatasources:
           - { name: Prometheus, orgId: 1 }
+          - { name: InfluxDB, orgId: 1 }
+          - { name: Unpoller InfluxDB, orgId: 1 }
         datasources:
           - name: Prometheus
             type: prometheus
@@ -64,6 +66,30 @@ spec:
             jsonData:
               prometheusType: Prometheus
             isDefault: true
+          - name: Unpoller InfluxDB
+            type: influxdb
+            uid: unpoller-influxdb
+            access: proxy
+            url: http://influxdb-influxdb2.databases.svc.cluster.local:80
+            jsonData:
+              version: Flux
+              organization: ${INFLUXDB_ORG}
+              defaultBucket: ${INFLUXDB_BUCKET}
+              httpMode: POST
+            secureJsonData:
+              token: $__env{INFLUXDB_TOKEN}
+          - name: InfluxDB
+            type: influxdb
+            uid: influxdb
+            access: proxy
+            url: http://influxdb-influxdb2.databases.svc.cluster.local:80
+            jsonData:
+              version: Flux
+              organization: ${INFLUXDB_ORG}
+              defaultBucket: ${INFLUXDB_BUCKET}
+              httpMode: POST
+            secureJsonData:
+              token: $__env{INFLUXDB_TOKEN}
           - name: TeslaMate
             type: postgres
             uid: teslamate
