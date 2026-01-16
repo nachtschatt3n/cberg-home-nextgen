@@ -82,6 +82,14 @@ spec:
             editable: true
             options:
               path: /var/lib/grafana/dashboards/teslamate
+          - name: unifi
+            orgId: 1
+            folder: UniFi
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/unifi
     datasources:
       datasources.yaml:
         apiVersion: 1

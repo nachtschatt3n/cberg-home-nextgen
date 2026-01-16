@@ -3,12 +3,14 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   annotations:
+    grafana_folder: UniFi
     kustomize.toolkit.fluxcd.io/substitute: disabled
   name: unpoller-dashboard-client-insights
   namespace: monitoring
   labels:
     grafana_dashboard: "1"
   annotations:
+    grafana_folder: UniFi
     grafana.com/dashboard-id: "11315"
 data:
   dashboard.json: |
@@ -111,7 +113,7 @@ data:
       "panels": [
         {
           "columns": [],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "This table represents current (latest) data.\nBytes columns are lifetime totals.",
           "fieldConfig": {
             "defaults": {
@@ -646,7 +648,7 @@ data:
         },
         {
           "columns": [],
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "This table represents current (latest) data.\nBytes columns are lifetime totals.",
           "fieldConfig": {
             "defaults": {
@@ -1059,7 +1061,7 @@ data:
             "label": "Others",
             "threshold": 0
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Visualize wireless channel usage w/ wired client counts.",
           "fieldConfig": {
@@ -1120,7 +1122,7 @@ data:
             "label": "Others",
             "threshold": 0
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "Visualize how many clients are connected to which radios/APs.",
           "fieldConfig": {
@@ -1175,7 +1177,7 @@ data:
             "label": "Others",
             "threshold": "0.01"
           },
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "description": "This shows an OUI breakdown from Unifi's perspective. e = wired, w = wireless",
           "fieldConfig": {
@@ -1239,7 +1241,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Bandwidth usage per wireless devices as reported by the UAPs. Rx is on the negative axis. Does not include amazon devices.",
           "fieldConfig": {
             "defaults": {
@@ -1355,7 +1357,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Wired TX / RX bytes per second (calculated in 30 second buckets). Rx is on the negative axis. Does not include amazon and camera devices. Unaffected by the AP setting.",
           "fieldConfig": {
             "defaults": {
@@ -1471,7 +1473,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Amazon Devices TX / RX bytes per second. Rx is on the negative axis. My home network has a ton of Amazon devices, so I broke them out separately. If you don't have Amazon devices, or they have different names, you can edit the query to use a different name. e = wired, w = wireless",
           "fieldConfig": {
             "defaults": {
@@ -1599,7 +1601,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Cameras TX / RX bytes per second. Rx is on the negative axis. This graph shows any device with the word \"camera\" in its name and has nothing to do with UniFi Protect/video products. e = wired, w = wireless",
           "fieldConfig": {
             "defaults": {
@@ -1729,7 +1731,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -1833,7 +1835,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -1939,7 +1941,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2043,7 +2045,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Client reported transmit rate.",
           "fieldConfig": {
             "defaults": {
@@ -2144,7 +2146,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2248,7 +2250,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Client reported receive rate.",
           "fieldConfig": {
             "defaults": {
@@ -2352,7 +2354,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2455,7 +2457,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2558,7 +2560,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2662,7 +2664,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2766,7 +2768,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2869,7 +2871,7 @@ data:
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "Prometheus",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
           "decimals": 0,
           "fieldConfig": {
             "defaults": {
@@ -2980,7 +2982,7 @@ data:
           {
             "allValue": null,
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds,source)",
             "hide": 2,
             "includeAll": true,
@@ -3002,7 +3004,7 @@ data:
           {
             "allValue": ".*",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds{source=~\"$Controller\"},site_name)",
             "hide": 0,
             "includeAll": true,
@@ -3024,7 +3026,7 @@ data:
           {
             "allValue": "",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds{site_name=~\"$Site\"},ap_name)",
             "hide": 0,
             "includeAll": true,
@@ -3046,7 +3048,7 @@ data:
           {
             "allValue": "",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds{site_name=~\"$Site\"},sw_name)",
             "hide": 0,
             "includeAll": true,
@@ -3068,7 +3070,7 @@ data:
           {
             "allValue": ".*",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds{site_name=~\"$Site\", ap_name=~\"$AP\", wired=\"false\"},name)",
             "hide": 0,
             "includeAll": true,
@@ -3090,7 +3092,7 @@ data:
           {
             "allValue": ".*",
             "current": {},
-            "datasource": "Prometheus",
+            "datasource": {"type": "prometheus", "uid": "prometheus"},
             "definition": "label_values(unpoller_client_uptime_seconds{site_name=~\"$Site\", sw_name=~\"$Switch\", wired=\"true\"},name)",
             "hide": 0,
             "includeAll": true,
@@ -3230,3 +3232,4 @@ data:
       "uid": "jMfvAjxWz",
       "version": 30
     }
+
