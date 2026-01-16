@@ -13,7 +13,7 @@ metadata:
     grafana_folder: UniFi
     grafana.com/dashboard-id: "11314"
 data:
-  dashboard.json: |
+  unifi-usw-insights.json: |
     {
       "__inputs": [
         {
