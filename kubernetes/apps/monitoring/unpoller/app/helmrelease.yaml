@@ -36,7 +36,7 @@ spec:
       dynamic = false
 
       [[unifi.controller]]
-      url = "https://192.168.50.1:8443"
+      url = "https://192.168.50.1"
       user = "cli-adm"
       pass = "KYmG4q@Vn366#_"
       sites = ["all"]
