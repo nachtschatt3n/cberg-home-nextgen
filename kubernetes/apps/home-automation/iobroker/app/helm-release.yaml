@@ -27,14 +27,14 @@ spec:
   values:
     defaultPodOptions:
       hostname: iobroker
-controllers:
-  main:
-    type: statefulset
-    strategy: RollingUpdate
-    replicas: 1
-    containers:
+    controllers:
       main:
-        nameOverride: iobroker
+        type: statefulset
+        strategy: RollingUpdate
+        replicas: 1
+        containers:
+          main:
+            nameOverride: iobroker
             image:
               repository: buanet/iobroker
               tag: v9.1.2
@@ -203,38 +203,37 @@ controllers:
                 service:
                   name: main
                   port: vis
-
-          # - host: "nodered.${SECRET_DOMAIN}"
-          #   paths:
-          #     - path: /
-          #       pathType: Prefix
-          #       service:
-          #         name: main
-          #         port: nodered
-          # - host: "vis.${SECRET_DOMAIN}"
-          #   paths:
-          #     - path: /
-          #       pathType: Prefix
-          #       service:
-          #         name: main
-          #         port: vis
-          # - host: "apiiobroker.${SECRET_DOMAIN}"
-          #   paths:
-          #     - path: /
-          #       pathType: Prefix
-          #       service:
-          #         name: main
-          #         port: iobrokerapi
-          # - host: "lovelace.${SECRET_DOMAIN}"
-          #   paths:
-          #     - path: /
-          #       pathType: Prefix
-          #       service:
-          #         name: main
-          #         port: lovelace
+              # - host: "nodered.${SECRET_DOMAIN}"
+              #   paths:
+              #     - path: /
+              #       pathType: Prefix
+              #       service:
+              #         name: main
+              #         port: nodered
+              # - host: "vis.${SECRET_DOMAIN}"
+              #   paths:
+              #     - path: /
+              #       pathType: Prefix
+              #       service:
+              #         name: main
+              #         port: vis
+              # - host: "apiiobroker.${SECRET_DOMAIN}"
+              #   paths:
+              #     - path: /
+              #       pathType: Prefix
+              #       service:
+              #         name: main
+              #         port: iobrokerapi
+              # - host: "lovelace.${SECRET_DOMAIN}"
+              #   paths:
+              #     - path: /
+              #       pathType: Prefix
+              #       service:
+              #         name: main
+              #         port: lovelace
         tls:
           - hosts:
-            - "iobroker.${SECRET_DOMAIN}"
+              - "iobroker.${SECRET_DOMAIN}"
             # - "nodered.${SECRET_DOMAIN}"
             # - "vis.${SECRET_DOMAIN}"
             # - "iobrokerapi.${SECRET_DOMAIN}"
@@ -254,6 +253,6 @@ controllers:
         memory: 4Gi
     securityContext:
       capabilities:
-            add:
-              - SYS_ADMIN
-              - DAC_READ_SEARCH
+        add:
+          - SYS_ADMIN
+          - DAC_READ_SEARCH
