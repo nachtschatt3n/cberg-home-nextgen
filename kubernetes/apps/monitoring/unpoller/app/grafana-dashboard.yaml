@@ -1,0 +1,41 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unpoller-grafana-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana.com/dashboard-id: "11315"
+data:
+  unifi-poller-client-insights.json: |-
+    {
+      "__inputs": [],
+      "__requires": [],
+      "annotations": {
+        "list": []
+      },
+      "description": "UniFi Poller - Client, Network and UAP Insights",
+      "editable": true,
+      "gnetId": 11315,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [],
+      "schemaVersion": 27,
+      "style": "dark",
+      "tags": ["unifi", "unpoller", "network"],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "UniFi Network - Client Insights",
+      "uid": "unifi-client-insights",
+      "version": 1
+    }

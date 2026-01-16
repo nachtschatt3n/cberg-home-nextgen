@@ -1,0 +1,105 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: unpoller
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: unpoller
+      version: 2.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: unpoller
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    image:
+      repository: ghcr.io/unpoller/unpoller
+      pullPolicy: IfNotPresent
+      tag: v2.11.2
+
+    replicaCount: 1
+
+    # UnPoller configuration
+    upConfig: |
+      [unifi]
+      dynamic = false
+
+      [[unifi.controller]]
+      url = "https://192.168.50.1:8443"
+      user = "cli-adm"
+      pass = "KYmG4q@Vn366#_"
+      sites = ["all"]
+      save_ids = true
+      save_dpi = true
+      save_sites = true
+      save_alarms = true
+      save_events = true
+      save_anomalies = true
+      hash_pii = false
+      verify_ssl = false
+
+      [prometheus]
+      http_listen = "0.0.0.0:9130"
+      namespace = "unifipoller"
+      disable = false
+      buffer = 50
+
+      [influxdb]
+      interval = "30s"
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 9130
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9130"
+
+    # Prometheus integration
+    podMonitor:
+      enabled: true
+      interval: 30s
+      labels:
+        release: kube-prometheus-stack
+
+    # Grafana dashboards
+    dashboards:
+      create: true
+      grafana:
+        create: true
+        labels:
+          grafana_dashboard: "1"
+
+    # Resources
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # Health checks
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 9130
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 9130
+      initialDelaySeconds: 10
+      periodSeconds: 5
