@@ -26,7 +26,7 @@ spec:
     image:
       repository: ghcr.io/unpoller/unpoller
       pullPolicy: IfNotPresent
-      tag: v2.11.2
+      tag: v2.21.0
 
     replicaCount: 1
 
