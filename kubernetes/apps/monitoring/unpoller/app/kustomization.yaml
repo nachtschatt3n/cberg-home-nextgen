@@ -7,7 +7,11 @@ resources:
   - secret.sops.yaml
   - servicemonitor.yaml
   - prometheusrule.yaml
-  - grafana-dashboard.yaml
+  - dashboards/dashboard-network-sites.yaml
+  - dashboards/dashboard-uap-insights.yaml
+  - dashboards/dashboard-usg-insights.yaml
+  - dashboards/dashboard-usw-insights.yaml
+  - dashboards/dashboard-client-insights.yaml
 commonLabels:
   app.kubernetes.io/name: unpoller
   app.kubernetes.io/instance: unpoller
