@@ -1,0 +1,94 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: unifi-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: unifi.devices
+      interval: 30s
+      rules:
+        - alert: UnifiDeviceOffline
+          expr: unifipoller_device_uptime_seconds == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: network
+            component: unifi
+          annotations:
+            summary: "UniFi device {{ $labels.name }} is offline"
+            description: "UniFi device {{ $labels.name }} ({{ $labels.model }}) has been offline for 5 minutes. This may indicate a network or power failure."
+
+        - alert: UnifiAccessPointHighClientCount
+          expr: unifipoller_device_user_num_sta > 50
+          for: 10m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "High client count on {{ $labels.name }}"
+            description: "Access point {{ $labels.name }} has {{ $value }} connected clients, exceeding the recommended threshold of 50."
+
+        - alert: UnifiDeviceHighMemory
+          expr: (unifipoller_device_sys_mem / 1024 / 1024) > 80
+          for: 10m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "High memory usage on {{ $labels.name }}"
+            description: "Device {{ $labels.name }} memory usage is {{ $value }}%, exceeding 80% threshold."
+
+        - alert: UnifiDeviceHighCPU
+          expr: unifipoller_device_system_stats_cpu > 90
+          for: 10m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "High CPU usage on {{ $labels.name }}"
+            description: "Device {{ $labels.name }} CPU usage is {{ $value }}%, exceeding 90% threshold."
+
+        - alert: UnifiSwitchPortDown
+          expr: unifipoller_device_port_up == 0 and unifipoller_device_port_poe_enable == 1
+          for: 5m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "PoE port down on {{ $labels.device_name }}"
+            description: "PoE-enabled port {{ $labels.port_idx }} on switch {{ $labels.device_name }} is down."
+
+    - name: unifi.network
+      interval: 30s
+      rules:
+        - alert: UnifiControllerUnreachable
+          expr: up{job="unpoller"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: network
+            component: unifi
+          annotations:
+            summary: "UnPoller cannot reach UniFi controller"
+            description: "UnPoller has failed to scrape metrics from the UniFi controller for 5 minutes. Check controller availability and credentials."
+
+        - alert: UnifiHighWirelessInterference
+          expr: unifipoller_device_radio_channel_interference > 70
+          for: 15m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "High wireless interference on {{ $labels.name }}"
+            description: "Access point {{ $labels.name }} radio {{ $labels.radio }} is experiencing {{ $value }}% channel interference on channel {{ $labels.channel }}."

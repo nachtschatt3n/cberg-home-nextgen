@@ -516,6 +516,90 @@ unifictl local client list --wired -o json | jq -r '.data | length'
 
 ---
 
+## 18a. UniFi Hardware Metrics (Prometheus)
+
+**Objective**: Verify network hardware health via UnPoller metrics
+**Success Criteria**: All devices online, no high-temperature alerts
+
+**Commands to Execute:**
+```bash
+# Port-forward to Prometheus
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+
+# Check UnPoller scraping status
+curl -s 'http://localhost:9090/api/v1/query?query=up{job="unpoller"}' | python3 -c "
+import sys, json
+result = json.load(sys.stdin)['data']['result']
+if result and result[0]['value'][1] == '1':
+    print('✅ UnPoller is scraping metrics')
+else:
+    print('❌ UnPoller scraping failed')
+"
+
+# Count online devices
+curl -s 'http://localhost:9090/api/v1/query?query=count(unifipoller_device_uptime_seconds>0)' | python3 -c "
+import sys, json
+count = json.load(sys.stdin)['data']['result'][0]['value'][1]
+print(f'Online devices: {count}')
+"
+
+# Check for offline devices
+curl -s 'http://localhost:9090/api/v1/query?query=unifipoller_device_uptime_seconds==0' | python3 -c "
+import sys, json
+offline = json.load(sys.stdin)['data']['result']
+if offline:
+    print('⚠️ Offline devices:')
+    for device in offline:
+        print(f\"  - {device['metric'].get('name', 'unknown')}\")
+else:
+    print('✅ All devices online')
+"
+
+# Check device temperatures
+curl -s 'http://localhost:9090/api/v1/query?query=unifipoller_device_system_stats_temps' | python3 -c "
+import sys, json
+temps = json.load(sys.stdin)['data']['result']
+for temp in temps:
+    device = temp['metric'].get('name', 'unknown')
+    temp_c = float(temp['value'][1])
+    if temp_c > 75:
+        print(f'🔴 {device}: {temp_c}°C (HIGH)')
+    elif temp_c > 60:
+        print(f'🟡 {device}: {temp_c}°C (WARM)')
+    else:
+        print(f'✅ {device}: {temp_c}°C')
+"
+
+# Check total client count
+curl -s 'http://localhost:9090/api/v1/query?query=sum(unifipoller_device_user_num_sta)' | python3 -c "
+import sys, json
+count = json.load(sys.stdin)['data']['result'][0]['value'][1]
+print(f'Total connected clients: {count}')
+"
+
+# Check wireless interference
+curl -s 'http://localhost:9090/api/v1/query?query=unifipoller_device_radio_channel_interference>50' | python3 -c "
+import sys, json
+interference = json.load(sys.stdin)['data']['result']
+if interference:
+    print('⚠️ High wireless interference detected:')
+    for radio in interference:
+        device = radio['metric'].get('name', 'unknown')
+        channel = radio['metric'].get('channel', 'N/A')
+        level = float(radio['value'][1])
+        print(f\"  - {device} (channel {channel}): {level}%\")
+else:
+    print('✅ No high interference detected')
+"
+
+# Kill port-forward when done
+killall kubectl
+```
+
+**AI Analysis**: Aggregate metrics, identify hardware issues, check for temperature anomalies, flag high client counts or interference.
+
+---
+
 ## 19. Network Connectivity (Kubernetes)
 
 **Objective**: Test internal networking

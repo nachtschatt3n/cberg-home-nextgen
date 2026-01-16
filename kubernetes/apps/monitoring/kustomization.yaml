@@ -8,6 +8,7 @@ resources:
   - ./grafana/ks.yaml
   - ./headlamp/ks.yaml
   - ./kube-prometheus-stack/ks.yaml
+  - ./unpoller/ks.yaml
   - ./uptime-kuma/ks.yaml
   - ./eck-operator/ks.yaml
   - ./elasticsearch/ks.yaml
