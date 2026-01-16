@@ -585,7 +585,6 @@ data:
               "fieldConfig": {
                 "defaults": {
                   "custom": {},
-                  "displayName": "${__series.name}",
                   "links": [],
                   "mappings": [
                     {
@@ -2540,4 +2539,3 @@ data:
       "uid": "4Yo8IZ-Wk",
       "version": 36
     }
-

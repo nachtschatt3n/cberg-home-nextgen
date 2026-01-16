@@ -27,13 +27,14 @@ spec:
   values:
     defaultPodOptions:
       hostname: iobroker
-    controllers:
+controllers:
+  main:
+    type: statefulset
+    strategy: RollingUpdate
+    replicas: 1
+    containers:
       main:
-        type: statefulset
-        strategy: RollingUpdate
-        containers:
-          main:
-            nameOverride: iobroker
+        nameOverride: iobroker
             image:
               repository: buanet/iobroker
               tag: v9.1.2
