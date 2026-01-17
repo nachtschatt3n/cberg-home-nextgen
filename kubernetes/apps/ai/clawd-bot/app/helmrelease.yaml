@@ -68,22 +68,22 @@ spec:
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
 
                 echo "Installing gh CLI..."
-                GH_TMP="/tmp/gh-cli"
-                rm -rf "${GH_TMP}"
-                mkdir -p "${GH_TMP}"
+                rm -rf /tmp/gh-cli
+                mkdir -p /tmp/gh-cli
+                cd /tmp/gh-cli
                 if apt-get download gh; then
-                  dpkg -x gh_*.deb "${GH_TMP}"
+                  dpkg -x gh_*.deb /tmp/gh-cli
                 else
                   echo "Failed to download gh via apt" >&2
                   exit 1
                 fi
-                if [ ! -x "${GH_TMP}/usr/bin/gh" ]; then
+                if [ ! -x "/tmp/gh-cli/usr/bin/gh" ]; then
                   echo "Failed to unpack gh CLI" >&2
                   exit 1
                 fi
-                cp "${GH_TMP}/usr/bin/gh" "${BIN_DIR}/gh"
+                cp "/tmp/gh-cli/usr/bin/gh" "${BIN_DIR}/gh"
                 chmod +x "${BIN_DIR}/gh"
-                rm -rf "${GH_TMP}" gh_*.deb
+                rm -rf /tmp/gh-cli gh_*.deb
 
                 echo "Installing jq..."
                 curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "${BIN_DIR}/jq"
