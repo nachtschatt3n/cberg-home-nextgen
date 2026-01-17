@@ -49,7 +49,11 @@ spec:
                 export NPM_CONFIG_CACHE="/home/node/.npm"
                 mkdir -p "$NPM_CONFIG_CACHE"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
-                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:${PYTHONPATH:-}"
+                if [ -n "$PYTHONPATH" ]; then
+                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:$PYTHONPATH"
+                else
+                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
+                fi
                 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
                 echo "Installing git and build dependencies..."
@@ -80,28 +84,28 @@ spec:
                   echo "Failed to unpack gh CLI" >&2
                   exit 1
                 fi
-                cp "/tmp/gh-cli/usr/bin/gh" "${BIN_DIR}/gh"
-                chmod +x "${BIN_DIR}/gh"
+                cp "/tmp/gh-cli/usr/bin/gh" "$BIN_DIR/gh"
+                chmod +x "$BIN_DIR/gh"
                 rm -rf /tmp/gh-cli gh_*.deb
                 rm -rf /var/lib/apt/lists/*
 
                 echo "Installing jq..."
-                curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "${BIN_DIR}/jq"
-                chmod +x "${BIN_DIR}/jq"
+                curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$BIN_DIR/jq"
+                chmod +x "$BIN_DIR/jq"
 
                 echo "Installing ffmpeg static build..."
                 FFMPEG_TMP="$(mktemp -d)"
-                curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o "${FFMPEG_TMP}/ffmpeg.tar.xz"
-                tar -xf "${FFMPEG_TMP}/ffmpeg.tar.xz" -C "${FFMPEG_TMP}"
-                FFMPEG_DIR="$(find "${FFMPEG_TMP}" -maxdepth 1 -type d -name 'ffmpeg-*static' | head -n 1)"
-                if [ -z "${FFMPEG_DIR}" ]; then
+                curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o "$FFMPEG_TMP/ffmpeg.tar.xz"
+                tar -xf "$FFMPEG_TMP/ffmpeg.tar.xz" -C "$FFMPEG_TMP"
+                FFMPEG_DIR="$(find "$FFMPEG_TMP" -maxdepth 1 -type d -name 'ffmpeg-*static' | head -n 1)"
+                if [ -z "$FFMPEG_DIR" ]; then
                   echo "Failed to unpack ffmpeg" >&2
                   exit 1
                 fi
-                cp "${FFMPEG_DIR}/ffmpeg" "${BIN_DIR}/ffmpeg"
-                cp "${FFMPEG_DIR}/ffprobe" "${BIN_DIR}/ffprobe"
-                chmod +x "${BIN_DIR}/ffmpeg" "${BIN_DIR}/ffprobe"
-                rm -rf "${FFMPEG_TMP}"
+                cp "$FFMPEG_DIR/ffmpeg" "$BIN_DIR/ffmpeg"
+                cp "$FFMPEG_DIR/ffprobe" "$BIN_DIR/ffprobe"
+                chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
+                rm -rf "$FFMPEG_TMP"
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -186,7 +190,11 @@ spec:
                 export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
                 export GIT_EXEC_PATH="/usr/lib/git-core"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
-                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:${PYTHONPATH:-}"
+                if [ -n "$PYTHONPATH" ]; then
+                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:$PYTHONPATH"
+                else
+                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
+                fi
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
 
