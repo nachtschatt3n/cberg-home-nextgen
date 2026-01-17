@@ -99,7 +99,7 @@ spec:
                 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
                   node -e "
                     const fs = require('fs');
-                    const path = '${CONFIG_PATH}';
+                    const path = '/home/node/.clawdbot/clawdbot.json';
                     const token = process.env.CLAWDBOT_GATEWAY_TOKEN;
                     if (!token || !fs.existsSync(path)) process.exit(0);
                     const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
