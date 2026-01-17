@@ -53,13 +53,14 @@ spec:
                   --initdb \
                   --keys-dir /etc/apk/keys \
                   --repositories-file /etc/apk/repositories \
-                  --update-cache --no-cache add git github-cli
+                  --update-cache --no-cache add git github-cli openssh-client
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/git /home/node/.clawdbot/bin/git
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/gh /home/node/.clawdbot/bin/gh
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
                 export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
+                export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
                 npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
