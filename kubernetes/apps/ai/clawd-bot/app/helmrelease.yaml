@@ -72,14 +72,29 @@ spec:
 
                 export PATH="/home/node/.clawdbot/bin:$PATH"
                 export CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
+                export STATE_DIR="$(dirname "${CONFIG_PATH}")"
+                mkdir -p "${STATE_DIR}"
+                chown -R 1000:1000 "${STATE_DIR}"
 
                 if [ ! -f "${CONFIG_PATH}" ]; then
-                  echo "Configuration not found. Please run onboarding wizard:"
-                  echo "  kubectl exec -it -n ai deployment/clawd-bot -- /bin/sh"
-                  echo "  Then run: /home/node/.clawdbot/bin/clawdbot onboard"
-                  echo ""
-                  echo "Sleeping indefinitely until configured..."
-                  sleep infinity
+                  echo "Configuration not found. Bootstrapping minimal gateway config..."
+                  cat > "${CONFIG_PATH}" <<'CFG'
+                  {
+                    "gateway": {
+                      "mode": "local",
+                      "bind": "lan",
+                      "port": 18789,
+                      "auth": {
+                        "mode": "token",
+                        "token": ""
+                      }
+                    },
+                    "agent": {
+                      "workspace": "/home/node/clawd"
+                    }
+                  }
+                  CFG
+                  chown 1000:1000 "${CONFIG_PATH}"
                 fi
 
                 if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
