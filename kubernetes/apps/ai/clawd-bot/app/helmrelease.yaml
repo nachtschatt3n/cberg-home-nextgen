@@ -161,6 +161,7 @@ spec:
                 install_npm mcporter
                 install_npm goplaces
                 install_npm gog
+                install_npm opencode-ai
                 install_npm summarize
                 install_npm sag
 
