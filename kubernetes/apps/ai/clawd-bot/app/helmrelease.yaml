@@ -73,12 +73,12 @@ spec:
                 export PATH="/home/node/.clawdbot/bin:$PATH"
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
-                mkdir -p "${STATE_DIR}"
-                chown -R 1000:1000 "${STATE_DIR}"
+                mkdir -p "$STATE_DIR"
+                chown -R 1000:1000 "$STATE_DIR"
 
                 if [ ! -f "$CONFIG_PATH" ]; then
                   echo "Configuration not found. Bootstrapping minimal gateway config..."
-                  cat > "${CONFIG_PATH}" <<'CFG'
+                  cat > "$CONFIG_PATH" <<'CFG'
                   {
                     "gateway": {
                       "mode": "local",
@@ -94,7 +94,7 @@ spec:
                     }
                   }
                   CFG
-                  chown 1000:1000 "${CONFIG_PATH}"
+                  chown 1000:1000 "$CONFIG_PATH"
                 fi
 
                 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
