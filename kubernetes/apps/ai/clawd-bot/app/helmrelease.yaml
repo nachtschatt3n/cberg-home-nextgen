@@ -276,7 +276,7 @@ spec:
 
       npm-cache:
         type: emptyDir
-        sizeLimit: 500Mi
+        sizeLimit: 2Gi
         advancedMounts:
           clawd-bot:
             install-clawdbot:
