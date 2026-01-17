@@ -46,7 +46,7 @@ spec:
                 apk add --no-cache python3 make g++
 
                 PREFIX="/home/node/.clawdbot"
-                PKGROOT="${PREFIX}/pkgroot"
+                PKGROOT="/home/node/.clawdbot/pkgroot"
                 mkdir -p "${PKGROOT}/etc/apk" "${PREFIX}/bin"
                 cp /etc/apk/repositories "${PKGROOT}/etc/apk/repositories"
 
