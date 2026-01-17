@@ -60,7 +60,6 @@ spec:
                   build-essential pkg-config \
                   git openssh-client ca-certificates curl \
                   libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
-                rm -rf /var/lib/apt/lists/*
 
                 BIN_DIR="/home/node/.clawdbot/bin"
                 mkdir -p "$BIN_DIR"
@@ -84,6 +83,7 @@ spec:
                 cp "/tmp/gh-cli/usr/bin/gh" "${BIN_DIR}/gh"
                 chmod +x "${BIN_DIR}/gh"
                 rm -rf /tmp/gh-cli gh_*.deb
+                rm -rf /var/lib/apt/lists/*
 
                 echo "Installing jq..."
                 curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "${BIN_DIR}/jq"
