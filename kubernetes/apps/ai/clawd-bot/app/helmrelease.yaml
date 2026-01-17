@@ -59,6 +59,7 @@ spec:
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
+                export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
                 npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
