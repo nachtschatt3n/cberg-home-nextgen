@@ -49,11 +49,16 @@ spec:
                 cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
 
                 echo "Installing git + gh into /home/node/.clawdbot/pkgroot..."
-                apk --root /home/node/.clawdbot/pkgroot --initdb add --no-cache git github-cli
+                apk --root /home/node/.clawdbot/pkgroot \
+                  --initdb \
+                  --keys-dir /etc/apk/keys \
+                  --repositories-file /etc/apk/repositories \
+                  --update-cache --no-cache add git github-cli
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/git /home/node/.clawdbot/bin/git
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/gh /home/node/.clawdbot/bin/gh
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
+                export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
                 npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
