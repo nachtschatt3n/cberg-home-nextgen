@@ -68,9 +68,13 @@ spec:
                 export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
                 export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
                 export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
+                git config --system url."https://github.com/".insteadOf "ssh://git@github.com/"
+                git config --system url."https://github.com/".insteadOf "git@github.com:"
+                git config --system url."https://github.com/".insteadOf "git+ssh://git@github.com/"
                 git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
                 git config --global url."https://github.com/".insteadOf "git@github.com:"
                 git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"
+                git config --global --get-regexp url || true
                 npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
