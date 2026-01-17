@@ -50,7 +50,7 @@ spec:
                 mkdir -p "$NPM_CONFIG_CACHE"
 
                 echo "Installing git and build dependencies..."
-                apk add --no-cache python3 make g++ ca-certificates curl jq ffmpeg
+                apk add --no-cache python3 py3-pip make g++ ca-certificates curl jq ffmpeg
 
                 mkdir -p /home/node/.clawdbot/pkgroot/etc/apk /home/node/.clawdbot/bin
                 cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
