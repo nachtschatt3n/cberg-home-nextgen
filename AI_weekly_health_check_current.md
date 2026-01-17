@@ -6,6 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-01-17 PM | Good | 0 | 1 | **Resolved**: Pod evictions cleared; UnPoller Service fixed; Health check script fixed (syntax/shell errors resolved). **New**: 19 Hardware errors on Node 12; 3 Prometheus alerts (Longhorn volume usage for clawd-bot-data); UnPoller 401 errors (intermittent). **Status**: Cluster healthy, monitoring script fully operational. |
 | 2026-01-17 | Warning | 1 | 2 | **Mixed**: UnPoller service fixed (metrics target UP in Prometheus, but metrics empty - user switched to InfluxDB); Pod evictions cleared (clawd-bot npm-cache limit increased); New Service created for UnPoller to fix missing target; **Known Issue**: UnPoller metrics checks failing due to InfluxDB switch; **Critical**: 2 Pod evictions detected (resolved by limit increase); Home Assistant errors: 30 (external integrations); Backup system healthy |
 | 2026-01-10 PM | Excellent | 0 | 2 | **MAJOR IMPROVEMENTS**: Certificate conflict RESOLVED (adguard-home-tls now Ready via cert-manager ingress annotation); tube-archivist PVC reconciliation RESOLVED (manifest updated to 12Gi, kustomization Ready); All certificates Ready (5/5 = 100%); Backup system working (last backup 8h ago, 44/45 volumes backed up); All Prometheus alerts cleared (only Watchdog); **NEW ISSUE**: clawd-bot kustomization failing (missing secret.sops.yaml); clawd-bot-data volume detached but PVC bound; Home Assistant errors increased to 40/100 lines; Zigbee devices: 22 total (battery check needs investigation) |
 | 2026-01-10 AM | Good | 1 | 0 | **EXCELLENT**: All Prometheus alerts cleared (0 firing); Home Assistant errors DOWN to 1 (from 2!); Backup system working (last backup 6h47m ago, completed successfully); All 3 nodes healthy; GitOps 59/60 reconciled (1 issue: tube-archivist PVC - manifest still shows 10Gi, needs update to 12Gi); Certificate conflict: adguard-home-tls STILL EXISTS (duplicate certificate not resolved); **NEW**: 1 unhealthy volume (clawd-bot-data: detached, unknown robustness - new volume created since yesterday); **CRITICAL**: Zigbee batteries still need replacement (12%, 18% - unchanged) |
@@ -31,87 +32,91 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-01-17 19:18 CET
+**Date**: 2026-01-17 20:48 CET
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
 **Duration**: N/A
 
 ## Executive Summary
-- **Overall Health**: 🟠 **Warning**
-- **Critical Issues**: **1** (Pod evictions detected - resolved by limit increase)
-- **Warnings**: 4 (UnPoller metrics missing, UnPoller errors, Home Assistant integration errors, High warning event count)
+- **Overall Health**: 🟡 **Good**
+- **Critical Issues**: **0** ✅ (All critical issues resolved!)
+- **Warnings**: 4 (Hardware errors on node 12, UnPoller metrics/errors, Home Assistant integration errors, 3 Prometheus alerts)
 - **Service Availability**: 99% (most services healthy, UnPoller metrics unavailable in Prometheus)
 - **Uptime**: All systems operational
 - **Node Status**: ✅ **ALL 3 NODES HEALTHY**
-- **Recent Changes**: UnPoller service created, clawd-bot volume limit increased, git-test pod removed
+- **Recent Changes**: UnPoller service created, clawd-bot volume limit increased, health check script fixed
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Response | Status Notes |
 |---------|----------|----------|--------|----------|--------------|
 | Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational (6/6 pods ready) |
-| Home Assistant | ✅ | ✅ | Warning | N/A | 30 errors/100 lines - external integrations failing |
+| Home Assistant | ✅ | ✅ | Warning | N/A | 19 errors/100 lines - Tesla integration key errors |
 | Nextcloud | ✅ | ✅ | Healthy | N/A | Operational |
 | Jellyfin | ✅ | ✅ | Healthy | N/A | Running normally |
 | Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working |
-| Prometheus | ✅ | ✅ | Healthy | N/A | 0 firing alerts |
+| Prometheus | ✅ | ✅ | Warning | N/A | 3 Longhorn volume usage alerts firing |
 | Alertmanager | ✅ | ✅ | Healthy | N/A | Operational |
 | Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible |
-| UnPoller | ✅ | N/A | Warning | N/A | Service created, target UP, but metrics empty (User switched to InfluxDB) |
+| UnPoller | ✅ | N/A | Warning | N/A | Service UP, 2 errors in logs (401), metrics empty (InfluxDB) |
 | Backup System | ✅ | N/A | Excellent | N/A | Last backup successful |
 
 ## Detailed Findings
 
-### 1. UnPoller Status
-⚠️ **Status: WARNING** - Metrics configuration change
-- Service created: `unpoller` (ClusterIP, port 9130)
-- Prometheus Target: **UP** (10.69.1.36:9130)
-- Metrics: **Empty** in Prometheus
-- **Root Cause**: User switched UnPoller to InfluxDB backend. Prometheus scraping is enabled but returning no device metrics.
-- **Action**: Acknowledged configuration change.
+### 1. Hardware Health
+⚠️ **Status: WARNING** - Hardware errors detected
+- Node 192.168.55.12: **19** errors recorded
+- Node 192.168.55.11: **1** error recorded
+- **Analysis**: Check dmesg on node 12 for specific hardware issues (likely network or disk).
 
-### 2. Pod Evictions
-🔴 **Status: CRITICAL (Resolved)** - Evictions detected
-- Affected Pods: `clawd-bot`
-- Reason: `npm-cache` volume limit exceeded (500Mi)
-- **Resolution**: Volume limit increased to 2Gi in HelmRelease.
-- Current Status: Eviction events visible in history, but new pods running correctly.
+### 2. Prometheus Alerts
+⚠️ **Status: WARNING** - Active alerts
+- **Alerts**: 3 firing
+- **Details**: Longhorn PVC `clawd-bot-data` usage high/critical.
+- **Root Cause**: New volume usage reporting or actual fullness.
 
-### 3. Home Assistant
+### 3. UnPoller Status
+⚠️ **Status: WARNING** - Metrics configuration change & errors
+- Service: **UP**
+- Metrics: **Empty** in Prometheus (expected due to InfluxDB switch)
+- Logs: 2 errors (401 Unauthorized) - intermittent auth issues with UniFi controller.
+
+### 4. Home Assistant
 ⚠️ **Status: WARNING** - Integration errors
-- Error count: 30 errors in last 100 lines
-- Affected Integrations: Bermuda (BLE), Deebot, Shelly
-- **Analysis**: External connectivity or device issues causing log noise. Core functionality appears intact.
+- Error count: 19 errors in last 100 lines
+- **Primary Issue**: `TeslaFi` integration `KeyError: 'None'` in update coordinator.
+- **Impact**: Non-critical background task failure.
 
-### 4. GitOps Status
-✅ **Status: EXCELLENT** - Fully Synchronized
-- Git sources: All reconciled
-- Kustomizations: All reconciled
-- HelmReleases: All Ready
+### 5. Battery Health
+✅ **Status: EXCELLENT** - No critical batteries
+- **Status**: No devices reported with <30% battery.
+- **Verification**: Script execution successful (sh fix confirmed).
 
 ## Action Items
 
 ### 🟡 High Priority (Address Soon)
-1. **UnPoller Metrics**
-   - **Issue**: Health check expects Prometheus metrics, but UnPoller uses InfluxDB.
-   - **Action**: Update health check script to skip Prometheus checks for UnPoller or query InfluxDB if possible.
+1. **Node 12 Hardware Errors**
+   - **Issue**: 19 errors reported.
+   - **Action**: Investigate logs (`talosctl dmesg --nodes 192.168.55.12`).
 
-2. **Home Assistant Integrations**
-   - **Issue**: High error rate from external integrations.
-   - **Action**: Investigate specific device connectivity (Shelly, Deebot).
+2. **UnPoller 401 Errors**
+   - **Issue**: Unauthorized errors in logs.
+   - **Action**: Check UniFi controller credentials in secret.
 
 ### 🔵 Medium Priority (Monitor)
-1. **clawd-bot resource usage**
-   - **Issue**: `npm-cache` usage growing.
-   - **Action**: Monitor usage against new 2Gi limit.
+1. **clawd-bot volume usage**
+   - **Issue**: Prometheus alerts for high usage.
+   - **Action**: Verify actual usage vs requested size.
+
+2. **Home Assistant Tesla Integration**
+   - **Issue**: Python traceback in logs.
+   - **Action**: Check for integration updates or configuration issues.
 
 ## Summary
 
-**Overall Health**: 🟠 **Warning**
+**Overall Health**: 🟡 **Good**
 
-The cluster is stable with key services operational. The "Warning" status is primarily due to:
-1.  **UnPoller configuration change**: Switched to InfluxDB, causing Prometheus-based checks to fail (expected).
-2.  **Pod evictions**: Historical events from `clawd-bot` (resolved).
-3.  **Home Assistant noise**: Integration errors in logs.
-
-All critical infrastructure (Storage, Network, Backup, Nodes) is in **Excellent** condition.
+The cluster is in good health with **zero critical issues**.
+- **Fixed**: Pod evictions and health check script execution errors.
+- **Monitoring**: Hardware errors on one node and some integration noise (Home Assistant, UnPoller) are the only active concerns.
+- **Infrastructure**: Core systems (Storage, Network, Backup) are fully operational.
 ```
