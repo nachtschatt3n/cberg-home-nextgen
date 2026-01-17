@@ -45,18 +45,16 @@ spec:
                 echo "Installing git and build dependencies..."
                 apk add --no-cache python3 make g++
 
-                PREFIX="/home/node/.clawdbot"
-                PKGROOT="/home/node/.clawdbot/pkgroot"
-                mkdir -p "${PKGROOT}/etc/apk" "${PREFIX}/bin"
-                cp /etc/apk/repositories "${PKGROOT}/etc/apk/repositories"
+                mkdir -p /home/node/.clawdbot/pkgroot/etc/apk /home/node/.clawdbot/bin
+                cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
 
-                echo "Installing git + gh into ${PKGROOT}..."
-                apk --root "${PKGROOT}" --initdb add --no-cache git github-cli
-                ln -sf "${PKGROOT}/usr/bin/git" "${PREFIX}/bin/git"
-                ln -sf "${PKGROOT}/usr/bin/gh" "${PREFIX}/bin/gh"
+                echo "Installing git + gh into /home/node/.clawdbot/pkgroot..."
+                apk --root /home/node/.clawdbot/pkgroot --initdb add --no-cache git github-cli
+                ln -sf /home/node/.clawdbot/pkgroot/usr/bin/git /home/node/.clawdbot/bin/git
+                ln -sf /home/node/.clawdbot/pkgroot/usr/bin/gh /home/node/.clawdbot/bin/gh
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
-                npm install -g --prefix "${PREFIX}" \
+                npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
                   @google/gemini-cli \
@@ -64,11 +62,11 @@ spec:
                   @mariozechner/pi-coding-agent
 
                 echo "Creating symlink..."
-                ln -sf "${PREFIX}/bin/clawdbot" "${PREFIX}/clawdbot"
-                echo "Clawdbot installed at: ${PREFIX}/bin/clawdbot"
-                "${PREFIX}/bin/clawdbot" --version
+                ln -sf /home/node/.clawdbot/bin/clawdbot /home/node/.clawdbot/clawdbot
+                echo "Clawdbot installed at: /home/node/.clawdbot/bin/clawdbot"
+                /home/node/.clawdbot/bin/clawdbot --version
                 echo "Fixing permissions..."
-                chown -R 1000:1000 "${PREFIX}"
+                chown -R 1000:1000 /home/node/.clawdbot
             securityContext:
               runAsUser: 0
               runAsGroup: 0
@@ -86,8 +84,8 @@ spec:
               - |
                 set -euo pipefail
 
-                export PATH="/home/node/.clawdbot/bin:/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
-                export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib:${LD_LIBRARY_PATH:-}"
+                export PATH="/home/node/.clawdbot/bin:/home/node/.clawdbot/pkgroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
                 mkdir -p "$STATE_DIR"
