@@ -65,6 +65,7 @@ spec:
                 mkdir -p "$BIN_DIR"
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
+                rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
 
                 echo "Installing gh CLI..."
                 rm -rf /tmp/gh-cli
