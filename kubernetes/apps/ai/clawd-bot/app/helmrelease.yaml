@@ -98,7 +98,7 @@ spec:
                 install_pip() {
                   pkg="$1"
                   echo "pip install $pkg..."
-                  if ! timeout 240 python3 -m pip install --no-cache-dir "$pkg"; then
+                  if ! timeout 240 python3 -m pip install --no-cache-dir --break-system-packages "$pkg"; then
                     echo "WARN: pip install failed for $pkg (continuing)"
                   fi
                 }
