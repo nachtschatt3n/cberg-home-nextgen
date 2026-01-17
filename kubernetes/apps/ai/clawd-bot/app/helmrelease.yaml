@@ -147,13 +147,15 @@ spec:
               - |
                 set -euo pipefail
 
-                export PATH="/home/node/.clawdbot/bin:/home/node/.clawdbot/pkgroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-                export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
-                export GIT_EXEC_PATH="/home/node/.clawdbot/pkgroot/usr/libexec/git-core"
+                export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
+                export GIT_EXEC_PATH="/usr/lib/git-core"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
                 export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:${PYTHONPATH:-}"
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
+
+                rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR"
                 chown -R 1000:1000 "$STATE_DIR"
 
