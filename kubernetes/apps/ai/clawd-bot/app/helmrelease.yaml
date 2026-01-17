@@ -37,7 +37,7 @@ spec:
           install-clawdbot:
             image:
               repository: node
-              tag: 22-alpine
+              tag: 22-bookworm
             command:
               - sh
               - -c
@@ -53,24 +53,24 @@ spec:
                 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
                 echo "Installing git and build dependencies..."
-                apk add --no-cache python3 py3-pip make g++ ca-certificates curl jq ffmpeg
+                apt-get update
+                DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                  python3 python3-pip python3-venv python3-dev \
+                  build-essential pkg-config \
+                  git gh openssh-client ca-certificates curl jq ffmpeg \
+                  libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
+                rm -rf /var/lib/apt/lists/*
 
-                mkdir -p /home/node/.clawdbot/pkgroot/etc/apk /home/node/.clawdbot/bin
-                cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
-
-                echo "Installing runtime toolchain into /home/node/.clawdbot/pkgroot..."
-                apk --root /home/node/.clawdbot/pkgroot \
-                  --initdb \
-                  --keys-dir /etc/apk/keys \
-                  --repositories-file /etc/apk/repositories \
-                  --update-cache --no-cache add python3 py3-pip git github-cli openssh-client ca-certificates curl jq ffmpeg
-                ln -sf /home/node/.clawdbot/pkgroot/usr/bin/git /home/node/.clawdbot/bin/git
-                ln -sf /home/node/.clawdbot/pkgroot/usr/bin/gh /home/node/.clawdbot/bin/gh
+                mkdir -p /home/node/.clawdbot/bin
+                ln -sf /usr/bin/git /home/node/.clawdbot/bin/git
+                ln -sf /usr/bin/gh /home/node/.clawdbot/bin/gh
+                ln -sf /usr/bin/jq /home/node/.clawdbot/bin/jq
+                ln -sf /usr/bin/python3 /home/node/.clawdbot/bin/python3
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
-                export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
-                export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
-                export GIT_EXEC_PATH="/home/node/.clawdbot/pkgroot/usr/libexec/git-core"
+                export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
+                export GIT_EXEC_PATH="/usr/lib/git-core"
                 export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
                 rm -f "$HOME/.gitconfig"
                 git config --system --add url."https://github.com/".insteadOf "ssh://git@github.com/"
@@ -137,7 +137,7 @@ spec:
           app:
             image:
               repository: node
-              tag: 22-alpine
+              tag: 22-bookworm
               pullPolicy: IfNotPresent
 
             command:
