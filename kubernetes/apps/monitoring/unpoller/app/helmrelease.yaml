@@ -53,7 +53,7 @@ spec:
       http_listen = "0.0.0.0:9130"
       namespace = "unpoller"
       interval = "30s"
-      disable = true
+      disable = false
       buffer = 50
 
       [influxdb]
