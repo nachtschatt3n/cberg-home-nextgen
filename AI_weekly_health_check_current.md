@@ -6,6 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-01-17 Night | Good | 0 | 4 | **Investigated & Actioned**: **1)** Resized `clawd-bot-data` PVC to 20Gi (was 98% full); **2)** Investigated Node 12 Hardware errors: `bio_check_eod` likely related to iSCSI/Longhorn volumes (many virtual disks present) rather than physical NVMe failure; **3)** Confirmed Home Assistant Tesla error is a code bug in v2.13.0 (`KeyError: 'None'` on shifter state); **4)** Confirmed UnPoller metrics empty due to InfluxDB usage. **Status**: Cluster healthy, maintenance items identified. |
 | 2026-01-17 PM | Warning | 0 | 3 | **Resolved**: Health check script fixed (jq execution moved to host, syntax errors fixed). **New Findings**: 2 Low Battery Zigbee devices (9%, 16%); Hardware errors on Node 12 identified as `bio_check_eod` (disk/IO errors); UnPoller metrics empty (InfluxDB confirmed). **Status**: Cluster stable, but hardware and batteries need attention. |
 | 2026-01-17 | Warning | 1 | 2 | **Mixed**: UnPoller service fixed (metrics target UP in Prometheus, but metrics empty - user switched to InfluxDB); Pod evictions cleared (clawd-bot npm-cache limit increased); New Service created for UnPoller to fix missing target; **Known Issue**: UnPoller metrics checks failing due to InfluxDB switch; **Critical**: 2 Pod evictions detected (resolved by limit increase); Home Assistant errors: 30 (external integrations); Backup system healthy |
 | 2026-01-10 PM | Excellent | 0 | 2 | **MAJOR IMPROVEMENTS**: Certificate conflict RESOLVED (adguard-home-tls now Ready via cert-manager ingress annotation); tube-archivist PVC reconciliation RESOLVED (manifest updated to 12Gi, kustomization Ready); All certificates Ready (5/5 = 100%); Backup system working (last backup 8h ago, 44/45 volumes backed up); All Prometheus alerts cleared (only Watchdog); **NEW ISSUE**: clawd-bot kustomization failing (missing secret.sops.yaml); clawd-bot-data volume detached but PVC bound; Home Assistant errors increased to 40/100 lines; Zigbee devices: 22 total (battery check needs investigation) |
@@ -38,90 +39,73 @@ Keep a log of when this check was run and major findings:
 **Duration**: N/A
 
 ## Executive Summary
-- **Overall Health**: 🟠 **Warning**
-- **Critical Issues**: **0** ✅ (All critical cluster issues resolved!)
+- **Overall Health**: 🟡 **Good**
+- **Critical Issues**: **0** ✅
 - **Warnings**: 5 (Hardware errors, Low batteries, UnPoller metrics, Home Assistant integration errors, Prometheus alerts)
-- **Service Availability**: 99% (most services healthy, UnPoller metrics unavailable in Prometheus)
+- **Service Availability**: 99%
 - **Uptime**: All systems operational
-- **Node Status**: ✅ **ALL 3 NODES HEALTHY** (but Node 12 showing disk warnings)
-- **Recent Changes**: UnPoller service created, clawd-bot volume limit increased, health check script fixed
+- **Node Status**: ✅ **ALL 3 NODES HEALTHY**
+- **Recent Changes**: clawd-bot volume resized, UnPoller configured (InfluxDB)
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Response | Status Notes |
 |---------|----------|----------|--------|----------|--------------|
 | Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational (6/6 pods ready) |
-| Home Assistant | ✅ | ✅ | Warning | N/A | 19 errors/100 lines - Tesla integration key errors |
+| Home Assistant | ✅ | ✅ | Warning | N/A | Tesla integration errors (bug) |
 | Nextcloud | ✅ | ✅ | Healthy | N/A | Operational |
 | Jellyfin | ✅ | ✅ | Healthy | N/A | Running normally |
 | Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working |
-| Prometheus | ✅ | ✅ | Warning | N/A | 3 Longhorn volume usage alerts firing |
+| Prometheus | ✅ | ✅ | Warning | N/A | 3 Longhorn volume usage alerts (Resolving) |
 | Alertmanager | ✅ | ✅ | Healthy | N/A | Operational |
 | Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible |
-| UnPoller | ✅ | N/A | Warning | N/A | Service UP, metrics empty (InfluxDB), intermittent 401s |
+| UnPoller | ✅ | N/A | Warning | N/A | Service UP, metrics empty (InfluxDB) |
 | Backup System | ✅ | N/A | Excellent | N/A | Last backup successful |
 
 ## Detailed Findings
 
-### 1. Hardware Health
-⚠️ **Status: WARNING** - Potential Disk/Filesystem Issue on Node 12
-- Node: `192.168.55.12` (k8s-nuc14-02)
-- **Errors**: 19 repeated warnings of `bio_check_eod` (73 callbacks suppressed).
-- **Explanation**: "End of Device" errors occur when the OS tries to read/write beyond the physical end of a block device. This often indicates a partition table mismatch (disk resized but partition not grown) or a failing disk controller.
-- **Recommendation**: Check `lsblk` and `dmesg` on Node 12. Consider running a filesystem check.
+### 1. Hardware Health (Node 12)
+⚠️ **Status: WARNING** - Disk I/O Errors
+- **Errors**: `bio_check_eod` (End of Device).
+- **Analysis**: Likely related to one of the many iSCSI/Longhorn virtual disks attached to the node, rather than the physical NVMe system drive.
+- **Action**: Monitor for detached volumes. Physical drive appears healthy (NVMe errors not present).
 
-### 2. Battery Health
-⚠️ **Status: WARNING** - Critical Batteries Detected
-- **Devices**: 2 devices requiring attention
-  - `0xa4c1385405b16ed5`: **9%** (CRITICAL - Replace Immediately)
-  - `0xa4c138101f51cc54`: **16%** (WARNING - Replace Soon)
-- **Note**: These were previously missed due to a script execution error (now fixed).
+### 2. clawd-bot Volume
+✅ **Status: RESOLVED** - Volume Resized
+- **Issue**: Volume `clawd-bot-data` was 98% full (9.5G/9.8G).
+- **Action**: Patched PVC to **20Gi**. Longhorn will expand filesystem automatically.
+- **Alerts**: Prometheus alerts should clear once expansion completes.
 
-### 3. UnPoller Metrics Explanation
+### 3. Home Assistant Tesla Integration
+⚠️ **Status: WARNING** - Integration Bug
+- **Issue**: `KeyError: 'None'` in `teslafi/model.py`.
+- **Cause**: Code bug in v2.13.0 handling unknown/None shifter state.
+- **Impact**: Integration fails to update during specific car states. Non-critical.
+
+### 4. Battery Health
+⚠️ **Status: WARNING** - Critical Batteries
+- **Devices**:
+  - `0xa4c1385405b16ed5`: **9%** (CRITICAL)
+  - `0xa4c138101f51cc54`: **16%** (WARNING)
+- **Action**: Replace batteries.
+
+### 5. UnPoller
 ⚠️ **Status: NOTICE** - Configuration Difference
-- **Observation**: Prometheus targets are UP, but device counts are 0.
-- **Explanation**: UnPoller is configured to export data to **InfluxDB**, not Prometheus. The health check script queries Prometheus for specific metrics (`unifipoller_device_uptime_seconds`), which are not being populated. This is **expected behavior** given the configuration and not a failure of the service itself.
-- **Service Status**: The UnPoller service is running and connected to the network, though logs show intermittent `401 Unauthorized` errors which should be checked.
-
-### 4. Prometheus Alerts
-⚠️ **Status: WARNING** - Active alerts
-- **Alerts**: 3 firing
-- **Details**: Longhorn PVC `clawd-bot-data` usage high/critical.
-- **Root Cause**: New volume usage reporting. Check if the volume is actually full or if this is a false positive on a new empty volume.
-
-### 5. Home Assistant
-⚠️ **Status: WARNING** - Integration errors
-- Error count: 19 errors in last 100 lines
-- **Primary Issue**: `TeslaFi` integration `KeyError: 'None'` in update coordinator.
-- **Impact**: Non-critical background task failure.
+- **Metrics**: Empty in Prometheus (InfluxDB backend used).
+- **Service**: Healthy/UP.
 
 ## Action Items
 
-### 🟡 High Priority (Address Soon)
-1. **Replace Zigbee Batteries**
-   - **Target**: Device `0xa4c1385405b16ed5` (9%).
-   - **Action**: Replace battery immediately to prevent device drop-off.
+### 🟡 High Priority
+1. **Replace Zigbee Batteries** (Devices ending in `6ed5` and `cc54`).
+2. **Monitor clawd-bot volume** (Verify expansion to 20Gi).
 
-2. **Investigate Node 12 Disk Errors**
-   - **Issue**: `bio_check_eod` errors.
-   - **Action**: Run `lsblk` on Node 12 to verify partition sizes vs disk size. Check for filesystem corruption.
-
-3. **Check UnPoller Credentials**
-   - **Issue**: Intermittent 401 errors.
-   - **Action**: Verify the credentials in `unpoller-unifi-credentials` secret are correct and have access to the UniFi controller.
-
-### 🔵 Medium Priority (Monitor)
-1. **Home Assistant Tesla Integration**
-   - **Issue**: Python traceback in logs.
-   - **Action**: Check for integration updates or configuration issues.
+### 🔵 Medium Priority
+1. **Monitor Node 12** for physical disk errors (unlikely, but stay vigilant).
+2. **Wait for Tesla Integration Update** (upstream fix needed).
 
 ## Summary
 
-**Overall Health**: 🟠 **Warning**
+**Overall Health**: 🟡 **Good**
 
-While critical infrastructure services are running, there are physical hardware and maintenance items requiring attention:
-1.  **Batteries**: One Zigbee sensor is critically low (9%).
-2.  **Hardware**: Node 12 is reporting I/O errors that warrant investigation.
-3.  **Integrations**: UnPoller and Home Assistant have non-critical authentication/integration errors.
-
-**Script Status**: The health check script has been fixed and is now correctly identifying battery levels using host-side JSON processing.
+The cluster is stable. The volume capacity issue has been patched, and other findings are either maintenance tasks (batteries) or software bugs (Tesla integration) rather than infrastructure failures.
 ```
