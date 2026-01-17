@@ -72,16 +72,15 @@ spec:
                 GH_TMP="$(mktemp -d)"
                 GH_URL_PRIMARY="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
                 GH_URL_MIRROR="https://mirror.gh-cli.com/gh_${GH_VERSION}_linux_amd64.tar.gz"
-                set +e
+                GH_DOWNLOADED=0
                 for url in "$GH_URL_PRIMARY" "$GH_URL_MIRROR"; do
-                  curl -fsSL "$url" -o "${GH_TMP}/gh.tar.gz"
-                  if [ $? -eq 0 ]; then
+                  if curl -fsSL "$url" -o "${GH_TMP}/gh.tar.gz"; then
+                    GH_DOWNLOADED=1
                     break
                   fi
                   echo "WARN: failed to download gh from ${url}" >&2
                 done
-                set -e
-                if [ ! -s "${GH_TMP}/gh.tar.gz" ]; then
+                if [ "${GH_DOWNLOADED}" -ne 1 ]; then
                   echo "Failed to download gh CLI" >&2
                   exit 1
                 fi
