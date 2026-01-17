@@ -68,36 +68,22 @@ spec:
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
 
                 echo "Installing gh CLI..."
-                GH_VERSION="2.56.0"
                 GH_TMP="/tmp/gh-cli"
                 rm -rf "${GH_TMP}"
                 mkdir -p "${GH_TMP}"
-                GH_URLS=(
-                  "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
-                  "https://mirror.gh-cli.com/gh_${GH_VERSION}_linux_amd64.tar.gz"
-                )
-                GH_DOWNLOADED=0
-                for url in "${GH_URLS[@]}"; do
-                  echo "Downloading gh from ${url}..."
-                  if curl -fL --retry 3 --retry-all-errors "$url" -o "${GH_TMP}/gh.tar.gz"; then
-                    GH_DOWNLOADED=1
-                    break
-                  fi
-                  echo "WARN: failed to download gh from ${url}" >&2
-                done
-                if [ "${GH_DOWNLOADED}" -ne 1 ]; then
-                  echo "Failed to download gh CLI" >&2
+                if apt-get download gh; then
+                  dpkg -x gh_*.deb "${GH_TMP}"
+                else
+                  echo "Failed to download gh via apt" >&2
                   exit 1
                 fi
-                tar -xzf "${GH_TMP}/gh.tar.gz" -C "${GH_TMP}"
-                GH_EXTRACT_DIR="$(find "${GH_TMP}" -maxdepth 1 -type d -name "gh_*_linux_amd64" | head -n 1)"
-                if [ -z "${GH_EXTRACT_DIR}" ]; then
+                if [ ! -x "${GH_TMP}/usr/bin/gh" ]; then
                   echo "Failed to unpack gh CLI" >&2
                   exit 1
                 fi
-                cp "${GH_EXTRACT_DIR}/bin/gh" "${BIN_DIR}/gh"
+                cp "${GH_TMP}/usr/bin/gh" "${BIN_DIR}/gh"
                 chmod +x "${BIN_DIR}/gh"
-                rm -rf "${GH_TMP}"
+                rm -rf "${GH_TMP}" gh_*.deb
 
                 echo "Installing jq..."
                 curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "${BIN_DIR}/jq"
