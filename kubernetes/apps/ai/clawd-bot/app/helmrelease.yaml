@@ -42,6 +42,13 @@ spec:
               - sh
               - -c
               - |
+                set -euo pipefail
+
+                export HOME="/home/node/.clawdbot"
+                mkdir -p "$HOME"
+                export NPM_CONFIG_CACHE="/home/node/.npm"
+                mkdir -p "$NPM_CONFIG_CACHE"
+
                 echo "Installing git and build dependencies..."
                 apk add --no-cache python3 make g++
 
@@ -61,6 +68,9 @@ spec:
                 export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
                 export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
                 export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
+                git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+                git config --global url."https://github.com/".insteadOf "git@github.com:"
+                git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"
                 npm install -g --prefix /home/node/.clawdbot \
                   clawdbot@latest \
                   @openai/codex \
