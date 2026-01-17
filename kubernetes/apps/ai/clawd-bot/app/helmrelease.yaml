@@ -50,7 +50,7 @@ spec:
                 mkdir -p "$NPM_CONFIG_CACHE"
 
                 echo "Installing git and build dependencies..."
-                apk add --no-cache python3 make g++ ca-certificates
+                apk add --no-cache python3 make g++ ca-certificates curl jq ffmpeg
 
                 mkdir -p /home/node/.clawdbot/pkgroot/etc/apk /home/node/.clawdbot/bin
                 cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
@@ -87,12 +87,38 @@ spec:
                 git config --global --add url."https://github.com/".insteadOf "git://github.com/"
                 git config --global --add url."https://github.com/".insteadOf "git://github.com"
                 git config -l --show-origin | grep url || true
-                npm install -g --prefix /home/node/.clawdbot \
-                  clawdbot@latest \
-                  @openai/codex \
-                  @google/gemini-cli \
-                  claude \
-                  @mariozechner/pi-coding-agent
+
+                install_npm() {
+                  pkg="$1"
+                  echo "npm install -g $pkg..."
+                  if ! npm install -g --prefix /home/node/.clawdbot "$pkg"; then
+                    echo "WARN: npm install failed for $pkg (continuing)"
+                  fi
+                }
+                install_pip() {
+                  pkg="$1"
+                  echo "pip install $pkg..."
+                  if ! timeout 240 python3 -m pip install --no-cache-dir "$pkg"; then
+                    echo "WARN: pip install failed for $pkg (continuing)"
+                  fi
+                }
+
+                install_npm clawdbot@latest
+                install_npm @openai/codex
+                install_npm @google/gemini-cli
+                install_npm claude
+                install_npm @mariozechner/pi-coding-agent
+                install_npm clawdhub
+                install_npm mcporter
+                install_npm goplaces
+                install_npm gog
+                install_npm summarize
+                install_npm sag
+
+                export PIP_ROOT_USER_ACTION=ignore
+                install_pip obsidian-cli
+                install_pip himalaya
+                install_pip openai-whisper
 
                 echo "Creating symlink..."
                 ln -sf /home/node/.clawdbot/bin/clawdbot /home/node/.clawdbot/clawdbot
