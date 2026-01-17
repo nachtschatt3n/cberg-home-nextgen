@@ -58,15 +58,41 @@ spec:
                   bash \
                   python3 python3-pip python3-venv python3-dev \
                   build-essential pkg-config \
-                  git gh openssh-client ca-certificates curl jq ffmpeg \
+                  git openssh-client ca-certificates curl \
                   libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
                 rm -rf /var/lib/apt/lists/*
 
-                mkdir -p /home/node/.clawdbot/bin
-                ln -sf /usr/bin/git /home/node/.clawdbot/bin/git
-                ln -sf /usr/bin/gh /home/node/.clawdbot/bin/gh
-                ln -sf /usr/bin/jq /home/node/.clawdbot/bin/jq
-                ln -sf /usr/bin/python3 /home/node/.clawdbot/bin/python3
+                BIN_DIR="/home/node/.clawdbot/bin"
+                mkdir -p "$BIN_DIR"
+                ln -sf /usr/bin/git "$BIN_DIR/git"
+                ln -sf /usr/bin/python3 "$BIN_DIR/python3"
+
+                echo "Installing gh CLI..."
+                GH_VERSION="2.56.0"
+                GH_TMP="$(mktemp -d)"
+                curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o "${GH_TMP}/gh.tar.gz"
+                tar -xzf "${GH_TMP}/gh.tar.gz" -C "${GH_TMP}"
+                cp "${GH_TMP}/gh_${GH_VERSION}_linux_amd64/bin/gh" "${BIN_DIR}/gh"
+                chmod +x "${BIN_DIR}/gh"
+                rm -rf "${GH_TMP}"
+
+                echo "Installing jq..."
+                curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "${BIN_DIR}/jq"
+                chmod +x "${BIN_DIR}/jq"
+
+                echo "Installing ffmpeg static build..."
+                FFMPEG_TMP="$(mktemp -d)"
+                curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o "${FFMPEG_TMP}/ffmpeg.tar.xz"
+                tar -xf "${FFMPEG_TMP}/ffmpeg.tar.xz" -C "${FFMPEG_TMP}"
+                FFMPEG_DIR="$(find "${FFMPEG_TMP}" -maxdepth 1 -type d -name 'ffmpeg-*static' | head -n 1)"
+                if [ -z "${FFMPEG_DIR}" ]; then
+                  echo "Failed to unpack ffmpeg" >&2
+                  exit 1
+                fi
+                cp "${FFMPEG_DIR}/ffmpeg" "${BIN_DIR}/ffmpeg"
+                cp "${FFMPEG_DIR}/ffprobe" "${BIN_DIR}/ffprobe"
+                chmod +x "${BIN_DIR}/ffmpeg" "${BIN_DIR}/ffprobe"
+                rm -rf "${FFMPEG_TMP}"
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
