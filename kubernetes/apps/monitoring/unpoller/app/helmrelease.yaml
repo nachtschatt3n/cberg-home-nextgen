@@ -53,7 +53,7 @@ spec:
       http_listen = "0.0.0.0:9130"
       namespace = "unpoller"
       interval = "30s"
-      disable = false
+      disable = true
       buffer = 50
 
       [influxdb]
@@ -75,7 +75,7 @@ spec:
 
     # Prometheus integration
     podMonitor:
-      enabled: true
+      enabled: false
       interval: 30s
       labels:
         release: kube-prometheus-stack
