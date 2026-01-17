@@ -107,6 +107,12 @@ spec:
                 chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
                 rm -rf "$FFMPEG_TMP"
 
+                echo "Linking tools into /usr/local/bin for interactive shells..."
+                for tool in "$BIN_DIR"/*; do
+                  [ -f "$tool" ] || continue
+                  ln -sf "$tool" "/usr/local/bin/$(basename "$tool")"
+                done
+
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
