@@ -5,6 +5,7 @@ namespace: monitoring
 resources:
   - helmrelease.yaml
   - secret.sops.yaml
+  - service.yaml
   - servicemonitor.yaml
   - prometheusrule.yaml
   - dashboards/dashboard-network-sites.yaml
