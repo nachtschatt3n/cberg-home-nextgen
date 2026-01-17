@@ -71,14 +71,14 @@ spec:
                 set -euo pipefail
 
                 export PATH="/home/node/.clawdbot/bin:$PATH"
-                export CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
-                export STATE_DIR="$(dirname "${CONFIG_PATH}")"
-                mkdir -p "${STATE_DIR}"
-                chown -R 1000:1000 "${STATE_DIR}"
+                CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
+                STATE_DIR="$(dirname "$CONFIG_PATH")"
+                mkdir -p "$STATE_DIR"
+                chown -R 1000:1000 "$STATE_DIR"
 
-                if [ ! -f "${CONFIG_PATH}" ]; then
+                if [ ! -f "$CONFIG_PATH" ]; then
                   echo "Configuration not found. Bootstrapping minimal gateway config..."
-                  cat > "${CONFIG_PATH}" <<'CFG'
+                  cat > "$CONFIG_PATH" <<'CFG'
                   {
                     "gateway": {
                       "mode": "local",
@@ -94,10 +94,10 @@ spec:
                     }
                   }
                   CFG
-                  chown 1000:1000 "${CONFIG_PATH}"
+                  chown 1000:1000 "$CONFIG_PATH"
                 fi
 
-                if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
+                if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
                   node - <<'EOF'
                     const fs = require('fs');
                     const path = process.env.CONFIG_PATH || '/home/node/.clawdbot/clawdbot.json';
