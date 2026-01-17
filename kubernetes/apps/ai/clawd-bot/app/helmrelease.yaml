@@ -78,29 +78,28 @@ spec:
 
                 if [ ! -f "$CONFIG_PATH" ]; then
                   echo "Configuration not found. Bootstrapping minimal gateway config..."
-                  cat > "$CONFIG_PATH" <<'CFG'
-                  {
-                    "gateway": {
-                      "mode": "local",
-                      "bind": "lan",
-                      "port": 18789,
-                      "auth": {
-                        "mode": "token",
-                        "token": ""
-                      }
-                    },
-                    "agent": {
-                      "workspace": "/home/node/clawd"
-                    }
-                  }
-                  CFG
+                  printf '%s\n' \
+                    '{' \
+                    '  "gateway": {' \
+                    '    "mode": "local",' \
+                    '    "bind": "lan",' \
+                    '    "port": 18789,' \
+                    '    "auth": {' \
+                    '      "mode": "token",' \
+                    '      "token": ""' \
+                    '    }' \
+                    '  },' \
+                    '  "agent": {' \
+                    '    "workspace": "/home/node/clawd"' \
+                    '  }' \
+                    '}' > "$CONFIG_PATH"
                   chown 1000:1000 "$CONFIG_PATH"
                 fi
 
                 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
-                  node - <<'EOF'
+                  node -e "
                     const fs = require('fs');
-                    const path = process.env.CONFIG_PATH || '/home/node/.clawdbot/clawdbot.json';
+                    const path = '${CONFIG_PATH}';
                     const token = process.env.CLAWDBOT_GATEWAY_TOKEN;
                     if (!token || !fs.existsSync(path)) process.exit(0);
                     const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -109,7 +108,7 @@ spec:
                     cfg.gateway.auth.mode = 'token';
                     cfg.gateway.auth.token = token;
                     fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
-                  EOF
+                  "
                 fi
 
                 echo "Starting Clawd Bot Gateway..."
