@@ -50,7 +50,7 @@ spec:
                 mkdir -p "$NPM_CONFIG_CACHE"
 
                 echo "Installing git and build dependencies..."
-                apk add --no-cache python3 make g++
+                apk add --no-cache python3 make g++ ca-certificates
 
                 mkdir -p /home/node/.clawdbot/pkgroot/etc/apk /home/node/.clawdbot/bin
                 cp /etc/apk/repositories /home/node/.clawdbot/pkgroot/etc/apk/repositories
@@ -60,13 +60,14 @@ spec:
                   --initdb \
                   --keys-dir /etc/apk/keys \
                   --repositories-file /etc/apk/repositories \
-                  --update-cache --no-cache add git github-cli openssh-client
+                  --update-cache --no-cache add git github-cli openssh-client ca-certificates
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/git /home/node/.clawdbot/bin/git
                 ln -sf /home/node/.clawdbot/pkgroot/usr/bin/gh /home/node/.clawdbot/bin/gh
 
                 echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
                 export PATH="/home/node/.clawdbot/pkgroot/usr/bin:$PATH"
                 export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
+                export GIT_EXEC_PATH="/home/node/.clawdbot/pkgroot/usr/libexec/git-core"
                 export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
                 rm -f "$HOME/.gitconfig"
                 git config --system --add url."https://github.com/".insteadOf "ssh://git@github.com/"
@@ -118,6 +119,7 @@ spec:
 
                 export PATH="/home/node/.clawdbot/bin:/home/node/.clawdbot/pkgroot/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 export LD_LIBRARY_PATH="/home/node/.clawdbot/pkgroot/lib:/home/node/.clawdbot/pkgroot/usr/lib"
+                export GIT_EXEC_PATH="/home/node/.clawdbot/pkgroot/usr/libexec/git-core"
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
                 mkdir -p "$STATE_DIR"
