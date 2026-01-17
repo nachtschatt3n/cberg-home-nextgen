@@ -85,6 +85,7 @@ spec:
                 chmod +x "$BIN_DIR/gh"
                 rm -rf /tmp/gh-cli gh_*.deb
                 rm -rf /var/lib/apt/lists/*
+                cd "$HOME"
 
                 echo "Installing jq..."
                 curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$BIN_DIR/jq"
