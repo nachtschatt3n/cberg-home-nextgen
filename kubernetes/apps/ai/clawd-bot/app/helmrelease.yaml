@@ -27,6 +27,8 @@ spec:
     controllers:
       clawd-bot:
         pod:
+          annotations:
+            secret.reloader.stakater.com/reload: clawd-bot-secret
           securityContext:
             fsGroup: 1000
             fsGroupChangePolicy: OnRootMismatch
@@ -66,19 +68,39 @@ spec:
               - sh
               - -c
               - |
+                set -euo pipefail
+
                 export PATH="/home/node/.clawdbot/bin:$PATH"
-                if [ ! -f /home/node/.clawdbot/clawdbot.json ]; then
+                export CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
+
+                if [ ! -f "${CONFIG_PATH}" ]; then
                   echo "Configuration not found. Please run onboarding wizard:"
                   echo "  kubectl exec -it -n ai deployment/clawd-bot -- /bin/sh"
                   echo "  Then run: /home/node/.clawdbot/bin/clawdbot onboard"
                   echo ""
                   echo "Sleeping indefinitely until configured..."
                   sleep infinity
-                else
-                  echo "Starting Clawd Bot Gateway..."
-                  cd /home/node/clawd
-                  exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
                 fi
+
+                if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
+                  node - <<'EOF'
+                    const fs = require('fs');
+                    const path = process.env.CONFIG_PATH || '/home/node/.clawdbot/clawdbot.json';
+                    const token = process.env.CLAWDBOT_GATEWAY_TOKEN;
+                    if (!token || !fs.existsSync(path)) process.exit(0);
+                    const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+                    cfg.gateway = cfg.gateway || {};
+                    cfg.gateway.auth = cfg.gateway.auth || {};
+                    cfg.gateway.auth.mode = 'token';
+                    cfg.gateway.auth.token = token;
+                    fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
+                  EOF
+                fi
+
+                echo "Starting Clawd Bot Gateway..."
+                mkdir -p /home/node/clawd
+                cd /home/node/clawd
+                exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
 
             env:
               # Node configuration
@@ -88,6 +110,9 @@ spec:
               # Gateway port
               - name: GATEWAY_PORT
                 value: "18789"
+            envFrom:
+              - secretRef:
+                  name: clawd-bot-secret
 
             probes:
               liveness:
