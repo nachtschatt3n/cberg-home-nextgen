@@ -70,7 +70,18 @@ spec:
                 echo "Installing gh CLI..."
                 GH_VERSION="2.56.0"
                 GH_TMP="$(mktemp -d)"
-                curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o "${GH_TMP}/gh.tar.gz"
+                GH_URL_PRIMARY="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+                GH_URL_MIRROR="https://mirror.gh-cli.com/gh_${GH_VERSION}_linux_amd64.tar.gz"
+                for url in "$GH_URL_PRIMARY" "$GH_URL_MIRROR"; do
+                  if curl -fsSL "$url" -o "${GH_TMP}/gh.tar.gz"; then
+                    break
+                  fi
+                  echo "WARN: failed to download gh from ${url}" >&2
+                done
+                if [ ! -s "${GH_TMP}/gh.tar.gz" ]; then
+                  echo "Failed to download gh CLI" >&2
+                  exit 1
+                fi
                 tar -xzf "${GH_TMP}/gh.tar.gz" -C "${GH_TMP}"
                 cp "${GH_TMP}/gh_${GH_VERSION}_linux_amd64/bin/gh" "${BIN_DIR}/gh"
                 chmod +x "${BIN_DIR}/gh"
