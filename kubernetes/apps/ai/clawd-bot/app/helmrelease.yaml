@@ -49,11 +49,7 @@ spec:
                 export NPM_CONFIG_CACHE="/home/node/.npm"
                 mkdir -p "$NPM_CONFIG_CACHE"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
-                if [ -n "$PYTHONPATH" ]; then
-                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:$PYTHONPATH"
-                else
-                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
-                fi
+                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
                 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
                 echo "Installing git and build dependencies..."
@@ -190,11 +186,7 @@ spec:
                 export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
                 export GIT_EXEC_PATH="/usr/lib/git-core"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
-                if [ -n "$PYTHONPATH" ]; then
-                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages:$PYTHONPATH"
-                else
-                  export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
-                fi
+                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
 
