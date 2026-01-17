@@ -3,6 +3,41 @@
 ## Purpose
 This document provides a systematic, AI-executable health check plan for a home lab Kubernetes cluster. The AI should execute checks in numerical order, collecting results and providing a comprehensive report.
 
+## Automated Health Check Script
+
+**⚡ Quick Start**: An automated health check script is available that executes all 33 sections:
+
+```bash
+# Run the automated health check
+./scripts/health-check.sh
+
+# Script generates three output files:
+# - Full report: /tmp/health-check-YYYYMMDD-HHMMSS.txt
+# - Summary: /tmp/health-check-summary-YYYYMMDD-HHMMSS.txt
+# - Issues only: /tmp/health-check-issues-YYYYMMDD-HHMMSS.txt
+```
+
+**Features:**
+- ✅ Executes all 33 health check sections automatically
+- ✅ Categorizes issues by severity (Critical, Major, Minor)
+- ✅ Generates comprehensive reports with recommendations
+- ✅ Includes Alertmanager alerts, Elasticsearch logs, and Home Assistant integration analysis
+- ✅ Queries UnPoller metrics via Prometheus for network hardware health
+- ✅ Safe execution with error handling and progress tracking
+
+**When to use the script:**
+- Weekly health checks
+- Post-deployment verification
+- Troubleshooting cluster issues
+- Generating health status reports
+
+**When to use manual execution:**
+- Deep-dive investigations
+- Specific component analysis
+- Custom checks not in the script
+
+---
+
 ## AI Execution Plan
 
 ### Phase 1: Preparation (Run First)
@@ -16,8 +51,8 @@ Execute in order, collecting metrics and identifying issues.
 ### Phase 3: Application & Service Checks (Sections 11-20)
 Execute systematically, testing each service's health.
 
-### Phase 4: Advanced Monitoring (Sections 21-30)
-Execute remaining checks, focusing on automation and security.
+### Phase 4: Advanced Monitoring (Sections 21-33)
+Execute remaining checks, focusing on automation, security, and home automation health.
 
 ### Phase 5: Report Generation
 Compile all findings into the standardized report format.
@@ -42,7 +77,7 @@ kubectl get nodes
 ### Execution Workflow
 1. **Start with Section 1**, execute all commands in order
 2. **Record results** for each check (✅ OK, ⚠️ Warning, ❌ Critical)
-3. **Continue sequentially** through all 30 sections
+3. **Continue sequentially** through all 33 sections
 4. **Collect metrics** and identify issues as you go
 5. **Generate final report** using the standardized format
 
