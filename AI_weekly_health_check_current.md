@@ -6,6 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-01-17 | Warning | 1 | 2 | **Mixed**: UnPoller service fixed (metrics target UP in Prometheus, but metrics empty - user switched to InfluxDB); Pod evictions cleared (clawd-bot npm-cache limit increased); New Service created for UnPoller to fix missing target; **Known Issue**: UnPoller metrics checks failing due to InfluxDB switch; **Critical**: 2 Pod evictions detected (resolved by limit increase); Home Assistant errors: 30 (external integrations); Backup system healthy |
 | 2026-01-10 PM | Excellent | 0 | 2 | **MAJOR IMPROVEMENTS**: Certificate conflict RESOLVED (adguard-home-tls now Ready via cert-manager ingress annotation); tube-archivist PVC reconciliation RESOLVED (manifest updated to 12Gi, kustomization Ready); All certificates Ready (5/5 = 100%); Backup system working (last backup 8h ago, 44/45 volumes backed up); All Prometheus alerts cleared (only Watchdog); **NEW ISSUE**: clawd-bot kustomization failing (missing secret.sops.yaml); clawd-bot-data volume detached but PVC bound; Home Assistant errors increased to 40/100 lines; Zigbee devices: 22 total (battery check needs investigation) |
 | 2026-01-10 AM | Good | 1 | 0 | **EXCELLENT**: All Prometheus alerts cleared (0 firing); Home Assistant errors DOWN to 1 (from 2!); Backup system working (last backup 6h47m ago, completed successfully); All 3 nodes healthy; GitOps 59/60 reconciled (1 issue: tube-archivist PVC - manifest still shows 10Gi, needs update to 12Gi); Certificate conflict: adguard-home-tls STILL EXISTS (duplicate certificate not resolved); **NEW**: 1 unhealthy volume (clawd-bot-data: detached, unknown robustness - new volume created since yesterday); **CRITICAL**: Zigbee batteries still need replacement (12%, 18% - unchanged) |
 | 2026-01-09 PM | Good | 1 | 0 | **EXCELLENT**: All Prometheus alerts cleared (0 firing); Home Assistant errors DOWN to 2 (from 11!); external-dns stable (813 restarts historical, now running fine); All 44 volumes healthy; All 3 nodes healthy; GitOps 59/60 reconciled (1 issue: tube-archivist PVC - manifest shows 10Gi but PVC is 12Gi, needs manifest update); Certificate conflict: adguard-home-tls (Helm chart creating duplicate certificate, needs disabling); Backup system: **WORKING** - Longhorn RecurringJob running successfully (last backup 17h ago, job completed); **CRITICAL**: Zigbee batteries still need replacement (12%, 18%) |
@@ -30,461 +31,87 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-01-10 12:48 UTC
+**Date**: 2026-01-17 19:18 CET
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
-**Duration**: ~30m
+**Duration**: N/A
 
 ## Executive Summary
-- **Overall Health**: 🟢 **Excellent**
-- **Critical Issues**: **0** ✅ (All previously identified issues resolved!)
-- **Warnings**: 2 (clawd-bot kustomization failing, clawd-bot-data volume detached)
-- **Service Availability**: 100% (all services healthy and operational)
+- **Overall Health**: 🟠 **Warning**
+- **Critical Issues**: **1** (Pod evictions detected - resolved by limit increase)
+- **Warnings**: 4 (UnPoller metrics missing, UnPoller errors, Home Assistant integration errors, High warning event count)
+- **Service Availability**: 99% (most services healthy, UnPoller metrics unavailable in Prometheus)
 - **Uptime**: All systems operational
-- **Node Status**: ✅ **ALL 3 NODES HEALTHY** - All schedulable and operational
-- **Recent Changes**: Certificate conflict RESOLVED, tube-archivist PVC reconciliation RESOLVED, clawd-bot deployment in progress
+- **Node Status**: ✅ **ALL 3 NODES HEALTHY**
+- **Recent Changes**: UnPoller service created, clawd-bot volume limit increased, git-test pod removed
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Response | Status Notes |
 |---------|----------|----------|--------|----------|--------------|
 | Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational (6/6 pods ready) |
-| Home Assistant | ✅ | ✅ | Warning | N/A | 40 errors/100 lines (increased from 1) - needs investigation |
+| Home Assistant | ✅ | ✅ | Warning | N/A | 30 errors/100 lines - external integrations failing |
 | Nextcloud | ✅ | ✅ | Healthy | N/A | Operational |
 | Jellyfin | ✅ | ✅ | Healthy | N/A | Running normally |
-| Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working (1/1 pod ready) |
-| Prometheus | ✅ | ✅ | Excellent | N/A | **0 firing alerts** (excluding Watchdog) - **ALL CLEARED!** |
+| Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working |
+| Prometheus | ✅ | ✅ | Healthy | N/A | 0 firing alerts |
 | Alertmanager | ✅ | ✅ | Healthy | N/A | Operational |
-| Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible (3/3 manager pods ready) |
-| phpMyAdmin | ✅ | ✅ | Healthy | N/A | Database admin working |
-| Uptime Kuma | ✅ | ✅ | Healthy | N/A | Monitoring dashboard active |
-| Tube Archivist | ✅ | ✅ | Excellent | N/A | **RESOLVED** - PVC reconciliation working, manifest matches (12Gi) |
-| PostgreSQL | ✅ | N/A | Healthy | N/A | Running normally |
-| MariaDB | ✅ | N/A | Healthy | N/A | Running normally |
-| Zigbee2MQTT | ✅ | N/A | Healthy | N/A | 22 devices total (battery check needs investigation) |
-| ESPHome | ✅ | N/A | Healthy | N/A | Running |
-| Node-RED | ✅ | N/A | Healthy | N/A | Automation flows active |
-| Scrypted | ✅ | N/A | Healthy | N/A | Camera integration working |
-| JDownloader | ✅ | N/A | Healthy | N/A | Download manager active |
-| Mosquitto | ✅ | N/A | Healthy | N/A | MQTT broker operational |
-| Music Assistant | ✅ | ✅ | Healthy | N/A | Media management working |
-| Frigate | ✅ | N/A | Healthy | N/A | NVR operational, high CPU/memory usage |
-| Cloudflare Tunnel | ✅ | ✅ | Healthy | N/A | External access working |
-| external-dns | ✅ | N/A | Healthy | N/A | **STABLE!** Running fine (historical restarts, now stable) |
-| Penpot | ✅ | ✅ | Healthy | N/A | DNS record created, accessible via https |
-| Backup System | ✅ | N/A | Excellent | N/A | **WORKING!** Last backup 8h ago (44/45 volumes backed up) |
-| AdGuard Home | ✅ | ✅ | Excellent | N/A | **RESOLVED** - Certificate Ready via cert-manager ingress annotation |
+| Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible |
+| UnPoller | ✅ | N/A | Warning | N/A | Service created, target UP, but metrics empty (User switched to InfluxDB) |
+| Backup System | ✅ | N/A | Excellent | N/A | Last backup successful |
 
 ## Detailed Findings
 
-### 1. Cluster Events & Logs
-✅ **Status: EXCELLENT** - Clean event log
-- Warning events: **2** in last 7 days (clawd-bot kustomization build failures)
-- Recent events: Mostly Normal (Flux reconciliation)
-- OOM kills: **0** (none in recent history)
-- Pod evictions: **0** (none in recent history)
-- **Analysis**: Cluster is very stable, only minor kustomization build issue
+### 1. UnPoller Status
+⚠️ **Status: WARNING** - Metrics configuration change
+- Service created: `unpoller` (ClusterIP, port 9130)
+- Prometheus Target: **UP** (10.69.1.36:9130)
+- Metrics: **Empty** in Prometheus
+- **Root Cause**: User switched UnPoller to InfluxDB backend. Prometheus scraping is enabled but returning no device metrics.
+- **Action**: Acknowledged configuration change.
 
-### 2. Jobs & CronJobs
-✅ **Status: EXCELLENT** - Backup system working correctly
-- Active CronJobs: **3**
-  - tube-archivist-nfo-sync (hourly) - Running ✅
-  - authentik-channels-cleanup (every 6h) - Running ✅
-  - daily-backup-all-volumes (daily at 03:00 UTC) - Running ✅
-- **Backup System**: ✅ **WORKING** - Longhorn RecurringJob
-  - RecurringJob: `daily-backup-all-volumes` (daily at 03:00 UTC)
-  - **Last backup**: **8h ago** (job `daily-backup-all-volumes-29466900` completed successfully)
-  - Volumes backed up: **44/45** (97.8%)
-  - Retention: 7 days
-  - Concurrency: 2 volumes at a time
-- Failed jobs: **0** in last 7 days
-- **Analysis**: Backup system is working correctly via Longhorn RecurringJob. One volume (clawd-bot-data) not backed up yet (detached state).
+### 2. Pod Evictions
+🔴 **Status: CRITICAL (Resolved)** - Evictions detected
+- Affected Pods: `clawd-bot`
+- Reason: `npm-cache` volume limit exceeded (500Mi)
+- **Resolution**: Volume limit increased to 2Gi in HelmRelease.
+- Current Status: Eviction events visible in history, but new pods running correctly.
 
-### 3. Certificates
-✅ **Status: EXCELLENT** - **ALL CERTIFICATES READY!**
-- Total certificates: **5**
-- Ready: **5/5** (100%) ✅
-- **RESOLVED**: Certificate conflict fixed!
-  - `adguard-home-tls`: ✅ **Ready** (created by cert-manager via ingress annotation)
-  - Certificate created: 2026-01-10T10:26:48Z (2h22m ago)
-  - Issuer: letsencrypt-production
-  - Secret: adguard-home-tls
-  - DNS Names: adguard.secret-domain
-  - **Root cause resolved**: Using cert-manager via Helm chart ingress annotation (cert-manager.io/cluster-issuer)
-  - **Status**: **RESOLVED** - Certificate working correctly
-- **Expiring soon** (<30 days): None currently
-- Issues: **None** - All certificates healthy
+### 3. Home Assistant
+⚠️ **Status: WARNING** - Integration errors
+- Error count: 30 errors in last 100 lines
+- Affected Integrations: Bermuda (BLE), Deebot, Shelly
+- **Analysis**: External connectivity or device issues causing log noise. Core functionality appears intact.
 
-### 4. DaemonSets
-✅ **Status: EXCELLENT** - All DaemonSets healthy
-- Total DaemonSets: **10**
-- Healthy: **10/10** (100%)
-- Key components:
-  - cilium: 3/3 (network fabric)
-  - longhorn-manager: 3/3 (storage)
-  - spegel: 3/3 (image distribution)
-  - intel-gpu-plugin: 3/3 (GPU resources)
-  - kube-prometheus-stack-prometheus-node-exporter: 3/3
-- Desired/Current/Ready: All matched perfectly
-- Issues: None
-
-### 5. Helm Deployments
-✅ **Status: EXCELLENT** - All releases reconciled
-- HelmReleases: **56** total
-- Failed releases: **0**
-- Ready: **56/56** (100%)
-- Flux kustomizations: **59/60** reconciled (1 issue: clawd-bot)
-- Recent upgrades: All successful
-- Key versions:
-  - Authentik: 2025.10.2
-  - Longhorn: 1.10.1
-  - Cilium: 1.17.1
-  - Prometheus Stack: 68.4.4
-  - Home Assistant: app-template 3.7.1
-- Issues: 1 kustomization reconciliation failure (clawd-bot - missing secret.sops.yaml)
-
-### 6. Deployments & StatefulSets
-✅ **Status: EXCELLENT** - All workloads at desired replicas
-- Deployments: All healthy (100% at desired replicas)
-- StatefulSets: **12** total
-  - 11/12 healthy at desired replicas
-  - paperless-ngx-redis-replicas: 0/0 (intentionally scaled down)
-- Issues: None
-
-### 7. Pods Health
-✅ **Status: EXCELLENT** - All pods healthy
-- Total pods: **163**
-- Running: **155** (95.1%)
-- Succeeded: **8** (4.9% - completed jobs)
-- Pending: **0**
-- Failed: **0**
-- CrashLoopBackOff: **0** - **EXCELLENT!**
-- **High restart counts**:
-  - external-dns: Historical restarts (now stable)
-- **Analysis**: All pods healthy, no issues detected
-
-### 8. Prometheus & Monitoring
-✅ **Status: EXCELLENT** - **ALL ALERTS CLEARED!**
-- Prometheus: **1/1** pod running (healthy)
-- Alertmanager: **1/1** pod running
-- **Active alerts**: **0** firing (excluding Watchdog/InfoInhibitor) - **PERFECT!**
-  - ✅ All previous alerts cleared
-- Metrics collection: Active across all targets
-- Prometheus health endpoint: ✅ Healthy
-- Issues: None - monitoring system perfect
-
-### 9. Alertmanager
-✅ **Status: EXCELLENT** - All alerts cleared
-- Active alerts: **0** (excluding Watchdog)
-- Alertmanager: Operational (1 pod running)
-- Alert routing: Configured and working
-- Issues: None - all alerts resolved
-
-### 10. Longhorn Storage
-⚠️ **Status: WARNING** - 1 detached volume detected
-- Total volumes: **45** (increased from 44 - new volume: clawd-bot-data)
-- Healthy volumes: **44/45** (97.8%)
-- Attached volumes: **44/45** (97.8%)
-- Degraded volumes: **0**
-- **Detached volume**: `clawd-bot-data`
-  - State: **detached**
-  - Robustness: **unknown**
-  - Size: 10.00 Gi
-  - Replicas: 0/2 (no replicas yet)
-  - PVC: Bound (ai/clawd-bot-data)
-  - **Analysis**: New volume created but not attached. PVC exists and is bound, but no pod is using it yet. Volume will attach automatically when clawd-bot pod starts (once kustomization issue is resolved).
-- PVC status: All bound, **0** pending/lost/unknown
-- autoDeletePodWhenVolumeDetachedUnexpectedly: **false** ✅ (correct setting)
-- Detachment events: **0** in last 24h
-- Engine failures: **0** in last 24h
-- Flux/Longhorn conflicts: **0**
-- Issues: 1 new volume detached (clawd-bot-data - expected, waiting for pod)
-
-### 11. Container Logs Analysis
-✅ **Status: EXCELLENT** - Infrastructure logs clean
-- Cilium errors (24h): **0**
-- CoreDNS errors (24h): **0**
-- Flux controller errors (24h): **0**
-- cert-manager errors (24h): **0**
-- **Analysis**: Infrastructure components running cleanly
-
-### 12. Talos System Health
-✅ **Status: EXCELLENT** - All nodes healthy
-- Node status: All 3 nodes Ready
-- Services: All running correctly
-- Hardware errors: **0** detected
-- **Analysis**: Node OS health excellent
-
-### 13. Hardware Health
-✅ **Status: EXCELLENT** - No hardware issues
-- Thermal throttling: **0** events
-- Network interface errors: **0**
-- **Analysis**: Hardware operating within normal parameters
-
-### 14. Resource Utilization
-✅ **Status: EXCELLENT** - Resources healthy
-- Node CPU usage:
-  - k8s-nuc14-01: 649m (~6.5%)
-  - k8s-nuc14-02: 1023m (~10.2%)
-  - k8s-nuc14-03: 1022m (~10.2%)
-- Node Memory usage:
-  - k8s-nuc14-01: 3%
-  - k8s-nuc14-02: 5%
-  - k8s-nuc14-03: 5%
-- **Analysis**: All nodes well within capacity, no resource pressure
-
-### 15. Backup System
-✅ **Status: EXCELLENT** - Backup system working correctly
-- RecurringJob: `daily-backup-all-volumes` (daily at 03:00 UTC)
-- **Last backup**: **8h ago** (job `daily-backup-all-volumes-29466900` completed successfully)
-- Volumes backed up: **44/45** (97.8%)
-- Retention: 7 days
-- Failed backups: **0**
-- **Analysis**: Backup system working perfectly. One volume (clawd-bot-data) not backed up yet because it's detached (waiting for pod).
-
-### 16. Version Checks & Updates
-✅ **Status: EXCELLENT** - Components up-to-date
-- Kubernetes: Current version
-- Talos: Current version
-- Helm charts: All at latest versions
-- **Analysis**: No version mismatches detected
-
-### 17. Security Checks
-✅ **Status: EXCELLENT** - Security posture good
-- Root pods: **0** (none detected)
-- LoadBalancer services: Minimal (only required services)
-- Ingresses: **53** total (40 with TLS, 13 without)
-- **Analysis**: Security configuration appropriate
-
-### 18. Network Infrastructure (UniFi)
-✅ **Status: EXCELLENT** - Network healthy
-- UniFi controller: Accessible
-- Devices: All online
-- VLAN configuration: Correct
-- **Analysis**: Network infrastructure operational
-
-### 19. Network Connectivity (Kubernetes)
-✅ **Status: EXCELLENT** - Networking functional
-- DNS resolution: Working
-- Cross-VLAN routing: Functional
-- Ingress controllers: Operational
-- external-dns: **STABLE** (running fine)
-- **Analysis**: All networking components healthy
-
-### 20. GitOps Status
-⚠️ **Status: WARNING** - 1 kustomization failing
+### 4. GitOps Status
+✅ **Status: EXCELLENT** - Fully Synchronized
 - Git sources: All reconciled
-- Kustomizations: **59/60** reconciled (98.3%)
-- **Failing kustomization**: `ai/clawd-bot`
-  - Error: "kustomize build failed: accumulating resources: accumulation err='accumulating resources from './secret.sops.yaml': open /tmp/kustomization-3629823539/kubernetes/apps/ai/clawd-bot/app/secret.sops.yaml: no such file or directory'"
-  - **Root cause**: Missing `secret.sops.yaml` file in `kubernetes/apps/ai/clawd-bot/app/`
-  - **Status**: Deployment in progress, secret file needs to be created
-- Flux controller logs: Clean (no errors)
-- **Analysis**: One new deployment (clawd-bot) missing secret file. This is expected for new deployments.
-
-### 21. Namespace Review
-✅ **Status: EXCELLENT** - Namespaces healthy
-- Total namespaces: All operational
-- Terminating namespaces: **0**
-- Terminating pods: **0**
-- Resource quotas: Appropriate
-- **Analysis**: No namespace issues
-
-### 22. Home Automation Health
-⚠️ **Status: WARNING** - Home Assistant errors increased
-- Home Assistant: **1/1** pod running (Ready)
-- Zigbee2MQTT: **1/1** pod running (Ready)
-- MQTT broker: Operational
-- **Home Assistant errors**: **40** errors in last 100 lines (increased from 1)
-  - **Analysis**: Error count increased significantly. Needs investigation to identify root cause.
-- Zigbee devices: **22** total
-  - Battery devices: Check needs investigation (state.json structure)
-- **Analysis**: Services running but Home Assistant showing increased error rate
-
-### 23. Media Services Health
-✅ **Status: EXCELLENT** - Media services operational
-- Jellyfin: Healthy
-- Tube Archivist: **RESOLVED** - PVC reconciliation working
-- JDownloader: Operational
-- Plex: Operational
-- **Analysis**: All media services healthy
-
-### 24. Database Health
-✅ **Status: EXCELLENT** - Databases healthy
-- PostgreSQL: Operational
-- MariaDB: Operational
-- Connection counts: Normal
-- **Analysis**: Database systems healthy
-
-### 25. External Services & Connectivity
-✅ **Status: EXCELLENT** - External access working
-- DNS resolution: Working
-- Cloudflare tunnel: Operational
-- External access: Functional
-- **Analysis**: External connectivity healthy
-
-### 26. Security & Access Monitoring
-✅ **Status: EXCELLENT** - Security events normal
-- Auth failures: Normal levels
-- Firewall blocks: Normal
-- **Analysis**: No security concerns
-
-### 27. Performance & Trends
-✅ **Status: EXCELLENT** - Performance stable
-- CPU usage: Low (6-10% average)
-- Memory usage: Low (3-5% average)
-- Network performance: Good
-- **Analysis**: Performance metrics stable
-
-### 28. Backup & Recovery Verification
-✅ **Status: EXCELLENT** - Backup integrity verified
-- Backup success rate: **100%** (last backup successful)
-- Backup retention: Working (7 days)
-- Volumes backed up: **44/45** (97.8%)
-- **Analysis**: Backup system working correctly
-
-### 29. Environmental & Power Monitoring
-✅ **Status: EXCELLENT** - Environmental conditions normal
-- Node temperatures: Normal
-- System load: Low
-- Thermal events: **0**
-- **Analysis**: Environmental conditions optimal
-
-### 30. Application-Specific Checks
-✅ **Status: EXCELLENT** - Critical applications healthy
-- Authentik: **6/6** pods ready
-- Prometheus: **1/1** pod ready
-- Grafana: **1/1** pod ready
-- Longhorn: **3/3** manager pods ready
-- **Analysis**: All critical applications operational
-
-### 31. Home Assistant Integration Health
-⚠️ **Status: WARNING** - Error count increased
-- Home Assistant errors: **40** errors in last 100 lines
-  - **Previous**: 1 error (2026-01-10 AM)
-  - **Change**: +3900% increase
-  - **Analysis**: Significant increase in errors. Needs investigation to identify root cause.
-- Integration failures: Needs detailed log analysis
-- **Analysis**: Home Assistant operational but showing increased error rate
-
-### 32. Zigbee2MQTT Device Monitoring
-✅ **Status: EXCELLENT** - Zigbee network healthy
-- Total devices: **22**
-- Battery devices: Check needs investigation (state.json structure)
-- Offline devices: **0** (all devices online)
-- **Analysis**: Zigbee network healthy, battery monitoring needs structure investigation
-
-### 33. Battery Health Monitoring
-⚠️ **Status: NEEDS INVESTIGATION** - Battery check structure issue
-- Zigbee devices: **22** total
-- Battery devices: Check failed (state.json structure needs investigation)
-- **Previous status**: 2 critical batteries (12%, 18%)
-- **Analysis**: Battery check needs to be updated to handle current state.json structure. Previous checks showed 2 critical batteries that may still need replacement.
-
-## Performance Metrics
-
-### Node Resource Usage
-- **k8s-nuc14-01**: CPU: 649m (~6.5%), Memory: 3%
-- **k8s-nuc14-02**: CPU: 1023m (~10.2%), Memory: 5%
-- **k8s-nuc14-03**: CPU: 1022m (~10.2%), Memory: 5%
-- **Average**: CPU: ~9%, Memory: ~4.3%
-- **Analysis**: All nodes well within capacity
-
-### Storage Metrics
-- Total volumes: **45**
-- Healthy volumes: **44** (97.8%)
-- Attached volumes: **44** (97.8%)
-- Degraded volumes: **0**
-- Detached volumes: **1** (clawd-bot-data - expected, waiting for pod)
-- Volumes backed up: **44/45** (97.8%)
-
-### Network Metrics
-- Total ingresses: **53**
-- TLS-enabled ingresses: **40** (75.5%)
-- Non-TLS ingresses: **13** (24.5%)
-
-## Version Report
-
-### Core Components
-- Kubernetes: Current version
-- Talos: Current version
-- Cilium: 1.17.1
-- Longhorn: 1.10.1
-
-### Applications
-- Authentik: 2025.10.2
-- Prometheus Stack: 68.4.4
-- Home Assistant: app-template 3.7.1
-- Grafana: Latest
+- Kustomizations: All reconciled
+- HelmReleases: All Ready
 
 ## Action Items
 
-### 🔴 Critical (Immediate Action Required)
-- **None** ✅ - All critical issues resolved!
-
 ### 🟡 High Priority (Address Soon)
-1. **clawd-bot kustomization failing**
-   - **Issue**: Missing `secret.sops.yaml` file
-   - **Location**: `kubernetes/apps/ai/clawd-bot/app/secret.sops.yaml`
-   - **Action**: Create SOPS-encrypted secret file for clawd-bot deployment
-   - **Status**: New deployment in progress
+1. **UnPoller Metrics**
+   - **Issue**: Health check expects Prometheus metrics, but UnPoller uses InfluxDB.
+   - **Action**: Update health check script to skip Prometheus checks for UnPoller or query InfluxDB if possible.
 
-2. **clawd-bot-data volume detached**
-   - **Issue**: Volume created but not attached (waiting for pod)
-   - **Action**: Volume will attach automatically when clawd-bot pod starts (after secret file is created)
-   - **Status**: Expected behavior for new deployment
-
-3. **Home Assistant errors increased**
-   - **Issue**: Error count increased from 1 to 40 errors in last 100 lines
-   - **Action**: Investigate Home Assistant logs to identify root cause
-   - **Status**: Needs investigation
+2. **Home Assistant Integrations**
+   - **Issue**: High error rate from external integrations.
+   - **Action**: Investigate specific device connectivity (Shelly, Deebot).
 
 ### 🔵 Medium Priority (Monitor)
-1. **Zigbee battery monitoring**
-   - **Issue**: Battery check script needs update for current state.json structure
-   - **Action**: Update battery check to handle current Zigbee2MQTT state.json format
-   - **Status**: Previous checks showed 2 critical batteries (12%, 18%) that may still need replacement
-
-## Trends & Observations
-
-### Positive Trends
-- ✅ **Certificate conflict RESOLVED**: adguard-home-tls now working via cert-manager ingress annotation
-- ✅ **tube-archivist PVC RESOLVED**: Manifest updated to 12Gi, kustomization Ready
-- ✅ **All certificates Ready**: 5/5 = 100%
-- ✅ **Backup system working**: Last backup 8h ago, 44/45 volumes backed up
-- ✅ **All Prometheus alerts cleared**: Only Watchdog firing (expected)
-- ✅ **All nodes healthy**: 3/3 nodes Ready
-- ✅ **All DaemonSets healthy**: 10/10 at desired replicas
-- ✅ **All HelmReleases Ready**: 56/56 = 100%
-
-### Areas of Concern
-- ⚠️ **Home Assistant errors increased**: From 1 to 40 errors (needs investigation)
-- ⚠️ **clawd-bot deployment**: Missing secret file (expected for new deployment)
-- ⚠️ **Zigbee battery check**: Script needs update for current state.json structure
-
-### Stability Metrics
-- **Cluster uptime**: Excellent
-- **Service availability**: 100%
-- **Pod health**: 95.1% Running, 0 Failed
-- **Storage health**: 97.8% healthy volumes
-- **Backup success rate**: 100%
+1. **clawd-bot resource usage**
+   - **Issue**: `npm-cache` usage growing.
+   - **Action**: Monitor usage against new 2Gi limit.
 
 ## Summary
 
-**Overall Health**: 🟢 **Excellent**
+**Overall Health**: 🟠 **Warning**
 
-This health check shows **significant improvements** from the previous check:
-- ✅ **Certificate conflict RESOLVED** (adguard-home-tls now Ready)
-- ✅ **tube-archivist PVC reconciliation RESOLVED** (manifest updated, kustomization Ready)
-- ✅ **All certificates Ready** (5/5 = 100%)
-- ✅ **Backup system working** (44/45 volumes backed up)
-- ✅ **All Prometheus alerts cleared** (only Watchdog)
+The cluster is stable with key services operational. The "Warning" status is primarily due to:
+1.  **UnPoller configuration change**: Switched to InfluxDB, causing Prometheus-based checks to fail (expected).
+2.  **Pod evictions**: Historical events from `clawd-bot` (resolved).
+3.  **Home Assistant noise**: Integration errors in logs.
 
-**New issues identified**:
-- ⚠️ clawd-bot kustomization failing (missing secret.sops.yaml - expected for new deployment)
-- ⚠️ Home Assistant errors increased (needs investigation)
-- ⚠️ Zigbee battery check needs structure update
-
-**Critical issues**: **0** ✅ (All previously identified critical issues resolved!)
-
-The cluster is in **excellent health** with only minor issues related to a new deployment (clawd-bot) and some monitoring script updates needed.
+All critical infrastructure (Storage, Network, Backup, Nodes) is in **Excellent** condition.
 ```
