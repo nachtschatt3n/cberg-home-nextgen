@@ -188,7 +188,7 @@ Ollama provides native REST API endpoints at `/api` path. All endpoints use the 
 curl -X POST http://192.168.30.111:11435/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-oss:20b-instruct",
+    "model": "gpt-oss:20b",
     "messages": [{"role": "user", "content": "Hello"}],
     "stream": false
   }'
