@@ -1,6 +1,6 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-01-18 23:11:43
+**Generated:** 2026-01-18 23:45:50
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
@@ -8,9 +8,69 @@
 
 - **Total Deployments:** 63
 - **Chart Updates Available:** 6
-- **Image Updates Available:** 10
-- **Update Breakdown:** 🔴 4 major | 🟡 8 minor | 🟢 3 patch
+- **Image Updates Available:** 4
+- **Update Breakdown:** 🔴 4 major | 🟡 5 minor | 🟢 0 patch
 - **⚠️ Breaking Changes Detected:** 4 updates with potential breaking changes
+
+---
+
+## Recommended Next Steps
+
+### ✅ Option 1: Safe Minor Chart Updates (Recommended First)
+These are low-risk minor version updates for charts where images are already up-to-date:
+
+1. **jellyfin** (media)
+   - Chart: `2.1.0 → 2.7.0` 🟡 MINOR
+   - Image already updated: `10.11.5` ✅
+   - Risk: Low (minor version, image already tested)
+
+2. **uptime-kuma** (monitoring)
+   - Chart: `2.18.0 → 2.24.0` 🟡 MINOR
+   - Image already updated: `2.0.2` ✅
+   - Risk: Low (minor version, image already tested)
+
+3. **adguard-home** (network)
+   - Chart: `0.19.0 → 0.24.0` 🟡 MINOR
+   - Image already updated: `v0.107.71` ✅
+   - Risk: Low (minor version, image already tested)
+
+4. **paperless-ngx** (office)
+   - Chart: `0.19.1 → 0.24.1` 🟡 MINOR
+   - Risk: Medium (review release notes for breaking changes)
+
+### ✅ Option 2: Safe Minor Image Update
+1. **nextcloud-exporter** (default/nextcloud)
+   - Image: `0.6.2 → 0.9.0` 🟡 MINOR
+   - Risk: Low (minor version update, separate exporter component)
+
+### ⚠️ Option 3: Major Updates (Investigate First)
+These require careful review of breaking changes before proceeding:
+
+1. **n8n** (home-automation)
+   - Image: `1.123.16 → 2.4.4` 🔴 MAJOR
+   - Risk: High (major version jump, workflow automation tool)
+   - Action: Review n8n v2 migration guide and breaking changes
+
+2. **jdownloader** (default)
+   - Image: `v25.02.1 → v26.01.1` 🔴 MAJOR
+   - Risk: High (major version jump)
+   - Action: Review release notes for breaking changes
+
+3. **nextcloud** (default)
+   - Chart: `6.6.4 → 8.8.1` 🔴 MAJOR
+   - Risk: High (major version jump, critical application)
+   - Action: Review NextCloud 8.x migration guide and breaking changes
+
+4. **eck-operator** (monitoring)
+   - Chart: `2.14.0 → 3.2.0` 🔴 MAJOR
+   - Risk: High (major version jump, Elasticsearch operator)
+   - Action: Review ECK 3.x migration guide and breaking changes
+
+### ❓ Option 4: Unknown Complexity
+1. **plex** (media)
+   - Image: `1.42.1.10060-4e8b05daf → latest` ⚪ UNKNOWN
+   - Risk: Unknown (version format not recognized)
+   - Action: Manually check Plex release notes for latest version
 
 ---
 
@@ -56,28 +116,28 @@
 | `spegel` | `default` | v0.0.30 ? | - | - | - |
 | `teslamate` | `default` | 3.7.1 ? | 2.2.0 ✅ | 2.2.0 | - |
 | `tube-archivist` | `default` | 3.7.1 ? | v0.5.8 ✅ | v0.5.8 | - |
-| `vaultwarden` | `default` | 3.7.1 ? | 1.32.7 → 1.35.2 | 1.32.7 | 🟡 MINOR |
+| `vaultwarden` | `default` | 3.7.1 ? | 1.35.2 ✅ | 1.35.2 | - |
 | `esphome` | `home-automation` | 3.7.1 ? | 2025.12.7 ? | 2025.12.7 | - |
 | `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.3 ? | 0.16.3 | - |
 | `home-assistant` | `home-automation` | 3.7.1 ? | 2026.1.2 ? | 2026.1.2 | - |
 | `mosquitto` | `home-automation` | 3.7.1 ? | 2.0.20@sha256:8b396cec28cd5e8e1a3aba1d9a... | 2.0.20@sha256:8b396cec28cd5e8e... | - |
 | `music-assistant-server` | `home-automation` | 3.7.1 ? | 2.7.5 ? | 2.7.5 | - |
 | `n8n` | `home-automation` | 1.0.6 ? | 1.123.16 → 2.4.4 | 1.123.16 | 🔴 MAJOR |
-| `node-red` | `home-automation` | 3.7.1 ? | 4.0.9 → 4.1.3 | 4.0.9 | 🟡 MINOR |
+| `node-red` | `home-automation` | 3.7.1 ? | 4.1.3 ✅ | 4.1.3 | - |
 | `scrypted` | `home-automation` | 3.7.1 ? | latest ✅ | - | - |
-| `zigbee2mqtt` | `home-automation` | 3.7.1 ? | 2.6.1 → 2.7.2 | 2.6.1 | 🟡 MINOR |
+| `zigbee2mqtt` | `home-automation` | 3.7.1 ? | 2.7.2 ✅ | 2.7.2 | - |
 | `authentik` | `kube-system` | 2025.12.1 ✅ | - | - | - |
 | `csi-driver-smb` | `kube-system` | 1.19.1 ✅ | - | - | - |
-| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.3 → 10.11.5 | 10.11.3 | 🟡 MINOR |
+| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.5 ✅ | 10.11.5 | 🟡 MINOR |
 | `makemkv` | `media` | 3.7.1 ? | latest ✅ | - | - |
 | `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
 | `eck-operator` | `monitoring` | 2.14.0 → 3.2.0 | - | - | 🔴 MAJOR |
 | `headlamp` | `monitoring` | 0.39.0 ✅ | - | - | - |
 | `unpoller` | `monitoring` | 2.1.0 ✅ | v2.21.0 ? | v2.21.0 | - |
-| `uptime-kuma` | `monitoring` | 2.18.0 → 2.24.0 | 2.0.0-beta.2 → 2.0.2 | 2.0.0-beta.2 | 🟡 MINOR |
+| `uptime-kuma` | `monitoring` | 2.18.0 → 2.24.0 | 2.0.2 ✅ | 2.0.2 | 🟡 MINOR |
 | `absenty` | `my-software-development` | 3.7.1 ? | sha-ff3910e-dev ? | sha-ff3910e-dev | - |
 | `absenty` | `my-software-production` | 3.7.1 ? | sha-ffa072a ? | sha-ffa072a | - |
-| `adguard-home` | `network` | 0.19.0 → 0.24.0 | v0.107.65 → v0.107.71 | v0.107.65 | 🟡 MINOR |
+| `adguard-home` | `network` | 0.19.0 → 0.24.0 | v0.107.71 ✅ | v0.107.71 | 🟡 MINOR |
 | `paperless-ngx` | `office` | 0.19.1 → 0.24.1 | 2.20.4 ? | 2.20.4 | 🟡 MINOR |
 | `penpot` | `office` | 0.32.0 ✅ | - | - | - |
 | `longhorn` | `storage` | 1.10.1 ✅ | - | - | - |
@@ -779,12 +839,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `vaultwarden/server`
   - **Path:** `controllers.main.containers.main.image`
-  - **Current Tag:** `1.32.7`
-  - **Latest Tag:** `1.35.2` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 1.32.x → 1.35.x
-  - **Source:** https://github.com/vaultwarden/server/releases/tag/1.35.2
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `1.35.2`
+  - **Latest Tag:** `1.35.2` ✅ (up-to-date)
 
 ---
 
@@ -928,12 +984,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
-  - **Current Tag:** `4.0.9`
-  - **Latest Tag:** `4.1.3` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 4.0.x → 4.1.x
-  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.3
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `4.1.3`
+  - **Latest Tag:** `4.1.3` ✅ (up-to-date)
 
 ---
 
@@ -968,42 +1020,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `koenkk/zigbee2mqtt`
   - **Path:** `controllers.zigbee2mqtt.containers.app.image`
-  - **Current Tag:** `2.6.1`
-  - **Latest Tag:** `2.7.2` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 2.6.x → 2.7.x
-  - **Source:** https://github.com/koenkk/zigbee2mqtt/releases/tag/2.7.2
-  - **Release Date:** 2026-01-01
-  - **Release Notes:**
-    ```markdown
-    # Improvements
-- [#11151](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11151) Bosch BTH-RM*: Support for `ctrlSeqeOfOper` (@burmistrzak)
-- [#30375](https://github.com/Koenkk/zigbee2mqtt/issues/30375) SMLIGHT SLZB-: support controlling LED (@Koenkk)
-- [#11111](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11111) Aqara T1: support segment control, segment colors, effect colors and effect segments (@absent42)
-- [#11110](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11110) Ikea E2204/E2206: enable child lock for fw 2.4.4 &gt; (@chris-1243)
-- [#11062](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11062) Aqara T1/T1M ceiling light: support for RGB dynamic effects and ring light individual segment control (@absent42)
-- [#11053](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11053) Inovelli: added toggle option for parameter 130 (firmware 3.0+) (@InovelliUSA)
-- [#11047](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11047) Aqara T2: support dynamic RGB effects (@absent42)
-- [#29406](https://github.com/Koenkk/zigbee2mqtt/issues/29406) Lincukoo SZLR08: support `detection_distance` (@Koenkk)
-- [#11041](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11041) Third Reality 3RSPE01044BZ and 3RSP02064Z: support more features (@3reality-support)
-- [#10990](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10990) Sinope TH1123ZB(-G2)/TH1124ZB(-G2): expose ecoMode (@lemoinem)
-- [#10986](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10986) Schneider Electric 545D6514: support indicator mode (@as8net)
-- [#10975](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10975) BITUO TECHNIK SPM01-U01: support OTA (@mrmaximas)
-
-# Fixes
-- [#30137](https://github.com/Koenkk/zigbee2mqtt/issues/30137) Biome floating promises detection (@Nerivec)
-- [#30216](https://github.com/Koenkk/zigbee2mqtt/issues/30216) Don't fail to start when removing old log directory fails (@Koenkk)
-- [#30324](https://github.com/Koenkk/zigbee2mqtt/issues/30324) Log dir tz format not working on some systems (@Nerivec)
-- [#30297](https://github.com/Koenkk/zigbee2mqtt/issues/30297) Proper timezone in logs dir (@Nerivec)
-- [#30065](https://github.com/Koenkk/zigbee2mqtt/issues/30065) Remove extra `>` in onboarding (@Bi11)
-- [#11154](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11154) IKEA BILRESA E2489 & E2490: fix actions (@andrei-lazarov)
-- [#11159](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11159) Third Reality 3RWS18BZ: fix power source (@philippeboyd)
-- [#11144](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11144) Ubisys: fix configuration substring (@andrewandneil)
-- [#11129](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11129) Aqara C3: fix automatic calibration (@marthubner)
-- [#1606](https://github.com/Koenkk/zigbee-herdsman/issues/1606) Aqara KD-R01D: expose device temperature (@Koenkk)
-- [#
-    ... (truncated, see source link above for full notes)
-    ```
+  - **Current Tag:** `2.7.2`
+  - **Latest Tag:** `2.7.2` ✅ (up-to-date)
 
 ---
 
@@ -1057,12 +1075,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `docker.io/jellyfin/jellyfin`
   - **Path:** `image`
-  - **Current Tag:** `10.11.3`
-  - **Latest Tag:** `10.11.5` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 10.11.3 → 10.11.5
-  - **Source:** https://github.com/docker.io/jellyfin/releases/tag/10.11.5
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `10.11.5`
+  - **Latest Tag:** `10.11.5` ✅ (up-to-date)
 
 ---
 
@@ -1219,20 +1233,8 @@ ECK will now generate longer passwords by default for the administrative user of
 #### Container Images
 - **Repository:** `louislam/uptime-kuma`
   - **Path:** `image`
-  - **Current Tag:** `2.0.0-beta.2`
-  - **Latest Tag:** `2.0.2` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.0.0 → 2.0.2
-  - **Source:** https://github.com/louislam/uptime-kuma/releases/tag/2.0.2
-  - **Release Date:** 2025-10-22
-  - **Release Notes:**
-    ```markdown
-    ### 🐞 Bug Fixes
-- #6225 Fix: False positive for Google Chrome during migration
-
-### Others
-- #6210 #6220 Revise supported versions and Docker tags in SECURITY.md
-    ```
+  - **Current Tag:** `2.0.2`
+  - **Latest Tag:** `2.0.2` ✅ (up-to-date)
 
 ---
 
@@ -1301,12 +1303,8 @@ ECK will now generate longer passwords by default for the administrative user of
 #### Container Images
 - **Repository:** `adguard/adguardhome`
   - **Path:** `image`
-  - **Current Tag:** `v0.107.65`
-  - **Latest Tag:** `v0.107.71` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 0.107.65 → 0.107.71
-  - **Source:** https://github.com/adguard/adguardhome/releases/tag/v0.107.71
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `v0.107.71`
+  - **Latest Tag:** `v0.107.71` ✅ (up-to-date)
 
 ---
 
