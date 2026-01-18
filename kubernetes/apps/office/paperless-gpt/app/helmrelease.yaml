@@ -45,7 +45,7 @@ spec:
               AUTO_TAG: "paperless-gpt-auto"
               TOKEN_LIMIT: "262144"
               LLM_PROVIDER: "openai"
-              LLM_MODEL: "gpt-oss:20b-instruct"
+              LLM_MODEL: "gpt-oss:20b"
               OPENAI_API_KEY:
                 valueFrom:
                   secretKeyRef:
