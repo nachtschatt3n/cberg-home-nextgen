@@ -1,0 +1,15 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: clawd-bot-filesystem-trim
+  namespace: storage
+spec:
+  name: clawd-bot-filesystem-trim
+  task: filesystem-trim
+  cron: "0 2 * * *"  # Daily at 2 AM (1 hour before backup)
+  retain: 0
+  concurrency: 1
+  labels:
+    job: clawd-bot-trim
+    volume: clawd-bot-data
