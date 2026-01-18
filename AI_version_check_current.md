@@ -1,16 +1,16 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-01-11 12:41:21
+**Generated:** 2026-01-18 23:11:43
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
 ## Summary
 
-- **Total Deployments:** 65
-- **Chart Updates Available:** 25
-- **Image Updates Available:** 16
-- **Update Breakdown:** 🔴 6 major | 🟡 16 minor | 🟢 7 patch
-- **⚠️ Breaking Changes Detected:** 6 updates with potential breaking changes
+- **Total Deployments:** 63
+- **Chart Updates Available:** 6
+- **Image Updates Available:** 10
+- **Update Breakdown:** 🔴 4 major | 🟡 8 minor | 🟢 3 patch
+- **⚠️ Breaking Changes Detected:** 4 updates with potential breaking changes
 
 ---
 
@@ -19,67 +19,66 @@
 | Deployment | Namespace | Chart | Image | App | Complexity |
 |------------|-----------|-------|-------|-----|------------|
 | `icloud-docker-mu` | `backup` | 3.7.1 ? | latest ✅ | - | - |
-| `absenty-development` | `custom-code-production` | 3.7.1 ? | sha-ff3910e-dev ? | sha-ff3910e-dev | - |
-| `absenty-production` | `custom-code-production` | 3.7.1 ? | sha-ffa072a ? | sha-ffa072a | - |
 | `nocodb` | `databases` | 3.7.1 ? | latest ✅ | - | - |
 | `phpmyadmin` | `databases` | 3.7.1 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.1 ? | latest ✅ | - | - |
 | `ai-sre` | `default` | 3.7.1 ? | 2.1.0 ? | 2.1.0 | - |
-| `cert-manager` | `default` | v1.19.1 → v1.19.2 | - | - | 🟢 PATCH |
-| `cilium` | `default` | 1.17.1 → 1.18.5 | - | - | 🟡 MINOR |
-| `clawd-bot` | `default` | 3.7.1 ? | 22-alpine ? | 22-alpine | - |
-| `cloudflared` | `default` | 3.7.1 ? | 2025.11.1 → 414-772ccc9 | 2025.11.1 | ⚪ UNKNOWN |
+| `cert-manager` | `default` | v1.19.2 ✅ | - | - | - |
+| `cilium` | `default` | 1.18.6 ✅ | - | - | - |
+| `clawd-bot` | `default` | 3.7.1 ? | 22-bookworm ? | 22-bookworm | - |
+| `cloudflared` | `default` | 3.7.1 ? | 2025.11.1 ✅ | 2025.11.1 | - |
 | `coredns` | `default` | 1.39.0 ? | - | - | - |
-| `descheduler` | `default` | 0.33.0 → 0.34.0 | - | - | 🟡 MINOR |
+| `descheduler` | `default` | 0.34.0 ✅ | - | - | - |
 | `echo-server` | `default` | 3.7.1 ? | 35 ? | 35 | - |
-| `external-dns` | `default` | 1.15.2 → 1.20.0 | - | - | 🟡 MINOR |
-| `external-ingress-nginx` | `default` | 4.12.0 → 4.14.1 | - | - | 🟡 MINOR |
-| `fluent-bit` | `default` | 0.47.10 → 0.54.1 | 3.1.9 ? | 3.1.9 | 🟡 MINOR |
+| `external-dns` | `default` | 1.20.0 ✅ | - | - | - |
+| `external-ingress-nginx` | `default` | 4.14.1 ✅ | - | - | - |
+| `fluent-bit` | `default` | 0.54.1 ✅ | 3.1.9 ? | 3.1.9 | - |
 | `flux-instance` | `default` | 0.14.0 ? | - | - | - |
 | `flux-operator` | `default` | 0.14.0 ? | - | - | - |
-| `grafana` | `default` | 7.0.19 → 10.5.5 | - | - | 🔴 MAJOR |
-| `homepage` | `default` | 2.0.2 → 2.1.0 | v1.6.1 ? | v1.6.1 | 🟡 MINOR |
-| `intel-device-plugin-gpu` | `default` | 0.34.0 → 0.34.1 | - | - | 🟢 PATCH |
-| `intel-device-plugin-operator` | `default` | 0.34.0 → 0.34.1 | - | - | 🟢 PATCH |
-| `internal-ingress-nginx` | `default` | 4.12.0 → 4.14.1 | - | - | 🟡 MINOR |
-| `jdownloader` | `default` | 3.7.1 ? | v25.02.1 → v1.0.0 | v25.02.1 | ⚪ UNKNOWN |
+| `grafana` | `default` | 10.5.8 ✅ | - | - | - |
+| `homepage` | `default` | 2.1.0 ✅ | v1.8.0 ? | v1.8.0 | - |
+| `intel-device-plugin-gpu` | `default` | 0.34.1 ✅ | - | - | - |
+| `intel-device-plugin-operator` | `default` | 0.34.1 ✅ | - | - | - |
+| `internal-ingress-nginx` | `default` | 4.14.1 ✅ | - | - | - |
+| `jdownloader` | `default` | 3.7.1 ? | v25.02.1 → v26.01.1 | v25.02.1 | 🔴 MAJOR |
 | `k8s-gateway` | `default` | 2.4.0 ✅ | - | - | - |
 | `kube-prometheus-stack` | `default` | 68.4.4 ? | - | - | - |
-| `kubernetes-dashboard` | `default` | 6.0.8 → 7.14.0 | - | - | 🔴 MAJOR |
 | `mcpo` | `default` | 3.7.1 ? | git-44ce6d0 ? | git-44ce6d0 | - |
-| `metricbeat` | `default` | 3.6.0 ? | 8.15.3 ? | 8.15.3 | - |
 | `metrics-server` | `default` | 3.13.0 ✅ | - | - | - |
-| `nextcloud` | `default` | 6.6.4 → 8.7.0 | 32.0.2 ? | 32.0.2 | 🔴 MAJOR |
-| `node-feature-discovery` | `default` | 0.17.1 → 0.18.3 | - | - | 🟡 MINOR |
-| `omni-tools` | `default` | 3.7.1 ? | 0.6.0 → 0.1.0 | 0.6.0 | ⚪ UNKNOWN |
-| `open-webui` | `default` | 5.13.0 → 10.1.0 | v0.6.43 ? | v0.6.43 | 🔴 MAJOR |
+| `nextcloud` | `default` | 6.6.4 → 8.8.1 | 32.0.3 ? | 32.0.3 | 🔴 MAJOR |
+| `node-feature-discovery` | `default` | 0.18.3 ✅ | - | - | - |
+| `omni-tools` | `default` | 3.7.1 ? | 0.6.0 ✅ | 0.6.0 | - |
+| `open-webui` | `default` | 10.2.1 ✅ | 0.7.2 ? | 0.7.2 | - |
 | `paperless-ai` | `default` | 3.7.1 ? | latest ✅ | - | - |
 | `paperless-gpt` | `default` | 3.7.1 ? | latest ✅ | - | - |
+| `redis` | `default` | 3.7.1 ? | 7-alpine ? | 7-alpine | - |
 | `reloader` | `default` | 1.2.1 ? | - | - | - |
 | `spegel` | `default` | v0.0.30 ? | - | - | - |
-| `teslamate` | `default` | 3.7.1 ? | 2.2.0 → 1.16.0 | 2.2.0 | 🟡 MINOR |
-| `tube-archivist` | `default` | 3.7.1 ? | v0.5.8 → v0.3.6 | v0.5.8 | ⚪ UNKNOWN |
-| `vaultwarden` | `default` | 3.7.1 ? | 1.32.7 → 1.21.0-alpine | 1.32.7 | ⚪ UNKNOWN |
-| `esphome` | `home-automation` | 3.7.1 ? | 2025.10.5 ? | 2025.10.5 | - |
-| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.2 ? | 0.16.2 | - |
-| `home-assistant` | `home-automation` | 3.7.1 ? | 2026.1.0 ✅ | 2026.1.0 | - |
+| `teslamate` | `default` | 3.7.1 ? | 2.2.0 ✅ | 2.2.0 | - |
+| `tube-archivist` | `default` | 3.7.1 ? | v0.5.8 ✅ | v0.5.8 | - |
+| `vaultwarden` | `default` | 3.7.1 ? | 1.32.7 → 1.35.2 | 1.32.7 | 🟡 MINOR |
+| `esphome` | `home-automation` | 3.7.1 ? | 2025.12.7 ? | 2025.12.7 | - |
+| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.3 ? | 0.16.3 | - |
+| `home-assistant` | `home-automation` | 3.7.1 ? | 2026.1.2 ? | 2026.1.2 | - |
 | `mosquitto` | `home-automation` | 3.7.1 ? | 2.0.20@sha256:8b396cec28cd5e8e1a3aba1d9a... | 2.0.20@sha256:8b396cec28cd5e8e... | - |
-| `music-assistant-server` | `home-automation` | 3.7.1 ? | 2.7.2 → 2.7.3 | 2.7.2 | 🟢 PATCH |
-| `n8n` | `home-automation` | 1.0.6 ? | 1.110.2 → 0.1.2 | 1.110.2 | ⚪ UNKNOWN |
-| `node-red` | `home-automation` | 3.7.1 ? | 4.0.9 → 1.0.0-10-minimal-amd64 | 4.0.9 | ⚪ UNKNOWN |
+| `music-assistant-server` | `home-automation` | 3.7.1 ? | 2.7.5 ? | 2.7.5 | - |
+| `n8n` | `home-automation` | 1.0.6 ? | 1.123.16 → 2.4.4 | 1.123.16 | 🔴 MAJOR |
+| `node-red` | `home-automation` | 3.7.1 ? | 4.0.9 → 4.1.3 | 4.0.9 | 🟡 MINOR |
 | `scrypted` | `home-automation` | 3.7.1 ? | latest ✅ | - | - |
-| `zigbee2mqtt` | `home-automation` | 3.7.1 ? | 2.6.1 → 0.1.0 | 2.6.1 | ⚪ UNKNOWN |
-| `authentik` | `kube-system` | 2025.10.2 → 2025.10.3 | - | - | 🟢 PATCH |
-| `csi-driver-smb` | `kube-system` | v1.17.0 → 1.19.1 | - | - | 🟡 MINOR |
-| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.3 → 10.0.0-arm | 10.11.3 | 🟡 MINOR |
+| `zigbee2mqtt` | `home-automation` | 3.7.1 ? | 2.6.1 → 2.7.2 | 2.6.1 | 🟡 MINOR |
+| `authentik` | `kube-system` | 2025.12.1 ✅ | - | - | - |
+| `csi-driver-smb` | `kube-system` | 1.19.1 ✅ | - | - | - |
+| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.3 → 10.11.5 | 10.11.3 | 🟡 MINOR |
 | `makemkv` | `media` | 3.7.1 ? | latest ✅ | - | - |
-| `plex` | `media` | 0.9.1 → 1.4.0 | 1.42.1.10060-4e8b05daf → 1.3.2.3112-1751... | 1.42.1.10060-4e8b05daf | 🔴 MAJOR |
+| `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
 | `eck-operator` | `monitoring` | 2.14.0 → 3.2.0 | - | - | 🔴 MAJOR |
-| `opentelemetry-operator` | `monitoring` | 0.66.0 → 0.102.0 | - | - | 🟡 MINOR |
-| `otel-collector` | `monitoring` | 0.92.0 → 0.143.0 |  → 0.2.10 | - | 🟡 MINOR |
-| `uptime-kuma` | `monitoring` | 2.18.0 → 2.24.0 | 2.0.0-beta.2 → 1.0.1 | 2.0.0-beta.2 | 🟡 MINOR |
-| `adguard-home` | `network` | 0.19.0 → 0.24.0 | v0.107.65 → v0.93 | v0.107.65 | 🟡 MINOR |
-| `paperless-ngx` | `office` | 0.19.1 → 0.24.1 | 2.20.3 ✅ | 2.20.3 | 🟡 MINOR |
+| `headlamp` | `monitoring` | 0.39.0 ✅ | - | - | - |
+| `unpoller` | `monitoring` | 2.1.0 ✅ | v2.21.0 ? | v2.21.0 | - |
+| `uptime-kuma` | `monitoring` | 2.18.0 → 2.24.0 | 2.0.0-beta.2 → 2.0.2 | 2.0.0-beta.2 | 🟡 MINOR |
+| `absenty` | `my-software-development` | 3.7.1 ? | sha-ff3910e-dev ? | sha-ff3910e-dev | - |
+| `absenty` | `my-software-production` | 3.7.1 ? | sha-ffa072a ? | sha-ffa072a | - |
+| `adguard-home` | `network` | 0.19.0 → 0.24.0 | v0.107.65 → v0.107.71 | v0.107.65 | 🟡 MINOR |
+| `paperless-ngx` | `office` | 0.19.1 → 0.24.1 | 2.20.4 ? | 2.20.4 | 🟡 MINOR |
 | `penpot` | `office` | 0.32.0 ✅ | - | - | - |
 | `longhorn` | `storage` | 1.10.1 ✅ | - | - | - |
 
@@ -101,50 +100,7 @@
 - **Repository:** `mandarons/icloud-drive`
   - **Path:** `controllers.main.containers.app.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `1.0.0` ✅ (up-to-date)
-
----
-
-## Namespace: `custom-code-production`
-
-### absenty-development
-
-- **File:** `kubernetes/apps/custom-code-production/absenty-development/app/helmrelease.yaml`
-
-#### Chart
-- **Name:** `app-template`
-- **Repository:** `bjw-s`
-- **Current Version:** `3.7.1`
-- **Latest Version:** *Could not determine*
-
-#### Container Images
-- **Repository:** `ghcr.io/nachtschatt3n/absenty`
-  - **Path:** `controllers.absenty.containers.app.image`
-  - **Current Tag:** `sha-ff3910e-dev`
-  - **Latest Tag:** *Could not determine*
-
-- **Repository:** `ghcr.io/nachtschatt3n/absenty`
-  - **Path:** `controllers.absenty.initContainers.bundle-install.image`
-  - **Current Tag:** `sha-ff3910e-dev`
-  - **Latest Tag:** *Could not determine*
-
----
-
-### absenty-production
-
-- **File:** `kubernetes/apps/custom-code-production/absenty-production/app/helmrelease.yaml`
-
-#### Chart
-- **Name:** `app-template`
-- **Repository:** `bjw-s`
-- **Current Version:** `3.7.1`
-- **Latest Version:** *Could not determine*
-
-#### Container Images
-- **Repository:** `ghcr.io/nachtschatt3n/absenty`
-  - **Path:** `controllers.absenty.containers.app.image`
-  - **Current Tag:** `sha-ffa072a`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `1.24.0` ✅ (up-to-date)
 
 ---
 
@@ -164,7 +120,7 @@
 - **Repository:** `nocodb/nocodb`
   - **Path:** `controllers.nocodb.containers.app.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `0.5.0` ✅ (up-to-date)
+  - **Latest Tag:** `0.301.1` ✅ (up-to-date)
 
 ---
 
@@ -202,7 +158,7 @@
 - **Repository:** `actualbudget/actual-server`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `sha-c3d89b6-alpine` ✅ (up-to-date)
+  - **Latest Tag:** `26.1.0` ✅ (up-to-date)
 
 ---
 
@@ -231,35 +187,8 @@
 #### Chart
 - **Name:** `cert-manager`
 - **Repository:** `jetstack`
-- **Current Version:** `v1.19.1`
-- **Latest Version:** `v1.19.2` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 1.19.1 → 1.19.2
-- **Source:** https://github.com/cert-manager/cert-manager/releases/tag/v1.19.2
-- **Release Date:** 2025-12-09
-- **Release Notes:**
-  ```markdown
-  cert-manager is the easiest way to automatically manage certificates in Kubernetes and OpenShift clusters.
-
-We updated Go to fix some vulnerabilities in the standard library.
-
-> 📖 Read the [full 1.19 release notes](https://cert-manager.io/docs/releases/release-notes/release-notes-1.19) on the cert-manager.io website before upgrading.
-
-
-## Changes since `v1.19.1`
-
-### Bug or Regression
-
-- Address false positive vulnerabilities `CVE-2025-47914` and `CVE-2025-58181` which were reported by Trivy. (#8283, @SgtCoDFish)
-- Update Go to `v1.25.5` to fix `CVE-2025-61727` and `CVE-2025-61729` (#8294, @wallrj-cyberark)
-- Update `global.nodeSelector` to helm chart to perform a `merge` and allow for a single `nodeSelector` to be set across all services. (#8233, @cert-manager-bot)
-
-### Other (Cleanup or Flake)
-
-- Update cert-manager's ACME client, forked from `golang/x/crypto` (#8270, @SgtCoDFish)
-- Updated Debian 12 distroless base images (#8326, @wallrj-cyberark)
-  ```
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `v1.19.2`
+- **Latest Version:** `v1.19.2` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -272,42 +201,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `cilium`
 - **Repository:** `cilium`
-- **Current Version:** `1.17.1`
-- **Latest Version:** `1.18.5` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 1.17.x → 1.18.x
-- **Source:** https://github.com/cilium/cilium/releases/tag/1.18.5
-- **Release Date:** 2025-12-18
-- **Release Notes:**
-  ```markdown
-  Summary of Changes
-------------------
-
-**Minor Changes:**
-* [v1.18] proxy: Bump envoy version to v1.34.11 (cilium/cilium#43143, @sayboras)
-* Change the sidecar etcd instance of the Cluster Mesh API Server listen on all IP addresses (Backport PR cilium/cilium#42948, Upstream PR cilium/cilium#42818, @giorio94)
-
-**Bugfixes:**
-* allow missing verbs for cilium-agent cluster role when readSecretsOnlyFromSecretsNamespace is false (Backport PR cilium/cilium#42948, Upstream PR cilium/cilium#42790, @kraashen)
-* AWS EC2: Fix ENI attachment on multi-network card instances with high-performance networking (EFA) setups (Backport PR cilium/cilium#42745, Upstream PR cilium/cilium#42512, @41ks)
-* CiliumEnvoyConfig proxy ports are now restored on agent restarts. (Backport PR cilium/cilium#43117, Upstream PR cilium/cilium#43108, @jrajahalme)
-* Cleanup FQDNs that have leaked into the global FQDN cache (Backport PR cilium/cilium#42864, Upstream PR cilium/cilium#42485, @sjohnsonpal)
-* Do not opt-out Endpoint ID 1 from dnsproxy transparent mode. (Backport PR cilium/cilium#42948, Upstream PR cilium/cilium#42887, @jrajahalme)
-* ENI: Fix panic on nil subnet (Backport PR cilium/cilium#43117, Upstream PR cilium/cilium#43023, @HadrienPatte)
-* Ensure cilium-agent gracefully does fallbacks when etcd is in a bad state. (Backport PR cilium/cilium#43059, Upstream PR cilium/cilium#42977, @odinuge)
-* Fix a bug that would cause Cilium to not report L4 checksum update errors when the length attribute is missing in ICMP Error messages with TCP inner packets. (Backport PR cilium/cilium#42828, Upstream PR cilium/cilium#42426, @yushoyamaguchi)
-* Fix a bug that would cause IPsec logs to incorrectly report the XFRM rules being processed as "Ingress" rules. (Backport PR cilium/cilium#42828, Upstream PR cilium/cilium#42640, @sjohnsonpal)
-* Fix agent local identity leak (Backport PR cilium/cilium#43117, Upstream PR cilium/cilium#42662, @odinuge)
-* Fix bug that could cause the agent to fail to add XFRM states when IPsec is enabled, thus preventing a proper startup. (Backport PR cilium/cilium#42948, Upstream PR cilium/cilium#42666, @pchaigno)
-* Fix GC of per-cluster ctmap entries (Backport PR cilium/cilium#43294, Upstream PR cilium/cilium#43160, @giorio94)
-* Fix ipcache issues causing severe issues with the fqdn subsystem (Backport PR cilium/cilium#42864, Upstream PR cilium/cilium#42815, @odinuge)
-* Fix issue where endpoints got stuck in "waiting-to-regenerate" (Backport PR cilium/cilium#42948, Upstream PR cilium/cilium#42856, @odinuge)
-* Fix leak in the policy subsystem (Backport PR cilium/cilium#43117, Upstream PR cilium/cilium#42661, @odinuge)
-* Fix rare kvstore issue where cilium continues to use an expired lease causing kvstore operations to fail consistently (Backport PR cilium/cilium#42745, Upstream PR cilium/cilium#42709, @odinuge)
-* fqdn: Fix fqdn subsystem correctness issues causing packet drops and inconsistent ipcache (Backport PR cilium/cilium#43117, Upstrea
-  ... (truncated, see source link above for full notes)
-  ```
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `1.18.6`
+- **Latest Version:** `1.18.6` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -326,12 +221,12 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Container Images
 - **Repository:** `node`
   - **Path:** `controllers.clawd-bot.containers.app.image`
-  - **Current Tag:** `22-alpine`
+  - **Current Tag:** `22-bookworm`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `node`
   - **Path:** `controllers.clawd-bot.initContainers.install-clawdbot.image`
-  - **Current Tag:** `22-alpine`
+  - **Current Tag:** `22-bookworm`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -350,11 +245,7 @@ We updated Go to fix some vulnerabilities in the standard library.
 - **Repository:** `docker.io/cloudflare/cloudflared`
   - **Path:** `controllers.cloudflared.containers.app.image`
   - **Current Tag:** `2025.11.1`
-  - **Latest Tag:** `414-772ccc9` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/docker.io/cloudflared/releases/tag/414-772ccc9
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Latest Tag:** `2025.11.1` ✅ (up-to-date)
 
 ---
 
@@ -379,42 +270,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `descheduler`
 - **Repository:** `descheduler`
-- **Current Version:** `0.33.0`
-- **Latest Version:** `0.34.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.33.x → 0.34.x
-- **Source:** https://github.com/kubernetes-sigs/descheduler/releases/tag/0.34.0
-- **Release Date:** 2025-10-30
-- **Release Notes:**
-  ```markdown
-  ## What's Changed
-* Remove reference to obsolete deschedulerPolicy fields in chart values by @meroupatate in https://github.com/kubernetes-sigs/descheduler/pull/1674
-* v0.33.0: bump helm chart by @a7i in https://github.com/kubernetes-sigs/descheduler/pull/1680
-* optimize: NodeFit function by reordering checks for performance by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1681
-* feature: sort pods by restarts count in RemovePodsHavingTooManyRestarts plugin by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1686
-* chore: move namespaces filtering logic to New() by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1684
-* RemovePodsViolatingNodeTaints: list only pods that are not failed/suceeded by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1688
-* fix(example): list only active pod by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1691
-* refactor: separate eviction constraints to constraints.go by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1693
-* Extend plugin's New with a context.Context by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1694
-* *1677 Allow Succeeded and Failed states in PodLifeTime by @doctapp in https://github.com/kubernetes-sigs/descheduler/pull/1696
-* metrics name refact by @lowang-bh in https://github.com/kubernetes-sigs/descheduler/pull/1232
-* feat(prometheus): allow different url schemes by @ricardomaraschini in https://github.com/kubernetes-sigs/descheduler/pull/1705
-* feature: use contextal logging for plugins by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1655
-* logger: Align with the previous logger verbosity by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1708
-* add activeDeadlineSeconds field for cronjob by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1709
-* chore: stop with no-op default evictor settings by @ricardomaraschini in https://github.com/kubernetes-sigs/descheduler/pull/1717
-* fix: removepodsviolatingtopologyspreadconstraint to favor evictable pods when balancing domains by @a7i in https://github.com/kubernetes-sigs/descheduler/pull/1719
-* fix: Fix panic in descheduler when using `--secure-port=0` by @dongjiang1989 in https://github.com/kubernetes-sigs/descheduler/pull/1647
-* feat(helm): run descedulerPolicy thru tpl func for more chart control by @schahal in https://github.com/kubernetes-sigs/descheduler/pull/1660
-* Test code refactorings by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1722
-* Default evictor no eviction policy by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1723
-* add PodProtections for DefaultEvictorArgs by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1665
-* add ValidateHighNodeUtilizationPluginConfig unit test by @googs1025 in https://github.com/kubernetes-sigs/descheduler/pull/1733
-* feature: ad
-  ... (truncated, see source link above for full notes)
-  ```
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.34.0`
+- **Latest Version:** `0.34.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -445,13 +302,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `external-dns`
 - **Repository:** `external-dns`
-- **Current Version:** `1.15.2`
-- **Latest Version:** `1.20.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 1.15.x → 1.20.x
-- **Source:** https://github.com/kubernetes-sigs/external-dns/releases/tag/1.20.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `1.20.0`
+- **Latest Version:** `1.20.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -464,13 +316,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `ingress-nginx`
 - **Repository:** `ingress-nginx`
-- **Current Version:** `4.12.0`
-- **Latest Version:** `4.14.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 4.12.x → 4.14.x
-- **Source:** https://github.com/kubernetes/ingress-nginx/releases/tag/4.14.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `4.14.1`
+- **Latest Version:** `4.14.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -483,13 +330,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `fluent-bit`
 - **Repository:** `fluent`
-- **Current Version:** `0.47.10`
-- **Latest Version:** `0.54.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.47.x → 0.54.x
-- **Source:** https://github.com/fluent/helm-charts/releases/tag/0.54.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.54.1`
+- **Latest Version:** `0.54.1` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `cr.fluentbit.io/fluent/fluent-bit`
@@ -534,13 +376,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `grafana`
 - **Repository:** `grafana`
-- **Current Version:** `7.0.19`
-- **Latest Version:** `10.5.5` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 7.x.x → 10.x.x
-- **Source:** https://github.com/grafana/helm-charts/releases/tag/10.5.5
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `10.5.8`
+- **Latest Version:** `10.5.8` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -553,18 +390,13 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `homepage`
 - **Repository:** `jameswynn`
-- **Current Version:** `2.0.2`
-- **Latest Version:** `2.1.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 2.0.x → 2.1.x
-- **Source:** https://github.com/gethomepage/homepage/releases/tag/2.1.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `2.1.0`
+- **Latest Version:** `2.1.0` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `ghcr.io/gethomepage/homepage`
   - **Path:** `image`
-  - **Current Tag:** `v1.6.1`
+  - **Current Tag:** `v1.8.0`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -576,13 +408,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `intel-device-plugins-gpu`
 - **Repository:** `intel`
-- **Current Version:** `0.34.0`
-- **Latest Version:** `0.34.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 0.34.0 → 0.34.1
-- **Source:** https://github.com/intel-device-plugins-gpu/intel-device-plugins-gpu/releases/tag/0.34.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `0.34.1`
+- **Latest Version:** `0.34.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -595,13 +422,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `intel-device-plugins-operator`
 - **Repository:** `intel`
-- **Current Version:** `0.34.0`
-- **Latest Version:** `0.34.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 0.34.0 → 0.34.1
-- **Source:** https://github.com/intel-device-plugins-operator/intel-device-plugins-operator/releases/tag/0.34.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `0.34.1`
+- **Latest Version:** `0.34.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -614,13 +436,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `ingress-nginx`
 - **Repository:** `ingress-nginx`
-- **Current Version:** `4.12.0`
-- **Latest Version:** `4.14.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 4.12.x → 4.14.x
-- **Source:** https://github.com/kubernetes/ingress-nginx/releases/tag/4.14.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `4.14.1`
+- **Latest Version:** `4.14.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -640,11 +457,14 @@ We updated Go to fix some vulnerabilities in the standard library.
 - **Repository:** `jlesage/jdownloader-2`
   - **Path:** `controllers.main.containers.app.image`
   - **Current Tag:** `v25.02.1`
-  - **Latest Tag:** `v1.0.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/jlesage/jdownloader-2/releases/tag/v1.0.0
+  - **Latest Tag:** `v26.01.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🔴 **MAJOR** (high complexity)
+  - **Update Description:** Major version update: 25.x.x → 26.x.x
+  - **⚠️ Breaking Changes Detected:**
+    - Major version change typically indicates breaking changes
+  - **Source:** https://github.com/jlesage/jdownloader-2/releases/tag/v26.01.1
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **⚠️ Breaking Changes:** *Major version update - review release notes above*
 
 ---
 
@@ -676,25 +496,6 @@ We updated Go to fix some vulnerabilities in the standard library.
 
 ---
 
-### kubernetes-dashboard
-
-- **File:** `kubernetes/apps/monitoring/kubernetes-dashboard/app/helmrelease.yaml`
-
-#### Chart
-- **Name:** `kubernetes-dashboard`
-- **Repository:** `kubernetes-dashboard`
-- **Current Version:** `6.0.8`
-- **Latest Version:** `7.14.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 6.x.x → 7.x.x
-- **Source:** https://github.com/kubernetes-dashboard/kubernetes-dashboard/releases/tag/7.14.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
-
-*No container images specified in values*
-
----
-
 ### mcpo
 
 - **File:** `kubernetes/apps/ai/mcpo/app/helmrelease.yaml`
@@ -714,24 +515,6 @@ We updated Go to fix some vulnerabilities in the standard library.
 - **Repository:** `python`
   - **Path:** `controllers.mcpo.initContainers.runtime-setup.image`
   - **Current Tag:** `3.11-slim`
-  - **Latest Tag:** *Could not determine*
-
----
-
-### metricbeat
-
-- **File:** `kubernetes/apps/monitoring/metricbeat/app/helmrelease.yaml`
-
-#### Chart
-- **Name:** `app-template`
-- **Repository:** `bjw-s`
-- **Current Version:** `3.6.0`
-- **Latest Version:** *Could not determine*
-
-#### Container Images
-- **Repository:** `docker.elastic.co/beats/metricbeat`
-  - **Path:** `controllers.metricbeat.containers.app.image`
-  - **Current Tag:** `8.15.3`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -758,37 +541,60 @@ We updated Go to fix some vulnerabilities in the standard library.
 - **Name:** `nextcloud`
 - **Repository:** `nextcloud`
 - **Current Version:** `6.6.4`
-- **Latest Version:** `8.7.0` ⚠️ **UPDATE AVAILABLE**
+- **Latest Version:** `8.8.1` ⚠️ **UPDATE AVAILABLE**
 - **Update Type:** 🔴 **MAJOR** (high complexity)
 - **Update Description:** Major version update: 6.x.x → 8.x.x
-- **Source:** https://github.com/nextcloud/helm/releases/tag/8.7.0
+- **Source:** https://github.com/nextcloud/helm/releases/tag/8.8.1
 - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 - **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
 
 #### Container Images
 - **Repository:** `nextcloud`
   - **Path:** `image`
-  - **Current Tag:** `32.0.2`
+  - **Current Tag:** `32.0.3`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `bitnamilegacy/mariadb`
   - **Path:** `mariadb.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `0.0.1` ✅ (up-to-date)
+  - **Latest Tag:** `12.0.2` ✅ (up-to-date)
 
 - **Repository:** `xperimental/nextcloud-exporter`
   - **Path:** `metrics.image`
   - **Current Tag:** `0.6.2`
-  - **Latest Tag:** `v0.1.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/xperimental/nextcloud-exporter/releases/tag/v0.1.0
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Latest Tag:** `0.9.0` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟡 **MINOR** (medium complexity)
+  - **Update Description:** Minor version update: 0.6.x → 0.9.x
+  - **Source:** https://github.com/xperimental/nextcloud-exporter/releases/tag/0.9.0
+  - **Release Date:** 2025-10-12
+  - **Release Notes:**
+    ```markdown
+    ## Docker images
+
+```plain
+xperimental/nextcloud-exporter:0.9.0
+ghcr.io/xperimental/nextcloud-exporter:0.9.0
+```
+
+## Changelog
+
+### Added
+
+- Prometheus alerting rule for notifying for updates (see `contrib/prometheus-alerts.yaml`)
+- Additional labels on `nextcloud_scrape_errors_total`
+  - `unavailable` for HTTP Service Unavailable (503) errors
+  - `maintenance` for maintenance mode
+- Panels for scrape errors and version info in Grafana Dashboard
+
+### Changed
+
+- Updated Go runtime and dependencies
+    ```
 
 - **Repository:** `bitnamilegacy/redis`
   - **Path:** `redis.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `3.2.0-r1` ✅ (up-to-date)
+  - **Latest Tag:** `8.2.1` ✅ (up-to-date)
 
 ---
 
@@ -799,21 +605,8 @@ We updated Go to fix some vulnerabilities in the standard library.
 #### Chart
 - **Name:** `node-feature-discovery`
 - **Repository:** `node-feature-discovery`
-- **Current Version:** `0.17.1`
-- **Latest Version:** `0.18.3` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.17.x → 0.18.x
-- **Source:** https://github.com/kubernetes-sigs/node-feature-discovery/releases/tag/0.18.3
-- **Release Date:** 2025-11-05
-- **Release Notes:**
-  ```markdown
-  ## What's Changed
-
-This patch release adds support for ppc64le and s390x architectures by providing official NFD container images for them. It also fixes the "test" subcommand of kubectl-nfd plugin.
-
-**Full Changelog**: https://github.com/kubernetes-sigs/node-feature-discovery/compare/v0.18.2...v0.18.3
-  ```
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.18.3`
+- **Latest Version:** `0.18.3` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -833,55 +626,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `iib0011/omni-tools`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `0.6.0`
-  - **Latest Tag:** `0.1.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/iib0011/omni-tools/releases/tag/0.1.0
-  - **Release Date:** 2025-02-27
-  - **Release Notes:**
-    ```markdown
-    ## Docker images
-- `iib0011/omni-tools:latest`
-- `iib0011/omni-tools:0.1.0`
-## What's new
-### PNG Tools:
-- **Compress PNG**: Reduce the file size of PNG images without losing quality.
-- **Convert JPG to PNG**: Easily convert JPG images to PNG format.
-- **Create Transparent PNG**: Make parts of an image transparent.
-- **Change Colors in PNG**: Replace specific colors in a PNG image.
-
-### Text Tools:
-- **Text Splitter**: Split text into multiple lines or segments.
-- **Text Joiner**: Combine multiple lines of text into one.
-- **String to Morse**: Convert text into Morse code.
-
-### JSON Tools:
-- **Prettify JSON**: Format JSON data for better readability.
-
-### List Tools:
-- **Sort**: Arrange list items in ascending or descending order.
-- **Unwrap**: Remove wrapping characters (like quotes) from list items.
-- **Reverse**: Reverse the order of items in a list.
-- **Find Unique**: Identify and keep only unique items from a list.
-- **Find Most Popular**: Find the most frequently occurring items.
-- **Group**: Group list items based on a common attribute.
-- **Rotate**: Shift list items by a certain number of positions.
-- **Shuffle**: Randomly rearrange list items.
-
-### GIF Tools:
-- **Change Speed**: Adjust the playback speed of GIFs.
-
-### Number Tools:
-- **Sum Calculator**: Calculate the sum of a list of numbers.
-- **Generate Numbers**: Create a sequence of numbers.
-
-## New Contributors
-* @Made4Uo made their first contribution in https://github.com/iib0011/omni-tools/pull/8
-* @Chesterkxng made their first contribution in https://github.com/iib0011/omni-tools/pull/15
-* @hhourani27 made their first contribution in https://github.com/iib0011/omni-tools/pull/17
-
-**Full Changelog**: https://github.com/iib0011/omni-tools/commits/v0.1.0
-    ```
+  - **Latest Tag:** `0.6.0` ✅ (up-to-date)
 
 ---
 
@@ -892,18 +637,13 @@ This patch release adds support for ppc64le and s390x architectures by providing
 #### Chart
 - **Name:** `open-webui`
 - **Repository:** `open-webui`
-- **Current Version:** `5.13.0`
-- **Latest Version:** `10.1.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 5.x.x → 10.x.x
-- **Source:** https://github.com/open-webui/open-webui/releases/tag/10.1.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `10.2.1`
+- **Latest Version:** `10.2.1` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `ghcr.io/open-webui/open-webui`
   - **Path:** `image`
-  - **Current Tag:** `v0.6.43`
+  - **Current Tag:** `0.7.2`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -922,7 +662,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `clusterzx/paperless-ai`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `1.1.5` ✅ (up-to-date)
+  - **Latest Tag:** `3.0.9` ✅ (up-to-date)
 
 ---
 
@@ -940,7 +680,25 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `icereed/paperless-gpt`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `ollama-bearer` ✅ (up-to-date)
+  - **Latest Tag:** `v0.24.0` ✅ (up-to-date)
+
+---
+
+### redis
+
+- **File:** `kubernetes/apps/databases/redis/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.1`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `redis`
+  - **Path:** `controllers.redis.containers.app.image`
+  - **Current Tag:** `7-alpine`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -986,11 +744,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `teslamate/teslamate`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `2.2.0`
-  - **Latest Tag:** `1.16.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 2.2.x → 2.16.x
-  - **Source:** https://github.com/teslamate/teslamate/releases/tag/1.16.0
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Latest Tag:** `2.2.0` ✅ (up-to-date)
 
 ---
 
@@ -1008,45 +762,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `bbilly1/tubearchivist`
   - **Path:** `controllers.main.containers.app.image`
   - **Current Tag:** `v0.5.8`
-  - **Latest Tag:** `v0.3.6` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/bbilly1/tubearchivist/releases/tag/v0.3.6
-  - **Release Date:** 2023-05-13
-  - **Release Notes:**
-    ```markdown
-    ## Project Updates
-- This update will automatically change and rebuild the video, channel and download queue indexes.
-- Tube Archivist Companion browser extension also got an update to control auto start behavior: [Release Notes](https://github.com/tubearchivist/browser-extension/releases/tag/v0.1.4)
-- If you are a sponsor, the real time monitor client also got an update to control auto start behavior: [Release Notes](https://github.com/tubearchivist/members/releases/tag/v0.0.2)
-- It is recommend to run [Rescan Filesystem](https://docs.tubearchivist.com/settings/#rescan-filesystem) to validate all media file paths before updating, monitor the logs to make sure, this does nothing unexpected.
-- At first start, there is a migration command running to index additional metadata from your media files. That includes file size, codec, bitrate, resolution. 
-  - That process can take some time, depending on various factors, expect this to take around 1 minute per 1000 videos.
-  - Log output will show progress and any error messages.
-  - The interface will become available again, after that completes.
-  - Be patient and grab some popcorn to watch the logs fly by.
-
-## Added
-- Added video stream metadata indexing like codecs, bitrate, filesize
-- Added channel metadata aggregation like total file size, total videos, total playback.
-- Added start now for adding to download queue, [docs](https://docs.tubearchivist.com/downloads/#add-to-download-queue)
-- Added auto start for subscriptions, [docs](https://docs.tubearchivist.com/settings/#subscriptions)
-- Added extractor language configuration, [docs](https://docs.tubearchivist.com/settings/#download-format)
-- Added `--format-sort` configuration, [docs](https://docs.tubearchivist.com/settings/#download-format), by @dsander
-- Added channel tags indexing for better search results
-- [API] Added endpoints to control auto start behavior
-
-## Changed
-- Changed channel metadata extraction to use `yt-dlp` instead of custom scraper for better reliability.
-- Removed the `limit_count` config field, use queue control instead
-
-## Fixed
-- Fixed backup run issue when not initiated with task
-- Fixed playlist ID parser for members only playlists, by @mglinski
-
-## Hotfix
-- I've pushed a quick hotfix dealing with #476, if you encounter that, please pull again.
-    ```
+  - **Latest Tag:** `v0.5.8` ✅ (up-to-date)
 
 ---
 
@@ -1064,10 +780,10 @@ This patch release adds support for ppc64le and s390x architectures by providing
 - **Repository:** `vaultwarden/server`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `1.32.7`
-  - **Latest Tag:** `1.21.0-alpine` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/vaultwarden/server/releases/tag/1.21.0-alpine
+  - **Latest Tag:** `1.35.2` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟡 **MINOR** (medium complexity)
+  - **Update Description:** Minor version update: 1.32.x → 1.35.x
+  - **Source:** https://github.com/vaultwarden/server/releases/tag/1.35.2
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1087,7 +803,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 #### Container Images
 - **Repository:** `ghcr.io/esphome/esphome`
   - **Path:** `controllers.esphome.containers.app.image`
-  - **Current Tag:** `2025.10.5`
+  - **Current Tag:** `2025.12.7`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -1105,7 +821,7 @@ This patch release adds support for ppc64le and s390x architectures by providing
 #### Container Images
 - **Repository:** `ghcr.io/blakeblackshear/frigate`
   - **Path:** `image`
-  - **Current Tag:** `0.16.2`
+  - **Current Tag:** `0.16.3`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -1123,8 +839,8 @@ This patch release adds support for ppc64le and s390x architectures by providing
 #### Container Images
 - **Repository:** `ghcr.io/home-assistant/home-assistant`
   - **Path:** `controllers.home-assistant.containers.app.image`
-  - **Current Tag:** `2026.1.0`
-  - **Latest Tag:** `2026.1.0` ✅ (up-to-date)
+  - **Current Tag:** `2026.1.2`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1164,48 +880,8 @@ This patch release adds support for ppc64le and s390x architectures by providing
 #### Container Images
 - **Repository:** `ghcr.io/music-assistant/server`
   - **Path:** `controllers.music-assistant-server.containers.app.image`
-  - **Current Tag:** `2.7.2`
-  - **Latest Tag:** `2.7.3` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.7.2 → 2.7.3
-  - **Source:** https://github.com/music-assistant/server/releases/tag/2.7.3
-  - **Release Date:** 2026-01-02
-  - **Release Notes:**
-    ```markdown
-    ## 📦 Stable Release
-
-_Changes since [2.7.2](https://github.com/music-assistant/server/releases/tag/2.7.2)_
-
-### 🐛 Bugfixes
-
-- Fix link in Roku manifest (by @OzGav in #2866)
-- Fix items not showing up in the library (filtering still not right) (by @arturpragacz in #2873)
-- Fix Sonos S1 not reconnecting after having gone offline. (by @MarvinSchenkel in #2874)
-- Audible: Fix authentication for new API token format (by @ztripez in #2875)
-- Plex Connect: Fix Plex Connect timeline reporting (by @anatosun in #2876)
-- Fix issue with remote_progress if user not logged in (by @jfeil in #2882)
-- Add 2 guards for queue missing after client disconnect (by @balloob in #2884)
-- Fix spotify podcast thumb image quality (by @OzGav in #2885)
-- Prevent cache with media_item=None (by @balloob in #2886)
-- Disconnect sendspin clients to allow clean shutdown (by @balloob in #2887)
-- Fix OpenSubsonic ReplayGain loudness calculation (by @OzGav in #2893)
-- Improve single artist detection when splitting (by @OzGav in #2899)
-- Fix base queries to work with provider mapping filters (by @MarvinSchenkel in #2900)
-- Fix track name stripping too agressive (by @OzGav in #2901)
-- Fix multiple spotify connect instances reporting to the latest registered webservice callback (by @kneirinck in #2905)
-- fix: MusicCast Pause (by @fmunkes in #2907)
-
-### 🧰 Maintenance and dependency bumps
-
-- Bump aioslimproto to 3.1.3 (by @MarvinSchenkel in #2906)
-- Bump aioslimproto to 3.1.4 (by @MarvinSchenkel in #2909)
-
-## :bow: Thanks to our contributors
-
-Special thanks to the following contributors who helped with this release:
-
-@MarvinSchenkel, @OzGav, @anatosun, @arturpragacz, @balloob, @fmunkes, @jfeil, @kneirinck, @ztripez
-    ```
+  - **Current Tag:** `2.7.5`
+  - **Latest Tag:** *Could not determine*
 
 - **Repository:** `ghcr.io/alams154/music-assistant-alexa-api`
   - **Path:** `controllers.music-assistant-server.containers.alexa-api.image`
@@ -1227,12 +903,15 @@ Special thanks to the following contributors who helped with this release:
 #### Container Images
 - **Repository:** `n8nio/n8n`
   - **Path:** `image`
-  - **Current Tag:** `1.110.2`
-  - **Latest Tag:** `0.1.2` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/n8nio/n8n/releases/tag/0.1.2
+  - **Current Tag:** `1.123.16`
+  - **Latest Tag:** `2.4.4` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🔴 **MAJOR** (high complexity)
+  - **Update Description:** Major version update: 1.x.x → 2.x.x
+  - **⚠️ Breaking Changes Detected:**
+    - Major version change typically indicates breaking changes
+  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.4.4
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **⚠️ Breaking Changes:** *Major version update - review release notes above*
 
 ---
 
@@ -1250,10 +929,10 @@ Special thanks to the following contributors who helped with this release:
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
   - **Current Tag:** `4.0.9`
-  - **Latest Tag:** `1.0.0-10-minimal-amd64` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/nodered/node-red/releases/tag/1.0.0-10-minimal-amd64
+  - **Latest Tag:** `4.1.3` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟡 **MINOR** (medium complexity)
+  - **Update Description:** Minor version update: 4.0.x → 4.1.x
+  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.3
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1272,7 +951,7 @@ Special thanks to the following contributors who helped with this release:
 - **Repository:** `koush/scrypted`
   - **Path:** `controllers.scrypted.containers.app.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `nightly-2022-03-08` ✅ (up-to-date)
+  - **Latest Tag:** `latest` ✅ (up-to-date)
 
 ---
 
@@ -1290,11 +969,41 @@ Special thanks to the following contributors who helped with this release:
 - **Repository:** `koenkk/zigbee2mqtt`
   - **Path:** `controllers.zigbee2mqtt.containers.app.image`
   - **Current Tag:** `2.6.1`
-  - **Latest Tag:** `0.1.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/koenkk/zigbee2mqtt/releases/tag/0.1.0
-  - **Release Date:** 2018-07-03
+  - **Latest Tag:** `2.7.2` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟡 **MINOR** (medium complexity)
+  - **Update Description:** Minor version update: 2.6.x → 2.7.x
+  - **Source:** https://github.com/koenkk/zigbee2mqtt/releases/tag/2.7.2
+  - **Release Date:** 2026-01-01
+  - **Release Notes:**
+    ```markdown
+    # Improvements
+- [#11151](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11151) Bosch BTH-RM*: Support for `ctrlSeqeOfOper` (@burmistrzak)
+- [#30375](https://github.com/Koenkk/zigbee2mqtt/issues/30375) SMLIGHT SLZB-: support controlling LED (@Koenkk)
+- [#11111](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11111) Aqara T1: support segment control, segment colors, effect colors and effect segments (@absent42)
+- [#11110](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11110) Ikea E2204/E2206: enable child lock for fw 2.4.4 &gt; (@chris-1243)
+- [#11062](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11062) Aqara T1/T1M ceiling light: support for RGB dynamic effects and ring light individual segment control (@absent42)
+- [#11053](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11053) Inovelli: added toggle option for parameter 130 (firmware 3.0+) (@InovelliUSA)
+- [#11047](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11047) Aqara T2: support dynamic RGB effects (@absent42)
+- [#29406](https://github.com/Koenkk/zigbee2mqtt/issues/29406) Lincukoo SZLR08: support `detection_distance` (@Koenkk)
+- [#11041](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11041) Third Reality 3RSPE01044BZ and 3RSP02064Z: support more features (@3reality-support)
+- [#10990](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10990) Sinope TH1123ZB(-G2)/TH1124ZB(-G2): expose ecoMode (@lemoinem)
+- [#10986](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10986) Schneider Electric 545D6514: support indicator mode (@as8net)
+- [#10975](https://github.com/Koenkk/zigbee-herdsman-converters/issues/10975) BITUO TECHNIK SPM01-U01: support OTA (@mrmaximas)
+
+# Fixes
+- [#30137](https://github.com/Koenkk/zigbee2mqtt/issues/30137) Biome floating promises detection (@Nerivec)
+- [#30216](https://github.com/Koenkk/zigbee2mqtt/issues/30216) Don't fail to start when removing old log directory fails (@Koenkk)
+- [#30324](https://github.com/Koenkk/zigbee2mqtt/issues/30324) Log dir tz format not working on some systems (@Nerivec)
+- [#30297](https://github.com/Koenkk/zigbee2mqtt/issues/30297) Proper timezone in logs dir (@Nerivec)
+- [#30065](https://github.com/Koenkk/zigbee2mqtt/issues/30065) Remove extra `>` in onboarding (@Bi11)
+- [#11154](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11154) IKEA BILRESA E2489 & E2490: fix actions (@andrei-lazarov)
+- [#11159](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11159) Third Reality 3RWS18BZ: fix power source (@philippeboyd)
+- [#11144](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11144) Ubisys: fix configuration substring (@andrewandneil)
+- [#11129](https://github.com/Koenkk/zigbee-herdsman-converters/issues/11129) Aqara C3: fix automatic calibration (@marthubner)
+- [#1606](https://github.com/Koenkk/zigbee-herdsman/issues/1606) Aqara KD-R01D: expose device temperature (@Koenkk)
+- [#
+    ... (truncated, see source link above for full notes)
+    ```
 
 ---
 
@@ -1307,13 +1016,8 @@ Special thanks to the following contributors who helped with this release:
 #### Chart
 - **Name:** `authentik`
 - **Repository:** `authentik`
-- **Current Version:** `2025.10.2`
-- **Latest Version:** `2025.10.3` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 2025.10.2 → 2025.10.3
-- **Source:** https://github.com/goauthentik/authentik/releases/tag/2025.10.3
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `2025.12.1`
+- **Latest Version:** `2025.12.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -1326,22 +1030,8 @@ Special thanks to the following contributors who helped with this release:
 #### Chart
 - **Name:** `csi-driver-smb`
 - **Repository:** `csi-driver-smb`
-- **Current Version:** `v1.17.0`
-- **Latest Version:** `1.19.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 1.17.x → 1.19.x
-- **Source:** https://github.com/kubernetes-csi/csi-driver-smb/releases/tag/1.19.1
-- **Release Date:** 2025-10-13
-- **Release Notes:**
-  ```markdown
-  ## What's Changed
-* [release-1.19] chore: Update csi release tools by @andyzhangx in https://github.com/kubernetes-csi/csi-driver-smb/pull/983
-* doc: cut v1.19.1 release by @andyzhangx in https://github.com/kubernetes-csi/csi-driver-smb/pull/984
-
-
-**Full Changelog**: https://github.com/kubernetes-csi/csi-driver-smb/compare/v1.19.0...v1.19.1
-  ```
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `1.19.1`
+- **Latest Version:** `1.19.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -1368,10 +1058,10 @@ Special thanks to the following contributors who helped with this release:
 - **Repository:** `docker.io/jellyfin/jellyfin`
   - **Path:** `image`
   - **Current Tag:** `10.11.3`
-  - **Latest Tag:** `10.0.0-arm` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/docker.io/jellyfin/releases/tag/10.0.0-arm
+  - **Latest Tag:** `10.11.5` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 10.11.3 → 10.11.5
+  - **Source:** https://github.com/docker.io/jellyfin/releases/tag/10.11.5
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1390,12 +1080,12 @@ Special thanks to the following contributors who helped with this release:
 - **Repository:** `jlesage/makemkv`
   - **Path:** `image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `v0.1.0-beta` ✅ (up-to-date)
+  - **Latest Tag:** `v26.01.1` ✅ (up-to-date)
 
 - **Repository:** `jlesage/makemkv`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `v0.1.0-beta` ✅ (up-to-date)
+  - **Latest Tag:** `v26.01.1` ✅ (up-to-date)
 
 ---
 
@@ -1406,22 +1096,17 @@ Special thanks to the following contributors who helped with this release:
 #### Chart
 - **Name:** `plex-media-server`
 - **Repository:** `plex`
-- **Current Version:** `0.9.1`
-- **Latest Version:** `1.4.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 0.x.x → 1.x.x
-- **Source:** https://github.com/plexinc/pms-docker/releases/tag/1.4.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `1.4.0`
+- **Latest Version:** `1.4.0` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `plexinc/pms-docker`
   - **Path:** `image`
   - **Current Tag:** `1.42.1.10060-4e8b05daf`
-  - **Latest Tag:** `1.3.2.3112-1751929` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 1.42.1 → 1.42.2
-  - **Source:** https://github.com/plexinc/pms-docker/releases/tag/1.3.2.3112-1751929
+  - **Latest Tag:** `latest` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Version format not recognized
+  - **Source:** https://github.com/plexinc/pms-docker/releases/tag/latest
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1484,49 +1169,35 @@ ECK will now generate longer passwords by default for the administrative user of
 
 ---
 
-### opentelemetry-operator
+### headlamp
 
-- **File:** `kubernetes/apps/monitoring/opentelemetry-operator/app/helmrelease.yaml`
+- **File:** `kubernetes/apps/monitoring/headlamp/app/helmrelease.yaml`
 
 #### Chart
-- **Name:** `opentelemetry-operator`
-- **Repository:** `opentelemetry`
-- **Current Version:** `0.66.0`
-- **Latest Version:** `0.102.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.66.x → 0.102.x
-- **Source:** https://github.com/open-telemetry/opentelemetry-helm-charts/releases/tag/0.102.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Name:** `headlamp`
+- **Repository:** `headlamp`
+- **Current Version:** `0.39.0`
+- **Latest Version:** `0.39.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
 ---
 
-### otel-collector
+### unpoller
 
-- **File:** `kubernetes/apps/monitoring/otel-collector/app/helmrelease.yaml`
+- **File:** `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`
 
 #### Chart
-- **Name:** `opentelemetry-collector`
-- **Repository:** `opentelemetry`
-- **Current Version:** `0.92.0`
-- **Latest Version:** `0.143.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.92.x → 0.143.x
-- **Source:** https://github.com/opentelemetry-collector/opentelemetry-collector/releases/tag/0.143.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Name:** `unpoller`
+- **Repository:** `unpoller`
+- **Current Version:** `2.1.0`
+- **Latest Version:** `2.1.0` ✅ (up-to-date)
 
 #### Container Images
-- **Repository:** `otel/opentelemetry-collector-contrib`
+- **Repository:** `ghcr.io/unpoller/unpoller`
   - **Path:** `image`
-  - **Current Tag:** ``
-  - **Latest Tag:** `0.2.10` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Version format not recognized
-  - **Source:** https://github.com/otel/opentelemetry-collector-contrib/releases/tag/0.2.10
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `v2.21.0`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1549,16 +1220,64 @@ ECK will now generate longer passwords by default for the administrative user of
 - **Repository:** `louislam/uptime-kuma`
   - **Path:** `image`
   - **Current Tag:** `2.0.0-beta.2`
-  - **Latest Tag:** `1.0.1` ⚠️ **UPDATE AVAILABLE**
+  - **Latest Tag:** `2.0.2` ⚠️ **UPDATE AVAILABLE**
   - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.0.0 → 2.0.1
-  - **Source:** https://github.com/louislam/uptime-kuma/releases/tag/1.0.1
-  - **Release Date:** 2021-07-12
+  - **Update Description:** Patch version update: 2.0.0 → 2.0.2
+  - **Source:** https://github.com/louislam/uptime-kuma/releases/tag/2.0.2
+  - **Release Date:** 2025-10-22
   - **Release Notes:**
     ```markdown
-    - Fix some bugs reported by the community. #5 #10 
-- Ability to change the listening port and hostname for someone who directly run the server without Docker.
+    ### 🐞 Bug Fixes
+- #6225 Fix: False positive for Google Chrome during migration
+
+### Others
+- #6210 #6220 Revise supported versions and Docker tags in SECURITY.md
     ```
+
+---
+
+## Namespace: `my-software-development`
+
+### absenty
+
+- **File:** `kubernetes/apps/my-software-development/absenty/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.1`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `ghcr.io/nachtschatt3n/absenty`
+  - **Path:** `controllers.absenty.containers.app.image`
+  - **Current Tag:** `sha-ff3910e-dev`
+  - **Latest Tag:** *Could not determine*
+
+- **Repository:** `ghcr.io/nachtschatt3n/absenty`
+  - **Path:** `controllers.absenty.initContainers.bundle-install.image`
+  - **Current Tag:** `sha-ff3910e-dev`
+  - **Latest Tag:** *Could not determine*
+
+---
+
+## Namespace: `my-software-production`
+
+### absenty
+
+- **File:** `kubernetes/apps/my-software-production/absenty/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.1`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `ghcr.io/nachtschatt3n/absenty`
+  - **Path:** `controllers.absenty.containers.app.image`
+  - **Current Tag:** `sha-ffa072a`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1583,10 +1302,10 @@ ECK will now generate longer passwords by default for the administrative user of
 - **Repository:** `adguard/adguardhome`
   - **Path:** `image`
   - **Current Tag:** `v0.107.65`
-  - **Latest Tag:** `v0.93` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Versions appear equal or downgrade detected
-  - **Source:** https://github.com/adguard/adguardhome/releases/tag/v0.93
+  - **Latest Tag:** `v0.107.71` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 0.107.65 → 0.107.71
+  - **Source:** https://github.com/adguard/adguardhome/releases/tag/v0.107.71
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1611,18 +1330,18 @@ ECK will now generate longer passwords by default for the administrative user of
 #### Container Images
 - **Repository:** `ghcr.io/paperless-ngx/paperless-ngx`
   - **Path:** `image`
-  - **Current Tag:** `2.20.3`
-  - **Latest Tag:** `2.20.3` ✅ (up-to-date)
+  - **Current Tag:** `2.20.4`
+  - **Latest Tag:** *Could not determine*
 
 - **Repository:** `bitnamilegacy/mariadb`
   - **Path:** `mariadb.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `0.0.1` ✅ (up-to-date)
+  - **Latest Tag:** `12.0.2` ✅ (up-to-date)
 
 - **Repository:** `bitnamilegacy/redis`
   - **Path:** `redis.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `3.2.0-r1` ✅ (up-to-date)
+  - **Latest Tag:** `8.2.1` ✅ (up-to-date)
 
 ---
 
