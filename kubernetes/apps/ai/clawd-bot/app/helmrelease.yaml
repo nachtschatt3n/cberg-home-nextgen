@@ -241,74 +241,72 @@ spec:
                 fi
                 chown -R 1000:1000 /home/node
 
-                if [ ! -f "$CONFIG_PATH" ]; then
-                  echo "Configuration not found. Bootstrapping minimal gateway config..."
-                  printf '%s\n' \
-                    '{' \
-                    '  "gateway": {' \
-                    '    "mode": "local",' \
-                    '    "bind": "lan",' \
-                    '    "port": 18789,' \
-                    '    "auth": {' \
-                    '      "mode": "token",' \
-                    '      "token": ""' \
-                    '    }' \
-                    '  },' \
-                    '  "agent": {' \
-                    '    "workspace": "/home/node/clawd"' \
-                    '  },' \
-                    '  "model": {' \
-                    '    "provider": "openai",' \
-                    '    "apiBase": "http://192.168.30.111:11435/v1",' \
-                    '    "apiKey": "ollama",' \
-                    '    "model": "gpt-oss:20b"' \
-                    '  }' \
-                    '}' > "$CONFIG_PATH"
-                  chown 1000:1000 "$CONFIG_PATH"
-                fi
-
-                if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
-                  node -e "
-                    const fs = require('fs');
-                    const path = '/home/node/.clawdbot/clawdbot.json';
-                    const token = process.env.CLAWDBOT_GATEWAY_TOKEN;
-                    if (!token || !fs.existsSync(path)) process.exit(0);
-                    const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
-                    cfg.gateway = cfg.gateway || {};
-                    cfg.gateway.auth = cfg.gateway.auth || {};
-                    cfg.gateway.auth.mode = 'token';
-                    cfg.gateway.auth.token = token;
-                    fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
-                  "
-                fi
-
                 node -e "
                   const fs = require('fs');
                   const path = '/home/node/.clawdbot/clawdbot.json';
-                  if (!fs.existsSync(path)) process.exit(0);
-                  const base = process.env.OLLAMA_BASE || 'http://192.168.30.111:11435/v1';
-                  const model = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
-                  const key = process.env.OLLAMA_API_KEY || 'ollama';
-                  const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
-                  cfg.model = cfg.model || {};
-                  cfg.model.provider = 'openai';
-                  cfg.model.apiBase = base;
-                  cfg.model.apiKey = key;
-                  cfg.model.model = model;
+                  const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
+                  const modelId = modelName.includes('/') ? modelName : `openai/${modelName}`;
+                  const baseCfg = {
+                    gateway: {
+                      mode: 'local',
+                      bind: 'lan',
+                      port: 18789,
+                      auth: { mode: 'token', token: '' },
+                    },
+                    agent: {
+                      workspace: '/home/node/clawd',
+                      model: modelId,
+                    },
+                    agents: {
+                      defaults: {
+                        workspace: '/home/node/clawd',
+                        model: { primary: modelId },
+                      },
+                    },
+                  };
+
+                  let cfg = baseCfg;
+                  if (fs.existsSync(path)) {
+                    try {
+                      cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+                    } catch (err) {
+                      console.warn('Invalid config, resetting to base', err);
+                      cfg = baseCfg;
+                    }
+                  }
+
+                  cfg.gateway = cfg.gateway || {};
+                  cfg.gateway.auth = cfg.gateway.auth || {};
+                  if (process.env.CLAWDBOT_GATEWAY_TOKEN) {
+                    cfg.gateway.auth.mode = 'token';
+                    cfg.gateway.auth.token = process.env.CLAWDBOT_GATEWAY_TOKEN;
+                  } else if (!cfg.gateway.auth.token) {
+                    cfg.gateway.auth.token = '';
+                  }
+
+                  cfg.agent = cfg.agent || {};
+                  cfg.agent.workspace = cfg.agent.workspace || '/home/node/clawd';
+                  cfg.agent.model = modelId;
+
+                  cfg.agents = cfg.agents || {};
+                  cfg.agents.defaults = cfg.agents.defaults || {};
+                  cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
+                  cfg.agents.defaults.model = cfg.agents.defaults.model || {};
+                  cfg.agents.defaults.model.primary = modelId;
+
+                  delete cfg.model;
+
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
                 "
+                chown 1000:1000 "$CONFIG_PATH"
 
                 AUTH_DIR="/home/node/.clawdbot/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
                 AUTH_FILE="$AUTH_DIR/auth-profiles.json"
                 if [ ! -f "$AUTH_FILE" ]; then
-                  printf '%s\n' \
-                    '{' \
-                    '  "openai": {' \
-                    '    "api_key": "ollama",' \
-                    '    "api_base": "http://192.168.30.111:11435/v1"' \
-                    '  }' \
-                    '}' > "$AUTH_FILE"
+                  API_KEY="${OLLAMA_API_KEY:-ollama}"
+                  API_BASE="${OLLAMA_BASE:-http://192.168.30.111:11435/v1}"
+                  printf '{\n  "openai": {\n    "api_key": "%s",\n    "api_base": "%s"\n  }\n}\n' "$API_KEY" "$API_BASE" > "$AUTH_FILE"
                 fi
                 chown -R 1000:1000 "$AUTH_DIR"
 
