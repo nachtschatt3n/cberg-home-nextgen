@@ -49,8 +49,8 @@ spec:
                     name: paperless-ai-secret
                     key: PAPERLESS_USERNAME
               AI_PROVIDER: "custom"
-              CUSTOM_BASE_URL: "http://192.168.30.111:1234/v1"
-              CUSTOM_MODEL: "qwen/qwen3-4b-2507"
+              CUSTOM_BASE_URL: "http://192.168.30.111:11435/api"
+              CUSTOM_MODEL: "qwen3:4b-instruct"
               OPENAI_API_KEY:
                 valueFrom:
                   secretKeyRef:

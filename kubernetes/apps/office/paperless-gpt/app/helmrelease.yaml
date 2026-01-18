@@ -45,15 +45,15 @@ spec:
               AUTO_TAG: "paperless-gpt-auto"
               TOKEN_LIMIT: "262144"
               LLM_PROVIDER: "openai"
-              LLM_MODEL: "openai/gpt-oss-20b"
+              LLM_MODEL: "gpt-oss:20b-instruct"
               OPENAI_API_KEY:
                 valueFrom:
                   secretKeyRef:
                     name: paperless-gpt-secret
                     key: OPENAI_API_KEY
               VISION_LLM_PROVIDER: "openai"
-              VISION_LLM_MODEL: "qwen/qwen3-vl-8b"
-              OPENAI_BASE_URL: "http://192.168.30.111:1234/v1"
+              VISION_LLM_MODEL: "qwen3-vl:8b-instruct"
+              OPENAI_BASE_URL: "http://192.168.30.111:11435/api"
               OCR_PROVIDER: "llm"
               LOG_LEVEL: "info"
               LLM_REQUESTS_PER_MINUTE: "10"

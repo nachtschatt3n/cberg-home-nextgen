@@ -135,6 +135,74 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
 - Follow kebab-case naming for files and directories, snake_case for variables/functions
 - Use task commands for common operations like validating templates or running tests
 
+## Ollama AI Endpoints
+
+### Mac Mini M4 Pro Ollama Instances
+
+The cluster uses Ollama running on Mac Mini M4 Pro (192.168.30.111) with three dedicated instances:
+
+| Instance | Port | Model | Purpose |
+|----------|------|-------|---------|
+| Voice | 11434 | `qwen3:4b-instruct` | Voice/audio processing |
+| Reason | 11435 | `gpt-oss:20b-instruct` | General reasoning and text processing |
+| Vision | 11436 | `qwen3-vl:8b-instruct` | Vision/image processing |
+
+### Native Ollama API Format
+
+Ollama provides native REST API endpoints at `/api` path. All endpoints use the format:
+- **Base URL**: `http://192.168.30.111:{PORT}/api` (no trailing slash, no `/v1`)
+- **Endpoints**: `/api/chat` for chat completions, `/api/generate` for text generation
+- **API Key**: Not required for native Ollama API
+- **Model Names**: Use Ollama model format (e.g., `gpt-oss:20b-instruct`, not `openai/gpt-oss-20b`)
+
+**Note**: Ollama also provides OpenAI-compatible endpoints at `/v1/` if applications require OpenAI-compatible format, but native Ollama API at `/api` is preferred.
+
+### Application Configuration
+
+#### Paperless-AI
+- **Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, native Ollama API)
+- **Model**: `qwen3:4b-instruct`
+- **Config**: `CUSTOM_BASE_URL` with `AI_PROVIDER: "custom"`
+
+#### Paperless-GPT
+- **LLM Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, native Ollama API)
+- **LLM Model**: `gpt-oss:20b-instruct`
+- **Vision Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, vision models can use same endpoint)
+- **Vision Model**: `qwen3-vl:8b-instruct`
+- **Config**: `OPENAI_BASE_URL` with `LLM_PROVIDER: "openai"` (Note: May need OpenAI-compatible format `/v1/` if app requires it)
+
+#### Frigate NVR
+- **Endpoint**: `http://192.168.30.111:11436/api` (Vision instance, native Ollama API)
+- **Config**: `OPENAI_BASE_URL` environment variable (Note: May need OpenAI-compatible format `/v1/` if app requires it)
+
+### Model Naming Convention
+
+**Important**: Ollama model names use colon format, not slash:
+- ✅ Correct: `gpt-oss:20b-instruct`, `qwen3:4b-instruct`, `qwen3-vl:8b-instruct`
+- ❌ Wrong: `openai/gpt-oss-20b`, `qwen/qwen3-4b-2507`
+
+### Endpoint Testing
+
+```bash
+# Test Reason endpoint (native Ollama API)
+curl -X POST http://192.168.30.111:11435/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-oss:20b-instruct",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": false
+  }'
+
+# Test Vision endpoint (native Ollama API)
+curl -X POST http://192.168.30.111:11436/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-vl:8b-instruct",
+    "messages": [{"role": "user", "content": "Describe this image"}],
+    "stream": false
+  }'
+```
+
 ## Homepage Integration
 
 ### Automatic Service Discovery
