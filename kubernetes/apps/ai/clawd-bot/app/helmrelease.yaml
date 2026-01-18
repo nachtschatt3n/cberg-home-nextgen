@@ -214,11 +214,15 @@ spec:
 
                 rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
+                SHELL_PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 for f in .bashrc .profile .bash_logout; do
                   if [ ! -f "/home/node/$f" ] && [ -f "/etc/skel/$f" ]; then
                     cp "/etc/skel/$f" "/home/node/$f"
                   fi
                 done
+                if ! grep -q "CLAWDBOT_PATH_EXPORT" /home/node/.bashrc 2>/dev/null; then
+                  printf '\n# CLAWDBOT_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.bashrc
+                fi
                 chown -R 1000:1000 /home/node
 
                 if [ ! -f "$CONFIG_PATH" ]; then
