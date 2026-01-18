@@ -50,7 +50,7 @@
 | **Alertmanager** | ✅ Running | Alert routing functional |
 | **Home Automation** | ✅ Healthy | Home Assistant, Zigbee2MQTT, Frigate |
 | **Media Services** | ✅ Healthy | Jellyfin, Plex |
-| **AI Services** | ✅ Healthy | Open WebUI, Bytebot, AI-SRE |
+| **AI Services** | ✅ Healthy | Open WebUI, AI-SRE |
 | **Backup System** | ✅ Healthy | Daily backups completing |
 
 ---
@@ -240,7 +240,7 @@
 **Quick Status:**
 - ✅ Home Automation: Home Assistant, Zigbee2MQTT, Frigate, ESPHome all running
 - ✅ Media: Jellyfin, Plex operational
-- ✅ AI Services: Open WebUI, Bytebot, AI-SRE running
+- ✅ AI Services: Open WebUI, AI-SRE running
 - ✅ Databases: PostgreSQL, MariaDB, InfluxDB healthy
 - ✅ Office: Paperless-NGX, Actual Budget, Vaultwarden running
 - ✅ Network: Cloudflared, External-DNS, Ingress controllers healthy

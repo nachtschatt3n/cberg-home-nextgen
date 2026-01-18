@@ -25,7 +25,6 @@
 | `phpmyadmin` | `databases` | 3.7.1 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.1 ? | latest ✅ | - | - |
 | `ai-sre` | `default` | 3.7.1 ? | 2.1.0 ? | 2.1.0 | - |
-| `bytebot` | `default` | 3.7.1 ? | 16-alpine ? | 16-alpine | - |
 | `cert-manager` | `default` | v1.19.1 → v1.19.2 | - | - | 🟢 PATCH |
 | `cilium` | `default` | 1.17.1 → 1.18.5 | - | - | 🟡 MINOR |
 | `clawd-bot` | `default` | 3.7.1 ? | 22-alpine ? | 22-alpine | - |
@@ -221,44 +220,6 @@
 - **Repository:** `ghcr.io/nachtschatt3n/ai-sre`
   - **Path:** `controllers.ai-sre.containers.app.image`
   - **Current Tag:** `2.1.0`
-  - **Latest Tag:** *Could not determine*
-
----
-
-### bytebot
-
-- **File:** `kubernetes/apps/ai/bytebot/app/helmrelease.yaml`
-
-#### Chart
-- **Name:** `app-template`
-- **Repository:** `bjw-s`
-- **Current Version:** `3.7.1`
-- **Latest Version:** *Could not determine*
-
-#### Container Images
-- **Repository:** `postgres`
-  - **Path:** `controllers.postgres.containers.postgres.image`
-  - **Current Tag:** `16-alpine`
-  - **Latest Tag:** *Could not determine*
-
-- **Repository:** `ghcr.io/bytebot-ai/bytebot-desktop`
-  - **Path:** `controllers.desktop.containers.desktop.image`
-  - **Current Tag:** `edge`
-  - **Latest Tag:** *Could not determine*
-
-- **Repository:** `busybox`
-  - **Path:** `controllers.desktop.initContainers.fix-permissions.image`
-  - **Current Tag:** `latest`
-  - **Latest Tag:** *Could not determine*
-
-- **Repository:** `ghcr.io/bytebot-ai/bytebot-agent`
-  - **Path:** `controllers.agent.containers.agent.image`
-  - **Current Tag:** `edge`
-  - **Latest Tag:** *Could not determine*
-
-- **Repository:** `ghcr.io/bytebot-ai/bytebot-ui`
-  - **Path:** `controllers.ui.containers.ui.image`
-  - **Current Tag:** `edge`
   - **Latest Tag:** *Could not determine*
 
 ---

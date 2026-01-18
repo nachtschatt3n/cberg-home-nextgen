@@ -607,7 +607,6 @@ spec:
 #### Examples of Correct Naming:
 - `langfuse-postgresql-data` (using longhorn) → PV: `pvc-df1999c2...` ✅
 - `home-assistant-config` (using longhorn-static) → PV: `home-assistant-config` ✅
-- `bytebot-cache` (using longhorn) → PV: `pvc-4b56f40c...` ✅
 
 ### Longhorn Volume Creation for longhorn-static
 
