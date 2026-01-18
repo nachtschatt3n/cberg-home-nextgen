@@ -11,6 +11,7 @@ metadata:
     gethomepage.dev/description: "Kubernetes storage management UI"
     gethomepage.dev/group: "Storage"
     gethomepage.dev/icon: "longhorn.png"
+    gethomepage.dev/pod-selector: "app=longhorn-ui"
     # Authentik forward auth annotations
     nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-longhorn-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
     nginx.ingress.kubernetes.io/auth-signin: "https://longhorn.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
