@@ -34,6 +34,8 @@ data:
       master_key: "bytebot-litellm-key-2025"
       # Drop unsupported parameters for Ollama
       drop_params: true
+      # Allow unauthenticated access to /v1/models (for Bytebot model discovery)
+      disable_auth_for_models: true
       
     router_settings:
       # Enable load balancing across models
