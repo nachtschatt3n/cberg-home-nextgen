@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: homepage
-      version: 2.0.2
+      version: 2.1.0
       sourceRef:
         kind: HelmRepository
         name: jameswynn
@@ -24,7 +24,7 @@ spec:
   values:
     image:
       repository: ghcr.io/gethomepage/homepage
-      tag: v1.6.1
+      tag: 1.8.0
 
     # Enable RBAC. RBAC is necessary to use Kubernetes integration
     enableRbac: true
