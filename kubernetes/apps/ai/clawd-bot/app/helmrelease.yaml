@@ -192,7 +192,7 @@ spec:
                 mkdir -p "$AUTH_DIR"
                 printf '%s\n' \
                   '{' \
-                  '  "openai": {' \
+                  '  "ollama": {' \
                   '    "api_key": "ollama",' \
                   '    "api_base": "http://192.168.30.111:11435/v1"' \
                   '  }' \
@@ -245,7 +245,9 @@ spec:
                   const fs = require('fs');
                   const path = '/home/node/.clawdbot/clawdbot.json';
                   const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
-                  const displayModel = modelName.includes('/') ? modelName : 'openai/' + modelName;
+                  const ollamaBase = process.env.OLLAMA_BASE || 'http://192.168.30.111:11435/v1';
+                  const ollamaKey = process.env.OLLAMA_API_KEY || 'ollama';
+                  const displayModel = modelName.includes('/') ? modelName : 'ollama/' + modelName;
                   const modelId = displayModel;
                   const baseCfg = {
                     gateway: {
@@ -262,6 +264,15 @@ spec:
                       defaults: {
                         workspace: '/home/node/clawd',
                         model: { primary: modelId },
+                      },
+                    },
+                    models: {
+                      providers: {
+                        ollama: {
+                          baseUrl: ollamaBase,
+                          apiKey: ollamaKey,
+                          api: 'openai-completions',
+                        },
                       },
                     },
                   };
@@ -294,10 +305,18 @@ spec:
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
                   cfg.agents.defaults.model.primary = displayModel;
-                  cfg.agents.defaults.model.defaultProvider = 'openai';
+                  cfg.agents.defaults.model.defaultProvider = 'ollama';
                   cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                  cfg.agents.defaults.models[displayModel] = { provider: 'openai', name: modelName };
-                  cfg.agents.defaults.models[modelName] = { provider: 'openai' };
+                  cfg.agents.defaults.models[displayModel] = { provider: 'ollama', name: modelName };
+                  cfg.agents.defaults.models[modelName] = { provider: 'ollama' };
+
+                  cfg.models = cfg.models || {};
+                  cfg.models.providers = cfg.models.providers || {};
+                  cfg.models.providers.ollama = {
+                    baseUrl: ollamaBase,
+                    apiKey: ollamaKey,
+                    api: 'openai-completions',
+                  };
 
                   delete cfg.model;
 
@@ -311,7 +330,7 @@ spec:
                 if [ ! -f "$AUTH_FILE" ]; then
                   API_KEY="${OLLAMA_API_KEY:-ollama}"
                   API_BASE="${OLLAMA_BASE:-http://192.168.30.111:11435/v1}"
-                  printf '{\n  "openai": {\n    "api_key": "%s",\n    "api_base": "%s"\n  }\n}\n' "$API_KEY" "$API_BASE" > "$AUTH_FILE"
+                  printf '{\n  "ollama": {\n    "api_key": "%s",\n    "api_base": "%s"\n  }\n}\n' "$API_KEY" "$API_BASE" > "$AUTH_FILE"
                 fi
                 chown -R 1000:1000 "$AUTH_DIR"
 
