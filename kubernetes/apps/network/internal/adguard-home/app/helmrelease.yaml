@@ -33,7 +33,7 @@ spec:
       repository: adguard/adguardhome
       pullPolicy: IfNotPresent
       # Overrides the image tag whose default is the chart appVersion.
-      tag: "v0.107.65"
+      tag: "v0.107.71"
 
     env:
       - name: ADMIN_PASSWORD
