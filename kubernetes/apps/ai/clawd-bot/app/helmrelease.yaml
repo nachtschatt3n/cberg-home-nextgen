@@ -262,6 +262,8 @@ spec:
                 exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
 
             env:
+              - name: PATH
+                value: "/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               # Node configuration
               - name: NODE_ENV
                 value: "production"
