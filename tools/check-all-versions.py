@@ -290,13 +290,14 @@ class VersionChecker:
                             if current_parsed:
                                 preferred_major = current_parsed[0]
                         
-                        # Filter for semantic version tags (x.y.z format)
-                        version_pattern = re.compile(r'^\d+\.\d+\.\d+$')
+                        # Filter for semantic version tags (x.y.z format, with optional v prefix)
+                        # Matches: 1.2.3, v1.2.3, 0.107.65, v0.107.65
+                        version_pattern = re.compile(r'^v?\d+\.\d+\.\d+$')
                         version_tags = [tag for tag in data['results'] if version_pattern.match(tag.get('name', ''))]
                         if version_tags:
                             # Sort by version number (not by last_updated)
                             def version_key(tag):
-                                name = tag['name']
+                                name = tag['name'].lstrip('vV')  # Remove v prefix for comparison
                                 parts = name.split('.')
                                 try:
                                     return (int(parts[0]), int(parts[1]), int(parts[2]))
