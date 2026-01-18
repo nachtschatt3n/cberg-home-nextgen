@@ -187,6 +187,18 @@ spec:
                 ln -sf /home/node/.clawdbot/bin/clawdbot /home/node/.clawdbot/clawdbot
                 echo "Clawdbot installed at: /home/node/.clawdbot/bin/clawdbot"
                 /home/node/.clawdbot/bin/clawdbot --version
+                echo "Seeding Ollama auth profile..."
+                AUTH_DIR="/home/node/.clawdbot/agents/main/agent"
+                mkdir -p "$AUTH_DIR"
+                cat > "$AUTH_DIR/auth-profiles.json" <<'EOF'
+{
+  "openai": {
+    "api_key": "ollama",
+    "api_base": "http://192.168.30.111:11435/v1"
+  }
+}
+EOF
+
                 echo "Fixing permissions..."
                 chown -R 1000:1000 /home/node/.clawdbot
             securityContext:
