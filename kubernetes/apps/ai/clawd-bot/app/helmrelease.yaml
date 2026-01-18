@@ -245,6 +245,12 @@ spec:
                     '  },' \
                     '  "agent": {' \
                     '    "workspace": "/home/node/clawd"' \
+                    '  },' \
+                    '  "model": {' \
+                    '    "provider": "openai",' \
+                    '    "apiBase": "http://192.168.30.111:11435/v1",' \
+                    '    "apiKey": "ollama",' \
+                    '    "model": "gpt-oss:20b-instruct"' \
                     '  }' \
                     '}' > "$CONFIG_PATH"
                   chown 1000:1000 "$CONFIG_PATH"
@@ -265,6 +271,22 @@ spec:
                   "
                 fi
 
+                node -e "
+                  const fs = require('fs');
+                  const path = '/home/node/.clawdbot/clawdbot.json';
+                  if (!fs.existsSync(path)) process.exit(0);
+                  const base = process.env.OLLAMA_BASE || 'http://192.168.30.111:11435/v1';
+                  const model = process.env.OLLAMA_MODEL || 'gpt-oss:20b-instruct';
+                  const key = process.env.OLLAMA_API_KEY || 'ollama';
+                  const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+                  cfg.model = cfg.model || {};
+                  cfg.model.provider = 'openai';
+                  cfg.model.apiBase = base;
+                  cfg.model.apiKey = key;
+                  cfg.model.model = model;
+                  fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
+                "
+
                 echo "Starting Clawd Bot Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
@@ -280,6 +302,12 @@ spec:
               # Gateway port
               - name: GATEWAY_PORT
                 value: "18789"
+              - name: OLLAMA_BASE
+                value: "http://192.168.30.111:11435/v1"
+              - name: OLLAMA_MODEL
+                value: "gpt-oss:20b-instruct"
+              - name: OLLAMA_API_KEY
+                value: "ollama"
             envFrom:
               - secretRef:
                   name: clawd-bot-secret
