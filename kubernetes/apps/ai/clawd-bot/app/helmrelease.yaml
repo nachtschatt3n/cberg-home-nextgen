@@ -213,8 +213,13 @@ spec:
                 STATE_DIR="/home/node/.clawdbot"
 
                 rm -rf /home/node/.clawdbot/pkgroot || true
-                mkdir -p "$STATE_DIR" /home/node/clawd
-                chown -R 1000:1000 "$STATE_DIR"
+                mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
+                for f in .bashrc .profile .bash_logout; do
+                  if [ ! -f "/home/node/$f" ] && [ -f "/etc/skel/$f" ]; then
+                    cp "/etc/skel/$f" "/home/node/$f"
+                  fi
+                done
+                chown -R 1000:1000 /home/node
 
                 if [ ! -f "$CONFIG_PATH" ]; then
                   echo "Configuration not found. Bootstrapping minimal gateway config..."
@@ -355,16 +360,15 @@ spec:
               - clawd-bot.${SECRET_DOMAIN}
 
     persistence:
-      config:
+     config:
         type: persistentVolumeClaim
         existingClaim: clawd-bot-data
         advancedMounts:
           clawd-bot:
             app:
-              - path: /home/node/.clawdbot
-              - path: /home/node/clawd
+              - path: /home/node
             install-clawdbot:
-              - path: /home/node/.clawdbot
+              - path: /home/node
 
       npm-cache:
         type: emptyDir
