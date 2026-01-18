@@ -5,3 +5,5 @@ namespace: ai
 resources:
   - ./helmrelease.yaml
   - ./secret.sops.yaml
+  - ./litellm-configmap.yaml
+  - ./litellm-deployment.yaml
