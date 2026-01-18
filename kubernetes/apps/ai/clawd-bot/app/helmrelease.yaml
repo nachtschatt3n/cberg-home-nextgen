@@ -272,7 +272,6 @@ spec:
                           baseUrl: ollamaBase,
                           apiKey: ollamaKey,
                           api: 'openai-completions',
-                          models: [modelName],
                         },
                       },
                     },
@@ -317,7 +316,6 @@ spec:
                     baseUrl: ollamaBase,
                     apiKey: ollamaKey,
                     api: 'openai-completions',
-                    models: [modelName],
                   };
 
                   delete cfg.model;
