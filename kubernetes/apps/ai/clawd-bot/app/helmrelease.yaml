@@ -294,6 +294,8 @@ spec:
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
                   cfg.agents.defaults.model.primary = modelId;
                   cfg.agents.defaults.model.defaultProvider = 'openai';
+                  cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                  cfg.agents.defaults.models[modelId] = { provider: 'openai' };
 
                   delete cfg.model;
 
