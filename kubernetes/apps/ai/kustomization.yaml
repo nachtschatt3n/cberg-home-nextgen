@@ -9,5 +9,4 @@ resources:
   - ./mcpo/ks.yaml
   - ./langfuse/ks.yaml
   - ./ai-sre/ks.yaml
-  - ./bytebot/ks.yaml
   - ./clawd-bot/ks.yaml
