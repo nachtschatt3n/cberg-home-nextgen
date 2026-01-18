@@ -73,7 +73,7 @@ The cluster runs on enterprise-grade Intel NUC systems with high-speed networkin
 
 **Additional Infrastructure:**
 - **NAS**: UNAS-CBERG at `192.168.31.230` provides bulk storage, backups, and SMB/NFS shares
-- **AI Compute**: Mac Mini M4 Pro running LM Studio for GPU-accelerated LLM inference with Metal Performance Shaders (MPS)
+- **AI Compute**: Mac Mini M4 Pro (`192.168.30.111`) running Ollama with three dedicated instances (Voice:11434, Reason:11435, Vision:11436) for GPU-accelerated LLM inference with Metal Performance Shaders (MPS). Provides OpenAI-compatible API endpoints for cluster applications.
 - **Remote Management**: PiKVM devices provide KVM-over-IP access to all Kubernetes nodes
 - **Network**: UniFi infrastructure with 10GbE backbone and 2.5GbE to compute nodes
 
@@ -103,7 +103,7 @@ NUCs  UNAS   [APs] (U6+, U6 Pro, U7 Pro, UAP AC LR)
 - **Access Points**: Strategic placement for full wireless coverage (U6+, U6 Pro, U7 Pro, UAP AC LR)
 - **Storage**: UNAS-CBERG connected via 10GbE SFP+ for high-speed data access
 - **Remote Management**: PiKVM devices for KVM-over-IP access to Kubernetes nodes
-- **AI Compute**: Mac Mini M4 Pro running LM Studio with OpenAI-compatible API endpoints and Metal acceleration
+- **AI Compute**: Mac Mini M4 Pro (`192.168.30.111`) running Ollama with three dedicated instances (Voice:11434, Reason:11435, Vision:11436) with native Ollama API endpoints and Metal acceleration. Endpoints accessible at `http://192.168.30.111:{PORT}/api`
 
 ---
 
@@ -350,7 +350,11 @@ The cluster hosts a variety of applications organized by functional category:
 - **phpMyAdmin** - Database administration interface
 
 ### 🤖 AI & Machine Learning
-- **LM Studio** - Local LLM inference server running on Mac Mini M4 Pro with OpenAI-compatible API endpoints
+- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro (`192.168.30.111`) with three dedicated instances:
+  - **Voice** (port 11434): `qwen3:4b-instruct` - Voice/audio processing
+  - **Reason** (port 11435): `gpt-oss:20b-instruct` - General reasoning and text processing
+  - **Vision** (port 11436): `qwen3-vl:8b-instruct` - Vision/image processing
+  - All instances provide native Ollama API endpoints at `http://192.168.30.111:{PORT}/api`
 - **Open WebUI** - Chat interface for AI models
 - **Langfuse** - LLM observability and analytics with S3-compatible MinIO storage
 

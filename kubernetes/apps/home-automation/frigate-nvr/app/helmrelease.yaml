@@ -31,7 +31,7 @@ spec:
     env:
       TZ: "Europe/Berlin"
       LIBVA_DRIVER_NAME: "iHD"
-      OPENAI_BASE_URL: "http://192.168.30.111:1234/v1"
+      OPENAI_BASE_URL: "http://192.168.30.111:11436/api"
 
     # Frigate configuration is now in ConfigMap (frigate-config)
     # Mount the ConfigMap as a volume to /config/config.yml
