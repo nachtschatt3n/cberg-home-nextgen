@@ -246,6 +246,7 @@ spec:
                   const path = '/home/node/.clawdbot/clawdbot.json';
                   const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
                   const displayModel = modelName.includes('/') ? modelName : 'openai/' + modelName;
+                  const modelId = displayModel;
                   const baseCfg = {
                     gateway: {
                       mode: 'local',
@@ -286,7 +287,7 @@ spec:
 
                   cfg.agent = cfg.agent || {};
                   cfg.agent.workspace = cfg.agent.workspace || '/home/node/clawd';
-                  cfg.agent.model = displayModel;
+                  cfg.agent.model = modelId;
 
                   cfg.agents = cfg.agents || {};
                   cfg.agents.defaults = cfg.agents.defaults || {};
