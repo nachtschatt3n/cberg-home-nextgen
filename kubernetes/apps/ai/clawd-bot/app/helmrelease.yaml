@@ -366,7 +366,7 @@ spec:
               - clawd-bot.${SECRET_DOMAIN}
 
     persistence:
-     config:
+      config:
         type: persistentVolumeClaim
         existingClaim: clawd-bot-data
         advancedMounts:
