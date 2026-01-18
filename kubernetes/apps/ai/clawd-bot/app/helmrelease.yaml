@@ -52,7 +52,7 @@ spec:
                 mkdir -p "$NPM_CONFIG_CACHE"
                 export PYTHONUSERBASE="/home/node/.clawdbot"
                 echo "Cleaning existing runtimes to free space..."
-                rm -rf /home/node/.clawdbot/lib/node_modules /home/node/.clawdbot/lib/python3.* /home/node/.clawdbot/.cache
+                rm -rf /home/node/.clawdbot/.cache
                 export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
                 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
