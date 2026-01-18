@@ -228,7 +228,7 @@ spec:
                 if ! grep -q "CLAWDBOT_PATH_EXPORT" /home/node/.profile 2>/dev/null; then
                   printf '\n# CLAWDBOT_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.profile
                 fi
-              chown -R 1000:1000 /home/node
+                chown -R 1000:1000 /home/node
 
                 if [ ! -f "$CONFIG_PATH" ]; then
                   echo "Configuration not found. Bootstrapping minimal gateway config..."
