@@ -566,175 +566,92 @@ log_section "Section 18: Network Infrastructure (UniFi)"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
-log_section "Section 18a: UniFi Hardware Metrics (Prometheus)"
+log_section "Section 18a: UniFi Hardware Metrics (InfluxDB)"
 {
-    echo "Checking UnPoller metrics via Prometheus..."
+    echo "Checking UnPoller metrics from InfluxDB exports..."
     echo ""
 
-    # Port-forward in background (use different port to avoid conflicts)
-    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9091:9090 > /dev/null 2>&1 &
-    PF_PID=$!
-    sleep 3
+    # Get UnPoller pod
+    UNPOLLER_POD=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
-    # Check if UnPoller is scraping
-    UNPOLLER_UP=$(curl -s 'http://localhost:9091/api/v1/query?query=up{job="unpoller"}' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        value = result['data']['result'][0]['value'][1]
-        print('1' if value == '1' else '0')
-    else:
-        print('0')
-except:
-    print('0')
-" || echo "0")
-
-    if [ "$UNPOLLER_UP" == "1" ]; then
-        echo "✅ UnPoller is scraping metrics"
-        echo ""
-
-        # Count online devices
-        echo "Online UniFi devices:"
-        curl -s 'http://localhost:9091/api/v1/query?query=count(unifipoller_device_uptime_seconds>0)' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        count = result['data']['result'][0]['value'][1]
-        print(f'  Total online: {count}')
-    else:
-        print('  Unable to get device count')
-except:
-    print('  Error getting device count')
-" || echo "  Error querying Prometheus"
-
-        echo ""
-
-        # Check for offline devices
-        echo "Offline UniFi devices:"
-        OFFLINE_DEVICES=$(curl -s 'http://localhost:9091/api/v1/query?query=unifipoller_device_uptime_seconds==0' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        offline = result['data']['result']
-        if offline:
-            for device in offline:
-                name = device['metric'].get('name', 'unknown')
-                print(f'  - {name}')
-            print(f'{len(offline)}')  # Return count on last line
-        else:
-            print('  None')
-            print('0')
-    else:
-        print('  Unable to check')
-        print('0')
-except:
-    print('  Error')
-    print('0')
-" || echo -e "  Error\n0")
-
-        OFFLINE_COUNT=$(echo "$OFFLINE_DEVICES" | tail -1)
-        echo "$OFFLINE_DEVICES" | head -n -1
-        echo ""
-
-        # Check device temperatures
-        echo "Device temperatures:"
-        curl -s 'http://localhost:9091/api/v1/query?query=unifipoller_device_system_stats_temps' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        temps = result['data']['result']
-        high_temp_count = 0
-        for temp in temps:
-            device = temp['metric'].get('name', 'unknown')
-            temp_c = float(temp['value'][1])
-            if temp_c > 75:
-                print(f'  🔴 {device}: {temp_c}°C (HIGH)')
-                high_temp_count += 1
-            elif temp_c > 60:
-                print(f'  🟡 {device}: {temp_c}°C (WARM)')
-            else:
-                print(f'  ✅ {device}: {temp_c}°C')
-        if not temps:
-            print('  No temperature data available')
-    else:
-        print('  Unable to get temperature data')
-except Exception as e:
-    print(f'  Error: {e}')
-" || echo "  Error querying temperatures"
-
-        echo ""
-
-        # Check total client count
-        echo "Connected clients:"
-        curl -s 'http://localhost:9091/api/v1/query?query=sum(unifipoller_device_user_num_sta)' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        count = result['data']['result'][0]['value'][1]
-        print(f'  Total clients: {count}')
-    else:
-        print('  Unable to get client count')
-except:
-    print('  Error getting client count')
-" || echo "  Error querying Prometheus"
-
-        echo ""
-
-        # Check wireless interference
-        echo "Wireless interference (>50%):"
-        INTERFERENCE=$(curl -s 'http://localhost:9091/api/v1/query?query=unifipoller_device_radio_channel_interference>50' 2>/dev/null | python3 -c "
-import sys, json
-try:
-    result = json.load(sys.stdin)
-    if result.get('status') == 'success' and result['data']['result']:
-        interference = result['data']['result']
-        if interference:
-            for radio in interference:
-                device = radio['metric'].get('name', 'unknown')
-                channel = radio['metric'].get('channel', 'N/A')
-                level = float(radio['value'][1])
-                print(f'  ⚠️  {device} (channel {channel}): {level}%')
-            print(f'{len(interference)}')  # Return count
-        else:
-            print('  ✅ No high interference detected')
-            print('0')
-    else:
-        print('  Unable to check interference')
-        print('0')
-except:
-    print('  Error')
-    print('0')
-" || echo -e "  Error\n0")
-
-        INTERFERENCE_COUNT=$(echo "$INTERFERENCE" | tail -1)
-        echo "$INTERFERENCE" | head -n -1
-
-        # Evaluate health
-        if [ "$OFFLINE_COUNT" -eq 0 ] && [ "$INTERFERENCE_COUNT" -eq 0 ]; then
-            log_success "UniFi network hardware healthy"
-        elif [ "$OFFLINE_COUNT" -gt 0 ]; then
-            log_warning "UniFi offline devices detected: $OFFLINE_COUNT"
-            add_minor_issue "UniFi offline devices: $OFFLINE_COUNT"
-        fi
-
-        if [ "$INTERFERENCE_COUNT" -gt 0 ]; then
-            log_warning "High wireless interference detected: $INTERFERENCE_COUNT radios"
-            add_minor_issue "High wireless interference: $INTERFERENCE_COUNT radios"
-        fi
+    if [ -z "$UNPOLLER_POD" ]; then
+        echo "⚠️  UnPoller pod not found"
+        log_warning "UnPoller pod not found"
+        add_major_issue "UnPoller pod not found"
     else
-        echo "⚠️  UnPoller is not scraping metrics or not found"
-        log_warning "UnPoller metrics not available"
-        add_minor_issue "UnPoller not providing metrics"
-    fi
+        echo "UnPoller pod: $UNPOLLER_POD"
+        echo ""
 
-    # Kill port-forward
-    kill $PF_PID 2>/dev/null || true
-    wait $PF_PID 2>/dev/null || true
+        # Get recent metrics from logs
+        RECENT_LOGS=$(kubectl logs -n monitoring "$UNPOLLER_POD" --tail=20 2>&1 || echo "Unable to get logs")
+
+        # Parse latest metrics from logs
+        LATEST_METRIC=$(echo "$RECENT_LOGS" | grep "UniFi Metrics Recorded" | tail -1)
+        LATEST_EXPORT=$(echo "$RECENT_LOGS" | grep "UniFi Measurements Exported" | tail -1)
+
+        if [ -n "$LATEST_METRIC" ]; then
+            echo "Latest metrics recorded:"
+            echo "$LATEST_METRIC"
+            echo ""
+
+            # Extract counts using grep and awk (take only first match)
+            CLIENT_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Client: \K\d+' | head -1 || echo "0")
+            GATEWAY_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Gateway(s)?: \K\d+' | head -1 || echo "0")
+            UAP_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'UAP: \K\d+' | head -1 || echo "0")
+            USW_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'USW: \K\d+' | head -1 || echo "0")
+            ERROR_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Err: \K\d+' | head -1 || echo "0")
+
+            echo "Network device summary:"
+            echo "  - Connected clients: $CLIENT_COUNT"
+            echo "  - Gateways: $GATEWAY_COUNT"
+            echo "  - Access Points (UAP): $UAP_COUNT"
+            echo "  - Switches (USW): $USW_COUNT"
+            echo "  - Errors in recording: $ERROR_COUNT"
+            echo ""
+
+            TOTAL_DEVICES=$((GATEWAY_COUNT + UAP_COUNT + USW_COUNT))
+            echo "  Total UniFi devices: $TOTAL_DEVICES"
+            echo ""
+        else
+            echo "⚠️  No recent metrics found in logs"
+        fi
+
+        if [ -n "$LATEST_EXPORT" ]; then
+            echo "Latest InfluxDB export:"
+            echo "$LATEST_EXPORT"
+            echo ""
+
+            # Check for export errors
+            EXPORT_ERRORS=$(echo "$LATEST_EXPORT" | grep -oP 'Err: \K\d+' || echo "0")
+            REQ_TIME=$(echo "$LATEST_EXPORT" | grep -oP 'Req/Total: \K[0-9.]+ms' || echo "N/A")
+
+            echo "InfluxDB export status:"
+            echo "  - Export errors: $EXPORT_ERRORS"
+            echo "  - Request time: $REQ_TIME"
+            echo ""
+        fi
+
+        # Check overall health
+        if [ -n "$LATEST_METRIC" ] && [ "$ERROR_COUNT" -eq 0 ] && [ "$TOTAL_DEVICES" -gt 0 ]; then
+            log_success "UnPoller successfully exporting metrics to InfluxDB"
+        elif [ -z "$LATEST_METRIC" ]; then
+            log_warning "No recent metrics found from UnPoller"
+            add_major_issue "UnPoller not recording metrics"
+        elif [ "$ERROR_COUNT" -gt 0 ]; then
+            log_warning "UnPoller reporting errors: $ERROR_COUNT"
+            add_minor_issue "UnPoller has $ERROR_COUNT errors in metric recording"
+        elif [ "$TOTAL_DEVICES" -eq 0 ]; then
+            log_warning "UnPoller not detecting any UniFi devices"
+            add_major_issue "UnPoller shows 0 UniFi devices"
+        fi
+
+        # Additional check for recent activity
+        LAST_TIMESTAMP=$(echo "$LATEST_METRIC" | grep -oP '^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}' || echo "")
+        if [ -n "$LAST_TIMESTAMP" ]; then
+            echo "Last metric timestamp: $LAST_TIMESTAMP"
+            echo ""
+        fi
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 19: Network Connectivity"
@@ -976,24 +893,130 @@ log_section "Section 32: Zigbee2MQTT Device Monitoring"
 
 log_section "Section 33: Battery Health Monitoring"
 {
-    echo "Checking battery status..."
-    BATTERY_CHECK=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- sh -c '
-        cat /data/state.json 2>/dev/null | jq -r "
-            to_entries[] |
-            select(.value.battery and (.value.battery < 30)) |
-            \"\(.key): \(.value.battery)%\"
-        " 2>/dev/null || echo "No critical batteries detected"
-    ' 2>&1)
+    echo "Checking battery status across all Zigbee devices..."
+    echo ""
 
-    echo "$BATTERY_CHECK"
+    # Get battery data (IEEE addresses and levels)
+    BATTERY_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq -r 'to_entries[] | select(.value.battery) | "\(.key)|\(.value.battery)"' 2>/dev/null || echo "")
 
-    CRITICAL_BATTERIES=$(echo "$BATTERY_CHECK" | grep -c "%" || true)
+    # Get device friendly names mapping
+    CONFIG_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/configuration.yaml 2>/dev/null | grep -A1 "'0x" | grep -E "^  '0x|friendly_name:" | sed "s/'//g" | paste - - | awk -F: '{gsub(/^[ \t]+/, "", $1); gsub(/^[ \t]+/, "", $3); print $1"|"$3}' 2>/dev/null || echo "")
 
-    if [ "$CRITICAL_BATTERIES" -gt 0 ]; then
-        log_warning "Critical batteries detected: $CRITICAL_BATTERIES devices"
-        add_minor_issue "Zigbee devices with low batteries (<30%): $CRITICAL_BATTERIES"
+    # Create combined list with friendly names
+    BATTERY_LIST=""
+    while IFS='|' read -r ieee battery; do
+        if [ -n "$ieee" ] && [ -n "$battery" ]; then
+            # Look up friendly name
+            friendly=$(echo "$CONFIG_DATA" | grep "^$ieee|" | cut -d'|' -f2-)
+            [ -z "$friendly" ] && friendly="$ieee"
+            BATTERY_LIST="${BATTERY_LIST}${friendly}|${battery}"$'\n'
+        fi
+    done <<< "$BATTERY_DATA"
+
+    if [ -z "$BATTERY_LIST" ]; then
+        echo "⚠️  Unable to retrieve battery data"
+        log_warning "Unable to retrieve Zigbee battery data"
+        add_minor_issue "Cannot retrieve Zigbee battery status"
     else
-        log_success "No critical battery levels"
+        # Count total battery devices
+        TOTAL_BATTERY=$(echo "$BATTERY_LIST" | wc -l)
+        echo "Total battery-powered devices: $TOTAL_BATTERY"
+        echo ""
+
+        # Initialize counters
+        CRITICAL_COUNT=0
+        WARNING_COUNT=0
+        MONITOR_COUNT=0
+        GOOD_COUNT=0
+
+        # Categorize by battery level
+        CRITICAL_BATTERIES=""
+        WARNING_BATTERIES=""
+        MONITOR_BATTERIES=""
+
+        while IFS='|' read -r friendly battery; do
+            if [ -n "$friendly" ] && [ -n "$battery" ]; then
+                # Remove any decimal points
+                battery_int=$(echo "$battery" | awk '{print int($1)}')
+
+                if [ "$battery_int" -lt 15 ]; then
+                    CRITICAL_BATTERIES="${CRITICAL_BATTERIES}  - ${friendly} (${battery}%)\n"
+                    CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
+                elif [ "$battery_int" -lt 30 ]; then
+                    WARNING_BATTERIES="${WARNING_BATTERIES}  - ${friendly} (${battery}%)\n"
+                    WARNING_COUNT=$((WARNING_COUNT + 1))
+                elif [ "$battery_int" -lt 50 ]; then
+                    MONITOR_BATTERIES="${MONITOR_BATTERIES}  - ${friendly} (${battery}%)\n"
+                    MONITOR_COUNT=$((MONITOR_COUNT + 1))
+                else
+                    GOOD_COUNT=$((GOOD_COUNT + 1))
+                fi
+            fi
+        done <<< "$BATTERY_LIST"
+
+        # Display categorized results
+        echo "🔴 CRITICAL (<15%) - Replace Immediately:"
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo -e "$CRITICAL_BATTERIES"
+        else
+            echo "  None"
+        fi
+        echo ""
+
+        echo "🟡 WARNING (15-30%) - Replace Soon:"
+        if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo -e "$WARNING_BATTERIES"
+        else
+            echo "  None"
+        fi
+        echo ""
+
+        echo "🔵 MONITOR (30-50%) - Watch Closely:"
+        if [ "$MONITOR_COUNT" -gt 0 ]; then
+            echo -e "$MONITOR_BATTERIES"
+        else
+            echo "  None"
+        fi
+        echo ""
+
+        echo "✅ GOOD (>50%):"
+        echo "  $GOOD_COUNT devices"
+        echo ""
+
+        # Calculate average battery level
+        AVG_BATTERY=$(echo "$BATTERY_LIST" | awk -F'|' '{sum+=$2; count++} END {if(count>0) print int(sum/count); else print 0}')
+        echo "Average battery level: ${AVG_BATTERY}%"
+        echo ""
+
+        # Add issues based on severity
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            log_warning "CRITICAL: $CRITICAL_COUNT devices with batteries <15%"
+            add_major_issue "Critical battery levels (<15%): $CRITICAL_COUNT devices need immediate replacement"
+        fi
+
+        if [ "$WARNING_COUNT" -gt 0 ]; then
+            log_warning "WARNING: $WARNING_COUNT devices with batteries 15-30%"
+            add_minor_issue "Low batteries (15-30%): $WARNING_COUNT devices need replacement soon"
+        fi
+
+        if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ]; then
+            log_success "All Zigbee device batteries above 30%"
+        fi
+
+        # Show recommendations
+        echo "📋 Recommendations:"
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "  🔴 URGENT: Replace batteries in $CRITICAL_COUNT devices immediately"
+        fi
+        if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo "  🟡 Replace batteries in $WARNING_COUNT devices within 1-2 weeks"
+        fi
+        if [ "$MONITOR_COUNT" -gt 0 ]; then
+            echo "  🔵 Monitor $MONITOR_COUNT devices, plan battery replacement"
+        fi
+        if [ "$CRITICAL_COUNT" -eq 0 ] && [ "$WARNING_COUNT" -eq 0 ] && [ "$MONITOR_COUNT" -eq 0 ]; then
+            echo "  ✅ All devices have healthy battery levels"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
