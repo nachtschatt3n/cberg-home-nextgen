@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: open-webui
-      version: 5.13.0
+      version: 10.2.1
       sourceRef:
         kind: HelmRepository
         name: open-webui
@@ -74,7 +74,7 @@ spec:
 
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
-      enabled: false
+      enabled: true
 
     # -- Value of cluster domain
     clusterDomain: example.com
@@ -85,7 +85,7 @@ spec:
     # -- Open WebUI image tags can be found here: https://github.com/open-webui/open-webui/pkgs/container/open-webui
     image:
       repository: ghcr.io/open-webui/open-webui
-      tag: v0.6.43
+      tag: 0.7.2
       pullPolicy: "IfNotPresent"
     resources:
       requests:
