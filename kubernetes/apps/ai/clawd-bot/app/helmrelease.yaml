@@ -245,7 +245,7 @@ spec:
                   const fs = require('fs');
                   const path = '/home/node/.clawdbot/clawdbot.json';
                   const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
-                  const modelId = modelName;
+                  const displayModel = modelName.includes('/') ? modelName : 'openai/' + modelName;
                   const baseCfg = {
                     gateway: {
                       mode: 'local',
@@ -286,16 +286,17 @@ spec:
 
                   cfg.agent = cfg.agent || {};
                   cfg.agent.workspace = cfg.agent.workspace || '/home/node/clawd';
-                  cfg.agent.model = modelId;
+                  cfg.agent.model = displayModel;
 
                   cfg.agents = cfg.agents || {};
                   cfg.agents.defaults = cfg.agents.defaults || {};
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
-                  cfg.agents.defaults.model.primary = modelId;
+                  cfg.agents.defaults.model.primary = displayModel;
                   cfg.agents.defaults.model.defaultProvider = 'openai';
                   cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                  cfg.agents.defaults.models[modelId] = { provider: 'openai' };
+                  cfg.agents.defaults.models[displayModel] = { provider: 'openai', name: modelName };
+                  cfg.agents.defaults.models[modelName] = { provider: 'openai' };
 
                   delete cfg.model;
 
