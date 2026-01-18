@@ -216,7 +216,7 @@ spec:
 
                 rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
-                SHELL_PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                SHELL_PATH="/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               for f in .bashrc .profile .bash_logout; do
                 if [ ! -f "/home/node/$f" ] && [ -f "/etc/skel/$f" ]; then
                   cp "/etc/skel/$f" "/home/node/$f"
@@ -272,7 +272,7 @@ spec:
 
             env:
               - name: PATH
-                value: "/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               # Node configuration
               - name: NODE_ENV
                 value: "production"
