@@ -60,7 +60,7 @@ spec:
                   bash \
                   python3 python3-pip python3-venv python3-dev \
                   build-essential pkg-config \
-                  git openssh-client ca-certificates curl \
+                  git openssh-client ca-certificates curl sudo \
                   libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
 
                 BIN_DIR="/home/node/.clawdbot/bin"
@@ -68,6 +68,17 @@ spec:
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
                 rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
+
+                echo "Installing kubectl..."
+                KUBECTL_VER="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
+                curl -L "https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl" -o "$BIN_DIR/kubectl"
+                chmod +x "$BIN_DIR/kubectl"
+
+                echo "Installing mise..."
+                MISE_TMP="$(mktemp -d)"
+                curl -fsSL https://mise.jdx.dev/install.sh -o "${MISE_TMP}/install.sh"
+                sh "${MISE_TMP}/install.sh" --yes --bin-dir "$BIN_DIR"
+                rm -rf "${MISE_TMP}"
 
                 echo "Installing gh CLI..."
                 rm -rf /tmp/gh-cli
