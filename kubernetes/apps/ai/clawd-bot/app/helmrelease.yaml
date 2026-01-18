@@ -293,6 +293,7 @@ spec:
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
                   cfg.agents.defaults.model.primary = modelId;
+                  cfg.agents.defaults.model.defaultProvider = 'openai';
 
                   delete cfg.model;
 
