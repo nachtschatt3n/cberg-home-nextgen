@@ -352,7 +352,7 @@ The cluster hosts a variety of applications organized by functional category:
 ### 🤖 AI & Machine Learning
 - **Ollama** - Local LLM inference server running on Mac Mini M4 Pro (`192.168.30.111`) with three dedicated instances:
   - **Voice** (port 11434): `qwen3:4b-instruct` - Voice/audio processing
-  - **Reason** (port 11435): `gpt-oss:20b-instruct` - General reasoning and text processing
+  - **Reason** (port 11435): `gpt-oss:20b` - General reasoning and text processing
   - **Vision** (port 11436): `qwen3-vl:8b-instruct` - Vision/image processing
   - All instances provide native Ollama API endpoints at `http://192.168.30.111:{PORT}/api`
 - **Open WebUI** - Chat interface for AI models
