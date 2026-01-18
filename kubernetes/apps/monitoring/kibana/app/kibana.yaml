@@ -42,6 +42,7 @@ metadata:
     gethomepage.dev/group: "Monitoring"
     gethomepage.dev/icon: "kibana.png"
     gethomepage.dev/description: "Elastic log search and dashboards"
+    gethomepage.dev/pod-selector: "kibana.k8s.elastic.co/name=kibana"
   labels:
     gethomepage.dev/enabled: "true"
 spec:
