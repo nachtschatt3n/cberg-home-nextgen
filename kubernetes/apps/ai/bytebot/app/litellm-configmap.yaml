@@ -30,12 +30,10 @@ data:
           api_base: http://192.168.30.111:11435
     
     general_settings:
-      # Master key for LiteLLM (can be any value, used for authentication)
-      master_key: "bytebot-litellm-key-2025"
       # Drop unsupported parameters for Ollama
       drop_params: true
-      # Allow unauthenticated access to /v1/models (for Bytebot model discovery)
-      disable_auth_for_models: true
+      # Note: No master_key set - allows unauthenticated access
+      # Bytebot will use OPENAI_API_KEY for chat requests, but /v1/models can be accessed without auth
       
     router_settings:
       # Enable load balancing across models
