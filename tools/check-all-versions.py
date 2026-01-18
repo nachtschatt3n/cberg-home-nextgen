@@ -246,7 +246,7 @@ class VersionChecker:
             
             # Handle different registries
             if 'ghcr.io' in repository or 'docker.io' in repository or 'quay.io' in repository:
-                return self.get_registry_image_tag(repository)
+                return self.get_registry_image_tag(repository, current_tag)
             elif 'gcr.io' in repository or 'k8s.gcr.io' in repository:
                 return self.get_gcr_image_tag(repository)
             else:
@@ -256,7 +256,7 @@ class VersionChecker:
             print(f"{Colors.YELLOW}Warning: Could not check image tag for {repository}: {e}{Colors.RESET}")
             return None
     
-    def get_registry_image_tag(self, repository: str) -> Optional[str]:
+    def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest tag from GHCR, Docker Hub, or Quay."""
         try:
             # For GHCR, use GitHub API
@@ -277,11 +277,42 @@ class VersionChecker:
             # For Docker Hub, try Docker Hub API
             elif 'docker.io' in repository or not '/' in repository.split('://')[-1].split('/')[0]:
                 image_name = repository.replace('docker.io/', '').split(':')[0]
-                api_url = f"https://hub.docker.com/v2/repositories/{image_name}/tags?page_size=1&ordering=-last_updated"
+                # Fetch more tags and filter for semantic versions
+                api_url = f"https://hub.docker.com/v2/repositories/{image_name}/tags?page_size=200"
                 response = requests.get(api_url, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     if data.get('results'):
+                        # Determine preferred major version from current tag
+                        preferred_major = None
+                        if current_tag:
+                            current_parsed = self.parse_version(current_tag)
+                            if current_parsed:
+                                preferred_major = current_parsed[0]
+                        
+                        # Filter for semantic version tags (x.y.z format)
+                        version_pattern = re.compile(r'^\d+\.\d+\.\d+$')
+                        version_tags = [tag for tag in data['results'] if version_pattern.match(tag.get('name', ''))]
+                        if version_tags:
+                            # Sort by version number (not by last_updated)
+                            def version_key(tag):
+                                name = tag['name']
+                                parts = name.split('.')
+                                try:
+                                    return (int(parts[0]), int(parts[1]), int(parts[2]))
+                                except (ValueError, IndexError):
+                                    return (0, 0, 0)
+                            version_tags.sort(key=version_key, reverse=True)
+                            
+                            # If we have a preferred major version, prefer tags from that major version
+                            if preferred_major is not None:
+                                same_major = [tag for tag in version_tags if version_key(tag)[0] == preferred_major]
+                                if same_major:
+                                    return same_major[0].get('name', '')
+                            
+                            # Otherwise return the highest version overall
+                            return version_tags[0].get('name', '')
+                        # Fallback: return first tag if no version tags found
                         return data['results'][0].get('name', '')
             
             # For Quay.io, use Quay API
