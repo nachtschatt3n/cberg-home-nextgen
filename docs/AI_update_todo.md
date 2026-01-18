@@ -153,7 +153,7 @@ curl -s https://registry.hub.docker.com/v2/repositories/bbilly1/tubearchivist/ta
 Current distribution:
 - 3.7.1: 12 apps ✅ (target version)
 - 3.6.1: 1 app (makemkv)
-- 3.6.0: 6 apps (ai-sre, bytebot, mcpo, mosquitto, scrypted, omni-tools)
+- 3.6.0: 5 apps (ai-sre, mcpo, mosquitto, scrypted, omni-tools)
 - 2.4.0: 1 app (iobroker) ⚠️ **Staying on 2.4.0** (see notes)
 
 **Action Items**:
@@ -162,7 +162,7 @@ Current distribution:
   - **Fixed on 2.4.0**: Updated probe configuration to use port 8081, added 20m timeout
   - **Status**: Running stable on 2.4.0, no issues
 - [ ] Update makemkv: 3.6.1 → 3.7.1
-- [ ] Update ai-sre, bytebot, mcpo: 3.6.0 → 3.7.1
+- [ ] Update ai-sre, mcpo: 3.6.0 → 3.7.1
 - [ ] Update mosquitto: 3.6.0 → 3.7.1
 - [ ] Update scrypted: 3.6.0 → 3.7.1
 - [ ] Update omni-tools: 3.6.0 → 3.7.1
