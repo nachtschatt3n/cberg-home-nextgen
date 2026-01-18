@@ -213,7 +213,7 @@ spec:
                 STATE_DIR="/home/node/.clawdbot"
 
                 rm -rf /home/node/.clawdbot/pkgroot || true
-                mkdir -p "$STATE_DIR"
+                mkdir -p "$STATE_DIR" /home/node/clawd
                 chown -R 1000:1000 "$STATE_DIR"
 
                 if [ ! -f "$CONFIG_PATH" ]; then
@@ -362,6 +362,7 @@ spec:
           clawd-bot:
             app:
               - path: /home/node/.clawdbot
+              - path: /home/node/clawd
             install-clawdbot:
               - path: /home/node/.clawdbot
 
