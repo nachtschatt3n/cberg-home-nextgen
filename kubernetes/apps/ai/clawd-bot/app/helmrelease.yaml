@@ -287,6 +287,21 @@ spec:
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
                 "
 
+                AUTH_DIR="/home/node/.clawdbot/agents/main/agent"
+                mkdir -p "$AUTH_DIR"
+                AUTH_FILE="$AUTH_DIR/auth-profiles.json"
+                if [ ! -f "$AUTH_FILE" ]; then
+                  cat > "$AUTH_FILE" <<'EOF'
+{
+  "openai": {
+    "api_key": "ollama",
+    "api_base": "http://192.168.30.111:11435/v1"
+  }
+}
+EOF
+                fi
+                chown -R 1000:1000 "$AUTH_DIR"
+
                 echo "Starting Clawd Bot Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
