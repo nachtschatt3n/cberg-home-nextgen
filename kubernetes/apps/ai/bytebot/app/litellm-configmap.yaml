@@ -6,20 +6,6 @@ metadata:
 data:
   config.yaml: |
     model_list:
-      # Ollama Reason instance models (via OpenAI-compatible endpoint)
-      # o3 and gpt-4.1 are available through OpenAI-compatible API
-      - model_name: local-o3
-        litellm_params:
-          model: o3-2025-04-16
-          api_base: http://192.168.30.111:11435/v1
-          api_key: "ollama"  # Required but ignored by Ollama
-      
-      - model_name: local-gpt-4.1
-        litellm_params:
-          model: gpt-4.1-2025-04-14
-          api_base: http://192.168.30.111:11435/v1
-          api_key: "ollama"  # Required but ignored by Ollama
-      
       # Standard Ollama models (via native Ollama API)
       - model_name: local-gpt-oss
         litellm_params:
@@ -37,6 +23,11 @@ data:
         litellm_params:
           model: ollama/qwen3:4b-instruct
           api_base: http://192.168.30.111:11434
+      
+      - model_name: local-qwen-30b
+        litellm_params:
+          model: ollama/qwen3:30b-instruct
+          api_base: http://192.168.30.111:11435
     
     general_settings:
       # Master key for LiteLLM (can be any value, used for authentication)
@@ -48,5 +39,5 @@ data:
       
       # Fallback configuration
       model_group_alias:
-        "smart-model": ["local-o3", "local-gpt-4.1"]
+        "smart-model": ["local-gpt-oss", "local-qwen-30b"]
         "vision-model": ["local-qwen-vl"]
