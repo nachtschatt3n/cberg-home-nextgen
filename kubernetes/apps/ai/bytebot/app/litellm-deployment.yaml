@@ -48,13 +48,12 @@ spec:
             timeoutSeconds: 10
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: 4000
-            initialDelaySeconds: 60
-            periodSeconds: 15
-            timeoutSeconds: 10
-            failureThreshold: 5
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: config
           configMap:
