@@ -29,7 +29,7 @@ spec:
   values:
     image:
       repository: nextcloud
-      tag: 32.0.2
+      tag: 32.0.3
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
@@ -189,7 +189,7 @@ spec:
       #        key: secret_key
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:32.0.2
+          image: nextcloud:32.0.3
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash", "-c"]
           args:
