@@ -447,7 +447,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Clawd Bot"
           gethomepage.dev/group: "AI"
-          gethomepage.dev/icon: "lobster.png"
+          gethomepage.dev/icon: "telegram.png"
           gethomepage.dev/description: "Telegram AI Assistant - ClawdBot Gateway"
         labels:
           gethomepage.dev/enabled: "true"

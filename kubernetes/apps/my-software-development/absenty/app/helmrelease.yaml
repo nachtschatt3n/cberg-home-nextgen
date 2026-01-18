@@ -133,7 +133,7 @@ spec:
           gethomepage.dev/name: "Absenty Dev"
           gethomepage.dev/description: "Employee management system - Development"
           gethomepage.dev/group: "Software Development"
-          gethomepage.dev/icon: "rails.png"
+          gethomepage.dev/icon: "ruby-on-rails.png"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
