@@ -127,6 +127,8 @@ spec:
             env:
               - name: BYTEBOT_DESKTOP_BASE_URL
                 value: http://bytebot-desktop:9990
+              - name: BYTEBOT_LLM_PROXY_URL
+                value: http://litellm:4000
               - name: OPENAI_BASE_URL
                 valueFrom:
                   secretKeyRef:
