@@ -272,6 +272,15 @@ spec:
                           baseUrl: ollamaBase,
                           apiKey: ollamaKey,
                           api: 'openai-completions',
+                          models: [{
+                            id: modelName,
+                            name: modelName,
+                            reasoning: false,
+                            input: ['text'],
+                            cost: { input: 0, output: 0 },
+                            contextWindow: 32768,
+                            maxTokens: 4096,
+                          }],
                         },
                       },
                     },
@@ -316,6 +325,15 @@ spec:
                     baseUrl: ollamaBase,
                     apiKey: ollamaKey,
                     api: 'openai-completions',
+                    models: [{
+                      id: modelName,
+                      name: modelName,
+                      reasoning: false,
+                      input: ['text'],
+                      cost: { input: 0, output: 0 },
+                      contextWindow: 32768,
+                      maxTokens: 4096,
+                    }],
                   };
 
                   delete cfg.model;
