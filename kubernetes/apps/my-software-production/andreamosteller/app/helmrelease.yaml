@@ -108,3 +108,12 @@ spec:
         tls:
           - hosts:
               - *host
+    persistence:
+      cache:
+        type: emptyDir
+        globalMounts:
+          - path: /var/cache/nginx
+      run:
+        type: emptyDir
+        globalMounts:
+          - path: /var/run
