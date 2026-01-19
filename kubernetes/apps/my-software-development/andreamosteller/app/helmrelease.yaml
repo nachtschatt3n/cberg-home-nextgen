@@ -15,9 +15,11 @@ spec:
         name: bjw-s
         namespace: flux-system
   install:
+    timeout: 15m
     remediation:
       retries: 3
   upgrade:
+    timeout: 15m
     cleanupOnFail: true
     remediation:
       strategy: rollback
@@ -29,7 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/andreamosteller.com
-              tag: 5d88656-unprivileged-v2
+              tag: 9ee725b-unprivileged-v2
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
@@ -97,7 +99,7 @@ spec:
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "dev-andreamosteller.uhl.cool"
+          - host: &host "dev-andreamosteller.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
