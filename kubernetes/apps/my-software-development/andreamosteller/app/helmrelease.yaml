@@ -29,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/andreamosteller.com
-              tag: 5d88656-unprivileged
+              tag: 5d88656-unprivileged-v2
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
