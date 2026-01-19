@@ -31,7 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/andreamosteller.com
-              tag: sha-9ee725b
+              tag: sha-394fe9f
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
