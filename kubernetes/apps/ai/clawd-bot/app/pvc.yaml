@@ -5,7 +5,7 @@ metadata:
   name: clawd-bot-data
 spec:
   capacity:
-    storage: 20Gi
+    storage: 40Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
@@ -29,6 +29,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 20Gi
+      storage: 40Gi
   storageClassName: longhorn-static
   volumeName: clawd-bot-data
