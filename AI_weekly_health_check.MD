@@ -18,11 +18,12 @@ This document provides a systematic, AI-executable health check plan for a home 
 ```
 
 **Features:**
-- ✅ Executes all 33 health check sections automatically
+- ✅ Executes all 34 health check sections automatically
 - ✅ Categorizes issues by severity (Critical, Major, Minor)
 - ✅ Generates comprehensive reports with recommendations
-- ✅ Includes Alertmanager alerts, Elasticsearch logs, and Home Assistant integration analysis
-- ✅ Queries UnPoller metrics via Prometheus for network hardware health
+- ✅ Includes Alertmanager alerts, Elasticsearch application log analysis, and Home Assistant integration analysis
+- ✅ Queries Elasticsearch indices for error patterns and trends
+- ✅ Queries UnPoller metrics for network hardware health
 - ✅ Safe execution with error handling and progress tracking
 
 **When to use the script:**
@@ -422,9 +423,16 @@ done
 for node in $(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'); do
   talosctl dmesg --nodes $node | grep -iE "(eth|network|link|carrier)" | grep -i error | wc -l
 done
+
+# IMPORTANT: Distinguish between real hardware errors and benign iSCSI messages
+# The following are NORMAL and should NOT be counted as hardware errors:
+# - "Direct-Access IET VIRTUAL-DISK" - iSCSI virtual disk attachments (Longhorn)
+# - "Attached SCSI disk" - Normal disk attachment messages
+# - "bio_check_eod" - End of device checks on virtual disks
+# Real hardware errors would include: "ECC", "PCI", "memory", "disk failure", etc.
 ```
 
-**AI Analysis**: Monitor temperatures, check for thermal or network issues.
+**AI Analysis**: Monitor temperatures, check for thermal or network issues. **IMPORTANT**: Distinguish between benign iSCSI virtual disk messages (normal for Longhorn storage) and actual hardware failures. The health check may count benign messages as "errors" - investigate the actual dmesg output before taking action.
 
 ---
 
@@ -947,6 +955,28 @@ kubectl exec -n home-automation deployment/home-assistant -- curl -s http://loca
 
 **AI Analysis**: Identify problematic integrations and categorize by severity. Flag integrations with persistent connectivity issues.
 
+**Common Error Patterns and Solutions:**
+
+1. **Uptime Kuma Connection Failures**:
+   - **Error**: `Error fetching uptime_kuma data: Connection to Uptime Kuma failed`
+   - **Cause**: Missing API authentication token in Home Assistant integration
+   - **Solution**: Configure API token in HA Uptime Kuma integration settings
+
+2. **Duplicate Sensor IDs**:
+   - **Error**: `Platform uptime_kuma does not generate unique IDs. ID ... already exists`
+   - **Cause**: Multiple monitors with same name in Uptime Kuma creating duplicate HA entities
+   - **Solution**: Rename monitors in Uptime Kuma to ensure unique identifiers, or clean up duplicate entities in HA
+
+3. **Tesla Integration Errors**:
+   - **Error**: `KeyError: 'None'` in shifter state handling
+   - **Cause**: Known bug in Tesla integration v2.13.0 with unknown shifter states
+   - **Solution**: Wait for upstream fix or disable problematic features
+
+4. **Amazon Alexa Failures**:
+   - **Error**: Connection/authentication failures
+   - **Cause**: Token expiration or Alexa service issues
+   - **Solution**: Re-authenticate Alexa integration in HA
+
 ---
 
 ## 32. Zigbee2MQTT Device Monitoring
@@ -1062,9 +1092,192 @@ echo "- Keep battery stock: CR123A, CR2032, AA, AAA batteries"
 
 ---
 
+## 34. Elasticsearch Application Logs Analysis
+
+**Objective**: Query Elasticsearch for error patterns in application logs
+**Success Criteria**: No recurring critical errors, error rate within acceptable thresholds
+
+**Commands to Execute:**
+```bash
+# Port-forward to Elasticsearch
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
+PF_PID=$!
+sleep 3
+
+# Get Elasticsearch password from secret
+ES_PASSWORD=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+
+# Get today's index name
+TODAY_INDEX="fluent-bit-$(date +%Y.%m.%d)"
+
+# Query for error patterns in today's logs
+curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+  "size": 0,
+  "query": {
+    "bool": {
+      "should": [
+        {"match": {"log": "error"}},
+        {"match": {"log": "ERROR"}},
+        {"match": {"log": "fatal"}},
+        {"match": {"log": "FATAL"}},
+        {"match": {"log": "critical"}},
+        {"match": {"log": "CRITICAL"}}
+      ],
+      "minimum_should_match": 1
+    }
+  },
+  "aggs": {
+    "by_namespace": {
+      "terms": {
+        "field": "k8s_namespace_name.keyword",
+        "size": 20
+      }
+    },
+    "by_pod": {
+      "terms": {
+        "field": "k8s_pod_name.keyword",
+        "size": 20
+      }
+    },
+    "by_container": {
+      "terms": {
+        "field": "k8s_container_name.keyword",
+        "size": 20
+      }
+    }
+  }
+}' 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+total = data['hits']['total']['value']
+print(f'Total errors today: {total}')
+print(f'\nTop 10 namespaces with errors:')
+for bucket in data['aggregations']['by_namespace']['buckets'][:10]:
+    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
+print(f'\nTop 10 pods with errors:')
+for bucket in data['aggregations']['by_pod']['buckets'][:10]:
+    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
+print(f'\nTop 10 containers with errors:')
+for bucket in data['aggregations']['by_container']['buckets'][:10]:
+    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
+"
+
+# Query for specific known error patterns
+echo ""
+echo "Checking for specific error patterns:"
+
+# kube-apiserver 'empty key' errors
+EMPTY_KEY_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+  "size": 0,
+  "query": {
+    "query_string": {
+      "query": "*empty key*",
+      "default_field": "log"
+    }
+  }
+}' 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data['hits']['total']['value'])
+" || echo "0")
+
+echo "  kube-apiserver 'empty key' errors: $EMPTY_KEY_ERRORS"
+
+# OOM errors
+OOM_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+  "size": 0,
+  "query": {
+    "query_string": {
+      "query": "*OOMKilled* OR *out of memory*",
+      "default_field": "log"
+    }
+  }
+}' 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data['hits']['total']['value'])
+" || echo "0")
+
+echo "  OOM/out of memory errors: $OOM_ERRORS"
+
+# Network errors
+NETWORK_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+  "size": 0,
+  "query": {
+    "query_string": {
+      "query": "*connection refused* OR *timeout* OR *connection reset*",
+      "default_field": "log"
+    }
+  }
+}' 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data['hits']['total']['value'])
+" || echo "0")
+
+echo "  Network-related errors: $NETWORK_ERRORS"
+
+# Get recent critical errors (last 10)
+echo ""
+echo "Recent critical errors (last 10):"
+curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+  "size": 10,
+  "query": {
+    "bool": {
+      "should": [
+        {"match": {"log": "CRITICAL"}},
+        {"match": {"log": "FATAL"}},
+        {"match": {"log": "OOMKilled"}}
+      ],
+      "minimum_should_match": 1
+    }
+  },
+  "sort": [
+    {
+      "@timestamp": {
+        "order": "desc"
+      }
+    }
+  ],
+  "_source": ["@timestamp", "log", "k8s_pod_name", "k8s_namespace_name"]
+}' 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for hit in data['hits']['hits']:
+    src = hit['_source']
+    ts = src.get('@timestamp', 'N/A')
+    pod = src.get('k8s_pod_name', 'N/A')
+    ns = src.get('k8s_namespace_name', 'N/A')
+    log = src.get('log', 'N/A')
+    if len(log) > 100:
+        log = log[:100] + '...'
+    print(f'{ts} [{ns}/{pod}]: {log}')
+"
+
+# Kill port-forward
+kill $PF_PID 2>/dev/null || true
+wait $PF_PID 2>/dev/null || true
+```
+
+**AI Analysis**:
+- Aggregate error counts by namespace, pod, and container
+- Identify recurring error patterns that need attention
+- Distinguish between benign errors (e.g., kube-apiserver 'empty key') and critical issues
+- Flag any OOM, fatal, or critical errors for immediate investigation
+- Compare error rates with baseline to identify anomalies
+- **Note**: Some errors like kube-apiserver "empty key" may be normal background noise and can be tracked for trends rather than treated as critical
+
+**Error Rate Thresholds:**
+- **Normal**: <1000 errors/day (mostly benign)
+- **Monitor**: 1000-5000 errors/day (review error patterns)
+- **Warning**: 5000-10000 errors/day (investigate top error sources)
+- **Critical**: >10000 errors/day or any FATAL/OOMKilled errors
+
+---
+
 ## Report Generation Instructions
 
-After executing all 33 sections, compile the results into the standardized format:
+After executing all 34 sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
@@ -1074,8 +1287,8 @@ After executing all 33 sections, compile the results into the standardized forma
 6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
 7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation (33 sections):**
-- **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries
-- **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery
-- **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries
-- **🔴 Critical**: ≥3 critical issues, ≥9 warnings, <90% services healthy, >30% devices offline, >5 critical batteries
+**Final Health Score Calculation (34 sections):**
+- **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
+- **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
+- **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day
+- **🔴 Critical**: ≥3 critical issues, ≥9 warnings, <90% services healthy, >30% devices offline, >5 critical batteries, >10000 log errors/day or FATAL errors

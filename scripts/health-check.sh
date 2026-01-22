@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Kubernetes Cluster Health Check Script
-# Executes all 33 sections from AI_weekly_health_check.MD
+# Executes all 34 sections from AI_weekly_health_check.MD
 # Usage: ./scripts/health-check.sh [output-file]
 
 set -uo pipefail
@@ -1020,29 +1020,146 @@ log_section "Section 33: Battery Health Monitoring"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
-#######################################
-# Additional Checks: Elasticsearch & UnPoller
-#######################################
-
-log_section "Elasticsearch Logs Analysis"
+log_section "Section 34: Elasticsearch Application Logs Analysis"
 {
-    echo "Checking Elasticsearch for errors..."
+    echo "Querying Elasticsearch for error patterns in application logs..."
+    echo ""
 
-    ES_POD=$(kubectl get pods -n monitoring -l common.k8s.elastic.co/type=elasticsearch -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    if [ -n "$ES_POD" ]; then
-        echo "Elasticsearch pod: $ES_POD"
-        ES_ERRORS=$(safe_count "kubectl logs -n monitoring '$ES_POD' --tail=100 --since=24h 2>&1 | grep -iE '(error|exception|warn)' | wc -l")
-        echo "Elasticsearch errors/warnings (24h): $ES_ERRORS"
+    # Get Elasticsearch password
+    ES_PASSWORD=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
 
-        if [ "$ES_ERRORS" -lt 20 ]; then
-            log_success "Elasticsearch logs clean"
-        else
-            log_warning "Elasticsearch errors detected: $ES_ERRORS"
-            add_minor_issue "Elasticsearch errors/warnings: $ES_ERRORS"
-        fi
+    if [ -z "$ES_PASSWORD" ]; then
+        log_warning "Cannot retrieve Elasticsearch password"
+        add_major_issue "Elasticsearch password not accessible"
     else
-        log_warning "Elasticsearch pod not found"
-        add_minor_issue "Elasticsearch pod not found"
+        # Port-forward to Elasticsearch
+        kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 > /dev/null 2>&1 &
+        PF_PID=$!
+        sleep 3
+
+        # Get today's index
+        TODAY_INDEX="fluent-bit-$(date +%Y.%m.%d)"
+        echo "Querying index: $TODAY_INDEX"
+        echo ""
+
+        # Query for error patterns
+        ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+          "size": 0,
+          "query": {
+            "bool": {
+              "should": [
+                {"match": {"log": "error"}},
+                {"match": {"log": "ERROR"}},
+                {"match": {"log": "fatal"}},
+                {"match": {"log": "FATAL"}},
+                {"match": {"log": "critical"}},
+                {"match": {"log": "CRITICAL"}}
+              ],
+              "minimum_should_match": 1
+            }
+          },
+          "aggs": {
+            "by_namespace": {
+              "terms": {
+                "field": "k8s_namespace_name.keyword",
+                "size": 10
+              }
+            },
+            "by_pod": {
+              "terms": {
+                "field": "k8s_pod_name.keyword",
+                "size": 10
+              }
+            }
+          }
+        }' 2>/dev/null || echo '{"hits":{"total":{"value":0}}}')
+
+        TOTAL_ERRORS=$(echo "$ERROR_DATA" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(data['hits']['total']['value'])
+except:
+    print('0')
+" || echo "0")
+
+        echo "Total errors in logs today: $TOTAL_ERRORS"
+        echo ""
+
+        if [ "$TOTAL_ERRORS" -gt 0 ] && [ "$TOTAL_ERRORS" != "0" ]; then
+            echo "Top 5 namespaces with errors:"
+            echo "$ERROR_DATA" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for bucket in data['aggregations']['by_namespace']['buckets'][:5]:
+        print(f\"  {bucket['key']}: {bucket['doc_count']}\")
+except:
+    print('  Unable to parse data')
+"
+            echo ""
+
+            echo "Top 5 pods with errors:"
+            echo "$ERROR_DATA" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for bucket in data['aggregations']['by_pod']['buckets'][:5]:
+        print(f\"  {bucket['key']}: {bucket['doc_count']}\")
+except:
+    print('  Unable to parse data')
+"
+            echo ""
+        fi
+
+        # Check for specific critical patterns
+        echo "Checking for critical error patterns..."
+
+        FATAL_COUNT=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+          "size": 0,
+          "query": {
+            "query_string": {
+              "query": "*FATAL* OR *OOMKilled*",
+              "default_field": "log"
+            }
+          }
+        }' 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(data['hits']['total']['value'])
+except:
+    print('0')
+" || echo "0")
+
+        echo "  FATAL/OOMKilled errors: $FATAL_COUNT"
+        echo ""
+
+        # Kill port-forward
+        kill $PF_PID 2>/dev/null || true
+        wait $PF_PID 2>/dev/null || true
+
+        # Categorize by severity
+        TOTAL_ERRORS_INT=$(echo "$TOTAL_ERRORS" | tr -cd '0-9' || echo "0")
+        [ -z "$TOTAL_ERRORS_INT" ] && TOTAL_ERRORS_INT=0
+
+        FATAL_COUNT_INT=$(echo "$FATAL_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$FATAL_COUNT_INT" ] && FATAL_COUNT_INT=0
+
+        if [ "$FATAL_COUNT_INT" -gt 0 ]; then
+            log_critical "FATAL/OOM errors detected in logs: $FATAL_COUNT_INT"
+            add_critical_issue "FATAL/OOM errors in Elasticsearch logs: $FATAL_COUNT_INT"
+        elif [ "$TOTAL_ERRORS_INT" -gt 10000 ]; then
+            log_warning "High error count in logs: $TOTAL_ERRORS_INT (>10,000 threshold)"
+            add_major_issue "High error count in logs: $TOTAL_ERRORS_INT"
+        elif [ "$TOTAL_ERRORS_INT" -gt 5000 ]; then
+            log_warning "Elevated error count in logs: $TOTAL_ERRORS_INT"
+            add_minor_issue "Elevated error count in logs: $TOTAL_ERRORS_INT"
+        elif [ "$TOTAL_ERRORS_INT" -lt 1000 ]; then
+            log_success "Log error count within normal range: $TOTAL_ERRORS_INT"
+        else
+            log_info "Log error count: $TOTAL_ERRORS_INT (monitor for trends)"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
