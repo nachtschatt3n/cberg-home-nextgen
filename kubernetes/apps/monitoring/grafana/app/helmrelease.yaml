@@ -45,6 +45,7 @@ spec:
           - { name: Prometheus, orgId: 1 }
           - { name: InfluxDB, orgId: 1 }
           - { name: Unpoller InfluxDB, orgId: 1 }
+          - { name: TeslaMate, orgId: 1 }
         datasources:
           - name: Prometheus
             type: prometheus
@@ -80,7 +81,7 @@ spec:
               token: $__env{INFLUXDB_TOKEN}
           - name: TeslaMate
             type: postgres
-            uid: teslamate
+            uid: TeslaMate
             access: proxy
             url: teslamate-postgres.home-automation.svc.cluster.local:5432
             database: teslamate
