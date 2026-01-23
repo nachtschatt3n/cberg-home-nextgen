@@ -182,7 +182,7 @@ spec:
         labelValue: ""
         label: grafana_dashboard
         folderAnnotation: grafana_folder
-        folder: /var/lib/grafana/dashboards
+        folder: /var/lib/grafana/dashboards/sidecar
         defaultFolderName: default
         provider:
           disableDelete: true
@@ -191,6 +191,50 @@ spec:
         enabled: true
         searchNamespace: ALL
         labelValue: ""
+    dashboardProviders:
+      dashboardproviders.yaml:
+        apiVersion: 1
+        providers:
+          - name: default
+            orgId: 1
+            folder: ""
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/default
+          - name: flux
+            orgId: 1
+            folder: Flux
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/flux
+          - name: kubernetes
+            orgId: 1
+            folder: Kubernetes
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/kubernetes
+          - name: nginx
+            orgId: 1
+            folder: Nginx
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/nginx
+          - name: teslamate
+            orgId: 1
+            folder: TeslaMate
+            type: file
+            disableDeletion: false
+            editable: true
+            options:
+              path: /var/lib/grafana/dashboards/teslamate
     serviceMonitor:
       enabled: true
     ingress:
