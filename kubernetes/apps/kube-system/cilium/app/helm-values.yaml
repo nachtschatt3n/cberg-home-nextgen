@@ -49,6 +49,8 @@ operator:
     serviceMonitor:
       enabled: true
       interval: "30s"
+      labels:
+        release: kube-prometheus-stack
   dashboards:
     enabled: true
 prometheus:
@@ -57,6 +59,8 @@ prometheus:
     enabled: true
     trustCRDsExist: true
     interval: "30s"
+    labels:
+      release: kube-prometheus-stack
 rollOutCiliumPods: true
 routingMode: native
 securityContext:
