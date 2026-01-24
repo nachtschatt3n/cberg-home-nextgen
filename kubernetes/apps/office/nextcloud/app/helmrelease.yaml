@@ -78,6 +78,8 @@ spec:
       existingSecret:
         enabled: true
         secretName: nextcloud-config
+        usernameKey: admin-username
+        passwordKey: admin-password
         tokenKey: metrics-token
       defaultConfigs:
         .htaccess: true
@@ -220,13 +222,13 @@ spec:
             - name: NEXTCLOUD_ADMIN_USER
               valueFrom:
                 secretKeyRef:
-                  name: nextcloud
-                  key: nextcloud-username
+                  name: nextcloud-config
+                  key: admin-username
             - name: NEXTCLOUD_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: nextcloud
-                  key: nextcloud-password
+                  name: nextcloud-config
+                  key: admin-password
             - name: NEXTCLOUD_TRUSTED_DOMAINS
               value: "drive.${SECRET_DOMAIN} nextcloud.office.svc.cluster.local"
             - name: NEXTCLOUD_DATA_DIR
