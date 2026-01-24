@@ -113,6 +113,14 @@ spec:
           gnetId: 15650 # https://grafana.com/grafana/dashboards/15650 - InfluxDB 2.x monitoring
           revision: 1
           datasource: Prometheus
+        adguard-home:
+          gnetId: 20799 # https://grafana.com/grafana/dashboards/20799 - AdGuard Home Exporter
+          revision: 1
+          datasource: Prometheus
+        mosquitto:
+          gnetId: 17721 # https://grafana.com/grafana/dashboards/17721 - Mosquitto Exporter
+          revision: 1
+          datasource: Prometheus
       flux:
         flux-cluster:
           url: https://raw.githubusercontent.com/fluxcd/flux2-monitoring-example/main/monitoring/configs/dashboards/cluster.json
