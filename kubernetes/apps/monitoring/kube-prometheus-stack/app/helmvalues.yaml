@@ -221,6 +221,13 @@ data:
             - port: http
               path: /metrics
               interval: 30s
+              basicAuth:
+                username:
+                  name: adguard-home-credentials
+                  key: admin-username
+                password:
+                  name: adguard-home-credentials
+                  key: admin-password
         - name: frigate
           namespaceSelector:
             matchNames: ["home-automation"]
