@@ -59,8 +59,12 @@ spec:
                     key: DATABASE_NAME
               - name: DATABASE_HOST
                 value: "teslamate-postgres"
-              - name: DISABLE_MQTT
-                value: "true"
+              - name: MQTT_HOST
+                value: "10.69.1.171"
+              - name: MQTT_PORT
+                value: "1883"
+              - name: MQTT_TLS
+                value: "false"
               - name: GRAFANA_EXTERNAL_URL
                 value: "https://grafana.${SECRET_DOMAIN}"
               - name: GRAFANA_INTERNAL_URL
