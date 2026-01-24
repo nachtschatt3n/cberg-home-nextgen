@@ -12,15 +12,8 @@ spec:
       - network
   selector:
     matchLabels:
-      helm.toolkit.fluxcd.io/name: adguard-home
+      app: adguard-exporter
   endpoints:
-    - targetPort: 80
+    - port: metrics
       path: /metrics
       interval: 30s
-      basicAuth:
-        username:
-          name: adguard-home-credentials
-          key: admin-username
-        password:
-          name: adguard-home-credentials
-          key: admin-password
