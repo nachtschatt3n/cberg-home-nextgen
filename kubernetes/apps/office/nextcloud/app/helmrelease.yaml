@@ -316,6 +316,7 @@ spec:
         secretName: nextcloud-config
         usernameKey: db-username
         passwordKey: db-password
+        tokenKey: metrics-token
         # hostKey: db-hostname-or-ip
         # databaseKey: db-name
         mariadb:
@@ -433,10 +434,6 @@ spec:
       replicaCount: 1
       https: false
       timeout: 5s
-      token:
-        existingSecret:
-          name: nextcloud-config
-          key: metrics-token
 
       image:
         repository: xperimental/nextcloud-exporter
