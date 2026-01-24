@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: *app
-      version: 6.6.4
+      version: 6.6.10
       sourceRef:
         kind: HelmRepository
         name: nextcloud
@@ -29,7 +29,7 @@ spec:
   values:
     image:
       repository: nextcloud
-      tag: 32.0.3
+      tag: 32.0.5
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
@@ -195,7 +195,7 @@ spec:
       #        key: secret_key
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:32.0.3
+          image: nextcloud:32.0.5
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash", "-c"]
           args:
