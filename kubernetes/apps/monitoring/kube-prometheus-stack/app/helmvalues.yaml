@@ -195,7 +195,8 @@ data:
             matchNames: ["office"]
           selector:
             matchLabels:
-              app: nextcloud-metrics
+              app.kubernetes.io/name: nextcloud
+              app.kubernetes.io/component: metrics
           endpoints:
             - port: metrics
               path: /metrics
@@ -205,7 +206,7 @@ data:
             matchNames: ["databases"]
           selector:
             matchLabels:
-              app.kubernetes.io/name: influxdb
+              app.kubernetes.io/name: influxdb2
           endpoints:
             - port: http
               path: /metrics
@@ -215,7 +216,7 @@ data:
             matchNames: ["network"]
           selector:
             matchLabels:
-              app.kubernetes.io/name: adguard-home
+              helm.toolkit.fluxcd.io/name: adguard-home
           endpoints:
             - port: http
               path: /metrics
@@ -235,7 +236,7 @@ data:
             matchNames: ["home-automation"]
           selector:
             matchLabels:
-              app: mosquitto
+              app.kubernetes.io/name: mosquitto
           endpoints:
             - port: metrics
               path: /metrics

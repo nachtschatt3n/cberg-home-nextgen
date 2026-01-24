@@ -87,6 +87,8 @@ spec:
     serviceMonitor:
       app:
         serviceName: cloudflared
+        labels:
+          release: kube-prometheus-stack
         endpoints:
           - port: http
             scheme: http
