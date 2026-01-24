@@ -94,6 +94,15 @@ spec:
             enabled: true
             port: 1883
             targetPort: 1883
+      internal:
+        controller: mosquitto
+        type: ClusterIP
+        ports:
+          mqtt:
+            protocol: TCP
+            enabled: true
+            port: 1883
+            targetPort: 1883
       metrics:
         controller: mosquitto
         ports:
