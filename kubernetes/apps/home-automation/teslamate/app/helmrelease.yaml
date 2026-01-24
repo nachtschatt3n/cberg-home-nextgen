@@ -60,9 +60,11 @@ spec:
               - name: DATABASE_HOST
                 value: "teslamate-postgres"
               - name: MQTT_HOST
-                value: "mosquitto-main.home-automation.svc.cluster.local"
+                value: "10.96.10.87"
               - name: MQTT_PORT
                 value: "1883"
+              - name: MQTT_TLS
+                value: "false"
               - name: GRAFANA_EXTERNAL_URL
                 value: "https://grafana.${SECRET_DOMAIN}"
               - name: GRAFANA_INTERNAL_URL
