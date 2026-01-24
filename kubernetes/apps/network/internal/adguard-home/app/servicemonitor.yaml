@@ -1,0 +1,26 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: adguard-home
+  namespace: network
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - network
+  selector:
+    matchLabels:
+      helm.toolkit.fluxcd.io/name: adguard-home
+  endpoints:
+    - targetPort: 80
+      path: /metrics
+      interval: 30s
+      basicAuth:
+        username:
+          name: adguard-home-credentials
+          key: admin-username
+        password:
+          name: adguard-home-credentials
+          key: admin-password

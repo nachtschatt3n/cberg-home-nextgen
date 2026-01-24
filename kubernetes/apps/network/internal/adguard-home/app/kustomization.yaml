@@ -5,3 +5,4 @@ namespace: network
 resources:
   - ./helmrelease.yaml
   - ./secret.sops.yaml
+  - ./servicemonitor.yaml
