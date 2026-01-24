@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: exporter
-          image: ghcr.io/henrywhitaker3/adguard-exporter:1.2.0
+          image: ghcr.io/henrywhitaker3/adguard-exporter:latest
           ports:
             - containerPort: 9618
               name: metrics
