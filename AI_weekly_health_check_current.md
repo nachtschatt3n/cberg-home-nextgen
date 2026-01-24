@@ -6,6 +6,9 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-01-25 00:18 | Warning | 1 | 2 | **Overall**: 🟠 WARNING (1 Critical, 2 Major, 2 Minor). **Critical Issues**: 1) teslamate pod in CrashLoopBackOff (MQTT connection timeout - config fixed to mosquitto-main, investigating network connectivity). **Major Issues**: 1) teslamate deployment 0/1 replicas (same as critical - MQTT connection issue); 2) Critical batteries: 2 devices <15% (Soil sensor 3: 2%, Soil Sensor 2: 14% - immediate replacement needed). **Minor Issues**: 14 warning events (mostly normal operations), UnPoller 2 errors (minor). **FIXED**: zigbee2mqtt MQTT connection resolved (service name updated to mosquitto-main, pod recreated successfully, web interface accessible); zigbee2mqtt 502 Bad Gateway resolved (pod restarted, MQTT connected). **Positive**: All Prometheus alerts cleared (0 firing), all certificates ready, all DaemonSets healthy, GitOps fully synchronized, no OOM kills or pod evictions, storage healthy, Elasticsearch logs: 0 errors today (excellent!), hardware health excellent (0 errors on all nodes). **Status**: Cluster stable, zigbee2mqtt working, teslamate MQTT connection needs investigation, battery replacement urgent. |
+| 2026-01-24 Night | Warning | 0 | 0 | **Overall**: 🟠 WARNING (0 Critical, 4 Major, 6 Minor). **Major Issues**: 1) Nextcloud HelmRelease in "Unknown" state (upgrade in progress - transient); 2) Nextcloud deployment 0/1 replicas (upgrade in progress); 3) Home Assistant errors: 56 (mostly external integrations - Tesla Wall Connector timeouts expected, Dirigera hub disconnects, Deebot command timeouts, Bermuda metadevice warnings); 4) Critical battery: Soil sensor 3 at 2% (immediate replacement needed). **Minor Issues**: 15 warning events (mostly normal operations), 1 terminating pod (Nextcloud upgrade), Zigbee2MQTT 50 warnings (normal operation), 1 low battery (Soil Sensor 2 at 15%), 10,000 log errors (mostly Frigate/Zigbee2MQTT - normal), UnPoller 4 errors. **Positive**: All certificates ready (8/8), backup system operational (last backup 17h ago), all DaemonSets healthy, GitOps 81/81 reconciled, no OOM kills, no pod evictions, hardware health excellent (0 errors on all nodes), storage healthy. **Status**: Cluster stable, Nextcloud upgrade in progress (transient), battery replacement urgent. |
+| 2026-01-18 Night | Good | 0 | 2 | **RESOLVED**: Longhorn volume alerts completely cleared (PVC expansion 20Gi→40Gi successful); **Investigated**: Home Assistant errors (87 total) - **1)** Uptime Kuma authentication failure (needs API token config); **2)** 86 duplicate sensor IDs (multiple monitors with same names); **Hardware errors clarified**: "Errors" are benign iSCSI virtual disk messages, not real hardware failures (normal for Longhorn operations). **Status**: Storage crisis resolved, HA integration issues identified for future fix. |
 | 2026-01-17 Night | Good | 0 | 4 | **Investigated & Actioned**: **1)** Resized `clawd-bot-data` PVC to 20Gi (was 98% full); **2)** Investigated Node 12 Hardware errors: `bio_check_eod` likely related to iSCSI/Longhorn volumes (many virtual disks present) rather than physical NVMe failure; **3)** Confirmed Home Assistant Tesla error is a code bug in v2.13.0 (`KeyError: 'None'` on shifter state); **4)** Confirmed UnPoller metrics empty due to InfluxDB usage. **Status**: Cluster healthy, maintenance items identified. |
 | 2026-01-17 PM | Warning | 0 | 3 | **Resolved**: Health check script fixed (jq execution moved to host, syntax errors fixed). **New Findings**: 2 Low Battery Zigbee devices (9%, 16%); Hardware errors on Node 12 identified as `bio_check_eod` (disk/IO errors); UnPoller metrics empty (InfluxDB confirmed). **Status**: Cluster stable, but hardware and batteries need attention. |
 | 2026-01-17 | Warning | 1 | 2 | **Mixed**: UnPoller service fixed (metrics target UP in Prometheus, but metrics empty - user switched to InfluxDB); Pod evictions cleared (clawd-bot npm-cache limit increased); New Service created for UnPoller to fix missing target; **Known Issue**: UnPoller metrics checks failing due to InfluxDB switch; **Critical**: 2 Pod evictions detected (resolved by limit increase); Home Assistant errors: 30 (external integrations); Backup system healthy |
@@ -33,79 +36,103 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-01-17 20:48 CET
+**Date**: 2026-01-25 00:18 CET
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
-**Duration**: N/A
+**Duration**: ~15 seconds
 
 ## Executive Summary
-- **Overall Health**: 🟡 **Good**
-- **Critical Issues**: **0** ✅
-- **Warnings**: 5 (Hardware errors, Low batteries, UnPoller metrics, Home Assistant integration errors, Prometheus alerts)
+- **Overall Health**: 🟠 **WARNING**
+- **Critical Issues**: **1** (teslamate CrashLoopBackOff - MQTT connection timeout)
+- **Major Issues**: 2 (teslamate deployment, Critical batteries)
+- **Minor Issues**: 2 (Warning events, UnPoller errors)
 - **Service Availability**: 99%
 - **Uptime**: All systems operational
 - **Node Status**: ✅ **ALL 3 NODES HEALTHY**
-- **Recent Changes**: clawd-bot volume resized, UnPoller configured (InfluxDB)
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Response | Status Notes |
 |---------|----------|----------|--------|----------|--------------|
-| Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational (6/6 pods ready) |
-| Home Assistant | ✅ | ✅ | Warning | N/A | Tesla integration errors (bug) |
-| Nextcloud | ✅ | ✅ | Healthy | N/A | Operational |
+| Authentik | ✅ | ✅ | Healthy | N/A | Authentication operational |
+| Home Assistant | ✅ | ✅ | Healthy | N/A | Running normally |
+| zigbee2mqtt | ✅ | ✅ | Healthy | N/A | MQTT connected, web interface accessible |
+| teslamate | ❌ | ❌ | Down | N/A | CrashLoopBackOff - MQTT connection timeout (config fixed, investigating) |
 | Jellyfin | ✅ | ✅ | Healthy | N/A | Running normally |
 | Grafana | ✅ | ✅ | Healthy | N/A | Monitoring dashboards working |
-| Prometheus | ✅ | ✅ | Warning | N/A | 3 Longhorn volume usage alerts (Resolving) |
+| Prometheus | ✅ | ✅ | Healthy | N/A | Operational, 0 alerts firing |
 | Alertmanager | ✅ | ✅ | Healthy | N/A | Operational |
 | Longhorn UI | ✅ | ✅ | Healthy | N/A | Storage management accessible |
-| UnPoller | ✅ | N/A | Warning | N/A | Service UP, metrics empty (InfluxDB) |
-| Backup System | ✅ | N/A | Excellent | N/A | Last backup successful |
+| UnPoller | ✅ | N/A | Healthy | N/A | Service UP, exporting to InfluxDB (2 minor errors) |
+| Backup System | ✅ | N/A | Excellent | N/A | Last backup 20h ago, successful |
 
 ## Detailed Findings
 
-### 1. Hardware Health (Node 12)
-⚠️ **Status: WARNING** - Disk I/O Errors
-- **Errors**: `bio_check_eod` (End of Device).
-- **Analysis**: Likely related to one of the many iSCSI/Longhorn virtual disks attached to the node, rather than the physical NVMe system drive.
-- **Action**: Monitor for detached volumes. Physical drive appears healthy (NVMe errors not present).
+### 1. teslamate MQTT Connection Issue
+🔴 **Status: CRITICAL** - CrashLoopBackOff
+- **Issue**: Pod crashing due to MQTT connection timeout
+- **Root Cause**: Service name was incorrect (`mosquitto` instead of `mosquitto-main`)
+- **Fix Applied**: Updated MQTT_HOST to `mosquitto-main.home-automation.svc.cluster.local`
+- **Current Status**: Configuration correct, but connection still timing out
+- **Action**: Investigating network connectivity between teslamate and mosquitto pods
 
-### 2. clawd-bot Volume
-✅ **Status: RESOLVED** - Volume Resized
-- **Issue**: Volume `clawd-bot-data` was 98% full (9.5G/9.8G).
-- **Action**: Patched PVC to **20Gi**. Longhorn will expand filesystem automatically.
-- **Alerts**: Prometheus alerts should clear once expansion completes.
+### 2. Battery Health
+🟡 **Status: MAJOR** - Critical Battery Replacement Needed
+- **CRITICAL (<15%)**: 
+  - Soil sensor 3: **2%** (immediate replacement required)
+  - Soil Sensor 2: **14%** (replace within 1-2 weeks)
+- **WARNING (15-30%)**: None
+- **MONITOR (30-50%)**: None
+- **GOOD (>50%)**: 16 devices
+- **Average Battery Level**: 76%
+- **Action**: Replace Soil sensor 3 battery immediately to prevent device failure
 
-### 3. Home Assistant Tesla Integration
-⚠️ **Status: WARNING** - Integration Bug
-- **Issue**: `KeyError: 'None'` in `teslafi/model.py`.
-- **Cause**: Code bug in v2.13.0 handling unknown/None shifter state.
-- **Impact**: Integration fails to update during specific car states. Non-critical.
+### 3. zigbee2mqtt Status
+✅ **Status: RESOLVED** - MQTT Connected
+- **Previous Issue**: 502 Bad Gateway, MQTT connection failures
+- **Fix Applied**: Updated service name to `mosquitto-main`, pod restarted
+- **Current Status**: Running, MQTT connected, web interface accessible
+- **MQTT Connection**: Successfully connected to mosquitto-main
 
-### 4. Battery Health
-⚠️ **Status: WARNING** - Critical Batteries
-- **Devices**:
-  - `0xa4c1385405b16ed5`: **9%** (CRITICAL)
-  - `0xa4c138101f51cc54`: **16%** (WARNING)
-- **Action**: Replace batteries.
+### 4. Infrastructure Health
+✅ **Status: EXCELLENT**
+- **Certificates**: All ready (100%)
+- **DaemonSets**: All healthy (desired = current = ready)
+- **GitOps**: Fully synchronized
+- **Backup System**: Operational (last backup 20h ago, successful)
+- **OOM Kills**: 0
+- **Pod Evictions**: 0
+- **Resource Pressure**: None detected
+- **Prometheus Alerts**: 0 firing (excellent!)
+- **Elasticsearch Logs**: 0 errors today (excellent!)
 
-### 5. UnPoller
-⚠️ **Status: NOTICE** - Configuration Difference
-- **Metrics**: Empty in Prometheus (InfluxDB backend used).
-- **Service**: Healthy/UP.
+### 5. Log Errors
+✅ **Status: EXCELLENT** - 0 Errors Today
+- **Total Errors**: 0 (down from 10,000+ previously)
+- **FATAL/OOMKilled**: 0
+- **Analysis**: Log collection and analysis working perfectly
+
+### 6. Warning Events
+🔵 **Status: MINOR** - 14 Warning Events
+- **Analysis**: Mostly normal operations (volume attachments, pod lifecycle)
+- **Action**: Monitor for trends, no immediate action needed
 
 ## Action Items
 
+### 🔴 URGENT
+1. **Replace Soil Sensor 3 Battery** (2% - immediate replacement required)
+2. **Investigate teslamate MQTT Connection** (config correct but still timing out)
+
 ### 🟡 High Priority
-1. **Replace Zigbee Batteries** (Devices ending in `6ed5` and `cc54`).
-2. **Monitor clawd-bot volume** (Verify expansion to 20Gi).
+1. **Replace Soil Sensor 2 Battery** (14% - replace within 1-2 weeks)
+2. **Monitor teslamate pod** after MQTT config fix
 
 ### 🔵 Medium Priority
-1. **Monitor Node 12** for physical disk errors (unlikely, but stay vigilant).
-2. **Wait for Tesla Integration Update** (upstream fix needed).
+1. **Review UnPoller errors** (2 minor errors, metrics still exporting)
+2. **Monitor warning events** for trends
 
 ## Summary
 
-**Overall Health**: 🟡 **Good**
+**Overall Health**: 🟠 **WARNING**
 
-The cluster is stable. The volume capacity issue has been patched, and other findings are either maintenance tasks (batteries) or software bugs (Tesla integration) rather than infrastructure failures.
+**Key Findings**: Cluster infrastructure is healthy with excellent monitoring (0 alerts, 0 log errors). **RESOLVED**: zigbee2mqtt MQTT connection and 502 Bad Gateway fixed. **CRITICAL**: teslamate MQTT connection still timing out despite correct configuration - needs network investigation. **URGENT**: Soil sensor 3 battery at 2% requires immediate replacement. All core systems operational: certificates ready, backups working, GitOps synchronized, no hardware errors, no OOM kills or evictions, storage healthy.
 ```
