@@ -60,7 +60,7 @@ spec:
               - name: DATABASE_HOST
                 value: "teslamate-postgres"
               - name: MQTT_HOST
-                value: "10.69.1.171"
+                value: "mosquitto-internal.home-automation.svc.cluster.local"
               - name: MQTT_PORT
                 value: "1883"
               - name: MQTT_TLS
