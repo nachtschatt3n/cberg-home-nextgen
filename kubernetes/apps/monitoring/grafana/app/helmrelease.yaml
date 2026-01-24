@@ -84,11 +84,11 @@ spec:
             uid: TeslaMate
             access: proxy
             url: teslamate-postgres.home-automation.svc.cluster.local:5432
-            database: teslamate
             user: teslamate
             secureJsonData:
               password: $__env{TESLAMATE_DB_PASSWORD}
             jsonData:
+              database: teslamate
               sslmode: disable
               postgresVersion: 1800
     dashboards:
