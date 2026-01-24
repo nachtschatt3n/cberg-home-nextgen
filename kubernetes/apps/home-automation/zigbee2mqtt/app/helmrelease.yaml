@@ -34,7 +34,7 @@ spec:
               - name: ZIGBEE2MQTT_DATA
                 value: "/data"
               - name: ZIGBEE2MQTT_CONFIG_MQTT_SERVER
-                value: "mqtt://mosquitto.home-automation.svc.cluster.local:1883"
+                value: "mqtt://mosquitto-main.home-automation.svc.cluster.local:1883"
               - name: ZIGBEE2MQTT_CONFIG_SERIAL_PORT
                 value: "tcp://192.168.32.20:6638"
               - name: ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER
