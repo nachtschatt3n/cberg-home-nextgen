@@ -75,6 +75,10 @@ spec:
               - "drive.${SECRET_DOMAIN}"
     nextcloud:
       host: drive.${SECRET_DOMAIN}
+      existingSecret:
+        enabled: true
+        secretName: nextcloud-config
+        tokenKey: metrics-token
       defaultConfigs:
         .htaccess: true
         apache-pretty-urls.config.php: true
@@ -316,7 +320,6 @@ spec:
         secretName: nextcloud-config
         usernameKey: db-username
         passwordKey: db-password
-        tokenKey: metrics-token
         # hostKey: db-hostname-or-ip
         # databaseKey: db-name
         mariadb:
