@@ -433,6 +433,10 @@ spec:
       replicaCount: 1
       https: false
       timeout: 5s
+      token:
+        existingSecret:
+          name: nextcloud-config
+          key: metrics-token
 
       image:
         repository: xperimental/nextcloud-exporter
