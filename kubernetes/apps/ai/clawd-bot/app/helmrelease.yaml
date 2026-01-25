@@ -281,10 +281,9 @@ spec:
                   const modelId = displayModel;
                   const baseCfg = {
                     gateway: {
-                      mode: 'remote',
+                      mode: 'local',
                       bind: 'lan',
                       port: 18789,
-                      auth: { mode: 'none' },
                       trustedProxies: ['10.69.0.0/16', '192.168.0.0/16', '127.0.0.1', 'localhost'],
                     },
                     agents: {
