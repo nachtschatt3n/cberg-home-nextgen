@@ -253,8 +253,7 @@ spec:
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
 
-                # Remove old config to force fresh generation with new format
-                rm -f "$CONFIG_PATH"
+                # Only remove pkgroot (not the config, to preserve device pairing)
                 rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
                 SHELL_PATH="/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -312,10 +311,25 @@ spec:
                     },
                   };
 
-                  // Always start with fresh config (old config deleted above)
+                  // Load existing config if it exists, otherwise start with baseCfg
                   let cfg = baseCfg;
+                  if (fs.existsSync(path)) {
+                    try {
+                      const existing = JSON.parse(fs.readFileSync(path, 'utf8'));
+                      // Preserve existing config but update key sections
+                      cfg = existing;
+                    } catch (e) {
+                      console.log('Failed to parse existing config, using defaults:', e.message);
+                    }
+                  }
 
+                  // Update gateway settings (preserve other gateway fields like devices)
                   cfg.gateway = cfg.gateway || {};
+                  cfg.gateway.mode = cfg.gateway.mode || 'local';
+                  cfg.gateway.bind = cfg.gateway.bind || 'lan';
+                  cfg.gateway.port = cfg.gateway.port || 18789;
+                  cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
+
                   // Only configure auth for non-local modes
                   if (cfg.gateway.mode !== 'local' && process.env.CLAWDBOT_GATEWAY_TOKEN) {
                     cfg.gateway.auth = {
@@ -324,12 +338,14 @@ spec:
                     };
                   }
 
+                  // Update agents defaults
                   cfg.agents = cfg.agents || {};
                   cfg.agents.defaults = cfg.agents.defaults || {};
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
                   cfg.agents.defaults.model.primary = displayModel;
 
+                  // Update models
                   cfg.models = cfg.models || {};
                   cfg.models.providers = cfg.models.providers || {};
                   cfg.models.providers.ollama = {
