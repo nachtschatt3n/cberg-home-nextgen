@@ -65,6 +65,12 @@ spec:
                   git openssh-client ca-certificates curl sudo \
                   libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
 
+                echo "Configuring passwordless sudo for node user..."
+                useradd -u 1000 -m -s /bin/bash node || true
+                echo "node ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/node
+                chmod 0440 /etc/sudoers.d/node
+                echo "Passwordless sudo configured for user 'node'"
+
                 BIN_DIR="/home/node/.clawdbot/bin"
                 mkdir -p "$BIN_DIR"
                 ln -sf /usr/bin/git "$BIN_DIR/git"
@@ -200,6 +206,13 @@ spec:
 
                 echo "Fixing permissions..."
                 chown -R 1000:1000 /home/node/.clawdbot
+            env:
+              # GitHub token for mise and git operations during init
+              - name: GITHUB_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: clawd-bot-secret
+                    key: GITHUB_TOKEN
             securityContext:
               runAsUser: 0
               runAsGroup: 0
@@ -352,6 +365,15 @@ spec:
                 fi
                 chown -R 1000:1000 "$AUTH_DIR"
 
+                echo "Configuring kubectl with kubeconfig symlink..."
+                mkdir -p /home/node/.kube
+                if [ -f /home/node/code/cberg-home-nextgen/kubeconfig ]; then
+                  ln -sf /home/node/code/cberg-home-nextgen/kubeconfig /home/node/.kube/config
+                  echo "Kubeconfig linked from ~/code/cberg-home-nextgen/kubeconfig"
+                else
+                  echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
+                fi
+
                 echo "Starting Clawd Bot Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
@@ -359,7 +381,7 @@ spec:
 
             env:
               - name: PATH
-                value: "/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/home/node/.local/share/mise/shims:/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               # Node configuration
               - name: NODE_ENV
                 value: "production"
@@ -373,6 +395,12 @@ spec:
                 value: "gpt-oss:20b"
               - name: OLLAMA_API_KEY
                 value: "ollama"
+              # GitHub token for mise and git operations
+              - name: GITHUB_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: clawd-bot-secret
+                    key: GITHUB_TOKEN
             envFrom:
               - secretRef:
                   name: clawd-bot-secret
