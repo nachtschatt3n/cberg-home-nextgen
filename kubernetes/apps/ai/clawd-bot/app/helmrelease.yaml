@@ -357,9 +357,6 @@ spec:
                   echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
                 fi
 
-                echo "Running clawdbot doctor --fix to migrate legacy config..."
-                /home/node/.clawdbot/bin/clawdbot doctor --fix || echo "Doctor fix completed with warnings"
-
                 echo "Starting Clawd Bot Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
