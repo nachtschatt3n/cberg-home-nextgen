@@ -253,8 +253,6 @@ spec:
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
 
-                # Only remove pkgroot (not the config, to preserve device pairing)
-                rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
                 SHELL_PATH="/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 for f in .bashrc .profile .bash_logout; do
