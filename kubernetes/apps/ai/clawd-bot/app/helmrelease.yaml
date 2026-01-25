@@ -318,19 +318,14 @@ spec:
                     cfg.gateway.auth.token = '';
                   }
 
-                  cfg.agent = cfg.agent || {};
-                  cfg.agent.workspace = cfg.agent.workspace || '/home/node/clawd';
-                  cfg.agent.model = modelId;
+                  // Remove old agent key if it exists (legacy)
+                  delete cfg.agent;
 
                   cfg.agents = cfg.agents || {};
                   cfg.agents.defaults = cfg.agents.defaults || {};
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
                   cfg.agents.defaults.model.primary = displayModel;
-                  cfg.agents.defaults.model.defaultProvider = 'ollama';
-                  cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                  cfg.agents.defaults.models[displayModel] = { provider: 'ollama', name: modelName };
-                  cfg.agents.defaults.models[modelName] = { provider: 'ollama' };
 
                   cfg.models = cfg.models || {};
                   cfg.models.providers = cfg.models.providers || {};
