@@ -281,7 +281,7 @@ spec:
                   const modelId = displayModel;
                   const baseCfg = {
                     gateway: {
-                      mode: 'local',
+                      mode: 'remote',
                       bind: 'lan',
                       port: 18789,
                       auth: { mode: 'token', token: '' },
