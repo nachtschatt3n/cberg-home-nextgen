@@ -79,8 +79,17 @@ spec:
 
                 echo "Installing kubectl..."
                 KUBECTL_VER="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
-                curl -L "https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl" -o "$BIN_DIR/kubectl"
-                chmod +x "$BIN_DIR/kubectl"
+                echo "Kubectl version: ${KUBECTL_VER}"
+                KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl"
+                if curl -L -f "${KUBECTL_URL}" -o "$BIN_DIR/kubectl"; then
+                  chmod +x "$BIN_DIR/kubectl"
+                  echo "kubectl installed successfully"
+                else
+                  echo "Failed to download kubectl from ${KUBECTL_URL}"
+                  echo "Trying alternative method..."
+                  # Fallback: install from apt
+                  apt-get update && apt-get install -y kubectl || echo "kubectl installation failed"
+                fi
 
                 echo "Installing mise..."
                 MISE_TMP="$(mktemp -d)"
