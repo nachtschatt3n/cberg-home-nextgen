@@ -376,7 +376,7 @@ spec:
                 echo "Starting Clawd Bot Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
-                exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose
+                exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose --allow-unconfigured
 
             env:
               - name: PATH
