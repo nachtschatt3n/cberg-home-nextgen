@@ -271,10 +271,6 @@ spec:
                       port: 18789,
                       auth: { mode: 'token', token: '' },
                     },
-                    agent: {
-                      workspace: '/home/node/clawd',
-                      model: modelId,
-                    },
                     agents: {
                       defaults: {
                         workspace: '/home/node/clawd',
@@ -312,9 +308,6 @@ spec:
                   } else if (!cfg.gateway.auth.token) {
                     cfg.gateway.auth.token = '';
                   }
-
-                  // Remove old agent key if it exists (legacy)
-                  delete cfg.agent;
 
                   cfg.agents = cfg.agents || {};
                   cfg.agents.defaults = cfg.agents.defaults || {};
