@@ -318,11 +318,13 @@ spec:
 
                   cfg.gateway = cfg.gateway || {};
                   cfg.gateway.auth = cfg.gateway.auth || {};
-                  if (process.env.CLAWDBOT_GATEWAY_TOKEN) {
+                  // Only override auth if not already configured in baseCfg
+                  if (!cfg.gateway.auth.mode && process.env.CLAWDBOT_GATEWAY_TOKEN) {
                     cfg.gateway.auth.mode = 'token';
                     cfg.gateway.auth.token = process.env.CLAWDBOT_GATEWAY_TOKEN;
-                  } else if (!cfg.gateway.auth.token) {
-                    cfg.gateway.auth.token = '';
+                  } else if (cfg.gateway.auth.mode === 'token' && process.env.CLAWDBOT_GATEWAY_TOKEN) {
+                    // If mode is token, update the token value
+                    cfg.gateway.auth.token = process.env.CLAWDBOT_GATEWAY_TOKEN;
                   }
 
                   cfg.agents = cfg.agents || {};
