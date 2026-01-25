@@ -238,6 +238,8 @@ spec:
                 CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
                 STATE_DIR="/home/node/.clawdbot"
 
+                # Remove old config to force fresh generation with new format
+                rm -f "$CONFIG_PATH"
                 rm -rf /home/node/.clawdbot/pkgroot || true
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
                 SHELL_PATH="/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -299,15 +301,8 @@ spec:
                     },
                   };
 
+                  // Always start with fresh config (old config deleted above)
                   let cfg = baseCfg;
-                  if (fs.existsSync(path)) {
-                    try {
-                      cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
-                    } catch (err) {
-                      console.warn('Invalid config, resetting to base', err);
-                      cfg = baseCfg;
-                    }
-                  }
 
                   cfg.gateway = cfg.gateway || {};
                   cfg.gateway.auth = cfg.gateway.auth || {};
