@@ -78,17 +78,23 @@ spec:
                 rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
 
                 echo "Installing kubectl..."
-                KUBECTL_VER="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
+                # Use a known stable version as fallback if latest check fails
+                KUBECTL_VER="$(curl -L -s https://dl.k8s.io/release/stable.txt 2>/dev/null || echo 'v1.31.4')"
                 echo "Kubectl version: ${KUBECTL_VER}"
                 KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl"
-                if curl -L -f "${KUBECTL_URL}" -o "$BIN_DIR/kubectl"; then
+                if curl -L -f "${KUBECTL_URL}" -o "$BIN_DIR/kubectl" 2>/dev/null; then
                   chmod +x "$BIN_DIR/kubectl"
                   echo "kubectl installed successfully"
+                  "$BIN_DIR/kubectl" version --client --short 2>/dev/null || true
                 else
-                  echo "Failed to download kubectl from ${KUBECTL_URL}"
-                  echo "Trying alternative method..."
-                  # Fallback: install from apt
-                  apt-get update && apt-get install -y kubectl || echo "kubectl installation failed"
+                  echo "Failed to download kubectl from ${KUBECTL_URL}, trying v1.31.4..."
+                  # Fallback to known version
+                  if curl -L -f "https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl" -o "$BIN_DIR/kubectl"; then
+                    chmod +x "$BIN_DIR/kubectl"
+                    echo "kubectl v1.31.4 installed successfully"
+                  else
+                    echo "kubectl installation failed"
+                  fi
                 fi
 
                 echo "Installing mise..."
