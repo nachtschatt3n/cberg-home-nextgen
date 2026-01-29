@@ -61,6 +61,11 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+        # Session configuration - 1 year lifetime, persist across browser close
+        - name: AUTHENTIK_COOKIE__SESSION__AGE
+          value: "31536000"  # 1 year in seconds (365 * 24 * 60 * 60)
+        - name: AUTHENTIK_SESSIONS__EXPIRE_AT_BROWSER_CLOSE
+          value: "false"
       initContainers:
         - name: copy-blueprints
           image: busybox:1.36
@@ -148,6 +153,11 @@ spec:
               key: SECRET_AUTHENTIK_DB_PASSWORD
         - name: AUTHENTIK_POSTGRESQL__PORT
           value: "5432"
+        # Session configuration - 1 year lifetime, persist across browser close
+        - name: AUTHENTIK_COOKIE__SESSION__AGE
+          value: "31536000"  # 1 year in seconds (365 * 24 * 60 * 60)
+        - name: AUTHENTIK_SESSIONS__EXPIRE_AT_BROWSER_CLOSE
+          value: "false"
       # WORKAROUND for Authentik 2025.10.1 bug - Remove when upgrading to 2025.10.2+
       # Issue: Workers try to connect to port 9000 (server port) instead of checking heartbeat file
       # Upstream: https://github.com/goauthentik/authentik/issues/17923
