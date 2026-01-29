@@ -234,6 +234,28 @@ log_section "Section 5: Helm Deployments"
     echo "HelmReleases: $((TOTAL_HELM - FAILED_HELM))/$TOTAL_HELM ready"
 
     echo ""
+    echo "HelmRepositories:"
+    flux get sources helmrepository -A | head -30
+    echo ""
+
+    # Check for failed HelmRepositories
+    FAILED_HELMREPOS=$(safe_count "flux get sources helmrepository -A 2>/dev/null | grep 'False' | wc -l")
+    echo "Failed HelmRepositories: $FAILED_HELMREPOS"
+
+    if [ "$FAILED_HELMREPOS" -gt 0 ]; then
+        echo ""
+        echo "Failed HelmRepository details:"
+        flux get sources helmrepository -A 2>/dev/null | grep 'False' | while read line; do
+            echo "  - $line"
+            # Extract namespace and name for detailed info
+            REPO_NS=$(echo "$line" | awk '{print $1}')
+            REPO_NAME=$(echo "$line" | awk '{print $2}')
+            kubectl get helmrepository "$REPO_NAME" -n "$REPO_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null | sed 's/^/    Error: /' || true
+            echo ""
+        done
+    fi
+
+    echo ""
     echo "Kustomizations:"
     flux get kustomizations -A | head -20
 
@@ -243,15 +265,62 @@ log_section "Section 5: Helm Deployments"
     echo ""
     echo "Kustomizations: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 
-    if [ "$FAILED_HELM" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ]; then
-        log_success "All Helm releases and Kustomizations healthy"
+    # Check for specific kustomization issues
+    if [ "$NOT_RECONCILED" -gt 0 ]; then
+        echo ""
+        echo "Kustomization issues:"
+        flux get kustomizations -A 2>/dev/null | grep -v 'Applied revision' | grep -v 'NAMESPACE' | while read line; do
+            echo "  - $line"
+            # Extract namespace and name for detailed info
+            KUST_NS=$(echo "$line" | awk '{print $1}')
+            KUST_NAME=$(echo "$line" | awk '{print $2}')
+
+            # Check for dependency issues
+            DEP_MSG=$(kubectl get kustomization "$KUST_NAME" -n "$KUST_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || echo "")
+            if [[ "$DEP_MSG" == *"dependency"* ]]; then
+                echo "    Status: Dependency issue - $DEP_MSG"
+            elif [[ "$DEP_MSG" == *"health check"* ]]; then
+                echo "    Status: Health check issue - $DEP_MSG"
+            elif [[ "$DEP_MSG" == *"Reconciliation in progress"* ]]; then
+                echo "    Status: Reconciliation in progress"
+            else
+                echo "    Status: $DEP_MSG"
+            fi
+        done
+    fi
+
+    # Evaluate issues
+    CRITICAL_FLUX_ISSUES=0
+
+    if [ "$FAILED_HELM" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ] && [ "$FAILED_HELMREPOS" -eq 0 ]; then
+        log_success "All Helm releases, repositories, and Kustomizations healthy"
     else
-        log_warning "Issues detected - Helm failures: $FAILED_HELM, Kustomization not reconciled: $NOT_RECONCILED"
+        if [ "$FAILED_HELMREPOS" -gt 0 ]; then
+            log_warning "Failed HelmRepositories detected: $FAILED_HELMREPOS (may block kustomizations)"
+            add_major_issue "Failed HelmRepositories: $FAILED_HELMREPOS (check for broken URLs or network issues)"
+            ((CRITICAL_FLUX_ISSUES++))
+        fi
+
         if [ "$FAILED_HELM" -gt 0 ]; then
+            log_warning "HelmRelease failures: $FAILED_HELM"
             add_major_issue "HelmRelease failures: $FAILED_HELM"
         fi
+
         if [ "$NOT_RECONCILED" -gt 0 ]; then
-            add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED"
+            # Check if stuck due to dependencies
+            DEPENDENCY_STUCK=$(flux get kustomizations -A 2>/dev/null | grep -c "dependency.*not ready" || echo "0")
+            HEALTHCHECK_STUCK=$(kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .reason=="Progressing" and (.message | contains("health check"))))] | length' || echo "0")
+
+            if [ "$DEPENDENCY_STUCK" -gt 0 ]; then
+                log_warning "Kustomizations blocked by dependencies: $DEPENDENCY_STUCK"
+                add_major_issue "Kustomizations blocked by dependencies: $DEPENDENCY_STUCK (check for failed HelmRepositories)"
+            elif [ "$HEALTHCHECK_STUCK" -gt 0 ]; then
+                log_warning "Kustomizations stuck in health checks: $HEALTHCHECK_STUCK"
+                add_major_issue "Kustomizations stuck in health checks: $HEALTHCHECK_STUCK (may timeout after 30 minutes)"
+            else
+                log_warning "Kustomizations not reconciled: $NOT_RECONCILED"
+                add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED"
+            fi
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
@@ -669,21 +738,55 @@ log_section "Section 19: Network Connectivity"
 log_section "Section 20: GitOps Status"
 {
     echo "Git sources:"
-    flux get sources git -A | head -10
+    flux get sources git -A
     echo ""
 
-    echo "Kustomizations:"
-    flux get kustomizations -A | head -20
+    # Check Git source status
+    FAILED_GIT=$(safe_count "flux get sources git -A 2>/dev/null | grep 'False' | wc -l")
+    if [ "$FAILED_GIT" -gt 0 ]; then
+        echo "Failed Git sources: $FAILED_GIT"
+        flux get sources git -A | grep 'False' | while read line; do
+            echo "  - $line"
+        done
+        echo ""
+    fi
+
+    echo "Flux controllers status:"
+    kubectl get pods -n flux-system
+    echo ""
+
+    # Check Flux controllers health
+    FLUX_CONTROLLERS=$(safe_count "kubectl get pods -n flux-system --no-headers 2>/dev/null | wc -l")
+    FLUX_RUNNING=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l")
+    echo "Flux controllers: $FLUX_RUNNING/$FLUX_CONTROLLERS running"
+    echo ""
+
+    echo "Kustomizations summary:"
+    flux get kustomizations -A | head -30
     echo ""
 
     NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'Applied revision' | grep -v 'NAMESPACE' | wc -l")
-    echo "Not reconciled: $NOT_RECONCILED"
+    TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    echo "Kustomization status: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 
-    if [ "$NOT_RECONCILED" -eq 0 ]; then
-        log_success "GitOps fully synchronized"
+    # Check for specific GitOps issues
+    if [ "$FAILED_GIT" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ] && [ "$FLUX_RUNNING" -eq "$FLUX_CONTROLLERS" ]; then
+        log_success "GitOps fully synchronized - All sources and kustomizations healthy"
     else
-        log_warning "GitOps reconciliation issues: $NOT_RECONCILED"
-        add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED"
+        if [ "$FLUX_RUNNING" -ne "$FLUX_CONTROLLERS" ]; then
+            log_critical "Flux controllers not running: $FLUX_RUNNING/$FLUX_CONTROLLERS"
+            add_critical_issue "Flux controllers down: $((FLUX_CONTROLLERS - FLUX_RUNNING)) controllers not running"
+        fi
+
+        if [ "$FAILED_GIT" -gt 0 ]; then
+            log_warning "Git source failures: $FAILED_GIT"
+            add_major_issue "Git source failures: $FAILED_GIT (check repository access and credentials)"
+        fi
+
+        if [ "$NOT_RECONCILED" -gt 0 ]; then
+            log_warning "GitOps reconciliation issues: $NOT_RECONCILED kustomizations not reconciled"
+            add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED (see Section 5 for details)"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
