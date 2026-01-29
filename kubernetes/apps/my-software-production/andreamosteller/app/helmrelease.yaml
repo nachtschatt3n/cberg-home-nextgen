@@ -92,13 +92,13 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Andrea Mosteller"
           gethomepage.dev/description: "andreamosteller.com production site"
-          gethomepage.dev/group: "Office"
+          gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "mdi-web"
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "pro-andreamosteller.uhl.cool"
+          - host: &host "pro-andreamosteller.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix

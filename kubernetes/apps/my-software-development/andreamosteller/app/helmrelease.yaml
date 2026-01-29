@@ -94,7 +94,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Andrea Mosteller Dev"
           gethomepage.dev/description: "Development preview of andreamosteller.com"
-          gethomepage.dev/group: "Office"
+          gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "mdi-web"
         labels:
           gethomepage.dev/enabled: "true"

@@ -5,7 +5,7 @@ This document provides a systematic, AI-executable health check plan for a home 
 
 ## Automated Health Check Script
 
-**⚡ Quick Start**: An automated health check script is available that executes all 33 sections:
+**⚡ Quick Start**: An automated health check script is available that executes all 35 sections:
 
 ```bash
 # Run the automated health check
@@ -18,10 +18,11 @@ This document provides a systematic, AI-executable health check plan for a home 
 ```
 
 **Features:**
-- ✅ Executes all 34 health check sections automatically
+- ✅ Executes all 35 health check sections automatically
 - ✅ Categorizes issues by severity (Critical, Major, Minor)
 - ✅ Generates comprehensive reports with recommendations
 - ✅ Includes Alertmanager alerts, Elasticsearch application log analysis, and Home Assistant integration analysis
+- ✅ Monitors MQTT broker connectivity and Shelly device health
 - ✅ Queries Elasticsearch indices for error patterns and trends
 - ✅ Queries UnPoller metrics for network hardware health
 - ✅ Safe execution with error handling and progress tracking
@@ -52,8 +53,8 @@ Execute in order, collecting metrics and identifying issues.
 ### Phase 3: Application & Service Checks (Sections 11-20)
 Execute systematically, testing each service's health.
 
-### Phase 4: Advanced Monitoring (Sections 21-33)
-Execute remaining checks, focusing on automation, security, and home automation health.
+### Phase 4: Advanced Monitoring (Sections 21-35)
+Execute remaining checks, focusing on automation, security, home automation health, and MQTT connectivity.
 
 ### Phase 5: Report Generation
 Compile all findings into the standardized report format.
@@ -78,7 +79,7 @@ kubectl get nodes
 ### Execution Workflow
 1. **Start with Section 1**, execute all commands in order
 2. **Record results** for each check (✅ OK, ⚠️ Warning, ❌ Critical)
-3. **Continue sequentially** through all 33 sections
+3. **Continue sequentially** through all 35 sections
 4. **Collect metrics** and identify issues as you go
 5. **Generate final report** using the standardized format
 
@@ -718,7 +719,7 @@ kubectl get resourcequotas -A 2>/dev/null | wc -l
 ## 22. Home Automation Health
 
 **Objective**: Verify smart home system functionality
-**Success Criteria**: All services running, Zigbee network healthy
+**Success Criteria**: All services running, Zigbee network healthy, MQTT broker operational
 
 **Commands to Execute:**
 ```bash
@@ -728,7 +729,10 @@ kubectl get pods -n home-automation -l app.kubernetes.io/name=home-assistant
 # Check Zigbee2MQTT
 kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt
 
-# Check MQTT broker
+# Check MQTT broker status
+kubectl get pods -n home-automation -l app.kubernetes.io/name=mosquitto
+
+# Check MQTT broker listening
 kubectl exec -n home-automation deployment/mosquitto -- netstat -tlnp | grep :1883 | wc -l
 
 # Get Zigbee device count
@@ -738,7 +742,74 @@ kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json |
 kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) | .key' | wc -l 2>/dev/null || echo "Unable to check offline devices"
 ```
 
-**AI Analysis**: Verify home automation services, check Zigbee health.
+**AI Analysis**: Verify home automation services, check Zigbee health, ensure MQTT broker is operational.
+
+---
+
+## 22a. MQTT Connectivity & Shelly Devices
+
+**Objective**: Monitor MQTT client connections and Shelly device health
+**Success Criteria**: Mosquitto accepting connections, Shelly devices connected via MQTT
+
+**Commands to Execute:**
+```bash
+# Count active MQTT clients
+echo "=== MQTT Client Count ==="
+kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=1000 | grep "New client connected" | awk '{print $NF}' | sort -u | wc -l
+
+# List unique MQTT clients (last 1000 connections)
+echo ""
+echo "=== Recent MQTT Clients ==="
+kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=1000 | grep "New client connected" | awk '{print $NF}' | sort -u | head -20
+
+# Count Shelly devices connected to MQTT
+echo ""
+echo "=== Shelly MQTT Connections ==="
+SHELLY_COUNT=$(kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=1000 | grep "New client connected" | grep -i shelly | awk '{print $NF}' | sort -u | wc -l)
+echo "Shelly devices connected: $SHELLY_COUNT"
+
+# Check for MQTT authentication failures (last 100 lines)
+echo ""
+echo "=== MQTT Authentication Issues ==="
+AUTH_FAILURES=$(kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 | grep -E "(not authorised|authentication|Connection refused)" | wc -l)
+echo "Authentication failures: $AUTH_FAILURES"
+
+# Check MQTT connection errors
+echo ""
+echo "=== MQTT Connection Errors ==="
+kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 | grep -i error | wc -l
+
+# List Home Assistant MQTT discovery devices
+echo ""
+echo "=== Home Assistant MQTT Integration Status ==="
+kubectl logs -n home-automation deployment/home-assistant --tail=200 | grep -i "mqtt" | grep -iE "(connected|disconnected|error)" | tail -5 || echo "No recent MQTT activity in HA logs"
+
+# Check Mosquitto service endpoint
+echo ""
+echo "=== MQTT Service Status ==="
+kubectl get svc -n home-automation mosquitto-internal -o wide
+kubectl get endpoints -n home-automation mosquitto-internal
+
+# Optional: Scan for Shelly devices on network (requires network tools)
+echo ""
+echo "=== Shelly Device Network Scan (Optional) ==="
+echo "Run this manually if detailed Shelly scan is needed:"
+echo "  python3 /tmp/scan-shelly-mqtt.py"
+echo ""
+echo "Quick network check - ping MQTT broker from IoT network:"
+echo "  Test from: 192.168.33.20 (example Shelly device)"
+echo "  Target: 192.168.55.15:1883 (Mosquitto LoadBalancer)"
+```
+
+**AI Analysis**:
+- Verify MQTT broker is accepting connections from all expected clients
+- Count Shelly device connections and compare with expected device count
+- Identify any authentication failures that need credentials configured
+- Check Home Assistant MQTT integration status
+- Monitor for connection drops or errors
+- **Expected Shelly Count**: ~34-38 devices (based on network scan)
+- **Critical Issues**: >5 authentication failures, <20 Shelly devices connected
+- **Warning Issues**: 20-30 Shelly devices connected, 1-5 auth failures
 
 ---
 
@@ -1277,7 +1348,7 @@ wait $PF_PID 2>/dev/null || true
 
 ## Report Generation Instructions
 
-After executing all 34 sections, compile the results into the standardized format:
+After executing all 35 sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
@@ -1287,7 +1358,7 @@ After executing all 34 sections, compile the results into the standardized forma
 6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
 7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation (34 sections):**
+**Final Health Score Calculation (35 sections):**
 - **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
 - **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
 - **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day

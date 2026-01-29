@@ -115,15 +115,6 @@ spec:
                 href: http://192.168.32.201
                 description: Epson ES-580W
                 ping: 192.168.32.201
-        - Software Development:
-            - Andrea Mosteller:
-                href: https://pro-andreamosteller.uhl.cool
-                icon: mdi-web
-                description: Production site
-            - Andrea Mosteller Dev:
-                href: https://dev-andreamosteller.uhl.cool
-                icon: mdi-web
-                description: Development preview
         - Monitoring:
             - Alertmanager:
                 href: https://alertmanager.${SECRET_DOMAIN}
