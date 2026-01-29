@@ -94,6 +94,11 @@ spec:
             enabled: true
             port: 1883
             targetPort: 1883
+          websockets:
+            protocol: TCP
+            enabled: true
+            port: 9001
+            targetPort: 9001
       internal:
         controller: mosquitto
         type: ClusterIP
