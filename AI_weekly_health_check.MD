@@ -178,7 +178,7 @@ kubectl get daemonsets -A -o json | jq -r '.items[] | select(.status.desiredNumb
 ## 5. Helm Deployments
 
 **Objective**: Ensure all applications are properly deployed via GitOps
-**Success Criteria**: All HelmReleases reconciled, no failures
+**Success Criteria**: All HelmReleases reconciled, no HelmRepository failures, no stuck kustomizations
 
 **Commands to Execute:**
 ```bash
@@ -188,14 +188,40 @@ flux get helmreleases -A
 # Check for failed releases
 flux get helmreleases -A | grep -E "(Failed|Error|Unknown)" | wc -l
 
+# CRITICAL: Check HelmRepositories for failures (can block kustomizations)
+flux get sources helmrepository -A
+
+# Count failed HelmRepositories
+flux get sources helmrepository -A | grep 'False' | wc -l
+
+# Get details of failed HelmRepositories
+flux get sources helmrepository -A | grep 'False' | while read line; do
+  REPO_NS=$(echo "$line" | awk '{print $1}')
+  REPO_NAME=$(echo "$line" | awk '{print $2}')
+  echo "Failed: $REPO_NS/$REPO_NAME"
+  kubectl get helmrepository "$REPO_NAME" -n "$REPO_NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+  echo ""
+done
+
 # List all Kustomizations
 flux get kustomizations -A
 
-# Check reconciliation status
-flux get kustomizations -A | grep -v "Reconciled" | wc -l
+# Check for kustomizations not reconciled
+flux get kustomizations -A | grep -v "Applied revision" | grep -v "NAMESPACE" | wc -l
+
+# Check for dependency-blocked kustomizations
+flux get kustomizations -A | grep "dependency.*not ready"
+
+# Check for kustomizations stuck in health checks
+kubectl get kustomizations -A -o json | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .reason=="Progressing" and (.message | contains("health check")))) | "\(.metadata.namespace)/\(.metadata.name): \(.status.conditions[] | select(.type=="Ready") | .message)"'
 ```
 
-**AI Analysis**: Count healthy vs failed releases, check reconciliation status.
+**AI Analysis**:
+- Count healthy vs failed HelmReleases
+- **CRITICAL**: Identify failed HelmRepositories (404 errors, auth issues, network problems)
+- Check for kustomizations blocked by dependencies
+- Identify kustomizations stuck in health check timeouts (>30 minutes indicates a problem)
+- Correlate failed HelmRepositories with stuck kustomizations (common root cause)
 
 ---
 
@@ -671,24 +697,49 @@ kubectl get deployment -n network external-dns
 ## 20. GitOps Status
 
 **Objective**: Ensure GitOps reconciliation is working
-**Success Criteria**: All sources and kustomizations reconciled
+**Success Criteria**: All sources and kustomizations reconciled, Flux controllers healthy
 
 **Commands to Execute:**
 ```bash
 # Check Git sources
 flux get sources git -A
 
+# Check for failed Git sources
+flux get sources git -A | grep 'False'
+
+# Check Flux controller pods
+kubectl get pods -n flux-system
+
+# Verify all Flux controllers are running
+kubectl get pods -n flux-system --field-selector=status.phase=Running
+
 # Check kustomizations
 flux get kustomizations -A
 
 # Check for reconciliation errors
-flux get kustomizations -A | grep -v "Reconciled" | wc -l
+flux get kustomizations -A | grep -v "Applied revision" | grep -v "NAMESPACE"
 
-# Check Flux controller logs
-kubectl logs -n flux-system deployment/kustomize-controller --tail=20 | grep -i error | wc -l
+# Identify kustomizations with dependency issues
+flux get kustomizations -A | grep "dependency.*not ready"
+
+# Check for kustomizations stuck in reconciliation
+kubectl get kustomizations -A -o json | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status!="True")) | "\(.metadata.namespace)/\(.metadata.name): \(.status.conditions[] | select(.type=="Ready") | .message)"'
+
+# Check Flux controller logs for errors
+kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=1h | grep -i error | wc -l
+kubectl logs -n flux-system deployment/source-controller --tail=50 --since=1h | grep -i error | wc -l
+
+# Check for HelmRepository failures that may block kustomizations
+flux get sources helmrepository -A | grep 'False'
 ```
 
-**AI Analysis**: Verify GitOps health, identify sync issues.
+**AI Analysis**:
+- Verify all Flux controllers are running (7 expected: flux-operator, helm-controller, image-automation-controller, image-reflector-controller, kustomize-controller, notification-controller, source-controller)
+- Verify GitOps health and check for sync issues
+- **CRITICAL**: Identify kustomizations blocked by failed dependencies (often caused by broken HelmRepositories)
+- Check for kustomizations stuck in "Reconciliation in progress" for >30 minutes
+- Correlate HelmRepository failures with stuck kustomizations
+- Review controller logs for systematic issues
 
 ---
 
