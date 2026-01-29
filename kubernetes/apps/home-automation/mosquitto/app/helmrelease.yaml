@@ -115,14 +115,16 @@ spec:
             port: 9234
     ingress:
       main:
-        enabled: false
-        #ingressclass: "internal"
+        enabled: true
+        className: internal
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Mosquitto"
           gethomepage.dev/description: "Mosquitto is an open-source message broker that implements the MQTT protocol"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "mosquitto.png"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -131,8 +133,8 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
-                  port: 80
+                  identifier: main
+                  port: websockets
     persistence:
       data:
         existingClaim: mosquitto-config
