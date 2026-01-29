@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Kubernetes Cluster Health Check Script
-# Executes all 34 sections from AI_weekly_health_check.MD
+# Executes all 35 sections from AI_weekly_health_check.MD
 # Usage: ./scripts/health-check.sh [output-file]
 
 set -uo pipefail
@@ -781,6 +781,84 @@ log_section "Section 22: Home Automation Health"
 
     if [ "$MQTT_ERRORS" -gt 0 ]; then
         add_minor_issue "Mosquitto MQTT broker errors: $MQTT_ERRORS"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 22a: MQTT Connectivity & Shelly Devices"
+{
+    echo "=== MQTT Broker Statistics (Real-time) ==="
+    # Use Mosquitto's $SYS topics for accurate connected client count
+    MQTT_CONNECTED=$(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 5 mosquitto_sub -h localhost -t '$SYS/broker/clients/connected' -C 1 2>/dev/null || echo "0")
+    MQTT_TOTAL=$(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 5 mosquitto_sub -h localhost -t '$SYS/broker/clients/total' -C 1 2>/dev/null || echo "0")
+    MQTT_INACTIVE=$(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 5 mosquitto_sub -h localhost -t '$SYS/broker/clients/inactive' -C 1 2>/dev/null || echo "0")
+
+    echo "Total clients: $MQTT_TOTAL"
+    echo "Connected/Active: $MQTT_CONNECTED"
+    echo "Inactive: $MQTT_INACTIVE"
+    echo ""
+
+    echo "=== Recent MQTT Clients (from logs) ==="
+    # Fixed parsing: extract client ID properly (field after "as", before space)
+    kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=20000 2>&1 | grep "New client connected" | grep -v "<unknown>" | sed 's/.* as //' | sed 's/ .*//' | sort -u | head -20
+    echo ""
+
+    echo "=== Shelly MQTT Connections ==="
+    # Fixed: increase log window to 20000 and use correct parsing
+    SHELLY_COUNT=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=20000 2>&1 | grep 'New client connected' | grep -v '<unknown>' | sed 's/.* as //' | sed 's/ .*//' | grep -i shelly | sort -u | wc -l")
+    echo "Shelly devices identified (recent reconnections): $SHELLY_COUNT"
+    echo ""
+    echo "Note: MQTT clients maintain persistent connections. This count shows devices"
+    echo "that reconnected recently. Stable devices won't appear in recent logs."
+    echo ""
+
+    echo "=== MQTT Authentication Issues ==="
+    AUTH_FAILURES=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -E '(not authorised|authentication|Connection refused)' | wc -l")
+    echo "Authentication failures: $AUTH_FAILURES"
+    echo ""
+
+    echo "=== MQTT Connection Errors ==="
+    MQTT_CONN_ERRORS=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -i error | wc -l")
+    echo "Connection errors: $MQTT_CONN_ERRORS"
+    echo ""
+
+    echo "=== MQTT Service Status ==="
+    kubectl get svc -n home-automation mosquitto-internal -o wide 2>/dev/null || echo "Service not found"
+    kubectl get endpoints -n home-automation mosquitto-internal 2>/dev/null || echo "Endpoints not found"
+    echo ""
+
+    # Health assessment - use real-time connected count instead of log-based count
+    EXPECTED_CLIENTS_MIN=40
+    EXPECTED_CLIENTS_MAX=60
+
+    if [ "$AUTH_FAILURES" -gt 5 ]; then
+        log_critical "High MQTT authentication failures: $AUTH_FAILURES"
+        add_critical_issue "MQTT authentication failures: $AUTH_FAILURES"
+    elif [ "$AUTH_FAILURES" -gt 0 ]; then
+        log_warning "MQTT authentication failures detected: $AUTH_FAILURES"
+        add_minor_issue "MQTT authentication failures: $AUTH_FAILURES"
+    fi
+
+    # Check total connected clients instead of just Shelly devices
+    if [ "$MQTT_CONNECTED" -lt 20 ]; then
+        log_critical "Low MQTT client count: $MQTT_CONNECTED (expected: $EXPECTED_CLIENTS_MIN-$EXPECTED_CLIENTS_MAX)"
+        add_critical_issue "Only $MQTT_CONNECTED MQTT clients connected (expected $EXPECTED_CLIENTS_MIN-$EXPECTED_CLIENTS_MAX)"
+    elif [ "$MQTT_CONNECTED" -lt 40 ]; then
+        log_warning "Below expected MQTT client count: $MQTT_CONNECTED (expected: $EXPECTED_CLIENTS_MIN-$EXPECTED_CLIENTS_MAX)"
+        add_minor_issue "MQTT client count below expected: $MQTT_CONNECTED (expected $EXPECTED_CLIENTS_MIN-$EXPECTED_CLIENTS_MAX)"
+    else
+        log_success "MQTT clients connected: $MQTT_CONNECTED (expected: $EXPECTED_CLIENTS_MIN-$EXPECTED_CLIENTS_MAX)"
+    fi
+
+    # Informational check for Shelly devices (not critical since it's based on logs)
+    if [ "$SHELLY_COUNT" -lt 10 ]; then
+        log_info "Few Shelly devices in recent logs: $SHELLY_COUNT (may indicate stable connections)"
+    else
+        log_info "Shelly devices in recent logs: $SHELLY_COUNT"
+    fi
+
+    if [ "$MQTT_CONN_ERRORS" -gt 10 ]; then
+        log_warning "High MQTT connection errors: $MQTT_CONN_ERRORS"
+        add_minor_issue "MQTT connection errors: $MQTT_CONN_ERRORS"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
