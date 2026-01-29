@@ -235,17 +235,17 @@ log_section "Section 5: Helm Deployments"
 
     echo ""
     echo "HelmRepositories:"
-    flux get sources helmrepository -A | head -30
+    flux get sources helm -A | head -30
     echo ""
 
-    # Check for failed HelmRepositories
-    FAILED_HELMREPOS=$(safe_count "flux get sources helmrepository -A 2>/dev/null | grep 'False' | wc -l")
+    # Check for failed HelmRepositories (READY column = False)
+    FAILED_HELMREPOS=$(safe_count "flux get sources helm -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
     echo "Failed HelmRepositories: $FAILED_HELMREPOS"
 
     if [ "$FAILED_HELMREPOS" -gt 0 ]; then
         echo ""
         echo "Failed HelmRepository details:"
-        flux get sources helmrepository -A 2>/dev/null | grep 'False' | while read line; do
+        flux get sources helm -A 2>/dev/null | awk '$5 == "False"' | while read line; do
             echo "  - $line"
             # Extract namespace and name for detailed info
             REPO_NS=$(echo "$line" | awk '{print $1}')
@@ -741,11 +741,11 @@ log_section "Section 20: GitOps Status"
     flux get sources git -A
     echo ""
 
-    # Check Git source status
-    FAILED_GIT=$(safe_count "flux get sources git -A 2>/dev/null | grep 'False' | wc -l")
+    # Check Git source status (READY column = False)
+    FAILED_GIT=$(safe_count "flux get sources git -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
     if [ "$FAILED_GIT" -gt 0 ]; then
         echo "Failed Git sources: $FAILED_GIT"
-        flux get sources git -A | grep 'False' | while read line; do
+        flux get sources git -A | awk '$5 == "False"' | while read line; do
             echo "  - $line"
         done
         echo ""
