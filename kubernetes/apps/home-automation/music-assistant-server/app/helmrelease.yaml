@@ -60,17 +60,19 @@ spec:
             image:
               repository: ghcr.io/alams154/music-assistant-alexa-api
               tag: latest
-            env:
-              - name: USERNAME
-                valueFrom:
-                  secretKeyRef:
-                    name: music-assistant-alexa-secrets
-                    key: alexa_username
-              - name: PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: music-assistant-alexa-secrets
-                    key: alexa_password
+            # Removed USERNAME/PASSWORD to disable Basic Auth
+            # Alexa skill requests cannot send Basic Auth credentials
+            # env:
+            #   - name: USERNAME
+            #     valueFrom:
+            #       secretKeyRef:
+            #         name: music-assistant-alexa-secrets
+            #         key: alexa_username
+            #   - name: PASSWORD
+            #     valueFrom:
+            #       secretKeyRef:
+            #         name: music-assistant-alexa-secrets
+            #         key: alexa_password
             ports:
               - name: alexa-api
                 containerPort: 3000
