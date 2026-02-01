@@ -40,6 +40,8 @@ spec:
                 value: "/config"
               - name: MUSIC_ASSISTANT_CACHE_PATH
                 value: "/cache"
+              - name: MASS_SERVER_URL
+                value: "https://music.${SECRET_DOMAIN}"
             ports:
               - name: http
                 containerPort: 8095
