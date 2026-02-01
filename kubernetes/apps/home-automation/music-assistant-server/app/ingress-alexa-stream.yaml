@@ -21,4 +21,4 @@ spec:
               service:
                 name: music-assistant-server
                 port:
-                  number: 8097
+                  number: 8098
