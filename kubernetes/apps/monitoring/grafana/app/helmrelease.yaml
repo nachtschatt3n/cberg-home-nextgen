@@ -31,6 +31,12 @@ spec:
     envFromSecret: grafana-admin-secret
     env:
       GF_EXPLORE_ENABLED: true
+    extraSecretMounts:
+      - name: elasticsearch-credentials
+        secretName: elasticsearch-es-elastic-user
+        defaultMode: 0440
+        mountPath: /etc/secrets/elasticsearch
+        readOnly: true
     grafana.ini:
       server:
         root_url: "https://grafana.${SECRET_DOMAIN}"
@@ -46,6 +52,7 @@ spec:
           - { name: InfluxDB, orgId: 1 }
           - { name: Unpoller InfluxDB, orgId: 1 }
           - { name: TeslaMate, orgId: 1 }
+          - { name: Elasticsearch, orgId: 1 }
         datasources:
           - name: Prometheus
             type: prometheus
@@ -91,6 +98,22 @@ spec:
               database: teslamate
               sslmode: disable
               postgresVersion: 1800
+          - name: Elasticsearch
+            type: elasticsearch
+            uid: elasticsearch
+            access: proxy
+            url: https://elasticsearch-es-http.monitoring.svc.cluster.local:9200
+            basicAuth: true
+            basicAuthUser: elastic
+            jsonData:
+              index: "fluent-bit-*"
+              timeField: "@timestamp"
+              logMessageField: log
+              logLevelField: level
+              tlsSkipVerify: true
+              esVersion: "8.15.3"
+            secureJsonData:
+              basicAuthPassword: $__file{/etc/secrets/elasticsearch/elastic}
     dashboards:
       default:
         cloudflared:
