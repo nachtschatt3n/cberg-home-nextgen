@@ -1,0 +1,15 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: prometheus-snapshot-cleanup
+  namespace: storage
+spec:
+  name: prometheus-snapshot-cleanup
+  task: snapshot-cleanup
+  cron: "30 2 * * *"  # Daily at 2:30 AM (after trim at 2 AM, before backup at 3 AM)
+  retain: 0
+  concurrency: 1
+  labels:
+    job: prometheus-snapshot-cleanup
+    volume: prometheus-kube-prometheus-stack

@@ -2,14 +2,14 @@
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
-  name: prometheus-filesystem-trim
+  name: home-assistant-filesystem-trim
   namespace: storage
 spec:
-  name: prometheus-filesystem-trim
+  name: home-assistant-filesystem-trim
   task: filesystem-trim
   cron: "0 2 * * *"  # Daily at 2 AM (1 hour before backup)
   retain: 0
   concurrency: 1
   labels:
-    job: prometheus-trim
-    volume: prometheus-kube-prometheus-stack
+    job: home-assistant-trim
+    volume: home-assistant-config
