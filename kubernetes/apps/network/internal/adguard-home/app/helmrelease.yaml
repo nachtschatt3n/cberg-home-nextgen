@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: adguard-home
-      version: 0.19.0
+      version: 0.24.0
       sourceRef:
         kind: HelmRepository
         name: rm3l
