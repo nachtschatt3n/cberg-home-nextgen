@@ -28,7 +28,7 @@ spec:
     ## ref: https://hub.docker.com/r/library/influxdb/tags/
     image:
       repository: docker.io/library/influxdb
-      tag: "2.7.12-alpine"
+      tag: "2.8.0-alpine"
       pullPolicy: IfNotPresent
 
     serviceAccount:
