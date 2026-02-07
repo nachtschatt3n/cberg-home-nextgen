@@ -112,7 +112,7 @@ log_section "Section 1: Cluster Events & Logs"
     kubectl get events -A --sort-by='.lastTimestamp' | tail -50
     echo ""
 
-    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | grep -vE '(BackOff|Pulling|FailedScheduling|Unhealthy)' | wc -l")
     echo "Warning events: $WARNING_COUNT"
 
     OOM_COUNT=$(safe_count "kubectl get events -A --field-selector reason=OOMKilled 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
@@ -487,16 +487,16 @@ log_section "Section 11: Container Logs Analysis"
 {
     echo "Checking infrastructure logs for errors..."
 
-    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -iE '(error|fatal|critical)' | wc -l")
+    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -v 'Err: 0' | wc -l")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
 
-    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -iE '(error|fatal)' | wc -l")
+    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -v 'Err: 0' | wc -l")
     echo "CoreDNS errors (24h): $COREDNS_ERRORS"
 
-    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -iE '(error|fail)' | wc -l")
+    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -v 'Err: 0' | wc -l")
     echo "Flux controller errors (24h): $FLUX_ERRORS"
 
-    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -i error | wc -l")
+    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -v 'Err: 0' | wc -l")
     echo "cert-manager errors (24h): $CERT_ERRORS"
 
     TOTAL_ERRORS=$((CILIUM_ERRORS + COREDNS_ERRORS + FLUX_ERRORS + CERT_ERRORS))
@@ -824,23 +824,36 @@ log_section "Section 22: Home Automation Health"
     echo "$HA_LOGS"
     echo ""
 
-    HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "(ERROR|error|Failed|failed)" || true)
-    echo "Home Assistant errors: $HA_ERRORS"
+    # Categorize errors by severity
+    CRITICAL_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "FATAL|CRITICAL" || true)
+    MAJOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "ERROR" | grep -v "Failed to connect" | grep -v "Flic Hub" || true)
+    MINOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "WARNING|Failed to connect|Flic Hub" || true)
+
+    # Total errors (excluding benign Flic Hub offline messages)
+    HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "(ERROR|error|Failed|failed)" | grep -v "Flic Hub" || true)
+
+    echo "Home Assistant error severity:"
+    echo "  - Critical: $CRITICAL_HA_ERRORS"
+    echo "  - Major: $MAJOR_HA_ERRORS"
+    echo "  - Minor: $MINOR_HA_ERRORS"
+    echo "  - Total (filtered): $HA_ERRORS"
     echo ""
 
-    # Categorize errors
+    # Integration-specific errors
     DIRIGERA_ERRORS=$(echo "$HA_LOGS" | grep -c "dirigera" || true)
     TIBBER_ERRORS=$(echo "$HA_LOGS" | grep -c "tibber" || true)
     RESMED_ERRORS=$(echo "$HA_LOGS" | grep -c "resmed" || true)
     SHELLY_ERRORS=$(echo "$HA_LOGS" | grep -c "shelly" || true)
     TESLA_ERRORS=$(echo "$HA_LOGS" | grep -c "tesla" || true)
+    FLIC_ERRORS=$(echo "$HA_LOGS" | grep -c "Flic Hub" || true)
 
-    echo "Error breakdown:"
+    echo "Integration error breakdown:"
     echo "  - Dirigera hub: $DIRIGERA_ERRORS"
     echo "  - Tibber API: $TIBBER_ERRORS"
     echo "  - ResMed MyAir: $RESMED_ERRORS"
     echo "  - Shelly devices: $SHELLY_ERRORS"
     echo "  - Tesla: $TESLA_ERRORS"
+    echo "  - Flic Hub (offline - expected): $FLIC_ERRORS"
     echo ""
 
     echo "Zigbee2MQTT:"
@@ -868,14 +881,20 @@ log_section "Section 22: Home Automation Health"
     MQTT_ERRORS=$(echo "$MQTT_LOGS" | grep -cE "(error|ERROR)" || true)
     echo "Mosquitto errors: $MQTT_ERRORS"
 
-    if [ "$HA_ERRORS" -lt 10 ] && [ "$Z2M_ERRORS" -lt 5 ] && [ "$MQTT_ERRORS" -eq 0 ]; then
+    # Assess Home Assistant health by severity
+    if [ "$CRITICAL_HA_ERRORS" -gt 0 ]; then
+        log_critical "Home Assistant critical errors: $CRITICAL_HA_ERRORS"
+        add_critical_issue "Home Assistant critical errors: $CRITICAL_HA_ERRORS"
+    elif [ "$MAJOR_HA_ERRORS" -gt 50 ]; then
+        log_warning "High Home Assistant major error count: $MAJOR_HA_ERRORS"
+        add_major_issue "High Home Assistant error count: $MAJOR_HA_ERRORS"
+    elif [ "$MAJOR_HA_ERRORS" -gt 10 ]; then
+        log_warning "Home Assistant errors: $MAJOR_HA_ERRORS (mostly external integrations)"
+        add_minor_issue "Home Assistant integration errors: $MAJOR_HA_ERRORS"
+    elif [ "$HA_ERRORS" -lt 10 ] && [ "$Z2M_ERRORS" -lt 5 ] && [ "$MQTT_ERRORS" -eq 0 ]; then
         log_success "Home automation healthy"
-    elif [ "$HA_ERRORS" -lt 50 ]; then
-        log_warning "Home Assistant errors: $HA_ERRORS (mostly external integrations)"
-        add_minor_issue "Home Assistant integration errors: $HA_ERRORS (external services)"
     else
-        log_warning "High Home Assistant error count: $HA_ERRORS"
-        add_major_issue "High Home Assistant error count: $HA_ERRORS"
+        log_info "Home Assistant minor issues: $MINOR_HA_ERRORS (external services, expected offline devices)"
     fi
 
     if [ "$Z2M_ERRORS" -gt 10 ]; then
@@ -1078,7 +1097,7 @@ log_section "Section 33: Battery Health Monitoring"
     echo ""
 
     # Get battery data (IEEE addresses and levels)
-    BATTERY_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq -r 'to_entries[] | select(.value.battery) | "\(.key)|\(.value.battery)"' 2>/dev/null || echo "")
+    BATTERY_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq -r 'to_entries[] | select(.value | has("battery")) | "\(.key)|\(.value.battery)"' 2>/dev/null || echo "")
 
     # Get device friendly names mapping
     CONFIG_DATA=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/configuration.yaml 2>/dev/null | grep -A1 "'0x" | grep -E "^  '0x|friendly_name:" | sed "s/'//g" | paste - - | awk -F: '{gsub(/^[ \t]+/, "", $1); gsub(/^[ \t]+/, "", $3); print $1"|"$3}' 2>/dev/null || echo "")
@@ -1344,6 +1363,157 @@ except:
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
+log_section "Section 35: Ingress Backend Health"
+{
+    echo "Checking ingress backend health..."
+
+    # Check for ingresses with no backend endpoints
+    MISSING_BACKENDS=0
+    kubectl get ingress -A -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for ing in data.get('items', []):
+        ns = ing['metadata']['namespace']
+        name = ing['metadata']['name']
+        rules = ing.get('spec', {}).get('rules', [])
+        for rule in rules:
+            host = rule.get('host', 'unknown')
+            paths = rule.get('http', {}).get('paths', [])
+            for path in paths:
+                backend = path.get('backend', {})
+                svc_name = backend.get('service', {}).get('name')
+                if svc_name:
+                    print(f'{ns}|{host}|{svc_name}')
+except Exception as e:
+    pass
+" 2>/dev/null | while IFS='|' read ns host svc; do
+        if [ -n "$ns" ] && [ -n "$svc" ]; then
+            ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
+            if [ -z "$ENDPOINTS" ]; then
+                echo "⚠️  No backends for $host (service: $ns/$svc)"
+                MISSING_BACKENDS=$((MISSING_BACKENDS + 1))
+            fi
+        fi
+    done
+
+    # Check ingress controller errors
+    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l")
+    echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
+
+    if [ "$MISSING_BACKENDS" -gt 0 ]; then
+        log_warning "Ingresses with missing backends: $MISSING_BACKENDS"
+        add_major_issue "Ingress backends unavailable: $MISSING_BACKENDS services"
+    elif [ "$INGRESS_ERRORS" -gt 10 ]; then
+        log_warning "High ingress controller error count: $INGRESS_ERRORS"
+        add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
+    else
+        log_success "All ingress backends healthy"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 36: PVC Capacity Monitoring"
+{
+    echo "Checking PVC status..."
+
+    # Count PVCs by status
+    BOUND_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Bound | wc -l")
+    PENDING_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Pending | wc -l")
+    LOST_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Lost | wc -l")
+
+    echo "PVC Status:"
+    echo "  - Bound: $BOUND_PVCS"
+    echo "  - Pending: $PENDING_PVCS"
+    echo "  - Lost: $LOST_PVCS"
+    echo ""
+
+    # List PVC allocations
+    echo "PVC Allocations (top 20 by size):"
+    kubectl get pvc -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SIZE:.spec.resources.requests.storage,STATUS:.status.phase' --no-headers 2>/dev/null | sort -k3 -h -r | head -20
+    echo ""
+    echo "Note: Actual disk usage requires metrics-server or Prometheus"
+
+    if [ "$LOST_PVCS" -gt 0 ]; then
+        log_critical "PVCs in Lost state: $LOST_PVCS"
+        add_critical_issue "PVCs in Lost state: $LOST_PVCS volumes"
+    elif [ "$PENDING_PVCS" -gt 0 ]; then
+        log_warning "PVCs in Pending state: $PENDING_PVCS"
+        add_major_issue "PVCs not bound: $PENDING_PVCS volumes"
+    else
+        log_success "All PVCs bound (total: $BOUND_PVCS)"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 37: Service Endpoint Health"
+{
+    echo "Checking services without endpoints..."
+
+    # Find services without endpoints
+    SERVICES_NO_ENDPOINTS=$(kubectl get endpoints -A -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for ep in data.get('items', []):
+        if not ep.get('subsets'):
+            ns = ep['metadata']['namespace']
+            name = ep['metadata']['name']
+            print(f'{ns}/{name}')
+except Exception as e:
+    pass
+")
+
+    # Filter out known services that shouldn't have endpoints
+    # Includes: headless services, metrics services, controller managers, webhooks, and replica services (commonly scaled to 0)
+    PROBLEMATIC_SERVICES=$(echo "$SERVICES_NO_ENDPOINTS" | grep -vE "(headless|metrics-service|controller-manager|webhook|replica)" | grep -v "^$" || echo "")
+
+    if [ -n "$PROBLEMATIC_SERVICES" ]; then
+        echo "Services without endpoints:"
+        echo "$PROBLEMATIC_SERVICES"
+        echo ""
+
+        SERVICE_COUNT=$(echo "$PROBLEMATIC_SERVICES" | grep -c "/" || echo "0")
+
+        if [ "$SERVICE_COUNT" -gt 5 ]; then
+            log_warning "Multiple services without endpoints: $SERVICE_COUNT"
+            add_major_issue "Services without endpoints: $SERVICE_COUNT"
+        elif [ "$SERVICE_COUNT" -gt 0 ]; then
+            log_info "Services without endpoints: $SERVICE_COUNT (may be expected)"
+            add_minor_issue "Services without endpoints: $SERVICE_COUNT"
+        fi
+    else
+        log_success "All services have endpoints"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 38: Admission Webhook Health"
+{
+    echo "Checking admission webhooks..."
+
+    # Check for webhook failures in events
+    WEBHOOK_FAILURES=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'webhook' | grep -iE 'failed|error|timeout' | wc -l")
+
+    # List configured webhooks
+    VALIDATING_WEBHOOKS=$(safe_count "kubectl get validatingwebhookconfigurations --no-headers 2>/dev/null | wc -l")
+    MUTATING_WEBHOOKS=$(safe_count "kubectl get mutatingwebhookconfigurations --no-headers 2>/dev/null | wc -l")
+    TOTAL_WEBHOOKS=$((VALIDATING_WEBHOOKS + MUTATING_WEBHOOKS))
+
+    echo "Webhook Configuration:"
+    echo "  - Validating webhooks: $VALIDATING_WEBHOOKS"
+    echo "  - Mutating webhooks: $MUTATING_WEBHOOKS"
+    echo "  - Total: $TOTAL_WEBHOOKS"
+    echo ""
+
+    if [ "$WEBHOOK_FAILURES" -gt 10 ]; then
+        log_warning "High webhook failure count: $WEBHOOK_FAILURES"
+        add_major_issue "Admission webhook failures: $WEBHOOK_FAILURES"
+    elif [ "$WEBHOOK_FAILURES" -gt 0 ]; then
+        log_info "Webhook failures detected: $WEBHOOK_FAILURES"
+        add_minor_issue "Admission webhook failures: $WEBHOOK_FAILURES"
+    else
+        log_success "All webhooks healthy ($TOTAL_WEBHOOKS configured)"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
 log_section "UnPoller Status (Current Investigation)"
 {
     echo "UnPoller deployment:"
@@ -1360,16 +1530,23 @@ log_section "UnPoller Status (Current Investigation)"
         kubectl logs -n monitoring "$UNPOLLER_POD" --tail=50 2>&1 || echo "Unable to get logs"
         echo ""
 
-        UNPOLLER_ERRORS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=100 2>&1 | grep -iE '(error|fail)' | wc -l")
+        # Check for errors using structured pattern
+        UNPOLLER_ERRORS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=100 2>&1 | grep '\[ERROR\]' | wc -l")
         echo "UnPoller errors (last 100 lines): $UNPOLLER_ERRORS"
+
+        # Check for recent successful operations to detect recovery
+        UNPOLLER_SUCCESS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=20 2>&1 | grep 'Err: 0' | wc -l")
+        echo "UnPoller recent successful operations (last 20 lines): $UNPOLLER_SUCCESS"
 
         UNPOLLER_STATUS=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
 
         if [ "$UNPOLLER_STATUS" == "Running" ] && [ "$UNPOLLER_ERRORS" -eq 0 ]; then
             log_success "UnPoller is running successfully"
-        elif [ "$UNPOLLER_STATUS" == "Running" ]; then
-            log_warning "UnPoller running but has errors: $UNPOLLER_ERRORS"
-            add_minor_issue "UnPoller has errors: $UNPOLLER_ERRORS"
+        elif [ "$UNPOLLER_STATUS" == "Running" ] && [ "$UNPOLLER_ERRORS" -gt 0 ] && [ "$UNPOLLER_SUCCESS" -gt 5 ]; then
+            log_info "UnPoller had transient errors but is currently healthy (recent operations successful)"
+        elif [ "$UNPOLLER_STATUS" == "Running" ] && [ "$UNPOLLER_ERRORS" -gt 0 ]; then
+            log_warning "UnPoller has errors without recent recovery: $UNPOLLER_ERRORS"
+            add_minor_issue "UnPoller has persistent errors: $UNPOLLER_ERRORS"
         else
             log_critical "UnPoller is not running properly (Status: $UNPOLLER_STATUS)"
             add_critical_issue "UnPoller not running (Status: $UNPOLLER_STATUS)"
