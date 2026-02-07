@@ -5,7 +5,7 @@ This document provides a systematic, AI-executable health check plan for a home 
 
 ## Automated Health Check Script
 
-**⚡ Quick Start**: An automated health check script is available that executes all 35 sections:
+**⚡ Quick Start**: An automated health check script is available that executes all 38 sections:
 
 ```bash
 # Run the automated health check
@@ -18,7 +18,7 @@ This document provides a systematic, AI-executable health check plan for a home 
 ```
 
 **Features:**
-- ✅ Executes all 35 health check sections automatically
+- ✅ Executes all 38 health check sections automatically
 - ✅ Categorizes issues by severity (Critical, Major, Minor)
 - ✅ Generates comprehensive reports with recommendations
 - ✅ Includes Alertmanager alerts, Elasticsearch application log analysis, and Home Assistant integration analysis
@@ -95,8 +95,9 @@ kubectl get nodes
 # Check recent events (last 7 days)
 kubectl get events -A --sort-by='.lastTimestamp' | tail -50
 
-# Count warning events
-kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | wc -l
+# Count warning events (filtered for actionable warnings only)
+# Excludes: BackOff, Pulling, FailedScheduling, Unhealthy (benign warnings)
+kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | grep -v 'NAMESPACE' | grep -vE '(BackOff|Pulling|FailedScheduling|Unhealthy)' | wc -l
 
 # Check for OOM kills
 kubectl get events -A --field-selector reason=OOMKilled
@@ -106,6 +107,7 @@ kubectl get events -A --field-selector reason=Evicted
 ```
 
 **AI Analysis**: Count events by type, identify patterns, flag any critical issues.
+**Pattern Improvements**: Filters out benign warnings (BackOff, Pulling, FailedScheduling, Unhealthy) that are normal Kubernetes behavior and not actionable issues.
 
 ---
 
@@ -384,20 +386,21 @@ print(f'\nTotal volumes with replica mismatch: {mismatched}')
 
 **Commands to Execute:**
 ```bash
-# Check Cilium logs for errors
-kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -iE "(error|fatal|critical)" | wc -l
+# Check Cilium logs for errors (structured patterns only)
+kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -v 'Err: 0' | wc -l
 
-# Check CoreDNS logs
-kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -iE "(error|fatal)" | wc -l
+# Check CoreDNS logs (structured patterns only)
+kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -v 'Err: 0' | wc -l
 
-# Check Flux controller logs
-kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -iE "(error|fail)" | wc -l
+# Check Flux controller logs (structured patterns only)
+kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -v 'Err: 0' | wc -l
 
-# Check cert-manager logs
-kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -i error | wc -l
+# Check cert-manager logs (structured patterns only)
+kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -v 'Err: 0' | wc -l
 ```
 
 **AI Analysis**: Count error occurrences, identify problematic components.
+**Pattern Improvements**: Uses structured log patterns (level=error, [ERROR]) to avoid false positives from status fields like "Err: 0" or "error_count: 0".
 
 ---
 
@@ -794,6 +797,7 @@ kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json |
 ```
 
 **AI Analysis**: Verify home automation services, check Zigbee health, ensure MQTT broker is operational.
+**Error Categorization**: Errors are now categorized by severity (CRITICAL/MAJOR/MINOR). Filters out benign errors from expected offline devices (e.g., Flic Hub) to reduce false positives. Focus on actionable errors vs. external integration issues.
 
 ---
 
@@ -1397,9 +1401,163 @@ wait $PF_PID 2>/dev/null || true
 
 ---
 
+## 35. Ingress Backend Health
+
+**Objective**: Verify all ingress backends have healthy endpoints and monitor ingress controller errors
+**Success Criteria**: All ingress services have available backends, ingress controller error rate is acceptable
+
+**Commands to Execute:**
+```bash
+# Check for ingresses with missing backend endpoints
+kubectl get ingress -A -o json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for ing in data.get('items', []):
+    ns = ing['metadata']['namespace']
+    name = ing['metadata']['name']
+    rules = ing.get('spec', {}).get('rules', [])
+    for rule in rules:
+        host = rule.get('host', 'unknown')
+        paths = rule.get('http', {}).get('paths', [])
+        for path in paths:
+            backend = path.get('backend', {})
+            svc_name = backend.get('service', {}).get('name')
+            if svc_name:
+                print(f'{ns}|{host}|{svc_name}')
+" | while IFS='|' read ns host svc; do
+    ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
+    if [ -z "$ENDPOINTS" ]; then
+        echo "⚠️  No backends for $host (service: $ns/$svc)"
+    fi
+done
+
+# Check ingress controller errors
+kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h | grep -E '\[error\]|\[emerg\]'
+```
+
+**AI Analysis**:
+- Identify any ingresses with no backend endpoints (leads to 503 errors)
+- Check for high error rates in ingress controller logs
+- Verify SSL/TLS certificate issues
+- Flag any ingress configuration problems
+
+**Thresholds:**
+- **Critical**: Any ingress with 0 backend endpoints
+- **Warning**: >10 ingress controller errors in last hour
+
+---
+
+## 36. PVC Capacity Monitoring
+
+**Objective**: Monitor PVC status and capacity allocations
+**Success Criteria**: All PVCs are Bound, no Lost or Pending volumes
+
+**Commands to Execute:**
+```bash
+# Check PVC status summary
+echo "PVC Status:"
+kubectl get pvc -A --no-headers | awk '{print $4}' | sort | uniq -c
+
+# List PVC allocations (top 20 by size)
+kubectl get pvc -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SIZE:.spec.resources.requests.storage,STATUS:.status.phase' --no-headers | sort -k3 -h -r | head -20
+
+# Check for non-Bound PVCs
+kubectl get pvc -A | grep -v Bound | grep -v NAMESPACE
+```
+
+**AI Analysis**:
+- Verify all PVCs are in Bound state
+- Identify any PVCs in Pending or Lost state
+- Monitor storage allocation distribution
+- Note: Actual disk usage requires metrics-server or Prometheus
+
+**Thresholds:**
+- **Critical**: Any PVCs in Lost state
+- **Major**: Any PVCs in Pending state
+- **Info**: Monitor large PVCs approaching storage limits
+
+---
+
+## 37. Service Endpoint Health
+
+**Objective**: Validate all services have available endpoints
+**Success Criteria**: All expected services have backend pods ready
+
+**Commands to Execute:**
+```bash
+# Find services without endpoints
+kubectl get endpoints -A -o json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for ep in data.get('items', []):
+    if not ep.get('subsets'):
+        ns = ep['metadata']['namespace']
+        name = ep['metadata']['name']
+        print(f'{ns}/{name}')
+" | grep -vE "(headless|metrics-service|controller-manager|webhook)"
+
+# Count services by endpoint status
+echo "Services without endpoints: $(kubectl get endpoints -A -o json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = 0
+for ep in data.get('items', []):
+    if not ep.get('subsets'):
+        count += 1
+print(count)
+")"
+```
+
+**AI Analysis**:
+- Identify services with no backend endpoints
+- Filter out known services that shouldn't have endpoints (metrics services, webhooks)
+- Cross-reference with pod status to determine root cause
+- Flag services that should have endpoints but don't
+
+**Thresholds:**
+- **Major**: >5 unexpected services without endpoints
+- **Minor**: 1-5 services without endpoints (may be expected)
+
+---
+
+## 38. Admission Webhook Health
+
+**Objective**: Monitor admission webhook configuration and failure rate
+**Success Criteria**: All webhooks functioning without blocking deployments
+
+**Commands to Execute:**
+```bash
+# List configured webhooks
+echo "Validating webhooks:"
+kubectl get validatingwebhookconfigurations --no-headers | wc -l
+
+echo "Mutating webhooks:"
+kubectl get mutatingwebhookconfigurations --no-headers | wc -l
+
+# Check for webhook failures in events
+kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i 'webhook' | grep -iE 'failed|error|timeout'
+
+# Count webhook failures
+WEBHOOK_FAILURES=$(kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i 'webhook' | grep -iE 'failed|error|timeout' | wc -l)
+echo "Webhook failures: $WEBHOOK_FAILURES"
+```
+
+**AI Analysis**:
+- Verify webhook count matches expected configuration
+- Check for recent webhook failures blocking operations
+- Identify webhook timeout or connection issues
+- Monitor webhook certificate expiration
+
+**Thresholds:**
+- **Major**: >10 webhook failures in recent events
+- **Minor**: 1-10 webhook failures
+- **Info**: Monitor webhook configuration changes
+
+---
+
 ## Report Generation Instructions
 
-After executing all 35 sections, compile the results into the standardized format:
+After executing all 38 sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
@@ -1409,7 +1567,7 @@ After executing all 35 sections, compile the results into the standardized forma
 6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
 7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation (35 sections):**
+**Final Health Score Calculation (38 sections):**
 - **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
 - **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
 - **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day
