@@ -1,76 +1,16 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-01-18 23:45:50
+**Generated:** 2026-01-29 19:21:11
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
 ## Summary
 
-- **Total Deployments:** 63
-- **Chart Updates Available:** 6
-- **Image Updates Available:** 4
-- **Update Breakdown:** 🔴 4 major | 🟡 5 minor | 🟢 0 patch
-- **⚠️ Breaking Changes Detected:** 4 updates with potential breaking changes
-
----
-
-## Recommended Next Steps
-
-### ✅ Option 1: Safe Minor Chart Updates (Recommended First)
-These are low-risk minor version updates for charts where images are already up-to-date:
-
-1. **jellyfin** (media)
-   - Chart: `2.1.0 → 2.7.0` 🟡 MINOR
-   - Image already updated: `10.11.5` ✅
-   - Risk: Low (minor version, image already tested)
-
-2. **uptime-kuma** (monitoring)
-   - Chart: `2.18.0 → 2.24.0` 🟡 MINOR
-   - Image already updated: `2.0.2` ✅
-   - Risk: Low (minor version, image already tested)
-
-3. **adguard-home** (network)
-   - Chart: `0.19.0 → 0.24.0` 🟡 MINOR
-   - Image already updated: `v0.107.71` ✅
-   - Risk: Low (minor version, image already tested)
-
-4. **paperless-ngx** (office)
-   - Chart: `0.19.1 → 0.24.1` 🟡 MINOR
-   - Risk: Medium (review release notes for breaking changes)
-
-### ✅ Option 2: Safe Minor Image Update
-1. **nextcloud-exporter** (default/nextcloud)
-   - Image: `0.6.2 → 0.9.0` 🟡 MINOR
-   - Risk: Low (minor version update, separate exporter component)
-
-### ⚠️ Option 3: Major Updates (Investigate First)
-These require careful review of breaking changes before proceeding:
-
-1. **n8n** (home-automation)
-   - Image: `1.123.16 → 2.4.4` 🔴 MAJOR
-   - Risk: High (major version jump, workflow automation tool)
-   - Action: Review n8n v2 migration guide and breaking changes
-
-2. **jdownloader** (default)
-   - Image: `v25.02.1 → v26.01.1` 🔴 MAJOR
-   - Risk: High (major version jump)
-   - Action: Review release notes for breaking changes
-
-3. **nextcloud** (default)
-   - Chart: `6.6.4 → 8.8.1` 🔴 MAJOR
-   - Risk: High (major version jump, critical application)
-   - Action: Review NextCloud 8.x migration guide and breaking changes
-
-4. **eck-operator** (monitoring)
-   - Chart: `2.14.0 → 3.2.0` 🔴 MAJOR
-   - Risk: High (major version jump, Elasticsearch operator)
-   - Action: Review ECK 3.x migration guide and breaking changes
-
-### ❓ Option 4: Unknown Complexity
-1. **plex** (media)
-   - Image: `1.42.1.10060-4e8b05daf → latest` ⚪ UNKNOWN
-   - Risk: Unknown (version format not recognized)
-   - Action: Manually check Plex release notes for latest version
+- **Total Deployments:** 65
+- **Chart Updates Available:** 11
+- **Image Updates Available:** 11
+- **Update Breakdown:** 🔴 5 major | 🟡 8 minor | 🟢 6 patch
+- **⚠️ Breaking Changes Detected:** 8 updates with potential breaking changes
 
 ---
 
@@ -82,65 +22,67 @@ These require careful review of breaking changes before proceeding:
 | `nocodb` | `databases` | 3.7.1 ? | latest ✅ | - | - |
 | `phpmyadmin` | `databases` | 3.7.1 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.1 ? | latest ✅ | - | - |
-| `ai-sre` | `default` | 3.7.1 ? | 2.1.0 ? | 2.1.0 | - |
+| `ai-sre` | `default` | 3.7.1 ? | 2.1.0 → 2.1.1 | 2.1.0 | 🟢 PATCH |
 | `cert-manager` | `default` | v1.19.2 ✅ | - | - | - |
 | `cilium` | `default` | 1.18.6 ✅ | - | - | - |
 | `clawd-bot` | `default` | 3.7.1 ? | 22-bookworm ? | 22-bookworm | - |
 | `cloudflared` | `default` | 3.7.1 ? | 2025.11.1 ✅ | 2025.11.1 | - |
-| `coredns` | `default` | 1.39.0 ? | - | - | - |
+| `coredns` | `default` | 1.39.2 ? | - | - | - |
 | `descheduler` | `default` | 0.34.0 ✅ | - | - | - |
 | `echo-server` | `default` | 3.7.1 ? | 35 ? | 35 | - |
 | `external-dns` | `default` | 1.20.0 ✅ | - | - | - |
-| `external-ingress-nginx` | `default` | 4.14.1 ✅ | - | - | - |
-| `fluent-bit` | `default` | 0.54.1 ✅ | 3.1.9 ? | 3.1.9 | - |
+| `external-ingress-nginx` | `default` | 4.14.1 → 4.14.2 | - | - | 🟢 PATCH |
+| `fluent-bit` | `default` | 0.54.1 → 0.55.0 | 3.1.9 ? | 3.1.9 | 🟡 MINOR |
 | `flux-instance` | `default` | 0.14.0 ? | - | - | - |
 | `flux-operator` | `default` | 0.14.0 ? | - | - | - |
-| `grafana` | `default` | 10.5.8 ✅ | - | - | - |
-| `homepage` | `default` | 2.1.0 ✅ | v1.8.0 ? | v1.8.0 | - |
+| `grafana` | `default` | 10.5.8 → 10.5.14 | - | - | 🟢 PATCH |
+| `homepage` | `default` | 2.1.0 ✅ | v1.9.0 → 1.9.0 | v1.9.0 | ⚪ UNKNOWN |
 | `intel-device-plugin-gpu` | `default` | 0.34.1 ✅ | - | - | - |
 | `intel-device-plugin-operator` | `default` | 0.34.1 ✅ | - | - | - |
-| `internal-ingress-nginx` | `default` | 4.14.1 ✅ | - | - | - |
+| `internal-ingress-nginx` | `default` | 4.14.1 → 4.14.2 | - | - | 🟢 PATCH |
 | `jdownloader` | `default` | 3.7.1 ? | v25.02.1 → v26.01.1 | v25.02.1 | 🔴 MAJOR |
 | `k8s-gateway` | `default` | 2.4.0 ✅ | - | - | - |
-| `kube-prometheus-stack` | `default` | 68.4.4 ? | - | - | - |
-| `mcpo` | `default` | 3.7.1 ? | git-44ce6d0 ? | git-44ce6d0 | - |
+| `kube-prometheus-stack` | `default` | 68.5.0 ? | - | - | - |
+| `mcpo` | `default` | 3.7.1 ? | git-44ce6d0 → 0.0.19 | git-44ce6d0 | ⚪ UNKNOWN |
 | `metrics-server` | `default` | 3.13.0 ✅ | - | - | - |
-| `nextcloud` | `default` | 6.6.4 → 8.8.1 | 32.0.3 ? | 32.0.3 | 🔴 MAJOR |
+| `nextcloud` | `default` | 6.6.10 → 8.9.0 | 32.0.5 ? | 32.0.5 | 🔴 MAJOR |
 | `node-feature-discovery` | `default` | 0.18.3 ✅ | - | - | - |
 | `omni-tools` | `default` | 3.7.1 ? | 0.6.0 ✅ | 0.6.0 | - |
-| `open-webui` | `default` | 10.2.1 ✅ | 0.7.2 ? | 0.7.2 | - |
+| `open-webui` | `default` | 10.2.1 ✅ | 0.7.2 ✅ | 0.7.2 | - |
 | `paperless-ai` | `default` | 3.7.1 ? | latest ✅ | - | - |
 | `paperless-gpt` | `default` | 3.7.1 ? | latest ✅ | - | - |
 | `redis` | `default` | 3.7.1 ? | 7-alpine ? | 7-alpine | - |
-| `reloader` | `default` | 1.2.1 ? | - | - | - |
+| `reloader` | `default` | 1.3.0 ? | - | - | - |
 | `spegel` | `default` | v0.0.30 ? | - | - | - |
 | `teslamate` | `default` | 3.7.1 ? | 2.2.0 ✅ | 2.2.0 | - |
 | `tube-archivist` | `default` | 3.7.1 ? | v0.5.8 ✅ | v0.5.8 | - |
 | `vaultwarden` | `default` | 3.7.1 ? | 1.35.2 ✅ | 1.35.2 | - |
-| `esphome` | `home-automation` | 3.7.1 ? | 2025.12.7 ? | 2025.12.7 | - |
-| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.3 ? | 0.16.3 | - |
-| `home-assistant` | `home-automation` | 3.7.1 ? | 2026.1.2 ? | 2026.1.2 | - |
-| `mosquitto` | `home-automation` | 3.7.1 ? | 2.0.20@sha256:8b396cec28cd5e8e1a3aba1d9a... | 2.0.20@sha256:8b396cec28cd5e8e... | - |
-| `music-assistant-server` | `home-automation` | 3.7.1 ? | 2.7.5 ? | 2.7.5 | - |
-| `n8n` | `home-automation` | 1.0.6 ? | 1.123.16 → 2.4.4 | 1.123.16 | 🔴 MAJOR |
-| `node-red` | `home-automation` | 3.7.1 ? | 4.1.3 ✅ | 4.1.3 | - |
+| `esphome` | `home-automation` | 3.7.1 ? | 2025.12.7 → 2026.1.2 | 2025.12.7 | 🔴 MAJOR |
+| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.3 → 0.16.4 | 0.16.3 | 🟢 PATCH |
+| `home-assistant` | `home-automation` | 3.7.1 ? | 2026.1.3 ✅ | 2026.1.3 | - |
+| `mosquitto` | `home-automation` | 3.7.1 ? | 2.0.22 ? | 2.0.22 | - |
+| `music-assistant-server` | `home-automation` | 3.7.1 ? | 2.7.5 ✅ | 2.7.5 | - |
+| `n8n` | `home-automation` | 1.1.0 ? | 1.123.17 → 2.6.2 | 1.123.17 | 🔴 MAJOR |
+| `node-red` | `home-automation` | 3.7.1 ? | 4.1.3 → 4.1.4 | 4.1.3 | 🟢 PATCH |
 | `scrypted` | `home-automation` | 3.7.1 ? | latest ✅ | - | - |
 | `zigbee2mqtt` | `home-automation` | 3.7.1 ? | 2.7.2 ✅ | 2.7.2 | - |
 | `authentik` | `kube-system` | 2025.12.1 ✅ | - | - | - |
 | `csi-driver-smb` | `kube-system` | 1.19.1 ✅ | - | - | - |
-| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.5 ✅ | 10.11.5 | 🟡 MINOR |
+| `jellyfin` | `media` | 2.1.0 → 2.7.0 | 10.11.6 ✅ | 10.11.6 | 🟡 MINOR |
 | `makemkv` | `media` | 3.7.1 ? | latest ✅ | - | - |
 | `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
 | `eck-operator` | `monitoring` | 2.14.0 → 3.2.0 | - | - | 🔴 MAJOR |
 | `headlamp` | `monitoring` | 0.39.0 ✅ | - | - | - |
-| `unpoller` | `monitoring` | 2.1.0 ✅ | v2.21.0 ? | v2.21.0 | - |
+| `unpoller` | `monitoring` | 2.1.0 ✅ | v2.21.0 → 2.25.0 | v2.21.0 | 🟡 MINOR |
 | `uptime-kuma` | `monitoring` | 2.18.0 → 2.24.0 | 2.0.2 ✅ | 2.0.2 | 🟡 MINOR |
 | `absenty` | `my-software-development` | 3.7.1 ? | sha-ff3910e-dev ? | sha-ff3910e-dev | - |
+| `andreamosteller` | `my-software-development` | 3.7.1 ? | sha-394fe9f ? | sha-394fe9f | - |
 | `absenty` | `my-software-production` | 3.7.1 ? | sha-ffa072a ? | sha-ffa072a | - |
+| `andreamosteller` | `my-software-production` | 3.7.1 ? | 5d88656-unprivileged-v2 ? | 5d88656-unprivileged-v2 | - |
 | `adguard-home` | `network` | 0.19.0 → 0.24.0 | v0.107.71 ✅ | v0.107.71 | 🟡 MINOR |
-| `paperless-ngx` | `office` | 0.19.1 → 0.24.1 | 2.20.4 ? | 2.20.4 | 🟡 MINOR |
+| `paperless-ngx` | `office` | 0.19.1 → 0.24.1 | 2.20.5 ✅ | 2.20.5 | 🟡 MINOR |
 | `penpot` | `office` | 0.32.0 ✅ | - | - | - |
-| `longhorn` | `storage` | 1.10.1 ✅ | - | - | - |
+| `longhorn` | `storage` | 1.10.1 → 1.11.0 | - | - | 🟡 MINOR |
 
 ---
 
@@ -180,7 +122,7 @@ These require careful review of breaking changes before proceeding:
 - **Repository:** `nocodb/nocodb`
   - **Path:** `controllers.nocodb.containers.app.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `0.301.1` ✅ (up-to-date)
+  - **Latest Tag:** `0.301.2` ✅ (up-to-date)
 
 ---
 
@@ -218,7 +160,7 @@ These require careful review of breaking changes before proceeding:
 - **Repository:** `actualbudget/actual-server`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `26.1.0` ✅ (up-to-date)
+  - **Latest Tag:** `sha-19edbeb-alpine` ✅ (up-to-date)
 
 ---
 
@@ -236,7 +178,73 @@ These require careful review of breaking changes before proceeding:
 - **Repository:** `ghcr.io/nachtschatt3n/ai-sre`
   - **Path:** `controllers.ai-sre.containers.app.image`
   - **Current Tag:** `2.1.0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.1.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.1.0 → 2.1.1
+  - **⚠️ Breaking Changes Detected:**
+    - - No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+  - **Source:** https://github.com/nachtschatt3n/ai-sre/releases/tag/2.1.1
+  - **Release Date:** 2025-10-18
+  - **Release Notes:**
+    ```markdown
+    ## What's New
+
+This release adds modern development tooling and AI capabilities to the AI-SRE container.
+
+### New Features
+
+**mise Runtime Manager**
+- Installed mise for flexible runtime version management
+- Provides foundation for managing multiple tool versions
+
+**Node.js 18 LTS**
+- Added Node.js 18 LTS support via mise
+- Enables JavaScript/TypeScript tooling and npm packages
+- Includes npm for package management
+
+**Claude CLI**
+- Installed @anthropics/claude-code globally
+- Enables AI-assisted operations within the container
+- Supports enhanced automation workflows
+
+### Technical Details
+
+- **Builder Stage Changes:**
+  - Install mise via curl installer
+  - Configure mise with global Node.js 18 installation
+  - Install Claude CLI globally via npm
+
+- **Runtime Stage Changes:**
+  - Copy mise binaries and Node.js runtime to runtime stage
+  - Update PATH to include Node.js binaries
+  - Set MISE_DATA_DIR and MISE_CACHE_DIR environment variables
+
+- **Container Size:** Minimal impact on image size due to multi-stage build optimization
+
+### Version
+
+- **Image Version:** 2.1.1
+- **Base Image:** Alpine 3.20
+- **Node.js Version:** 18 (LTS)
+
+### Compatibility
+
+- All existing MCP tools remain functional
+- Backward compatible with v2.1.0
+- No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+    ```
+  - **⚠️ Breaking Changes:**
+    - - No breaking changes to existing workflows
+    - ---
+    - **Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
 
 ---
 
@@ -316,7 +324,7 @@ These require careful review of breaking changes before proceeding:
 #### Chart
 - **Name:** `coredns`
 - **Repository:** `coredns`
-- **Current Version:** `1.39.0`
+- **Current Version:** `1.39.2`
 - **Latest Version:** *Could not determine*
 
 *No container images specified in values*
@@ -377,7 +385,12 @@ These require careful review of breaking changes before proceeding:
 - **Name:** `ingress-nginx`
 - **Repository:** `ingress-nginx`
 - **Current Version:** `4.14.1`
-- **Latest Version:** `4.14.1` ✅ (up-to-date)
+- **Latest Version:** `4.14.2` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟢 **PATCH** (low complexity)
+- **Update Description:** Patch version update: 4.14.1 → 4.14.2
+- **Source:** https://github.com/kubernetes/ingress-nginx/releases/tag/4.14.2
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
 
 *No container images specified in values*
 
@@ -391,7 +404,12 @@ These require careful review of breaking changes before proceeding:
 - **Name:** `fluent-bit`
 - **Repository:** `fluent`
 - **Current Version:** `0.54.1`
-- **Latest Version:** `0.54.1` ✅ (up-to-date)
+- **Latest Version:** `0.55.0` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟡 **MINOR** (medium complexity)
+- **Update Description:** Minor version update: 0.54.x → 0.55.x
+- **Source:** https://github.com/fluent/helm-charts/releases/tag/0.55.0
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
 
 #### Container Images
 - **Repository:** `cr.fluentbit.io/fluent/fluent-bit`
@@ -437,7 +455,12 @@ These require careful review of breaking changes before proceeding:
 - **Name:** `grafana`
 - **Repository:** `grafana`
 - **Current Version:** `10.5.8`
-- **Latest Version:** `10.5.8` ✅ (up-to-date)
+- **Latest Version:** `10.5.14` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟢 **PATCH** (low complexity)
+- **Update Description:** Patch version update: 10.5.8 → 10.5.14
+- **Source:** https://github.com/grafana/helm-charts/releases/tag/10.5.14
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
 
 *No container images specified in values*
 
@@ -456,8 +479,50 @@ These require careful review of breaking changes before proceeding:
 #### Container Images
 - **Repository:** `ghcr.io/gethomepage/homepage`
   - **Path:** `image`
-  - **Current Tag:** `v1.8.0`
-  - **Latest Tag:** *Could not determine*
+  - **Current Tag:** `v1.9.0`
+  - **Latest Tag:** `1.9.0` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Versions appear equal or downgrade detected
+  - **⚠️ Breaking Changes Detected:**
+    - * Enhancement: support netalertx v26.1.17 breaking changes by @shamoon in https://github.com/gethomepage/homepage/pull/6196
+* Enhancement: booklore service widget by @shamoon in https://github.com/gethomepage/homepage/pull/6202
+
+## New Contributors
+* @camhorn made their first contribution in https://github.com/gethomepage/homepage/pull/6126
+  - **Source:** https://github.com/gethomepage/homepage/releases/tag/1.9.0
+  - **Release Date:** 2026-01-19
+  - **Release Notes:**
+    ```markdown
+    ## What's Changed
+* Enhancement: refactor UptimeRobot widget by @shamoon in https://github.com/gethomepage/homepage/pull/6088
+* Fix: retrieve stats from all network interfaces by @shamoon in https://github.com/gethomepage/homepage/pull/6102
+* Enhancement: fully support custom headers by @shamoon in https://github.com/gethomepage/homepage/pull/6125
+* Fix: prevent cache collision with multiple plex widgets by @camhorn in https://github.com/gethomepage/homepage/pull/6126
+* Enhancement: include prefix length when displaying ipv6 prefix by @I-am-not-a-number in https://github.com/gethomepage/homepage/pull/6130
+* Fix: ensure minimum gap for resource widget items by @DocBrown101 in https://github.com/gethomepage/homepage/pull/6137
+* Fix: support latest homebridge status labels by @shamoon in https://github.com/gethomepage/homepage/pull/6139
+* Enhancement: Add support for Pyload-ng 0.5.0 CSRF-protected API by @shamoon in https://github.com/gethomepage/homepage/pull/6142
+* Fix: fix default configured service weight = 0 by @faeibson in https://github.com/gethomepage/homepage/pull/6151
+* Fix: correct month handling for Wallos widget by @JanGrosse in https://github.com/gethomepage/homepage/pull/6150
+* Tweak: skip chown operations when running as root by @shamoon in https://github.com/gethomepage/homepage/pull/6170
+* Enhancement: TrueNAS widget web socket API support by @shamoon in https://github.com/gethomepage/homepage/pull/6161
+* Enhancement: support netalertx v26.1.17 breaking changes by @shamoon in https://github.com/gethomepage/homepage/pull/6196
+* Enhancement: booklore service widget by @shamoon in https://github.com/gethomepage/homepage/pull/6202
+
+## New Contributors
+* @camhorn made their first contribution in https://github.com/gethomepage/homepage/pull/6126
+* @I-am-not-a-number made their first contribution in https://github.com/gethomepage/homepage/pull/6130
+* @DocBrown101 made their first contribution in https://github.com/gethomepage/homepage/pull/6137
+* @faeibson made their first contribution in https://github.com/gethomepage/homepage/pull/6151
+* @JanGrosse made their first contribution in https://github.com/gethomepage/homepage/pull/6150
+
+**Full Changelog**: https://github.com/gethomepage/homepage/compare/v1.8.0...v1.9.0
+    ```
+  - **⚠️ Breaking Changes:**
+    - * Enhancement: support netalertx v26.1.17 breaking changes by @shamoon in https://github.com/gethomepage/homepage/pull/6196
+    - * Enhancement: booklore service widget by @shamoon in https://github.com/gethomepage/homepage/pull/6202
+    - ## New Contributors
+    - * @camhorn made their first contribution in https://github.com/gethomepage/homepage/pull/6126
 
 ---
 
@@ -497,7 +562,12 @@ These require careful review of breaking changes before proceeding:
 - **Name:** `ingress-nginx`
 - **Repository:** `ingress-nginx`
 - **Current Version:** `4.14.1`
-- **Latest Version:** `4.14.1` ✅ (up-to-date)
+- **Latest Version:** `4.14.2` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟢 **PATCH** (low complexity)
+- **Update Description:** Patch version update: 4.14.1 → 4.14.2
+- **Source:** https://github.com/kubernetes/ingress-nginx/releases/tag/4.14.2
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
 
 *No container images specified in values*
 
@@ -549,7 +619,7 @@ These require careful review of breaking changes before proceeding:
 #### Chart
 - **Name:** `kube-prometheus-stack`
 - **Repository:** `prometheus-community`
-- **Current Version:** `68.4.4`
+- **Current Version:** `68.5.0`
 - **Latest Version:** *Could not determine*
 
 *No container images specified in values*
@@ -570,7 +640,19 @@ These require careful review of breaking changes before proceeding:
 - **Repository:** `ghcr.io/open-webui/mcpo`
   - **Path:** `controllers.mcpo.containers.app.image`
   - **Current Tag:** `git-44ce6d0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.0.19` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Version format not recognized
+  - **Source:** https://github.com/open-webui/mcpo/releases/tag/0.0.19
+  - **Release Date:** 2025-10-14
+  - **Release Notes:**
+    ```markdown
+    ## [0.0.19] - 2025-10-14
+
+### Fixed
+
+* 🔁 **Reverted Client Header Forwarding**: Reverted changes introduced in 0.0.18.
+    ```
 
 - **Repository:** `python`
   - **Path:** `controllers.mcpo.initContainers.runtime-setup.image`
@@ -600,18 +682,18 @@ These require careful review of breaking changes before proceeding:
 #### Chart
 - **Name:** `nextcloud`
 - **Repository:** `nextcloud`
-- **Current Version:** `6.6.4`
-- **Latest Version:** `8.8.1` ⚠️ **UPDATE AVAILABLE**
+- **Current Version:** `6.6.10`
+- **Latest Version:** `8.9.0` ⚠️ **UPDATE AVAILABLE**
 - **Update Type:** 🔴 **MAJOR** (high complexity)
 - **Update Description:** Major version update: 6.x.x → 8.x.x
-- **Source:** https://github.com/nextcloud/helm/releases/tag/8.8.1
+- **Source:** https://github.com/nextcloud/helm/releases/tag/8.9.0
 - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 - **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
 
 #### Container Images
 - **Repository:** `nextcloud`
   - **Path:** `image`
-  - **Current Tag:** `32.0.3`
+  - **Current Tag:** `32.0.5`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `bitnamilegacy/mariadb`
@@ -704,7 +786,7 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 - **Repository:** `ghcr.io/open-webui/open-webui`
   - **Path:** `image`
   - **Current Tag:** `0.7.2`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.7.2` ✅ (up-to-date)
 
 ---
 
@@ -769,7 +851,7 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Chart
 - **Name:** `reloader`
 - **Repository:** `stakater`
-- **Current Version:** `1.2.1`
+- **Current Version:** `1.3.0`
 - **Latest Version:** *Could not determine*
 
 *No container images specified in values*
@@ -860,7 +942,32 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 - **Repository:** `ghcr.io/esphome/esphome`
   - **Path:** `controllers.esphome.containers.app.image`
   - **Current Tag:** `2025.12.7`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2026.1.2` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🔴 **MAJOR** (high complexity)
+  - **Update Description:** Major version update: 2025.x.x → 2026.x.x
+  - **⚠️ Breaking Changes Detected:**
+    - Major version change typically indicates breaking changes
+    - Major version update - breaking changes likely. Review full release notes for details.
+  - **Source:** https://github.com/esphome/esphome/releases/tag/2026.1.2
+  - **Release Date:** 2026-01-25
+  - **Release Notes:**
+    ```markdown
+    - [st7701s] Fix dump_summary deprecation warning [esphome#13462](https://github.com/esphome/esphome/pull/13462) by [@bdraco](https://github.com/bdraco)
+- [mipi_rgb] Fix dump_summary deprecation warning [esphome#13463](https://github.com/esphome/esphome/pull/13463) by [@bdraco](https://github.com/bdraco)
+- [rpi_dpi_rgb] Fix dump_summary deprecation warning [esphome#13461](https://github.com/esphome/esphome/pull/13461) by [@bdraco](https://github.com/bdraco)
+- [ir_rf_proxy] Remove unnecessary headers, add tests [esphome#13464](https://github.com/esphome/esphome/pull/13464) by [@kbx81](https://github.com/kbx81)
+- [mipi_rgb] Add software reset command to st7701s init sequence [esphome#13470](https://github.com/esphome/esphome/pull/13470) by [@clydebarrow](https://github.com/clydebarrow)
+- [slow_pwm] Fix dump_summary deprecation warning [esphome#13460](https://github.com/esphome/esphome/pull/13460) by [@bdraco](https://github.com/bdraco)
+- [sen5x] Fix store baseline functionality [esphome#13469](https://github.com/esphome/esphome/pull/13469) by [@mikelawrence](https://github.com/mikelawrence)
+- [lvgl] Fix setting empty text [esphome#13494](https://github.com/esphome/esphome/pull/13494) by [@clydebarrow](https://github.com/clydebarrow)
+- [light] Fix cwww state restore [esphome#13493](https://github.com/esphome/esphome/pull/13493) by [@kbx81](https://github.com/kbx81)
+- [rd03d] Fix speed and resolution field order [esphome#13495](https://github.com/esphome/esphome/pull/13495) by [@jasstrong](https://github.com/jasstrong)
+- [modbus_controller] Fix YAML serialization error with custom_command [esphome#13482](https://github.com/esphome/esphome/pull/13482) by [@swoboda1337](https://github.com/swoboda1337)
+- [i2c] Increase ESP-IDF I2C transaction timeout from 20ms to 100ms [esphome#13483](https://github.com/esphome/esphome/pull/13483) by [@swoboda1337](https://github.com/swoboda1337)
+- [wifi] Fix watchdog timeout on P4 WiFi scan [esphome#13520](https://github.com/esphome/esphome/pull/13520) by [@clydebarrow](https://github.com/clydebarrow)
+- [wifi] Fix scan flag race condition causing reconnect failure on ESP8266/LibreTiny [esphome#13514](https://github.com/esphome/esphome/pull/13514) by [@bdraco](https://github.com/bdraco)
+    ```
+  - **⚠️ Breaking Changes:** *Major version update - review release notes above*
 
 ---
 
@@ -878,7 +985,40 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 - **Repository:** `ghcr.io/blakeblackshear/frigate`
   - **Path:** `image`
   - **Current Tag:** `0.16.3`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.16.4` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 0.16.3 → 0.16.4
+  - **Source:** https://github.com/blakeblackshear/frigate/releases/tag/0.16.4
+  - **Release Date:** 2026-01-29
+  - **Release Notes:**
+    ```markdown
+    ## Images
+
+- [ghcr.io/blakeblackshear/frigate:0.16.4](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/660761432?tag=0.16.4)
+- [ghcr.io/blakeblackshear/frigate:0.16.4-standard-arm64](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/660757850?tag=0.16.4-standard-arm64)
+- [ghcr.io/blakeblackshear/frigate:0.16.4-tensorrt](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/660772919?tag=0.16.4-tensorrt)
+- [ghcr.io/blakeblackshear/frigate:0.16.4-rk](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/660781033?tag=0.16.4-rk)
+- [ghcr.io/blakeblackshear/frigate:0.16.4-rocm](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/660792419?tag=0.16.4-rocm)
+- [ghcr.io/blakeblackshear/frigate:0.16.4-tensorrt-jp6](https://github.com/blakeblackshear/frigate/pkgs/container/frigate/661068168?tag=0.16.4-tensorrt-jp6)
+
+## Security Advisory
+A security vulnerability was reported and addressed with this release. Exploiting this vulnerability requires authenticated access to Frigate.
+
+- [Authenticated Remote Command Execution (RCE) and Container Escape](https://github.com/blakeblackshear/frigate/security/advisories/GHSA-4c97-5jmr-8f6x)
+
+## What's Changed
+* docs: fix the missing quotes in the Reolink example within the docume… by @ZhaiSoul in https://github.com/blakeblackshear/frigate/pull/21178
+* Update camera_specific.md for Wyze Cameras (Thingino) by @User873902 in https://github.com/blakeblackshear/frigate/pull/21221
+* docs: update OpenVINO D-FINE configuration default device by @ZhaiSoul in https://github.com/blakeblackshear/frigate/pull/21231
+* Update Hikvision camera link in hardware documentation by @NickM-27 in https://github.com/blakeblackshear/frigate/pull/21256
+* update copyright by @blakeblackshear in https://github.com/blakeblackshear/frigate/pull/21485
+* Port go2rtc check by @blakeblackshear in https://github.com/blakeblackshear/frigate/pull/21808
+
+## New Contributors
+* @User873902 made their first contribution in https://github.com/blakeblackshear/frigate/pull/21221
+
+**Full Changelog**: https://github.com/blakeblackshear/frigate/compare/v0.16.3...v0.16.4
+    ```
 
 ---
 
@@ -895,8 +1035,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `ghcr.io/home-assistant/home-assistant`
   - **Path:** `controllers.home-assistant.containers.app.image`
-  - **Current Tag:** `2026.1.2`
-  - **Latest Tag:** *Could not determine*
+  - **Current Tag:** `2026.1.3`
+  - **Latest Tag:** `2026.1.3` ✅ (up-to-date)
 
 ---
 
@@ -913,12 +1053,17 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `public.ecr.aws/docker/library/eclipse-mosquitto`
   - **Path:** `controllers.mosquitto.containers.app.image`
-  - **Current Tag:** `2.0.20@sha256:8b396cec28cd5e8e1a3aba1d9abdbddd42c454c80f703e77c1bec56e152fa54e`
+  - **Current Tag:** `2.0.22`
   - **Latest Tag:** *Could not determine*
+
+- **Repository:** `sapcc/mosquitto-exporter`
+  - **Path:** `controllers.mosquitto.containers.exporter.image`
+  - **Current Tag:** `0.8.0`
+  - **Latest Tag:** `0.8.0` ✅ (up-to-date)
 
 - **Repository:** `public.ecr.aws/docker/library/eclipse-mosquitto`
   - **Path:** `controllers.mosquitto.initContainers.init-config.image`
-  - **Current Tag:** `2.0.20@sha256:8b396cec28cd5e8e1a3aba1d9abdbddd42c454c80f703e77c1bec56e152fa54e`
+  - **Current Tag:** `2.0.22`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -937,7 +1082,7 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 - **Repository:** `ghcr.io/music-assistant/server`
   - **Path:** `controllers.music-assistant-server.containers.app.image`
   - **Current Tag:** `2.7.5`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.7.5` ✅ (up-to-date)
 
 - **Repository:** `ghcr.io/alams154/music-assistant-alexa-api`
   - **Path:** `controllers.music-assistant-server.containers.alexa-api.image`
@@ -953,19 +1098,19 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Chart
 - **Name:** `n8n`
 - **Repository:** `n8n`
-- **Current Version:** `1.0.6`
+- **Current Version:** `1.1.0`
 - **Latest Version:** *Could not determine*
 
 #### Container Images
 - **Repository:** `n8nio/n8n`
   - **Path:** `image`
-  - **Current Tag:** `1.123.16`
-  - **Latest Tag:** `2.4.4` ⚠️ **UPDATE AVAILABLE**
+  - **Current Tag:** `1.123.17`
+  - **Latest Tag:** `2.6.2` ⚠️ **UPDATE AVAILABLE**
   - **Update Type:** 🔴 **MAJOR** (high complexity)
   - **Update Description:** Major version update: 1.x.x → 2.x.x
   - **⚠️ Breaking Changes Detected:**
     - Major version change typically indicates breaking changes
-  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.4.4
+  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.6.2
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
   - **⚠️ Breaking Changes:** *Major version update - review release notes above*
 
@@ -985,7 +1130,11 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
   - **Current Tag:** `4.1.3`
-  - **Latest Tag:** `4.1.3` ✅ (up-to-date)
+  - **Latest Tag:** `4.1.4` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 4.1.3 → 4.1.4
+  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.4
+  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
 
@@ -1075,8 +1224,8 @@ ghcr.io/xperimental/nextcloud-exporter:0.9.0
 #### Container Images
 - **Repository:** `docker.io/jellyfin/jellyfin`
   - **Path:** `image`
-  - **Current Tag:** `10.11.5`
-  - **Latest Tag:** `10.11.5` ✅ (up-to-date)
+  - **Current Tag:** `10.11.6`
+  - **Latest Tag:** `10.11.6` ✅ (up-to-date)
 
 ---
 
@@ -1211,7 +1360,19 @@ ECK will now generate longer passwords by default for the administrative user of
 - **Repository:** `ghcr.io/unpoller/unpoller`
   - **Path:** `image`
   - **Current Tag:** `v2.21.0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.25.0` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟡 **MINOR** (medium complexity)
+  - **Update Description:** Minor version update: 2.21.x → 2.25.x
+  - **Source:** https://github.com/unpoller/unpoller/releases/tag/2.25.0
+  - **Release Date:** 2026-01-28
+  - **Release Notes:**
+    ```markdown
+    ## Changelog
+* d26d84e8ade1867eb74e1934c4bb023460ebe4d7 Merge pull request #923 from unpoller/issue-921
+* 5e68016564888479044c9489cd4505bc459469e6 fix client side log error
+* a14d5c4150497bc882c10bebcfb4577a129b35ab Merge pull request #922 from brngates98/add-ai-context-files
+* 969445fadec99dfbbb9b924dd5a6ac8fb74b5dd5 Add AI context files for major LLMs
+    ```
 
 ---
 
@@ -1263,6 +1424,24 @@ ECK will now generate longer passwords by default for the administrative user of
 
 ---
 
+### andreamosteller
+
+- **File:** `kubernetes/apps/my-software-development/andreamosteller/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.1`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `ghcr.io/nachtschatt3n/andreamosteller.com`
+  - **Path:** `controllers.andreamosteller.containers.app.image`
+  - **Current Tag:** `sha-394fe9f`
+  - **Latest Tag:** *Could not determine*
+
+---
+
 ## Namespace: `my-software-production`
 
 ### absenty
@@ -1279,6 +1458,24 @@ ECK will now generate longer passwords by default for the administrative user of
 - **Repository:** `ghcr.io/nachtschatt3n/absenty`
   - **Path:** `controllers.absenty.containers.app.image`
   - **Current Tag:** `sha-ffa072a`
+  - **Latest Tag:** *Could not determine*
+
+---
+
+### andreamosteller
+
+- **File:** `kubernetes/apps/my-software-production/andreamosteller/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.1`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `ghcr.io/nachtschatt3n/andreamosteller.com`
+  - **Path:** `controllers.andreamosteller.containers.app.image`
+  - **Current Tag:** `5d88656-unprivileged-v2`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -1328,8 +1525,8 @@ ECK will now generate longer passwords by default for the administrative user of
 #### Container Images
 - **Repository:** `ghcr.io/paperless-ngx/paperless-ngx`
   - **Path:** `image`
-  - **Current Tag:** `2.20.4`
-  - **Latest Tag:** *Could not determine*
+  - **Current Tag:** `2.20.5`
+  - **Latest Tag:** `2.20.5` ✅ (up-to-date)
 
 - **Repository:** `bitnamilegacy/mariadb`
   - **Path:** `mariadb.image`
@@ -1367,7 +1564,75 @@ ECK will now generate longer passwords by default for the administrative user of
 - **Name:** `longhorn`
 - **Repository:** `longhorn`
 - **Current Version:** `1.10.1`
-- **Latest Version:** `1.10.1` ✅ (up-to-date)
+- **Latest Version:** `1.11.0` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟡 **MINOR** (medium complexity)
+- **Update Description:** Minor version update: 1.10.x → 1.11.x
+- **Source:** https://github.com/longhorn/longhorn/releases/tag/1.11.0
+- **Release Date:** 2026-01-29
+- **Release Notes:**
+  ```markdown
+  # Longhorn v1.11.0 Release Notes
+
+The Longhorn team is excited to announce the release of Longhorn v1.11.0. This release marks a major milestone, with the **V2 Data Engine** officially entering the **Technical Preview** stage following significant stability improvements.
+
+Additionally, this version optimizes the stability of the whole system and introduces critical improvements in resource observability, scheduling, and utilization.
+
+For terminology and background on Longhorn releases, see [Releases](https://github.com/longhorn/longhorn#releases).
+
+## Deprecation
+
+### V2 Backing Image Deprecation
+
+The Backing Image feature for the V2 Data Engine is now deprecated in v1.11.0 and is scheduled for removal in v1.12.0.
+
+Users using V2 volumes for virtual machines are encouraged to adopt the [Containerized Data Importer (CDI)](https://kubevirt.io/user-guide/operations/containerized_data_importer/) for volume population instead.
+
+[GitHub Issue #12237](https://github.com/longhorn/longhorn/issues/12237)
+
+## Primary Highlights
+
+### V2 Data Engine
+
+#### Now in Technical Preview Stage
+
+We are pleased to announce that the V2 Data Engine has officially graduated to the **Technical Preview** stage. This indicates increased stability and feature maturity as we move toward General Availability.
+
+> **Limitation:** While the engine is in Technical Preview, live upgrade is not supported yet. V2 volumes must be detached (offline) before engine upgrade.
+
+#### Support for `ublk` Frontend
+
+Users can now configure `ublk` (Userspace Block Device) as the frontend for V2 Data Engine volumes. This provides a high-performance alternative to the NVMe-oF frontend for environments running Kernel v6.0+.
+
+[GitHub Issue #11039](https://github.com/longhorn/longhorn/issues/11039)
+
+### V1 Data Engine
+
+#### Faster Replica Rebuilding from Multiple Sources
+
+The V1 Data Engine now supports parallel rebuilding. When a replica needs to be rebuilt, the engine can now stream data from multiple healthy replicas simultaneously rather than a single source. This significantly reduces the time required to restore redundancy for volumes containing tons of scattered data chunks.
+
+[GitHub Issue #11331](https://www.google.com/search?q=https://github.com/longhorn/longhorn/issues/11331)
+
+### General
+
+#### Balance-Aware Algorithm Disk Selection For Replica Scheduling
+
+Longhorn improves the disk selection for the replica scheduling by introducing an intelligent `balance-aware` scheduling algorithm, reducing uneven storage usage across nodes and disks.
+
+[GitHub Issue #10512](https://github.com/longhorn/longhorn/issues/10512)
+
+#### Node Disk Health Monitoring
+
+Longhorn now actively monitors the physical health of the underlying disks used for storage by using S.M.A.R.T. data. This allows administrators to identify issues and raise alerts when abnormal SMART metrics are detected, helping prevent failed volumes.
+
+[GitHub Issue #12016](https://github.com/lo
+  ... (truncated, see source link above for full notes)
+  ```
+- **⚠️ Breaking Changes:**
+  - Migration/Upgrade Guide:
+  - > [!IMPORTANT]
+  - **Ensure that your cluster is running Kubernetes v1.25 or later before upgrading from Longhorn v1.10.x to v1.11.0.**
+  - Longhorn only allows upgrades from supported versions. For more information about upgrade paths and procedures, see [Upgrade](https://longhorn.io/docs/1.11.0/deploy/upgrade/) in the Longhorn documentation.
 
 *No container images specified in values*
 
