@@ -25,6 +25,9 @@ spec:
   uninstall:
     keepHistory: false
   values:
+    global:
+      security:
+        allowInsecureImages: true
     image:
       repository: ghcr.io/paperless-ngx/paperless-ngx
       tag: "2.20.6"
