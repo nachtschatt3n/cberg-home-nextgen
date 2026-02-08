@@ -18,10 +18,8 @@ spec:
   install:
     remediation:
       retries: 1
-  timeout: 10m
   upgrade:
     cleanupOnFail: true
-    force: true
     remediation:
       retries: 1
   uninstall:
