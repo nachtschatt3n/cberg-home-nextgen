@@ -398,7 +398,7 @@ spec:
                 echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
-                exec /home/node/.openclaw/bin/openclaw gateway start --port 18789 --verbose
+                exec /home/node/.openclaw/bin/openclaw gateway --port 18789 --verbose
 
             env:
               - name: PATH
