@@ -2,7 +2,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2beta2
 kind: HelmRelease
 metadata:
-  name: clawd-bot
+  name: openclaw
 spec:
   interval: 30m
   chart:
@@ -27,16 +27,16 @@ spec:
     keepHistory: false
   values:
     controllers:
-      clawd-bot:
+      openclaw:
         pod:
           annotations:
-            secret.reloader.stakater.com/reload: clawd-bot-secret
+            secret.reloader.stakater.com/reload: openclaw-secret
           securityContext:
             fsGroup: 1000
             fsGroupChangePolicy: OnRootMismatch
 
         initContainers:
-          install-clawdbot:
+          install-openclaw:
             image:
               repository: node
               tag: 22-bookworm
@@ -46,14 +46,21 @@ spec:
               - |
                 set -euo pipefail
 
-                export HOME="/home/node/.clawdbot"
+                # Migrate .clawdbot -> .openclaw if needed
+                if [ -d "/home/node/.clawdbot" ] && [ ! -L "/home/node/.clawdbot" ]; then
+                  echo "Migrating .clawdbot → .openclaw..."
+                  mv /home/node/.clawdbot /home/node/.openclaw
+                  ln -sf /home/node/.openclaw /home/node/.clawdbot
+                fi
+
+                export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
                 export NPM_CONFIG_CACHE="/home/node/.npm"
                 mkdir -p "$NPM_CONFIG_CACHE"
-                export PYTHONUSERBASE="/home/node/.clawdbot"
+                export PYTHONUSERBASE="/home/node/.openclaw"
                 echo "Cleaning existing runtimes to free space..."
-                rm -rf /home/node/.clawdbot/.cache
-                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
+                rm -rf /home/node/.openclaw/.cache
+                export PYTHONPATH="/home/node/.openclaw/lib/python3.12/site-packages"
                 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
                 echo "Installing git and build dependencies..."
@@ -71,7 +78,7 @@ spec:
                 chmod 0440 /etc/sudoers.d/node
                 echo "Passwordless sudo configured for user 'node'"
 
-                BIN_DIR="/home/node/.clawdbot/bin"
+                BIN_DIR="/home/node/.openclaw/bin"
                 mkdir -p "$BIN_DIR"
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
@@ -147,8 +154,8 @@ spec:
                   ln -sf "$tool" "/usr/local/bin/$(basename "$tool")"
                 done
 
-                echo "Installing clawdbot CLI + coding agent runtimes to shared volume..."
-                export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                echo "Installing openclaw CLI + coding agent runtimes to shared volume..."
+                export PATH="/home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
                 export GIT_EXEC_PATH="/usr/lib/git-core"
                 export GIT_SSH_COMMAND="ssh -oStrictHostKeyChecking=accept-new"
@@ -174,7 +181,7 @@ spec:
                 install_npm() {
                   pkg="$1"
                   echo "npm install -g $pkg..."
-                  if ! npm install -g --prefix /home/node/.clawdbot "$pkg"; then
+                  if ! npm install -g --prefix /home/node/.openclaw "$pkg"; then
                     echo "WARN: npm install failed for $pkg (continuing)"
                   fi
                 }
@@ -186,7 +193,7 @@ spec:
                   fi
                 }
 
-                install_npm clawdbot@latest
+                install_npm openclaw@latest
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm claude
@@ -205,11 +212,11 @@ spec:
                 install_pip openai-whisper
 
                 echo "Creating symlink..."
-                ln -sf /home/node/.clawdbot/bin/clawdbot /home/node/.clawdbot/clawdbot
-                echo "Clawdbot installed at: /home/node/.clawdbot/bin/clawdbot"
-                /home/node/.clawdbot/bin/clawdbot --version
+                ln -sf /home/node/.openclaw/bin/openclaw /home/node/.openclaw/openclaw
+                echo "OpenClaw installed at: /home/node/.openclaw/bin/openclaw"
+                /home/node/.openclaw/bin/openclaw --version
                 echo "Seeding Ollama auth profile..."
-                AUTH_DIR="/home/node/.clawdbot/agents/main/agent"
+                AUTH_DIR="/home/node/.openclaw/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
                 printf '%s\n' \
                   '{' \
@@ -220,13 +227,13 @@ spec:
                   '}' > "$AUTH_DIR/auth-profiles.json"
 
                 echo "Fixing permissions..."
-                chown -R 1000:1000 /home/node/.clawdbot
+                chown -R 1000:1000 /home/node/.openclaw
             env:
               # GitHub token for mise and git operations during init
               - name: GITHUB_TOKEN
                 valueFrom:
                   secretKeyRef:
-                    name: clawd-bot-secret
+                    name: openclaw-secret
                     key: GITHUB_TOKEN
             securityContext:
               runAsUser: 0
@@ -245,32 +252,32 @@ spec:
               - |
                 set -euo pipefail
 
-                export PATH="/home/node/.clawdbot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                export PATH="/home/node/.openclaw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib:/lib"
                 export GIT_EXEC_PATH="/usr/lib/git-core"
-                export PYTHONUSERBASE="/home/node/.clawdbot"
-                export PYTHONPATH="/home/node/.clawdbot/lib/python3.12/site-packages"
-                CONFIG_PATH="/home/node/.clawdbot/clawdbot.json"
-                STATE_DIR="/home/node/.clawdbot"
+                export PYTHONUSERBASE="/home/node/.openclaw"
+                export PYTHONPATH="/home/node/.openclaw/lib/python3.12/site-packages"
+                CONFIG_PATH="/home/node/.openclaw/openclaw.json"
+                STATE_DIR="/home/node/.openclaw"
 
                 mkdir -p "$STATE_DIR" /home/node/clawd /home/node/.ssh
-                SHELL_PATH="/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                SHELL_PATH="/home/node/.openclaw/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 for f in .bashrc .profile .bash_logout; do
                   if [ ! -f "/home/node/$f" ] && [ -f "/etc/skel/$f" ]; then
                     cp "/etc/skel/$f" "/home/node/$f"
                   fi
                 done
-                if ! grep -q "CLAWDBOT_PATH_EXPORT" /home/node/.bashrc 2>/dev/null; then
-                  printf '\n# CLAWDBOT_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.bashrc
+                if ! grep -q "OPENCLAW_PATH_EXPORT" /home/node/.bashrc 2>/dev/null; then
+                  printf '\n# OPENCLAW_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.bashrc
                 fi
-                if ! grep -q "CLAWDBOT_PATH_EXPORT" /home/node/.profile 2>/dev/null; then
-                  printf '\n# CLAWDBOT_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.profile
+                if ! grep -q "OPENCLAW_PATH_EXPORT" /home/node/.profile 2>/dev/null; then
+                  printf '\n# OPENCLAW_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.profile
                 fi
                 chown -R 1000:1000 /home/node
 
                 node - <<'NODE'
                   const fs = require('fs');
-                  const path = '/home/node/.clawdbot/clawdbot.json';
+                  const path = '/home/node/.openclaw/openclaw.json';
                   const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
                   const ollamaBase = process.env.OLLAMA_BASE || 'http://192.168.30.111:11435/v1';
                   const ollamaKey = process.env.OLLAMA_API_KEY || 'ollama';
@@ -329,10 +336,10 @@ spec:
                   cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
 
                   // Only configure auth for non-local modes
-                  if (cfg.gateway.mode !== 'local' && process.env.CLAWDBOT_GATEWAY_TOKEN) {
+                  if (cfg.gateway.mode !== 'local' && process.env.OPENCLAW_GATEWAY_TOKEN) {
                     cfg.gateway.auth = {
                       mode: 'token',
-                      token: process.env.CLAWDBOT_GATEWAY_TOKEN
+                      token: process.env.OPENCLAW_GATEWAY_TOKEN
                     };
                   }
 
@@ -367,7 +374,7 @@ spec:
                 NODE
                 chown 1000:1000 "$CONFIG_PATH"
 
-                AUTH_DIR="/home/node/.clawdbot/agents/main/agent"
+                AUTH_DIR="/home/node/.openclaw/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
                 AUTH_FILE="$AUTH_DIR/auth-profiles.json"
                 if [ ! -f "$AUTH_FILE" ]; then
@@ -386,14 +393,14 @@ spec:
                   echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
                 fi
 
-                echo "Starting Clawd Bot Gateway..."
+                echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
-                exec /home/node/.clawdbot/bin/clawdbot gateway --port 18789 --verbose --allow-unconfigured
+                exec /home/node/.openclaw/bin/openclaw gateway start --port 18789 --verbose
 
             env:
               - name: PATH
-                value: "/home/node/.local/share/mise/shims:/home/node/.clawdbot/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/home/node/.local/share/mise/shims:/home/node/.openclaw/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               # Node configuration
               - name: NODE_ENV
                 value: "production"
@@ -411,11 +418,11 @@ spec:
               - name: GITHUB_TOKEN
                 valueFrom:
                   secretKeyRef:
-                    name: clawd-bot-secret
+                    name: openclaw-secret
                     key: GITHUB_TOKEN
             envFrom:
               - secretRef:
-                  name: clawd-bot-secret
+                  name: openclaw-secret
 
             probes:
               liveness:
@@ -471,7 +478,7 @@ spec:
 
     service:
       main:
-        controller: clawd-bot
+        controller: openclaw
         type: ClusterIP
         ports:
           http:
@@ -485,14 +492,14 @@ spec:
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Clawd Bot"
+          gethomepage.dev/name: "OpenClaw"
           gethomepage.dev/group: "AI"
           gethomepage.dev/icon: "telegram.png"
-          gethomepage.dev/description: "Telegram AI Assistant - ClawdBot Gateway"
+          gethomepage.dev/description: "Telegram AI Assistant - OpenClaw Gateway"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: clawd-bot.${SECRET_DOMAIN}
+          - host: openclaw.${SECRET_DOMAIN}
             paths:
               - path: /
                 pathType: Prefix
@@ -501,30 +508,30 @@ spec:
                   port: http
         tls:
           - hosts:
-              - clawd-bot.${SECRET_DOMAIN}
+              - openclaw.${SECRET_DOMAIN}
 
     persistence:
       config:
         type: persistentVolumeClaim
-        existingClaim: clawd-bot-data
+        existingClaim: openclaw-data
         advancedMounts:
-          clawd-bot:
+          openclaw:
             app:
               - path: /home/node
-            install-clawdbot:
+            install-openclaw:
               - path: /home/node
 
       npm-cache:
         type: emptyDir
         sizeLimit: 2Gi
         advancedMounts:
-          clawd-bot:
-            install-clawdbot:
+          openclaw:
+            install-openclaw:
               - path: /home/node/.npm
 
       tmp:
         type: emptyDir
         advancedMounts:
-          clawd-bot:
+          openclaw:
             app:
               - path: /tmp

@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: clawd-bot-data
+  name: openclaw-data
 spec:
   capacity:
     storage: 40Gi
@@ -22,7 +22,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: clawd-bot-data
+  name: openclaw-data
   namespace: ai
 spec:
   accessModes:
@@ -31,4 +31,4 @@ spec:
     requests:
       storage: 40Gi
   storageClassName: longhorn-static
-  volumeName: clawd-bot-data
+  volumeName: openclaw-data

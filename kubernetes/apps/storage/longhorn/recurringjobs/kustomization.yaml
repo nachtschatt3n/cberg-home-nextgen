@@ -8,5 +8,5 @@ resources:
   - ./influxdb-snapshot-cleanup.yaml
   - ./home-assistant-filesystem-trim.yaml
   - ./home-assistant-snapshot-cleanup.yaml
-  - ./clawd-bot-filesystem-trim.yaml
-  - ./clawd-bot-snapshot-cleanup.yaml
+  - ./openclaw-filesystem-trim.yaml
+  - ./openclaw-snapshot-cleanup.yaml
