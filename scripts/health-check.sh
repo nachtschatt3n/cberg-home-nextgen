@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Kubernetes Cluster Health Check Script
-# Executes all 35 sections from AI_weekly_health_check.MD
+# Executes all 39 sections from AI_weekly_health_check.MD
 # Usage: ./scripts/health-check.sh [output-file]
 
 set -uo pipefail
@@ -663,12 +663,17 @@ log_section "Section 18a: UniFi Hardware Metrics (InfluxDB)"
             echo "$LATEST_METRIC"
             echo ""
 
-            # Extract counts using grep and awk (take only first match)
-            CLIENT_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Client: \K\d+' | head -1 || echo "0")
-            GATEWAY_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Gateway(s)?: \K\d+' | head -1 || echo "0")
-            UAP_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'UAP: \K\d+' | head -1 || echo "0")
-            USW_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'USW: \K\d+' | head -1 || echo "0")
-            ERROR_COUNT=$(echo "$LATEST_METRIC" | grep -oP 'Err: \K\d+' | head -1 || echo "0")
+            # Extract counts using sed (compatible with macOS and Linux)
+            CLIENT_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Client: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$CLIENT_COUNT" ] && CLIENT_COUNT=0
+            GATEWAY_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Gateways*: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$GATEWAY_COUNT" ] && GATEWAY_COUNT=0
+            UAP_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*UAP: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$UAP_COUNT" ] && UAP_COUNT=0
+            USW_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*USW: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$USW_COUNT" ] && USW_COUNT=0
+            ERROR_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Err: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$ERROR_COUNT" ] && ERROR_COUNT=0
 
             echo "Network device summary:"
             echo "  - Connected clients: $CLIENT_COUNT"
@@ -691,8 +696,10 @@ log_section "Section 18a: UniFi Hardware Metrics (InfluxDB)"
             echo ""
 
             # Check for export errors
-            EXPORT_ERRORS=$(echo "$LATEST_EXPORT" | grep -oP 'Err: \K\d+' || echo "0")
-            REQ_TIME=$(echo "$LATEST_EXPORT" | grep -oP 'Req/Total: \K[0-9.]+ms' || echo "N/A")
+            EXPORT_ERRORS=$(echo "$LATEST_EXPORT" | sed -n 's/.*Err: \([0-9]*\).*/\1/p' | head -1)
+            [ -z "$EXPORT_ERRORS" ] && EXPORT_ERRORS=0
+            REQ_TIME=$(echo "$LATEST_EXPORT" | sed -n 's/.*Req\/Total: \([0-9.]*ms\).*/\1/p' | head -1)
+            [ -z "$REQ_TIME" ] && REQ_TIME="N/A"
 
             echo "InfluxDB export status:"
             echo "  - Export errors: $EXPORT_ERRORS"
@@ -715,7 +722,7 @@ log_section "Section 18a: UniFi Hardware Metrics (InfluxDB)"
         fi
 
         # Additional check for recent activity
-        LAST_TIMESTAMP=$(echo "$LATEST_METRIC" | grep -oP '^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}' || echo "")
+        LAST_TIMESTAMP=$(echo "$LATEST_METRIC" | sed -n 's/^\([0-9]\{4\}\/[0-9]\{2\}\/[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\).*/\1/p' | head -1)
         if [ -n "$LAST_TIMESTAMP" ]; then
             echo "Last metric timestamp: $LAST_TIMESTAMP"
             echo ""
@@ -981,6 +988,122 @@ log_section "Section 22a: MQTT Connectivity & Shelly Devices"
     if [ "$MQTT_CONN_ERRORS" -gt 10 ]; then
         log_warning "High MQTT connection errors: $MQTT_CONN_ERRORS"
         add_minor_issue "MQTT connection errors: $MQTT_CONN_ERRORS"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 22b: Frigate NVR & Camera Health"
+{
+    echo "=== Frigate Pod Status ==="
+    kubectl get pods -n home-automation -l app.kubernetes.io/name=frigate
+    echo ""
+
+    FRIGATE_RUNNING=$(kubectl get pods -n home-automation -l app.kubernetes.io/name=frigate -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+
+    if [ "$FRIGATE_RUNNING" -eq 0 ]; then
+        log_critical "Frigate NVR is not running"
+        add_critical_issue "Frigate NVR pod not running - all cameras offline"
+    else
+        log_success "Frigate NVR pod running"
+
+        # Check camera streaming status via Frigate API
+        echo "=== Camera Streaming Status (Frigate API) ==="
+        kubectl port-forward -n home-automation svc/frigate 5000:5000 > /dev/null 2>&1 &
+        PF_PID=$!
+        sleep 3
+
+        CAMERA_STATS=$(curl -s http://localhost:5000/api/stats 2>/dev/null || echo "{}")
+
+        CAMERA_RESULTS=$(echo "$CAMERA_STATS" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    cameras = data.get('cameras', {})
+    total = len(cameras)
+    streaming = 0
+    detecting = 0
+    down_cameras = []
+    for cam, info in cameras.items():
+        fps = info.get('camera_fps', 0)
+        det_fps = info.get('detection_fps', 0)
+        status = 'OK' if fps > 0 else 'DOWN'
+        if fps > 0:
+            streaming += 1
+        else:
+            down_cameras.append(cam)
+        print(f'  {cam}: fps={fps}, detection_fps={det_fps} [{status}]')
+    print(f'SUMMARY:{streaming}/{total}')
+    if down_cameras:
+        print(f'DOWN:{\"|\".join(down_cameras)}')
+except Exception as e:
+    print(f'Error: {e}')
+    print('SUMMARY:0/0')
+" 2>/dev/null || echo "SUMMARY:0/0")
+
+        echo "$CAMERA_RESULTS" | grep -v "^SUMMARY:" | grep -v "^DOWN:"
+        echo ""
+
+        STREAMING_COUNT=$(echo "$CAMERA_RESULTS" | grep "^SUMMARY:" | sed 's/SUMMARY://' | cut -d'/' -f1)
+        TOTAL_CAMERAS=$(echo "$CAMERA_RESULTS" | grep "^SUMMARY:" | sed 's/SUMMARY://' | cut -d'/' -f2)
+        DOWN_CAMERAS=$(echo "$CAMERA_RESULTS" | grep "^DOWN:" | sed 's/DOWN://' | tr '|' ', ')
+
+        [ -z "$STREAMING_COUNT" ] && STREAMING_COUNT=0
+        [ -z "$TOTAL_CAMERAS" ] && TOTAL_CAMERAS=0
+
+        echo "Cameras streaming: $STREAMING_COUNT/$TOTAL_CAMERAS"
+
+        if [ "$STREAMING_COUNT" -eq "$TOTAL_CAMERAS" ] && [ "$TOTAL_CAMERAS" -gt 0 ]; then
+            log_success "All $TOTAL_CAMERAS cameras streaming"
+        elif [ "$STREAMING_COUNT" -gt 0 ]; then
+            CAMERAS_DOWN=$((TOTAL_CAMERAS - STREAMING_COUNT))
+            log_warning "Cameras down: $CAMERAS_DOWN/$TOTAL_CAMERAS ($DOWN_CAMERAS)"
+            add_major_issue "Frigate cameras not streaming: $DOWN_CAMERAS ($CAMERAS_DOWN of $TOTAL_CAMERAS)"
+        elif [ "$TOTAL_CAMERAS" -gt 0 ]; then
+            log_critical "All $TOTAL_CAMERAS cameras are down"
+            add_critical_issue "All Frigate cameras are down (0/$TOTAL_CAMERAS streaming)"
+        fi
+
+        kill $PF_PID 2>/dev/null || true
+        wait $PF_PID 2>/dev/null || true
+
+        # Check Frigate MQTT availability (critical for HA integration)
+        echo ""
+        echo "=== Frigate MQTT Availability ==="
+        FRIGATE_AVAILABLE=$(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 5 mosquitto_sub -t 'frigate/available' -C 1 2>/dev/null || echo "unknown")
+        echo "frigate/available: $FRIGATE_AVAILABLE"
+
+        if [ "$FRIGATE_AVAILABLE" == "online" ]; then
+            log_success "Frigate MQTT availability: online"
+        elif [ "$FRIGATE_AVAILABLE" == "offline" ]; then
+            log_critical "Frigate MQTT reports offline - ALL cameras unavailable in Home Assistant"
+            add_critical_issue "Frigate MQTT availability is 'offline' (stale retained message) - all HA cameras show unavailable. Fix: mosquitto_pub -t 'frigate/available' -m 'online' -r"
+        else
+            log_warning "Frigate MQTT availability: $FRIGATE_AVAILABLE"
+            add_major_issue "Frigate MQTT availability unknown: $FRIGATE_AVAILABLE"
+        fi
+
+        # Check for camera crash loops in logs
+        echo ""
+        echo "=== Camera Crash Loops (recent logs) ==="
+        CRASH_CAMERAS=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "crashed unexpectedly" | sed 's/.*for //' | sed 's/\..*//' | sort | uniq -c | sort -rn)
+        if [ -n "$CRASH_CAMERAS" ]; then
+            echo "$CRASH_CAMERAS"
+            CRASH_COUNT=$(echo "$CRASH_CAMERAS" | wc -l | tr -cd '0-9')
+            if [ "$CRASH_COUNT" -gt 0 ]; then
+                add_minor_issue "Frigate camera crash loops detected: $(echo "$CRASH_CAMERAS" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')"
+            fi
+        else
+            echo "  No crash loops detected"
+        fi
+
+        # Check RTSP connection timeouts
+        echo ""
+        echo "=== RTSP Connection Timeouts ==="
+        RTSP_TIMEOUTS=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "Connection to tcp://" | sed 's/.*Connection to tcp:\/\///' | sed 's/?.*//' | sort | uniq -c | sort -rn)
+        if [ -n "$RTSP_TIMEOUTS" ]; then
+            echo "$RTSP_TIMEOUTS"
+        else
+            echo "  No RTSP timeouts"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
