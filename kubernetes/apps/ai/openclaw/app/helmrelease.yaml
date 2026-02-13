@@ -409,6 +409,15 @@ spec:
                   echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
                 fi
 
+                echo "=== Debug: config files ==="
+                find /home/node/.openclaw -maxdepth 3 -name "*.json" -not -path "*/node_modules/*" 2>/dev/null || true
+                echo "=== Debug: openclaw.json gateway section ==="
+                node -e "try{const c=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8'));console.log(JSON.stringify(c.gateway,null,2))}catch(e){console.log('no openclaw.json:',e.message)}" 2>/dev/null || true
+                echo "=== Debug: env vars ==="
+                env | grep -i 'OPENCLAW\|CLAWDBOT\|gateway\|token' || true
+                echo "=== Debug: openclaw config show ==="
+                /home/node/.openclaw/bin/openclaw config show 2>&1 | head -30 || true
+
                 echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
