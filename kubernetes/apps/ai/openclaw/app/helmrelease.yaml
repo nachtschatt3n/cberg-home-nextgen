@@ -337,13 +337,6 @@ spec:
                   cfg.gateway.port = cfg.gateway.port || 18789;
                   cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
 
-                  // Only configure auth for non-local modes
-                  if (cfg.gateway.mode !== 'local' && process.env.OPENCLAW_GATEWAY_TOKEN) {
-                    cfg.gateway.auth = {
-                      mode: 'token',
-                      token: process.env.OPENCLAW_GATEWAY_TOKEN
-                    };
-                  }
 
                   // Update agents defaults
                   cfg.agents = cfg.agents || {};
