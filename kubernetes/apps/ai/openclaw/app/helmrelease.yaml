@@ -62,6 +62,15 @@ spec:
                 # Remove legacy clawdbot.json — openclaw reads it as fallback
                 rm -f /home/node/.openclaw/clawdbot.json
 
+                # Fix .clawdbot paths in session/state files — openclaw rejects
+                # session file paths that resolve outside the sessions directory
+                find /home/node/.openclaw -maxdepth 5 -name "*.json" -not -path "*/node_modules/*" 2>/dev/null | while read f; do
+                  if grep -q '\.clawdbot' "$f" 2>/dev/null; then
+                    sed -i 's|/home/node/.clawdbot/|/home/node/.openclaw/|g' "$f"
+                    echo "Fixed .clawdbot paths in: $f"
+                  fi
+                done
+
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
                 export NPM_CONFIG_CACHE="/home/node/.npm"
