@@ -62,22 +62,6 @@ spec:
                 # Remove legacy clawdbot.json — openclaw reads it as fallback
                 rm -f /home/node/.openclaw/clawdbot.json
 
-                # Strip gateway auth from ALL json config files in .openclaw
-                echo "Cleaning gateway auth from all config files..."
-                find /home/node/.openclaw -maxdepth 3 -name "*.json" -not -path "*/node_modules/*" -exec grep -l '"auth"' {} \; 2>/dev/null | while read f; do
-                  echo "  Stripping auth from: $f"
-                  node -e "
-                    const fs = require('fs');
-                    try {
-                      const cfg = JSON.parse(fs.readFileSync('$f','utf8'));
-                      let changed = false;
-                      if (cfg.gateway && cfg.gateway.auth) { delete cfg.gateway.auth; changed = true; }
-                      if (cfg.auth) { delete cfg.auth; changed = true; }
-                      if (changed) fs.writeFileSync('$f', JSON.stringify(cfg, null, 2));
-                    } catch(e) {}
-                  "
-                done
-
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
                 export NPM_CONFIG_CACHE="/home/node/.npm"
@@ -361,9 +345,6 @@ spec:
                   cfg.gateway.bind = cfg.gateway.bind || 'lan';
                   cfg.gateway.port = cfg.gateway.port || 18789;
                   cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
-
-                  // Remove stale auth config — gateway runs without auth on internal ingress
-                  delete cfg.gateway.auth;
 
                   // Update agents defaults
                   cfg.agents = cfg.agents || {};
