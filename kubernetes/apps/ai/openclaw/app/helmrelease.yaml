@@ -337,6 +337,8 @@ spec:
                   cfg.gateway.port = cfg.gateway.port || 18789;
                   cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
 
+                  // Remove stale auth config — gateway runs without auth on internal ingress
+                  delete cfg.gateway.auth;
 
                   // Update agents defaults
                   cfg.agents = cfg.agents || {};
