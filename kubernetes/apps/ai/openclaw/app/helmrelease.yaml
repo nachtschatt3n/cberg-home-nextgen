@@ -59,18 +59,22 @@ spec:
                   mv /home/node/.openclaw/clawdbot.json /home/node/.openclaw/openclaw.json
                 fi
 
-                # Remove stale gateway auth from config files
-                for cfg in /home/node/.openclaw/openclaw.json /home/node/.openclaw/clawdbot.json; do
-                  if [ -f "$cfg" ] && grep -q '"auth"' "$cfg" 2>/dev/null; then
-                    echo "Removing stale gateway.auth from $cfg..."
-                    node -e "
-                      const fs = require('fs');
-                      const cfg = JSON.parse(fs.readFileSync('$cfg','utf8'));
-                      if (cfg.gateway && cfg.gateway.auth) { delete cfg.gateway.auth; }
-                      fs.writeFileSync('$cfg', JSON.stringify(cfg, null, 2));
-                    "
-                  fi
-                done
+                # Remove legacy clawdbot.json — openclaw falls back to it and reads stale auth
+                if [ -f "/home/node/.openclaw/clawdbot.json" ]; then
+                  echo "Removing legacy clawdbot.json..."
+                  rm -f /home/node/.openclaw/clawdbot.json
+                fi
+
+                # Remove stale gateway auth from openclaw.json if present
+                if [ -f "/home/node/.openclaw/openclaw.json" ] && grep -q '"auth"' "/home/node/.openclaw/openclaw.json" 2>/dev/null; then
+                  echo "Removing stale gateway.auth from openclaw.json..."
+                  node -e "
+                    const fs = require('fs');
+                    const cfg = JSON.parse(fs.readFileSync('/home/node/.openclaw/openclaw.json','utf8'));
+                    if (cfg.gateway && cfg.gateway.auth) { delete cfg.gateway.auth; }
+                    fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(cfg, null, 2));
+                  "
+                fi
 
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
@@ -408,15 +412,6 @@ spec:
                 else
                   echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
                 fi
-
-                echo "=== Debug: config files ==="
-                find /home/node/.openclaw -maxdepth 3 -name "*.json" -not -path "*/node_modules/*" 2>/dev/null || true
-                echo "=== Debug: openclaw.json gateway section ==="
-                node -e "try{const c=JSON.parse(require('fs').readFileSync('/home/node/.openclaw/openclaw.json','utf8'));console.log(JSON.stringify(c.gateway,null,2))}catch(e){console.log('no openclaw.json:',e.message)}" 2>/dev/null || true
-                echo "=== Debug: env vars ==="
-                env | grep -i 'OPENCLAW\|CLAWDBOT\|gateway\|token' || true
-                echo "=== Debug: openclaw config show ==="
-                /home/node/.openclaw/bin/openclaw config show 2>&1 | head -30 || true
 
                 echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
