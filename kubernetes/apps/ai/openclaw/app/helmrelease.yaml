@@ -228,6 +228,8 @@ spec:
 
                 echo "Fixing permissions..."
                 chown -R 1000:1000 /home/node/.openclaw
+                # Fix ownership of backward-compat symlink created during migration
+                chown -h 1000:1000 /home/node/.clawdbot 2>/dev/null || true
             env:
               # GitHub token for mise and git operations during init
               - name: GITHUB_TOKEN
@@ -273,7 +275,7 @@ spec:
                 if ! grep -q "OPENCLAW_PATH_EXPORT" /home/node/.profile 2>/dev/null; then
                   printf '\n# OPENCLAW_PATH_EXPORT\nexport PATH="%s:$PATH"\n' "$SHELL_PATH" >> /home/node/.profile
                 fi
-                chown -R 1000:1000 /home/node
+                chown -R 1000:1000 /home/node 2>/dev/null || true
 
                 node - <<'NODE'
                   const fs = require('fs');
