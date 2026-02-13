@@ -3,14 +3,14 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: &app clawd-bot
+  name: &app openclaw
   namespace: &namespace ai
 spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
   interval: 30m
-  path: ./kubernetes/apps/ai/clawd-bot/app
+  path: ./kubernetes/apps/ai/openclaw/app
   prune: true
   sourceRef:
     kind: GitRepository

@@ -2,14 +2,14 @@
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
-  name: clawd-bot-snapshot-cleanup
+  name: openclaw-snapshot-cleanup
   namespace: storage
 spec:
-  name: clawd-bot-snapshot-cleanup
+  name: openclaw-snapshot-cleanup
   task: snapshot-cleanup
   cron: "30 2 * * *"  # Daily at 2:30 AM (after trim, before backup)
   retain: 0
   concurrency: 1
   labels:
-    job: clawd-bot-snapshot-cleanup
+    job: openclaw-snapshot-cleanup
     volume: clawd-bot-data
