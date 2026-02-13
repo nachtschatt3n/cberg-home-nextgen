@@ -59,22 +59,24 @@ spec:
                   mv /home/node/.openclaw/clawdbot.json /home/node/.openclaw/openclaw.json
                 fi
 
-                # Remove legacy clawdbot.json — openclaw falls back to it and reads stale auth
-                if [ -f "/home/node/.openclaw/clawdbot.json" ]; then
-                  echo "Removing legacy clawdbot.json..."
-                  rm -f /home/node/.openclaw/clawdbot.json
-                fi
+                # Remove legacy clawdbot.json — openclaw reads it as fallback
+                rm -f /home/node/.openclaw/clawdbot.json
 
-                # Remove stale gateway auth from openclaw.json if present
-                if [ -f "/home/node/.openclaw/openclaw.json" ] && grep -q '"auth"' "/home/node/.openclaw/openclaw.json" 2>/dev/null; then
-                  echo "Removing stale gateway.auth from openclaw.json..."
+                # Strip gateway auth from ALL json config files in .openclaw
+                echo "Cleaning gateway auth from all config files..."
+                find /home/node/.openclaw -maxdepth 3 -name "*.json" -not -path "*/node_modules/*" -exec grep -l '"auth"' {} \; 2>/dev/null | while read f; do
+                  echo "  Stripping auth from: $f"
                   node -e "
                     const fs = require('fs');
-                    const cfg = JSON.parse(fs.readFileSync('/home/node/.openclaw/openclaw.json','utf8'));
-                    if (cfg.gateway && cfg.gateway.auth) { delete cfg.gateway.auth; }
-                    fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(cfg, null, 2));
+                    try {
+                      const cfg = JSON.parse(fs.readFileSync('$f','utf8'));
+                      let changed = false;
+                      if (cfg.gateway && cfg.gateway.auth) { delete cfg.gateway.auth; changed = true; }
+                      if (cfg.auth) { delete cfg.auth; changed = true; }
+                      if (changed) fs.writeFileSync('$f', JSON.stringify(cfg, null, 2));
+                    } catch(e) {}
                   "
-                fi
+                done
 
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
