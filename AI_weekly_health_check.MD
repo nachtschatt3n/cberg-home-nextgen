@@ -5,7 +5,7 @@ This document provides a systematic, AI-executable health check plan for a home 
 
 ## Automated Health Check Script
 
-**⚡ Quick Start**: An automated health check script is available that executes all 38 sections:
+**⚡ Quick Start**: An automated health check script is available that executes all 39 sections:
 
 ```bash
 # Run the automated health check
@@ -18,7 +18,7 @@ This document provides a systematic, AI-executable health check plan for a home 
 ```
 
 **Features:**
-- ✅ Executes all 38 health check sections automatically
+- ✅ Executes all 39 health check sections automatically
 - ✅ Categorizes issues by severity (Critical, Major, Minor)
 - ✅ Generates comprehensive reports with recommendations
 - ✅ Includes Alertmanager alerts, Elasticsearch application log analysis, and Home Assistant integration analysis
@@ -52,6 +52,9 @@ Execute in order, collecting metrics and identifying issues.
 
 ### Phase 3: Application & Service Checks (Sections 11-20)
 Execute systematically, testing each service's health.
+
+### Phase 3b: Camera & NVR Checks (Section 22b)
+Verify Frigate NVR camera streaming, MQTT availability, and Home Assistant camera integration.
 
 ### Phase 4: Advanced Monitoring (Sections 21-35)
 Execute remaining checks, focusing on automation, security, home automation health, and MQTT connectivity.
@@ -868,6 +871,119 @@ echo "  Target: 192.168.55.15:1883 (Mosquitto LoadBalancer)"
 
 ---
 
+## 22b. Frigate NVR & Camera Health
+
+**Objective**: Verify Frigate NVR is operational, all cameras are streaming, and MQTT availability is correct for Home Assistant integration
+**Success Criteria**: Frigate pod running, all cameras have active FPS, MQTT availability reports "online", detection enabled where expected
+
+**Commands to Execute:**
+```bash
+# Check Frigate pod status
+echo "=== Frigate Pod Status ==="
+kubectl get pods -n home-automation -l app.kubernetes.io/name=frigate
+
+# Check Frigate camera FPS via API
+echo ""
+echo "=== Camera Streaming Status (Frigate API) ==="
+kubectl port-forward -n home-automation svc/frigate 5000:5000 > /dev/null 2>&1 &
+PF_PID=$!
+sleep 3
+
+curl -s http://localhost:5000/api/stats 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    cameras = data.get('cameras', {})
+    total = len(cameras)
+    streaming = 0
+    detecting = 0
+    for cam, info in cameras.items():
+        fps = info.get('camera_fps', 0)
+        det_fps = info.get('detection_fps', 0)
+        detect_enabled = info.get('detection_enabled', False)
+        status = 'OK' if fps > 0 else 'DOWN'
+        if fps > 0:
+            streaming += 1
+        if detect_enabled:
+            detecting += 1
+        print(f'  {cam}: fps={fps}, detection_fps={det_fps}, detect={\"ON\" if detect_enabled else \"OFF\"} [{status}]')
+    print(f'\nSummary: {streaming}/{total} cameras streaming, {detecting}/{total} detection enabled')
+except Exception as e:
+    print(f'Error querying Frigate API: {e}')
+"
+
+kill $PF_PID 2>/dev/null || true
+wait $PF_PID 2>/dev/null || true
+
+# Check Frigate MQTT availability (critical for HA integration)
+echo ""
+echo "=== Frigate MQTT Availability ==="
+FRIGATE_AVAILABLE=$(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 5 mosquitto_sub -t 'frigate/available' -C 1 2>/dev/null || echo "unknown")
+echo "frigate/available: $FRIGATE_AVAILABLE"
+
+if [ "$FRIGATE_AVAILABLE" != "online" ]; then
+    echo "WARNING: Frigate reports '$FRIGATE_AVAILABLE' via MQTT"
+    echo "This causes ALL cameras to show as unavailable in Home Assistant"
+    echo "Fix: kubectl exec -n home-automation deployment/mosquitto -c app -- mosquitto_pub -t 'frigate/available' -m 'online' -r"
+    echo "Permanent fix: kubectl rollout restart deployment/frigate -n home-automation"
+fi
+
+# Check Frigate logs for camera connection errors
+echo ""
+echo "=== Camera Connection Errors (last 500 log lines) ==="
+kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "crashed unexpectedly" | sed 's/.*for //' | sed 's/\..*//' | sort | uniq -c | sort -rn
+
+# Check for RTSP connection timeouts
+echo ""
+echo "=== RTSP Connection Timeouts ==="
+kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "Connection to tcp://" | sed 's/.*Connection to tcp:\/\///' | sed 's/?.*//' | sort | uniq -c | sort -rn
+
+# Check detection state per camera via MQTT
+echo ""
+echo "=== Camera Detection States (MQTT) ==="
+for state_topic in $(kubectl exec -n home-automation deployment/mosquitto -c app -- timeout 3 mosquitto_sub -t 'frigate/+/detect/state' -C 10 -v 2>/dev/null || echo ""); do
+    echo "  $state_topic"
+done
+```
+
+**AI Analysis**:
+- Verify Frigate pod is running and cameras are streaming (FPS > 0)
+- **CRITICAL**: Check `frigate/available` MQTT topic - if "offline", ALL cameras show unavailable in HA regardless of actual streaming status
+- Identify cameras with 0 FPS (RTSP connection issues, camera offline, network problems)
+- Check for cameras stuck in crash loops (repeated ffmpeg crashes)
+- Monitor detection state (ON/OFF) per camera
+- Cross-reference camera IPs with IoT VLAN (192.168.32.0/23) for network issues
+
+**Camera Infrastructure:**
+- Cameras are on IoT VLAN (192.168.32.0/23, VLAN 30)
+- Frigate connects via RTSP on port 554
+- Frigate reports availability to Home Assistant via MQTT topic `frigate/available`
+- Home Assistant Frigate integration marks ALL cameras unavailable when MQTT availability is "offline"
+
+**Common Issues and Solutions:**
+
+1. **All cameras unavailable in HA but Frigate is running**:
+   - **Cause**: Stale `frigate/available` MQTT retained message set to "offline"
+   - **Quick fix**: `kubectl exec -n home-automation deployment/mosquitto -c app -- mosquitto_pub -t 'frigate/available' -m 'online' -r`
+   - **Permanent fix**: `kubectl rollout restart deployment/frigate -n home-automation`
+
+2. **Individual camera down (0 FPS)**:
+   - **Cause**: Camera offline, RTSP connection timeout, network issue
+   - **Check**: Verify camera IP is reachable from k8s-network VLAN
+   - **Check**: Camera power and network connectivity on IoT VLAN
+
+3. **Detection disabled on all cameras**:
+   - **Check**: `frigate/+/detect/state` MQTT topics
+   - **Enable**: Publish `ON` to `frigate/{camera}/detect/set` or enable in Frigate UI
+
+**Thresholds:**
+- **Critical**: `frigate/available` = "offline", or Frigate pod not running
+- **Major**: >1 camera with 0 FPS, or MQTT availability unknown
+- **Minor**: Detection disabled on cameras, individual camera connection timeouts
+- **Info**: All cameras streaming, detection states as expected
+
+---
+
 ## 23. Media Services Health
 
 **Objective**: Check media server functionality
@@ -1557,7 +1673,7 @@ echo "Webhook failures: $WEBHOOK_FAILURES"
 
 ## Report Generation Instructions
 
-After executing all 38 sections, compile the results into the standardized format:
+After executing all 39 sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
@@ -1567,7 +1683,7 @@ After executing all 38 sections, compile the results into the standardized forma
 6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
 7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation (38 sections):**
+**Final Health Score Calculation (39 sections):**
 - **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
 - **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
 - **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day
