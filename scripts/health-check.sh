@@ -86,6 +86,68 @@ safe_count() {
     fi
 }
 
+# =========================================
+# KNOWN FALSE POSITIVES
+# =========================================
+# Centralized list of known benign patterns that should be excluded from error counts.
+# Each entry is a grep-compatible pattern. Add new entries here when a pattern is
+# confirmed as a false positive, with a comment explaining why.
+#
+# To add a new exclusion:
+#   1. Add the grep pattern to the appropriate array below
+#   2. Add a comment with the date confirmed and reason
+#   3. Document in AI_weekly_health_check.MD (Section 31 for HA, relevant section for others)
+
+# Home Assistant log patterns that are not real errors
+HA_FALSE_POSITIVES=(
+    "Flic Hub"                      # Expected offline device (no longer in use)
+    "dynamic_energy_cost"           # Transient startup warning - Tibber JWT init delay (confirmed 2026-02-15)
+    "does not generate unique IDs"  # music_assistant duplicate entity IDs - cosmetic, no functional impact (confirmed 2026-02-15)
+)
+
+# Kubernetes event patterns that are normal operations (not actionable warnings)
+K8S_EVENT_FALSE_POSITIVES=(
+    "BackOff"                       # Normal pod restart backoff
+    "Pulling"                       # Normal image pulling
+    "FailedScheduling"              # Transient scheduling delays
+    "Unhealthy"                     # Transient probe failures during rolling updates
+)
+
+# Infrastructure log patterns that are not real errors
+INFRA_LOG_FALSE_POSITIVES=(
+    "Err: 0"                        # Status field showing zero errors (not an actual error)
+)
+
+# Build a combined grep exclusion pattern from an array
+# Usage: exclude_pattern=$(build_grep_exclude "${ARRAY[@]}")
+build_grep_exclude() {
+    local patterns=("$@")
+    local result=""
+    for pattern in "${patterns[@]}"; do
+        if [ -n "$result" ]; then
+            result="$result|$pattern"
+        else
+            result="$pattern"
+        fi
+    done
+    echo "$result"
+}
+
+# Filter out false positives from piped input
+# Usage: echo "$LOGS" | filter_ha_false_positives
+filter_ha_false_positives() {
+    local exclude
+    exclude=$(build_grep_exclude "${HA_FALSE_POSITIVES[@]}")
+    grep -vE "$exclude"
+}
+
+# Filter out false positives from infrastructure logs
+filter_infra_false_positives() {
+    local exclude
+    exclude=$(build_grep_exclude "${INFRA_LOG_FALSE_POSITIVES[@]}")
+    grep -vE "$exclude"
+}
+
 # Verify cluster access
 log_section "Phase 1: Preparation"
 if kubectl cluster-info &>> "$OUTPUT_FILE"; then
@@ -112,7 +174,8 @@ log_section "Section 1: Cluster Events & Logs"
     kubectl get events -A --sort-by='.lastTimestamp' | tail -50
     echo ""
 
-    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | grep -vE '(BackOff|Pulling|FailedScheduling|Unhealthy)' | wc -l")
+    K8S_EXCLUDE=$(build_grep_exclude "${K8S_EVENT_FALSE_POSITIVES[@]}")
+    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | grep -vE '($K8S_EXCLUDE)' | wc -l")
     echo "Warning events: $WARNING_COUNT"
 
     OOM_COUNT=$(safe_count "kubectl get events -A --field-selector reason=OOMKilled 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
@@ -487,16 +550,18 @@ log_section "Section 11: Container Logs Analysis"
 {
     echo "Checking infrastructure logs for errors..."
 
-    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -v 'Err: 0' | wc -l")
+    INFRA_EXCLUDE=$(build_grep_exclude "${INFRA_LOG_FALSE_POSITIVES[@]}")
+
+    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
 
-    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -v 'Err: 0' | wc -l")
+    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l")
     echo "CoreDNS errors (24h): $COREDNS_ERRORS"
 
-    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -v 'Err: 0' | wc -l")
+    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l")
     echo "Flux controller errors (24h): $FLUX_ERRORS"
 
-    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -v 'Err: 0' | wc -l")
+    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l")
     echo "cert-manager errors (24h): $CERT_ERRORS"
 
     TOTAL_ERRORS=$((CILIUM_ERRORS + COREDNS_ERRORS + FLUX_ERRORS + CERT_ERRORS))
@@ -831,13 +896,13 @@ log_section "Section 22: Home Automation Health"
     echo "$HA_LOGS"
     echo ""
 
-    # Categorize errors by severity
+    # Categorize errors by severity (excludes known false positives via HA_FALSE_POSITIVES array)
     CRITICAL_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "FATAL|CRITICAL" || true)
-    MAJOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "ERROR" | grep -v "Failed to connect" | grep -v "Flic Hub" || true)
-    MINOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "WARNING|Failed to connect|Flic Hub" || true)
+    MAJOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -E "ERROR" | grep -v "Failed to connect" | filter_ha_false_positives | wc -l || true)
+    MINOR_HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "WARNING|Failed to connect" || true)
 
-    # Total errors (excluding benign Flic Hub offline messages)
-    HA_ERRORS=$(echo "$HA_LOGS" | grep -cE "(ERROR|error|Failed|failed)" | grep -v "Flic Hub" || true)
+    # Total errors (excluding known false positives)
+    HA_ERRORS=$(echo "$HA_LOGS" | grep -E "(ERROR|error|Failed|failed)" | filter_ha_false_positives | wc -l || true)
 
     echo "Home Assistant error severity:"
     echo "  - Critical: $CRITICAL_HA_ERRORS"
@@ -1512,10 +1577,16 @@ except Exception as e:
     pass
 " 2>/dev/null | while IFS='|' read ns host svc; do
         if [ -n "$ns" ] && [ -n "$svc" ]; then
-            ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
-            if [ -z "$ENDPOINTS" ]; then
-                echo "⚠️  No backends for $host (service: $ns/$svc)"
-                MISSING_BACKENDS=$((MISSING_BACKENDS + 1))
+            # Check if this is an ExternalName service (Authentik outposts) - these resolve via DNS, not Endpoints
+            SVC_TYPE=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
+            if [ "$SVC_TYPE" = "ExternalName" ]; then
+                echo "ℹ️  ExternalName service $ns/$svc (DNS-resolved, no Endpoints object expected)"
+            else
+                ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
+                if [ -z "$ENDPOINTS" ]; then
+                    echo "⚠️  No backends for $host (service: $ns/$svc)"
+                    MISSING_BACKENDS=$((MISSING_BACKENDS + 1))
+                fi
             fi
         fi
     done
