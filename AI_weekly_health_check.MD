@@ -1219,6 +1219,12 @@ kubectl exec -n home-automation deployment/home-assistant -- curl -s http://loca
    - **Cause**: Token expiration or Alexa service issues
    - **Solution**: Re-authenticate Alexa integration in HA
 
+5. **Dynamic Energy Cost / Tibber Sensor Unavailable (FALSE POSITIVE)**:
+   - **Error**: `State of sensor.schulstrasse_105_electricity_price is 'unavailable', skipping update` from `custom_components.dynamic_energy_cost.sensor`
+   - **Cause**: During HA startup or restart, the Tibber integration takes a few minutes to initialize and authenticate via JWT. Until initialization completes, `sensor.schulstrasse_105_electricity_price` briefly shows as `unavailable`, causing the `dynamic_energy_cost` integration to log warnings.
+   - **Resolution**: This is transient startup noise that auto-resolves within minutes. No action needed. Verify by checking the live sensor state after startup completes: `curl -s -H "Authorization: Bearer $TOKEN" https://hass.uhl.cool/api/states/sensor.schulstrasse_105_electricity_price | jq .state`
+   - **Confirmed**: 2026-02-15 — all Tibber sensors operational (electricity price, real-time power via Tibber Pulse). Do not flag as critical.
+
 ---
 
 ## 32. Zigbee2MQTT Device Monitoring
@@ -1556,9 +1562,10 @@ kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --sin
 - Check for high error rates in ingress controller logs
 - Verify SSL/TLS certificate issues
 - Flag any ingress configuration problems
+- **KNOWN FALSE POSITIVE**: Authentik outpost services (e.g., `nocodb-authentik-outpost`, `frigate-authentik-outpost`, `longhorn-authentik-outpost`, etc.) are `ExternalName` type services that resolve via DNS to `ak-outpost-*` ClusterIP services in `kube-system`. ExternalName services do **not** have `Endpoints` objects, so `kubectl get endpoints` returns empty. This is expected behavior - verify the actual outpost services in `kube-system` have healthy endpoints instead. Typically ~11 Authentik outpost ExternalName services will show "no backends" and should be excluded from the missing backends count.
 
 **Thresholds:**
-- **Critical**: Any ingress with 0 backend endpoints
+- **Critical**: Any ingress with 0 backend endpoints (excluding Authentik ExternalName outpost services)
 - **Warning**: >10 ingress controller errors in last hour
 
 ---
