@@ -8,6 +8,7 @@ components:
 resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
+  - ./opencode-andreamosteller/ks.yaml
 ---
 apiVersion: v1
 kind: Namespace
