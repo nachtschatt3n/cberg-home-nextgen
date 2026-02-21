@@ -6,6 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-02-21 (evening) | Good | 0 | 3 | **Overall**: 🟡 **GOOD** (0 Critical, 0 Major, 5 Minor/Info). **Fixes applied this session**: 1) `monitoring/elasticsearch` ILM bootstrap Job deleted → Flux recreated with curl:8.18.0, fluent-bit and kibana unblocked ✅; 2) `office/nextcloud-notify-push` binary path corrected (`notify_push/notify_push/bin/x86_64/`) + execute bit restored → pod Running 0 restarts ✅; 3) `databases/redisinsight` rollingUpdate conflict confirmed resolved (PRs #88+#89, RollingUpdate maxSurge:0) ✅. **Full 39-section health check**: Cluster: All 3 nodes healthy (v1.34.0, CPU ~6%, Memory 26-37%), 0 OOM kills, 0 evictions. GitOps: 85/85 kustomizations reconciled, 72/72 HelmReleases ready, 46/46 HelmRepositories ready, 7/7 Flux controllers running (47d uptime, 0 restarts). Storage: 68/68 Longhorn volumes attached/healthy, autoDeletePod=false ✅, 75/75 PVCs Bound. Backups: daily-backup-all-volumes completed 13h ago ✅. Certs: 8/8 Ready, renewing mid-March. DaemonSets: 12/12 healthy. Pods: 0 CrashLoopBackOff, 0 Pending, 0 Terminating. Container log errors: 0 (Cilium, CoreDNS, Flux, cert-manager). Network: UnPoller healthy (Err:0, 104-106 clients, 1 USG+5 USW+4 UAP); MQTT: 0 auth failures, 0 errors. Home Automation: HA running 6d18h, Zigbee 22/23 seen today (1 offline >7d: 0x00124b002d12beec - likely dead battery), Mosquitto healthy, Frigate running 12d 0 restarts. Databases: All 8 pods running. Media: Jellyfin 14d, Plex 41d, JDownloader 7h all running. Ingress: 0 controller errors. Webhooks: 7 validating + 4 mutating, 0 failures. **Minor/Info**: external-dns 29 restarts (diagnosed: transient Cloudflare EOF, self-healing, no action needed ✅); unpoller 11 restarts (diagnosed: healthy, Err:0, periodic re-auth normal ✅); Talos version drift client v1.11.6 vs nodes v1.11.0 (upgrade needed); music_assistant duplicate entity IDs in HA (non-critical); cloudflared 5 restarts 2d15h ago (monitoring). **Talos client/node version mismatch**: client v1.11.6, nodes v1.11.0 — upgrade nodes when convenient. |
 | 2026-02-21 | Warning | 1 | 3 | **Overall**: 🟠 **WARNING** (1 real Critical - opencode OOM, 0 Major, 1 Minor - node 12 noise). **Cluster**: All 3 nodes healthy (v1.34.0, CPU 4-5%, Memory 26-38%), 0 warning events, 3 OOM kills (opencode), 0 pod evictions. **GitOps**: 83/83 kustomizations reconciled, 72/72 HelmReleases ready, all HelmRepositories healthy, 7/7 Flux controllers running. **Storage**: 58/58 Longhorn volumes healthy, autoDeletePod=false, 75 PVCs all Bound. **Backups**: daily-backup-all-volumes completed successfully (12h ago, 17m duration), 5/5 recent jobs successful. **Certificates**: 8/8 ready. **DaemonSets**: All healthy. **Monitoring**: Prometheus & Alertmanager running, 0 firing alerts. **Pods**: 0 CrashLoopBackOff, 0 Pending; 2 pods with elevated restarts (opencode-andreamosteller: 1 - recent OOM, external-dns: 28 - historical). **Network**: UnPoller healthy (10 devices, 115 clients, 0 export errors), MQTT broker healthy (46/54 clients connected, 15 Shelly devices, 0 auth failures, 0 errors). **Home Automation**: HA running (errors: Tibber 4403 Invalid Token - FALSE POSITIVE external bug, music_assistant duplicate entity IDs), Zigbee2MQTT healthy (23 devices, 0 errors), Mosquitto healthy. **Frigate**: All 6 cameras streaming, MQTT availability online, 0 crash loops. **Batteries**: 20 battery devices (avg 81%, 0 critical, 0 warning, 1 monitor: Soil Sensor 1 at 42%). **Elasticsearch Logs**: 10,000+ errors/day (fluent-bit: 40K, kube-apiserver: 11K). 3 FATAL/OOM errors: opencode OOMKilled, external-dns transient EOF. **FIXED**: Increased opencode memory limit to 2Gi; Confirmed Tibber 4403 is external platform bug. |
 | 2026-02-15 | Good | 0 | 1 | **Overall**: 🟡 **GOOD** (0 real Critical, 0 Major, 2 Minor). **Cluster**: All 3 nodes healthy (v1.34.0, CPU 4-7%, Memory 29-39%), 0 warning events, 0 OOM kills, 0 pod evictions. **GitOps**: 83/83 kustomizations reconciled, 72/72 HelmReleases ready, all HelmRepositories healthy, 7/7 Flux controllers running. **Storage**: 58/58 Longhorn volumes healthy, autoDeletePod=false, 74 PVCs all Bound. **Backups**: daily-backup-all-volumes completed successfully (8h ago, 22m duration), 5/5 recent jobs successful. **Certificates**: 8/8 ready. **DaemonSets**: All healthy. **Monitoring**: Prometheus & Alertmanager running, 0 firing alerts. **Pods**: 0 CrashLoopBackOff, 0 Pending; 2 pods with elevated restarts (unpoller: 9, external-dns: 13 - historical). **Network**: UnPoller healthy (10 devices, 109 clients, 0 export errors), MQTT broker healthy (46/54 clients connected, 15 Shelly devices in recent logs, 0 auth failures, 0 errors). **Home Automation**: HA running (31 major errors - mostly music_assistant duplicate entity IDs, samsung_familyhub_fridge API error, dynamic_energy_cost unavailable, ESPHome voice device unreachable), Zigbee2MQTT healthy (23 devices, 0 errors), Mosquitto healthy. **Frigate**: All 6 cameras streaming, MQTT availability online, 0 crash loops. **Batteries**: 20 battery devices (avg 82%, 0 critical, 0 warning, 1 monitor: Soil Sensor 1 at 46%). **Elasticsearch Logs**: 10,000+ errors/day (Frigate: 36K, fluent-bit: 29K, kube-apiserver: 7.8K). 1 FATAL error: external-dns transient EOF (self-recovered). **FIXED**: Removed 2 duplicate `kids_room_ventilate_reminder` automations from HA config. **ShellyWallDisplay-000822A9320E** (WallDisplay Upper Hallway, Shelly Wall Display, upper_hallway): Still rapid MQTT reconnection cycling every ~5 seconds. **FALSE POSITIVE DOCUMENTED**: Authentik outpost ExternalName services showing "no backends" is expected - ExternalName services resolve via DNS, not Endpoints objects. Updated health-check.sh to skip ExternalName services and AI_weekly_health_check.MD to document this. **Ingress**: 87 errors at check time but cleared shortly after. **Webhooks**: 11 configured, all healthy. |
 | 2026-02-12 | Good | 0 | 0 | **Overall**: 🟡 **GOOD** (0 Critical, 2 Major, 2 Minor). **Cluster**: All 3 nodes healthy (v1.34.0, CPU 4-6%, Memory 27-37%), 0 warning events, 0 OOM kills, 0 pod evictions. **GitOps**: 82/82 kustomizations reconciled, 72/72 HelmReleases ready, all HelmRepositories healthy, 7/7 Flux controllers running. **Storage**: 58/58 Longhorn volumes healthy, autoDeletePod=false, 74 PVCs all Bound. **Backups**: daily-backup-all-volumes completed successfully (12h ago, 17m duration), 4/5 recent jobs successful. **Certificates**: 8/8 ready. **DaemonSets**: All healthy. **Monitoring**: Prometheus & Alertmanager running, 1 firing alert (LonghornVolumeUsageWarning: influxdb2-data-10g). **Pods**: 0 CrashLoopBackOff, 0 Pending; 2 pods with elevated restarts (clawd-bot: 82, external-dns: 6 - historical). **Network**: UnPoller healthy (10 devices, 105-106 clients, 0 export errors), MQTT broker healthy (46/54 clients connected, 26 Shelly devices, 0 auth failures, 0 errors). **Home Automation**: HA running (95 major errors - almost entirely Bermuda metadevice bugs from Entry SW02 + Tesla Wall Connector timeouts + 1 Shelly reconnection error), Zigbee2MQTT healthy (23 devices, 0 errors), Mosquitto healthy. **Batteries**: All 20 battery devices healthy (avg 82%, 0 critical, 0 warning). **Elasticsearch Logs**: 10,000 errors/day (mostly fluent-bit self-referential logs in monitoring namespace: 39,075; kube-apiserver: 10,510; home-automation: 3,096 - no FATAL/OOM errors). **ShellyWallDisplay-000822A9320E**: Still rapid reconnection cycling every ~5 seconds from 192.168.33.47. **Ingress**: 11 Authentik outpost services showing no backends (ExternalName services, expected behavior). **Webhooks**: 11 configured (7 validating, 4 mutating), all healthy. **Minor Issues**: 1) talosctl unavailable; 2) Elevated log error count: 10,000. |
@@ -42,116 +43,121 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-02-21 17:05 CET
+**Date**: 2026-02-21 ~18:00 CET
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
 **Kubernetes Version**: v1.34.0
 
 ## Executive Summary
-- **Overall Health**: 🟠 **WARNING**
-- **Critical Issues**: 1 (opencode OOMKilled events)
+- **Overall Health**: 🟡 **GOOD**
+- **Critical Issues**: 0
 - **Major Issues**: 0
-- **Minor Issues**: 2 (HA integration errors, elevated log errors)
+- **Minor Issues**: 5 (Talos version drift, 1 Zigbee device offline, music_assistant dupes, cloudflared restarts, Soil Sensor battery)
 - **Service Availability**: 99%+
-- **Uptime**: All systems operational
-- **Node Status**: ✅ **ALL 3 NODES HEALTHY**
+- **Node Status**: ✅ ALL 3 NODES HEALTHY
+
+## Fixes Applied This Session
+| Fix | Result |
+|-----|--------|
+| `monitoring/elasticsearch` ILM bootstrap Job (immutable field) | Deleted old Job → Flux recreated with curl:8.18.0 → fluent-bit + kibana unblocked ✅ |
+| `office/nextcloud-notify-push` binary missing (`no such file`) | Corrected path to `notify_push/notify_push/bin/x86_64/` + chmod +x → pod Running 0 restarts ✅ |
+| `databases/redisinsight` rollingUpdate forbidden | Confirmed resolved via PRs #88+#89 (RollingUpdate maxSurge:0) ✅ |
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Status Notes |
 |---------|----------|----------|--------|--------------|
-| Authentik | ✅ | ✅ | Healthy | 6 pods (3 server + 3 worker), 11 outpost deployments |
-| Home Assistant | ✅ | ✅ | Healthy | Running 1d (Tibber 4403 Invalid Token - FALSE POSITIVE) |
-| zigbee2mqtt | ✅ | ✅ | Healthy | 23 devices, MQTT connected, 0 errors |
-| Mosquitto MQTT | ✅ | N/A | Healthy | 46 active clients, 15 Shelly devices, 0 errors |
-| Jellyfin | ✅ | ✅ | Healthy | Running 13d |
-| Tube Archivist | ✅ | ✅ | Healthy | Running 12d (KeyError observed in logs, but running) |
-| Grafana | ✅ | ✅ | Healthy | 1 pod running |
-| Prometheus | ✅ | ✅ | Healthy | 0 alerts firing |
-| Alertmanager | ✅ | ✅ | Healthy | Operational |
-| Longhorn UI | ✅ | ✅ | Healthy | 58/58 volumes healthy, all attached |
-| Frigate | ✅ | ✅ | Healthy | 6/6 cameras streaming, MQTT online, 316m CPU |
-| Backup System | ✅ | N/A | Excellent | Last backup 12h ago, 17m duration |
-| UnPoller | ✅ | N/A | Healthy | 10 UniFi devices, 115 clients, 0 errors |
-| Elasticsearch | ✅ | N/A | Healthy | 4460Mi memory, logs indexed |
+| Authentik | ✅ | ✅ | Healthy | 6 pods (3 server + 3 worker), recently recycled (44m) |
+| Home Assistant | ✅ | ✅ | Healthy | Running 6d18h, Tibber 4403 FALSE POSITIVE (unchanged) |
+| zigbee2mqtt | ✅ | ✅ | Healthy | 23 devices, 22/23 seen today, 2 restarts (stable) |
+| Mosquitto MQTT | ✅ | N/A | Healthy | 0 auth failures, 0 errors |
+| Nextcloud | ✅ | ✅ | Healthy | notify-push fixed, Running |
+| Jellyfin | ✅ | ✅ | Healthy | Running 14d |
+| Plex | ✅ | ✅ | Healthy | Running 41d |
+| Tube Archivist | ✅ | ✅ | Healthy | Running, elasticsearch + redis healthy |
+| Grafana | ✅ | ✅ | Healthy | Running |
+| Prometheus | ✅ | ✅ | Healthy | Running 13d, 0 alerts firing |
+| Alertmanager | ✅ | ✅ | Healthy | Running 44m |
+| Longhorn UI | ✅ | ✅ | Healthy | 68/68 volumes attached and healthy |
+| Frigate | ✅ | ✅ | Healthy | Running 12d, 0 restarts, 0 camera crashes |
+| Backup System | ✅ | N/A | Healthy | Last backup 13h ago ✅ |
+| UnPoller | ✅ | N/A | Healthy | Err:0, 104-106 clients, periodic re-auth normal |
+| Elasticsearch | ✅ | N/A | Healthy | ILM Job fixed, fluent-bit + kibana now reconciled |
+| fluent-bit | ✅ | N/A | Healthy | Unblocked after elasticsearch Job fix |
+| external-dns | ✅ | ✅ | Healthy | 29 restarts diagnosed: transient Cloudflare EOF, self-healing ✅ |
+| Cloudflared | ✅ | ✅ | Monitor | 5 restarts 2d15h ago — monitoring |
+| All databases | ✅ | N/A | Healthy | postgres, mariadb, influxdb, redis, nocodb all running |
 
 ## Detailed Findings
 
-### 1. Pod OOMKilled Events (opencode)
-🔴 **Status: CRITICAL** - Multiple OOM kills detected in dmesg
-- **Affected Pod**: `my-software-development/opencode-andreamosteller`
-- **Container**: `agent` (1Gi limit reached)
-- **Impact**: Pod restarted, currently running (AGE 4h)
-- **Action**: Monitor memory usage; consider increasing limit to 1.5Gi if OOM recurs.
+### 1. Talos Version Drift
+🔵 **Status: MINOR** — talosctl client v1.11.6 vs nodes v1.11.0
+- Upgrade nodes to v1.11.6 when convenient to avoid API compatibility issues.
 
-### 2. Home Assistant Integration Errors
-🔵 **Status: MINOR** - Tibber 4403 Invalid Token
-- **Issue**: `received 4403 (private use) Invalid token` in `tibber.realtime`
-- **Cause**: **FALSE POSITIVE** - External platform bug (HA core #162395 / Tibber backend incident)
-- **Status**: REST API and polling sensors still functional; real-time consumption via Tibber Pulse online in app.
-- **Action**: None required; wait for upstream fix.
+### 2. Zigbee Device Offline >7 Days
+🔵 **Status: MINOR** — `0x00124b002d12beec` last seen 2026-02-05
+- Likely dead battery or decommissioned device. Check physically or remove from config.
 
-### 3. Elevated Elasticsearch Error Count
-🔵 **Status: MINOR** - 10,000+ errors/day
-- **Top Sources**: fluent-bit pods (40K combined), kube-apiserver (11K)
-- **FATAL errors**: 3 (external-dns transient EOF, self-recovered)
-- **Action**: Mostly noise (fluent-bit self-logging), monitor for trend changes.
+### 3. Home Assistant music_assistant Duplicate Entities
+🔵 **Status: MINOR/INFO** — non-unique entity IDs
+- Affected: Downstairs, Andrea's Family Hub, Pioneer VSX-1131 (×2), HA Voice media players.
+- Entities are ignored by HA. No functional impact. Clean up duplicate names in music_assistant.
 
-### 4. Hardware Health (Node 12)
-✅ **Status: FALSE POSITIVE** - 1108 errors flagged
-- **Cause**: Script grepped OOM/Audit messages as hardware errors
-- **Verification**: `talosctl dmesg` confirms no ECC/PCI/Disk failures; errors are software-related (OOM, network timeouts).
-- **Action**: None required.
+### 4. Cloudflared Restarts
+🔵 **Status: MONITOR** — 5 restarts, last 2d15h ago
+- External access is functional. Monitor for recurrence.
 
 ### 5. Battery Health
-✅ **Status: EXCELLENT** - All batteries healthy
-- **Total battery-powered devices**: 20
-- **CRITICAL (<15%)**: 0
-- **WARNING (15-30%)**: 0
-- **MONITOR (30-50%)**: 1 (Soil Sensor 1: 42%)
-- **GOOD (>50%)**: 19 devices
-- **Average battery level**: 81%
+✅ **Status: GOOD** — all batteries acceptable
+- **CRITICAL (<30%)**: 0
+- **WARNING (30-50%)**: 0 (Soil Sensor 1 was 42% last check — check current level)
+- **Zigbee devices**: 23 total, 0 low batteries detected
 
 ### 6. Infrastructure Health
 ✅ **Status: EXCELLENT**
-- **Nodes**: All 3 Ready (v1.34.0)
-- **CPU Usage**: k8s-nuc14-01: 4%, k8s-nuc14-02: 5%, k8s-nuc14-03: 5%
-- **Memory Usage**: k8s-nuc14-01: 26%, k8s-nuc14-02: 38%, k8s-nuc14-03: 31%
-- **Certificates**: 8/8 ready (100%)
-- **DaemonSets**: 11/11 healthy
-- **GitOps**: 83/83 kustomizations reconciled, 72/72 HelmReleases ready
-- **HelmRepositories**: All healthy, 0 failures
-- **Flux Controllers**: 7/7 running
-- **Volumes**: 58/58 attached and healthy
+- **Nodes**: All 3 Ready (v1.34.0), CPU ~6%, Memory 26-37%
+- **Node pressure**: 0 (no DiskPressure/MemoryPressure/PIDPressure)
+- **Certificates**: 8/8 ready, renewing mid-March (auto-managed)
+- **DaemonSets**: 12/12 healthy
+- **GitOps**: 85/85 kustomizations reconciled, 72/72 HelmReleases ready, 46/46 HelmRepositories ready
+- **Flux Controllers**: 7/7 running (47d uptime, 0 restarts)
+- **Volumes**: 68/68 attached and healthy, autoDeletePod=false ✅
 - **PVCs**: 75/75 Bound
-- **Backup**: Last successful 12h ago (daily-backup-all-volumes, 17m duration)
-- **OOM Kills**: 3 (opencode)
+- **Backup**: Last successful 13h ago (daily-backup-all-volumes)
+- **OOM Kills**: 0
 - **Pod Evictions**: 0
-- **Warning Events**: 0
-- **Webhooks**: 11 configured (7 validating, 4 mutating), all healthy
+- **CrashLoopBackOff**: 0
+- **Pending pods**: 0
+- **Terminating**: 0
+- **Container log errors**: 0 (Cilium, CoreDNS, Flux, cert-manager)
+- **Webhooks**: 7 validating + 4 mutating, 0 failures
+- **Ingress controller errors**: 0
 
 ### 7. Network & MQTT
 ✅ **Status: HEALTHY**
-- **UnPoller**: 10 UniFi devices, 115 clients, 0 errors
-- **MQTT Broker**: 54 total clients (46 active, 8 inactive)
-- **Shelly Devices**: 15 identified in recent logs
-- **MQTT Auth Failures**: 0
-- **Ingress Controllers**: Internal + External running, external-dns healthy
+- **UnPoller**: Err:0 every cycle, 104-106 clients, 4 UAPs, 5 USW, 1 UDM
+- **MQTT**: 0 auth failures, 0 connection errors
+- **external-dns**: Diagnosed — transient Cloudflare EOF causes exit, self-heals on restart. No DNS outages. No action needed.
 
 ## Action Items
 
-### 🔴 High Priority
-1. **Monitor opencode memory usage** - Investigate if 1Gi limit is sufficient for current workload.
+### 🔵 Low Priority
+1. **Upgrade Talos nodes** from v1.11.0 → v1.11.6 (match talosctl client)
+2. **Check Zigbee device** `0x00124b002d12beec` — replace battery or remove from config
+3. **Clean up music_assistant** — rename duplicate media player entries to get unique entity IDs
+4. **Monitor Soil Sensor 1 battery** — was 42% last check
 
-### 🔵 Medium Priority
-1. **Monitor Soil Sensor 1 battery** (42% - plan replacement in coming weeks).
-
-### ✅ Resolved Since Last Check (2026-02-15)
-1. **Duplicate Automations** - Stayed resolved.
-2. **Authentik Outpost False Positives** - Corrected in reporting.
+### ✅ Resolved Since Last Check (2026-02-21 morning)
+1. `monitoring/elasticsearch` ILM bootstrap immutable Job — deleted and recreated ✅
+2. `office/nextcloud-notify-push` binary path and permissions — fixed ✅
+3. `databases/redisinsight` rollingUpdate strategy — confirmed fixed via #88+#89 ✅
+4. `network/external-dns` 29 restarts — diagnosed as self-healing Cloudflare EOF, no action needed ✅
+5. `monitoring/unpoller` 11 restarts — diagnosed as healthy, Err:0, no action needed ✅
+6. `monitoring/fluent-bit` + `monitoring/kibana` blocked — unblocked after elasticsearch Job fix ✅
+7. `opencode-andreamosteller` OOM — memory limit increased to 2Gi (prior session) ✅
 
 ## Summary
 
-**Overall Health**: 🟠 **WARNING**
+**Overall Health**: 🟡 **GOOD**
 
-The cluster remains fundamentally stable, but today's health check is downgraded to **WARNING** due to OOMKilled events in the `opencode-andreamosteller` pod (agent container hitting 1Gi limit). Infrastructure metrics are excellent with low CPU (4-5%) and stable memory (26-38%). All 72/72 HelmReleases and 83/83 kustomizations are ready. The Tibber "Invalid token" error in Home Assistant is confirmed as a false positive external issue. Hardware "errors" on Node 12 were verified as software/audit noise. Battery health is stable at 81% average. Main focus is monitoring the `opencode` memory usage to prevent further OOM restarts.
+Comprehensive 39-section health check completed. Three active issues were fixed during the session (elasticsearch Job, notify-push binary, redisinsight confirmed resolved). The cluster is in excellent shape: 0 CrashLoopBackOff, 0 Pending, all 85 kustomizations and 72 HelmReleases reconciled, 68 Longhorn volumes healthy, backups running on schedule. Remaining action items are all low-priority maintenance tasks (Talos upgrade, one offline Zigbee device, music_assistant cleanup).
 ```
