@@ -30,7 +30,7 @@ spec:
     image:
       repository: n8nio/n8n
       pullPolicy: IfNotPresent
-      tag: "1.123.20"
+      tag: "1.123.21"
 
     # Ingress handles HTTPS externally
     ingress:
