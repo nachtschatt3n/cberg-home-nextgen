@@ -34,7 +34,7 @@ spec:
           init-clone:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-5583b80
+              tag: sha-39b8cd3
               pullPolicy: Always
             command: ["/usr/local/bin/clone.sh"]
             envFrom:
@@ -48,7 +48,7 @@ spec:
           opencode:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-5583b80
+              tag: sha-39b8cd3
               pullPolicy: Always
             command: ["bash", "-lc", "opencode serve --port 4096 --hostname 0.0.0.0"]
             envFrom:
@@ -98,21 +98,33 @@ spec:
           preview:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-5583b80
+              tag: sha-39b8cd3
               pullPolicy: Always
-            # DEV_SERVER_CMD requires python3 which is not in the image.
-            # Temporarily disabled until python3 is added to the devcontainer image.
-            # To re-enable: change command back to:
-            #   ["bash", "-lc", "cd $HOME/workspace && eval \"$DEV_SERVER_CMD\""]
-            command: ["sleep", "infinity"]
+            command: ["bash", "-lc", "cd $HOME/workspace && eval \"$DEV_SERVER_CMD\""]
             envFrom:
               - secretRef:
                   name: opencode-andreamosteller-secrets
             probes:
               liveness:
-                enabled: false
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 5173
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 5
               startup:
-                enabled: false
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 5173
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 60
             resources:
               requests:
                 cpu: 100m
