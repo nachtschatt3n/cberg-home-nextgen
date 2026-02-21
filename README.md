@@ -10,7 +10,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 [![Talos](https://img.shields.io/badge/Talos-v1.11.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
-[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.4.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
+[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.7.5-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
 
@@ -33,14 +33,14 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 ### Core Components
 
 - **Operating System**: [Talos Linux v1.11.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration
-- **Container Runtime**: [Containerd 2.0.2](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
-- **Networking**: [Cilium](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
-- **Storage**: [Longhorn](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
+- **Container Runtime**: [Containerd 2.1.4](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
+- **Networking**: [Cilium v1.18.6](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
+- **Storage**: [Longhorn v1.10.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
-- **GitOps**: [Flux](https://github.com/fluxcd/flux2) monitors this repository and keeps the cluster in sync
+- **GitOps**: [Flux v2.7.5](https://github.com/fluxcd/flux2) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
-- **Certificate Management**: [cert-manager](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
+- **Certificate Management**: [cert-manager v1.19.3](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
 ### GitOps Workflow
 
@@ -324,6 +324,10 @@ The cluster hosts a variety of applications organized by functional category:
 - **Zigbee2MQTT** - Zigbee device integration via MQTT
 - **Mosquitto** - MQTT broker for IoT communications
 - **Music Assistant** - Multi-room audio management
+- **ioBroker** - IoT integration platform
+- **n8n** - Workflow automation tool
+- **Teslamate** - Tesla data logger
+- **MQTTX Web** - Web-based MQTT client
 
 ### 🌐 Network Services  
 - **AdGuard Home** - Network-wide ad blocking at `192.168.55.5`
@@ -331,12 +335,16 @@ The cluster hosts a variety of applications organized by functional category:
 - **Cloudflared** - Cloudflare Tunnel for external access
 - **External DNS** - Automatic DNS record management
 - **k8s-gateway** - Internal DNS resolution for cluster services
+- **Flux Webhook** - Webhook receiver for Flux GitOps automation
 
 ### 📊 Monitoring & Observability
 - **Grafana** - Data visualization and dashboards
 - **Prometheus Stack** - Metrics collection and alerting  
 - **Uptime Kuma** - Service monitoring and status pages
-- **Kubernetes Dashboard** - Cluster management interface
+- **ECK Stack** - Elasticsearch, Kibana, and Fluent-bit for log management
+- **Elasticsearch Exporter** - Prometheus exporter for Elasticsearch metrics
+- **Headlamp** - Kubernetes web UI
+- **Unpoller** - UniFi metrics exporter for Prometheus
 
 ### 🎬 Media & Entertainment
 - **Plex** - Media server for streaming content
@@ -344,40 +352,53 @@ The cluster hosts a variety of applications organized by functional category:
 - **TubeArchivist** - YouTube content archival and management
 - **MakeMKV** - Blu-ray and DVD ripping utility
 
+### 📥 Download
+- **JDownloader** - Download manager
+- **TubeArchivist** - YouTube content archival and management
+
 ### 🗄️ Databases
+- **PostgreSQL** - Advanced relational database
 - **MariaDB** - Primary relational database
+- **Redis** - In-memory data structure store
 - **InfluxDB** - Time-series database for metrics
-- **phpMyAdmin** - Database administration interface
+- **Nocodb** - Open-source Airtable alternative
+- **phpMyAdmin** - MySQL/MariaDB administration interface
+- **pgAdmin** - PostgreSQL administration interface
+- **RedisInsight** - Redis GUI
 
 ### 🤖 AI & Machine Learning
-- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro (`192.168.30.111`) with three dedicated instances:
-  - **Voice** (port 11434): `qwen3:4b-instruct` - Voice/audio processing
-  - **Reason** (port 11435): `gpt-oss:20b` - General reasoning and text processing
-  - **Vision** (port 11436): `qwen3-vl:8b-instruct` - Vision/image processing
-  - All instances provide native Ollama API endpoints at `http://192.168.30.111:{PORT}/api`
+- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro (`192.168.30.111`)
 - **Open WebUI** - Chat interface for AI models
-- **Langfuse** - LLM observability and analytics with S3-compatible MinIO storage
+- **Langfuse** - LLM observability and analytics
+- **OpenClaw** - AI agent platform
+- **MCPO** - Model Control Plane Orchestrator
+- **AI-SRE** - AI-powered Site Reliability Engineering tools
 
 ### 📄 Office & Productivity
 - **Nextcloud** - Self-hosted cloud storage and collaboration
 - **Paperless-ngx** - Document management and OCR
+- **Actual Budget** - Personal finance management
+- **Omni-Tools** - Collection of productivity tools
+- **Paperless-AI/GPT** - AI enhancements for Paperless-ngx
+- **Penpot** - Design and prototyping platform
+- **Vaultwarden** - Bitwarden-compatible password manager
 
 ### 💾 Storage & Backup
 - **Longhorn** - Distributed storage with replication 
-- **Kopia** - Backup and snapshot management
 - **iCloud Drive Sync** - Apple iCloud integration
 
 ### 🔧 System Services
+- **authentik** - Unified identity provider
 - **cert-manager** - Automated TLS certificate management
 - **Cilium** - eBPF-based networking and security
 - **CoreDNS** - Cluster DNS resolution  
 - **CSI Driver SMB** - SMB/CIFS storage integration
-- **Intel Device Plugin** - GPU acceleration support
-- **Local Path Provisioner** - Local storage provisioning
-- **Metrics Server** - Resource usage metrics
-- **Node Feature Discovery** - Hardware feature detection
-- **Reloader** - Automatic pod restart on config changes
-- **Spegel** - Distributed container image mirroring
+- **descheduler** - Kubernetes pod descheduler
+- **intel-device-plugin** - GPU acceleration support
+- **metrics-server** - Resource usage metrics
+- **node-feature-discovery** - Hardware feature detection
+- **reloader** - Automatic pod restart on config changes
+- **spegel** - Distributed container image mirroring
 
 ### 🛠️ Custom Applications
 - **Absenty** - Custom development and production deployments
@@ -416,7 +437,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **Python 3.13** - For automation scripts and utilities
 - **uv** - Fast Python package installer
 - **kubectl 1.34.0** - Kubernetes CLI
-- **flux 2.4.0** - GitOps toolkit CLI
+- **flux 2.7.5** - GitOps toolkit CLI
 - **talosctl 1.11.0** - Talos Linux management
 - **talhelper 3.0.37** - Talos configuration helper
 - **sops 3.9.4** - Secrets encryption
@@ -452,7 +473,7 @@ mise install
 mise ls
 python --version   # Python 3.13.8
 kubectl version    # kubectl 1.34.0
-flux version       # flux 2.4.0
+flux version       # flux 2.7.5
 
 # Access cluster (KUBECONFIG already set by mise)
 kubectl get nodes
@@ -486,3 +507,4 @@ Additional inspiration from:
 ## 📄 License
 
 This repository is available under the [MIT License](LICENSE).
+
