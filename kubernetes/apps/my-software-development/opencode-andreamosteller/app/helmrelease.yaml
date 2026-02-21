@@ -210,8 +210,19 @@ spec:
         storageClass: longhorn
         accessMode: ReadWriteOnce
         size: 5Gi
-        globalMounts:
-          - path: /home/opencode/workspace
+        advancedMounts:
+          opencode-andreamosteller:
+            init-clone:
+              - path: /home/opencode/workspace
+                subPath: workspace
+            opencode:
+              - path: /home/opencode/workspace
+                subPath: workspace
+              - path: /home/opencode/.local/share/opencode
+                subPath: opencode-data
+            preview:
+              - path: /home/opencode/workspace
+                subPath: workspace
       tmp:
         type: emptyDir
         globalMounts:
