@@ -69,8 +69,7 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /
+                  tcpSocket:
                     port: 4096
                   initialDelaySeconds: 30
                   periodSeconds: 15
@@ -101,31 +100,19 @@ spec:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
               tag: sha-5583b80
               pullPolicy: Always
-            command: ["bash", "-lc", "cd $HOME/workspace && eval \"$DEV_SERVER_CMD\""]
+            # DEV_SERVER_CMD requires python3 which is not in the image.
+            # Temporarily disabled until python3 is added to the devcontainer image.
+            # To re-enable: change command back to:
+            #   ["bash", "-lc", "cd $HOME/workspace && eval \"$DEV_SERVER_CMD\""]
+            command: ["sleep", "infinity"]
             envFrom:
               - secretRef:
                   name: opencode-andreamosteller-secrets
             probes:
               liveness:
-                enabled: true
-                custom: true
-                spec:
-                  tcpSocket:
-                    port: 5173
-                  initialDelaySeconds: 60
-                  periodSeconds: 30
-                  timeoutSeconds: 5
-                  failureThreshold: 5
+                enabled: false
               startup:
-                enabled: true
-                custom: true
-                spec:
-                  tcpSocket:
-                    port: 5173
-                  initialDelaySeconds: 10
-                  periodSeconds: 10
-                  timeoutSeconds: 5
-                  failureThreshold: 60
+                enabled: false
             resources:
               requests:
                 cpu: 100m
