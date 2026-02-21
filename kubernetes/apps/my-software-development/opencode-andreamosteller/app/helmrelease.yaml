@@ -34,7 +34,7 @@ spec:
           init-clone:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-39b8cd3
+              tag: sha-4d4c614
               pullPolicy: Always
             command: ["/usr/local/bin/clone.sh"]
             envFrom:
@@ -48,7 +48,7 @@ spec:
           opencode:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-39b8cd3
+              tag: sha-4d4c614
               pullPolicy: Always
             command: ["bash", "-lc", "opencode serve --port 4096 --hostname 0.0.0.0"]
             envFrom:
@@ -98,7 +98,7 @@ spec:
           preview:
             image:
               repository: ghcr.io/nachtschatt3n/opencode-web-devcontainer
-              tag: sha-39b8cd3
+              tag: sha-4d4c614
               pullPolicy: Always
             command: ["bash", "-lc", "cd $HOME/workspace && eval \"$DEV_SERVER_CMD\""]
             envFrom:
