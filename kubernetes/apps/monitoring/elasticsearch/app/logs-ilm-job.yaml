@@ -12,7 +12,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: curlimages/curl:8.9.1
+          image: curlimages/curl:8.18.0
           imagePullPolicy: IfNotPresent
           env:
             - name: ELASTIC_PASSWORD
