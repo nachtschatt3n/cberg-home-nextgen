@@ -169,6 +169,7 @@ spec:
           gethomepage.dev/description: "AI coding agent for andreamosteller"
           gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "mdi-code-braces"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=opencode-andreamosteller"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -190,6 +191,7 @@ spec:
           gethomepage.dev/description: "Live app preview for andreamosteller"
           gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "mdi-eye"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=opencode-andreamosteller"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
