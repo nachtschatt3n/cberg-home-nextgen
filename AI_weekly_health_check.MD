@@ -1222,8 +1222,17 @@ kubectl exec -n home-automation deployment/home-assistant -- curl -s http://loca
 5. **Dynamic Energy Cost / Tibber Sensor Unavailable (FALSE POSITIVE)**:
    - **Error**: `State of sensor.schulstrasse_105_electricity_price is 'unavailable', skipping update` from `custom_components.dynamic_energy_cost.sensor`
    - **Cause**: During HA startup or restart, the Tibber integration takes a few minutes to initialize and authenticate via JWT. Until initialization completes, `sensor.schulstrasse_105_electricity_price` briefly shows as `unavailable`, causing the `dynamic_energy_cost` integration to log warnings.
-   - **Resolution**: This is transient startup noise that auto-resolves within minutes. No action needed. Verify by checking the live sensor state after startup completes: `curl -s -H "Authorization: Bearer $TOKEN" https://hass.uhl.cool/api/states/sensor.schulstrasse_105_electricity_price | jq .state`
+   - **Resolution**: This is transient startup noise that auto-resolves within minutes. No action needed. Verify by checking the live sensor state after startup completes: `curl -s -H "Authorization: Bearer $TOKEN" https://hass.secret-domain/api/states/sensor.schulstrasse_105_electricity_price | jq .state`
    - **Confirmed**: 2026-02-15 — all Tibber sensors operational (electricity price, real-time power via Tibber Pulse). Do not flag as critical.
+
+6. **Tibber Realtime WebSocket 4403 "Invalid token" (FALSE POSITIVE)**:
+   - **Error**: `Error in watchdog connect, retrying in 300 seconds, N: received 4403 (private use) Invalid token; then sent 4403 (private use) Invalid token` from `tibber.realtime`
+   - **Cause**: Known bug affecting HA 2026.2.x (tracked in [home-assistant/core #162395](https://github.com/home-assistant/core/issues/162395)), also acknowledged on the [Tibber status page](https://status.tibber.com) as an open incident ("Issues maintaining connection to Tibber API", identified 2026-02-14). Root cause is Tibber's backend JWT validation failing for WebSocket connections; the REST API and polling sensors continue to work normally.
+   - **How to verify it is NOT a real token problem**: The Tibber REST API works (`curl -s -H "Authorization: Bearer $TOKEN" -X POST https://api.tibber.com/v1-beta/gql -d '{"query":"{ viewer { name } }"}' | jq .`). The Tibber Pulse is online (live consumption visible in Tibber app). The subscription shows `status: running`.
+   - **Do NOT**: Regenerate the Tibber API token — it will not fix the WebSocket issue and may cause additional auth problems.
+   - **Do NOT**: Re-authenticate the integration — the OAuth flow has rate-limiting bugs in 2026.x.
+   - **Resolution**: Wait for upstream fix in HA core or Tibber backend. Monitor [#162395](https://github.com/home-assistant/core/issues/162395) for resolution.
+   - **Confirmed**: 2026-02-21 — token valid, REST API operational, Tibber Pulse online in app, WebSocket 4403 is an external platform bug.
 
 ---
 
