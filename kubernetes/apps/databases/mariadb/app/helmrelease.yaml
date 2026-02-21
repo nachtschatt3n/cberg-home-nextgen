@@ -71,7 +71,7 @@ spec:
 
       hostname: &host "mariadb.${SECRET_DOMAIN}"
       hosts:
-        - &host "mariadb.${SECRET_DOMAIN}"
+        - *host
       tls:
         - hosts:
             - *host

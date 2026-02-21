@@ -89,7 +89,7 @@ spec:
         gethomepage.dev/enabled: "true"
       hostname: &host "influx.${SECRET_DOMAIN}"
       hosts:
-        - &host "influx.${SECRET_DOMAIN}"
+        - *host
       tls:
         - hosts:
             - *host

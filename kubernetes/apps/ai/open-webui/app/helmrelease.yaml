@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: open-webui
-      version: 10.2.1
+      version: 12.3.0
       sourceRef:
         kind: HelmRepository
         name: open-webui
@@ -75,6 +75,8 @@ spec:
     websocket:
       # -- Enables websocket support in Open WebUI with env `ENABLE_WEBSOCKET_SUPPORT`
       enabled: true
+      # -- Explicit Redis URL to preserve service name after chart 12.x naming convention change
+      url: "redis://open-webui-redis:6379/0"
 
     # -- Value of cluster domain
     clusterDomain: example.com
@@ -85,7 +87,7 @@ spec:
     # -- Open WebUI image tags can be found here: https://github.com/open-webui/open-webui/pkgs/container/open-webui
     image:
       repository: ghcr.io/open-webui/open-webui
-      tag: 0.7.2
+      tag: 0.8.3
       pullPolicy: "IfNotPresent"
     resources:
       requests:
