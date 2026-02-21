@@ -30,7 +30,7 @@ spec:
           fix-permissions:
             image:
               repository: busybox
-              tag: 1.35
+              tag: 1.37
             command: ["/bin/sh", "-c"]
             args:
               - |
