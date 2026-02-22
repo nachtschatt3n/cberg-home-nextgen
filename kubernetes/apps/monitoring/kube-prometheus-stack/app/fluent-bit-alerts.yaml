@@ -1,0 +1,99 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fluent-bit-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: fluent-bit.pipeline.health
+      interval: 30s
+      rules:
+        # Warn when a significant number of log chunks are stuck in filesystem
+        # storage waiting to be retried. Normal steady-state is <20 chunks.
+        # Our incident had 3600+ queued retry tasks.
+        - alert: FluentBitRetryBacklogHigh
+          expr: fluentbit_storage_chunks_down > 100
+          for: 10m
+          labels:
+            severity: warning
+            category: logging
+            component: fluent-bit
+          annotations:
+            summary: "fluent-bit retry backlog building up on {{ $labels.instance }}"
+            description: >-
+              fluent-bit on {{ $labels.instance }} has {{ $value }} chunks queued in
+              filesystem storage (threshold: 100). This usually means Elasticsearch is
+              slow or rejecting writes, causing chunks to accumulate. Check ES cluster
+              health and write thread pool rejections.
+              Recovery: if ES is healthy, restart the DaemonSet to clear the backlog:
+              kubectl rollout restart daemonset/fluent-bit -n monitoring
+
+        # Fire earlier with a higher threshold so we can catch it before it gets out of hand
+        - alert: FluentBitRetryBacklogCritical
+          expr: fluentbit_storage_chunks_down > 500
+          for: 5m
+          labels:
+            severity: critical
+            category: logging
+            component: fluent-bit
+          annotations:
+            summary: "fluent-bit retry backlog is critical on {{ $labels.instance }}"
+            description: >-
+              fluent-bit on {{ $labels.instance }} has {{ $value }} chunks queued in
+              filesystem storage (threshold: 500). Logs are heavily backed up and
+              may start dropping when the 5G storage limit is reached. Immediate
+              action required. Check ES health first, then restart fluent-bit DaemonSet.
+
+        # Dropped records mean Retry_Limit (currently 15) was exceeded and logs are
+        # permanently lost. This is the worst-case outcome of a backlog.
+        - alert: FluentBitLogsDropped
+          expr: increase(fluentbit_output_dropped_records_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+            category: logging
+            component: fluent-bit
+          annotations:
+            summary: "fluent-bit is dropping log records on {{ $labels.instance }}"
+            description: >-
+              fluent-bit on {{ $labels.instance }} dropped {{ $value }} log records
+              in the last 5 minutes. Records are dropped when the Retry_Limit (15) is
+              exceeded. This means logs are being permanently lost.
+              Check Elasticsearch health immediately.
+
+        # Persistent output errors usually indicate ES connectivity or auth issues.
+        - alert: FluentBitOutputErrors
+          expr: increase(fluentbit_output_errors_total[5m]) > 50
+          for: 10m
+          labels:
+            severity: warning
+            category: logging
+            component: fluent-bit
+          annotations:
+            summary: "fluent-bit output errors elevated on {{ $labels.instance }}"
+            description: >-
+              fluent-bit on {{ $labels.instance }} recorded {{ $value }} output errors
+              in the last 5 minutes. Persistent errors indicate Elasticsearch
+              connectivity or authentication issues. Check ES pod status and logs.
+
+    - name: fluent-bit.availability
+      interval: 30s
+      rules:
+        # Alert if fluent-bit is not running on all nodes
+        - alert: FluentBitDown
+          expr: up{job="fluent-bit"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: logging
+            component: fluent-bit
+          annotations:
+            summary: "fluent-bit is down on {{ $labels.instance }}"
+            description: >-
+              fluent-bit on {{ $labels.instance }} has been unreachable for 5 minutes.
+              Logs from this node are not being collected or shipped to Elasticsearch.
