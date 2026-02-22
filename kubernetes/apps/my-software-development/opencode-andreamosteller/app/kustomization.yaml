@@ -6,3 +6,5 @@ resources:
   - ./secrets.sops.yaml
   - ./ghcr-secret.sops.yaml
   - ./helmrelease.yaml
+  - ./storageclass.yaml
+  - ./pvc.yaml
