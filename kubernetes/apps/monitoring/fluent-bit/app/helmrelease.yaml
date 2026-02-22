@@ -143,10 +143,7 @@ spec:
       - effect: NoSchedule
         operator: Exists
 
+    # ServiceMonitor is managed as a standalone resource (servicemonitor.yaml)
+    # so we can attach the required release: kube-prometheus-stack label
     serviceMonitor:
-      enabled: true
-      labels:
-        release: kube-prometheus-stack
-      interval: 30s
-      scrapeTimeout: 10s
-      telemetryPath: /api/v1/metrics/prometheus
+      enabled: false
