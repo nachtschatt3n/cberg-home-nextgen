@@ -118,6 +118,7 @@ spec:
             tls On
             tls.verify Off
             Retry_Limit 15
+            Replace_Dots On
             Suppress_Type_Name On
             Buffer_Size 10M
             storage.total_limit_size 5G
