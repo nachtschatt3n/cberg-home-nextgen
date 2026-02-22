@@ -27,7 +27,7 @@ spec:
   values:
     image:
       repository: louislam/uptime-kuma
-      tag: 2.1.1
+      tag: 2.1.3
     env:
       - name: UPTIME_KUMA_DISABLE_FRAME_SAMEORIGIN
         value: "true"

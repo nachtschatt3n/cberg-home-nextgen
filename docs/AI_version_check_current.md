@@ -1,16 +1,16 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-02-21 11:09:03
+**Generated:** 2026-02-22 14:09:38
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
 ## Summary
 
 - **Total Deployments:** 70
-- **Chart Updates Available:** 12
-- **Image Updates Available:** 8
-- **Update Breakdown:** 🔴 6 major | 🟡 7 minor | 🟢 5 patch
-- **⚠️ Breaking Changes Detected:** 7 updates with potential breaking changes
+- **Chart Updates Available:** 4
+- **Image Updates Available:** 10
+- **Update Breakdown:** 🔴 2 major | 🟡 2 minor | 🟢 5 patch
+- **⚠️ Breaking Changes Detected:** 4 updates with potential breaking changes
 
 ---
 
@@ -24,12 +24,12 @@
 | `nocodb` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `phpmyadmin` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.3 ? | latest ✅ | - | - |
-| `ai-sre` | `default` | 3.7.3 ? | 2.1.0 ? | 2.1.0 | - |
+| `ai-sre` | `default` | 3.7.3 ? | 2.1.0 → 2.1.1 | 2.1.0 | 🟢 PATCH |
 | `cert-manager` | `default` | v1.19.3 ✅ | - | - | - |
 | `cilium` | `default` | 1.18.6 → 1.19.1 | - | - | 🟡 MINOR |
 | `cloudflared` | `default` | 3.7.3 ? | 2026.2.0 ✅ | 2026.2.0 | - |
 | `coredns` | `default` | 1.45.2 ? | - | - | - |
-| `descheduler` | `default` | 0.34.0 → 0.35.0 | - | - | 🟡 MINOR |
+| `descheduler` | `default` | 0.35.0 ✅ | - | - | - |
 | `echo-server` | `default` | 3.7.3 ? | 35 ? | 35 | - |
 | `external-dns` | `default` | 1.20.0 ✅ | - | - | - |
 | `external-ingress-nginx` | `default` | 4.14.3 ✅ | - | - | - |
@@ -37,22 +37,22 @@
 | `flux-instance` | `default` | 0.14.0 ? | - | - | - |
 | `flux-operator` | `default` | 0.14.0 ? | - | - | - |
 | `grafana` | `default` | 10.5.15 ✅ | - | - | - |
-| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 ? | v1.10.1 | - |
-| `intel-device-plugin-gpu` | `default` | 0.34.1 → 0.35.0 | - | - | 🟡 MINOR |
-| `intel-device-plugin-operator` | `default` | 0.34.1 → 0.35.0 | - | - | 🟡 MINOR |
+| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 → 1.10.1 | v1.10.1 | ⚪ UNKNOWN |
+| `intel-device-plugin-gpu` | `default` | 0.35.0 ✅ | - | - | - |
+| `intel-device-plugin-operator` | `default` | 0.35.0 ✅ | - | - | - |
 | `internal-ingress-nginx` | `default` | 4.14.3 ✅ | - | - | - |
 | `jdownloader` | `default` | 3.7.3 ? | v26.02.2 ✅ | v26.02.2 | - |
 | `k8s-gateway` | `default` | 2.4.0 ✅ | - | - | - |
-| `kube-prometheus-stack` | `default` | 81.5.0 ? | - | - | - |
-| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 ? | git-44ce6d0 | - |
+| `kube-prometheus-stack` | `default` | 81.6.9 ? | - | - | - |
+| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 → 0.0.19 | git-44ce6d0 | ⚪ UNKNOWN |
 | `metrics-server` | `default` | 3.13.0 ✅ | - | - | - |
-| `nextcloud` | `default` | 6.6.10 → 8.9.1 | 32.0.5 ? | 32.0.5 | 🔴 MAJOR |
+| `nextcloud` | `default` | 6.6.10 → 8.9.1 | 32.0.6 ? | 32.0.6 | 🔴 MAJOR |
 | `node-feature-discovery` | `default` | 0.18.3 ✅ | - | - | - |
 | `omni-tools` | `default` | 3.7.3 ? | 0.6.0 ✅ | 0.6.0 | - |
-| `open-webui` | `default` | 10.2.1 → 12.3.0 | 0.7.2 ? | 0.7.2 | 🔴 MAJOR |
+| `open-webui` | `default` | 12.3.0 ✅ | 0.8.3 ✅ | 0.8.3 | - |
 | `openclaw` | `default` | 3.7.3 ? | 22-bookworm ? | 22-bookworm | - |
 | `opencode-PROJECT_NAME` | `default` | 3.7.3 ? | latest ✅ | - | - |
-| `opencode-andreamosteller` | `default` | 3.7.3 ? | sha-5583b80 ? | sha-5583b80 | - |
+| `opencode-andreamosteller` | `default` | 3.7.3 ? | sha-4d4c614 ? | sha-4d4c614 | - |
 | `paperless-ai` | `default` | 3.7.3 ? | latest ✅ | - | - |
 | `paperless-gpt` | `default` | 3.7.3 ? | latest ✅ | - | - |
 | `redis` | `default` | 3.7.3 ? | 7-alpine ? | 7-alpine | - |
@@ -60,33 +60,33 @@
 | `spegel` | `default` | v0.0.30 ? | - | - | - |
 | `teslamate` | `default` | 3.7.3 ? | 2.2.0 ✅ | 2.2.0 | - |
 | `tube-archivist` | `default` | 3.7.3 ? | v0.5.9 ✅ | v0.5.9 | - |
-| `vaultwarden` | `default` | 3.7.3 ? | 1.35.2 → 1.35.3 | 1.35.2 | 🟢 PATCH |
-| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.1 ? | 2026.2.1 | - |
-| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ? | 0.16.4 | - |
-| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.1 ? | 2026.2.1 | - |
+| `vaultwarden` | `default` | 3.7.3 ? | 1.35.3 ✅ | 1.35.3 | - |
+| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.1 ✅ | 2026.2.1 | - |
+| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ✅ | 0.16.4 | - |
+| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.1 → 2026.2.3 | 2026.2.1 | 🟢 PATCH |
 | `mosquitto` | `home-automation` | 3.7.3 ? | 2.0.22 ? | 2.0.22 | - |
 | `mqttx-web` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
-| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.6 ? | 2.7.6 | - |
-| `n8n` | `home-automation` | 1.1.0 ? | 1.123.21 → 2.9.1 | 1.123.21 | 🔴 MAJOR |
-| `node-red` | `home-automation` | 3.7.3 ? | 4.1.4 → 4.1.5 | 4.1.4 | 🟢 PATCH |
+| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.6 → 2.7.8 | 2.7.6 | 🟢 PATCH |
+| `n8n` | `home-automation` | 2.0.1 ? | 2.9.1 ✅ | 2.9.1 | - |
+| `node-red` | `home-automation` | 3.7.3 ? | 4.1.5 ✅ | 4.1.5 | - |
 | `scrypted` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
 | `zigbee2mqtt` | `home-automation` | 3.7.3 ? | 2.8.0 ✅ | 2.8.0 | - |
-| `authentik` | `kube-system` | 2025.12.3 → 2025.12.4 | - | - | 🟢 PATCH |
+| `authentik` | `kube-system` | 2025.12.4 ✅ | - | - | - |
 | `csi-driver-smb` | `kube-system` | 1.20.0 ✅ | - | - | - |
 | `jellyfin` | `media` | 2.7.0 ✅ | 10.11.6 ✅ | 10.11.6 | - |
 | `makemkv` | `media` | 3.7.3 ? | latest ✅ | - | - |
 | `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
-| `eck-operator` | `monitoring` | 2.14.0 → 3.3.0 | - | - | 🔴 MAJOR |
+| `eck-operator` | `monitoring` | 3.3.0 ✅ | - | - | - |
 | `headlamp` | `monitoring` | 0.40.0 ✅ | - | - | - |
-| `unpoller` | `monitoring` | 2.1.0 ✅ | v2.33.0 → 2.34.0 | v2.33.0 | 🟡 MINOR |
-| `uptime-kuma` | `monitoring` | 2.25.0 → 4.0.0 | 2.1.0 → 2.1.3 | 2.1.0 | 🔴 MAJOR |
+| `unpoller` | `monitoring` | 2.1.0 ✅ | v2.34.0 → 2.34.0 | v2.34.0 | ⚪ UNKNOWN |
+| `uptime-kuma` | `monitoring` | 4.0.0 ✅ | 2.1.1 → 2.1.3 | 2.1.1 | 🟢 PATCH |
 | `absenty` | `my-software-development` | 3.7.3 ? | sha-ff3910e-dev ? | sha-ff3910e-dev | - |
 | `andreamosteller` | `my-software-development` | 3.7.3 ? | sha-394fe9f ? | sha-394fe9f | - |
 | `absenty` | `my-software-production` | 3.7.3 ? | sha-ffa072a ? | sha-ffa072a | - |
 | `andreamosteller` | `my-software-production` | 3.7.3 ? | 5d88656-unprivileged-v2 ? | 5d88656-unprivileged-v2 | - |
-| `adguard-home` | `network` | 0.24.0 ✅ | v0.107.71 → v0.107.72 | v0.107.71 | 🟢 PATCH |
-| `paperless-ngx` | `office` | 0.24.1 ✅ | 2.20.7 ✅ | 2.20.7 | - |
-| `penpot` | `office` | 0.33.0 → 0.35.0 | - | - | 🟡 MINOR |
+| `adguard-home` | `network` | 0.24.0 ✅ | v0.107.72 ✅ | v0.107.72 | - |
+| `paperless-ngx` | `office` | 0.24.1 ✅ | 2.20.7 → 2.20.8 | 2.20.7 | 🟢 PATCH |
+| `penpot` | `office` | 0.35.0 ✅ | - | - | - |
 | `longhorn` | `storage` | 1.10.1 → 1.11.0 | - | - | 🟡 MINOR |
 
 ---
@@ -210,7 +210,7 @@
 - **Repository:** `actualbudget/actual-server`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `sha-a68b2ac-alpine` ✅ (up-to-date)
+  - **Latest Tag:** `sha-31a027f-alpine` ✅ (up-to-date)
 
 ---
 
@@ -228,7 +228,73 @@
 - **Repository:** `ghcr.io/nachtschatt3n/ai-sre`
   - **Path:** `controllers.ai-sre.containers.app.image`
   - **Current Tag:** `2.1.0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.1.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.1.0 → 2.1.1
+  - **⚠️ Breaking Changes Detected:**
+    - - No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+  - **Source:** https://github.com/nachtschatt3n/ai-sre/releases/tag/2.1.1
+  - **Release Date:** 2025-10-18
+  - **Release Notes:**
+    ```markdown
+    ## What's New
+
+This release adds modern development tooling and AI capabilities to the AI-SRE container.
+
+### New Features
+
+**mise Runtime Manager**
+- Installed mise for flexible runtime version management
+- Provides foundation for managing multiple tool versions
+
+**Node.js 18 LTS**
+- Added Node.js 18 LTS support via mise
+- Enables JavaScript/TypeScript tooling and npm packages
+- Includes npm for package management
+
+**Claude CLI**
+- Installed @anthropics/claude-code globally
+- Enables AI-assisted operations within the container
+- Supports enhanced automation workflows
+
+### Technical Details
+
+- **Builder Stage Changes:**
+  - Install mise via curl installer
+  - Configure mise with global Node.js 18 installation
+  - Install Claude CLI globally via npm
+
+- **Runtime Stage Changes:**
+  - Copy mise binaries and Node.js runtime to runtime stage
+  - Update PATH to include Node.js binaries
+  - Set MISE_DATA_DIR and MISE_CACHE_DIR environment variables
+
+- **Container Size:** Minimal impact on image size due to multi-stage build optimization
+
+### Version
+
+- **Image Version:** 2.1.1
+- **Base Image:** Alpine 3.20
+- **Node.js Version:** 18 (LTS)
+
+### Compatibility
+
+- All existing MCP tools remain functional
+- Backward compatible with v2.1.0
+- No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+    ```
+  - **⚠️ Breaking Changes:**
+    - - No breaking changes to existing workflows
+    - ---
+    - **Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
 
 ---
 
@@ -337,38 +403,8 @@
 #### Chart
 - **Name:** `descheduler`
 - **Repository:** `descheduler`
-- **Current Version:** `0.34.0`
-- **Latest Version:** `0.35.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.34.x → 0.35.x
-- **Source:** https://github.com/kubernetes-sigs/descheduler/releases/tag/0.35.0
-- **Release Date:** 2026-02-19
-- **Release Notes:**
-  ```markdown
-  ## What's Changed
-* feat: enable pod protection based on storage classes by @ricardomaraschini in https://github.com/kubernetes-sigs/descheduler/pull/1752
-* fix: pod resource calculation to consider native sidecars by @a7i in https://github.com/kubernetes-sigs/descheduler/pull/1771
-* docs: fix incorrect gracePeriodSeconds default in README.md by @petersalas in https://github.com/kubernetes-sigs/descheduler/pull/1773
-* docs: fix README.md link to kubernetes bot commands by @Sycrosity in https://github.com/kubernetes-sigs/descheduler/pull/1772
-* Fix "Current requires cgo or $USER set in environment" error by @abelfodil in https://github.com/kubernetes-sigs/descheduler/pull/1764
-* refactor(TestPodLifeTime): remove ineffective owner references assignments by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1781
-* refactor(TestPodLifeTime): have a pod fully created through BuildTestPod without any edits by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1782
-* refactor(TestPodLifeTime): consolidations, simplifications and node instance for each unit test by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1783
-* refactor(TestPodLifeTime): inline pod creation in each unit test to avoid accidental pod spec updates by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1784
-* refactor(TestPodLifeTime): update unit test names and simplify pod creation by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1785
-* feat(TestPodLifeTime): check only expected pods are evicted by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1787
-* feat(PodLifeTime): document the plugin with details that can be used for reasoning during reviews and design discussions by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1789
-* refactor(TestPodLifeTime): split the unit tests into smaller semantically close groups by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1790
-* refactor(TestFindDuplicatePods): have a pod fully created through BuildTestPod without any edits by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1791
-* refactor(TestFindDuplicatePods): reduce duplicates and inline by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1792
-* refactor(TestRemoveDuplicates): reduce test code duplication by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1793
-* refactor(TestRemovePodsHavingTooManyRestarts): inline object creation by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1794
-* refactor(TestPodAntiAffinity): inline object creation by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1795
-* refactor(TestRemovePodsViolatingNodeAffinity): inline object creation by @ingvagabund in https://github.com/kubernetes-sigs/descheduler/pull/1796
-* refactor(TestDeletePodsViolatingNodeTaints): inline object creation by @ingvaga
-  ... (truncated, see source link above for full notes)
-  ```
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.35.0`
+- **Latest Version:** `0.35.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -494,7 +530,20 @@
 - **Repository:** `ghcr.io/gethomepage/homepage`
   - **Path:** `image`
   - **Current Tag:** `v1.10.1`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `1.10.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Versions appear equal or downgrade detected
+  - **Source:** https://github.com/gethomepage/homepage/releases/tag/1.10.1
+  - **Release Date:** 2026-02-05
+  - **Release Notes:**
+    ```markdown
+    ## What's Changed
+* Chore: move to Zensical docs by @shamoon in https://github.com/gethomepage/homepage/pull/6279
+* Enhancement: better display of Arcane widget errors by @shamoon in https://github.com/gethomepage/homepage/pull/6281
+
+
+**Full Changelog**: https://github.com/gethomepage/homepage/compare/v1.10.0...v1.10.1
+    ```
 
 ---
 
@@ -505,13 +554,8 @@
 #### Chart
 - **Name:** `intel-device-plugins-gpu`
 - **Repository:** `intel`
-- **Current Version:** `0.34.1`
-- **Latest Version:** `0.35.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.34.x → 0.35.x
-- **Source:** https://github.com/intel-device-plugins-gpu/intel-device-plugins-gpu/releases/tag/0.35.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.35.0`
+- **Latest Version:** `0.35.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -524,13 +568,8 @@
 #### Chart
 - **Name:** `intel-device-plugins-operator`
 - **Repository:** `intel`
-- **Current Version:** `0.34.1`
-- **Latest Version:** `0.35.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.34.x → 0.35.x
-- **Source:** https://github.com/intel-device-plugins-operator/intel-device-plugins-operator/releases/tag/0.35.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.35.0`
+- **Latest Version:** `0.35.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -589,7 +628,7 @@
 #### Chart
 - **Name:** `kube-prometheus-stack`
 - **Repository:** `prometheus-community`
-- **Current Version:** `81.5.0`
+- **Current Version:** `81.6.9`
 - **Latest Version:** *Could not determine*
 
 *No container images specified in values*
@@ -610,7 +649,19 @@
 - **Repository:** `ghcr.io/open-webui/mcpo`
   - **Path:** `controllers.mcpo.containers.app.image`
   - **Current Tag:** `git-44ce6d0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.0.19` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Version format not recognized
+  - **Source:** https://github.com/open-webui/mcpo/releases/tag/0.0.19
+  - **Release Date:** 2025-10-14
+  - **Release Notes:**
+    ```markdown
+    ## [0.0.19] - 2025-10-14
+
+### Fixed
+
+* 🔁 **Reverted Client Header Forwarding**: Reverted changes introduced in 0.0.18.
+    ```
 
 - **Repository:** `python`
   - **Path:** `controllers.mcpo.initContainers.runtime-setup.image`
@@ -651,7 +702,7 @@
 #### Container Images
 - **Repository:** `nextcloud`
   - **Path:** `image`
-  - **Current Tag:** `32.0.5`
+  - **Current Tag:** `32.0.6`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `bitnamilegacy/mariadb`
@@ -710,19 +761,14 @@
 #### Chart
 - **Name:** `open-webui`
 - **Repository:** `open-webui`
-- **Current Version:** `10.2.1`
-- **Latest Version:** `12.3.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 10.x.x → 12.x.x
-- **Source:** https://github.com/open-webui/open-webui/releases/tag/12.3.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `12.3.0`
+- **Latest Version:** `12.3.0` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `ghcr.io/open-webui/open-webui`
   - **Path:** `image`
-  - **Current Tag:** `0.7.2`
-  - **Latest Tag:** *Could not determine*
+  - **Current Tag:** `0.8.3`
+  - **Latest Tag:** `0.8.3` ✅ (up-to-date)
 
 ---
 
@@ -790,17 +836,17 @@
 #### Container Images
 - **Repository:** `ghcr.io/nachtschatt3n/opencode-web-devcontainer`
   - **Path:** `controllers.opencode-andreamosteller.containers.opencode.image`
-  - **Current Tag:** `sha-5583b80`
+  - **Current Tag:** `sha-4d4c614`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `ghcr.io/nachtschatt3n/opencode-web-devcontainer`
   - **Path:** `controllers.opencode-andreamosteller.containers.preview.image`
-  - **Current Tag:** `sha-5583b80`
+  - **Current Tag:** `sha-4d4c614`
   - **Latest Tag:** *Could not determine*
 
 - **Repository:** `ghcr.io/nachtschatt3n/opencode-web-devcontainer`
   - **Path:** `controllers.opencode-andreamosteller.initContainers.init-clone.image`
-  - **Current Tag:** `sha-5583b80`
+  - **Current Tag:** `sha-4d4c614`
   - **Latest Tag:** *Could not determine*
 
 ---
@@ -936,12 +982,8 @@
 #### Container Images
 - **Repository:** `vaultwarden/server`
   - **Path:** `controllers.main.containers.main.image`
-  - **Current Tag:** `1.35.2`
-  - **Latest Tag:** `1.35.3` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 1.35.2 → 1.35.3
-  - **Source:** https://github.com/vaultwarden/server/releases/tag/1.35.3
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `1.35.3`
+  - **Latest Tag:** `1.35.3` ✅ (up-to-date)
 
 ---
 
@@ -961,7 +1003,7 @@
 - **Repository:** `ghcr.io/esphome/esphome`
   - **Path:** `controllers.esphome.containers.app.image`
   - **Current Tag:** `2026.2.1`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2026.2.1` ✅ (up-to-date)
 
 ---
 
@@ -979,7 +1021,7 @@
 - **Repository:** `ghcr.io/blakeblackshear/frigate`
   - **Path:** `image`
   - **Current Tag:** `0.16.4`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.16.4` ✅ (up-to-date)
 
 ---
 
@@ -997,7 +1039,54 @@
 - **Repository:** `ghcr.io/home-assistant/home-assistant`
   - **Path:** `controllers.home-assistant.containers.app.image`
   - **Current Tag:** `2026.2.1`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2026.2.3` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2026.2.1 → 2026.2.3
+  - **Source:** https://github.com/home-assistant/home-assistant/releases/tag/2026.2.3
+  - **Release Date:** 2026-02-20
+  - **Release Notes:**
+    ```markdown
+    - Add the ability to select region for Roborock ([@Lash-L] - [#160898]) ([roborock docs])
+- Fix dynamic entity creation in eheimdigital ([@autinerd] - [#161155]) ([eheimdigital docs])
+- Fix HomematicIP entity recovery after access point cloud reconnect ([@lackas] - [#162575]) ([homematicip_cloud docs])
+- Show progress indicator during backup stage of Core/App update ([@hbludworth] - [#162683]) ([hassio docs])
+- Fix Z-Wave climate set preset ([@MartinHjelmare] - [#162728]) ([zwave_js docs])
+- Block redirect to localhost ([@edenhaus] - [#162941])
+- Bump pypck to 0.9.10 ([@alengwenus] - [#162333]) ([lcn docs]) (dependency)
+- Bump pypck to 0.9.11 ([@alengwenus] - [#163043]) ([lcn docs]) (dependency)
+- Fix blocking call in Xbox config flow ([@tr4nt0r] - [#163122]) ([xbox docs])
+- Bump ical to 13.2.0 ([@allenporter] - [#163123]) ([google docs]) ([local_calendar docs]) ([local_todo docs]) ([remote_calendar docs]) (dependency)
+- Add Lux to homee units ([@Taraman17] - [#163180]) ([homee docs])
+- Fix remote calendar event handling of events within the same update period ([@allenporter] - [#163186]) ([remote_calendar docs])
+- Fix Control4 HVAC action mapping for multi-stage and idle states ([@davidrecordon] - [#163222]) ([control4 docs])
+- NRGkick: do not update vehicle connected timestamp when vehicle is not connected ([@andijakl] - [#163292]) ([nrgkick docs])
+- Add Miele dishwasher program code ([@astrandb] - [#163308]) ([miele docs])
+- Bump pyrainbird to 6.0.5 ([@allenporter] - [#163333]) ([rainbird docs]) (dependency)
+- Fix touchline_sl zone availability when alarm state is set ([@molsmadsen] - [#163338]) ([touchline_sl docs])
+- Bump pySmartThings to 3.5.3 ([@joostlek] - [#163375]) ([smartthings docs])
+- Fix hassfest requirements check ([@cdce8p] - [#163681])
+- Bump eheimdigital to 1.6.0 ([@autinerd] - [#161961]) ([eheimdigital docs]) (dependency)
+
+[#160898]: https://github.com/home-assistant/core/pull/160898
+[#161155]: https://github.com/home-assistant/core/pull/161155
+[#161961]: https://github.com/home-assistant/core/pull/161961
+[#162224]: https://github.com/home-assistant/core/pull/162224
+[#162333]: https://github.com/home-assistant/core/pull/162333
+[#162450]: https://github.com/home-assistant/core/pull/162450
+[#162575]: https://github.com/home-assistant/core/pull/162575
+[#162683]: https://github.com/home-assistant/core/pull/162683
+[#162728]: https://github.com/home-assistant/core/pull/162728
+[#162941]: https://github.com/home-assistant/core/pull/162941
+[#162950]: https://github.com/home-assistant/core/pull/162950
+[#163043]: https://github.com/home-assistant/core/pull/163043
+[#163122]: https://github.com/home-assistant/core/pull/163122
+[#163123]: https://github.com/home-assistant/core/pull/163123
+[#163180]: https://github.com/home-assistant/core/pull/163180
+[#163186]: https://github.com/home-assistant/core/pull/163186
+[#163222]: https://github.com/home-assistant/core/pull/163222
+[#163292]: https://github.com/home
+    ... (truncated, see source link above for full notes)
+    ```
 
 ---
 
@@ -1061,7 +1150,29 @@
 - **Repository:** `ghcr.io/music-assistant/server`
   - **Path:** `controllers.music-assistant-server.containers.app.image`
   - **Current Tag:** `2.7.6`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.7.8` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.7.6 → 2.7.8
+  - **Source:** https://github.com/music-assistant/server/releases/tag/2.7.8
+  - **Release Date:** 2026-02-16
+  - **Release Notes:**
+    ```markdown
+    ## 📦 Stable Release
+
+_Changes since [2.7.7](https://github.com/music-assistant/server/releases/tag/2.7.7)_
+
+### 🐛 Bugfixes
+
+- Fix AttributeError when provider is temporarily unavailable (by @teancom in #3157)
+- Fix HTTP proxy URL parsing for wss:// WebSocket URLs (by @chrisuthe in #3168)
+- Auto cleanup cache db when it grows >= 2GB (by @MarvinSchenkel in #3174)
+
+## :bow: Thanks to our contributors
+
+Special thanks to the following contributors who helped with this release:
+
+@MarvinSchenkel, @chrisuthe, @teancom
+    ```
 
 - **Repository:** `ghcr.io/alams154/music-assistant-alexa-api`
   - **Path:** `controllers.music-assistant-server.containers.alexa-api.image`
@@ -1082,21 +1193,14 @@
 #### Chart
 - **Name:** `n8n`
 - **Repository:** `n8n`
-- **Current Version:** `1.1.0`
+- **Current Version:** `2.0.1`
 - **Latest Version:** *Could not determine*
 
 #### Container Images
 - **Repository:** `n8nio/n8n`
   - **Path:** `image`
-  - **Current Tag:** `1.123.21`
-  - **Latest Tag:** `2.9.1` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🔴 **MAJOR** (high complexity)
-  - **Update Description:** Major version update: 1.x.x → 2.x.x
-  - **⚠️ Breaking Changes Detected:**
-    - Major version change typically indicates breaking changes
-  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.9.1
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-  - **⚠️ Breaking Changes:** *Major version update - review release notes above*
+  - **Current Tag:** `2.9.1`
+  - **Latest Tag:** `2.9.1` ✅ (up-to-date)
 
 ---
 
@@ -1113,12 +1217,8 @@
 #### Container Images
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
-  - **Current Tag:** `4.1.4`
-  - **Latest Tag:** `4.1.5` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 4.1.4 → 4.1.5
-  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.5
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `4.1.5`
+  - **Latest Tag:** `4.1.5` ✅ (up-to-date)
 
 ---
 
@@ -1167,13 +1267,8 @@
 #### Chart
 - **Name:** `authentik`
 - **Repository:** `authentik`
-- **Current Version:** `2025.12.3`
-- **Latest Version:** `2025.12.4` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 2025.12.3 → 2025.12.4
-- **Source:** https://github.com/goauthentik/authentik/releases/tag/2025.12.4
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `2025.12.4`
+- **Latest Version:** `2025.12.4` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -1267,49 +1362,8 @@
 #### Chart
 - **Name:** `eck-operator`
 - **Repository:** `elastic`
-- **Current Version:** `2.14.0`
-- **Latest Version:** `3.3.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 2.x.x → 3.x.x
-- **Source:** https://github.com/elastic/cloud-on-k8s/releases/tag/3.3.0
-- **Release Date:** 2026-02-03
-- **Release Notes:**
-  ```markdown
-  # Elastic Cloud on Kubernetes 3.3.0
-- [Quickstart guide](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s#eck-quickstart)
-
-### Release Highlights
-
-#### AutoOps Integration (Enterprise feature)
-
-ECK now supports integration with Elastic AutoOps through a new `AutoOpsAgentPolicy` custom resource. This allows you to instrument multiple Elasticsearch clusters at once for automated health monitoring and performance recommendations. The [AutoOps documentation](https://www.elastic.co/docs/deploy-manage/monitor/autoops) provides more details.
-
-#### Elastic Package Registry Integration
-
-ECK now supports deploying and managing Elastic Package Registry (EPR) through a new `PackageRegistry` custom resource. This is particularly useful for air-gapped environments, enabling Kibana to reference a self-hosted registry instead of the public one. The [package registry documentation](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/package-registry) provides more details.
-
-#### Multiple Stack Configuration Policies composition support (Enterprise feature)
-
-ECK now includes support for multiple Stack Config Policies targeting the same Elasticsearch cluster or Kibana instance, using a weight-based priority system for deterministic policy composition. The [stack config policy documentation](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s/elastic-stack-configuration-policies) provides more details.
-
-### Features and enhancements
-
-- AutoOpsAgentPolicy support [#8941](https://github.com/elastic/cloud-on-k8s/pull/8941) (issue: [#8789](https://github.com/elastic/cloud-on-k8s/issues/8789))
-- ElasticPackageRegistry support [#8800](https://github.com/elastic/cloud-on-k8s/pull/8800) (issue: [#8925](https://github.com/elastic/cloud-on-k8s/issues/8925))
-- Stack Config Policies composition support [#8917](https://github.com/elastic/cloud-on-k8s/pull/8917)
-- Use standard Kibana labels and Helm labels on the ECK Operator pod [#8840](https://github.com/elastic/cloud-on-k8s/pull/8840) (issue: [#8584](https://github.com/elastic/cloud-on-k8s/issues/8584))
-- Add service customization support for Elasticsearch remote cluster server [#8892](https://github.com/elastic/cloud-on-k8s/pull/8892)
-- Removal of Elasticsearch 6.x support from codebase [#8979](https://github.com/elastic/cloud-on-k8s/pull/8979)
-
-### Fixes
-
-- Upgrade master StatefulSets last when performing a version upgrade of Elasticsearch [#8871](https://github.com/elastic/cloud-on-k8s/pull/8871) (issue: [#8429](https://github.com/elastic/cloud-on-k8s/issues/8429))
-- Fix race condition for pre-existing Stack Config Policy [#8928](https://github.com/elastic/cloud-on-k8s/pull/8928) (issue: [#8912](https://github.com/elastic/cloud-on-k8s/issues/8912))
-- Do not set Kibana server.name [#8930](https://github.com/elastic/cloud-on-k8s/pull/8930) (issue: [#8929](https://github.com/elastic/cloud-on-k8s/issues/8929))
-- Do not write `elasticsearch.k8s.elastic.co/managed-re
-  ... (truncated, see source link above for full notes)
-  ```
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `3.3.0`
+- **Latest Version:** `3.3.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -1342,10 +1396,10 @@ ECK now includes support for multiple Stack Config Policies targeting the same E
 #### Container Images
 - **Repository:** `ghcr.io/unpoller/unpoller`
   - **Path:** `image`
-  - **Current Tag:** `v2.33.0`
+  - **Current Tag:** `v2.34.0`
   - **Latest Tag:** `2.34.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 2.33.x → 2.34.x
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Versions appear equal or downgrade detected
   - **Source:** https://github.com/unpoller/unpoller/releases/tag/2.34.0
   - **Release Date:** 2026-02-18
   - **Release Notes:**
@@ -1365,21 +1419,16 @@ ECK now includes support for multiple Stack Config Policies targeting the same E
 #### Chart
 - **Name:** `uptime-kuma`
 - **Repository:** `dirsigler`
-- **Current Version:** `2.25.0`
-- **Latest Version:** `4.0.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 2.x.x → 4.x.x
-- **Source:** https://github.com/louislam/uptime-kuma/releases/tag/4.0.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `4.0.0`
+- **Latest Version:** `4.0.0` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `louislam/uptime-kuma`
   - **Path:** `image`
-  - **Current Tag:** `2.1.0`
+  - **Current Tag:** `2.1.1`
   - **Latest Tag:** `2.1.3` ⚠️ **UPDATE AVAILABLE**
   - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.1.0 → 2.1.3
+  - **Update Description:** Patch version update: 2.1.1 → 2.1.3
   - **Source:** https://github.com/louislam/uptime-kuma/releases/tag/2.1.3
   - **Release Date:** 2026-02-19
   - **Release Notes:**
@@ -1486,12 +1535,8 @@ ECK now includes support for multiple Stack Config Policies targeting the same E
 #### Container Images
 - **Repository:** `adguard/adguardhome`
   - **Path:** `image`
-  - **Current Tag:** `v0.107.71`
-  - **Latest Tag:** `v0.107.72` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 0.107.71 → 0.107.72
-  - **Source:** https://github.com/adguard/adguardhome/releases/tag/v0.107.72
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `v0.107.72`
+  - **Latest Tag:** `v0.107.72` ✅ (up-to-date)
 
 ---
 
@@ -1511,7 +1556,18 @@ ECK now includes support for multiple Stack Config Policies targeting the same E
 - **Repository:** `ghcr.io/paperless-ngx/paperless-ngx`
   - **Path:** `image`
   - **Current Tag:** `2.20.7`
-  - **Latest Tag:** `2.20.7` ✅ (up-to-date)
+  - **Latest Tag:** `2.20.8` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.20.7 → 2.20.8
+  - **Source:** https://github.com/paperless-ngx/paperless-ngx/releases/tag/2.20.8
+  - **Release Date:** 2026-02-22
+  - **Release Notes:**
+    ```markdown
+    > [!NOTE]
+> This release addresses a security issue (GHSA-7qqc-wrcw-2fj9) and is recommended for all users. Our sincere thank you to the community members who reported this.
+
+## paperless-ngx 2.20.8
+    ```
 
 - **Repository:** `bitnamilegacy/mariadb`
   - **Path:** `mariadb.image`
@@ -1532,13 +1588,8 @@ ECK now includes support for multiple Stack Config Policies targeting the same E
 #### Chart
 - **Name:** `penpot`
 - **Repository:** `penpot`
-- **Current Version:** `0.33.0`
-- **Latest Version:** `0.35.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 0.33.x → 0.35.x
-- **Source:** https://github.com/penpot/penpot/releases/tag/0.35.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `0.35.0`
+- **Latest Version:** `0.35.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
