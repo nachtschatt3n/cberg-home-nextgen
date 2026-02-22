@@ -118,9 +118,9 @@ spec:
             tls.verify Off
             Retry_Limit 15
             Suppress_Type_Name On
-            Buffer_Size 2MB
+            Buffer_Size False
             storage.total_limit_size 5G
-            Workers 2
+            Workers 4
 
       customParsers: |
         [PARSER]
