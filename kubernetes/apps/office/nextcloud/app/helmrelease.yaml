@@ -119,6 +119,8 @@ spec:
           $CONFIG = array (
             'overwriteprotocol' => 'https',
             'overwrite.cli.url' => 'https://drive.${SECRET_DOMAIN}',
+            'overwritecondaddr' => '^10\.',
+            'integrity.check.disabled' => true,
             'filelocking.enabled' => 'true',
             'loglevel' => '2',
             'check_data_directory_permissions' => 'false',
@@ -140,7 +142,7 @@ spec:
             'memcache.local' => '\\OC\\Memcache\\APCu',
             'memcache.distributed' => '\\OC\\Memcache\\Redis',
             'memcache.locking' => '\\OC\\Memcache\\Redis',
-            'blacklisted_files' => 
+            'forbidden_filenames' =>
               [
                 '.htaccess',
                 'Thumbs.db',
@@ -181,6 +183,14 @@ spec:
             'reverse_proxy' => true,
 
           );
+        spreed.config.php: |-
+          <?php
+          $CONFIG = array (
+            'spreed' => array (
+              'has_matterbridge' => 'false',
+              'has_janus' => 'false',
+            ),
+          );
 
       strategy:
         type: Recreate
@@ -197,6 +207,9 @@ spec:
         - name: worker
           image: nextcloud:32.0.6
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 33
+            runAsGroup: 33
           command: ["/bin/bash", "-c"]
           args:
             - |
