@@ -33,8 +33,6 @@
     "fileMatch": ["(^|/)[\\w-]*requirements(-\\w+)?\\.(txt|pip)(?:\\.j2)?$"]
   },
   "ignoreDeps": [
-    // Private GHCR image — updates managed by Flux ImageAutomation, not Renovate
-    "ghcr.io/nachtschatt3n/andreamosteller.com",
     // Private GitHub repo — Renovate App token has no access, managed separately
     "nachtschatt3n/k8s-self-ai-ops"
   ],
