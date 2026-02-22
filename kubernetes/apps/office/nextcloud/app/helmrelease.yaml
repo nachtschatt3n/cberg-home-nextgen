@@ -41,6 +41,7 @@ spec:
           gethomepage.dev/description: "Self-hosted file sharing and collaboration platform"
           gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "nextcloud.png"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/component=app"
           nginx.ingress.kubernetes.io/proxy-body-size: "4G"
           nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
           nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
