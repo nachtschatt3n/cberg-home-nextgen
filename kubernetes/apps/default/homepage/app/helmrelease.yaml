@@ -173,7 +173,7 @@ spec:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
         ingress: true
-        gateway: true
+        gateway: false
         services: true
         pods: true
         nodes: true
