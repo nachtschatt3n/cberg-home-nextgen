@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: mariadb
-      version: 11.5.7
+      version: 25.0.0
       sourceRef:
         kind: HelmRepository
         name: bitnami
@@ -40,9 +40,8 @@ spec:
       valuesKey: mariadb-database
       targetPath: auth.database
   values:
-    image:
-      repository: bitnamilegacy/mariadb
-      tag: latest
+    auth:
+      usePasswordFiles: false
     primary:
       persistence:
         enabled: true
