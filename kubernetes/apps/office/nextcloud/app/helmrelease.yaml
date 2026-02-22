@@ -120,8 +120,6 @@ spec:
             'overwriteprotocol' => 'https',
             'overwrite.cli.url' => 'https://drive.${SECRET_DOMAIN}',
             'overwritecondaddr' => '^10\.',
-            'integrity.check.disabled' => true,
-            'filelocking.enabled' => 'true',
             'loglevel' => '2',
             'check_data_directory_permissions' => 'false',
             'enable_previews' => true,
