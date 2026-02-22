@@ -74,9 +74,7 @@ spec:
           value: "https://n8n.${SECRET_DOMAIN}"
         N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:
           value: "true"
-        # v2: enable task runners in internal mode (child process, no sidecar needed)
-        N8N_RUNNERS_ENABLED:
-          value: "true"
+        # v2: task runners always enabled by default; use internal mode (child process)
         N8N_RUNNERS_MODE:
           value: "internal"
         # v2: SQLite connection pool (fixes deprecation warning)
