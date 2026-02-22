@@ -209,9 +209,7 @@ spec:
     persistence:
       home:
         type: persistentVolumeClaim
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        existingClaim: opencode-andreamosteller-smb
         advancedMounts:
           opencode-andreamosteller:
             init-clone:
