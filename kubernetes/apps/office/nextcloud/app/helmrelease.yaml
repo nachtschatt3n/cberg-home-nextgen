@@ -373,6 +373,9 @@ spec:
       type: cronjob
       cronjob:
         schedule: "*/5 * * * *"
+        securityContext:
+          runAsUser: 33
+          runAsGroup: 33
         resources:
           limits:
             memory: 1024M
