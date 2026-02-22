@@ -9,6 +9,7 @@ resources:
   - ./alertmanager-telegram-config.yaml
   - ./longhorn-alerts.yaml
   - ./authentik-alerts.yaml
+  - ./fluent-bit-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml
   - ./alertmanager-ingress.yaml
