@@ -9,9 +9,7 @@ spec:
   chart:
     spec:
       chart: n8n
-      #version: 1.58.2
-      #version: 0.25.2
-      version: 1.1.0
+      version: 2.0.1
       sourceRef:
         kind: HelmRepository
         name: n8n
@@ -30,7 +28,7 @@ spec:
     image:
       repository: n8nio/n8n
       pullPolicy: IfNotPresent
-      tag: "1.123.21"
+      tag: "2.9.1"
 
     # Ingress handles HTTPS externally
     ingress:
@@ -47,7 +45,9 @@ spec:
         gethomepage.dev/enabled: "true"
       hosts:
         - host: n8n.${SECRET_DOMAIN}
-          paths: ["/"]
+          paths:
+            - path: /
+              pathType: Prefix
       tls:
         - hosts:
             - n8n.${SECRET_DOMAIN}
@@ -60,14 +60,8 @@ spec:
           protocol: http
           timezone: Europe/Berlin
         executions:
-          process: queue
           pruneData: "true"
           pruneDataMaxAge: 3760
-        queue:
-          bull:
-            redis:
-              host: "n8n-redis-master"
-              port: 6379
       secret: {}
       extraEnv:
         N8N_HOST:
@@ -79,6 +73,20 @@ spec:
         WEBHOOK_URL:
           value: "https://n8n.${SECRET_DOMAIN}"
         N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE:
+          value: "true"
+        # v2: enable task runners in internal mode (child process, no sidecar needed)
+        N8N_RUNNERS_ENABLED:
+          value: "true"
+        N8N_RUNNERS_MODE:
+          value: "internal"
+        # v2: SQLite connection pool (fixes deprecation warning)
+        DB_SQLITE_POOL_SIZE:
+          value: "5"
+        # v2: keep current behaviour — allow Code nodes to access env vars
+        N8N_BLOCK_ENV_ACCESS_IN_NODE:
+          value: "false"
+        # v2: disable bare repo support in Git node (security hardening)
+        N8N_GIT_NODE_DISABLE_BARE_REPOS:
           value: "true"
       persistence:
         enabled: true
@@ -98,16 +106,14 @@ spec:
       podAnnotations:
         rollme: "{{ randAlphaNum 5 }}"
 
-    # ── Worker (disabled) ──
+    # ── Worker (disabled — single-instance main mode) ──
     worker:
       enabled: false
 
-    # ── Webhook handler ──
+    # ── Webhook handler (disabled) ──
     webhook:
       enabled: false
-      count: 1
 
-    # ── Redis ──
-    redis:
-      enabled: true
-      architecture: standalone
+    # ── Valkey/Redis (disabled — using SQLite, not queue mode) ──
+    valkey:
+      enabled: false
