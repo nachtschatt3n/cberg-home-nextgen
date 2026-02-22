@@ -6,6 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
+| 2026-02-22 | Good | 0 | 8 | **Overall**: 🟡 **GOOD** — Major upgrade + maintenance session. **Patch updates**: authentik 2025.12.3→4, vaultwarden 1.35.2→3, adguard-home v0.107.71→72, node-red 4.1.4→5. **Minor updates**: descheduler chart 0.34.0→0.35.0, intel-device-plugin charts 0.34.1→0.35.0 (×2), unpoller v2.33.0→v2.34.0, penpot chart 0.33.0→0.35.0 — all services confirmed running post-upgrade. **open-webui 10.2.1→12.3.0**: Required deleting immutable `open-webui-pipelines` Deployment (chart 12.x changed label selectors), adding `upgrade.timeout: 15m`, explicit Redis URL `redis://open-webui-redis:6379/0`. All pods running post-upgrade. **Flux CRD API migration**: 47 files migrated from deprecated `helm.toolkit.fluxcd.io/v2beta1/v2beta2` → `/v2` and `source/image.toolkit.fluxcd.io/v1beta2` → `/v1` (stable). **Renovate ignoreDeps**: Added `nachtschatt3n/k8s-self-ai-ops` (private GitHub repo, no token access). **ECK operator 2.14.0→3.3.0**: No breaking changes for ES/Kibana 8.15.3 users. Upgrade succeeded immediately. **fluent-bit chunk retry backlog**: Diagnosed pre-existing issue — 3600+ queued retry tasks, only 2 workers, 15-retry limit. ES healthy (0 write rejections, 30% heap, logs still ingesting). Fixed by restarting DaemonSet to clear backlog. Added log pipeline monitoring to health check docs. **Deferred (require investigation)**: longhorn 1.10.1→1.11.0 (pre-upgrade volume checks needed), cilium (HA mDNS/UPnP post-validation needed), nextcloud chart 6.6.10→8.9.1, uptime-kuma 2.25.0→4.0.0, Talos/K8s cluster upgrade, n8n v2 migration (BLOCKED), mariadb chart migration (BLOCKED). |
 | 2026-02-21 (evening) | Good | 0 | 3 | **Overall**: 🟡 **GOOD** (0 Critical, 0 Major, 5 Minor/Info). **Fixes applied this session**: 1) `monitoring/elasticsearch` ILM bootstrap Job deleted → Flux recreated with curl:8.18.0, fluent-bit and kibana unblocked ✅; 2) `office/nextcloud-notify-push` binary path corrected (`notify_push/notify_push/bin/x86_64/`) + execute bit restored → pod Running 0 restarts ✅; 3) `databases/redisinsight` rollingUpdate conflict confirmed resolved (PRs #88+#89, RollingUpdate maxSurge:0) ✅. **Full 39-section health check**: Cluster: All 3 nodes healthy (v1.34.0, CPU ~6%, Memory 26-37%), 0 OOM kills, 0 evictions. GitOps: 85/85 kustomizations reconciled, 72/72 HelmReleases ready, 46/46 HelmRepositories ready, 7/7 Flux controllers running (47d uptime, 0 restarts). Storage: 68/68 Longhorn volumes attached/healthy, autoDeletePod=false ✅, 75/75 PVCs Bound. Backups: daily-backup-all-volumes completed 13h ago ✅. Certs: 8/8 Ready, renewing mid-March. DaemonSets: 12/12 healthy. Pods: 0 CrashLoopBackOff, 0 Pending, 0 Terminating. Container log errors: 0 (Cilium, CoreDNS, Flux, cert-manager). Network: UnPoller healthy (Err:0, 104-106 clients, 1 USG+5 USW+4 UAP); MQTT: 0 auth failures, 0 errors. Home Automation: HA running 6d18h, Zigbee 22/23 seen today (1 offline >7d: 0x00124b002d12beec - likely dead battery), Mosquitto healthy, Frigate running 12d 0 restarts. Databases: All 8 pods running. Media: Jellyfin 14d, Plex 41d, JDownloader 7h all running. Ingress: 0 controller errors. Webhooks: 7 validating + 4 mutating, 0 failures. **Minor/Info**: external-dns 29 restarts (diagnosed: transient Cloudflare EOF, self-healing, no action needed ✅); unpoller 11 restarts (diagnosed: healthy, Err:0, periodic re-auth normal ✅); Talos version drift client v1.11.6 vs nodes v1.11.0 (upgrade needed); music_assistant duplicate entity IDs in HA (non-critical); cloudflared 5 restarts 2d15h ago (monitoring). **Talos client/node version mismatch**: client v1.11.6, nodes v1.11.0 — upgrade nodes when convenient. |
 | 2026-02-21 | Warning | 1 | 3 | **Overall**: 🟠 **WARNING** (1 real Critical - opencode OOM, 0 Major, 1 Minor - node 12 noise). **Cluster**: All 3 nodes healthy (v1.34.0, CPU 4-5%, Memory 26-38%), 0 warning events, 3 OOM kills (opencode), 0 pod evictions. **GitOps**: 83/83 kustomizations reconciled, 72/72 HelmReleases ready, all HelmRepositories healthy, 7/7 Flux controllers running. **Storage**: 58/58 Longhorn volumes healthy, autoDeletePod=false, 75 PVCs all Bound. **Backups**: daily-backup-all-volumes completed successfully (12h ago, 17m duration), 5/5 recent jobs successful. **Certificates**: 8/8 ready. **DaemonSets**: All healthy. **Monitoring**: Prometheus & Alertmanager running, 0 firing alerts. **Pods**: 0 CrashLoopBackOff, 0 Pending; 2 pods with elevated restarts (opencode-andreamosteller: 1 - recent OOM, external-dns: 28 - historical). **Network**: UnPoller healthy (10 devices, 115 clients, 0 export errors), MQTT broker healthy (46/54 clients connected, 15 Shelly devices, 0 auth failures, 0 errors). **Home Automation**: HA running (errors: Tibber 4403 Invalid Token - FALSE POSITIVE external bug, music_assistant duplicate entity IDs), Zigbee2MQTT healthy (23 devices, 0 errors), Mosquitto healthy. **Frigate**: All 6 cameras streaming, MQTT availability online, 0 crash loops. **Batteries**: 20 battery devices (avg 81%, 0 critical, 0 warning, 1 monitor: Soil Sensor 1 at 42%). **Elasticsearch Logs**: 10,000+ errors/day (fluent-bit: 40K, kube-apiserver: 11K). 3 FATAL/OOM errors: opencode OOMKilled, external-dns transient EOF. **FIXED**: Increased opencode memory limit to 2Gi; Confirmed Tibber 4403 is external platform bug. |
 | 2026-02-15 | Good | 0 | 1 | **Overall**: 🟡 **GOOD** (0 real Critical, 0 Major, 2 Minor). **Cluster**: All 3 nodes healthy (v1.34.0, CPU 4-7%, Memory 29-39%), 0 warning events, 0 OOM kills, 0 pod evictions. **GitOps**: 83/83 kustomizations reconciled, 72/72 HelmReleases ready, all HelmRepositories healthy, 7/7 Flux controllers running. **Storage**: 58/58 Longhorn volumes healthy, autoDeletePod=false, 74 PVCs all Bound. **Backups**: daily-backup-all-volumes completed successfully (8h ago, 22m duration), 5/5 recent jobs successful. **Certificates**: 8/8 ready. **DaemonSets**: All healthy. **Monitoring**: Prometheus & Alertmanager running, 0 firing alerts. **Pods**: 0 CrashLoopBackOff, 0 Pending; 2 pods with elevated restarts (unpoller: 9, external-dns: 13 - historical). **Network**: UnPoller healthy (10 devices, 109 clients, 0 export errors), MQTT broker healthy (46/54 clients connected, 15 Shelly devices in recent logs, 0 auth failures, 0 errors). **Home Automation**: HA running (31 major errors - mostly music_assistant duplicate entity IDs, samsung_familyhub_fridge API error, dynamic_energy_cost unavailable, ESPHome voice device unreachable), Zigbee2MQTT healthy (23 devices, 0 errors), Mosquitto healthy. **Frigate**: All 6 cameras streaming, MQTT availability online, 0 crash loops. **Batteries**: 20 battery devices (avg 82%, 0 critical, 0 warning, 1 monitor: Soil Sensor 1 at 46%). **Elasticsearch Logs**: 10,000+ errors/day (Frigate: 36K, fluent-bit: 29K, kube-apiserver: 7.8K). 1 FATAL error: external-dns transient EOF (self-recovered). **FIXED**: Removed 2 duplicate `kids_room_ventilate_reminder` automations from HA config. **ShellyWallDisplay-000822A9320E** (WallDisplay Upper Hallway, Shelly Wall Display, upper_hallway): Still rapid MQTT reconnection cycling every ~5 seconds. **FALSE POSITIVE DOCUMENTED**: Authentik outpost ExternalName services showing "no backends" is expected - ExternalName services resolve via DNS, not Endpoints objects. Updated health-check.sh to skip ExternalName services and AI_weekly_health_check.MD to document this. **Ingress**: 87 errors at check time but cleared shortly after. **Webhooks**: 11 configured, all healthy. |
@@ -43,7 +44,7 @@ Keep a log of when this check was run and major findings:
 
 ```markdown
 # Kubernetes Cluster Health Check Report
-**Date**: 2026-02-21 ~18:00 CET
+**Date**: 2026-02-22 CET
 **Cluster**: cberg-home-nextgen
 **Nodes**: 3 (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03)
 **Kubernetes Version**: v1.34.0
@@ -52,39 +53,48 @@ Keep a log of when this check was run and major findings:
 - **Overall Health**: 🟡 **GOOD**
 - **Critical Issues**: 0
 - **Major Issues**: 0
-- **Minor Issues**: 5 (Talos version drift, 1 Zigbee device offline, music_assistant dupes, cloudflared restarts, Soil Sensor battery)
+- **Minor Issues**: 4 (Talos version drift, 1 Zigbee device offline, music_assistant dupes, Soil Sensor battery)
 - **Service Availability**: 99%+
 - **Node Status**: ✅ ALL 3 NODES HEALTHY
 
-## Fixes Applied This Session
-| Fix | Result |
-|-----|--------|
-| `monitoring/elasticsearch` ILM bootstrap Job (immutable field) | Deleted old Job → Flux recreated with curl:8.18.0 → fluent-bit + kibana unblocked ✅ |
-| `office/nextcloud-notify-push` binary missing (`no such file`) | Corrected path to `notify_push/notify_push/bin/x86_64/` + chmod +x → pod Running 0 restarts ✅ |
-| `databases/redisinsight` rollingUpdate forbidden | Confirmed resolved via PRs #88+#89 (RollingUpdate maxSurge:0) ✅ |
+## Upgrades Applied This Session (2026-02-22)
+| Component | From | To | Notes |
+|-----------|------|----|-------|
+| authentik chart | 2025.12.3 | 2025.12.4 | Patch — running ✅ |
+| vaultwarden image | 1.35.2 | 1.35.3 | Patch — running ✅ |
+| adguard-home image | v0.107.71 | v0.107.72 | Patch — running ✅ |
+| node-red image | 4.1.4 | 4.1.5 | Patch — running ✅ |
+| descheduler chart | 0.34.0 | 0.35.0 | Minor — running ✅ |
+| intel-device-plugin charts | 0.34.1 | 0.35.0 | Minor (×2) — running ✅ |
+| unpoller image | v2.33.0 | v2.34.0 | Minor — running ✅ |
+| penpot chart | 0.33.0 | 0.35.0 | Minor — running ✅ |
+| open-webui chart + image | 10.2.1 / 0.7.2 | 12.3.0 / 0.8.3 | Major — immutable Deployment deleted, explicit Redis URL added, timeout extended ✅ |
+| eck-operator chart | 2.14.0 | 3.3.0 | Major — no breaking changes for ES/Kibana 8.15.3 ✅ |
+| Flux CRD API versions | v2beta1/v2beta2 / v1beta2 | v2 / v1 | 47 files migrated to stable APIs ✅ |
 
 ## Service Availability Matrix
 | Service | Internal | External | Health | Status Notes |
 |---------|----------|----------|--------|--------------|
-| Authentik | ✅ | ✅ | Healthy | 6 pods (3 server + 3 worker), recently recycled (44m) |
-| Home Assistant | ✅ | ✅ | Healthy | Running 6d18h, Tibber 4403 FALSE POSITIVE (unchanged) |
-| zigbee2mqtt | ✅ | ✅ | Healthy | 23 devices, 22/23 seen today, 2 restarts (stable) |
+| Authentik | ✅ | ✅ | Healthy | Upgraded to 2025.12.4 |
+| Home Assistant | ✅ | ✅ | Healthy | Running, Tibber 4403 FALSE POSITIVE (unchanged) |
+| zigbee2mqtt | ✅ | ✅ | Healthy | 23 devices, 22/23 seen today |
 | Mosquitto MQTT | ✅ | N/A | Healthy | 0 auth failures, 0 errors |
-| Nextcloud | ✅ | ✅ | Healthy | notify-push fixed, Running |
-| Jellyfin | ✅ | ✅ | Healthy | Running 14d |
-| Plex | ✅ | ✅ | Healthy | Running 41d |
+| Nextcloud | ✅ | ✅ | Healthy | Running, notify-push path fixed (prior session) |
+| Jellyfin | ✅ | ✅ | Healthy | Running |
+| Plex | ✅ | ✅ | Healthy | Running |
 | Tube Archivist | ✅ | ✅ | Healthy | Running, elasticsearch + redis healthy |
 | Grafana | ✅ | ✅ | Healthy | Running |
-| Prometheus | ✅ | ✅ | Healthy | Running 13d, 0 alerts firing |
-| Alertmanager | ✅ | ✅ | Healthy | Running 44m |
-| Longhorn UI | ✅ | ✅ | Healthy | 68/68 volumes attached and healthy |
-| Frigate | ✅ | ✅ | Healthy | Running 12d, 0 restarts, 0 camera crashes |
-| Backup System | ✅ | N/A | Healthy | Last backup 13h ago ✅ |
-| UnPoller | ✅ | N/A | Healthy | Err:0, 104-106 clients, periodic re-auth normal |
-| Elasticsearch | ✅ | N/A | Healthy | ILM Job fixed, fluent-bit + kibana now reconciled |
-| fluent-bit | ✅ | N/A | Healthy | Unblocked after elasticsearch Job fix |
-| external-dns | ✅ | ✅ | Healthy | 29 restarts diagnosed: transient Cloudflare EOF, self-healing ✅ |
-| Cloudflared | ✅ | ✅ | Monitor | 5 restarts 2d15h ago — monitoring |
+| Prometheus | ✅ | ✅ | Healthy | Running, 0 alerts firing |
+| Alertmanager | ✅ | ✅ | Healthy | Running |
+| Longhorn UI | ✅ | ✅ | Healthy | All volumes attached and healthy |
+| Frigate | ✅ | ✅ | Healthy | Running, 0 restarts, 0 camera crashes |
+| Backup System | ✅ | N/A | Healthy | Daily backup on schedule |
+| UnPoller | ✅ | N/A | Healthy | Upgraded to v2.34.0, Err:0 |
+| Elasticsearch | ✅ | N/A | Healthy | 0 write rejections, ~30% heap, green |
+| fluent-bit | ✅ | N/A | Healthy | DaemonSet restarted to clear retry backlog |
+| open-webui | ✅ | ✅ | Healthy | Upgraded 10.2.1→12.3.0 / 0.7.2→0.8.3 |
+| ECK operator | ✅ | N/A | Healthy | Upgraded 2.14.0→3.3.0 |
+| external-dns | ✅ | ✅ | Healthy | Self-healing Cloudflare EOF, no DNS outages |
 | All databases | ✅ | N/A | Healthy | postgres, mariadb, influxdb, redis, nocodb all running |
 
 ## Detailed Findings
@@ -102,62 +112,124 @@ Keep a log of when this check was run and major findings:
 - Affected: Downstairs, Andrea's Family Hub, Pioneer VSX-1131 (×2), HA Voice media players.
 - Entities are ignored by HA. No functional impact. Clean up duplicate names in music_assistant.
 
-### 4. Cloudflared Restarts
-🔵 **Status: MONITOR** — 5 restarts, last 2d15h ago
-- External access is functional. Monitor for recurrence.
-
-### 5. Battery Health
+### 4. Battery Health
 ✅ **Status: GOOD** — all batteries acceptable
 - **CRITICAL (<30%)**: 0
-- **WARNING (30-50%)**: 0 (Soil Sensor 1 was 42% last check — check current level)
+- **WARNING (30-50%)**: 0 (Soil Sensor 1 was 42% last check — monitor)
 - **Zigbee devices**: 23 total, 0 low batteries detected
 
-### 6. Infrastructure Health
+### 5. Infrastructure Health
 ✅ **Status: EXCELLENT**
 - **Nodes**: All 3 Ready (v1.34.0), CPU ~6%, Memory 26-37%
 - **Node pressure**: 0 (no DiskPressure/MemoryPressure/PIDPressure)
 - **Certificates**: 8/8 ready, renewing mid-March (auto-managed)
 - **DaemonSets**: 12/12 healthy
-- **GitOps**: 85/85 kustomizations reconciled, 72/72 HelmReleases ready, 46/46 HelmRepositories ready
-- **Flux Controllers**: 7/7 running (47d uptime, 0 restarts)
-- **Volumes**: 68/68 attached and healthy, autoDeletePod=false ✅
-- **PVCs**: 75/75 Bound
-- **Backup**: Last successful 13h ago (daily-backup-all-volumes)
+- **GitOps**: All kustomizations reconciled, all HelmReleases ready
+- **Flux Controllers**: 7/7 running
+- **Volumes**: All attached and healthy, autoDeletePod=false ✅
+- **PVCs**: All Bound
+- **Backup**: Running on daily schedule
 - **OOM Kills**: 0
 - **Pod Evictions**: 0
 - **CrashLoopBackOff**: 0
 - **Pending pods**: 0
-- **Terminating**: 0
-- **Container log errors**: 0 (Cilium, CoreDNS, Flux, cert-manager)
-- **Webhooks**: 7 validating + 4 mutating, 0 failures
+- **Webhooks**: All healthy
 - **Ingress controller errors**: 0
 
-### 7. Network & MQTT
+### 6. Network & MQTT
 ✅ **Status: HEALTHY**
-- **UnPoller**: Err:0 every cycle, 104-106 clients, 4 UAPs, 5 USW, 1 UDM
+- **UnPoller**: Err:0 every cycle, periodic re-auth normal
 - **MQTT**: 0 auth failures, 0 connection errors
-- **external-dns**: Diagnosed — transient Cloudflare EOF causes exit, self-heals on restart. No DNS outages. No action needed.
+- **external-dns**: Transient Cloudflare EOF, self-heals on restart. No DNS outages.
+
+### 7. Fluent-bit → Elasticsearch Log Pipeline
+🔵 **Status: MONITOR** — backlog cleared; watch for recurrence
+
+**Background**: During the 2026-02-22 session, fluent-bit was found to have accumulated 3600+ chunk retry tasks with only 2 workers processing them. This built up during a prior ES restart (ILM Job fix on 2026-02-21). ES itself was healthy (0 write rejections, 30% heap). The DaemonSet was restarted to clear the retry queue. Logs were still flowing during the backlog (720K docs that day).
+
+**What to check each session:**
+
+```bash
+# 1. Fluent-bit pod health — all 3 nodes should be Running
+kubectl get pods -n monitoring -l app.kubernetes.io/name=fluent-bit
+
+# 2. Fluent-bit error rate in current logs (look for retry failures)
+kubectl logs -n monitoring -l app.kubernetes.io/name=fluent-bit --tail=200 \
+  | grep -E "cannot be retried|failed to flush|error flushing"
+
+# 3. Check for backlog warning (many retries queued)
+kubectl logs -n monitoring -l app.kubernetes.io/name=fluent-bit --tail=100 \
+  | grep -E "retry|Retry" | tail -20
+
+# 4. Elasticsearch cluster health
+kubectl exec -n monitoring elasticsearch-es-default-0 -- \
+  curl -s http://localhost:9200/_cluster/health | python3 -c \
+  "import sys,json; h=json.load(sys.stdin); print(f\"Status: {h['status']}, Nodes: {h['number_of_nodes']}, Shards: {h['active_shards']}\")"
+
+# 5. ES write thread pool — check for rejections (should be 0)
+kubectl exec -n monitoring elasticsearch-es-default-0 -- \
+  curl -s 'http://localhost:9200/_cat/thread_pool/write?v&h=name,active,queue,rejected'
+
+# 6. Today's fluent-bit index doc count (verify logs are flowing)
+kubectl exec -n monitoring elasticsearch-es-default-0 -- \
+  curl -s "http://localhost:9200/_cat/indices/fluent-bit-$(date +%Y.%m.%d)?v&h=index,docs.count,store.size"
+
+# 7. ES heap usage (warn if >70%)
+kubectl exec -n monitoring elasticsearch-es-default-0 -- \
+  curl -s 'http://localhost:9200/_cat/nodes?v&h=name,heap.percent,heap.current,heap.max'
+```
+
+**Warning Signs (investigate if any are true):**
+- fluent-bit pods not Running on all 3 nodes
+- `cannot be retried` or `failed to flush` appearing in current logs (post-restart)
+- ES write rejections > 0 (means ES is backpressuring; check heap/shard count)
+- Today's doc count = 0 or same as yesterday (logs stopped flowing)
+- ES heap > 70% (risk of GC pressure causing write rejections)
+- ES status = `red` (critical: shard allocation failure)
+
+**Recovery Procedure (if backlog recurs):**
+1. First confirm ES is healthy (status green/yellow, 0 write rejections, heap < 70%)
+2. If ES is healthy but fluent-bit logs show thousands of retry entries: restart the DaemonSet
+   ```bash
+   kubectl rollout restart daemonset/fluent-bit -n monitoring
+   kubectl rollout status daemonset/fluent-bit -n monitoring
+   ```
+3. If ES is rejecting writes (heap > 80%): scale down non-essential workloads or force-merge old indices
+4. Do NOT restart fluent-bit while ES is unhealthy — backlog will just rebuild
+
+**Known False Positive**: fluent-bit logs itself (monitoring namespace) producing ~40K log entries/day that fluent-bit then tries to ship back to ES — creating a feedback loop in the error counts. This is normal and expected; the actual application log count is lower.
 
 ## Action Items
 
-### 🔵 Low Priority
-1. **Upgrade Talos nodes** from v1.11.0 → v1.11.6 (match talosctl client)
-2. **Check Zigbee device** `0x00124b002d12beec` — replace battery or remove from config
-3. **Clean up music_assistant** — rename duplicate media player entries to get unique entity IDs
-4. **Monitor Soil Sensor 1 battery** — was 42% last check
+### 🟡 Upgrade Backlog (Deferred — needs research/window)
+1. **longhorn 1.10.1 → 1.11.0** — check all 68 volumes healthy, no degraded replicas, CRD migration needed
+2. **cilium 1.18.6 → 1.19.1** — validate HA mDNS, UPnP, MQTT, ESPHome all work post-upgrade
+3. **nextcloud chart 6.6.10 → 8.9.1** — research breaking changes
+4. **uptime-kuma chart 2.25.0 → 4.0.0** — research major version breaking changes
+5. **Talos nodes v1.11.0 → v1.12.2 + Kubernetes v1.34.0 → v1.35.0** — full cluster upgrade window
 
-### ✅ Resolved Since Last Check (2026-02-21 morning)
-1. `monitoring/elasticsearch` ILM bootstrap immutable Job — deleted and recreated ✅
-2. `office/nextcloud-notify-push` binary path and permissions — fixed ✅
-3. `databases/redisinsight` rollingUpdate strategy — confirmed fixed via #88+#89 ✅
-4. `network/external-dns` 29 restarts — diagnosed as self-healing Cloudflare EOF, no action needed ✅
-5. `monitoring/unpoller` 11 restarts — diagnosed as healthy, Err:0, no action needed ✅
-6. `monitoring/fluent-bit` + `monitoring/kibana` blocked — unblocked after elasticsearch Job fix ✅
-7. `opencode-andreamosteller` OOM — memory limit increased to 2Gi (prior session) ✅
+### 🔴 Blocked (do not upgrade without resolution)
+- **mariadb chart 11.5.7 → 25.0.0** — password injection breaking change, no explicit tag support
+- **n8n 1.123.x → 2.9.1** — missing task runner in chart 1.1.0, need migration strategy
+
+### 🔵 Low Priority
+1. **Check Zigbee device** `0x00124b002d12beec` — replace battery or remove from config
+2. **Clean up music_assistant** — rename duplicate media player entries
+3. **Monitor Soil Sensor 1 battery** — was 42% last check
+4. **Monitor fluent-bit** — watch for retry backlog recurrence after DaemonSet restart
+
+### ✅ Resolved Since Last Check (2026-02-21 evening)
+1. Patch updates applied: authentik, vaultwarden, adguard-home, node-red ✅
+2. Minor updates applied: descheduler, intel-device-plugin (×2), unpoller, penpot ✅
+3. open-webui upgraded 10.2.1→12.3.0 / 0.7.2→0.8.3 (with immutable Deployment fix) ✅
+4. ECK operator upgraded 2.14.0→3.3.0 ✅
+5. Flux CRD API versions migrated to stable (47 files) ✅
+6. Renovate ignoreDeps: added k8s-self-ai-ops private repo ✅
+7. fluent-bit retry backlog cleared (DaemonSet restarted) ✅
 
 ## Summary
 
 **Overall Health**: 🟡 **GOOD**
 
-Comprehensive 39-section health check completed. Three active issues were fixed during the session (elasticsearch Job, notify-push binary, redisinsight confirmed resolved). The cluster is in excellent shape: 0 CrashLoopBackOff, 0 Pending, all 85 kustomizations and 72 HelmReleases reconciled, 68 Longhorn volumes healthy, backups running on schedule. Remaining action items are all low-priority maintenance tasks (Talos upgrade, one offline Zigbee device, music_assistant cleanup).
+Major upgrade session completed: 10 components upgraded (4 patch, 5 minor, 2 major), 47 Flux CRD API files migrated to stable versions, fluent-bit retry backlog cleared. All services confirmed running post-upgrade. Remaining items are deferred upgrades requiring dedicated maintenance windows (longhorn, cilium, nextcloud, uptime-kuma, Talos/K8s cluster) and two blocked items requiring further research (mariadb, n8n).
 ```
