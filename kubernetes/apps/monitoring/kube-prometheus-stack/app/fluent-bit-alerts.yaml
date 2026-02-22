@@ -17,7 +17,7 @@ spec:
         # storage waiting to be retried. Normal steady-state is <20 chunks.
         # Our incident had 3600+ queued retry tasks.
         - alert: FluentBitRetryBacklogHigh
-          expr: fluentbit_storage_chunks_down > 100
+          expr: fluentbit_storage_fs_chunks_down > 100
           for: 10m
           labels:
             severity: warning
@@ -35,7 +35,7 @@ spec:
 
         # Fire earlier with a higher threshold so we can catch it before it gets out of hand
         - alert: FluentBitRetryBacklogCritical
-          expr: fluentbit_storage_chunks_down > 500
+          expr: fluentbit_storage_fs_chunks_down > 500
           for: 5m
           labels:
             severity: critical
