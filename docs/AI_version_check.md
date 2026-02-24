@@ -132,7 +132,7 @@ The script will:
 3. Check each deployment for updates
 4. Assess update complexity (major/minor/patch)
 5. Detect breaking changes from release notes
-6. Generate `AI_version_check_current.md` with results including:
+6. Generate `docs/AI_version_check_current.md` with results including:
    - Update indicators (⚠️ for updates available, ✅ for up-to-date)
    - Complexity assessment (🔴 major, 🟡 minor, 🟢 patch)
    - Breaking changes warnings
@@ -151,11 +151,11 @@ bash tools/extract-current-versions.sh
 This script will:
 1. Scan all HelmRelease files
 2. Extract current versions (no update checking)
-3. Generate `AI_version_check_current.md` with current state only
+3. Generate `docs/AI_version_check_current.md` with current state only
 
 ### Output
 
-The script generates `AI_version_check_current.md` containing:
+The script generates `docs/AI_version_check_current.md` containing:
 - Summary statistics (total deployments, updates available)
 - Update breakdown by complexity (major/minor/patch)
 - Breaking changes count
@@ -429,7 +429,7 @@ Consider setting up a scheduled job to run version checks:
 
 ```bash
 # Add to crontab (weekly on Sundays at 2 AM)
-0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 tools/check-all-versions.py && git add AI_version_check_current.md && git commit -m "chore: update version check status" && git push
+0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 tools/check-all-versions.py && git add docs/AI_version_check_current.md && git commit -m "chore: update version check status" && git push
 ```
 
 ### CI/CD Integration

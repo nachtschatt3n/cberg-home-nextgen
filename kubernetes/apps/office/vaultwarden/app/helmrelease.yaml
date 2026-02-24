@@ -32,7 +32,7 @@ spec:
           main:
             image:
               repository: vaultwarden/server
-              tag: "1.35.3"
+              tag: "1.35.4"
             env:
               ADMIN_TOKEN:
                 secretKeyRef:
