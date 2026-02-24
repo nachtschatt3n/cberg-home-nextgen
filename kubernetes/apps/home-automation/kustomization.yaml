@@ -8,6 +8,7 @@ resources:
  - ./frigate-nvr/ks.yaml
  - ./home-assistant/ks.yaml
  - ./iobroker/ks.yaml
+ - ./matter-server/ks.yaml
  - ./mosquitto/ks.yaml
  - ./mqttx-web/ks.yaml
  - ./music-assistant-server/ks.yaml
