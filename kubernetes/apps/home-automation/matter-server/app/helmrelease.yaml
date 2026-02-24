@@ -30,8 +30,8 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/home-assistant/python-matter-server
-              tag: 7.0.1
+              repository: ghcr.io/home-assistant-libs/python-matter-server
+              tag: stable
             env:
               - name: TZ
                 value: "Europe/Berlin"
