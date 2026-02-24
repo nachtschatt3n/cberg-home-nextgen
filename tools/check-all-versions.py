@@ -339,6 +339,24 @@ class VersionChecker:
         # GCR requires authentication, skip for now
         return None
     
+    def normalize_tag(self, tag: str) -> str:
+        """Normalize a container image tag for comparison.
+
+        Strips v/V prefix and known variant suffixes (e.g. -alpine, -bookworm, -slim)
+        so that '2.8.0-alpine' and '2.8.0', or 'v2.34.0' and '2.34.0', compare as equal.
+        """
+        # Strip v/V prefix
+        tag = tag.lstrip('vV')
+        # Strip known OS/variant suffixes that don't represent version differences
+        tag = re.sub(r'-(alpine|alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|focal|jammy|noble)(\d*)$', '', tag, flags=re.IGNORECASE)
+        return tag
+
+    def tags_are_equal(self, current: str, latest: str) -> bool:
+        """Return True if two tags represent the same version after normalization."""
+        if current == latest:
+            return True
+        return self.normalize_tag(current) == self.normalize_tag(latest)
+
     def parse_version(self, version_str: str) -> Optional[Tuple[int, int, int]]:
         """Parse version string into (major, minor, patch) tuple.
         
@@ -746,7 +764,7 @@ class VersionChecker:
                 if hr['repository_name'] in self.helm_repositories:
                     repo_url = self.helm_repositories[hr['repository_name']].get('url', '')
                 
-                if latest_chart and latest_chart != hr['chart_version']:
+                if latest_chart and not self.tags_are_equal(latest_chart, hr['chart_version']):
                     # Assess update complexity
                     assessment = self.assess_update_complexity(hr['chart_version'], latest_chart)
                     result['chart']['update_assessment'] = assessment
@@ -794,7 +812,7 @@ class VersionChecker:
                         'path': img['path']
                     }
                     
-                    if latest_tag and latest_tag != img['tag'] and img['tag'] != 'latest':
+                    if latest_tag and not self.tags_are_equal(latest_tag, img['tag']) and img['tag'] != 'latest':
                         # Assess update complexity
                         assessment = self.assess_update_complexity(img['tag'], latest_tag)
                         img_result['update_assessment'] = assessment
@@ -818,7 +836,7 @@ class VersionChecker:
                         
                         complexity_emoji = {'low': '🟢', 'medium': '🟡', 'high': '🔴'}.get(assessment['complexity'], '⚪')
                         print(f"  {Colors.YELLOW}Image {img['repository']}: {img['tag']} → {latest_tag} {complexity_emoji} {assessment['type'].upper()}{Colors.RESET}")
-                    elif img['tag'] == 'latest' or latest_tag == img['tag']:
+                    elif img['tag'] == 'latest' or (latest_tag and self.tags_are_equal(latest_tag, img['tag'])):
                         print(f"  {Colors.GREEN}Image {img['repository']}: {img['tag']} (latest){Colors.RESET}")
                     else:
                         print(f"  {Colors.YELLOW}Image {img['repository']}: {img['tag']} (could not check){Colors.RESET}")
@@ -1184,7 +1202,7 @@ def main():
     report = checker.generate_markdown_report()
     
     # Write to file
-    output_file = repo_root / "AI_version_check_current.md"
+    output_file = repo_root / "docs" / "AI_version_check_current.md"
     with open(output_file, 'w') as f:
         f.write(report)
     

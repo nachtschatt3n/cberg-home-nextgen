@@ -10,8 +10,17 @@ COLOR_GREEN='\033[0;32m'
 COLOR_YELLOW='\033[1;33m'
 COLOR_BLUE='\033[0;34m'
 
+# Resolve repo root and output directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DOCS_DIR="${REPO_ROOT}/docs"
+OUTPUT_FILE="${DOCS_DIR}/AI_version_check_current.md"
+
+mkdir -p "${DOCS_DIR}"
+
 echo -e "${COLOR_BLUE}=== Kubernetes Cluster Version Check ===${COLOR_RESET}"
 echo "Date: $(date)"
+echo "Output: ${OUTPUT_FILE}"
 echo ""
 
 # Function to check GitHub releases
@@ -61,4 +70,5 @@ kubectl get helmreleases -A -o json | jq -r '.items[] | "\(.metadata.namespace)|
 
 echo ""
 echo -e "${COLOR_GREEN}Version check complete!${COLOR_RESET}"
-echo "Check /tmp/version-*.txt files for latest available versions"
+echo "Results saved to: ${OUTPUT_FILE}"
+echo "Raw release data in: /tmp/version-*.txt"
