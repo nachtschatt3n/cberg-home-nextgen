@@ -32,7 +32,7 @@ spec:
             image:
               repository: ghcr.io/home-assistant-libs/python-matter-server
               tag: stable
-            args: ["--primary-interface", "enp86s0"]
+            args: ["--primary-interface", "enp86s0", "--verbose"]
             env:
               - name: TZ
                 value: "Europe/Berlin"
