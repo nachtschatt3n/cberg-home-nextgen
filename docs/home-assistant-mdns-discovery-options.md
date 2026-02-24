@@ -170,14 +170,14 @@ controllers:
 
 ### Option 3: hostNetwork Mode
 
-**Status**: Currently implemented (temporary solution)
+**Status**: Currently implemented for **Matter Server** (and temporarily for Home Assistant)
 
 #### Configuration
 
 ```yaml
-# kubernetes/apps/home-automation/home-assistant/app/helmrelease.yaml
+# kubernetes/apps/home-automation/matter-server/app/helmrelease.yaml
 controllers:
-  home-assistant:
+  matter-server:
     pod:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
@@ -185,7 +185,7 @@ controllers:
 
 #### Pros
 - Simple to implement
-- Full network access including mDNS
+- Full network access including mDNS (Essential for Matter/Thread)
 - Works immediately
 
 #### Cons
@@ -194,10 +194,14 @@ controllers:
 - Port conflicts possible with host services
 - Less isolation
 
+#### Implementation Note for Matter
+The **Matter Server** requires robust mDNS access to discover Thread Border Routers (like SLZB-06P7) and Matter devices. Using `hostNetwork: true` combined with defining the primary interface (e.g., `args: ["--primary-interface", "enp86s0"]`) ensures reliable discovery across VLANs when the upstream gateway (UniFi) has an mDNS reflector enabled. This is the **production** configuration for `matter-server` in this cluster.
+
 #### When to Use
 - Quick testing
 - Single-node clusters
 - When failover is not critical
+- **Required for Matter/Thread discovery** in complex network topologies without Multus
 
 ---
 
