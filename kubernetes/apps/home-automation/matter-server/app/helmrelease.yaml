@@ -27,13 +27,12 @@ spec:
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
-          nodeName: k8s-nuc14-03
         containers:
           app:
             image:
               repository: ghcr.io/home-assistant-libs/python-matter-server
               tag: stable
-            args: ["--primary-interface", "enp86s0", "--log-level", "debug", "--log-level-sdk", "debug"]
+            args: ["--primary-interface", "enp86s0", "--log-level", "info", "--log-level-sdk", "info"]
             env:
               - name: TZ
                 value: "Europe/Berlin"
