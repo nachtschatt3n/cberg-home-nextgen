@@ -319,6 +319,7 @@ The cluster hosts a variety of applications organized by functional category:
 - **Home Assistant** - Central home automation platform
 - **ESPHome** - ESP device management and configuration  
 - **Node-RED** - Flow-based automation and integration
+- **Matter Server** - Matter and Thread device connectivity
 - **Frigate NVR** - AI-powered network video recorder
 - **Scrypted NVR** - Additional video management platform
 - **Zigbee2MQTT** - Zigbee device integration via MQTT
