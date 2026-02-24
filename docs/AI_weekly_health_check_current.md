@@ -6,7 +6,7 @@ Keep a log of when this check was run and major findings:
 
 | Date | Health Status | Critical Issues | Actions Taken | Notes |
 |------|---------------|-----------------|---------------|-------|
-| 2026-02-24 (evening) | Excellent | 0 | 0 | **Overall**: ✅ **EXCELLENT** (0 real issues, 2 script false positives). **Script flags**: 1) 3 FATAL errors in Elasticsearch — all from `external-dns` `level=fatal` log field (transient EOF at 01:21/01:31/03:52 UTC, self-recovered, currently stable); 2) 1 failed job — `kube-system/descheduler` was still running at check time (false positive). **Cert alert**: `KubeClientCertificateExpiration WARNING` on `192.168.55.11:6443` was active at session start but self-resolved within minutes — transient rate-based histogram spike from short-lived auth tokens, all actual certs healthy (kubelet: 314d, apiserver p1: 181d, cert-manager: 39–50d). **Cluster**: All 3 nodes healthy, 0 active Alertmanager alerts, 75/75 PVCs Bound, all kustomizations reconciled, backup completed 03:20 UTC. No actions required. |
+| 2026-02-24 (evening) | Excellent | 0 | 8 | **Overall**: ✅ **EXCELLENT** (0 real issues, 2 script false positives). **Script flags**: 1) 3 FATAL errors in Elasticsearch — all from `external-dns` `level=fatal` log field (transient EOF, self-recovered); 2) 1 failed job — descheduler still running at check time (false positive). **Cert alert**: `KubeClientCertificateExpiration WARNING` on `192.168.55.11:6443` — transient histogram spike, self-resolved, all actual certs healthy (kubelet: 314d, apiserver: 181d, cert-manager: 39–50d). **Cluster**: All 3 nodes healthy, 0 active alerts, 75/75 PVCs Bound. **Patch updates applied**: cert-manager v1.19.3→v1.19.4 (CVE fix), vaultwarden 1.35.3→1.35.4, jdownloader v26.02.2→v26.02.3, open-webui chart 12.3.0→12.5.0 + image 0.8.3→0.8.5 (all pods verified running post-upgrade). **PRs merged**: #92 n8n 2.9.1→2.10.0 (v2 migration complete), #93 flux2 aqua tool 2.7.5→2.8.0. **Renovate fix**: Migrated `absenty` ImageRepository/ImagePolicy/ImageUpdateAutomation from `image.toolkit.fluxcd.io/v1beta2` → `v1` (dev+prod) — clears 3 stale Renovate dashboard items. **Tools fix**: version check output → `docs/` folder, added tag normalization (v-prefix, OS variants like `-alpine`). **Pending**: authentik 2026.2.0 (major), longhorn 1.11.0 (minor), cilium 1.19.1 (minor), ai-sre 2.1.1 (owner). |
 | 2026-02-22 (evening) | Warning | 1 | 1 | **Overall**: 🟠 **WARNING** (1 real Critical - Elasticsearch FATAL logs, 1 Major - Failed Jobs, 2 Minor). **Actions Taken**: 1) Fixed `nextcloud-cron` failure by adding `securityContext` (UID 33) to the `worker` sidecar in Nextcloud HelmRelease ✅. **Health Check**: Nodes healthy, storage healthy, GitOps synchronized. **Critical/Major Issues**: 1) 6 FATAL/OOM errors in Elasticsearch logs (linked to `external-dns` transient EOF errors - self-recovered); 2) 2 failed `nextcloud-cron` jobs (UID mismatch - resolved). **Minor Issues**: 1) "Hardware errors" on node 12 (identified as opencode OOMs and benign Longhorn iSCSI noise). **Status**: Cluster stable, issues addressed or identified as transient/benign. |
 | 2026-02-22 (afternoon) | Good | 0 | 2 | **Overall**: 🟡 **GOOD** (0 Critical, 0 Major, 4 Minor). **Actions Taken**: 1) Deleted stuck job `kube-system/descheduler-29528880` (8h running); 2) Fixed `absenty` Flux Kustomization failures by downgrading `ImagePolicy` manifests to `v1beta2` (API `v1` not supported); 3) Verified "hardware errors" on node 12 are transient DNS timeouts from Feb 19th (false positive). **Health Check**: Nodes healthy, storage healthy, monitoring operational. **Minor Issues**: 1) Talos version drift; 2) 1 Zigbee device offline; 3) music_assistant duplicates; 4) Soil Sensor battery monitoring. **Status**: Cluster healthy, minor issues resolved. |
 | 2026-02-22 | Good | 0 | 8 | **Overall**: 🟡 **GOOD** — Major upgrade + maintenance session. **Patch updates**: authentik 2025.12.3→4, vaultwarden 1.35.2→3, adguard-home v0.107.71→72, node-red 4.1.4→5. **Minor updates**: descheduler chart 0.34.0→0.35.0, intel-device-plugin charts 0.34.1→0.35.0 (×2), unpoller v2.33.0→v2.34.0, penpot chart 0.33.0→0.35.0 — all services confirmed running post-upgrade. **open-webui 10.2.1→12.3.0**: Required deleting immutable `open-webui-pipelines` Deployment (chart 12.x changed label selectors), adding `upgrade.timeout: 15m`, explicit Redis URL `redis://open-webui-redis:6379/0`. All pods running post-upgrade. **Flux CRD API migration**: 47 files migrated from deprecated `helm.toolkit.fluxcd.io/v2beta1/v2beta2` → `/v2` and `source/image.toolkit.fluxcd.io/v1beta2` → `/v1` (stable). **Renovate ignoreDeps**: Added `nachtschatt3n/k8s-self-ai-ops` (private GitHub repo, no token access). **ECK operator 2.14.0→3.3.0**: No breaking changes for ES/Kibana 8.15.3 users. Upgrade succeeded immediately. **fluent-bit chunk retry backlog**: Diagnosed pre-existing issue — 3600+ queued retry tasks, only 2 workers, 15-retry limit. ES healthy (0 write rejections, 30% heap, logs still ingesting). Fixed by restarting DaemonSet to clear backlog. Added log pipeline monitoring to health check docs. **Deferred (require investigation)**: longhorn 1.10.1→1.11.0 (pre-upgrade volume checks needed), cilium (HA mDNS/UPnP post-validation needed), nextcloud chart 6.6.10→8.9.1, uptime-kuma 2.25.0→4.0.0, Talos/K8s cluster upgrade, n8n v2 migration (BLOCKED), mariadb chart migration (BLOCKED). |
@@ -85,8 +85,30 @@ Keep a log of when this check was run and major findings:
 - **HelmRepositories**: 0 failed
 - **Active Alertmanager alerts**: 0
 
-## Action Items
-None. Cluster is fully healthy.
+## Updates Applied This Session
+
+| Component | Change | Verified |
+|-----------|--------|----------|
+| cert-manager | v1.19.3 → v1.19.4 (CVE-2026-24051, CVE-2025-68121) | ✅ pod Running |
+| vaultwarden | 1.35.3 → 1.35.4 | ✅ pod Running |
+| jdownloader | v26.02.2 → v26.02.3 | ✅ pod Running |
+| open-webui | chart 12.3.0→12.5.0, image 0.8.3→0.8.5 | ✅ pod Running, HTTP 200 |
+| n8n (PR #92) | 2.9.1 → 2.10.0 (v2 migration done) | ✅ merged |
+| flux2 aqua tool (PR #93) | 2.7.5 → 2.8.0 | ✅ merged |
+
+## Maintenance Actions This Session
+
+- **Renovate Flux CRD fix**: Migrated `absenty` (dev + prod) ImageRepository/ImagePolicy/ImageUpdateAutomation from `image.toolkit.fluxcd.io/v1beta2` → `/v1`. This completes the full Flux API migration started on 2026-02-22 (47 HelmRelease/HelmRepository/source files) which missed the absenty image automation files. Clears 3 stale Renovate dashboard items.
+- **Version check tooling**: Output path moved to `docs/`, tag normalization added (strips `v` prefix and OS variant suffixes like `-alpine`, `-bookworm`) to eliminate false-positive update reports for unpoller, homepage, influxdb.
+
+## Pending Updates (Deferred)
+
+| Component | Current | Latest | Category | Blocker |
+|-----------|---------|--------|----------|---------|
+| authentik | 2025.12.4 | 2026.2.0 | 🔴 Major | Review breaking changes |
+| longhorn | 1.10.1 | 1.11.0 | 🟡 Minor | Pre-upgrade volume checks needed |
+| cilium | 1.18.6 | 1.19.1 | 🟡 Minor | CNI upgrade needs maintenance window |
+| ai-sre | 2.1.0 | 2.1.1 | 🟢 Patch | Owner will handle |
 
 ## Recurring Pattern to Monitor
 - **external-dns EOF restarts** (47 over 9 days): Transient Cloudflare API connection resets. Self-healing, no impact on DNS records. If restart count accelerates, investigate Cloudflare API rate limits or network stability on the k8s-network VLAN.
