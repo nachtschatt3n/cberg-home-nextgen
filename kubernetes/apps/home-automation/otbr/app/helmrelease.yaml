@@ -39,6 +39,8 @@ spec:
                 value: "Europe/Berlin"
               - name: NETWORK_DEVICE
                 value: "192.168.32.70:6638"
+              - name: DEVICE
+                value: "/tmp/ttyOTBR"
               - name: OTBR_WEB_PORT
                 value: "8081"
             securityContext:
