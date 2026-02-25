@@ -41,6 +41,8 @@ spec:
                 value: "192.168.32.70:6638"
               - name: DEVICE
                 value: "/tmp/ttyOTBR"
+              - name: BAUDRATE
+                value: "115200"
               - name: OTBR_WEB_PORT
                 value: "8081"
             securityContext:
