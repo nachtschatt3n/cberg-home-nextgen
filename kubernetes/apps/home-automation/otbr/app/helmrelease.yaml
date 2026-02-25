@@ -27,7 +27,8 @@ spec:
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
-          nodeName: k8s-nuc14-03
+          nodeSelector:
+            kubernetes.io/hostname: k8s-nuc14-03
         containers:
           app:
             image:
