@@ -32,12 +32,15 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/homeassistant/otbr
-              tag: latest
+              repository: ghcr.io/ownbee/hass-otbr-docker
+              tag: v0.3.0
             env:
               - name: TZ
                 value: "Europe/Berlin"
-            args: ["--radio-url", "spinel+tcp://192.168.32.70:6638"]
+              - name: NETWORK_DEVICE
+                value: "192.168.32.70:6638"
+              - name: OTBR_WEB_PORT
+                value: "8081"
             securityContext:
               privileged: true
             resources:
