@@ -32,7 +32,7 @@ spec:
         containers:
           app:
             image:
-              repository: openthread/otbr
+              repository: ghcr.io/homeassistant/otbr
               tag: latest
             env:
               - name: TZ
