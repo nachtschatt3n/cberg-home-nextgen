@@ -43,6 +43,8 @@ spec:
                 value: "/tmp/ttyOTBR"
               - name: BAUDRATE
                 value: "115200"
+              - name: BACKBONE_IF
+                value: "enp86s0"
               - name: OTBR_WEB_PORT
                 value: "8081"
             securityContext:
