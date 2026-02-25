@@ -75,5 +75,9 @@ spec:
         enabled: true
         type: persistentVolumeClaim
         existingClaim: matter-server-data
-        globalMounts:
-          - path: /data
+        advancedMounts:
+          matter-server:
+            app:
+              - path: /data
+              - path: /root/.matter_server
+                subPath: matter_server_sdk
