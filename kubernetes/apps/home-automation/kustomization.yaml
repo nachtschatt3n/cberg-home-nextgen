@@ -14,6 +14,7 @@ resources:
  - ./music-assistant-server/ks.yaml
  - ./n8n/ks.yaml
  - ./node-red/ks.yaml
+ - ./otbr/ks.yaml
  - ./scrypted-nvr/ks.yaml
  - ./teslamate/ks.yaml
  - ./zigbee2mqtt/ks.yaml
