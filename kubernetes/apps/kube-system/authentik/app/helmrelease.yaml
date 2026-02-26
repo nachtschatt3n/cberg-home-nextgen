@@ -68,7 +68,7 @@ spec:
           value: "days=365"
       initContainers:
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2025.12.1
+          image: ghcr.io/goauthentik/server:2026.2.0
           command:
             - sh
             - -c
@@ -189,7 +189,7 @@ spec:
       startupProbe: null
       initContainers:
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2025.12.1
+          image: ghcr.io/goauthentik/server:2026.2.0
           command:
             - sh
             - -c
