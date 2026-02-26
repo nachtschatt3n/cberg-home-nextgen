@@ -1,16 +1,16 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-02-24 23:46:16
+**Generated:** 2026-02-26 12:44:06
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
 ## Summary
 
-- **Total Deployments:** 71
+- **Total Deployments:** 72
 - **Chart Updates Available:** 5
-- **Image Updates Available:** 6
-- **Update Breakdown:** 🔴 1 major | 🟡 4 minor | 🟢 3 patch
-- **⚠️ Breaking Changes Detected:** 2 updates with potential breaking changes
+- **Image Updates Available:** 11
+- **Update Breakdown:** 🔴 1 major | 🟡 2 minor | 🟢 6 patch
+- **⚠️ Breaking Changes Detected:** 3 updates with potential breaking changes
 
 ---
 
@@ -20,12 +20,12 @@
 |------------|-----------|-------|-------|-----|------------|
 | `icloud-docker-mu` | `backup` | 3.7.3 ? | latest ✅ | - | - |
 | `influxdb` | `databases` | 2.1.2 ✅ | 2.8.0-alpine → 2.8.0 | 2.8.0-alpine | ⚠️ |
-| `mariadb` | `databases` | 25.0.0 ✅ | - | - | - |
+| `mariadb` | `databases` | 25.0.0 → 25.0.1 | - | - | 🟢 PATCH |
 | `nocodb` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `phpmyadmin` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.3 ? | latest ✅ | - | - |
-| `ai-sre` | `default` | 3.7.3 ? | 2.1.0 ? | 2.1.0 | - |
-| `cert-manager` | `default` | v1.19.3 → v1.19.4 | - | - | 🟢 PATCH |
+| `ai-sre` | `default` | 3.7.3 ? | 2.1.0 → 2.1.1 | 2.1.0 | 🟢 PATCH |
+| `cert-manager` | `default` | v1.19.4 ✅ | - | - | - |
 | `cilium` | `default` | 1.18.6 → 1.19.1 | - | - | 🟡 MINOR |
 | `cloudflared` | `default` | 3.7.3 ? | 2026.2.0 ✅ | 2026.2.0 | - |
 | `coredns` | `default` | 1.45.2 ? | - | - | - |
@@ -37,19 +37,19 @@
 | `flux-instance` | `default` | 0.14.0 ? | - | - | - |
 | `flux-operator` | `default` | 0.14.0 ? | - | - | - |
 | `grafana` | `default` | 10.5.15 ✅ | - | - | - |
-| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 ? | v1.10.1 | - |
+| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 → 1.10.1 | v1.10.1 | ⚠️ |
 | `intel-device-plugin-gpu` | `default` | 0.35.0 ✅ | - | - | - |
 | `intel-device-plugin-operator` | `default` | 0.35.0 ✅ | - | - | - |
 | `internal-ingress-nginx` | `default` | 4.14.3 ✅ | - | - | - |
-| `jdownloader` | `default` | 3.7.3 ? | v26.02.2 → v26.02.3 | v26.02.2 | 🟢 PATCH |
+| `jdownloader` | `default` | 3.7.3 ? | v26.02.3 ✅ | v26.02.3 | - |
 | `k8s-gateway` | `default` | 2.4.0 ✅ | - | - | - |
 | `kube-prometheus-stack` | `default` | 81.6.9 ? | - | - | - |
-| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 ? | git-44ce6d0 | - |
+| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 → 0.0.19 | git-44ce6d0 | ⚪ UNKNOWN |
 | `metrics-server` | `default` | 3.13.0 ✅ | - | - | - |
 | `nextcloud` | `default` | 8.9.1 ✅ | 32.0.6 ? | 32.0.6 | - |
 | `node-feature-discovery` | `default` | 0.18.3 ✅ | - | - | - |
 | `omni-tools` | `default` | 3.7.3 ? | 0.6.0 ✅ | 0.6.0 | - |
-| `open-webui` | `default` | 12.3.0 → 12.5.0 | 0.8.3 ? | 0.8.3 | 🟡 MINOR |
+| `open-webui` | `default` | 12.5.0 ✅ | 0.8.5 ✅ | 0.8.5 | - |
 | `openclaw` | `default` | 3.7.3 ? | 22-bookworm ? | 22-bookworm | - |
 | `opencode-PROJECT_NAME` | `default` | 3.7.3 ? | latest ✅ | - | - |
 | `opencode-andreamosteller` | `default` | 3.7.3 ? | sha-4d4c614 ? | sha-4d4c614 | - |
@@ -60,16 +60,17 @@
 | `spegel` | `default` | v0.0.30 ? | - | - | - |
 | `teslamate` | `default` | 3.7.3 ? | 2.2.0 ✅ | 2.2.0 | - |
 | `tube-archivist` | `default` | 3.7.3 ? | v0.5.9 ✅ | v0.5.9 | - |
-| `vaultwarden` | `default` | 3.7.3 ? | 1.35.3 → 1.35.4 | 1.35.3 | 🟢 PATCH |
-| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.1 ? | 2026.2.1 | - |
-| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ? | 0.16.4 | - |
-| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.3 ? | 2026.2.3 | - |
-| `matter-server` | `home-automation` | 3.7.3 ? | stable ? | stable | - |
+| `vaultwarden` | `default` | 3.7.3 ? | 1.35.4 ✅ | 1.35.4 | - |
+| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.1 → 2026.2.2 | 2026.2.1 | 🟢 PATCH |
+| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ✅ | 0.16.4 | - |
+| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.3 ✅ | 2026.2.3 | - |
+| `matter-server` | `home-automation` | 3.7.3 ? | stable → 8.1.2 | stable | ⚪ UNKNOWN |
 | `mosquitto` | `home-automation` | 3.7.3 ? | 2.0.22 ? | 2.0.22 | - |
 | `mqttx-web` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
-| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.8 ? | 2.7.8 | - |
-| `n8n` | `home-automation` | 2.0.1 ? | 2.9.1 → 2.10.0 | 2.9.1 | 🟡 MINOR |
-| `node-red` | `home-automation` | 3.7.3 ? | 4.1.5 ✅ | 4.1.5 | - |
+| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.8 ✅ | 2.7.8 | - |
+| `n8n` | `home-automation` | 2.0.1 ? | 2.10.0 → 2.10.1 | 2.10.0 | 🟢 PATCH |
+| `node-red` | `home-automation` | 3.7.3 ? | 4.1.5 → 4.1.6 | 4.1.5 | 🟢 PATCH |
+| `otbr` | `home-automation` | 3.7.3 ? | v0.3.0 → 0.3.0 | v0.3.0 | ⚠️ |
 | `scrypted` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
 | `zigbee2mqtt` | `home-automation` | 3.7.3 ? | 2.8.0 ✅ | 2.8.0 | - |
 | `authentik` | `kube-system` | 2025.12.4 → 2026.2.0 | - | - | 🔴 MAJOR |
@@ -77,7 +78,7 @@
 | `jellyfin` | `media` | 2.7.0 ✅ | 10.11.6 ✅ | 10.11.6 | - |
 | `makemkv` | `media` | 3.7.3 ? | latest ✅ | - | - |
 | `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
-| `eck-operator` | `monitoring` | 3.3.0 ✅ | - | - | - |
+| `eck-operator` | `monitoring` | 3.3.0 → 3.3.1 | - | - | 🟢 PATCH |
 | `headlamp` | `monitoring` | 0.40.0 ✅ | - | - | - |
 | `unpoller` | `monitoring` | 2.1.0 ✅ | v2.34.0 → 2.34.0 | v2.34.0 | ⚠️ |
 | `uptime-kuma` | `monitoring` | 4.0.0 ✅ | 2.1.3 ✅ | 2.1.3 | - |
@@ -141,7 +142,12 @@
 - **Name:** `mariadb`
 - **Repository:** `bitnami`
 - **Current Version:** `25.0.0`
-- **Latest Version:** `25.0.0` ✅ (up-to-date)
+- **Latest Version:** `25.0.1` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟢 **PATCH** (low complexity)
+- **Update Description:** Patch version update: 25.0.0 → 25.0.1
+- **Source:** https://github.com/mariadb/mariadb/releases/tag/25.0.1
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
 
 *No container images specified in values*
 
@@ -217,7 +223,73 @@
 - **Repository:** `ghcr.io/nachtschatt3n/ai-sre`
   - **Path:** `controllers.ai-sre.containers.app.image`
   - **Current Tag:** `2.1.0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.1.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.1.0 → 2.1.1
+  - **⚠️ Breaking Changes Detected:**
+    - - No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+  - **Source:** https://github.com/nachtschatt3n/ai-sre/releases/tag/2.1.1
+  - **Release Date:** 2025-10-18
+  - **Release Notes:**
+    ```markdown
+    ## What's New
+
+This release adds modern development tooling and AI capabilities to the AI-SRE container.
+
+### New Features
+
+**mise Runtime Manager**
+- Installed mise for flexible runtime version management
+- Provides foundation for managing multiple tool versions
+
+**Node.js 18 LTS**
+- Added Node.js 18 LTS support via mise
+- Enables JavaScript/TypeScript tooling and npm packages
+- Includes npm for package management
+
+**Claude CLI**
+- Installed @anthropics/claude-code globally
+- Enables AI-assisted operations within the container
+- Supports enhanced automation workflows
+
+### Technical Details
+
+- **Builder Stage Changes:**
+  - Install mise via curl installer
+  - Configure mise with global Node.js 18 installation
+  - Install Claude CLI globally via npm
+
+- **Runtime Stage Changes:**
+  - Copy mise binaries and Node.js runtime to runtime stage
+  - Update PATH to include Node.js binaries
+  - Set MISE_DATA_DIR and MISE_CACHE_DIR environment variables
+
+- **Container Size:** Minimal impact on image size due to multi-stage build optimization
+
+### Version
+
+- **Image Version:** 2.1.1
+- **Base Image:** Alpine 3.20
+- **Node.js Version:** 18 (LTS)
+
+### Compatibility
+
+- All existing MCP tools remain functional
+- Backward compatible with v2.1.0
+- No breaking changes to existing workflows
+
+---
+
+**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+    ```
+  - **⚠️ Breaking Changes:**
+    - - No breaking changes to existing workflows
+    - ---
+    - **Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
 
 ---
 
@@ -228,26 +300,8 @@
 #### Chart
 - **Name:** `cert-manager`
 - **Repository:** `jetstack`
-- **Current Version:** `v1.19.3`
-- **Latest Version:** `v1.19.4` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 1.19.3 → 1.19.4
-- **Source:** https://github.com/cert-manager/cert-manager/releases/tag/v1.19.4
-- **Release Date:** 2026-02-24
-- **Release Notes:**
-  ```markdown
-  cert-manager is the easiest way to automatically manage certificates in Kubernetes and OpenShift clusters.
-
-v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably CVE-2026-24051 and CVE-2025-68121. All users should upgrade.
-
-## Changes by Kind
-
-### Bug or Regression
-
-- Bump go to address CVE-2025-68121 (#8526, @SgtCoDFish)
-- Bump otel SDK to address GO-2026-4394 (#8531, @SgtCoDFish)
-  ```
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `v1.19.4`
+- **Latest Version:** `v1.19.4` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -471,7 +525,8 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/gethomepage/homepage`
   - **Path:** `image`
   - **Current Tag:** `v1.10.1`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `1.10.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Assessment:** *Could not assess*
 
 ---
 
@@ -530,12 +585,8 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 #### Container Images
 - **Repository:** `jlesage/jdownloader-2`
   - **Path:** `controllers.main.containers.app.image`
-  - **Current Tag:** `v26.02.2`
-  - **Latest Tag:** `v26.02.3` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 26.2.2 → 26.2.3
-  - **Source:** https://github.com/jlesage/jdownloader-2/releases/tag/v26.02.3
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `v26.02.3`
+  - **Latest Tag:** `v26.02.3` ✅ (up-to-date)
 
 ---
 
@@ -581,7 +632,19 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/open-webui/mcpo`
   - **Path:** `controllers.mcpo.containers.app.image`
   - **Current Tag:** `git-44ce6d0`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.0.19` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Version format not recognized
+  - **Source:** https://github.com/open-webui/mcpo/releases/tag/0.0.19
+  - **Release Date:** 2025-10-14
+  - **Release Notes:**
+    ```markdown
+    ## [0.0.19] - 2025-10-14
+
+### Fixed
+
+* 🔁 **Reverted Client Header Forwarding**: Reverted changes introduced in 0.0.18.
+    ```
 
 - **Repository:** `python`
   - **Path:** `controllers.mcpo.initContainers.runtime-setup.image`
@@ -676,19 +739,14 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 #### Chart
 - **Name:** `open-webui`
 - **Repository:** `open-webui`
-- **Current Version:** `12.3.0`
-- **Latest Version:** `12.5.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟡 **MINOR** (medium complexity)
-- **Update Description:** Minor version update: 12.3.x → 12.5.x
-- **Source:** https://github.com/open-webui/open-webui/releases/tag/12.5.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
+- **Current Version:** `12.5.0`
+- **Latest Version:** `12.5.0` ✅ (up-to-date)
 
 #### Container Images
 - **Repository:** `ghcr.io/open-webui/open-webui`
   - **Path:** `image`
-  - **Current Tag:** `0.8.3`
-  - **Latest Tag:** *Could not determine*
+  - **Current Tag:** `0.8.5`
+  - **Latest Tag:** `0.8.5` ✅ (up-to-date)
 
 ---
 
@@ -902,12 +960,8 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 #### Container Images
 - **Repository:** `vaultwarden/server`
   - **Path:** `controllers.main.containers.main.image`
-  - **Current Tag:** `1.35.3`
-  - **Latest Tag:** `1.35.4` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 1.35.3 → 1.35.4
-  - **Source:** https://github.com/vaultwarden/server/releases/tag/1.35.4
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `1.35.4`
+  - **Latest Tag:** `1.35.4` ✅ (up-to-date)
 
 ---
 
@@ -927,7 +981,30 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/esphome/esphome`
   - **Path:** `controllers.esphome.containers.app.image`
   - **Current Tag:** `2026.2.1`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2026.2.2` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2026.2.1 → 2026.2.2
+  - **Source:** https://github.com/esphome/esphome/releases/tag/2026.2.2
+  - **Release Date:** 2026-02-26
+  - **Release Notes:**
+    ```markdown
+    - [max7219digit] Fix typo in action names [esphome#14162](https://github.com/esphome/esphome/pull/14162) by [@swoboda1337](https://github.com/swoboda1337)
+- [mipi_dsi] Disallow swap_xy [esphome#14124](https://github.com/esphome/esphome/pull/14124) by [@clydebarrow](https://github.com/clydebarrow)
+- [dsmr] Add deprecated std::string overload for set_decryption_key [esphome#14180](https://github.com/esphome/esphome/pull/14180) by [@bdraco](https://github.com/bdraco)
+- [api] Fix build error when lambda returns StringRef in homeassistant.event data [esphome#14187](https://github.com/esphome/esphome/pull/14187) by [@bdraco](https://github.com/bdraco)
+- [haier] Fix uninitialized HonSettings causing API connection failures [esphome#14188](https://github.com/esphome/esphome/pull/14188) by [@bdraco](https://github.com/bdraco)
+- [bme68x_bsec2] Fix compilation on ESP32 Arduino [esphome#14194](https://github.com/esphome/esphome/pull/14194) by [@bdraco](https://github.com/bdraco)
+- [network] Improve IPAddress::str() deprecation warning with usage example [esphome#14195](https://github.com/esphome/esphome/pull/14195) by [@bdraco](https://github.com/bdraco)
+- [water_heater] Fix device_id missing from state responses [esphome#14212](https://github.com/esphome/esphome/pull/14212) by [@bdraco](https://github.com/bdraco)
+- [mipi_dsi] Allow transform disable; fix warnings [esphome#14216](https://github.com/esphome/esphome/pull/14216) by [@clydebarrow](https://github.com/clydebarrow) (new-feature)
+- [http_request.ota] Percent-encode credentials in URL [esphome#14257](https://github.com/esphome/esphome/pull/14257) by [@swoboda1337](https://github.com/swoboda1337)
+- Don't get stuck forever on a failed component can_proceed [esphome#14267](https://github.com/esphome/esphome/pull/14267) by [@jesserockz](https://github.com/jesserockz)
+- [pid] Fix deadband threshold conversion for Fahrenheit [esphome#14268](https://github.com/esphome/esphome/pull/14268) by [@swoboda1337](https://github.com/swoboda1337)
+- [ld2420] Fix sizeof vs value bug in register memcpy [esphome#14286](https://github.com/esphome/esphome/pull/14286) by [@swoboda1337](https://github.com/swoboda1337)
+- [rtttl] Fix speaker playback bugs [esphome#14280](https://github.com/esphome/esphome/pull/14280) by [@swoboda1337](https://github.com/swoboda1337)
+- [hmc5883l] Fix wrong gain for 88uT range [esphome#14281](https://github.com/esphome/esphome/pull/14281) by [@swoboda1337](https://github.com/swoboda1337)
+- [sensor] Fix delta filter percentage mode regression [esphome#14302](https://github.com/esphome/esphome/pull/14302) by [@swoboda1337](https://github.com/swoboda1337)
+    ```
 
 ---
 
@@ -945,7 +1022,7 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/blakeblackshear/frigate`
   - **Path:** `image`
   - **Current Tag:** `0.16.4`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `0.16.4` ✅ (up-to-date)
 
 ---
 
@@ -963,7 +1040,7 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/home-assistant/home-assistant`
   - **Path:** `controllers.home-assistant.containers.app.image`
   - **Current Tag:** `2026.2.3`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2026.2.3` ✅ (up-to-date)
 
 ---
 
@@ -981,7 +1058,54 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/home-assistant-libs/python-matter-server`
   - **Path:** `controllers.matter-server.containers.app.image`
   - **Current Tag:** `stable`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `8.1.2` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
+  - **Update Description:** Version format not recognized
+  - **Source:** https://github.com/home-assistant-libs/python-matter-server/releases/tag/8.1.2
+  - **Release Date:** 2025-12-15
+  - **Release Notes:**
+    ```markdown
+    ## What’s Changed
+
+- #1303 - Dashboard: Fallback for unknown endpoint device types (@lboue)
+- #1298 - Change motionSensitivity and attribute_type to uint (@beeguy1234)
+- #1297 - add low power mode in Heiman's cluster (@Leo2442926161)
+- #1296 - add siren and mute for heiman smoke alarm (@Leo2442926161)
+- #1281 - Update node.ts to handle non-string label data (@mullender)
+- #1288 - Fix typo in Linux OS requirements section (@florianbehrens)
+- #1262 - docs: Update Docker image reference for Matter server container image (@agners)
+- #1250 - Announce Matter Server rewrite and maintenance mode (@Apollon77)
+
+## ⬆️ Dependencies and CI
+
+<details>
+<summary>44 changes</summary>
+
+- #1305 - Bump mypy from 1.19.0 to 1.19.1 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1304 - Bump ruff from 0.14.8 to 0.14.9 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1293 - Bump mypy from 1.18.2 to 1.19.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1294 - Bump pylint from 4.0.3 to 4.0.4 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1301 - Bump orjson from 3.11.4 to 3.11.5 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1300 - Bump ruff from 0.14.7 to 0.14.8 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1302 - Bump pytest from 9.0.1 to 9.0.2 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1295 - Bump actions/checkout from 6.0.0 to 6.0.1 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1292 - Bump ruff from 0.14.6 to 0.14.7 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1291 - Bump actions/setup-python from 6.0.0 to 6.1.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1289 - Bump pre-commit from 4.4.0 to 4.5.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1290 - Bump ruff from 0.14.5 to 0.14.6 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1287 - Bump actions/checkout from 5.0.1 to 6.0.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1286 - Bump actions/checkout from 5.0.0 to 5.0.1 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1285 - Bump pytest from 8.4.2 to 9.0.1 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1283 - Bump ruff from 0.14.4 to 0.14.5 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1282 - Bump pylint from 4.0.2 to 4.0.3 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1284 - Bump pytest-asyncio from 1.2.0 to 1.3.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1280 - Bump ruff from 0.14.3 to 0.14.4 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1278 - Bump pre-commit from 4.3.0 to 4.4.0 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1276 - Bump aiohttp from 3.13.1 to 3.13.2 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1277 - Bump ruff from 0.14.1 to 0.14.3 (@[dependabot[bot]](https://github.com/apps/dependabot))
+- #1275 - Bump orjson from 3.11.3 to 3.11.
+    ... (truncated, see source link above for full notes)
+    ```
 
 ---
 
@@ -1045,7 +1169,7 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `ghcr.io/music-assistant/server`
   - **Path:** `controllers.music-assistant-server.containers.app.image`
   - **Current Tag:** `2.7.8`
-  - **Latest Tag:** *Could not determine*
+  - **Latest Tag:** `2.7.8` ✅ (up-to-date)
 
 - **Repository:** `ghcr.io/alams154/music-assistant-alexa-api`
   - **Path:** `controllers.music-assistant-server.containers.alexa-api.image`
@@ -1072,11 +1196,11 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 #### Container Images
 - **Repository:** `n8nio/n8n`
   - **Path:** `image`
-  - **Current Tag:** `2.9.1`
-  - **Latest Tag:** `2.10.0` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟡 **MINOR** (medium complexity)
-  - **Update Description:** Minor version update: 2.9.x → 2.10.x
-  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.10.0
+  - **Current Tag:** `2.10.0`
+  - **Latest Tag:** `2.10.1` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.10.0 → 2.10.1
+  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.10.1
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1095,7 +1219,30 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
   - **Current Tag:** `4.1.5`
-  - **Latest Tag:** `4.1.5` ✅ (up-to-date)
+  - **Latest Tag:** `4.1.6` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 4.1.5 → 4.1.6
+  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.6
+  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+
+---
+
+### otbr
+
+- **File:** `kubernetes/apps/home-automation/otbr/app/helmrelease.yaml`
+
+#### Chart
+- **Name:** `app-template`
+- **Repository:** `bjw-s`
+- **Current Version:** `3.7.3`
+- **Latest Version:** *Could not determine*
+
+#### Container Images
+- **Repository:** `ghcr.io/ownbee/hass-otbr-docker`
+  - **Path:** `controllers.otbr.containers.app.image`
+  - **Current Tag:** `v0.3.0`
+  - **Latest Tag:** `0.3.0` ⚠️ **UPDATE AVAILABLE**
+  - **Update Assessment:** *Could not assess*
 
 ---
 
@@ -1245,7 +1392,39 @@ v1.19.4 is a simple patch release to fix some reported vulnerabilities - notably
 - **Name:** `eck-operator`
 - **Repository:** `elastic`
 - **Current Version:** `3.3.0`
-- **Latest Version:** `3.3.0` ✅ (up-to-date)
+- **Latest Version:** `3.3.1` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟢 **PATCH** (low complexity)
+- **Update Description:** Patch version update: 3.3.0 → 3.3.1
+- **Source:** https://github.com/elastic/cloud-on-k8s/releases/tag/3.3.1
+- **Release Date:** 2026-02-25
+- **Release Notes:**
+  ```markdown
+  # Elastic Cloud on Kubernetes 3.3.1
+- [Quickstart guide](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s#eck-quickstart)
+
+### Release Highlights
+
+#### Removing Enterprise requirement for Elastic AutoOps
+
+ECK 3.3.1 has removed the enterprise requirement for AutoOpsAgentPolicy. AutoOps can now be used by on premises users without the need for an enterprise license.
+
+### Features and enhancements
+
+- Removing enterprise requirement for AutoOpsAgentPolicy [#9125](https://github.com/elastic/cloud-on-k8s/pull/9125)
+- Add Namespace Selector to AutoOpsAgentPolicy [#8991](https://github.com/elastic/cloud-on-k8s/pull/8991)
+- Update minimum AutoOps Agent to 9.2.4 when a Basic license is used [#9157](https://github.com/elastic/cloud-on-k8s/pull/9157)
+
+### Dependency updates
+
+- Go 1.25.6 => 1.25.7
+- github.com/elastic/go-ucfg v0.8.9-0.20251017163010-3520930bed4f -> v0.8.9-0.20260108155023-368693374ae9
+- go.elastic.co/apm/v2 v2.7.2 -> v2.7.3
+- golang.org/x/crypto v0.46.0 -> v0.48.0
+- k8s.io/api v0.35.0 -> v0.35.1
+- k8s.io/apimachinery v0.35.0 -> v0.35.1
+- k8s.io/client-go v0.35.0 -> v0.35.1
+  ```
+- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
 
 *No container images specified in values*
 
