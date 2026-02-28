@@ -1,0 +1,31 @@
+---
+# Grant descheduler SA permission to list/watch PVCs at cluster scope.
+# Required when ignorePvcPods: true is set in DefaultEvictor — the descheduler
+# must enumerate PVCs to know which pods are backed by persistent storage.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: descheduler-pvc
+  labels:
+    app.kubernetes.io/name: descheduler
+    app.kubernetes.io/instance: descheduler
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: descheduler-pvc
+  labels:
+    app.kubernetes.io/name: descheduler
+    app.kubernetes.io/instance: descheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: descheduler-pvc
+subjects:
+  - kind: ServiceAccount
+    name: descheduler
+    namespace: kube-system
