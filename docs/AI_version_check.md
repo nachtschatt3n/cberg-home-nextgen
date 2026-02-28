@@ -127,13 +127,13 @@ mise run deps
 python3 tools/check-all-versions.py
 ```
 
-The script will:
-1. Fetch open Renovate PRs via GitHub CLI
-2. Scan all HelmRelease files
-3. Load HelmRepository definitions
-4. Check each deployment for updates
-5. Assess update complexity (major/minor/patch)
-6. Detect breaking changes from release notes
+The script independently scans the cluster for updates **and** overlays open Renovate PRs as a complementary view. It will:
+1. Scan all HelmRelease files
+2. Load HelmRepository definitions
+3. Check each deployment for updates (directly against Helm repos and container registries)
+4. Assess update complexity (major/minor/patch)
+5. Detect breaking changes from release notes
+6. Fetch open Renovate PRs via GitHub CLI (independent of the above scans)
 7. Generate `docs/AI_version_check_current.md` with results including:
    - **Renovate PRs table** (open PRs grouped by type with merge status)
    - Update indicators (⚠️ for updates available, ✅ for up-to-date)
@@ -326,7 +326,9 @@ The script attempts to detect breaking changes by:
 - Migration guides
 - Upgrade documentation
 
-### 8. Fetching Renovate PRs
+### 8. Fetching Renovate PRs (Complementary View)
+
+The Renovate PR section is independent of the version scanning above — the script queries Helm repos and registries directly regardless of whether Renovate has opened any PRs. The Renovate section simply shows what the bot has already staged, which can be useful to cross-reference or merge directly instead of manually bumping versions.
 
 The script fetches open Renovate bot PRs via the GitHub CLI (`gh`):
 
