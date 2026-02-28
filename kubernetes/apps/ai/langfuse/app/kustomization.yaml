@@ -10,4 +10,6 @@ resources:
   - ./langfuse.yaml
   - ./ingress.yaml
   - ./secret.sops.yaml
+  - ./clickhouse-secret.sops.yaml
+  - ./postgresql-secret.sops.yaml
   - ./s3-credentials.sops.yaml

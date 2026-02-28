@@ -33,15 +33,6 @@ data:
         </macros>
     </clickhouse>
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: langfuse-clickhouse
-  namespace: ai
-type: Opaque
-stringData:
-  password: clickhouse123
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
