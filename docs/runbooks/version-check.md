@@ -134,7 +134,7 @@ The script independently scans the cluster for updates **and** overlays open Ren
 4. Assess update complexity (major/minor/patch)
 5. Detect breaking changes from release notes
 6. Fetch open Renovate PRs via GitHub CLI (independent of the above scans)
-7. Generate `docs/AI_version_check_current.md` with results including:
+7. Generate `docs/version-check-current.md` with results including:
    - **Renovate PRs table** (open PRs grouped by type with merge status)
    - Update indicators (⚠️ for updates available, ✅ for up-to-date)
    - Complexity assessment (🔴 major, 🟡 minor, 🟢 patch)
@@ -154,11 +154,11 @@ bash tools/extract-current-versions.sh
 This script will:
 1. Scan all HelmRelease files
 2. Extract current versions (no update checking)
-3. Generate `docs/AI_version_check_current.md` with current state only
+3. Generate `docs/version-check-current.md` with current state only
 
 ### Output
 
-The script generates `docs/AI_version_check_current.md` containing:
+The script generates `docs/version-check-current.md` containing:
 - Summary statistics (total deployments, updates available)
 - Update breakdown by complexity (major/minor/patch)
 - Breaking changes count
@@ -460,7 +460,7 @@ Consider setting up a scheduled job to run version checks:
 
 ```bash
 # Add to crontab (weekly on Sundays at 2 AM)
-0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 tools/check-all-versions.py && git add docs/AI_version_check_current.md && git commit -m "chore: update version check status" && git push
+0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 tools/check-all-versions.py && git add docs/version-check-current.md && git commit -m "chore: update version check status" && git push
 ```
 
 ### CI/CD Integration
