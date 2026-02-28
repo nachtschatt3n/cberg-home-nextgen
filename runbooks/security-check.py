@@ -292,12 +292,13 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
     name   = _sensitive.get("NAME", "")
     email  = _sensitive.get("EMAIL", "")
 
+    # --- A: personal literals (domain / git name / email) -----------------
     for label, val in [("domain", domain), ("name", name), ("email", email)]:
         if not val:
             continue
         hits = run_lines(
             f"git ls-files | grep -v '\\.sops\\.yaml$' "
-            f"| xargs grep -l '{val}' 2>/dev/null"
+            f"| xargs grep -Fl '{val}' 2>/dev/null"
         )
         if hits:
             for h in hits:
@@ -306,7 +307,128 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
         else:
             cprint(C.GREEN, f"  🟢 {label} not in tracked non-sops files")
 
-    return f.worst(), f, f.markdown()
+    # --- B: credential keyword = value patterns (YAML key-value / INI) ----
+    # Matches: password: value, auth_token = "value", jwt_secret: value, etc.
+    kw = (r"password|passwd|secret[_-]?key|api[_-]?key|access[_-]?key|"
+          r"private[_-]?key|auth[_-]?token|jwt[_-]?secret|signing[_-]?key|"
+          r"client[_-]?secret|webhook[_-]?secret|encryption[_-]?key|"
+          r"bearer[_-]?token|access[_-]?token")
+    val_re = r"""\s*[:=]\s*["']?[A-Za-z0-9+/!@#$%^&*()\[\]._:;,{}<>|\\~`@-]{8,}["']?"""
+    raw_hits = run_lines(
+        f"git ls-files kubernetes/ talos/ | grep -v '\\.sops\\.yaml$' "
+        f"| xargs grep -rniE '({kw}){val_re}' 2>/dev/null",
+        timeout=30,
+    )
+    # Whitelist patterns: references, shell vars, placeholders, SOPS, comments
+    _ref = re.compile(
+        r"secretKeyRef|valueFrom|secretRef|existingSecret|secretName|"
+        r"secretStore|envFromSecret|backupTargetCredential|"
+        r"ENC\[|sops:|"
+        r"\$\{[^}]*\}|\$[A-Z_][A-Z0-9_]*|PGPASSWORD=\$|DB_PASSWORD\b|"
+        r"__file|__env|\$__|process\.env|"
+        r"changeme|placeholder|example|EXAMPLE|your_|my-aws-|"
+        r"NOPASSWD|ollamaKey|basicAuth.*__file",
+        re.IGNORECASE,
+    )
+    cred_hits = []
+    for line in raw_hits:
+        # extract the content part after "filename:linenum:"
+        parts = line.split(":", 2)
+        content = parts[2] if len(parts) >= 3 else line
+        # skip comment lines
+        if content.lstrip().startswith("#"):
+            continue
+        if _ref.search(line):
+            continue
+        # skip if value portion is a plain kebab/snake k8s resource name
+        # (no uppercase, no special chars, no digits-only) → likely a ref
+        m = re.search(r'[:=]\s*["\']?([A-Za-z0-9+/!@#$%^&*._-]{8,})["\']?', content)
+        if m:
+            val_str = m.group(1)
+            if re.fullmatch(r"[a-z0-9][a-z0-9-]*", val_str):
+                continue  # plain kebab-case → k8s resource name
+        cred_hits.append(line)
+
+    if cred_hits:
+        for h in cred_hits[:15]:
+            short = redact(h[:130])
+            f.add(WARNING, f"Plaintext credential pattern: `{short}`")
+            cprint(C.YELLOW, f"  🟡 Credential pattern: {short}")
+    else:
+        cprint(C.GREEN, "  🟢 No plaintext credential keyword=value patterns")
+
+    # --- C: Kubernetes env var format: - name: SECRET_FOO / value: literal --
+    # Read tracked non-sops YAML files and look for adjacent name/value pairs
+    tracked = run_lines(
+        "git ls-files kubernetes/ talos/ | grep -v '\\.sops\\.yaml$' "
+        "| grep '\\.yaml$'"
+    )
+    _secret_name_re = re.compile(
+        r"name:\s*(.*(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|"
+        r"AUTH_KEY|SIGNING_KEY|JWT_SECRET|WEBHOOK_SECRET|"
+        r"ACCESS_KEY|CLIENT_SECRET|ENCRYPTION_KEY)[A-Z0-9_]*)\s*$",
+        re.IGNORECASE,
+    )
+    _value_re = re.compile(
+        r"value:\s*[\"']?([A-Za-z0-9+/!@#$%^&*._-]{8,})[\"']?\s*$"
+    )
+    _ref2 = re.compile(r"valueFrom|secretKeyRef|\$\{|\$[A-Z_]")
+    env_hits = []
+    for fpath in tracked:
+        try:
+            lines_text = Path(REPO_ROOT / fpath).read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, ln in enumerate(lines_text[:-1]):
+            nm = _secret_name_re.search(ln)
+            if not nm:
+                continue
+            next_ln = lines_text[i + 1]
+            vm = _value_re.search(next_ln)
+            if not vm:
+                continue
+            if _ref2.search(next_ln):
+                continue
+            entry = f"`{fpath}:{i+2}` — env `{nm.group(1)}` = `{redact(vm.group(1)[:60])}`"
+            env_hits.append(entry)
+
+    if env_hits:
+        for h in env_hits:
+            f.add(WARNING, f"Hardcoded env secret: {h}")
+            cprint(C.YELLOW, f"  🟡 Hardcoded env: {h}")
+    else:
+        cprint(C.GREEN, "  🟢 No hardcoded secrets in Kubernetes env vars")
+
+    # --- D: known token format fingerprints ------------------------------
+    TOKEN_PATTERNS = [
+        ("GitHub PAT (classic)",  r"ghp_[A-Za-z0-9]{36}"),
+        ("GitHub PAT (fine-grained)", r"github_pat_[A-Za-z0-9_]{82}"),
+        ("GitHub app/action token", r"ghs_[A-Za-z0-9]{36}"),
+        ("AWS access key",         r"AKIA[0-9A-Z]{16}"),
+        ("Slack webhook",          r"hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]+"),
+        ("Discord webhook",        r"discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+"),
+        ("JWT token",              r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"),
+        ("Cloudflare API token",   r"[A-Za-z0-9_-]{40}(?=[^A-Za-z0-9_-]|$)"),
+    ]
+    token_hits = []
+    for label, pat in TOKEN_PATTERNS[:-1]:  # skip Cloudflare (too broad for generic scan)
+        matches = run_lines(
+            f"git ls-files kubernetes/ talos/ | grep -v '\\.sops\\.yaml$' "
+            f"| xargs grep -rniE '{pat}' 2>/dev/null",
+            timeout=20,
+        )
+        for m in matches:
+            token_hits.append((label, redact(m[:130])))
+
+    if token_hits:
+        for label, hit in token_hits:
+            f.add(CRITICAL, f"{label} format found: `{hit}`")
+            cprint(C.RED, f"  🔴 {label}: {hit}")
+    else:
+        cprint(C.GREEN, "  🟢 No known token format fingerprints found")
+
+    lines = [f.markdown()]
+    return f.worst(), f, "\n".join(lines)
 
 
 def s3_git_history() -> tuple[str, Findings, str]:
