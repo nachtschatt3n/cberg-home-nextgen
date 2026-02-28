@@ -1,5 +1,5 @@
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
+apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageRepository
 metadata:
   name: absenty
@@ -10,7 +10,7 @@ spec:
   secretRef:
     name: ghcr-secret
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
+apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy
 metadata:
   name: absenty
@@ -24,7 +24,7 @@ spec:
   filterTags:
     pattern: '^sha-[0-9a-f]+-dev$'
 ---
-apiVersion: image.toolkit.fluxcd.io/v1
+apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImageUpdateAutomation
 metadata:
   name: absenty-image-updates
