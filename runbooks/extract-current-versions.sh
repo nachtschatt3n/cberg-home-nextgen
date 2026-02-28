@@ -5,7 +5,7 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUTPUT_FILE="${REPO_ROOT}/AI_version_check_current.md"
+OUTPUT_FILE="${REPO_ROOT}/docs/version-check-current.md"
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
@@ -14,7 +14,7 @@ echo "" >> "$OUTPUT_FILE"
 echo "**Generated:** $(date '+%Y-%m-%d %H:%M:%S')" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 echo "> **Note:** This is a basic extraction. For full version checking with update detection," >> "$OUTPUT_FILE"
-echo "> install Python dependencies (\`pip install pyyaml requests\`) and run \`tools/check-all-versions.py\`" >> "$OUTPUT_FILE"
+echo "> install Python dependencies (\`pip install pyyaml requests\`) and run \`runbooks/check-all-versions.py\`" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 echo "## Summary" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"

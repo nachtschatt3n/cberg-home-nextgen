@@ -16,7 +16,7 @@ The version checking system scans all HelmReleases in the repository and checks 
 
 ### Primary Tool: `check-all-versions.py` (Full Version Check)
 
-Location: `tools/check-all-versions.py`
+Location: `runbooks/check-all-versions.py`
 
 A comprehensive Python script that:
 - Scans all HelmRelease YAML files in `kubernetes/apps/`
@@ -38,7 +38,7 @@ A comprehensive Python script that:
 
 ### Basic Tool: `extract-current-versions.sh` (Current State Only)
 
-Location: `tools/extract-current-versions.sh`
+Location: `runbooks/extract-current-versions.sh`
 
 A bash script that:
 - Scans all HelmRelease YAML files
@@ -55,7 +55,7 @@ A bash script that:
 
 ### Legacy Tool: `check-versions.sh`
 
-Location: `tools/check-versions.sh`
+Location: `runbooks/check-versions.sh`
 
 A basic bash script that checks a limited set of applications via GitHub releases API. This is kept for reference but the Python script is recommended.
 
@@ -124,7 +124,7 @@ mise run deps
 # export GITHUB_TOKEN=your_github_token_here
 
 # Run the full version checker
-python3 tools/check-all-versions.py
+python3 runbooks/check-all-versions.py
 ```
 
 The script independently scans the cluster for updates **and** overlays open Renovate PRs as a complementary view. It will:
@@ -148,7 +148,7 @@ The script independently scans the cluster for updates **and** overlays open Ren
 cd /home/mu/code/cberg-home-nextgen
 
 # Run the basic extraction script
-bash tools/extract-current-versions.sh
+bash runbooks/extract-current-versions.sh
 ```
 
 This script will:
@@ -460,7 +460,7 @@ Consider setting up a scheduled job to run version checks:
 
 ```bash
 # Add to crontab (weekly on Sundays at 2 AM)
-0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 tools/check-all-versions.py && git add docs/version-check-current.md && git commit -m "chore: update version check status" && git push
+0 2 * * 0 cd /home/mu/code/cberg-home-nextgen && python3 runbooks/check-all-versions.py && git add docs/version-check-current.md && git commit -m "chore: update version check status" && git push
 ```
 
 ### CI/CD Integration
