@@ -8,8 +8,8 @@ Scans all HelmReleases in the repository and checks for:
 3. Application versions (where applicable)
 
 Outputs:
-- AI_version_check_current.md: Current status of all deployments
-- AI_version_check.md: Documentation on how to use this tool
+- runbooks/version-check-current.md: Current status of all deployments
+- runbooks/version-check.md: Documentation on how to use this tool
 """
 
 import os
