@@ -1,16 +1,28 @@
 # Kubernetes Deployment Version Status
 
-**Generated:** 2026-02-26 12:44:06
+**Generated:** 2026-02-28 10:54:00
 
 > **Note:** Release notes are fetched from GitHub API. If rate limited, some release notes may not be available. Check source links for full details.
 
 ## Summary
 
 - **Total Deployments:** 72
-- **Chart Updates Available:** 5
-- **Image Updates Available:** 11
-- **Update Breakdown:** 🔴 1 major | 🟡 2 minor | 🟢 6 patch
-- **⚠️ Breaking Changes Detected:** 3 updates with potential breaking changes
+- **Chart Updates Available:** 3
+- **Image Updates Available:** 7
+- **Update Breakdown:** 🔴 0 major | 🟡 3 minor | 🟢 2 patch
+- **⚠️ Breaking Changes Detected:** 1 updates with potential breaking changes
+
+---
+
+## Renovate PRs
+
+**3 open PR(s):** ⚪ 3 unknown
+
+| PR | Title | Type | Status |
+|----|-------|------|--------|
+| [#94](https://github.com/nachtschatt3n/cberg-home-nextgen/pull/94) | feat(container): update postgres ( 17.8 → 17.9 ) | ⚪ ? | ❓ Pending |
+| [#95](https://github.com/nachtschatt3n/cberg-home-nextgen/pull/95) | fix(container): update ghcr.io/siderolabs/kubelet ( v1.34.4 → v1.34.5 ) | ⚪ ? | ❓ Pending |
+| [#96](https://github.com/nachtschatt3n/cberg-home-nextgen/pull/96) | feat(helm): update fluent-bit ( 0.55.0 → 0.56.0 ) | ⚪ ? | ❓ Pending |
 
 ---
 
@@ -20,11 +32,11 @@
 |------------|-----------|-------|-------|-----|------------|
 | `icloud-docker-mu` | `backup` | 3.7.3 ? | latest ✅ | - | - |
 | `influxdb` | `databases` | 2.1.2 ✅ | 2.8.0-alpine → 2.8.0 | 2.8.0-alpine | ⚠️ |
-| `mariadb` | `databases` | 25.0.0 → 25.0.1 | - | - | 🟢 PATCH |
+| `mariadb` | `databases` | 25.0.1 ✅ | - | - | - |
 | `nocodb` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `phpmyadmin` | `databases` | 3.7.3 ? | latest ✅ | - | - |
 | `actual-budget` | `default` | 3.7.3 ? | latest ✅ | - | - |
-| `ai-sre` | `default` | 3.7.3 ? | 2.1.0 → 2.1.1 | 2.1.0 | 🟢 PATCH |
+| `ai-sre` | `default` | 3.7.3 ? | 2.1.1 ? | 2.1.1 | - |
 | `cert-manager` | `default` | v1.19.4 ✅ | - | - | - |
 | `cilium` | `default` | 1.18.6 → 1.19.1 | - | - | 🟡 MINOR |
 | `cloudflared` | `default` | 3.7.3 ? | 2026.2.0 ✅ | 2026.2.0 | - |
@@ -33,23 +45,23 @@
 | `echo-server` | `default` | 3.7.3 ? | 35 ? | 35 | - |
 | `external-dns` | `default` | 1.20.0 ✅ | - | - | - |
 | `external-ingress-nginx` | `default` | 4.14.3 ✅ | - | - | - |
-| `fluent-bit` | `default` | 0.55.0 ✅ | 4.2.2 ? | 4.2.2 | - |
+| `fluent-bit` | `default` | 0.55.0 → 0.56.0 | 4.2.2 ? | 4.2.2 | 🟡 MINOR |
 | `flux-instance` | `default` | 0.14.0 ? | - | - | - |
 | `flux-operator` | `default` | 0.14.0 ? | - | - | - |
 | `grafana` | `default` | 10.5.15 ✅ | - | - | - |
-| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 → 1.10.1 | v1.10.1 | ⚠️ |
+| `homepage` | `default` | 2.1.0 ✅ | v1.10.1 ? | v1.10.1 | - |
 | `intel-device-plugin-gpu` | `default` | 0.35.0 ✅ | - | - | - |
 | `intel-device-plugin-operator` | `default` | 0.35.0 ✅ | - | - | - |
 | `internal-ingress-nginx` | `default` | 4.14.3 ✅ | - | - | - |
 | `jdownloader` | `default` | 3.7.3 ? | v26.02.3 ✅ | v26.02.3 | - |
 | `k8s-gateway` | `default` | 2.4.0 ✅ | - | - | - |
 | `kube-prometheus-stack` | `default` | 81.6.9 ? | - | - | - |
-| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 → 0.0.19 | git-44ce6d0 | ⚪ UNKNOWN |
+| `mcpo` | `default` | 3.7.3 ? | git-44ce6d0 ? | git-44ce6d0 | - |
 | `metrics-server` | `default` | 3.13.0 ✅ | - | - | - |
 | `nextcloud` | `default` | 8.9.1 ✅ | 32.0.6 ? | 32.0.6 | - |
 | `node-feature-discovery` | `default` | 0.18.3 ✅ | - | - | - |
 | `omni-tools` | `default` | 3.7.3 ? | 0.6.0 ✅ | 0.6.0 | - |
-| `open-webui` | `default` | 12.5.0 ✅ | 0.8.5 ✅ | 0.8.5 | - |
+| `open-webui` | `default` | 12.5.0 ✅ | 0.8.5 ? | 0.8.5 | - |
 | `openclaw` | `default` | 3.7.3 ? | 22-bookworm ? | 22-bookworm | - |
 | `opencode-PROJECT_NAME` | `default` | 3.7.3 ? | latest ✅ | - | - |
 | `opencode-andreamosteller` | `default` | 3.7.3 ? | sha-4d4c614 ? | sha-4d4c614 | - |
@@ -61,24 +73,24 @@
 | `teslamate` | `default` | 3.7.3 ? | 2.2.0 ✅ | 2.2.0 | - |
 | `tube-archivist` | `default` | 3.7.3 ? | v0.5.9 ✅ | v0.5.9 | - |
 | `vaultwarden` | `default` | 3.7.3 ? | 1.35.4 ✅ | 1.35.4 | - |
-| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.1 → 2026.2.2 | 2026.2.1 | 🟢 PATCH |
-| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ✅ | 0.16.4 | - |
-| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.3 ✅ | 2026.2.3 | - |
+| `esphome` | `home-automation` | 3.7.3 ? | 2026.2.2 ? | 2026.2.2 | - |
+| `frigate` | `home-automation` | 7.8.0 ✅ | 0.16.4 ? | 0.16.4 | - |
+| `home-assistant` | `home-automation` | 3.7.3 ? | 2026.2.3 ? | 2026.2.3 | - |
 | `matter-server` | `home-automation` | 3.7.3 ? | stable → 8.1.2 | stable | ⚪ UNKNOWN |
 | `mosquitto` | `home-automation` | 3.7.3 ? | 2.0.22 ? | 2.0.22 | - |
 | `mqttx-web` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
-| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.8 ✅ | 2.7.8 | - |
-| `n8n` | `home-automation` | 2.0.1 ? | 2.10.0 → 2.10.1 | 2.10.0 | 🟢 PATCH |
-| `node-red` | `home-automation` | 3.7.3 ? | 4.1.5 → 4.1.6 | 4.1.5 | 🟢 PATCH |
+| `music-assistant-server` | `home-automation` | 3.7.3 ? | 2.7.8 → 2.7.9 | 2.7.8 | 🟢 PATCH |
+| `n8n` | `home-automation` | 2.0.1 ? | 2.10.1 → 2.10.2 | 2.10.1 | 🟢 PATCH |
+| `node-red` | `home-automation` | 3.7.3 ? | 4.1.6 ✅ | 4.1.6 | - |
 | `otbr` | `home-automation` | 3.7.3 ? | v0.3.0 → 0.3.0 | v0.3.0 | ⚠️ |
 | `scrypted` | `home-automation` | 3.7.3 ? | latest ✅ | - | - |
 | `zigbee2mqtt` | `home-automation` | 3.7.3 ? | 2.8.0 ✅ | 2.8.0 | - |
-| `authentik` | `kube-system` | 2025.12.4 → 2026.2.0 | - | - | 🔴 MAJOR |
+| `authentik` | `kube-system` | 2026.2.0 ✅ | - | - | - |
 | `csi-driver-smb` | `kube-system` | 1.20.0 ✅ | - | - | - |
 | `jellyfin` | `media` | 2.7.0 ✅ | 10.11.6 ✅ | 10.11.6 | - |
 | `makemkv` | `media` | 3.7.3 ? | latest ✅ | - | - |
 | `plex` | `media` | 1.4.0 ✅ | 1.42.1.10060-4e8b05daf → latest | 1.42.1.10060-4e8b05daf | ⚪ UNKNOWN |
-| `eck-operator` | `monitoring` | 3.3.0 → 3.3.1 | - | - | 🟢 PATCH |
+| `eck-operator` | `monitoring` | 3.3.1 ✅ | - | - | - |
 | `headlamp` | `monitoring` | 0.40.0 ✅ | - | - | - |
 | `unpoller` | `monitoring` | 2.1.0 ✅ | v2.34.0 → 2.34.0 | v2.34.0 | ⚠️ |
 | `uptime-kuma` | `monitoring` | 4.0.0 ✅ | 2.1.3 ✅ | 2.1.3 | - |
@@ -141,13 +153,8 @@
 #### Chart
 - **Name:** `mariadb`
 - **Repository:** `bitnami`
-- **Current Version:** `25.0.0`
-- **Latest Version:** `25.0.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 25.0.0 → 25.0.1
-- **Source:** https://github.com/mariadb/mariadb/releases/tag/25.0.1
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `25.0.1`
+- **Latest Version:** `25.0.1` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -167,7 +174,7 @@
 - **Repository:** `nocodb/nocodb`
   - **Path:** `controllers.nocodb.containers.app.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `0.301.2` ✅ (up-to-date)
+  - **Latest Tag:** `0.301.3` ✅ (up-to-date)
 
 ---
 
@@ -222,74 +229,8 @@
 #### Container Images
 - **Repository:** `ghcr.io/nachtschatt3n/ai-sre`
   - **Path:** `controllers.ai-sre.containers.app.image`
-  - **Current Tag:** `2.1.0`
-  - **Latest Tag:** `2.1.1` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.1.0 → 2.1.1
-  - **⚠️ Breaking Changes Detected:**
-    - - No breaking changes to existing workflows
-
----
-
-**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
-  - **Source:** https://github.com/nachtschatt3n/ai-sre/releases/tag/2.1.1
-  - **Release Date:** 2025-10-18
-  - **Release Notes:**
-    ```markdown
-    ## What's New
-
-This release adds modern development tooling and AI capabilities to the AI-SRE container.
-
-### New Features
-
-**mise Runtime Manager**
-- Installed mise for flexible runtime version management
-- Provides foundation for managing multiple tool versions
-
-**Node.js 18 LTS**
-- Added Node.js 18 LTS support via mise
-- Enables JavaScript/TypeScript tooling and npm packages
-- Includes npm for package management
-
-**Claude CLI**
-- Installed @anthropics/claude-code globally
-- Enables AI-assisted operations within the container
-- Supports enhanced automation workflows
-
-### Technical Details
-
-- **Builder Stage Changes:**
-  - Install mise via curl installer
-  - Configure mise with global Node.js 18 installation
-  - Install Claude CLI globally via npm
-
-- **Runtime Stage Changes:**
-  - Copy mise binaries and Node.js runtime to runtime stage
-  - Update PATH to include Node.js binaries
-  - Set MISE_DATA_DIR and MISE_CACHE_DIR environment variables
-
-- **Container Size:** Minimal impact on image size due to multi-stage build optimization
-
-### Version
-
-- **Image Version:** 2.1.1
-- **Base Image:** Alpine 3.20
-- **Node.js Version:** 18 (LTS)
-
-### Compatibility
-
-- All existing MCP tools remain functional
-- Backward compatible with v2.1.0
-- No breaking changes to existing workflows
-
----
-
-**Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
-    ```
-  - **⚠️ Breaking Changes:**
-    - - No breaking changes to existing workflows
-    - ---
-    - **Full Changelog**: https://github.com/nachtschatt3n/ai-sre/compare/v2.1.0...v2.1.1
+  - **Current Tag:** `2.1.1`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -459,7 +400,12 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Name:** `fluent-bit`
 - **Repository:** `fluent`
 - **Current Version:** `0.55.0`
-- **Latest Version:** `0.55.0` ✅ (up-to-date)
+- **Latest Version:** `0.56.0` ⚠️ **UPDATE AVAILABLE**
+- **Update Type:** 🟡 **MINOR** (medium complexity)
+- **Update Description:** Minor version update: 0.55.x → 0.56.x
+- **Source:** https://github.com/fluent/helm-charts/releases/tag/0.56.0
+- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+- **⚠️ Breaking Changes:** *Review release notes above for potential breaking changes*
 
 #### Container Images
 - **Repository:** `cr.fluentbit.io/fluent/fluent-bit`
@@ -525,8 +471,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/gethomepage/homepage`
   - **Path:** `image`
   - **Current Tag:** `v1.10.1`
-  - **Latest Tag:** `1.10.1` ⚠️ **UPDATE AVAILABLE**
-  - **Update Assessment:** *Could not assess*
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -632,19 +577,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/open-webui/mcpo`
   - **Path:** `controllers.mcpo.containers.app.image`
   - **Current Tag:** `git-44ce6d0`
-  - **Latest Tag:** `0.0.19` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** ⚪ **UNKNOWN** (unknown complexity)
-  - **Update Description:** Version format not recognized
-  - **Source:** https://github.com/open-webui/mcpo/releases/tag/0.0.19
-  - **Release Date:** 2025-10-14
-  - **Release Notes:**
-    ```markdown
-    ## [0.0.19] - 2025-10-14
-
-### Fixed
-
-* 🔁 **Reverted Client Header Forwarding**: Reverted changes introduced in 0.0.18.
-    ```
+  - **Latest Tag:** *Could not determine*
 
 - **Repository:** `python`
   - **Path:** `controllers.mcpo.initContainers.runtime-setup.image`
@@ -746,7 +679,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/open-webui/open-webui`
   - **Path:** `image`
   - **Current Tag:** `0.8.5`
-  - **Latest Tag:** `0.8.5` ✅ (up-to-date)
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -861,7 +794,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `icereed/paperless-gpt`
   - **Path:** `controllers.main.containers.main.image`
   - **Current Tag:** `latest`
-  - **Latest Tag:** `v0.25.0` ✅ (up-to-date)
+  - **Latest Tag:** `v0.25.1` ✅ (up-to-date)
 
 ---
 
@@ -980,31 +913,8 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 #### Container Images
 - **Repository:** `ghcr.io/esphome/esphome`
   - **Path:** `controllers.esphome.containers.app.image`
-  - **Current Tag:** `2026.2.1`
-  - **Latest Tag:** `2026.2.2` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2026.2.1 → 2026.2.2
-  - **Source:** https://github.com/esphome/esphome/releases/tag/2026.2.2
-  - **Release Date:** 2026-02-26
-  - **Release Notes:**
-    ```markdown
-    - [max7219digit] Fix typo in action names [esphome#14162](https://github.com/esphome/esphome/pull/14162) by [@swoboda1337](https://github.com/swoboda1337)
-- [mipi_dsi] Disallow swap_xy [esphome#14124](https://github.com/esphome/esphome/pull/14124) by [@clydebarrow](https://github.com/clydebarrow)
-- [dsmr] Add deprecated std::string overload for set_decryption_key [esphome#14180](https://github.com/esphome/esphome/pull/14180) by [@bdraco](https://github.com/bdraco)
-- [api] Fix build error when lambda returns StringRef in homeassistant.event data [esphome#14187](https://github.com/esphome/esphome/pull/14187) by [@bdraco](https://github.com/bdraco)
-- [haier] Fix uninitialized HonSettings causing API connection failures [esphome#14188](https://github.com/esphome/esphome/pull/14188) by [@bdraco](https://github.com/bdraco)
-- [bme68x_bsec2] Fix compilation on ESP32 Arduino [esphome#14194](https://github.com/esphome/esphome/pull/14194) by [@bdraco](https://github.com/bdraco)
-- [network] Improve IPAddress::str() deprecation warning with usage example [esphome#14195](https://github.com/esphome/esphome/pull/14195) by [@bdraco](https://github.com/bdraco)
-- [water_heater] Fix device_id missing from state responses [esphome#14212](https://github.com/esphome/esphome/pull/14212) by [@bdraco](https://github.com/bdraco)
-- [mipi_dsi] Allow transform disable; fix warnings [esphome#14216](https://github.com/esphome/esphome/pull/14216) by [@clydebarrow](https://github.com/clydebarrow) (new-feature)
-- [http_request.ota] Percent-encode credentials in URL [esphome#14257](https://github.com/esphome/esphome/pull/14257) by [@swoboda1337](https://github.com/swoboda1337)
-- Don't get stuck forever on a failed component can_proceed [esphome#14267](https://github.com/esphome/esphome/pull/14267) by [@jesserockz](https://github.com/jesserockz)
-- [pid] Fix deadband threshold conversion for Fahrenheit [esphome#14268](https://github.com/esphome/esphome/pull/14268) by [@swoboda1337](https://github.com/swoboda1337)
-- [ld2420] Fix sizeof vs value bug in register memcpy [esphome#14286](https://github.com/esphome/esphome/pull/14286) by [@swoboda1337](https://github.com/swoboda1337)
-- [rtttl] Fix speaker playback bugs [esphome#14280](https://github.com/esphome/esphome/pull/14280) by [@swoboda1337](https://github.com/swoboda1337)
-- [hmc5883l] Fix wrong gain for 88uT range [esphome#14281](https://github.com/esphome/esphome/pull/14281) by [@swoboda1337](https://github.com/swoboda1337)
-- [sensor] Fix delta filter percentage mode regression [esphome#14302](https://github.com/esphome/esphome/pull/14302) by [@swoboda1337](https://github.com/swoboda1337)
-    ```
+  - **Current Tag:** `2026.2.2`
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1022,7 +932,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/blakeblackshear/frigate`
   - **Path:** `image`
   - **Current Tag:** `0.16.4`
-  - **Latest Tag:** `0.16.4` ✅ (up-to-date)
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1040,7 +950,7 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/home-assistant/home-assistant`
   - **Path:** `controllers.home-assistant.containers.app.image`
   - **Current Tag:** `2026.2.3`
-  - **Latest Tag:** `2026.2.3` ✅ (up-to-date)
+  - **Latest Tag:** *Could not determine*
 
 ---
 
@@ -1169,7 +1079,37 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 - **Repository:** `ghcr.io/music-assistant/server`
   - **Path:** `controllers.music-assistant-server.containers.app.image`
   - **Current Tag:** `2.7.8`
-  - **Latest Tag:** `2.7.8` ✅ (up-to-date)
+  - **Latest Tag:** `2.7.9` ⚠️ **UPDATE AVAILABLE**
+  - **Update Type:** 🟢 **PATCH** (low complexity)
+  - **Update Description:** Patch version update: 2.7.8 → 2.7.9
+  - **Source:** https://github.com/music-assistant/server/releases/tag/2.7.9
+  - **Release Date:** 2026-02-27
+  - **Release Notes:**
+    ```markdown
+    ## 📦 Stable Release
+
+_Changes since [2.7.8](https://github.com/music-assistant/server/releases/tag/2.7.8)_
+
+### 🚀 Features and enhancements
+
+- Cap Apple Music artwork resolution to 1000x1000 (by @OzGav in #3177)
+- Subsonic: Reorder image metadata for artists (by @khers in #3227)
+
+### 🐛 Bugfixes
+
+- Gpodder: pass verify_ssl to web requests (by @fmunkes in #3195)
+- Fix Sonos S2 announcement 404 error on cloud queue context endpoint (by @Copilot in #3208)
+- Fix Radioparadise image URL (by @OzGav in #3220)
+- Allow user-configured shairport-sync instances on the same host to be discovered as AirPlay players (by @Copilot in #3221)
+- Treat narrators as a distinguishing field to prevent merging different recordings (by @hayupadhyaya in #3230)
+- Fix language and genre mapping for Spotify podcasts and audiobooks (by @OzGav in #3231)
+
+## :bow: Thanks to our contributors
+
+Special thanks to the following contributors who helped with this release:
+
+@Copilot, @OzGav, @fmunkes, @hayupadhyaya, @khers
+    ```
 
 - **Repository:** `ghcr.io/alams154/music-assistant-alexa-api`
   - **Path:** `controllers.music-assistant-server.containers.alexa-api.image`
@@ -1196,11 +1136,11 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 #### Container Images
 - **Repository:** `n8nio/n8n`
   - **Path:** `image`
-  - **Current Tag:** `2.10.0`
-  - **Latest Tag:** `2.10.1` ⚠️ **UPDATE AVAILABLE**
+  - **Current Tag:** `2.10.1`
+  - **Latest Tag:** `2.10.2` ⚠️ **UPDATE AVAILABLE**
   - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 2.10.0 → 2.10.1
-  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.10.1
+  - **Update Description:** Patch version update: 2.10.1 → 2.10.2
+  - **Source:** https://github.com/n8nio/n8n/releases/tag/2.10.2
   - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
 
 ---
@@ -1218,12 +1158,8 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 #### Container Images
 - **Repository:** `nodered/node-red`
   - **Path:** `controllers.node-red.containers.app.image`
-  - **Current Tag:** `4.1.5`
-  - **Latest Tag:** `4.1.6` ⚠️ **UPDATE AVAILABLE**
-  - **Update Type:** 🟢 **PATCH** (low complexity)
-  - **Update Description:** Patch version update: 4.1.5 → 4.1.6
-  - **Source:** https://github.com/nodered/node-red/releases/tag/4.1.6
-  - **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
+  - **Current Tag:** `4.1.6`
+  - **Latest Tag:** `4.1.6` ✅ (up-to-date)
 
 ---
 
@@ -1291,13 +1227,8 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 #### Chart
 - **Name:** `authentik`
 - **Repository:** `authentik`
-- **Current Version:** `2025.12.4`
-- **Latest Version:** `2026.2.0` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🔴 **MAJOR** (high complexity)
-- **Update Description:** Major version update: 2025.x.x → 2026.x.x
-- **Source:** https://github.com/goauthentik/authentik/releases/tag/2026.2.0
-- **Release Notes:** *Could not fetch release notes (GitHub API rate limit or release not found). Check source link above.*
-- **⚠️ Breaking Changes:** *Major version update - review release notes above for breaking changes*
+- **Current Version:** `2026.2.0`
+- **Latest Version:** `2026.2.0` ✅ (up-to-date)
 
 *No container images specified in values*
 
@@ -1391,40 +1322,8 @@ This release adds modern development tooling and AI capabilities to the AI-SRE c
 #### Chart
 - **Name:** `eck-operator`
 - **Repository:** `elastic`
-- **Current Version:** `3.3.0`
-- **Latest Version:** `3.3.1` ⚠️ **UPDATE AVAILABLE**
-- **Update Type:** 🟢 **PATCH** (low complexity)
-- **Update Description:** Patch version update: 3.3.0 → 3.3.1
-- **Source:** https://github.com/elastic/cloud-on-k8s/releases/tag/3.3.1
-- **Release Date:** 2026-02-25
-- **Release Notes:**
-  ```markdown
-  # Elastic Cloud on Kubernetes 3.3.1
-- [Quickstart guide](https://www.elastic.co/docs/deploy-manage/deploy/cloud-on-k8s#eck-quickstart)
-
-### Release Highlights
-
-#### Removing Enterprise requirement for Elastic AutoOps
-
-ECK 3.3.1 has removed the enterprise requirement for AutoOpsAgentPolicy. AutoOps can now be used by on premises users without the need for an enterprise license.
-
-### Features and enhancements
-
-- Removing enterprise requirement for AutoOpsAgentPolicy [#9125](https://github.com/elastic/cloud-on-k8s/pull/9125)
-- Add Namespace Selector to AutoOpsAgentPolicy [#8991](https://github.com/elastic/cloud-on-k8s/pull/8991)
-- Update minimum AutoOps Agent to 9.2.4 when a Basic license is used [#9157](https://github.com/elastic/cloud-on-k8s/pull/9157)
-
-### Dependency updates
-
-- Go 1.25.6 => 1.25.7
-- github.com/elastic/go-ucfg v0.8.9-0.20251017163010-3520930bed4f -> v0.8.9-0.20260108155023-368693374ae9
-- go.elastic.co/apm/v2 v2.7.2 -> v2.7.3
-- golang.org/x/crypto v0.46.0 -> v0.48.0
-- k8s.io/api v0.35.0 -> v0.35.1
-- k8s.io/apimachinery v0.35.0 -> v0.35.1
-- k8s.io/client-go v0.35.0 -> v0.35.1
-  ```
-- **⚠️ Breaking Changes:** *Patch updates typically don't have breaking changes - see release notes above*
+- **Current Version:** `3.3.1`
+- **Latest Version:** `3.3.1` ✅ (up-to-date)
 
 *No container images specified in values*
 

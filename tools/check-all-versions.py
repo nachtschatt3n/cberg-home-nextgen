@@ -52,7 +52,8 @@ class VersionChecker:
         
         # Check if gh CLI is available
         self.use_gh_cli = self._check_gh_available()
-        
+        self.renovate_prs: List[Dict] = []
+
     def find_helmreleases(self) -> List[Path]:
         """Find all HelmRelease YAML files."""
         helmreleases = []
@@ -723,7 +724,15 @@ class VersionChecker:
         # Load repositories
         self.load_helmrepositories()
         print(f"Loaded {len(self.helm_repositories)} Helm repositories")
-        
+
+        # Fetch open Renovate PRs
+        print("Fetching open Renovate PRs...")
+        self.renovate_prs = self.get_renovate_prs()
+        if self.renovate_prs:
+            print(f"Found {len(self.renovate_prs)} open Renovate PR(s)")
+        else:
+            print("No open Renovate PRs found")
+
         # Find and parse all HelmReleases
         helmrelease_files = self.find_helmreleases()
         print(f"Found {len(helmrelease_files)} HelmRelease files")
@@ -846,6 +855,136 @@ class VersionChecker:
             self.results.append(result)
             print()
     
+    def get_renovate_prs(self) -> List[Dict]:
+        """Fetch open Renovate PRs from GitHub using gh CLI."""
+        if not self.use_gh_cli:
+            return []
+
+        try:
+            cmd = [
+                'gh', 'pr', 'list',
+                '--author', 'app/renovate',
+                '--state', 'open',
+                '--json', 'number,title,labels,isDraft,mergeable,url',
+                '--limit', '100',
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode != 0:
+                print(f"{Colors.YELLOW}Warning: Could not fetch Renovate PRs{Colors.RESET}")
+                return []
+
+            prs = json.loads(result.stdout)
+
+            # Infer update type from labels then title
+            # Renovate uses either plain labels (patch/minor/major) or
+            # namespaced labels (type/patch, type/minor, type/major)
+            for pr in prs:
+                labels = [l['name'].lower() for l in pr.get('labels', [])]
+                title = pr.get('title', '').lower()
+
+                def has_label(keyword: str) -> bool:
+                    return keyword in labels or f'type/{keyword}' in labels
+
+                if has_label('major') or '(major)' in title:
+                    pr['update_type'] = 'major'
+                elif has_label('minor') or '(minor)' in title:
+                    pr['update_type'] = 'minor'
+                elif has_label('patch') or '(patch)' in title:
+                    pr['update_type'] = 'patch'
+                elif has_label('security'):
+                    pr['update_type'] = 'security'
+                else:
+                    pr['update_type'] = 'unknown'
+
+            return prs
+
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"{Colors.YELLOW}Warning: Could not fetch Renovate PRs: {e}{Colors.RESET}")
+            return []
+
+    def _generate_renovate_section(self) -> List[str]:
+        """Generate markdown section listing open Renovate PRs."""
+        lines = []
+        lines.append("## Renovate PRs")
+        lines.append("")
+
+        if not self.use_gh_cli:
+            lines.append("*GitHub CLI (gh) not available — cannot fetch Renovate PRs*")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+            return lines
+
+        if not self.renovate_prs:
+            lines.append("*No open Renovate PRs found*")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+            return lines
+
+        # Count by type
+        type_counts: Dict[str, int] = {}
+        for pr in self.renovate_prs:
+            t = pr.get('update_type', 'unknown')
+            type_counts[t] = type_counts.get(t, 0) + 1
+
+        type_display = {
+            'major':    ('🔴', 'major'),
+            'minor':    ('🟡', 'minor'),
+            'patch':    ('🟢', 'patch'),
+            'security': ('🔒', 'security'),
+            'unknown':  ('⚪', 'unknown'),
+        }
+        parts = []
+        for t in ['major', 'minor', 'patch', 'security', 'unknown']:
+            if t in type_counts:
+                emoji, label = type_display[t]
+                parts.append(f"{emoji} {type_counts[t]} {label}")
+
+        lines.append(f"**{len(self.renovate_prs)} open PR(s):** {' | '.join(parts)}")
+        lines.append("")
+        lines.append("| PR | Title | Type | Status |")
+        lines.append("|----|-------|------|--------|")
+
+        type_order = {'major': 0, 'minor': 1, 'security': 2, 'patch': 3, 'unknown': 4}
+        sorted_prs = sorted(
+            self.renovate_prs,
+            key=lambda p: (type_order.get(p.get('update_type', 'unknown'), 4), p['number'])
+        )
+
+        for pr in sorted_prs:
+            number = pr['number']
+            title = pr['title']
+            url = pr.get('url', f"https://github.com/pull/{number}")
+            update_type = pr.get('update_type', 'unknown')
+            is_draft = pr.get('isDraft', False)
+            mergeable = pr.get('mergeable', 'UNKNOWN')
+
+            type_label = {
+                'major':    '🔴 MAJOR',
+                'minor':    '🟡 MINOR',
+                'patch':    '🟢 PATCH',
+                'security': '🔒 SECURITY',
+                'unknown':  '⚪ ?',
+            }.get(update_type, '⚪ ?')
+
+            if is_draft:
+                status = "📝 Draft"
+            elif mergeable == 'CONFLICTING':
+                status = "⚡ Conflicts"
+            elif mergeable == 'MERGEABLE':
+                status = "✅ Ready"
+            else:
+                status = "❓ Pending"
+
+            lines.append(f"| [#{number}]({url}) | {title} | {type_label} | {status} |")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        return lines
+
     def generate_markdown_report(self) -> str:
         """Generate markdown report of current status."""
         lines = []
@@ -899,6 +1038,7 @@ class VersionChecker:
         lines.append("")
         lines.append("---")
         lines.append("")
+        lines.extend(self._generate_renovate_section())
         lines.append("## Quick Overview Table")
         lines.append("")
         lines.append("| Deployment | Namespace | Chart | Image | App | Complexity |")
