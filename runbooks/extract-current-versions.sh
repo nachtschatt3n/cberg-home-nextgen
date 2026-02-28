@@ -5,7 +5,7 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUTPUT_FILE="${REPO_ROOT}/docs/version-check-current.md"
+OUTPUT_FILE="${REPO_ROOT}/runbooks/version-check-current.md"
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
