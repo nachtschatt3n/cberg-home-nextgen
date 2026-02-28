@@ -71,12 +71,11 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /_cluster/health
-                    port: 9200
-                    httpHeaders:
-                      - name: Authorization
-                        value: "Basic ZWxhc3RpYzpQOWk0IXRpamxyZjM0b2ppZWZ3c20ua2RzZl8="
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - 'curl -sf -u "elastic:${ELASTIC_PASSWORD}" http://localhost:9200/_cluster/health'
                   initialDelaySeconds: 60
                   periodSeconds: 30
                   timeoutSeconds: 60
@@ -85,12 +84,11 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /_cluster/health
-                    port: 9200
-                    httpHeaders:
-                      - name: Authorization
-                        value: "Basic ZWxhc3RpYzpQOWk0IXRpamxyZjM0b2ppZWZ3c20ua2RzZl8="
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - 'curl -sf -u "elastic:${ELASTIC_PASSWORD}" http://localhost:9200/_cluster/health'
                   initialDelaySeconds: 60
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -99,12 +97,11 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /_cluster/health
-                    port: 9200
-                    httpHeaders:
-                      - name: Authorization
-                        value: "Basic ZWxhc3RpYzpQOWk0IXRpamxyZjM0b2ppZWZ3c20ua2RzZl8="
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - 'curl -sf -u "elastic:${ELASTIC_PASSWORD}" http://localhost:9200/_cluster/health'
                   failureThreshold: 30
                   periodSeconds: 10
 
