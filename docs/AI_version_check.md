@@ -10,6 +10,7 @@ The version checking system scans all HelmReleases in the repository and checks 
 3. **Application Versions**: Where applicable (extracted from image tags)
 4. **Update Complexity Assessment**: Classifies updates as major/minor/patch
 5. **Breaking Changes Detection**: Identifies potential breaking changes from release notes
+6. **Renovate PRs**: Lists open Renovate bot PRs with type and merge status
 
 ## Tools
 
@@ -127,12 +128,14 @@ python3 tools/check-all-versions.py
 ```
 
 The script will:
-1. Scan all HelmRelease files
-2. Load HelmRepository definitions
-3. Check each deployment for updates
-4. Assess update complexity (major/minor/patch)
-5. Detect breaking changes from release notes
-6. Generate `docs/AI_version_check_current.md` with results including:
+1. Fetch open Renovate PRs via GitHub CLI
+2. Scan all HelmRelease files
+3. Load HelmRepository definitions
+4. Check each deployment for updates
+5. Assess update complexity (major/minor/patch)
+6. Detect breaking changes from release notes
+7. Generate `docs/AI_version_check_current.md` with results including:
+   - **Renovate PRs table** (open PRs grouped by type with merge status)
    - Update indicators (⚠️ for updates available, ✅ for up-to-date)
    - Complexity assessment (🔴 major, 🟡 minor, 🟢 patch)
    - Breaking changes warnings
@@ -159,6 +162,8 @@ The script generates `docs/AI_version_check_current.md` containing:
 - Summary statistics (total deployments, updates available)
 - Update breakdown by complexity (major/minor/patch)
 - Breaking changes count
+- **Renovate PRs table** — open Renovate bot PRs with type (🔴 major / 🟡 minor / 🟢 patch / 🔒 security) and status (✅ Ready / ⚡ Conflicts / 📝 Draft)
+- Quick overview table of all deployments
 - Detailed breakdown by namespace
 - For each deployment:
   - Chart name, repository, current and latest versions
@@ -320,6 +325,30 @@ The script attempts to detect breaking changes by:
 - Changelogs
 - Migration guides
 - Upgrade documentation
+
+### 8. Fetching Renovate PRs
+
+The script fetches open Renovate bot PRs via the GitHub CLI (`gh`):
+
+```bash
+gh pr list --author app/renovate --state open \
+  --json number,title,labels,isDraft,mergeable,url --limit 100
+```
+
+**Update type inference** — checked in order:
+1. Labels: `type/major`, `type/minor`, `type/patch` (Renovate's namespaced format)
+2. Labels: `major`, `minor`, `patch` (plain format)
+3. Labels: `security` (security updates)
+4. Title patterns: `(major)`, `(minor)`, `(patch)` in title text
+5. Fallback: `unknown`
+
+**Merge status mapping:**
+- `✅ Ready` — PR is mergeable
+- `⚡ Conflicts` — PR has merge conflicts
+- `📝 Draft` — PR is a draft
+- `❓ Pending` — mergeable state not yet computed by GitHub
+
+**Requirements:** GitHub CLI (`gh`) must be installed and authenticated. The Renovate PR section is silently skipped if `gh` is not available.
 
 ## Limitations
 
