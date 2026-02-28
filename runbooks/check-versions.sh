@@ -13,7 +13,7 @@ COLOR_BLUE='\033[0;34m'
 # Resolve repo root and output directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DOCS_DIR="${REPO_ROOT}/docs"
+DOCS_DIR="${REPO_ROOT}/runbooks"
 OUTPUT_FILE="${DOCS_DIR}/version-check-current.md"
 
 mkdir -p "${DOCS_DIR}"

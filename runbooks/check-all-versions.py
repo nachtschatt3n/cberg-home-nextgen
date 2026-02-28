@@ -1342,7 +1342,7 @@ def main():
     report = checker.generate_markdown_report()
     
     # Write to file
-    output_file = repo_root / "docs" / "version-check-current.md"
+    output_file = repo_root / "runbooks" / "version-check-current.md"
     with open(output_file, 'w') as f:
         f.write(report)
     
