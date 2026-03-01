@@ -15,7 +15,7 @@ and worker).
 |-----------|-------|
 | Kubernetes | v1.34.0 |
 | Talos Linux | v1.11.0 |
-| Flux | v2.7.5 |
+| Flux | v2.8.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.18.6 |
 | Storage | Longhorn v1.10.1 |
@@ -160,16 +160,16 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 |------|---------|---------|
 | Kubernetes | v1.34.0 | Container orchestration |
 | Talos Linux | v1.11.0 | Cluster OS |
-| Flux | v2.7.5 | GitOps operator |
+| Flux | v2.8.0 | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
 | Longhorn | v1.10.1 | Distributed storage |
 | cert-manager | v1.19.3 | TLS management |
-| Helm | 3.17.1 | Package manager |
+| Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |
-| talosctl | 1.11.0 | Talos CLI |
-| talhelper | 3.0.37 | Talos config helper |
-| sops | 3.9.4 | Secrets encryption |
-| age | 1.2.1 | Encryption backend |
+| talosctl | 1.11.0 | Talos CLI (server); client v1.12.4 |
+| talhelper | 3.1.3 | Talos config helper |
+| sops | 3.12.1 | Secrets encryption |
+| age | 1.3.1 | Encryption backend |
 
 ---
 

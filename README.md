@@ -10,7 +10,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 [![Talos](https://img.shields.io/badge/Talos-v1.11.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
-[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.7.5-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
+[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.8.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
 
@@ -57,7 +57,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 - **Storage**: [Longhorn v1.10.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
-- **GitOps**: [Flux v2.7.5](https://github.com/fluxcd/flux2) monitors this repository and keeps the cluster in sync
+- **GitOps**: [Flux v2.8.0](https://github.com/fluxcd/flux2) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
 - **Certificate Management**: [cert-manager v1.19.3](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
