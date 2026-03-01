@@ -30,7 +30,7 @@ spec:
         allowInsecureImages: true
     image:
       repository: ghcr.io/paperless-ngx/paperless-ngx
-      tag: "2.20.8"
+      tag: "2.20.9"
       pullPolicy: IfNotPresent
     env:
       TZ: UTC
