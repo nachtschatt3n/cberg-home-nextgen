@@ -21,6 +21,7 @@ Brewfile.lock.json
 .idea
 # Runbook outputs with sensitive findings
 runbooks/security-check-current.md
+runbooks/doc-check-current.md
 # Bootstrap
 /config.yaml
 cloudflared.json
