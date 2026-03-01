@@ -25,6 +25,16 @@ spec:
       retries: 1
   uninstall:
     keepHistory: false
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: open-webui
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     nameOverride: ""
     ollama:

@@ -23,6 +23,16 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: influxdb-influxdb2
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     ## influxdb image version
     ## ref: https://hub.docker.com/r/library/influxdb/tags/

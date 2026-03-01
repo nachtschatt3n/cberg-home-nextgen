@@ -21,6 +21,16 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: mqttx-web
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     controllers:
       mqttx-web:
