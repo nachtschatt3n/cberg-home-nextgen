@@ -19,9 +19,8 @@ talosconfig
 Brewfile.lock.json
 # intellij
 .idea
-# Runbook outputs with sensitive findings
-runbooks/security-check-current.md
-runbooks/doc-check-current.md
+# Auto-generated runbook snapshots (never commit)
+runbooks/*-current.md
 # Guard against accidental duplicate outputs in docs/
 docs/*-current.md
 # Bootstrap
