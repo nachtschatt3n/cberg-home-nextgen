@@ -73,6 +73,15 @@ def run(cmd: str, timeout: int = 30) -> str:
         return ""
 
 
+def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
+    """Run command and return (returncode, stdout, stderr)."""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
 def run_lines(cmd: str, timeout: int = 30) -> list[str]:
     out = run(cmd, timeout=timeout)
     return [l for l in out.splitlines() if l.strip()]
@@ -818,14 +827,36 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
     checks = []
 
     # sops-age secret
-    age = kubectl("get secret sops-age -n flux-system -o jsonpath='{.metadata.name}' 2>/dev/null")
-    if age.strip("'") == "sops-age":
+    rc, age_out, age_err = run_cmd(
+        "kubectl get secret sops-age -n flux-system -o jsonpath='{.metadata.name}'",
+        timeout=15,
+    )
+    age_name = age_out.strip("'")
+    err_l = age_err.lower()
+    api_unreachable = any(x in err_l for x in (
+        "unable to connect to the server",
+        "operation not permitted",
+        "connection refused",
+        "i/o timeout",
+        "context deadline exceeded",
+        "no route to host",
+    ))
+
+    if rc == 0 and age_name == "sops-age":
         checks.append(f"{OK} `sops-age` secret present in flux-system")
         cprint(C.GREEN, "  🟢 sops-age secret present")
-    else:
+    elif "notfound" in err_l or "not found" in err_l:
         f.add(CRITICAL, "sops-age secret MISSING — cluster cannot decrypt secrets on restart")
         checks.append(f"{CRITICAL} `sops-age` secret MISSING")
         cprint(C.RED, "  🔴 sops-age MISSING")
+    elif api_unreachable:
+        f.add(WARNING, f"Could not verify `sops-age` secret (cluster/API unreachable: {age_err})")
+        checks.append(f"{WARNING} `sops-age` secret check skipped (API unreachable)")
+        cprint(C.YELLOW, "  🟡 Could not verify sops-age (cluster/API unreachable)")
+    else:
+        f.add(WARNING, f"Could not verify `sops-age` secret (kubectl error: {age_err or 'unknown'})")
+        checks.append(f"{WARNING} `sops-age` secret check failed")
+        cprint(C.YELLOW, "  🟡 Could not verify sops-age (kubectl error)")
 
     # Webhook receiver secretRef
     receivers = kubectl_json("get receiver -n flux-system 2>/dev/null")
