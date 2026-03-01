@@ -135,141 +135,28 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
 - Follow kebab-case naming for files and directories, snake_case for variables/functions
 - Use task commands for common operations like validating templates or running tests
 
-## Ollama AI Endpoints
+## AI & App/Infra References
 
-### Mac Mini M4 Pro Ollama Instances
+Detailed AI/Ollama operational guidance has been moved to:
+- `docs/sops/ai-integration.md`
 
-The cluster uses Ollama running on Mac Mini M4 Pro (192.168.30.111) with three dedicated instances:
+Application inventory and service-level context:
+- `docs/applications.md`
 
-| Instance | Port | Model | Purpose |
-|----------|------|-------|---------|
-| Voice | 11434 | `qwen3:4b-instruct` | Voice/audio processing |
-| Reason | 11435 | `gpt-oss:20b` | General reasoning and text processing |
-| Vision | 11436 | `qwen3-vl:8b-instruct` | Vision/image processing |
+Infrastructure and topology reference:
+- `docs/infrastructure.md`
 
-### Native Ollama API Format
+## New Deployment Blueprint
 
-Ollama provides native REST API endpoints at `/api` path. All endpoints use the format:
-- **Base URL**: `http://192.168.30.111:{PORT}/api` (no trailing slash, no `/v1`)
-- **Endpoints**: `/api/chat` for chat completions, `/api/generate` for text generation
-- **API Key**: Not required for native Ollama API
-- **Model Names**: Use Ollama model format (e.g., `gpt-oss:20b`, not `openai/gpt-oss-20b`)
+Use `docs/sops/new-deployment-blueprint.md` as the default SOP for any new application rollout.
 
-**Note**: Ollama also provides OpenAI-compatible endpoints at `/v1/` if applications require OpenAI-compatible format, but native Ollama API at `/api` is preferred.
-
-### Application Configuration
-
-#### Paperless-AI
-- **Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, native Ollama API)
-- **Model**: `qwen3:4b-instruct`
-- **Config**: `CUSTOM_BASE_URL` with `AI_PROVIDER: "custom"`
-
-#### Paperless-GPT
-- **LLM Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, native Ollama API)
-- **LLM Model**: `gpt-oss:20b`
-- **Vision Endpoint**: `http://192.168.30.111:11435/api` (Reason instance, vision models can use same endpoint)
-- **Vision Model**: `qwen3-vl:8b-instruct`
-- **Config**: `OPENAI_BASE_URL` with `LLM_PROVIDER: "openai"` (Note: May need OpenAI-compatible format `/v1/` if app requires it)
-
-#### Frigate NVR
-- **Endpoint**: `http://192.168.30.111:11436/api` (Vision instance, native Ollama API)
-- **Config**: `OPENAI_BASE_URL` environment variable (Note: May need OpenAI-compatible format `/v1/` if app requires it)
-
-### Model Naming Convention
-
-**Important**: Ollama model names use colon format, not slash:
-- ✅ Correct: `gpt-oss:20b`, `qwen3:4b-instruct`, `qwen3-vl:8b-instruct`
-- ❌ Wrong: `openai/gpt-oss-20b`, `qwen/qwen3-4b-2507`
-
-### Endpoint Testing
-
-```bash
-# Test Reason endpoint (native Ollama API)
-curl -X POST http://192.168.30.111:11435/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-oss:20b",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": false
-  }'
-
-# Test Vision endpoint (native Ollama API)
-curl -X POST http://192.168.30.111:11436/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen3-vl:8b-instruct",
-    "messages": [{"role": "user", "content": "Describe this image"}],
-    "stream": false
-  }'
-```
-
-## Homepage Integration
-
-### Automatic Service Discovery
-
-The cluster uses [Homepage](https://gethomepage.dev/) as a dashboard that automatically discovers services via Kubernetes integration. When deploying new applications with a web UI, **always** register them with Homepage.
-
-### Required Configuration
-
-For a service to appear in Homepage, you must add **both annotations AND labels** to the ingress:
-
-```yaml
-ingress:
-  main:
-    enabled: true
-    className: internal  # or external
-    annotations:
-      gethomepage.dev/enabled: "true"
-      gethomepage.dev/name: "My App Name"
-      gethomepage.dev/group: "Group Name"  # e.g., "Office", "Media", "AI", "Monitoring"
-      gethomepage.dev/icon: "app-icon.png"
-      gethomepage.dev/description: "Brief description of the app"
-    labels:
-      gethomepage.dev/enabled: "true"  # REQUIRED - enables discovery
-    hosts:
-      - host: myapp.${SECRET_DOMAIN}
-        # ... rest of config
-```
-
-### Homepage Groups
-
-Available groups (defined in homepage helmrelease kubernetes/apps/default/homepage/app/helmrelease.yaml):
-- **AI**: AI/ML applications and services
-- **Databases**: Database management UIs
-- **System**: System administration tools
-- **Network Services**: Network infrastructure UIs
-- **Home Automation**: Smart home and IoT services
-- **Monitoring**: Observability and monitoring tools
-- **Infrastructure**: Core infrastructure services
-- **Office**: Productivity and office applications
-- **Media**: Media servers and streaming services
-- **Download**: Download managers and archivers
-
-### Icon Selection
-
-Homepage supports icons from:
-- **Dashboard Icons**: https://github.com/walkxcode/dashboard-icons
-- **Material Design Icons**: Use format `mdi-icon-name`
-- **Simple Icons**: Use format `si-brand-name`
-- **Custom icons**: Place in homepage config volume
-
-### Checklist for New Deployments
-
-When deploying a new application with a web UI:
-- [ ] Add `gethomepage.dev/enabled: "true"` to both annotations AND labels
-- [ ] Set descriptive `gethomepage.dev/name`
-- [ ] Choose appropriate `gethomepage.dev/group`
-- [ ] Select matching `gethomepage.dev/icon`
-- [ ] Write clear `gethomepage.dev/description`
-- [ ] Verify service appears in Homepage after deployment
-
-### Troubleshooting
-
-If a service doesn't appear in Homepage:
-1. Check that both annotations AND labels include `gethomepage.dev/enabled: "true"`
-2. Verify the ingress is created: `kubectl get ingress -n {namespace}`
-3. Check Homepage logs: `kubectl logs -n default -l app.kubernetes.io/name=homepage`
-4. Ensure the group name matches one defined in the homepage layout configuration
+Minimum mandatory rules:
+- Use GitOps only: change manifests in git, push, and rely on Flux webhook flow (no direct cluster edits and no manual reconcile by default)
+- Follow code/style standards from this file (naming, formatting, schema-first config, secret handling)
+- Follow namespace placement and directory structure rules from `docs/applications.md` and `docs/infrastructure.md`
+- Register all user-facing web apps in Homepage via ingress annotations + labels
+- Apply Longhorn storage-class rules (`longhorn` vs `longhorn-static`) from `docs/sops/longhorn.md`
+- Execute rollout verification using the SOP test structure (deployment checks, health checks, security checks, rollback path)
 
 ## Network Architecture
 
@@ -907,281 +794,12 @@ curl http://localhost:2020/api/v1/health
 
 ## Authentik Blueprint Management
 
-### Default Approach: Blueprints, Not UI
-**ALWAYS use blueprints for Authentik configuration, never the UI.** This ensures:
-- Version-controlled authentication configuration
-- GitOps-compatible deployment
-- Reproducible authentication setup across environments
-- No manual UI configuration that can drift
+Detailed Authentik blueprint workflows, UUIDs, ingress patterns, and troubleshooting are documented in:
+- `docs/sops/authentik.md`
 
-### Blueprint File Location
-**Important**: All blueprints are stored in a **SOPS-encrypted ConfigMap** (`configmap.sops.yaml`), which is the **source of truth** that Authentik loads.
-
-- **Source of Truth**: `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (SOPS-encrypted, contains all blueprints)
-- **Deployment**: Flux decrypts and applies the ConfigMap, init containers copy blueprints to `/blueprints` for Authentik to load
-- **Mount path**: `/blueprints` (automatically loaded by Authentik)
-
-**Workflow**: Decrypt ConfigMap → Edit blueprint entry → Re-encrypt → Commit
-
-### DO's: Blueprint Best Practices
-
-#### ✅ Use Blueprints for All Authentik Resources
-```yaml
-# DO: Define all resources in blueprint
-version: 1
-entries:
-  - id: my-app-provider
-    model: authentik_providers_proxy.proxyprovider
-    state: present
-    # ... configuration
-```
-
-#### ✅ Use UUIDs for Flow References
-```yaml
-# DO: Use hardcoded UUIDs for default flows
-attrs:
-  authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"  # default-provider-authorization-implicit-consent
-  invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"   # default-provider-invalidation-flow
-```
-
-#### ✅ Use !KeyOf for Cross-References
-```yaml
-# DO: Reference other blueprint entries using !KeyOf
-- id: my-app-application
-  attrs:
-    provider: !KeyOf my-app-provider  # Resolves to UUID at runtime
-
-- id: my-app-outpost
-  attrs:
-    providers:
-      - !KeyOf my-app-provider  # List of provider UUIDs
-```
-
-#### ✅ Use SOPS-Encrypted ConfigMap for Blueprints
-```yaml
-# DO: Blueprints are stored in SOPS-encrypted configmap.sops.yaml
-# This securely stores the actual domain in a public repository
-# Flux automatically decrypts the ConfigMap on deployment
-#
-# To update: decrypt -> edit -> re-encrypt
-# sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
-# # Edit the file
-# sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-```
-
-#### ✅ Include Service Connection for Kubernetes Outposts
-```yaml
-# DO: Always include service_connection for Kubernetes outposts
-- id: my-app-outpost
-  attrs:
-    service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"  # Local Kubernetes Cluster
-    config:
-      kubernetes_namespace: kube-system
-```
-
-#### ✅ Use Separate Outposts (Not Embedded)
-```yaml
-# DO: Create dedicated outpost for each application
-- id: my-app-outpost
-  model: authentik_outposts.outpost
-  attrs:
-    name: my-app-forward-auth
-    type: proxy
-    providers:
-      - !KeyOf my-app-provider
-```
-
-#### ✅ Verify Backend Service Ports
-```yaml
-# DO: Use actual service port in internal_host
-attrs:
-  internal_host: "http://myapp.namespace.svc.cluster.local:5000"  # Use actual port
-```
-
-#### ✅ Test Blueprint Loading
-```bash
-# DO: Verify blueprints are loaded after ConfigMap update
-kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints
-```
-
-### DON'Ts: Common Pitfalls
-
-#### ❌ DON'T Use UI for Configuration
-```yaml
-# DON'T: Manually configure Authentik via UI
-# This creates drift and is not version-controlled
-```
-
-#### ❌ DON'T Use Slugs for Flow References
-```yaml
-# DON'T: Use slug names for flows
-attrs:
-  authorization_flow: "default-provider-authorization-implicit-consent"  # ❌ Will fail
-
-# DO: Use UUIDs instead
-attrs:
-  authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"  # ✅ Correct
-```
-
-#### ❌ DON'T Use String Names for Provider References
-```yaml
-# DON'T: Reference providers by name
-attrs:
-  provider: "my-app-provider"  # ❌ Will fail with type error
-
-# DO: Use !KeyOf instead
-attrs:
-  provider: !KeyOf my-app-provider  # ✅ Correct
-```
-
-#### ❌ DON'T Use Flux Substitution in ConfigMap Data
-```yaml
-# DON'T: Flux substitution doesn't work in ConfigMap data fields
-data:
-  blueprint.yaml: |
-    external_host: "https://app.${SECRET_DOMAIN}"  # ❌ Won't be substituted
-
-# DO: Use SOPS-encrypted ConfigMap with actual domain
-# The encrypted ConfigMap is safe to commit to public repositories
-# See kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-```
-
-#### ❌ DON'T Omit Service Connection for Kubernetes Outposts
-```yaml
-# DON'T: Missing service_connection prevents Kubernetes resource creation
-- id: my-app-outpost
-  attrs:
-    service_connection: null  # ❌ Outpost won't create K8s resources
-
-# DO: Include service connection UUID
-- id: my-app-outpost
-  attrs:
-    service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"  # ✅ Correct
-```
-
-#### ❌ DON'T Bind to Embedded Outpost
-```yaml
-# DON'T: Binding to embedded outpost doesn't create separate service
-# (This creates confusion when ingress expects dedicated outpost service)
-
-# DO: Create dedicated outpost for each application
-```
-
-#### ❌ DON'T Use Non-Existent Ports
-```yaml
-# DON'T: Reference ports that don't exist
-attrs:
-  internal_host: "http://myapp.namespace.svc.cluster.local:8971"  # ❌ If port 8971 doesn't exist
-
-# DO: Use actual service port
-attrs:
-  internal_host: "http://myapp.namespace.svc.cluster.local:5000"  # ✅ Actual port
-```
-
-#### ❌ DON'T Forget Outpost Ingress
-```yaml
-# DON'T: Missing outpost ingress causes auth signin redirects to fail
-# The /outpost.goauthentik.io/* paths need to be exposed via ingress
-
-# DO: Create separate ingress for outpost paths (see pattern below)
-```
-
-### Blueprint Entry Pattern Checklist
-
-When creating a new Authentik integration, ensure:
-
-1. **Proxy Provider Entry**
-   - [ ] Uses hardcoded flow UUIDs (not slugs)
-   - [ ] `external_host` uses actual domain (stored in SOPS-encrypted ConfigMap)
-   - [ ] `internal_host` uses correct service name and port
-
-2. **Application Entry**
-   - [ ] Uses `!KeyOf` to reference provider (not string)
-   - [ ] `meta_launch_url` uses actual domain (stored in SOPS-encrypted ConfigMap)
-
-3. **Outpost Entry**
-   - [ ] Uses `!KeyOf` to reference provider in `providers` list
-   - [ ] Includes `service_connection` UUID for Kubernetes deployments
-   - [ ] `config.authentik_host` uses actual domain (stored in SOPS-encrypted ConfigMap)
-   - [ ] `config.kubernetes_namespace` is set (usually `kube-system`)
-   - [ ] Blueprint added to SOPS-encrypted configmap.sops.yaml
-
-4. **Ingress Configuration**
-   - [ ] Auth annotations point to correct outpost service name
-   - [ ] Auth signin URL uses correct domain
-   - [ ] Separate ingress created for `/outpost.goauthentik.io/*` paths
-   - [ ] Outpost service (ExternalName) references outpost service in `kube-system`
-
-5. **Testing**
-   - [ ] Blueprint loads successfully (`show_blueprints` command)
-   - [ ] Outpost deployment created in `kube-system`
-   - [ ] Outpost service created (`ak-outpost-{app}-forward-auth`)
-   - [ ] Login flow works end-to-end
-
-### Blueprint Debugging Commands
-
-```bash
-# Check if blueprints are loaded
-kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints
-
-# Check outpost deployment status
-kubectl get deployment -n kube-system ak-outpost-{app}-forward-auth
-
-# Check outpost service
-kubectl get svc -n kube-system ak-outpost-{app}-forward-auth
-
-# Check blueprint application logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | grep -i blueprint
-
-# Check outpost controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | grep -i outpost
-
-# Verify outpost is creating resources
-kubectl get all -n kube-system -l goauthentik.io/outpost-name={app}-forward-auth
-```
-
-### Blueprint Workflow
-
-When adding a new app with Authentik:
-
-1. **Create Blueprint**: Create `authentik-blueprint.yaml` in your app's `app/` directory
-   - Location: `kubernetes/apps/{namespace}/{app}/app/authentik-blueprint.yaml`
-   - This is the source of truth
-
-2. **Update Encrypted ConfigMap**: Add your blueprint to the SOPS-encrypted ConfigMap
-   ```bash
-   # Decrypt the ConfigMap
-   sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
-
-   # Edit the ConfigMap and add your blueprint as a new data entry
-   # data:
-   #   {app-name}-blueprint.yaml: |
-   #     <your blueprint content>
-
-   # Re-encrypt and save
-   sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-   ```
-
-3. **Configure App**: Update ingress, secrets, and deployment as needed
-
-4. **Deploy**: Commit and push - Flux will decrypt and apply, Authentik will load the blueprint
-
-When removing an app:
-1. Remove the blueprint from the app directory
-2. Decrypt the ConfigMap, remove the blueprint entry, re-encrypt
-3. Commit and push - the blueprint will be automatically removed
-
-### Example: Complete Application Integration
-
-Reference implementation: `kubernetes/apps/home-automation/frigate-nvr/`
-- **Blueprint Source**: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-blueprint.yaml`
-- **Blueprint Copy**: `kubernetes/apps/kube-system/authentik/app/frigate-blueprint.yaml`
-- **Ingress**: `kubernetes/apps/home-automation/frigate-nvr/app/ingress.yaml`
-- **Outpost Ingress**: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-outpost-ingress.yaml`
-
-Other examples:
-- **phpMyAdmin**: `kubernetes/apps/databases/phpmyadmin/app/authentik-blueprint.yaml`
-- **Longhorn**: `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml`
+Required policy in this AGENTS file:
+- Always use blueprints (GitOps), never UI-only configuration.
+- Keep Authentik blueprint data in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`.
 
 ## Documentation Conventions
 
@@ -1190,7 +808,7 @@ Other examples:
 ```
 runbooks/                        # Recurring operational procedures + their scripts
   version-check.md               # How to run the version check tool
-  weekly-health-check.md         # Weekly cluster health check procedure
+  health-check.md                # Cluster health check procedure
   check-all-versions.py          # Version check script (primary tool)
   extract-current-versions.sh    # Basic extraction script (no update checking)
   check-versions.sh              # Legacy bash version check script
@@ -1199,7 +817,7 @@ docs/
     <topic>-plan.md              # Analysis and options for an ongoing issue
     <topic>-setup.md             # Reference/setup guide for a specific integration
   version-check-current.md       # Auto-generated by runbooks/check-all-versions.py (do not hand-edit)
-  health-check-current.md        # Latest weekly health check output (do not hand-edit)
+  health-check-current.md        # Latest health check output (do not hand-edit)
 ```
 
 ### When to Create a Doc
@@ -1226,6 +844,53 @@ Do not create session-specific docs. Use:
 - `docs/health-check-current.md` for current cluster state
 - `docs/version-check-current.md` for current version/Renovate PR status
 - `docs/troubleshooting/` only for issues that span multiple sessions and need structured analysis
+
+### Canonical Reference Docs
+
+Use these docs as source-of-truth references instead of duplicating large operational detail in AGENTS:
+- `docs/applications.md` for application inventory and app-level context
+- `docs/infrastructure.md` for infrastructure, topology, and platform reference
+- `docs/sops/` for operational SOPs (including new deployment blueprint, AI integration, and Authentik blueprint workflows)
+
+### SOP Default Structure
+
+All SOP documents under `docs/sops/` must follow the template at:
+- `docs/sops/SOP-TEMPLATE.md`
+
+Required sections in every SOP:
+- Description
+- Overview
+- Blueprints (or `N/A` if not applicable)
+- Operational Instructions
+- Examples
+- Verification Tests (to confirm it worked)
+- Troubleshooting
+- Diagnose Examples
+- Health Check
+- Security Check
+- Rollback Plan
+
+Versioning requirement:
+- Use date versioning format `YYYY.MM.DD` (example: `2026.02.04`)
+- Include `Version` and `Last Updated` fields in the SOP header
+
+### SOP Discovery And Usage
+
+Before implementing operational changes, discover and apply existing SOPs:
+- List SOPs: `ls docs/sops/`
+- Search by topic: `rg -n "<keyword>" docs/sops/*.md`
+- View SOP titles: `rg -n "^# SOP:" docs/sops/*.md`
+
+When using an SOP:
+- Follow `Operational Instructions`
+- Run `Verification Tests`
+- Run `Health Check` and `Security Check`
+- Keep a rollback path from `Rollback Plan`
+
+If a reusable solution is found and no matching SOP exists:
+- Create a new SOP in `docs/sops/<topic>.md` using `docs/sops/SOP-TEMPLATE.md`
+- Fill all required sections
+- Set date-based version (`YYYY.MM.DD`)
 
 ## Special Notes
 - Cursor rules: Environment configurations from .cursor/rules/env.mdc
