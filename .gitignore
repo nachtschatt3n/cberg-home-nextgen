@@ -22,6 +22,8 @@ Brewfile.lock.json
 # Runbook outputs with sensitive findings
 runbooks/security-check-current.md
 runbooks/doc-check-current.md
+# Guard against accidental duplicate outputs in docs/
+docs/*-current.md
 # Bootstrap
 /config.yaml
 cloudflared.json
