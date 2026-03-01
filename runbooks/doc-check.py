@@ -11,6 +11,7 @@ Output:
     runbooks/doc-check-current.md
 """
 
+import fnmatch
 import json
 import os
 import re
@@ -319,8 +320,9 @@ def s2_network_docs() -> tuple[str, Findings, str]:
     cprint(C.CYAN, f"  Documented VLANs: {sorted(documented_vlan_ids)}")
 
     # Fetch live VLANs from UniFi
-    live_vlan_raw = run("unifictl local network list -o json 2>/dev/null", timeout=15)
-    if live_vlan_raw and (live_vlan_raw.startswith("[") or live_vlan_raw.startswith("{")):
+    vlan_cmd = "unifictl local network list -o json"
+    vlan_rc, live_vlan_raw, vlan_err = run_cmd(vlan_cmd, timeout=15)
+    if vlan_rc == 0 and live_vlan_raw and (live_vlan_raw.startswith("[") or live_vlan_raw.startswith("{")):
         try:
             parsed = json.loads(live_vlan_raw)
             networks = parsed.get("data", parsed) if isinstance(parsed, dict) else parsed
@@ -352,13 +354,25 @@ def s2_network_docs() -> tuple[str, Findings, str]:
             f.add(WARNING, f"Could not parse UniFi networks response: {e}")
             cprint(C.YELLOW, f"  {WARNING} Could not parse UniFi networks JSON")
     else:
-        f.add(WARNING, "Could not fetch live VLAN data from `unifictl local network list` — verify unifictl is configured")
-        cprint(C.YELLOW, f"  {WARNING} unifictl not available or not configured — skipping live VLAN check")
-        lines.append("Live VLAN check: skipped (unifictl unavailable)\n")
+        err_l = vlan_err.lower()
+        if vlan_rc == 127 or "command not found" in err_l:
+            f.add(WARNING, f"Could not fetch live VLAN data from `{vlan_cmd}` — unifictl not installed")
+            cprint(C.YELLOW, f"  {WARNING} unifictl not installed — skipping live VLAN check")
+            lines.append("Live VLAN check: skipped (unifictl unavailable)\n")
+        elif "login failed" in err_l or "unauthorized" in err_l:
+            f.add(WARNING, f"Could not fetch live VLAN data from `{vlan_cmd}` — UniFi login failed (credentials/session invalid)")
+            cprint(C.YELLOW, f"  {WARNING} unifictl authentication failed — verify local credentials/session")
+            lines.append("Live VLAN check: skipped (unifictl authentication failed)\n")
+        else:
+            detail = (vlan_err.splitlines()[-1] if vlan_err else f"command failed (rc={vlan_rc})")[:200]
+            f.add(WARNING, f"Could not fetch live VLAN data from `{vlan_cmd}` — {detail}")
+            cprint(C.YELLOW, f"  {WARNING} live VLAN query failed: {detail}")
+            lines.append("Live VLAN check: skipped (unifictl query failed)\n")
 
     # Fetch live WiFi SSIDs from UniFi
-    live_wlan_raw = run("unifictl local wlan list -o json 2>/dev/null", timeout=15)
-    if live_wlan_raw and (live_wlan_raw.startswith("[") or live_wlan_raw.startswith("{")):
+    wlan_cmd = "unifictl local wlan list -o json"
+    wlan_rc, live_wlan_raw, wlan_err = run_cmd(wlan_cmd, timeout=15)
+    if wlan_rc == 0 and live_wlan_raw and (live_wlan_raw.startswith("[") or live_wlan_raw.startswith("{")):
         try:
             wlans = json.loads(live_wlan_raw)
             if isinstance(wlans, dict):
@@ -376,7 +390,14 @@ def s2_network_docs() -> tuple[str, Findings, str]:
         except Exception:
             cprint(C.YELLOW, f"  {WARNING} Could not parse UniFi wlans response")
     else:
-        cprint(C.YELLOW, "  Skipping live SSID check (unifictl unavailable)")
+        err_l = wlan_err.lower()
+        if wlan_rc == 127 or "command not found" in err_l:
+            cprint(C.YELLOW, "  Skipping live SSID check (unifictl unavailable)")
+        elif "login failed" in err_l or "unauthorized" in err_l:
+            cprint(C.YELLOW, "  Skipping live SSID check (unifictl authentication failed)")
+        else:
+            detail = (wlan_err.splitlines()[-1] if wlan_err else f"command failed (rc={wlan_rc})")[:160]
+            cprint(C.YELLOW, f"  Skipping live SSID check ({detail})")
 
     # Check mDNS section
     expected_mdns = ["Trusted", "Servers", "Trusted-Devices", "IoT", "k8s-network"]
@@ -1034,7 +1055,8 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
     sensitive_outputs = ["security-check-current.md", "doc-check-current.md"]
     for output_name in sensitive_outputs:
         rel = f"runbooks/{output_name}"
-        if output_name in gitignore or rel in gitignore:
+        gitignore_lines = [l.strip() for l in gitignore.splitlines() if l.strip() and not l.strip().startswith("#")]
+        if output_name in gitignore or rel in gitignore or any(fnmatch.fnmatch(rel, pat) for pat in gitignore_lines):
             cprint(C.GREEN, f"  {OK} {rel} is gitignored")
             lines.append(f"- {OK} `{rel}` gitignored\n")
         else:
