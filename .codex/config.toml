@@ -1,0 +1,18 @@
+[features]
+multi_agent = true
+
+[agents.health_check]
+description = "Runs cluster and service health diagnostics with a read-only, evidence-first workflow."
+config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/health-check.toml"
+
+[agents.version_check]
+description = "Audits Helm chart and container image versions and reports safe upgrade opportunities."
+config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/version-check.toml"
+
+[agents.security]
+description = "Performs repository and cluster security audits with strict redaction and SOPS-first handling."
+config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/security.toml"
+
+[agents.doc]
+description = "Validates that infrastructure and operational documentation matches repository and cluster state."
+config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/doc.toml"
