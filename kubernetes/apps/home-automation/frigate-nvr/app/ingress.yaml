@@ -17,7 +17,6 @@ metadata:
     nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
     nginx.ingress.kubernetes.io/auth-snippet: |
       proxy_set_header X-Forwarded-Host $http_host;
-      proxy_set_header X-Proxy-Secret a12644bc9bebd49f58f487d3f4751f3f8cf31843b63a23d0a17609080513189a625c80c62e6b1fe8967f3e27d5a8c054ff28259122434753de0eb29e47b6e2d4;
   labels:
     gethomepage.dev/enabled: "true"
 spec:

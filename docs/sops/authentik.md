@@ -217,6 +217,11 @@ spec:
                   number: 8080
 ```
 
+**Important:** Do not inline `proxy_set_header X-Proxy-Secret ...` values in ingress annotations.
+Ingress annotations do not support reading values from Kubernetes `Secret` objects.
+If a custom auth header is ever required, use `nginx.ingress.kubernetes.io/auth-proxy-set-headers`
+with a same-namespace `ConfigMap` reference.
+
 ### Step 4: Create Outpost Ingress
 
 The `/outpost.goauthentik.io/*` paths must be exposed via a separate ingress:
