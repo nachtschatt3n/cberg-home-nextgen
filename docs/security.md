@@ -19,6 +19,48 @@
 
 ---
 
+## Accepted Risk Register
+
+The following risks are explicitly accepted as of **2026-03-01** with compensating controls.
+Each item must be reviewed on the listed review date (or sooner after incident, host migration,
+or policy changes).
+
+### AR-2026-03-01-01 — Local Talos Bootstrap Artifacts in Plaintext
+
+- Status: Accepted risk
+- Scope: Local-only files in `kubernetes/bootstrap/talos/clusterconfig/`:
+  - `kubernetes-k8s-nuc14-01.yaml`
+  - `kubernetes-k8s-nuc14-02.yaml`
+  - `kubernetes-k8s-nuc14-03.yaml`
+  - `talosconfig`
+- Git exposure: **Not committed in git** (paths are ignored by
+  `kubernetes/bootstrap/talos/clusterconfig/.gitignore`)
+- Rationale: Required local operational artifacts for Talos node management and recovery.
+- Compensating controls:
+  - Keep permissions restrictive (`0600` or stricter) on local files.
+  - Never copy these artifacts to shared locations, tickets, or chat.
+  - Rotate Talos/Kubernetes bootstrap material immediately if host compromise is suspected.
+  - Prefer regenerating ephemeral local artifacts over long-term retention when practical.
+- Owner: Platform operations
+- Next review date: **2026-06-01**
+
+### AR-2026-03-01-02 — Local `cloudflared.json` Credential File
+
+- Status: Accepted risk
+- Scope: Local tunnel credential file `cloudflared.json`
+- Git exposure: **Not committed in git** (ignored by repository `.gitignore`)
+- Rationale: Local runtime credential required by Cloudflare tunnel tooling.
+- Compensating controls:
+  - Keep file local-only with restrictive permissions (`0600`).
+  - Do not reference or embed file contents in repository manifests or docs.
+  - Rotate the tunnel credential immediately after suspected host compromise.
+  - Prefer SOPS-encrypted Kubernetes secret (`kubernetes/apps/network/external/cloudflared/app/secret.sops.yaml`)
+    for cluster-managed credential workflows.
+- Owner: Platform operations
+- Next review date: **2026-06-01**
+
+---
+
 ## Secret Management (SOPS + age)
 
 All secrets stored in Git are encrypted with [SOPS](https://github.com/getsops/sops) using
