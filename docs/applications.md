@@ -11,9 +11,9 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 5 |
-| home-automation | 13 |
+| home-automation | 14 |
 | databases | 8 |
-| monitoring | 10 |
+| monitoring | 11 |
 | office | 8 |
 | media | 3 |
 | download | 2 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~76** |
+| **Total** | **~78** |
 
 ---
 
@@ -61,8 +61,7 @@
 | teslamate | Tesla data logger and analytics | Internal | Home Automation |
 | mqttx-web | Web-based MQTT client | Internal | Home Automation |
 | matter-server | Matter and Thread protocol server | Internal (cluster) | — |
-
-**Note:** `otbr` (OpenThread Border Router) may also be deployed — check cluster state.
+| otbr | OpenThread Border Router (Matter/Thread) | Internal (cluster) | — |
 
 ---
 
