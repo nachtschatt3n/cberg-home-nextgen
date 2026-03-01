@@ -19,6 +19,8 @@ talosconfig
 Brewfile.lock.json
 # intellij
 .idea
+# Runbook outputs with sensitive findings
+runbooks/security-check-current.md
 # Bootstrap
 /config.yaml
 cloudflared.json
