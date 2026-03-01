@@ -24,6 +24,25 @@ This is a mono repository for my home infrastructure and Kubernetes cluster. I a
 
 My setup focuses on running containerized applications on a robust Kubernetes platform with integrated DNS filtering via AdGuard Home, automated backups, and comprehensive monitoring.
 
+## 📚 SOP Library
+
+Operational procedures are documented in `docs/sops/`.
+
+Find and apply SOPs:
+- List SOPs: `ls docs/sops/`
+- Search by topic: `rg -n "<keyword>" docs/sops/*.md`
+- List SOP titles: `rg -n "^# SOP:" docs/sops/*.md`
+
+When executing an SOP, always run:
+- `Verification Tests`
+- `Health Check`
+- `Security Check`
+
+If you discover a reusable solution and no SOP exists yet, create a new SOP from:
+- `docs/sops/SOP-TEMPLATE.md`
+
+Use date versioning in the SOP header (`YYYY.MM.DD`, e.g. `2026.03.01`).
+
 ---
 
 ## 🌱 Kubernetes
@@ -510,4 +529,3 @@ Additional inspiration from:
 ## 📄 License
 
 This repository is available under the [MIT License](LICENSE).
-
