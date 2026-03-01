@@ -66,6 +66,15 @@ def run(cmd: str, timeout: int = 30) -> str:
         return ""
 
 
+def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
+    """Run command and return (returncode, stdout, stderr)."""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
 def run_lines(cmd: str, timeout: int = 30) -> list[str]:
     out = run(cmd, timeout=timeout)
     return [l for l in out.splitlines() if l.strip()]
@@ -536,8 +545,21 @@ def s4_security_docs() -> tuple[str, Findings, str]:
         cprint(C.CYAN, "  No unencrypted authentik-blueprint.yaml files found")
 
     # Check Flux sops-age secret exists and contains the correct key
-    flux_secret = run("kubectl get secret sops-age -n flux-system -o jsonpath='{.data.age\\.agekey}' 2>/dev/null", timeout=15)
-    if flux_secret:
+    rc, flux_secret, flux_err = run_cmd(
+        "kubectl get secret sops-age -n flux-system -o jsonpath='{.data.age\\.agekey}'",
+        timeout=15,
+    )
+    err_l = flux_err.lower()
+    api_unreachable = any(x in err_l for x in (
+        "unable to connect to the server",
+        "operation not permitted",
+        "connection refused",
+        "i/o timeout",
+        "context deadline exceeded",
+        "no route to host",
+    ))
+
+    if rc == 0 and flux_secret:
         try:
             import base64
             decoded = base64.b64decode(flux_secret).decode().strip()
@@ -554,9 +576,15 @@ def s4_security_docs() -> tuple[str, Findings, str]:
                 f.add(WARNING, "Flux `sops-age` secret has unexpected format")
         except Exception:
             cprint(C.CYAN, "  Could not decode sops-age secret")
-    else:
+    elif "notfound" in err_l or "not found" in err_l:
         f.add(WARNING, "Flux `sops-age` secret not found in `flux-system` — SOPS decryption will fail")
         cprint(C.YELLOW, f"  {WARNING} Flux sops-age secret missing from flux-system")
+    elif api_unreachable:
+        f.add(WARNING, f"Could not verify Flux `sops-age` secret (cluster/API unreachable: {flux_err})")
+        cprint(C.YELLOW, f"  {WARNING} Could not verify Flux sops-age secret (cluster/API unreachable)")
+    else:
+        f.add(WARNING, f"Could not verify Flux `sops-age` secret (kubectl error: {flux_err or 'unknown'})")
+        cprint(C.YELLOW, f"  {WARNING} Could not verify Flux sops-age secret (kubectl error)")
 
     # Check no .sops.yaml files exist outside kubernetes/ or talos/
     stray_sops = [
