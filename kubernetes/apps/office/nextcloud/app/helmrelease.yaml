@@ -200,11 +200,14 @@ spec:
         before-starting: |-
           #!/bin/bash
           set -eu
-          if [ -z "${WHITEBOARD_JWT_SECRET:-}" ]; then
-            echo "WHITEBOARD_JWT_SECRET not set; skipping whiteboard jwt sync"
+
+          secret_file="/run/secrets/whiteboard/whiteboard-jwt-secret"
+          if [ ! -s "${secret_file}" ]; then
+            echo "whiteboard secret file not found; skipping whiteboard jwt sync"
             exit 0
           fi
 
+          WHITEBOARD_JWT_SECRET="$(cat "${secret_file}")"
           current="$(php /var/www/html/occ config:app:get whiteboard jwt_secret_key 2>/dev/null || true)"
           if [ "${current}" = "${WHITEBOARD_JWT_SECRET}" ]; then
             echo "whiteboard jwt_secret_key already in sync"
@@ -219,17 +222,23 @@ spec:
 
       ##
       ## Extra environment variables
-      extraEnv:
-        - name: WHITEBOARD_JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: nextcloud-config
-              key: whiteboard-jwt-secret
+      extraEnv: []
       #  - name: SOME_SECRET_ENV
       #    valueFrom:
       #      secretKeyRef:
       #        name: nextcloud
       #        key: secret_key
+      extraVolumes:
+        - name: whiteboard-jwt
+          secret:
+            secretName: nextcloud-config
+            items:
+              - key: whiteboard-jwt-secret
+                path: whiteboard-jwt-secret
+      extraVolumeMounts:
+        - name: whiteboard-jwt
+          mountPath: /run/secrets/whiteboard
+          readOnly: true
       extraSidecarContainers:
         - name: worker
           image: nextcloud:32.0.6
