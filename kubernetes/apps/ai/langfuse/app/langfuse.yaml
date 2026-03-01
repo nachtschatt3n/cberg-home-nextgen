@@ -156,7 +156,7 @@ spec:
               name: langfuse-clickhouse
               key: password
         - name: CLICKHOUSE_MIGRATION_URL
-          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
+          value: "clickhouse://default:$(CLICKHOUSE_PASSWORD)@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
           value: "true"
         resources:
@@ -405,7 +405,7 @@ spec:
               name: langfuse-clickhouse
               key: password
         - name: CLICKHOUSE_MIGRATION_URL
-          value: "clickhouse://default:clickhouse123@langfuse-clickhouse:9000/default"
+          value: "clickhouse://default:$(CLICKHOUSE_PASSWORD)@langfuse-clickhouse:9000/default"
         - name: LANGFUSE_CLICKHOUSE_CLUSTER_ENABLED
           value: "true"
         resources:
