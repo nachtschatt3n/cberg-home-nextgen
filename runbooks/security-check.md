@@ -4,6 +4,23 @@
 
 This runbook provides a systematic, AI-executable security audit for the home lab Kubernetes cluster and network. Execute checks in section order, collecting results and producing `runbooks/security-check-current.md`.
 
+## SOP Integration
+
+Use SOPs in `docs/sops/` during security investigations:
+- Discover SOPs: `ls docs/sops/`
+- Search by security topic/component: `rg -n "<keyword>" docs/sops/*.md`
+- List SOP titles: `rg -n "^# SOP:" docs/sops/*.md`
+
+If a relevant SOP exists, execute its:
+- `Verification Tests`
+- `Health Check`
+- `Security Check`
+
+If this audit reveals a reusable mitigation/workaround with no SOP:
+- Create `docs/sops/<topic>.md` from `docs/sops/SOP-TEMPLATE.md`
+- Document procedure, diagnosis, verification, security checks, and rollback
+- Set date version `YYYY.MM.DD`
+
 ## Severity Model
 
 - 🔴 **Critical** — act immediately (exposed secret, active attack indicator, unexpected public exposure)

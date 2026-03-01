@@ -3,6 +3,22 @@
 ## Purpose
 This document provides a systematic, AI-executable health check plan for a home lab Kubernetes cluster. The AI should execute checks in numerical order, collecting results and providing a comprehensive report.
 
+## SOP Integration
+
+Use SOPs in `docs/sops/` as first-class procedures during this runbook:
+- Discover SOPs: `ls docs/sops/`
+- Search by topic: `rg -n "<keyword>" docs/sops/*.md`
+- View SOP names: `rg -n "^# SOP:" docs/sops/*.md`
+
+When a relevant SOP exists, apply it and run its:
+- `Verification Tests`
+- `Health Check`
+- `Security Check`
+
+If this runbook uncovers a reusable fix and no SOP exists yet:
+- Create `docs/sops/<topic>.md` from `docs/sops/SOP-TEMPLATE.md`
+- Fill all required sections and set date version (`YYYY.MM.DD`)
+
 ## Automated Health Check Script
 
 **⚡ Quick Start**: An automated health check script is available that executes all 39 sections:

@@ -2,6 +2,23 @@
 
 This document describes how to check for updates to all Kubernetes deployments in the cluster.
 
+## SOP Integration
+
+Before or during version review, check for relevant SOPs in `docs/sops/`:
+- List SOPs: `ls docs/sops/`
+- Search by component/topic: `rg -n "<keyword>" docs/sops/*.md`
+- List SOP titles: `rg -n "^# SOP:" docs/sops/*.md`
+
+If an update path is covered by an SOP, follow its `Operational Instructions` and validate with:
+- `Verification Tests`
+- `Health Check`
+- `Security Check`
+
+If the version check produces a reusable solution not captured in SOPs:
+- Create a new SOP from `docs/sops/SOP-TEMPLATE.md`
+- Save as `docs/sops/<topic>.md`
+- Use date versioning `YYYY.MM.DD`
+
 ## Overview
 
 The version checking system scans all HelmReleases in the repository and checks for:
