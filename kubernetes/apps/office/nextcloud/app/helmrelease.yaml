@@ -202,6 +202,10 @@ spec:
           set -eu
 
           secret_file="/run/secrets/whiteboard/whiteboard-jwt-secret"
+          for _ in $(seq 1 30); do
+            [ -s "${secret_file}" ] && break
+            sleep 1
+          done
           if [ ! -s "${secret_file}" ]; then
             echo "whiteboard secret file not found; skipping whiteboard jwt sync"
             exit 0
