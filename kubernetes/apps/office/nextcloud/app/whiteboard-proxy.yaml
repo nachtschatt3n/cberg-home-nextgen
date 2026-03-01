@@ -4,6 +4,8 @@ kind: Deployment
 metadata:
   name: nextcloud-whiteboard
   namespace: office
+  annotations:
+    reloader.stakater.com/auto: "true"
   labels:
     app: nextcloud-whiteboard
     app.kubernetes.io/name: nextcloud-whiteboard
@@ -26,7 +28,10 @@ spec:
           name: websocket
         env:
         - name: JWT_SECRET_KEY
-          value: "a68fdf7688d44d432ca8c2b5e6fc1fdbef2427dffe91e4a2f382080454449fbe"
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-config
+              key: whiteboard-jwt-secret
         - name: NEXTCLOUD_URL
           value: "https://drive.${SECRET_DOMAIN}"
         - name: STORAGE_STRATEGY

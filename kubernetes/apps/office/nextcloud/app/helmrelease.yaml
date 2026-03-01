@@ -27,6 +27,8 @@ spec:
     keepHistory: false
   # Values link: https://github.com/nextcloud/helm/blob/master/charts/nextcloud/values.yaml
   values:
+    deploymentAnnotations:
+      reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
       tag: 32.0.6
@@ -194,9 +196,35 @@ spec:
       strategy:
         type: Recreate
 
+      hooks:
+        before-starting: |-
+          #!/bin/bash
+          set -eu
+          if [ -z "${WHITEBOARD_JWT_SECRET:-}" ]; then
+            echo "WHITEBOARD_JWT_SECRET not set; skipping whiteboard jwt sync"
+            exit 0
+          fi
+
+          current="$(php /var/www/html/occ config:app:get whiteboard jwt_secret_key 2>/dev/null || true)"
+          if [ "${current}" = "${WHITEBOARD_JWT_SECRET}" ]; then
+            echo "whiteboard jwt_secret_key already in sync"
+            exit 0
+          fi
+
+          if php /var/www/html/occ config:app:set whiteboard jwt_secret_key --value="${WHITEBOARD_JWT_SECRET}" >/dev/null 2>&1; then
+            echo "updated whiteboard jwt_secret_key from Kubernetes secret"
+          else
+            echo "whiteboard app config sync skipped (app may not be installed yet)"
+          fi
+
       ##
       ## Extra environment variables
       extraEnv:
+        - name: WHITEBOARD_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-config
+              key: whiteboard-jwt-secret
       #  - name: SOME_SECRET_ENV
       #    valueFrom:
       #      secretKeyRef:
