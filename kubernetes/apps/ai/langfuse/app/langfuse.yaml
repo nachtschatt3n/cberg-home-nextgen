@@ -16,6 +16,8 @@ spec:
       app: langfuse-web
   template:
     metadata:
+      annotations:
+        secret.reloader.stakater.com/reload: "langfuse-clickhouse,langfuse-postgresql,langfuse-s3-credentials,langfuse-secret"
       labels:
         app: langfuse-web
     spec:
@@ -284,6 +286,8 @@ spec:
       app: langfuse-worker
   template:
     metadata:
+      annotations:
+        secret.reloader.stakater.com/reload: "langfuse-clickhouse,langfuse-postgresql,langfuse-s3-credentials,langfuse-secret"
       labels:
         app: langfuse-worker
     spec:
