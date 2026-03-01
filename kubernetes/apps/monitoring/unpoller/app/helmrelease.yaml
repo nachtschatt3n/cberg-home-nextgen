@@ -22,6 +22,11 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
+  valuesFrom:
+    - kind: Secret
+      name: unpoller-credentials
+      valuesKey: upConfig
+      targetPath: upConfig
   values:
     image:
       repository: ghcr.io/unpoller/unpoller
@@ -29,40 +34,6 @@ spec:
       tag: v2.34.0
 
     replicaCount: 1
-
-    # UnPoller configuration
-    upConfig: |
-      [unifi]
-      dynamic = false
-
-      [[unifi.controller]]
-      url = "https://192.168.50.1"
-      user = "cli-adm"
-      pass = "KYmG4q@Vn366#_"
-      sites = ["all"]
-      save_ids = true
-      save_dpi = true
-      save_sites = true
-      save_alarms = true
-      save_events = true
-      save_anomalies = true
-      hash_pii = false
-      verify_ssl = false
-
-      [prometheus]
-      http_listen = "0.0.0.0:9130"
-      namespace = "unpoller"
-      interval = "30s"
-      disable = false
-      buffer = 50
-
-      [influxdb]
-      url = "http://influxdb-influxdb2.databases.svc.cluster.local:80"
-      org = "influxdata"
-      bucket = "default"
-      auth_token = "Mmih1SVbxAJMQY36zknZN-p09CRDZbtDNzS2wO22o7Ni6luHYFU3Qeq3C0iKr81Mk5uONPFwhFuSyrcw_d7yYw=="
-      interval = "30s"
-      disable = false
 
     # Service configuration
     service:
