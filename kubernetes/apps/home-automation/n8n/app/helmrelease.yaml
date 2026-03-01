@@ -24,6 +24,16 @@ spec:
       retries: 3
   uninstall:
     keepHistory: false
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: n8n
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     image:
       repository: n8nio/n8n

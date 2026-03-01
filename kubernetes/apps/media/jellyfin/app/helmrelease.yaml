@@ -29,6 +29,16 @@ spec:
     timeout: 10m
   uninstall:
     keepHistory: false
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: jellyfin
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
       # Default values for Jellyfin.
     # This is a YAML-formatted file.

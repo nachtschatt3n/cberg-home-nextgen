@@ -22,6 +22,16 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 1
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: adguard-home-http
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     # Default values for adguard-home.
     # This is a YAML-formatted file.

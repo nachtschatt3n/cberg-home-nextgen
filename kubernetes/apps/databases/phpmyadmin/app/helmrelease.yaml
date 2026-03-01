@@ -24,7 +24,16 @@ spec:
       retries: 3
   uninstall:
     keepHistory: false
-
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: phpmyadmin
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     controllers:
       phpmyadmin:
