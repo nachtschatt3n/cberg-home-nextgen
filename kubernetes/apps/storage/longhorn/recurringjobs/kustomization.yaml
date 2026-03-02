@@ -10,3 +10,7 @@ resources:
   - ./home-assistant-snapshot-cleanup.yaml
   - ./openclaw-filesystem-trim.yaml
   - ./openclaw-snapshot-cleanup.yaml
+  - ./langfuse-clickhouse-filesystem-trim.yaml
+  - ./langfuse-clickhouse-snapshot-cleanup.yaml
+  - ./adguard-home-filesystem-trim.yaml
+  - ./adguard-home-snapshot-cleanup.yaml
