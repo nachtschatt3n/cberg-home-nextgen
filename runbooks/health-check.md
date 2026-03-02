@@ -104,6 +104,38 @@ kubectl get nodes
 
 ---
 
+## 0. Active Firing Alerts (MANDATORY — Run First)
+
+**Objective**: Surface any Prometheus alerts that are currently firing before diving into individual checks
+**Success Criteria**: No firing alerts except Watchdog and InfoInhibitor
+
+**Commands to Execute:**
+```bash
+# Port-forward to Alertmanager and query firing alerts
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
+PFPID=$!
+sleep 3
+curl -s 'http://localhost:9093/api/v2/alerts?active=true' | python3 -c "
+import sys, json
+alerts = json.load(sys.stdin)
+firing = [a for a in alerts if a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor')]
+if not firing:
+    print('OK: No actionable alerts firing')
+else:
+    for a in firing:
+        name = a['labels'].get('alertname', '?')
+        sev  = a['labels'].get('severity', '?')
+        ns   = a['labels'].get('pvc_namespace') or a['labels'].get('namespace', '')
+        desc = a['annotations'].get('description') or a['annotations'].get('summary', '')
+        print(f'[{sev.upper()}] {name} ns={ns}: {desc}')
+"
+kill \$PFPID 2>/dev/null
+```
+
+**AI Analysis**: Treat every non-Watchdog/non-InfoInhibitor alert as at minimum a WARNING. Flag any `critical` severity alert as Critical in the report. Do NOT mark the health check as overall OK if any actionable alert is firing. Include all firing alerts verbatim in the findings summary.
+
+---
+
 ## 1. Cluster Events & Logs
 
 **Objective**: Identify recent errors, warnings, and system issues
@@ -317,22 +349,52 @@ kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-prometheu
 
 ## 9. Alertmanager
 
-**Objective**: Ensure alert routing is working
-**Success Criteria**: Alertmanager operational, no silenced critical alerts
+**Objective**: Ensure alert routing is working and no actionable alerts are firing
+**Success Criteria**: Alertmanager operational, no firing alerts except Watchdog/InfoInhibitor
 
 **Commands to Execute:**
 ```bash
-# Check Alertmanager status
+# Check Alertmanager pod status
 kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 
-# Check for silenced alerts
-kubectl get prometheusalerts -A 2>/dev/null | grep -i silenced | wc -l
+# Query all currently firing alerts (canonical check — mirrors Section 0)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
+PFPID=$!
+sleep 3
+curl -s 'http://localhost:9093/api/v2/alerts?active=true' | python3 -c "
+import sys, json
+alerts = json.load(sys.stdin)
+firing = [a for a in alerts if a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor')]
+print(f'Total firing: {len(firing)}')
+for a in firing:
+    name = a['labels'].get('alertname', '?')
+    sev  = a['labels'].get('severity', '?')
+    ns   = a['labels'].get('pvc_namespace') or a['labels'].get('namespace', '')
+    desc = a['annotations'].get('description') or a['annotations'].get('summary', '')
+    since = a.get('startsAt', '?')
+    print(f'  [{sev.upper()}] {name} ns={ns} since={since}: {desc}')
+"
+kill \$PFPID 2>/dev/null
 
-# Check Alertmanager logs for errors
-kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmanager --tail=50 --since=24h 2>&1 | grep -i error | wc -l
+# Check for silenced alerts (silences can hide real problems)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
+PFPID=$!
+sleep 3
+curl -s 'http://localhost:9093/api/v2/silences' | python3 -c "
+import sys, json
+silences = json.load(sys.stdin)
+active = [s for s in silences if s.get('status', {}).get('state') == 'active']
+print(f'Active silences: {len(active)}')
+for s in active:
+    print(f'  {s[\"comment\"]} (expires: {s[\"endsAt\"]})')
+"
+kill \$PFPID 2>/dev/null
+
+# Check Alertmanager logs for routing errors
+kubectl logs -n monitoring -l app.kubernetes.io/name=alertmanager --tail=50 --since=24h 2>&1 | grep -i "error\|fail" | wc -l
 ```
 
-**AI Analysis**: Verify alert processing is working correctly.
+**AI Analysis**: Flag any firing alert (excluding Watchdog/InfoInhibitor) in the report. Active silences masking critical alerts should also be flagged.
 
 ---
 
@@ -387,6 +449,29 @@ for vol in volumes:
         mismatched += 1
 print(f'\nTotal volumes with replica mismatch: {mismatched}')
 "
+
+# IMPORTANT: Check volume disk usage % via Prometheus (robustness != full disk)
+# Longhorn actual_size includes snapshots and replica overhead — cross-check with df inside pod
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &>/dev/null &
+PFPID=$!
+sleep 3
+curl -s 'http://localhost:9090/api/v1/query?query=(longhorn_volume_actual_size_bytes/longhorn_volume_capacity_bytes)*100' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+results = data['data']['result']
+results.sort(key=lambda x: float(x['value'][1]), reverse=True)
+print('Volume usage (Longhorn metric — includes snapshot/replica overhead):')
+for r in results:
+    vol = r['metric'].get('volume','?')
+    pct = float(r['value'][1])
+    flag = ' *** HIGH' if pct >= 80 else (' * WATCH' if pct >= 70 else '')
+    print(f'  {pct:5.1f}%  {vol}{flag}')
+"
+kill \$PFPID 2>/dev/null
+
+# For any volume flagged HIGH above, verify actual filesystem usage inside the pod:
+# kubectl exec -n <namespace> <pod> -- df -h <mountpath>
+# Note: df reports filesystem usage; Longhorn metric is always higher due to snapshots.
 ```
 
 **AI Analysis**:
@@ -395,6 +480,8 @@ print(f'\nTotal volumes with replica mismatch: {mismatched}')
 - Check for mass detachment events indicating cluster-wide issues
 - Monitor for Flux/Longhorn admission webhook conflicts
 - Flag any replica count mismatches that could indicate underlying problems
+- **Flag volumes ≥ 80% usage** as WARNING in the report; volumes ≥ 90% as CRITICAL
+- For flagged volumes, always verify actual filesystem usage with `df` inside the pod (Longhorn metric inflates due to snapshots)
 
 ---
 
