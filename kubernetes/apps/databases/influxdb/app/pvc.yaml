@@ -9,6 +9,6 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 15Gi
   storageClassName: longhorn-static
   volumeName: influxdb2-data-10g

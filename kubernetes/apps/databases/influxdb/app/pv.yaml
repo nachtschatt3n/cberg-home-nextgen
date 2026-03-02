@@ -5,7 +5,7 @@ metadata:
   name: influxdb2-data-10g
 spec:
   capacity:
-    storage: 10Gi
+    storage: 15Gi
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
