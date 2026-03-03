@@ -96,6 +96,9 @@ spec:
         # v2: disable bare repo support in Git node (security hardening)
         N8N_GIT_NODE_DISABLE_BARE_REPOS:
           value: "true"
+        # Re-enable executeCommand node (disabled by default in v2; required for tool-exec workflows)
+        NODES_EXCLUDE:
+          value: "[]"
       persistence:
         enabled: true
         type: existing
