@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # Kubernetes Cluster Health Check Script
-# Executes all 39 sections from AI_weekly_health_check.MD
+# Executes all operational health checks from runbooks/health-check.md
+# Scope: operational correctness only — does not flag newer upstream versions
 # Usage: ./scripts/health-check.sh [output-file]
 
 set -uo pipefail
@@ -266,6 +267,27 @@ log_section "Section 3: Certificates"
         echo "Not ready certificates:"
         kubectl get certificates -A -o json | jq -r '.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status!="True")) | "\(.metadata.namespace)/\(.metadata.name)"'
     fi
+
+    # Check for certificates expiring within 14 days
+    echo ""
+    echo "Checking for certificates expiring within 14 days..."
+    EXPIRING_SOON=$(kubectl get certificates -A -o json 2>/dev/null | jq -r '
+        .items[] |
+        select(.status.notAfter != null) |
+        select(
+            (.status.notAfter | fromdateiso8601) - now < 1209600
+        ) |
+        "\(.metadata.namespace)/\(.metadata.name): expires \(.status.notAfter)"
+    ' || echo "")
+    if [ -n "$EXPIRING_SOON" ]; then
+        echo "Certificates expiring within 14 days:"
+        echo "$EXPIRING_SOON"
+        EXPIRY_COUNT=$(echo "$EXPIRING_SOON" | grep -c "/" || echo "0")
+        log_warning "Certificates expiring within 14 days: $EXPIRY_COUNT"
+        add_major_issue "Certificates expiring within 14 days: $EXPIRY_COUNT"
+    else
+        log_success "No certificates expiring within 14 days"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 4: DaemonSets"
@@ -526,7 +548,32 @@ log_section "Section 10: Longhorn Storage"
     AUTO_DELETE=$(kubectl get settings.longhorn.io auto-delete-pod-when-volume-detached-unexpectedly -n storage -o jsonpath='{.value}' 2>/dev/null || echo "unknown")
     echo "autoDeletePodWhenVolumeDetachedUnexpectedly: $AUTO_DELETE (should be false)"
 
-    if [ "$UNHEALTHY_VOLUMES" -eq 0 ] && [ "$PENDING_PVC" -eq 0 ] && [ "$AUTO_DELETE" == "false" ]; then
+    # Check volume replica count mismatches
+    echo ""
+    echo "Volume replica mismatches:"
+    REPLICA_MISMATCHES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '
+        .items[] |
+        select(.status.currentNumberOfReplicas != .spec.numberOfReplicas) |
+        "\(.metadata.name): \(.status.currentNumberOfReplicas // 0)/\(.spec.numberOfReplicas) replicas"
+    ' || echo "")
+    if [ -n "$REPLICA_MISMATCHES" ]; then
+        echo "$REPLICA_MISMATCHES"
+        MISMATCH_COUNT=$(echo "$REPLICA_MISMATCHES" | grep -c "/" || echo "0")
+        echo "Total volumes with replica mismatch: $MISMATCH_COUNT"
+    else
+        echo "None"
+    fi
+    echo ""
+
+    # Check for recent unexpected volume detachment events (last 24h)
+    DETACH_EVENTS=$(safe_count "kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'DetachedUnexpectedly' | wc -l")
+    echo "Unexpected volume detachment events (recent): $DETACH_EVENTS"
+
+    # Check for Flux/Longhorn admission webhook conflicts
+    ADMISSION_CONFLICTS=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'admission webhook.*longhorn.*denied' | wc -l")
+    echo "Longhorn admission webhook conflicts: $ADMISSION_CONFLICTS"
+
+    if [ "$UNHEALTHY_VOLUMES" -eq 0 ] && [ "$PENDING_PVC" -eq 0 ] && [ "$AUTO_DELETE" == "false" ] && [ -z "$REPLICA_MISMATCHES" ]; then
         log_success "Longhorn storage healthy"
     else
         log_warning "Storage issues - Unhealthy volumes: $UNHEALTHY_VOLUMES, Pending PVCs: $PENDING_PVC, AutoDelete: $AUTO_DELETE"
@@ -539,6 +586,17 @@ log_section "Section 10: Longhorn Storage"
         if [ "$AUTO_DELETE" != "false" ]; then
             add_minor_issue "AutoDelete setting is $AUTO_DELETE (should be false)"
         fi
+        if [ -n "$REPLICA_MISMATCHES" ]; then
+            add_minor_issue "Longhorn volumes with replica mismatch: $MISMATCH_COUNT"
+        fi
+    fi
+    if [ "$DETACH_EVENTS" -gt 5 ]; then
+        log_warning "High volume detachment event count: $DETACH_EVENTS"
+        add_major_issue "Unexpected volume detachments: $DETACH_EVENTS events"
+    fi
+    if [ "$ADMISSION_CONFLICTS" -gt 0 ]; then
+        log_warning "Longhorn admission webhook conflicts detected: $ADMISSION_CONFLICTS"
+        add_minor_issue "Longhorn admission webhook conflicts: $ADMISSION_CONFLICTS"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -582,11 +640,27 @@ log_section "Section 12: Talos System Health"
     echo "Checking Talos node health..."
 
     if command -v talosctl &> /dev/null; then
+        TOTAL_TALOS_ISSUES=0
         for node in $NODE_IPS; do
             echo "=== Node $node ==="
-            talosctl services --nodes "$node" 2>&1 | head -10 || echo "Failed to get services for $node"
+            SERVICES_OUTPUT=$(talosctl services --nodes "$node" 2>&1 || echo "Failed to get services for $node")
+            echo "$SERVICES_OUTPUT" | head -20
+
+            # Count non-running services (exclude header line)
+            NOT_RUNNING=$(echo "$SERVICES_OUTPUT" | grep -v "^NODE" | grep -v "^$" | grep -v "Running" | wc -l | tr -cd '0-9')
+            if [ "${NOT_RUNNING:-0}" -gt 0 ]; then
+                echo "  Non-running services on $node: $NOT_RUNNING"
+                TOTAL_TALOS_ISSUES=$((TOTAL_TALOS_ISSUES + NOT_RUNNING))
+            fi
+            echo ""
         done
-        log_success "Talos health check completed"
+
+        if [ "$TOTAL_TALOS_ISSUES" -gt 0 ]; then
+            log_warning "Talos services not running across all nodes: $TOTAL_TALOS_ISSUES"
+            add_major_issue "Talos services not in Running state: $TOTAL_TALOS_ISSUES"
+        else
+            log_success "All Talos services running on all nodes"
+        fi
     else
         log_warning "talosctl not available, skipping Talos checks"
         add_minor_issue "talosctl not available for Talos health checks"
@@ -653,18 +727,53 @@ log_section "Section 15: Backup System"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
-log_section "Section 16: Version Checks"
+log_section "Section 16: Talos Client/Server Version Mismatch"
 {
-    echo "Kubernetes version:"
-    kubectl version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion' || kubectl version --short 2>&1 | grep Server
-    echo ""
-
     if command -v talosctl &> /dev/null; then
-        echo "Talos version:"
-        talosctl version --nodes "$(echo "$NODE_IPS" | awk '{print $1}')" 2>&1 | head -5 || echo "Failed to get Talos version"
-    fi
+        FIRST_NODE=$(echo "$NODE_IPS" | awk '{print $1}')
+        echo "Talos version info:"
+        TALOS_VERSION_OUTPUT=$(talosctl version --nodes "$FIRST_NODE" 2>&1 | head -10 || echo "Failed to get Talos version")
+        echo "$TALOS_VERSION_OUTPUT"
+        echo ""
 
-    log_success "Version check completed"
+        # Extract client and server versions to detect mismatch that causes gRPC failures
+        CLIENT_VER=$(echo "$TALOS_VERSION_OUTPUT" | grep -A1 "Client:" | grep "Tag:" | awk '{print $2}' || echo "")
+        SERVER_VER=$(echo "$TALOS_VERSION_OUTPUT" | grep -A1 "Server:" | grep "Tag:" | awk '{print $2}' || echo "")
+
+        if [ -n "$CLIENT_VER" ] && [ -n "$SERVER_VER" ] && [ "$CLIENT_VER" != "$SERVER_VER" ]; then
+            log_warning "Talos client/server version mismatch: client=$CLIENT_VER server=$SERVER_VER (may cause gRPC failures)"
+            add_minor_issue "Talos client/server mismatch: client=$CLIENT_VER vs server=$SERVER_VER"
+        elif [ -n "$CLIENT_VER" ] && [ -n "$SERVER_VER" ]; then
+            log_success "Talos client/server versions match: $CLIENT_VER"
+        else
+            log_info "Could not parse Talos version info"
+        fi
+
+        # Check for Kubernetes client/server mismatch
+        echo ""
+        echo "Kubernetes version:"
+        K8S_VERSION=$(kubectl version -o json 2>/dev/null || echo "{}")
+        CLIENT_K8S=$(echo "$K8S_VERSION" | jq -r '.clientVersion.gitVersion // empty' 2>/dev/null || echo "")
+        SERVER_K8S=$(echo "$K8S_VERSION" | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null || echo "")
+        echo "  client: $CLIENT_K8S"
+        echo "  server: $SERVER_K8S"
+
+        # Check for major skew (client major.minor differs from server by >1)
+        CLIENT_MINOR=$(echo "$CLIENT_K8S" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/' || echo "0")
+        SERVER_MINOR=$(echo "$SERVER_K8S" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/' || echo "0")
+        if [ -n "$CLIENT_MINOR" ] && [ -n "$SERVER_MINOR" ] && [ "$CLIENT_MINOR" != "$SERVER_MINOR" ]; then
+            SKEW=$(( CLIENT_MINOR - SERVER_MINOR ))
+            SKEW=${SKEW#-}  # absolute value
+            if [ "$SKEW" -gt 1 ]; then
+                log_warning "Kubernetes client/server minor version skew: client=.${CLIENT_MINOR} server=.${SERVER_MINOR} (skew=${SKEW})"
+                add_minor_issue "kubectl client/server minor version skew: $SKEW"
+            else
+                log_success "Kubernetes client/server versions within acceptable skew"
+            fi
+        fi
+    else
+        log_warning "talosctl not available, skipping Talos version check"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 17: Security Checks"
@@ -803,8 +912,56 @@ log_section "Section 19: Network Connectivity"
 
     echo "external-dns status:"
     kubectl get deployment -n network external-dns 2>/dev/null || echo "external-dns not found"
+    echo ""
 
-    log_success "Network connectivity check completed"
+    # Check external-dns restart count
+    EXTDNS_RESTARTS=$(kubectl get deployment -n network external-dns -o jsonpath='{.status.conditions}' 2>/dev/null | jq -r '.' 2>/dev/null || echo "")
+    EXTDNS_PODS_READY=$(kubectl get deployment -n network external-dns -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    EXTDNS_PODS_DESIRED=$(kubectl get deployment -n network external-dns -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    echo "external-dns pods: $EXTDNS_PODS_READY/$EXTDNS_PODS_DESIRED ready"
+
+    # Check Cloudflare tunnel
+    echo ""
+    echo "Cloudflare tunnel:"
+    kubectl get pods -n network -l app=cloudflared 2>/dev/null || echo "Cloudflare tunnel not found"
+    CLOUDFLARED_RUNNING=$(kubectl get pods -n network -l app=cloudflared -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "cloudflared running pods: $CLOUDFLARED_RUNNING"
+
+    # Check ingress-nginx error rate
+    echo ""
+    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=100 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l")
+    echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
+
+    # Check NAS connectivity (important for storage)
+    echo ""
+    echo "NAS connectivity (192.168.31.230):"
+    ping -c 2 -W 2 192.168.31.230 > /dev/null 2>&1 && echo "NAS reachable" || echo "NAS unreachable - check storage integration"
+
+    NETWORK_ISSUES=0
+    if [ "$EXTDNS_PODS_READY" != "$EXTDNS_PODS_DESIRED" ]; then
+        log_warning "external-dns not fully ready: $EXTDNS_PODS_READY/$EXTDNS_PODS_DESIRED"
+        add_major_issue "external-dns pods not ready: $EXTDNS_PODS_READY/$EXTDNS_PODS_DESIRED"
+        NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
+    fi
+    if [ "$CLOUDFLARED_RUNNING" -eq 0 ]; then
+        log_warning "Cloudflare tunnel not running"
+        add_major_issue "Cloudflare tunnel pods not running - external access may be broken"
+        NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
+    fi
+    if [ "$INGRESS_ERRORS" -gt 10 ]; then
+        log_warning "High ingress controller error rate: $INGRESS_ERRORS in last hour"
+        add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
+        NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
+    fi
+    if ! ping -c 1 -W 2 192.168.31.230 > /dev/null 2>&1; then
+        log_warning "NAS (192.168.31.230) not reachable from cluster"
+        add_major_issue "NAS not reachable - storage backup integration may be broken"
+        NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
+    fi
+
+    if [ "$NETWORK_ISSUES" -eq 0 ]; then
+        log_success "Network connectivity healthy"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 20: GitOps Status"
@@ -1177,11 +1334,38 @@ log_section "Section 23: Media Services Health"
     echo "Jellyfin status:"
     kubectl get pods -n media -l app.kubernetes.io/name=jellyfin
     echo ""
+    JELLYFIN_RUNNING=$(kubectl get pods -n media -l app.kubernetes.io/name=jellyfin -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+
+    echo "Plex status:"
+    kubectl get pods -n media -l app.kubernetes.io/name=plex 2>/dev/null || echo "Plex not found"
+    echo ""
+    PLEX_RUNNING=$(kubectl get pods -n media -l app.kubernetes.io/name=plex -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
 
     echo "Tube Archivist:"
-    kubectl get pods -n download -l app.kubernetes.io/name=tube-archivist
+    kubectl get pods -n download -l app.kubernetes.io/name=tube-archivist 2>/dev/null || echo "Tube Archivist not found"
+    echo ""
+    TA_ERRORS=$(safe_count "kubectl logs -n download deployment/tube-archivist --tail=20 --since=1h 2>&1 | grep -iE '\[ERROR\]|error:' | wc -l")
+    echo "Tube Archivist errors (last hour): $TA_ERRORS"
 
-    log_success "Media services check completed"
+    echo "JDownloader:"
+    kubectl get pods -n download -l app.kubernetes.io/name=jdownloader 2>/dev/null || echo "JDownloader not found"
+    echo ""
+
+    MEDIA_ISSUES=0
+    if [ "$JELLYFIN_RUNNING" -eq 0 ]; then
+        log_warning "Jellyfin not running"
+        add_major_issue "Jellyfin pod not running"
+        MEDIA_ISSUES=$((MEDIA_ISSUES + 1))
+    fi
+    if [ "$TA_ERRORS" -gt 10 ]; then
+        log_warning "Tube Archivist has errors: $TA_ERRORS in last hour"
+        add_minor_issue "Tube Archivist errors: $TA_ERRORS"
+        MEDIA_ISSUES=$((MEDIA_ISSUES + 1))
+    fi
+
+    if [ "$MEDIA_ISSUES" -eq 0 ]; then
+        log_success "Media services healthy"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 24: Database Health"
@@ -1189,27 +1373,106 @@ log_section "Section 24: Database Health"
     echo "PostgreSQL:"
     kubectl get pods -n databases -l app.kubernetes.io/name=postgresql 2>/dev/null || echo "PostgreSQL not found"
     echo ""
+    PG_RUNNING=$(kubectl get pods -n databases -l app.kubernetes.io/name=postgresql -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+
+    # Check PostgreSQL active connections
+    if [ "$PG_RUNNING" -gt 0 ]; then
+        PG_CONNECTIONS=$(kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';" 2>/dev/null | tr -d ' ' || echo "unavailable")
+        echo "PostgreSQL active connections: $PG_CONNECTIONS"
+
+        # Check for databases with bloat or lock contention (quick check)
+        PG_LOCKS=$(kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_locks WHERE NOT granted;" 2>/dev/null | tr -d ' ' || echo "0")
+        echo "PostgreSQL waiting locks: $PG_LOCKS"
+    fi
+    echo ""
 
     echo "MariaDB:"
     kubectl get statefulsets -n databases mariadb 2>/dev/null || echo "MariaDB not found"
+    echo ""
+    MARIADB_READY=$(kubectl get statefulset -n databases mariadb -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    MARIADB_DESIRED=$(kubectl get statefulset -n databases mariadb -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    echo "MariaDB pods: $MARIADB_READY/$MARIADB_DESIRED ready"
 
-    log_success "Database health check completed"
+    DB_ISSUES=0
+    if [ "$PG_RUNNING" -eq 0 ]; then
+        log_critical "PostgreSQL not running"
+        add_critical_issue "PostgreSQL pod not running - all dependent services may be affected"
+        DB_ISSUES=$((DB_ISSUES + 1))
+    fi
+    if [ -n "$PG_LOCKS" ] && [ "$PG_LOCKS" != "unavailable" ] && [ "$PG_LOCKS" -gt 10 ] 2>/dev/null; then
+        log_warning "PostgreSQL has $PG_LOCKS waiting lock(s)"
+        add_minor_issue "PostgreSQL lock contention: $PG_LOCKS waiting locks"
+        DB_ISSUES=$((DB_ISSUES + 1))
+    fi
+    if [ "$MARIADB_READY" != "$MARIADB_DESIRED" ]; then
+        log_warning "MariaDB not fully ready: $MARIADB_READY/$MARIADB_DESIRED"
+        add_major_issue "MariaDB pods not ready: $MARIADB_READY/$MARIADB_DESIRED"
+        DB_ISSUES=$((DB_ISSUES + 1))
+    fi
+
+    if [ "$DB_ISSUES" -eq 0 ]; then
+        log_success "Databases healthy"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 25: External Services & Connectivity"
 {
-    echo "Cloudflare tunnel:"
+    # Cloudflare tunnel status (covered in Section 19, summarize here)
+    echo "Cloudflare tunnel pods:"
     kubectl get pods -n network -l app=cloudflared 2>/dev/null || echo "Cloudflare tunnel not found"
+    echo ""
 
-    log_success "External connectivity check completed"
+    # Check Authentik readiness (auth gateway for all external services)
+    echo "Authentik server:"
+    kubectl get pods -n kube-system -l app.kubernetes.io/name=authentik 2>/dev/null || echo "Authentik not found"
+    echo ""
+    AUTHENTIK_RUNNING=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "Authentik server running pods: $AUTHENTIK_RUNNING"
+
+    # Check SOPS age key secret exists (required for Flux to decrypt secrets)
+    echo ""
+    echo "SOPS age key secret:"
+    kubectl get secret sops-age -n flux-system 2>/dev/null && echo "sops-age secret present" || echo "WARNING: sops-age secret missing - Flux cannot decrypt secrets"
+    SOPS_SECRET=$(kubectl get secret sops-age -n flux-system 2>/dev/null && echo "present" || echo "missing")
+
+    EXT_ISSUES=0
+    if [ "$AUTHENTIK_RUNNING" -eq 0 ]; then
+        log_critical "Authentik server not running - all external auth will fail"
+        add_critical_issue "Authentik server pod not running"
+        EXT_ISSUES=$((EXT_ISSUES + 1))
+    fi
+    if [ "$SOPS_SECRET" = "missing" ]; then
+        log_critical "SOPS age key secret missing in flux-system - Flux cannot decrypt secrets"
+        add_critical_issue "sops-age secret missing from flux-system namespace"
+        EXT_ISSUES=$((EXT_ISSUES + 1))
+    fi
+
+    if [ "$EXT_ISSUES" -eq 0 ]; then
+        log_success "External services connectivity healthy"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 26: Security & Access Monitoring"
 {
     echo "Authentik server:"
     kubectl get pods -n kube-system -l app.kubernetes.io/name=authentik
+    echo ""
 
-    log_success "Security monitoring check completed"
+    # Check Authentik auth failure rate
+    AUTH_FAILURES=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=200 --since=24h 2>&1 | grep -iE 'authentication.*failed|login.*failed|invalid.*credentials' | wc -l")
+    echo "Authentik auth failures (last 24h): $AUTH_FAILURES"
+    echo ""
+
+    # Check for RBAC permission errors in audit/controller logs
+    RBAC_ERRORS=$(safe_count "kubectl logs -n kube-system -l component=kube-apiserver --tail=100 --since=1h 2>&1 | grep -i 'RBAC.*denied\|forbidden.*reason' | wc -l")
+    echo "RBAC denied events (last hour, apiserver): $RBAC_ERRORS"
+
+    if [ "$AUTH_FAILURES" -gt 20 ]; then
+        log_warning "High authentication failure count: $AUTH_FAILURES in 24h (possible brute-force or misconfiguration)"
+        add_minor_issue "High Authentik auth failure count: $AUTH_FAILURES"
+    else
+        log_success "Security monitoring check completed"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 27: Performance & Trends"
@@ -1272,11 +1535,53 @@ log_section "Section 32: Zigbee2MQTT Device Monitoring"
     kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt
     echo ""
 
-    echo "Checking device count..."
-    ZIGBEE_DEVICES=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq 'keys | length' 2>/dev/null || echo "Unable to check")
-    echo "Total Zigbee devices: $ZIGBEE_DEVICES"
+    Z2M_RUNNING=$(kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
 
-    log_success "Zigbee monitoring completed"
+    if [ "$Z2M_RUNNING" -eq 0 ]; then
+        log_critical "Zigbee2MQTT is not running"
+        add_critical_issue "Zigbee2MQTT pod not running - Zigbee devices unavailable"
+    else
+        echo "Checking device count..."
+        ZIGBEE_DEVICES=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq 'keys | length' 2>/dev/null || echo "Unable to check")
+        echo "Total Zigbee devices: $ZIGBEE_DEVICES"
+        echo ""
+
+        # Check for devices offline >5 days
+        echo "Devices offline >5 days:"
+        OFFLINE_DEVICES=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq -r '
+            to_entries[] |
+            select(.value.last_seen != null) |
+            select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) |
+            .key
+        ' 2>/dev/null || echo "")
+        if [ -n "$OFFLINE_DEVICES" ]; then
+            OFFLINE_COUNT=$(echo "$OFFLINE_DEVICES" | wc -l | tr -cd '0-9')
+            echo "$OFFLINE_DEVICES" | head -10
+            echo "Total offline >5 days: $OFFLINE_COUNT"
+        else
+            echo "None"
+        fi
+        echo ""
+
+        # Check Zigbee coordinator/controller errors in logs
+        Z2M_COORD_ERRORS=$(safe_count "kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 --since=24h 2>&1 | grep -iE '(error|ERROR)' | grep -v 'WARN' | wc -l")
+        echo "Zigbee2MQTT errors (24h): $Z2M_COORD_ERRORS"
+
+        Z2M_ISSUES=0
+        if [ -n "$OFFLINE_DEVICES" ] && [ "${OFFLINE_COUNT:-0}" -gt 5 ]; then
+            log_warning "Many Zigbee devices offline >5 days: $OFFLINE_COUNT"
+            add_minor_issue "Zigbee devices offline >5 days: $OFFLINE_COUNT"
+            Z2M_ISSUES=$((Z2M_ISSUES + 1))
+        fi
+        if [ "$Z2M_COORD_ERRORS" -gt 20 ]; then
+            log_warning "High Zigbee2MQTT error count: $Z2M_COORD_ERRORS in 24h"
+            add_minor_issue "Zigbee2MQTT coordinator errors: $Z2M_COORD_ERRORS"
+            Z2M_ISSUES=$((Z2M_ISSUES + 1))
+        fi
+        if [ "$Z2M_ISSUES" -eq 0 ]; then
+            log_success "Zigbee2MQTT healthy ($ZIGBEE_DEVICES devices)"
+        fi
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 33: Battery Health Monitoring"
@@ -1887,4 +2192,4 @@ echo "Next steps:"
 echo "  - Review full output: cat $OUTPUT_FILE"
 echo "  - Check summary: cat $SUMMARY_FILE"
 echo "  - Review issues: cat $ISSUES_FILE"
-echo "  - Update health check log: AI_weekly_health_check_current.md"
+echo "  - Save snapshot: cp $SUMMARY_FILE runbooks/health-check-current.md"

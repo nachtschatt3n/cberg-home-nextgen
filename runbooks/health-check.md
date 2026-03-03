@@ -21,7 +21,7 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 
 ## Automated Health Check Script
 
-**⚡ Quick Start**: An automated health check script is available that executes all 39 sections:
+**Quick Start**: An automated health check script covers all operational checks in this runbook:
 
 ```bash
 # Run the automated health check
@@ -33,15 +33,21 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 # - Issues only: /tmp/health-check-issues-YYYYMMDD-HHMMSS.txt
 ```
 
-**Features:**
-- ✅ Executes all 39 health check sections automatically
-- ✅ Categorizes issues by severity (Critical, Major, Minor)
-- ✅ Generates comprehensive reports with recommendations
-- ✅ Includes Alertmanager alerts, Elasticsearch application log analysis, and Home Assistant integration analysis
-- ✅ Monitors MQTT broker connectivity and Shelly device health
-- ✅ Queries Elasticsearch indices for error patterns and trends
-- ✅ Queries UnPoller metrics for network hardware health
-- ✅ Safe execution with error handling and progress tracking
+**What the script checks (automatically):**
+- Cluster events, failed jobs, certificate readiness and 14-day expiry
+- DaemonSet, Deployment, StatefulSet, and Pod health
+- Prometheus alerts, Longhorn volumes (including replica mismatches and detachment events)
+- Talos service health and client/server version mismatch
+- Hardware resource pressure and temperatures
+- Flux GitOps sync status (HelmReleases, HelmRepositories, Kustomizations, Git sources)
+- Network connectivity: external-dns, Cloudflare tunnel, NAS reachability, ingress errors
+- Security: Authentik auth failures, SOPS age key presence, pods running as root
+- Home automation: Home Assistant, Zigbee2MQTT (offline devices, coordinator errors), MQTT, Frigate cameras
+- Media services (Jellyfin, Plex, Tube Archivist), databases (PostgreSQL, MariaDB)
+- Ingress backend health, PVC status, service endpoints, admission webhooks
+- Elasticsearch error patterns, Zigbee battery health, UnPoller metrics
+
+**Scope**: The script checks operational correctness only — it does not flag that newer software versions exist. Version tracking is handled by Renovate PRs and `runbooks/version-check.md`.
 
 **When to use the script:**
 - Weekly health checks
@@ -72,11 +78,11 @@ Execute systematically, testing each service's health.
 ### Phase 3b: Camera & NVR Checks (Section 22b)
 Verify Frigate NVR camera streaming, MQTT availability, and Home Assistant camera integration.
 
-### Phase 4: Advanced Monitoring (Sections 21-35)
+### Phase 4: Advanced Monitoring (Sections 21-38)
 Execute remaining checks, focusing on automation, security, home automation health, and MQTT connectivity.
 
 ### Phase 5: Report Generation
-Compile all findings into the standardized report format.
+Compile all findings into the standardized report format. Focus on operational issues — do not include version-update recommendations (those belong in the version-check runbook).
 
 ---
 
@@ -101,38 +107,6 @@ kubectl get nodes
 3. **Continue sequentially** through all 35 sections
 4. **Collect metrics** and identify issues as you go
 5. **Generate final report** using the standardized format
-
----
-
-## 0. Active Firing Alerts (MANDATORY — Run First)
-
-**Objective**: Surface any Prometheus alerts that are currently firing before diving into individual checks
-**Success Criteria**: No firing alerts except Watchdog and InfoInhibitor
-
-**Commands to Execute:**
-```bash
-# Port-forward to Alertmanager and query firing alerts
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
-PFPID=$!
-sleep 3
-curl -s 'http://localhost:9093/api/v2/alerts?active=true' | python3 -c "
-import sys, json
-alerts = json.load(sys.stdin)
-firing = [a for a in alerts if a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor')]
-if not firing:
-    print('OK: No actionable alerts firing')
-else:
-    for a in firing:
-        name = a['labels'].get('alertname', '?')
-        sev  = a['labels'].get('severity', '?')
-        ns   = a['labels'].get('pvc_namespace') or a['labels'].get('namespace', '')
-        desc = a['annotations'].get('description') or a['annotations'].get('summary', '')
-        print(f'[{sev.upper()}] {name} ns={ns}: {desc}')
-"
-kill \$PFPID 2>/dev/null
-```
-
-**AI Analysis**: Treat every non-Watchdog/non-InfoInhibitor alert as at minimum a WARNING. Flag any `critical` severity alert as Critical in the report. Do NOT mark the health check as overall OK if any actionable alert is firing. Include all firing alerts verbatim in the findings summary.
 
 ---
 
@@ -192,21 +166,21 @@ kubectl get jobs -A --sort-by='.status.completionTime' | grep -E "(Failed|Error)
 ## 3. Certificates
 
 **Objective**: Ensure SSL certificates are valid and not expiring
-**Success Criteria**: All certificates valid, none expiring within 30 days
+**Success Criteria**: All certificates ready, none expiring within 14 days
 
-**Commands to Execute:**
+**Automated**: Certificate readiness and 14-day expiry checks are fully automated in the health check script.
+
+**Manual Investigation** (if certificate issues detected):
 ```bash
-# List all certificates
-kubectl get certificates -A
+# Inspect a specific failing certificate
+kubectl describe certificate -n <namespace> <name>
 
-# Check expiration dates
-kubectl get certificates -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}: ready={.status.conditions[?(@.type=="Ready")].status}, expires={.status.renewalTime}{"\n"}{end}'
+# Check cert-manager logs for renewal errors
+kubectl logs -n cert-manager deployment/cert-manager --tail=100 | grep -i error
 
-# Count certificates expiring soon (<30 days)
-kubectl get certificates -A -o json | jq -r '.items[] | select(.status.renewalTime != null) | select((.status.renewalTime | fromdate) - now < 2592000) | .metadata.name' | wc -l
+# Force certificate renewal
+kubectl annotate certificate -n <namespace> <name> cert-manager.io/issuer-kind-
 ```
-
-**AI Analysis**: Parse dates, identify expiring certificates, check readiness status.
 
 ---
 
@@ -349,52 +323,22 @@ kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-prometheu
 
 ## 9. Alertmanager
 
-**Objective**: Ensure alert routing is working and no actionable alerts are firing
-**Success Criteria**: Alertmanager operational, no firing alerts except Watchdog/InfoInhibitor
+**Objective**: Ensure alert routing is working
+**Success Criteria**: Alertmanager operational, no silenced critical alerts
 
 **Commands to Execute:**
 ```bash
-# Check Alertmanager pod status
+# Check Alertmanager status
 kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 
-# Query all currently firing alerts (canonical check — mirrors Section 0)
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
-PFPID=$!
-sleep 3
-curl -s 'http://localhost:9093/api/v2/alerts?active=true' | python3 -c "
-import sys, json
-alerts = json.load(sys.stdin)
-firing = [a for a in alerts if a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor')]
-print(f'Total firing: {len(firing)}')
-for a in firing:
-    name = a['labels'].get('alertname', '?')
-    sev  = a['labels'].get('severity', '?')
-    ns   = a['labels'].get('pvc_namespace') or a['labels'].get('namespace', '')
-    desc = a['annotations'].get('description') or a['annotations'].get('summary', '')
-    since = a.get('startsAt', '?')
-    print(f'  [{sev.upper()}] {name} ns={ns} since={since}: {desc}')
-"
-kill \$PFPID 2>/dev/null
+# Check for silenced alerts
+kubectl get prometheusalerts -A 2>/dev/null | grep -i silenced | wc -l
 
-# Check for silenced alerts (silences can hide real problems)
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 &>/dev/null &
-PFPID=$!
-sleep 3
-curl -s 'http://localhost:9093/api/v2/silences' | python3 -c "
-import sys, json
-silences = json.load(sys.stdin)
-active = [s for s in silences if s.get('status', {}).get('state') == 'active']
-print(f'Active silences: {len(active)}')
-for s in active:
-    print(f'  {s[\"comment\"]} (expires: {s[\"endsAt\"]})')
-"
-kill \$PFPID 2>/dev/null
-
-# Check Alertmanager logs for routing errors
-kubectl logs -n monitoring -l app.kubernetes.io/name=alertmanager --tail=50 --since=24h 2>&1 | grep -i "error\|fail" | wc -l
+# Check Alertmanager logs for errors
+kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmanager --tail=50 --since=24h 2>&1 | grep -i error | wc -l
 ```
 
-**AI Analysis**: Flag any firing alert (excluding Watchdog/InfoInhibitor) in the report. Active silences masking critical alerts should also be flagged.
+**AI Analysis**: Verify alert processing is working correctly.
 
 ---
 
@@ -403,85 +347,22 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=alertmanager --tail=50 --si
 **Objective**: Verify storage system health
 **Success Criteria**: All volumes healthy, no degraded storage, no recent detachment events
 
-**Commands to Execute:**
+**Automated**: Volume health, PVC status, `autoDeletePodWhenVolumeDetachedUnexpectedly` setting, replica mismatches, unexpected detachment events, and admission webhook conflicts are all checked by the script.
+
+**Manual Investigation** (if storage issues detected):
 ```bash
-# List all volumes with status
-kubectl get volumes -n storage -o wide
-
-# Count unhealthy volumes
-kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.state != "attached" or .status.robustness != "healthy") | .metadata.name' | wc -l
-
-# Check PVC status
-kubectl get pvc -A | grep -E "(Pending|Lost|Unknown)" | wc -l
-
-# Check Longhorn node status
-kubectl get nodes -n storage
-
-# CRITICAL: Check autoDeletePodWhenVolumeDetachedUnexpectedly setting
-# This should be "false" to prevent conflicts with Flux reconciliation
-kubectl get settings.longhorn.io auto-delete-pod-when-volume-detached-unexpectedly -n storage -o jsonpath='{.value}' && echo
-echo "Expected: false (prevents GitOps conflicts)"
-
-# Check for recent volume detachment events (last 24 hours)
-kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "DetachedUnexpectedly" | tail -20
-
-# Count recent engine failures
-kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "engine.*dead unexpectedly" | wc -l
-
-# Check for Flux reconciliation conflicts with Longhorn admission webhook
-kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | grep -i "admission webhook.*longhorn.*denied" | tail -10
+# Inspect a specific unhealthy volume
+kubectl describe volume -n storage <volume-name>
 
 # Check Longhorn manager logs for detachment warnings
-kubectl logs -n storage daemonset/longhorn-manager --tail=100 --since=24h | grep -i "detach\|degrad" | wc -l
+kubectl logs -n storage daemonset/longhorn-manager --tail=100 --since=24h | grep -i "detach\|degrad"
 
-# Verify replica counts match expected (should not be 0/2)
-kubectl get volumes -n storage -o json | python3 -c "
-import sys, json
-volumes = json.load(sys.stdin)['items']
-mismatched = 0
-for vol in volumes:
-    name = vol['metadata']['name']
-    status = vol.get('status', {})
-    current = status.get('currentNumberOfReplicas', 0)
-    desired = vol['spec'].get('numberOfReplicas', 0)
-    if current != desired:
-        print(f'{name}: {current}/{desired} replicas')
-        mismatched += 1
-print(f'\nTotal volumes with replica mismatch: {mismatched}')
-"
-
-# IMPORTANT: Check volume disk usage % via Prometheus (robustness != full disk)
-# Longhorn actual_size includes snapshots and replica overhead — cross-check with df inside pod
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &>/dev/null &
-PFPID=$!
-sleep 3
-curl -s 'http://localhost:9090/api/v1/query?query=(longhorn_volume_actual_size_bytes/longhorn_volume_capacity_bytes)*100' | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-results = data['data']['result']
-results.sort(key=lambda x: float(x['value'][1]), reverse=True)
-print('Volume usage (Longhorn metric — includes snapshot/replica overhead):')
-for r in results:
-    vol = r['metric'].get('volume','?')
-    pct = float(r['value'][1])
-    flag = ' *** HIGH' if pct >= 80 else (' * WATCH' if pct >= 70 else '')
-    print(f'  {pct:5.1f}%  {vol}{flag}')
-"
-kill \$PFPID 2>/dev/null
-
-# For any volume flagged HIGH above, verify actual filesystem usage inside the pod:
-# kubectl exec -n <namespace> <pod> -- df -h <mountpath>
-# Note: df reports filesystem usage; Longhorn metric is always higher due to snapshots.
+# Open Longhorn UI (port-forward)
+kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
+# Then browse to http://localhost:8080
 ```
 
-**AI Analysis**:
-- Identify any storage issues, check volume health
-- **CRITICAL**: Verify `autoDeletePodWhenVolumeDetachedUnexpectedly` is `false` (issue from 2025-12-14)
-- Check for mass detachment events indicating cluster-wide issues
-- Monitor for Flux/Longhorn admission webhook conflicts
-- Flag any replica count mismatches that could indicate underlying problems
-- **Flag volumes ≥ 80% usage** as WARNING in the report; volumes ≥ 90% as CRITICAL
-- For flagged volumes, always verify actual filesystem usage with `df` inside the pod (Longhorn metric inflates due to snapshots)
+**Known Issue**: `autoDeletePodWhenVolumeDetachedUnexpectedly` must be `false` to prevent GitOps conflicts (Flux reconciliation can trigger unexpected detachment).
 
 ---
 
@@ -513,27 +394,22 @@ kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 
 ## 12. Talos System Health
 
 **Objective**: Verify node OS health
-**Success Criteria**: All nodes healthy, no hardware errors
+**Success Criteria**: All Talos services running on all nodes
 
-**Commands to Execute:**
+**Automated**: Non-running Talos services are detected and counted per node by the script.
+
+**Manual Investigation** (if Talos service issues detected):
 ```bash
-# Check node status
-talosctl get machinestatus
+# Check specific node services
+talosctl services --nodes <node-ip>
 
-# Check services on each node (run for each node)
-for node in $(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'); do
-  echo "=== Node $node ==="
-  talosctl services --nodes $node | grep -v "Running" | wc -l
-done
+# Check for hardware errors in dmesg (distinguish benign iSCSI messages from real errors)
+talosctl dmesg --nodes <node-ip> | grep -iE "(ECC|PCI|memory error|disk failure)" | head -20
+# Note: "Direct-Access IET VIRTUAL-DISK" and "Attached SCSI disk" are normal Longhorn iSCSI messages
 
-# Check for hardware errors (run for each node)
-for node in $(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'); do
-  echo "=== Hardware errors on $node ==="
-  talosctl dmesg --nodes $node | grep -iE "(error|fail|hardware|memory|ecc|pci|disk)" | wc -l
-done
+# Check machine status
+talosctl get machinestatus --nodes <node-ip>
 ```
-
-**AI Analysis**: Check node health, identify hardware issues.
 
 ---
 
@@ -626,26 +502,23 @@ kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.backup
 
 ---
 
-## 16. Version Checks & Updates
+## 16. Client/Server Version Mismatch
 
-**Objective**: Ensure components are up-to-date
-**Success Criteria**: No critical version mismatches
+**Objective**: Detect version skew between CLI tools and cluster that causes operational failures
+**Success Criteria**: talosctl client and server versions match; kubectl client/server minor version skew ≤1
 
-**Commands to Execute:**
+**Automated**: This check is fully automated in the health check script.
+
+**Manual Investigation** (if mismatch detected):
 ```bash
-# Kubernetes version
-kubectl version -o json | jq -r '.serverVersion.gitVersion'
+# Confirm Talos mismatch and impact
+talosctl version --nodes <node-ip>
 
-# Talos version
-talosctl version --nodes $(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
-# Check Helm chart versions (sample)
-kubectl get helmrelease -n storage longhorn -o jsonpath='{.spec.chart.spec.version}'
-kubectl get helmrelease -n monitoring kube-prometheus-stack -o jsonpath='{.spec.chart.spec.version}'
-kubectl get helmrelease -n kube-system cilium -o jsonpath='{.spec.chart.spec.version}'
+# Confirm kubectl skew
+kubectl version
 ```
 
-**AI Analysis**: Compare versions, identify outdated components.
+**AI Analysis**: Flag only when a mismatch actually causes failures (e.g., gRPC errors in talosctl output, API compatibility warnings from kubectl). Version *updates* are tracked separately by Renovate and the version-check runbook.
 
 ---
 
@@ -781,25 +654,22 @@ killall kubectl
 
 ## 19. Network Connectivity (Kubernetes)
 
-**Objective**: Test internal networking
-**Success Criteria**: DNS working, cross-VLAN routing functional
+**Objective**: Test internal networking and external connectivity infrastructure
+**Success Criteria**: external-dns ready, Cloudflare tunnel running, NAS reachable, ingress controller error rate low
 
-**Commands to Execute:**
+**Automated**: external-dns readiness, Cloudflare tunnel pod status, NAS reachability (192.168.31.230), and ingress controller error rate are checked by the script.
+
+**Manual Investigation** (if network issues detected):
 ```bash
-# Check ingress controllers
-kubectl get svc -n network | grep ingress
-
-# Test DNS resolution
+# Test in-cluster DNS resolution
 kubectl run test-dns --rm -it --image=busybox --restart=Never -- nslookup kubernetes.default.svc.cluster.local
 
-# Test cross-VLAN routing
-kubectl run test-network --rm -it --image=busybox --restart=Never -- ping -c 3 192.168.31.230
+# Test NAS connectivity from a cluster pod
+kubectl run test-net --rm -it --image=busybox --restart=Never -- ping -c 3 192.168.31.230
 
-# Check external-dns
-kubectl get deployment -n network external-dns
+# Check external-dns logs for sync failures
+kubectl logs -n network deployment/external-dns --tail=50 | grep -iE "error|failed"
 ```
-
-**AI Analysis**: Verify DNS and routing functionality.
 
 ---
 
@@ -1090,87 +960,88 @@ done
 ## 23. Media Services Health
 
 **Objective**: Check media server functionality
-**Success Criteria**: Services accessible, no critical errors
+**Success Criteria**: Jellyfin running, no elevated Tube Archivist errors
 
-**Commands to Execute:**
+**Automated**: Jellyfin, Plex, Tube Archivist, and JDownloader pod status plus Tube Archivist error rate are checked by the script.
+
+**Manual Investigation** (if media service issues detected):
 ```bash
-# Check Jellyfin health
-curl -s http://jellyfin.media.svc.cluster.local:8096/health | grep -q "Healthy" && echo "Healthy" || echo "Jellyfin health check failed"
+# Check Jellyfin logs
+kubectl logs -n media -l app.kubernetes.io/name=jellyfin --tail=50 | grep -iE "error|fatal"
 
-# Check Tube Archivist
-kubectl logs -n download deployment/tube-archivist --tail=10 | grep -i error | wc -l
+# Check Tube Archivist detailed errors
+kubectl logs -n download deployment/tube-archivist --tail=50 | grep -iE "error|failed"
 
-# Check JDownloader
-kubectl get pods -n download -l app.kubernetes.io/name=jdownloader
-
-# Check Plex
-kubectl get pods -n media -l app.kubernetes.io/name=plex
+# Restart a stuck media service
+kubectl rollout restart deployment/<app> -n media
 ```
-
-**AI Analysis**: Verify media services are operational.
 
 ---
 
 ## 24. Database Health
 
-**Objective**: Monitor database performance and connections
-**Success Criteria**: Databases accessible, reasonable connection counts
+**Objective**: Monitor database availability and lock contention
+**Success Criteria**: PostgreSQL running with acceptable lock count, MariaDB ready
 
-**Commands to Execute:**
+**Automated**: PostgreSQL pod status, active connection count, waiting lock count, and MariaDB StatefulSet readiness are checked by the script.
+
+**Manual Investigation** (if database issues detected):
 ```bash
-# Check PostgreSQL connections
-kubectl exec -n databases deployment/postgresql -- psql -U postgres -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';" 2>/dev/null || echo "PostgreSQL check failed"
-
-# Check MariaDB
-kubectl exec -n databases deployment/mariadb -- mysql -u root -e "SELECT COUNT(*) FROM information_schema.processlist;" 2>/dev/null | wc -l 2>/dev/null || echo "MariaDB check failed"
+# Check long-running queries (PostgreSQL)
+kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -c "
+  SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state
+  FROM pg_stat_activity
+  WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes';"
 
 # Check database sizes
-kubectl exec -n databases deployment/postgresql -- psql -U postgres -c "SELECT pg_size_pretty(pg_database_size(current_database()));" 2>/dev/null || echo "Size check failed"
-```
+kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -c "
+  SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database ORDER BY pg_database_size(datname) DESC;"
 
-**AI Analysis**: Monitor database health and performance.
+# Check MariaDB process list
+kubectl exec -n databases -l app.kubernetes.io/name=mariadb -- mysql -u root -e "SHOW PROCESSLIST;"
+```
 
 ---
 
 ## 25. External Services & Connectivity
 
-**Objective**: Verify external access and DNS
-**Success Criteria**: External services accessible, DNS resolving
+**Objective**: Verify external gateway and auth infrastructure is running
+**Success Criteria**: Authentik server running, SOPS age key present, Cloudflare tunnel running
 
-**Commands to Execute:**
+**Automated**: Authentik server pod status, SOPS age key secret presence, and Cloudflare tunnel pod status are checked by the script (Section 19 covers tunnel, Section 25 covers auth and SOPS).
+
+**Manual Investigation** (if external access broken):
 ```bash
 # Test external DNS resolution
 for domain in "auth.$DOMAIN" "hass.$DOMAIN"; do
   echo "Testing $domain:"
-  dig +short $domain | wc -l
+  dig +short $domain
 done
 
-# Check Cloudflare tunnel
-kubectl get pods -n network -l app=cloudflared | wc -l
+# Test external response time to auth endpoint
+curl -s -w "Response time: %{time_total}s\n" -o /dev/null https://auth.$DOMAIN
 
-# Test external response times
-curl -s -w "%{time_total}s" -o /dev/null https://auth.$DOMAIN 2>/dev/null || echo "Auth check failed"
+# Check Authentik logs for errors
+kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=50 | grep -iE "error|critical"
 ```
-
-**AI Analysis**: Verify external connectivity and DNS.
 
 ---
 
 ## 26. Security & Access Monitoring
 
-**Objective**: Monitor for security events
-**Success Criteria**: No suspicious activity, authentication working
+**Objective**: Monitor for security events and authentication anomalies
+**Success Criteria**: Authentik auth failure count within normal range, no RBAC escalation
 
-**Commands to Execute:**
+**Automated**: Authentik auth failure count (24h) and RBAC denial events (last hour) are checked by the script.
+
+**Manual Investigation** (if elevated auth failure count detected):
 ```bash
-# Check recent auth failures
-kubectl logs -n kube-system deployment/authentik-server --tail=100 --since=24h | grep -i "failed\|invalid" | wc -l 2>/dev/null || echo "Auth logs check failed"
+# Review specific auth failure details
+kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=200 --since=24h | grep -iE "authentication.*failed|login.*failed" | head -20
 
-# Check firewall blocks (if unifictl available)
-unifictl local event list --limit 50 -o json | jq -r '.data[] | select(.key | contains("blocked")) | .msg' | wc -l 2>/dev/null || echo "Firewall check requires unifictl"
+# Check firewall blocks via unifictl (requires local unifictl configured)
+cd /home/mu/code/unifictl && unifictl local events -o json | jq -r '.[] | select(.key | contains("blocked")) | .msg' | head -20
 ```
-
-**AI Analysis**: Monitor security events and access patterns.
 
 ---
 
@@ -1341,34 +1212,24 @@ kubectl exec -n home-automation deployment/home-assistant -- curl -s http://loca
 
 ## 32. Zigbee2MQTT Device Monitoring
 
-**Objective**: Monitor Zigbee device connectivity and battery health
-**Success Criteria**: All critical devices online, battery levels acceptable
+**Objective**: Monitor Zigbee device connectivity
+**Success Criteria**: Zigbee2MQTT running, no large number of devices offline >5 days
 
-**Commands to Execute:**
+**Automated**: Zigbee2MQTT pod status, total device count, devices offline >5 days, and coordinator error count (24h) are checked by the script.
+
+**Manual Investigation** (if offline devices detected):
 ```bash
-# Get total device count
-kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq 'keys | length' 2>/dev/null || echo "Cannot check device count"
+# List devices offline >5 days with friendly names
+kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r '
+  to_entries[] |
+  select(.value.last_seen != null) |
+  select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) |
+  "\(.key): last seen \(.value.last_seen)"
+'
 
-# Check for devices offline >5 days
-kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) | "\(.key): \(.value.last_seen)"' 2>/dev/null || echo "Cannot check offline devices"
-
-# Check battery levels <30%
-kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 30)) | "\(.key): \(.value.battery)%"' 2>/dev/null || echo "Cannot check battery levels"
-
-# Get device friendly names and status summary
-kubectl exec -n home-automation deployment/zigbee2mqtt -- bash -c "
-cat /data/configuration.yaml | grep -A 100 'devices:' | grep -E 'friendly_name|0x[0-9a-f]+' | paste - - | head -20
-echo '--- Device Status Summary ---'
-cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime(\"%Y-%m-%dT%H:%M:%S.%fZ\") | mktime)) < 86400) | \"\(.key): OK\"' | wc -l | xargs echo 'Devices seen today:'
-cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime(\"%Y-%m-%dT%H:%M:%S.%fZ\") | mktime)) > 86400*7) | \"\(.key): OLD\"' | wc -l | xargs echo 'Devices offline >7 days:'
-cat /data/state.json | jq -r 'to_entries[] | select(.value.battery and (.value.battery < 50)) | \"\(.key): \(.value.battery)%\"' | wc -l | xargs echo 'Devices with low battery (<50%):'
-"
-
-# Check Zigbee2MQTT coordinator logs for errors
-kubectl logs -n home-automation deployment/zigbee2mqtt --tail=20 | grep -i error | wc -l
+# Check Zigbee2MQTT logs for coordinator errors
+kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 | grep -iE "error|coordinator"
 ```
-
-**AI Analysis**: Analyze device connectivity patterns, identify offline devices requiring attention, and flag low battery levels. Categorize issues by priority (critical sensors vs decorative devices).
 
 ---
 
@@ -1792,18 +1653,19 @@ echo "Webhook failures: $WEBHOOK_FAILURES"
 
 ## Report Generation Instructions
 
-After executing all 39 sections, compile the results into the standardized format:
+After executing all sections, compile the results into the standardized format:
 
 1. **Executive Summary**: Calculate overall health based on critical issues found
 2. **Service Availability Matrix**: Fill in actual service status
 3. **Detailed Findings**: Document results from each section including integration health and device status
 4. **Performance Metrics**: Aggregate resource usage data
-5. **Version Report**: Compile version information
-6. **Action Items**: Prioritize issues found including integration fixes and device maintenance
-7. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
+5. **Action Items**: Prioritize issues found including integration fixes and device maintenance
+6. **Trends & Observations**: Note patterns including integration reliability and device connectivity trends
 
-**Final Health Score Calculation (39 sections):**
-- **✅ Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
-- **🟡 Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
-- **🟠 Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day
-- **🔴 Critical**: ≥3 critical issues, ≥9 warnings, <90% services healthy, >30% devices offline, >5 critical batteries, >10000 log errors/day or FATAL errors
+Note: Do not include version-update recommendations — those are tracked by Renovate and `runbooks/version-check.md`.
+
+**Final Health Score Calculation:**
+- **Excellent**: 0 critical issues, ≤2 warnings, ≥98% services healthy, <10% devices offline, 0 critical batteries, <1000 log errors/day
+- **Good**: 0 critical issues, 3-4 warnings, ≥95% services healthy, 10-20% devices offline, ≤1 critical battery, <5000 log errors/day
+- **Warning**: 1-2 critical issues, 5-8 warnings, ≥90% services healthy, 20-30% devices offline, 2-5 critical batteries, <10000 log errors/day
+- **Critical**: ≥3 critical issues, ≥9 warnings, <90% services healthy, >30% devices offline, >5 critical batteries, >10000 log errors/day or FATAL errors
