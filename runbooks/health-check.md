@@ -36,14 +36,18 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 **What the script checks (automatically):**
 - Cluster events, failed jobs, certificate readiness and 14-day expiry
 - DaemonSet, Deployment, StatefulSet, and Pod health
-- Prometheus alerts, Longhorn volumes (including replica mismatches and detachment events)
+- Node Ready condition (kubelet health) in addition to disk/memory pressure
+- Prometheus alerts, Longhorn volumes (including replica mismatches, detachment events, and disk pool capacity)
 - Talos service health and client/server version mismatch
 - Hardware resource pressure and temperatures
-- Flux GitOps sync status (HelmReleases, HelmRepositories, Kustomizations, Git sources)
-- Network connectivity: external-dns, Cloudflare tunnel, NAS reachability, ingress errors
+- Flux GitOps sync status (HelmReleases, HelmRepositories, Kustomizations, Git sources, OCI sources)
+- Backup staleness: alerts if last successful backup is older than 48 hours
+- Network connectivity: external-dns, Cloudflare tunnel, NAS reachability, ingress errors, AdGuard Home availability
+- Ollama AI backend (Mac Mini 192.168.30.111) reachability
 - Security: Authentik auth failures, SOPS age key presence, pods running as root
 - Home automation: Home Assistant, Zigbee2MQTT (offline devices, coordinator errors), MQTT, Frigate cameras
-- Media services (Jellyfin, Plex, Tube Archivist), databases (PostgreSQL, MariaDB)
+- Media services (Jellyfin, Plex, Tube Archivist), office services (Vaultwarden, Nextcloud, Paperless-ngx)
+- Databases: PostgreSQL, MariaDB, Redis, InfluxDB
 - Ingress backend health, PVC status, service endpoints, admission webhooks
 - Elasticsearch error patterns, Zigbee battery health, UnPoller metrics
 
@@ -347,7 +351,9 @@ kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmana
 **Objective**: Verify storage system health
 **Success Criteria**: All volumes healthy, no degraded storage, no recent detachment events
 
-**Automated**: Volume health, PVC status, `autoDeletePodWhenVolumeDetachedUnexpectedly` setting, replica mismatches, unexpected detachment events, and admission webhook conflicts are all checked by the script.
+**Automated**: Volume health, PVC status, `autoDeletePodWhenVolumeDetachedUnexpectedly` setting, replica mismatches, unexpected detachment events, admission webhook conflicts, and **disk pool capacity** (via Longhorn node objects) are all checked by the script.
+
+Disk capacity thresholds: **Critical** = <15% free, **Major** = 15-25% free. New volume creation will fail silently when a storage pool is full, so this check is important even if all existing volumes appear healthy.
 
 **Manual Investigation** (if storage issues detected):
 ```bash
@@ -450,8 +456,10 @@ done
 
 ## 14. Resource Utilization
 
-**Objective**: Check system resource usage
-**Success Criteria**: Resources within acceptable limits (<90% utilization)
+**Objective**: Check system resource usage and node health
+**Success Criteria**: Resources within acceptable limits (<90% utilization), all nodes in Ready state
+
+**Automated**: DiskPressure/MemoryPressure conditions and the node `Ready` condition are both checked by the script. A node can be `NotReady` without triggering the pressure conditions (e.g., kubelet stopped after a crash), so both checks are necessary.
 
 **Commands to Execute:**
 ```bash
@@ -464,41 +472,54 @@ kubectl top pods -A --sort-by=cpu | head -15
 # Top 10 memory consuming pods
 kubectl top pods -A --sort-by=memory | head -15
 
-# Check disk usage
-kubectl get nodes -o json | jq -r '.items[] | "\(.metadata.name): \(.status.capacity)"'
-
 # Check for resource pressure
 kubectl get nodes -o json | jq -r '.items[] | select(.status.conditions[] | select(.type=="DiskPressure" or .type=="MemoryPressure") | .status=="True") | .metadata.name'
+
+# Check all nodes are Ready (catches kubelet crashes not reflected in pressure conditions)
+kubectl get nodes -o json | jq -r '.items[] | select(.status.conditions[] | select(.type=="Ready" and .status!="True")) | .metadata.name'
 ```
 
-**AI Analysis**: Identify resource bottlenecks, check for pressure conditions.
+**Manual Investigation** (if a node is NotReady):
+```bash
+# Get full node conditions
+kubectl describe node <node-name> | grep -A 30 "Conditions:"
+
+# Check Talos services on the affected node
+talosctl services --nodes <node-ip>
+```
+
+**AI Analysis**: Identify resource bottlenecks, check for pressure conditions, flag any non-Ready nodes immediately.
 
 ---
 
 ## 15. Backup System
 
-**Objective**: Verify backup integrity and schedule
-**Success Criteria**: Recent successful backups, proper retention
+**Objective**: Verify backup integrity, schedule, and recency
+**Success Criteria**: Recent successful backups within 48 hours, proper retention
+
+**Automated**: The script checks whether the last backup job completed successfully AND whether its completion time is within the 48-hour threshold. A job that ran successfully 5 days ago (e.g., due to a suspended CronJob) will be flagged as stale.
 
 **Commands to Execute:**
 ```bash
 # Check backup CronJob
-kubectl get cronjob -n storage backup-of-all-volumes
+kubectl get cronjob -n storage daily-backup-all-volumes
 
-# Get last backup job
-kubectl get jobs -n storage -l job-name=backup-of-all-volumes --sort-by=.metadata.creationTimestamp | tail -1
+# Get last backup job name and status
+kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp | tail -5
 
-# Check backup job logs
-BACKUP_JOB=$(kubectl get jobs -n storage -l job-name=backup-of-all-volumes --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null)
-if [ ! -z "$BACKUP_JOB" ]; then
-  kubectl logs -n storage job/$BACKUP_JOB --tail=20 | grep -E "(completed|failed|error)" | tail -5
-fi
+# Check last successful backup completion time
+BACKUP_JOB=$(kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null | grep -o 'daily-backup-all-volumes[^ ]*' | head -1)
+kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}'
 
 # Check backup volume count
 kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.backupStatus != null) | .metadata.name' | wc -l
 ```
 
-**AI Analysis**: Verify backup completion, check for failures.
+**AI Analysis**: Verify backup completion and recency. Alert if last backup is older than 48 hours even if the job technically succeeded.
+
+**Thresholds:**
+- **Major**: Last successful backup older than 48 hours
+- **Minor**: Backup job found but no completion time (may still be running or failed silently)
 
 ---
 
@@ -678,6 +699,8 @@ kubectl logs -n network deployment/external-dns --tail=50 | grep -iE "error|fail
 **Objective**: Ensure GitOps reconciliation is working
 **Success Criteria**: All sources and kustomizations reconciled, Flux controllers healthy
 
+**Automated**: Git sources, OCI sources, HelmRepositories, Kustomizations, and Flux controller pod status are all checked by the script.
+
 **Commands to Execute:**
 ```bash
 # Check Git sources
@@ -685,6 +708,9 @@ flux get sources git -A
 
 # Check for failed Git sources
 flux get sources git -A | grep 'False'
+
+# Check OCI sources (used for Flux operator bootstrap charts)
+flux get sources oci -A
 
 # Check Flux controller pods
 kubectl get pods -n flux-system
@@ -981,9 +1007,9 @@ kubectl rollout restart deployment/<app> -n media
 ## 24. Database Health
 
 **Objective**: Monitor database availability and lock contention
-**Success Criteria**: PostgreSQL running with acceptable lock count, MariaDB ready
+**Success Criteria**: PostgreSQL running with acceptable lock count, MariaDB ready, Redis ready, InfluxDB ready
 
-**Automated**: PostgreSQL pod status, active connection count, waiting lock count, and MariaDB StatefulSet readiness are checked by the script.
+**Automated**: PostgreSQL pod status, active connection count, waiting lock count, MariaDB StatefulSet readiness, Redis StatefulSet readiness, and InfluxDB readiness are all checked by the script.
 
 **Manual Investigation** (if database issues detected):
 ```bash
@@ -999,6 +1025,12 @@ kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgr
 
 # Check MariaDB process list
 kubectl exec -n databases -l app.kubernetes.io/name=mariadb -- mysql -u root -e "SHOW PROCESSLIST;"
+
+# Check Redis pod events
+kubectl describe pod -n databases -l app.kubernetes.io/name=redis | grep -A 10 "Events:"
+
+# Check InfluxDB pod events
+kubectl describe pod -n databases -l app.kubernetes.io/name=influxdb | grep -A 10 "Events:"
 ```
 
 ---
@@ -1648,6 +1680,63 @@ echo "Webhook failures: $WEBHOOK_FAILURES"
 - **Major**: >10 webhook failures in recent events
 - **Minor**: 1-10 webhook failures
 - **Info**: Monitor webhook configuration changes
+
+---
+
+## 23a. Office Services Health
+
+**Objective**: Verify externally-exposed and business-critical office applications are running
+**Success Criteria**: Vaultwarden running (users can access passwords), Nextcloud running (cloud storage accessible), Paperless-ngx running
+
+**Automated**: Vaultwarden, Nextcloud, and Paperless-ngx pod status are checked by the script (Section 23a).
+
+**Manual Investigation** (if an office service is down):
+```bash
+# Check pod events for crash reason
+kubectl describe pod -n office -l app.kubernetes.io/name=vaultwarden | grep -A 15 "Events:"
+kubectl describe pod -n office -l app.kubernetes.io/name=nextcloud | grep -A 15 "Events:"
+
+# Check logs for startup errors
+kubectl logs -n office -l app.kubernetes.io/name=vaultwarden --tail=50
+kubectl logs -n office -l app.kubernetes.io/name=nextcloud --tail=50
+
+# Check PVC for office namespace (data volume issues can prevent startup)
+kubectl get pvc -n office
+```
+
+**Thresholds:**
+- **Critical**: Vaultwarden not running (password loss risk)
+- **Major**: Nextcloud not running (cloud storage unavailable)
+- **Minor**: Paperless-ngx not running
+
+---
+
+## 24a. Network Infrastructure Services
+
+**Objective**: Verify AdGuard Home DNS and the Ollama AI inference backend are reachable
+**Success Criteria**: AdGuard Home pod running, Ollama Mac Mini (192.168.30.111) reachable from cluster
+
+**Automated**: Both checks are fully automated in the script (Section 24a).
+
+**AdGuard Home** is the network-level DNS resolver and ad-blocker serving IoT and LAN clients at `192.168.55.5`. If it goes down, devices on the IoT and Trusted VLANs lose DNS resolution.
+
+**Ollama** runs on the Mac Mini M4 Pro at `192.168.30.111` (not in-cluster). All AI apps (open-webui, langfuse, openclaw, mcpo) use it as the LLM inference backend. A ping failure means AI features will silently break.
+
+**Manual Investigation** (if checks fail):
+```bash
+# AdGuard pod events
+kubectl describe pod -n network -l app.kubernetes.io/name=adguard-home | grep -A 10 "Events:"
+
+# Test AdGuard DNS from a cluster pod
+kubectl run test-dns --rm -it --image=busybox --restart=Never -- nslookup google.com 192.168.55.5
+
+# Test Ollama API from a cluster pod
+kubectl run test-ollama --rm -it --image=busybox --restart=Never -- wget -O- -T 3 http://192.168.30.111:11434/api/version
+```
+
+**Thresholds:**
+- **Critical**: AdGuard Home not running (network DNS broken for IoT/LAN)
+- **Major**: Ollama host unreachable (all AI features degraded)
 
 ---
 
