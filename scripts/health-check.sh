@@ -598,6 +598,35 @@ log_section "Section 10: Longhorn Storage"
         log_warning "Longhorn admission webhook conflicts detected: $ADMISSION_CONFLICTS"
         add_minor_issue "Longhorn admission webhook conflicts: $ADMISSION_CONFLICTS"
     fi
+
+    # Check Longhorn node disk capacity (storageAvailable vs storageMaximum)
+    echo ""
+    echo "Longhorn node disk capacity:"
+    kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq -r '
+        .items[] |
+        (.spec.disks // {}) | to_entries[] |
+        select(.value.storageMaximum > 0) |
+        "\(env.LONGHORN_NODE // "node")/\(.key): \((.value.storageAvailable / .value.storageMaximum * 100 | floor))% free (\(.value.storageAvailable / 1073741824 | floor)Gi free of \(.value.storageMaximum / 1073741824 | floor)Gi)"
+    ' 2>/dev/null | tee /tmp/_lh_disk_check.txt || echo "Unable to retrieve Longhorn disk data"
+    DISK_CRITICAL=$(grep -c ' [0-9]\b\| [1-9]\b' /tmp/_lh_disk_check.txt 2>/dev/null || echo "0")
+    LH_DISK_LOW=$(kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq '
+        [.items[].spec.disks // {} | to_entries[] |
+        select(.value.storageMaximum > 0 and (.value.storageAvailable / .value.storageMaximum) < 0.15)] | length
+    ' 2>/dev/null || echo "0")
+    LH_DISK_WARN=$(kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq '
+        [.items[].spec.disks // {} | to_entries[] |
+        select(.value.storageMaximum > 0 and (.value.storageAvailable / .value.storageMaximum) >= 0.15 and (.value.storageAvailable / .value.storageMaximum) < 0.25)] | length
+    ' 2>/dev/null || echo "0")
+    rm -f /tmp/_lh_disk_check.txt
+    if [ "${LH_DISK_LOW:-0}" -gt 0 ] 2>/dev/null; then
+        log_critical "Longhorn disk(s) critically low (<15% free): $LH_DISK_LOW disk(s)"
+        add_critical_issue "Longhorn storage critically low: $LH_DISK_LOW disk(s) have <15% free space"
+    elif [ "${LH_DISK_WARN:-0}" -gt 0 ] 2>/dev/null; then
+        log_warning "Longhorn disk(s) running low (15-25% free): $LH_DISK_WARN disk(s)"
+        add_major_issue "Longhorn storage low: $LH_DISK_WARN disk(s) have 15-25% free space"
+    else
+        log_success "Longhorn disk capacity healthy"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 #######################################
@@ -708,6 +737,17 @@ log_section "Section 14: Resource Utilization"
         log_critical "Resource pressure detected on: $PRESSURE"
         add_critical_issue "Resource pressure on nodes: $PRESSURE"
     fi
+
+    # Check for nodes not in Ready condition (kubelet stopped, network partition, etc.)
+    echo ""
+    echo "Node Ready conditions:"
+    NOT_READY_NODES=$(kubectl get nodes -o json | jq -r '.items[] | select(.status.conditions[] | select(.type=="Ready" and .status!="True")) | .metadata.name')
+    if [ -z "$NOT_READY_NODES" ]; then
+        log_success "All nodes Ready"
+    else
+        log_critical "Nodes not Ready: $NOT_READY_NODES"
+        add_critical_issue "Nodes not in Ready state: $NOT_READY_NODES"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 15: Backup System"
@@ -720,7 +760,24 @@ log_section "Section 15: Backup System"
     if [ -n "$BACKUP_JOB" ]; then
         echo "Last backup job:"
         kubectl get job -n storage "$BACKUP_JOB" 2>/dev/null || echo "Job details not available"
-        log_success "Backup system operational"
+
+        # Check staleness: flag if last successful backup completed more than 48 hours ago
+        LAST_BACKUP_TIME=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "")
+        if [ -n "$LAST_BACKUP_TIME" ]; then
+            LAST_BACKUP_EPOCH=$(date -d "$LAST_BACKUP_TIME" +%s 2>/dev/null || echo "0")
+            NOW_EPOCH=$(date +%s)
+            BACKUP_AGE_HOURS=$(( (NOW_EPOCH - LAST_BACKUP_EPOCH) / 3600 ))
+            echo "Last successful backup completed: ${BACKUP_AGE_HOURS}h ago ($LAST_BACKUP_TIME)"
+            if [ "$BACKUP_AGE_HOURS" -gt 48 ]; then
+                log_warning "Last backup is stale: ${BACKUP_AGE_HOURS}h ago (threshold: 48h)"
+                add_major_issue "Backup stale: last successful backup was ${BACKUP_AGE_HOURS}h ago (expected daily)"
+            else
+                log_success "Backup system operational (last: ${BACKUP_AGE_HOURS}h ago)"
+            fi
+        else
+            log_warning "Backup job found but no completion time recorded"
+            add_minor_issue "Backup job has no completion timestamp - may still be running or failed"
+        fi
     else
         log_warning "No backup jobs found"
         add_minor_issue "No backup jobs found"
@@ -980,6 +1037,16 @@ log_section "Section 20: GitOps Status"
         echo ""
     fi
 
+    # Check OCI sources (used for Flux operator bootstrap charts)
+    echo "OCI sources:"
+    flux get sources oci -A 2>/dev/null || echo "No OCI sources found"
+    FAILED_OCI=$(safe_count "flux get sources oci -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
+    if [ "$FAILED_OCI" -gt 0 ]; then
+        log_warning "Failed OCI sources: $FAILED_OCI"
+        add_major_issue "Failed Flux OCI sources: $FAILED_OCI (may block bootstrap chart deployments)"
+    fi
+    echo ""
+
     echo "Flux controllers status:"
     kubectl get pods -n flux-system
     echo ""
@@ -999,7 +1066,7 @@ log_section "Section 20: GitOps Status"
     echo "Kustomization status: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 
     # Check for specific GitOps issues
-    if [ "$FAILED_GIT" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ] && [ "$FLUX_RUNNING" -eq "$FLUX_CONTROLLERS" ]; then
+    if [ "$FAILED_GIT" -eq 0 ] && [ "$FAILED_OCI" -eq 0 ] && [ "$NOT_RECONCILED" -eq 0 ] && [ "$FLUX_RUNNING" -eq "$FLUX_CONTROLLERS" ]; then
         log_success "GitOps fully synchronized - All sources and kustomizations healthy"
     else
         if [ "$FLUX_RUNNING" -ne "$FLUX_CONTROLLERS" ]; then
@@ -1368,6 +1435,50 @@ log_section "Section 23: Media Services Health"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
+log_section "Section 23a: Office Services Health"
+{
+    OFFICE_ISSUES=0
+
+    # Vaultwarden — password manager, externally exposed and business-critical
+    echo "Vaultwarden:"
+    kubectl get pods -n office -l app.kubernetes.io/name=vaultwarden 2>/dev/null || echo "Vaultwarden not found"
+    VAULT_RUNNING=$(kubectl get pods -n office -l app.kubernetes.io/name=vaultwarden -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "Vaultwarden running: $VAULT_RUNNING"
+    if [ "$VAULT_RUNNING" -eq 0 ]; then
+        log_critical "Vaultwarden is not running - password manager unavailable"
+        add_critical_issue "Vaultwarden pod not running - users cannot access passwords"
+        OFFICE_ISSUES=$((OFFICE_ISSUES + 1))
+    fi
+    echo ""
+
+    # Nextcloud — self-hosted cloud storage, externally exposed
+    echo "Nextcloud:"
+    kubectl get pods -n office -l app.kubernetes.io/name=nextcloud 2>/dev/null || echo "Nextcloud not found"
+    NEXTCLOUD_RUNNING=$(kubectl get pods -n office -l app.kubernetes.io/name=nextcloud -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "Nextcloud running: $NEXTCLOUD_RUNNING"
+    if [ "$NEXTCLOUD_RUNNING" -eq 0 ]; then
+        log_warning "Nextcloud is not running"
+        add_major_issue "Nextcloud pod not running - cloud storage and collaboration unavailable"
+        OFFICE_ISSUES=$((OFFICE_ISSUES + 1))
+    fi
+    echo ""
+
+    # Paperless-ngx — document management (data loss risk if down during OCR)
+    echo "Paperless-ngx:"
+    PAPERLESS_RUNNING=$(kubectl get pods -n office -l app.kubernetes.io/name=paperless-ngx -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "Paperless-ngx running: $PAPERLESS_RUNNING"
+    if [ "$PAPERLESS_RUNNING" -eq 0 ]; then
+        log_warning "Paperless-ngx is not running"
+        add_minor_issue "Paperless-ngx pod not running"
+        OFFICE_ISSUES=$((OFFICE_ISSUES + 1))
+    fi
+    echo ""
+
+    if [ "$OFFICE_ISSUES" -eq 0 ]; then
+        log_success "Office services healthy"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
 log_section "Section 24: Database Health"
 {
     echo "PostgreSQL:"
@@ -1412,6 +1523,68 @@ log_section "Section 24: Database Health"
 
     if [ "$DB_ISSUES" -eq 0 ]; then
         log_success "Databases healthy"
+    fi
+
+    # Redis health (shared cache used by multiple apps including langfuse)
+    echo ""
+    echo "Redis:"
+    kubectl get statefulsets -n databases redis 2>/dev/null || echo "Redis not found"
+    REDIS_READY=$(kubectl get statefulset -n databases redis -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    REDIS_DESIRED=$(kubectl get statefulset -n databases redis -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    echo "Redis pods: $REDIS_READY/$REDIS_DESIRED ready"
+    if [ "$REDIS_READY" != "$REDIS_DESIRED" ]; then
+        log_warning "Redis not fully ready: $REDIS_READY/$REDIS_DESIRED"
+        add_major_issue "Redis pods not ready: $REDIS_READY/$REDIS_DESIRED (affects langfuse and other cache-dependent apps)"
+        DB_ISSUES=$((DB_ISSUES + 1))
+    fi
+
+    # InfluxDB health (used by home automation dashboards and UnPoller metrics)
+    echo ""
+    echo "InfluxDB:"
+    kubectl get statefulsets -n databases influxdb 2>/dev/null || kubectl get deployments -n databases influxdb 2>/dev/null || echo "InfluxDB not found"
+    INFLUXDB_READY=$(kubectl get statefulset -n databases influxdb -o jsonpath='{.status.readyReplicas}' 2>/dev/null || kubectl get deployment -n databases influxdb -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    INFLUXDB_DESIRED=$(kubectl get statefulset -n databases influxdb -o jsonpath='{.spec.replicas}' 2>/dev/null || kubectl get deployment -n databases influxdb -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    echo "InfluxDB pods: ${INFLUXDB_READY:-0}/${INFLUXDB_DESIRED:-1} ready"
+    if [ "${INFLUXDB_READY:-0}" != "${INFLUXDB_DESIRED:-1}" ] && [ "${INFLUXDB_DESIRED:-1}" -gt 0 ] 2>/dev/null; then
+        log_warning "InfluxDB not fully ready: ${INFLUXDB_READY:-0}/${INFLUXDB_DESIRED:-1}"
+        add_major_issue "InfluxDB pods not ready: ${INFLUXDB_READY:-0}/${INFLUXDB_DESIRED:-1} (affects UnPoller metrics and home automation dashboards)"
+        DB_ISSUES=$((DB_ISSUES + 1))
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+log_section "Section 24a: Network Infrastructure Services"
+{
+    INFRA_SVC_ISSUES=0
+
+    # AdGuard Home — cluster DNS + ad-blocking at 192.168.55.5
+    # If down, DNS resolution for IoT and internal LAN clients breaks.
+    echo "AdGuard Home:"
+    kubectl get pods -n network -l app.kubernetes.io/name=adguard-home 2>/dev/null || echo "AdGuard Home not found"
+    ADGUARD_RUNNING=$(kubectl get pods -n network -l app.kubernetes.io/name=adguard-home -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    echo "AdGuard pods running: $ADGUARD_RUNNING"
+    if [ "$ADGUARD_RUNNING" -eq 0 ]; then
+        log_critical "AdGuard Home is not running - internal DNS and ad-blocking unavailable"
+        add_critical_issue "AdGuard Home pod not running (cluster DNS for IoT/LAN clients at 192.168.55.5 is down)"
+        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    fi
+    echo ""
+
+    # Ollama Mac Mini AI inference backend at 192.168.30.111
+    # All AI apps (open-webui, langfuse, openclaw) depend on this host.
+    echo "Ollama AI backend (Mac Mini at 192.168.30.111):"
+    if ping -c 1 -W 2 192.168.30.111 > /dev/null 2>&1; then
+        echo "Ollama host reachable"
+        log_success "Ollama AI backend (192.168.30.111) reachable"
+    else
+        echo "Ollama host unreachable"
+        log_warning "Ollama AI backend (192.168.30.111) not reachable - AI features (open-webui, langfuse) may be broken"
+        add_major_issue "Ollama host 192.168.30.111 not reachable from cluster - AI inference unavailable"
+        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    fi
+    echo ""
+
+    if [ "$INFRA_SVC_ISSUES" -eq 0 ]; then
+        log_success "Network infrastructure services healthy"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
