@@ -85,7 +85,7 @@ spec:
           app:
             image:
               repository: ghcr.io/open-webui/mcpo
-              tag: "0.0.20"
+              tag: git-44ce6d0
             env:
               - name: PATH
                 value: "/shared/bin:/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
