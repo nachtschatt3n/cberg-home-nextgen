@@ -784,55 +784,6 @@ log_section "Section 15: Backup System"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
-log_section "Section 16: Talos Client/Server Version Mismatch"
-{
-    if command -v talosctl &> /dev/null; then
-        FIRST_NODE=$(echo "$NODE_IPS" | awk '{print $1}')
-        echo "Talos version info:"
-        TALOS_VERSION_OUTPUT=$(talosctl version --nodes "$FIRST_NODE" 2>&1 | head -10 || echo "Failed to get Talos version")
-        echo "$TALOS_VERSION_OUTPUT"
-        echo ""
-
-        # Extract client and server versions to detect mismatch that causes gRPC failures
-        CLIENT_VER=$(echo "$TALOS_VERSION_OUTPUT" | grep -A1 "Client:" | grep "Tag:" | awk '{print $2}' || echo "")
-        SERVER_VER=$(echo "$TALOS_VERSION_OUTPUT" | grep -A1 "Server:" | grep "Tag:" | awk '{print $2}' || echo "")
-
-        if [ -n "$CLIENT_VER" ] && [ -n "$SERVER_VER" ] && [ "$CLIENT_VER" != "$SERVER_VER" ]; then
-            log_warning "Talos client/server version mismatch: client=$CLIENT_VER server=$SERVER_VER (may cause gRPC failures)"
-            add_minor_issue "Talos client/server mismatch: client=$CLIENT_VER vs server=$SERVER_VER"
-        elif [ -n "$CLIENT_VER" ] && [ -n "$SERVER_VER" ]; then
-            log_success "Talos client/server versions match: $CLIENT_VER"
-        else
-            log_info "Could not parse Talos version info"
-        fi
-
-        # Check for Kubernetes client/server mismatch
-        echo ""
-        echo "Kubernetes version:"
-        K8S_VERSION=$(kubectl version -o json 2>/dev/null || echo "{}")
-        CLIENT_K8S=$(echo "$K8S_VERSION" | jq -r '.clientVersion.gitVersion // empty' 2>/dev/null || echo "")
-        SERVER_K8S=$(echo "$K8S_VERSION" | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null || echo "")
-        echo "  client: $CLIENT_K8S"
-        echo "  server: $SERVER_K8S"
-
-        # Check for major skew (client major.minor differs from server by >1)
-        CLIENT_MINOR=$(echo "$CLIENT_K8S" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/' || echo "0")
-        SERVER_MINOR=$(echo "$SERVER_K8S" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/' || echo "0")
-        if [ -n "$CLIENT_MINOR" ] && [ -n "$SERVER_MINOR" ] && [ "$CLIENT_MINOR" != "$SERVER_MINOR" ]; then
-            SKEW=$(( CLIENT_MINOR - SERVER_MINOR ))
-            SKEW=${SKEW#-}  # absolute value
-            if [ "$SKEW" -gt 1 ]; then
-                log_warning "Kubernetes client/server minor version skew: client=.${CLIENT_MINOR} server=.${SERVER_MINOR} (skew=${SKEW})"
-                add_minor_issue "kubectl client/server minor version skew: $SKEW"
-            else
-                log_success "Kubernetes client/server versions within acceptable skew"
-            fi
-        fi
-    else
-        log_warning "talosctl not available, skipping Talos version check"
-    fi
-} >> "$OUTPUT_FILE" 2>&1
-
 log_section "Section 17: Security Checks"
 {
     echo "Security posture check..."
@@ -1485,6 +1436,7 @@ log_section "Section 24: Database Health"
     kubectl get pods -n databases -l app.kubernetes.io/name=postgresql 2>/dev/null || echo "PostgreSQL not found"
     echo ""
     PG_RUNNING=$(kubectl get pods -n databases -l app.kubernetes.io/name=postgresql -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    PG_LOCKS="0"
 
     # Check PostgreSQL active connections
     if [ "$PG_RUNNING" -gt 0 ]; then

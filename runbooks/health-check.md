@@ -38,7 +38,7 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 - DaemonSet, Deployment, StatefulSet, and Pod health
 - Node Ready condition (kubelet health) in addition to disk/memory pressure
 - Prometheus alerts, Longhorn volumes (including replica mismatches, detachment events, and disk pool capacity)
-- Talos service health and client/server version mismatch
+- Talos service health (non-Running services across all nodes)
 - Hardware resource pressure and temperatures
 - Flux GitOps sync status (HelmReleases, HelmRepositories, Kustomizations, Git sources, OCI sources)
 - Backup staleness: alerts if last successful backup is older than 48 hours
@@ -520,26 +520,6 @@ kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.backup
 **Thresholds:**
 - **Major**: Last successful backup older than 48 hours
 - **Minor**: Backup job found but no completion time (may still be running or failed silently)
-
----
-
-## 16. Client/Server Version Mismatch
-
-**Objective**: Detect version skew between CLI tools and cluster that causes operational failures
-**Success Criteria**: talosctl client and server versions match; kubectl client/server minor version skew ≤1
-
-**Automated**: This check is fully automated in the health check script.
-
-**Manual Investigation** (if mismatch detected):
-```bash
-# Confirm Talos mismatch and impact
-talosctl version --nodes <node-ip>
-
-# Confirm kubectl skew
-kubectl version
-```
-
-**AI Analysis**: Flag only when a mismatch actually causes failures (e.g., gRPC errors in talosctl output, API compatibility warnings from kubectl). Version *updates* are tracked separately by Renovate and the version-check runbook.
 
 ---
 
