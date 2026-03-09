@@ -743,11 +743,12 @@ log_section "Section 13: Hardware Health"
         done
 
         # Talos discovery service errors (DiscoveryServiceController / hello failed)
-        # These indicate the node cannot reach discovery.talos.dev — benign but noisy if excessive
+        # A short burst (up to ~25) is normal during a transient upstream outage at discovery.talos.dev;
+        # only alert if the count is high enough to indicate a sustained or recurring connectivity problem.
         for node in $NODE_IPS; do
             DISC_COUNT=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(DiscoveryServiceController|hello failed)' | wc -l")
             echo "Talos discovery service errors on $node: $DISC_COUNT"
-            if [ "$DISC_COUNT" -gt 5 ]; then
+            if [ "$DISC_COUNT" -gt 30 ]; then
                 add_minor_issue "Talos discovery service errors on $node: $DISC_COUNT (discovery.talos.dev unreachable)"
             fi
         done
