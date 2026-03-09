@@ -11,6 +11,7 @@ talosconfig
 # Private
 .private
 .bin
+.unifictl.yaml
 # Ansible
 .venv*
 # Taskfile
