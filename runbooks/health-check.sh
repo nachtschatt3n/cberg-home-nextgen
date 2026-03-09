@@ -3,7 +3,7 @@
 # Kubernetes Cluster Health Check Script
 # Executes all operational health checks from runbooks/health-check.md
 # Scope: operational correctness only — does not flag newer upstream versions
-# Usage: ./scripts/health-check.sh [output-file]
+# Usage: ./runbooks/health-check.sh [output-file]
 
 set -uo pipefail
 
@@ -24,6 +24,35 @@ echo "Kubernetes Cluster Health Check" | tee -a "$OUTPUT_FILE"
 echo "Date: $(date)" | tee -a "$OUTPUT_FILE"
 echo "Output: $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
 echo "========================================" | tee -a "$OUTPUT_FILE"
+echo "" | tee -a "$OUTPUT_FILE"
+
+# --- Dependency check ---
+echo "=== Dependency Check ===" | tee -a "$OUTPUT_FILE"
+REQUIRED_TOOLS="kubectl python3 curl jq"
+OPTIONAL_TOOLS="unifictl talosctl flux sops nc"
+MISSING_REQUIRED=()
+MISSING_OPTIONAL=()
+for tool in $REQUIRED_TOOLS; do
+    if ! command -v "$tool" &>/dev/null; then
+        MISSING_REQUIRED+=("$tool")
+        echo "  ❌ MISSING (required): $tool" | tee -a "$OUTPUT_FILE"
+    else
+        echo "  ✅ $tool" | tee -a "$OUTPUT_FILE"
+    fi
+done
+for tool in $OPTIONAL_TOOLS; do
+    if ! command -v "$tool" &>/dev/null; then
+        MISSING_OPTIONAL+=("$tool")
+        echo "  ⚠️  MISSING (optional): $tool — some checks will be skipped" | tee -a "$OUTPUT_FILE"
+    else
+        echo "  ✅ $tool" | tee -a "$OUTPUT_FILE"
+    fi
+done
+if [ "${#MISSING_REQUIRED[@]}" -gt 0 ]; then
+    echo "  ❌ Missing required tools: ${MISSING_REQUIRED[*]} — install before running" | tee -a "$OUTPUT_FILE"
+    echo "" | tee -a "$OUTPUT_FILE"
+    exit 1
+fi
 echo "" | tee -a "$OUTPUT_FILE"
 
 # Counters for summary
@@ -548,18 +577,20 @@ log_section "Section 10: Longhorn Storage"
     AUTO_DELETE=$(kubectl get settings.longhorn.io auto-delete-pod-when-volume-detached-unexpectedly -n storage -o jsonpath='{.value}' 2>/dev/null || echo "unknown")
     echo "autoDeletePodWhenVolumeDetachedUnexpectedly: $AUTO_DELETE (should be false)"
 
-    # Check volume replica count mismatches
+    # Check volume replica count mismatches via robustness field
+    # NOTE: currentNumberOfReplicas is often null in the status API even when healthy;
+    # use the robustness field as the authoritative health indicator instead.
     echo ""
-    echo "Volume replica mismatches:"
+    echo "Volume replica mismatches (non-healthy robustness):"
     REPLICA_MISMATCHES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '
         .items[] |
-        select(.status.currentNumberOfReplicas != .spec.numberOfReplicas) |
-        "\(.metadata.name): \(.status.currentNumberOfReplicas // 0)/\(.spec.numberOfReplicas) replicas"
+        select(.status.robustness != null and .status.robustness != "healthy") |
+        "\(.metadata.name): robustness=\(.status.robustness) state=\(.status.state)"
     ' || echo "")
     if [ -n "$REPLICA_MISMATCHES" ]; then
         echo "$REPLICA_MISMATCHES"
-        MISMATCH_COUNT=$(echo "$REPLICA_MISMATCHES" | grep -c "/" || echo "0")
-        echo "Total volumes with replica mismatch: $MISMATCH_COUNT"
+        MISMATCH_COUNT=$(echo "$REPLICA_MISMATCHES" | grep -c "robustness=" || echo "0")
+        echo "Total volumes with unhealthy robustness: $MISMATCH_COUNT"
     else
         echo "None"
     fi
@@ -587,7 +618,7 @@ log_section "Section 10: Longhorn Storage"
             add_minor_issue "AutoDelete setting is $AUTO_DELETE (should be false)"
         fi
         if [ -n "$REPLICA_MISMATCHES" ]; then
-            add_minor_issue "Longhorn volumes with replica mismatch: $MISMATCH_COUNT"
+            add_minor_issue "Longhorn volumes with unhealthy robustness: $MISMATCH_COUNT"
         fi
     fi
     if [ "$DETACH_EVENTS" -gt 5 ]; then
@@ -703,12 +734,24 @@ log_section "Section 13: Hardware Health"
     if command -v talosctl &> /dev/null; then
         for node in $NODE_IPS; do
             echo "=== Hardware errors on $node ==="
-            ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(error|fail|hardware|memory|ecc|pci|disk)' | wc -l")
+            # Filter to actual hardware faults only; exclude known software/service error messages
+        ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(hardware|ecc|mce|edac|uncorrected|corrected error|pcie.*error|disk error|bad sector|ata.*error|nvme.*error)' | grep -viE '(DiscoveryService|controller-runtime|rpc error|context deadline|connection refused|EOF|dialing)' | wc -l")
             echo "Hardware errors: $ERRORS"
             if [ "$ERRORS" -gt 10 ]; then
                 add_minor_issue "High hardware errors on $node: $ERRORS"
             fi
         done
+
+        # Talos discovery service errors (DiscoveryServiceController / hello failed)
+        # These indicate the node cannot reach discovery.talos.dev — benign but noisy if excessive
+        for node in $NODE_IPS; do
+            DISC_COUNT=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(DiscoveryServiceController|hello failed)' | wc -l")
+            echo "Talos discovery service errors on $node: $DISC_COUNT"
+            if [ "$DISC_COUNT" -gt 5 ]; then
+                add_minor_issue "Talos discovery service errors on $node: $DISC_COUNT (discovery.talos.dev unreachable)"
+            fi
+        done
+
         log_success "Hardware health check completed"
     else
         log_warning "talosctl not available, skipping hardware checks"
@@ -764,7 +807,8 @@ log_section "Section 15: Backup System"
         # Check staleness: flag if last successful backup completed more than 48 hours ago
         LAST_BACKUP_TIME=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "")
         if [ -n "$LAST_BACKUP_TIME" ]; then
-            LAST_BACKUP_EPOCH=$(date -d "$LAST_BACKUP_TIME" +%s 2>/dev/null || echo "0")
+            # date -d is GNU only; use python3 for portable ISO8601 parsing
+            LAST_BACKUP_EPOCH=$(python3 -c "import datetime,sys; t=sys.argv[1].rstrip('Z'); print(int(datetime.datetime.fromisoformat(t).replace(tzinfo=datetime.timezone.utc).timestamp()))" "$LAST_BACKUP_TIME" 2>/dev/null || echo "0")
             NOW_EPOCH=$(date +%s)
             BACKUP_AGE_HOURS=$(( (NOW_EPOCH - LAST_BACKUP_EPOCH) / 3600 ))
             echo "Last successful backup completed: ${BACKUP_AGE_HOURS}h ago ($LAST_BACKUP_TIME)"
@@ -781,6 +825,31 @@ log_section "Section 15: Backup System"
     else
         log_warning "No backup jobs found"
         add_minor_issue "No backup jobs found"
+    fi
+
+    # iCloud sync check
+    echo ""
+    echo "iCloud sync (icloud-docker-mu):"
+    ICLOUD_POD=$(kubectl get pods -n backup -l app.kubernetes.io/name=icloud-docker-mu -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$ICLOUD_POD" ]; then
+        ICLOUD_PHASE=$(kubectl get pod -n backup "$ICLOUD_POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+        ICLOUD_RESTARTS=$(kubectl get pod -n backup "$ICLOUD_POD" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+        echo "  iCloud pod: $ICLOUD_POD, phase: $ICLOUD_PHASE, restarts: $ICLOUD_RESTARTS"
+        if [ "$ICLOUD_PHASE" != "Running" ]; then
+            log_warning "iCloud sync pod is not running (phase: $ICLOUD_PHASE)"
+            add_minor_issue "icloud-docker-mu pod not running (phase: $ICLOUD_PHASE)"
+        else
+            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --tail=50 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | wc -l")
+            echo "  iCloud log errors (last 50 lines): $ICLOUD_LOG_ERRORS"
+            if [ "$ICLOUD_LOG_ERRORS" -gt 5 ]; then
+                log_warning "iCloud sync pod has errors in recent logs: $ICLOUD_LOG_ERRORS"
+                add_minor_issue "icloud-docker-mu recent log errors: $ICLOUD_LOG_ERRORS"
+            else
+                log_success "iCloud sync pod running (restarts: $ICLOUD_RESTARTS)"
+            fi
+        fi
+    else
+        echo "  iCloud sync pod not found (namespace: backup)"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -807,108 +876,209 @@ log_section "Section 17: Security Checks"
 log_section "Section 18: Network Infrastructure (UniFi)"
 {
     echo "Checking UniFi network..."
+    UNIFI_ISSUES=0
 
+    # --- Live controller check via unifictl (optional) ---
     if command -v unifictl &> /dev/null; then
-        cd /home/mu/code/unifictl 2>/dev/null || true
+        echo "=== Controller Health ==="
         unifictl local health get 2>&1 || echo "UniFi controller not accessible"
-        log_success "UniFi check completed"
-    else
-        log_warning "unifictl not available, skipping UniFi checks"
-    fi
-} >> "$OUTPUT_FILE" 2>&1
-
-log_section "Section 18a: UniFi Hardware Metrics (InfluxDB)"
-{
-    echo "Checking UnPoller metrics from InfluxDB exports..."
-    echo ""
-
-    # Get UnPoller pod
-    UNPOLLER_POD=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-    if [ -z "$UNPOLLER_POD" ]; then
-        echo "⚠️  UnPoller pod not found"
-        log_warning "UnPoller pod not found"
-        add_major_issue "UnPoller pod not found"
-    else
-        echo "UnPoller pod: $UNPOLLER_POD"
         echo ""
 
-        # Get recent metrics from logs
-        RECENT_LOGS=$(kubectl logs -n monitoring "$UNPOLLER_POD" --tail=20 2>&1 || echo "Unable to get logs")
+        echo "=== Devices ==="
+        unifictl local devices 2>/dev/null || echo "Unable to list devices"
+        echo ""
 
-        # Parse latest metrics from logs
-        LATEST_METRIC=$(echo "$RECENT_LOGS" | grep "UniFi Metrics Recorded" | tail -1)
-        LATEST_EXPORT=$(echo "$RECENT_LOGS" | grep "UniFi Measurements Exported" | tail -1)
+        OFFLINE_DEVICES=$(unifictl local devices -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    items = d.get('data', d) if isinstance(d, dict) else d
+    offline = [x.get('name','?') for x in items if x.get('state') != 1]
+    print(len(offline))
+    for o in offline: print(' ', o)
+except: print(0)
+" 2>/dev/null | head -1 | tr -d '\r\n' || echo "0")
 
-        if [ -n "$LATEST_METRIC" ]; then
-            echo "Latest metrics recorded:"
-            echo "$LATEST_METRIC"
-            echo ""
+        if [ "${OFFLINE_DEVICES:-0}" -gt 0 ] 2>/dev/null; then
+            log_warning "UniFi offline devices: $OFFLINE_DEVICES"
+            add_major_issue "UniFi devices offline: $OFFLINE_DEVICES"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        fi
 
-            # Extract counts using sed (compatible with macOS and Linux)
-            CLIENT_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Client: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$CLIENT_COUNT" ] && CLIENT_COUNT=0
-            GATEWAY_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Gateways*: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$GATEWAY_COUNT" ] && GATEWAY_COUNT=0
-            UAP_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*UAP: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$UAP_COUNT" ] && UAP_COUNT=0
-            USW_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*USW: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$USW_COUNT" ] && USW_COUNT=0
-            ERROR_COUNT=$(echo "$LATEST_METRIC" | sed -n 's/.*Err: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$ERROR_COUNT" ] && ERROR_COUNT=0
+        echo "=== Clients ==="
+        WIRED=$(unifictl local clients --wired -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
+        WIRELESS=$(unifictl local clients --wireless -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
+        echo "Wired clients: $WIRED  |  Wireless clients: $WIRELESS"
+        echo ""
+    else
+        echo "(unifictl not available — skipping live controller checks)"
+        echo ""
+    fi
 
-            echo "Network device summary:"
-            echo "  - Connected clients: $CLIENT_COUNT"
-            echo "  - Gateways: $GATEWAY_COUNT"
-            echo "  - Access Points (UAP): $UAP_COUNT"
-            echo "  - Switches (USW): $USW_COUNT"
-            echo "  - Errors in recording: $ERROR_COUNT"
-            echo ""
+    # --- Historical data from InfluxDB (UnPoller) ---
+    echo "=== UnPoller / InfluxDB Historical Data ==="
 
-            TOTAL_DEVICES=$((GATEWAY_COUNT + UAP_COUNT + USW_COUNT))
-            echo "  Total UniFi devices: $TOTAL_DEVICES"
-            echo ""
+    # Fetch InfluxDB token from Kubernetes secret at runtime
+    INFLUX_TOKEN=$(kubectl get secret -n monitoring unpoller-credentials \
+        -o jsonpath='{.data.upConfig}' 2>/dev/null \
+        | base64 -d 2>/dev/null \
+        | python3 -c "import sys; cfg=sys.stdin.read(); lines=[l for l in cfg.split('\n') if 'auth_token' in l]; print(lines[0].split('=',1)[1].strip().strip('\"') if lines else '')" 2>/dev/null)
+
+    INFLUX_URL="http://influxdb-influxdb2.databases.svc.cluster.local:80"
+    INFLUX_ORG="influxdata"
+    INFLUX_BUCKET="default"
+
+    # Port-forward to InfluxDB for external access
+    INFLUX_PORT=18086
+    kubectl port-forward -n databases svc/influxdb-influxdb2 "${INFLUX_PORT}:80" > /dev/null 2>&1 &
+    INFLUX_PF_PID=$!
+    sleep 2
+
+    influx_query() {
+        curl -s --connect-timeout 5 \
+            -H "Authorization: Token ${INFLUX_TOKEN}" \
+            -H "Content-Type: application/vnd.flux" \
+            "http://localhost:${INFLUX_PORT}/api/v2/query?org=${INFLUX_ORG}" \
+            --data "$1" 2>/dev/null
+    }
+
+    # Check UnPoller pod health
+    UNPOLLER_POD=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -z "$UNPOLLER_POD" ]; then
+        log_warning "UnPoller pod not found"
+        add_major_issue "UnPoller pod not found - no UniFi metrics being collected"
+        UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+    else
+        UNPOLLER_RESTARTS=$(kubectl get pod -n monitoring "$UNPOLLER_POD" \
+            -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+        echo "UnPoller pod: $UNPOLLER_POD (restarts: $UNPOLLER_RESTARTS)"
+        if [ "$UNPOLLER_RESTARTS" -gt 20 ]; then
+            log_warning "UnPoller has high restart count: $UNPOLLER_RESTARTS"
+            add_minor_issue "UnPoller restart count high: $UNPOLLER_RESTARTS"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        fi
+        echo ""
+    fi
+
+    if [ -n "$INFLUX_TOKEN" ]; then
+        # CSV column layout after keep():
+        #   uap/usw uptime+num_sta: ,result,table,_value,_field,model,name
+        #   usw uptime only:        ,result,table,_value,model,name
+        #   usg_wan_ports speed:    ,result,table,_value,ifname
+        #   reboots keep(_measurement,name,_time): ,result,table,_measurement,name,_time
+
+        # Helper: parse InfluxDB annotated CSV, stripping \r and skipping annotation/header rows
+        # Data rows start with ',_result'; header rows start with ',result'; annotations start with '#'
+        PYPARSE="import sys, collections
+def rows(text):
+    for l in text.replace('\r','').split('\n'):
+        l = l.strip()
+        if l and not l.startswith('#') and not l.startswith(',result'):
+            yield [c.strip() for c in l.split(',')]
+"
+
+        # Access Points: name, model, uptime, client count
+        # CSV cols: ,_result,table,_value,_field,model,name  (indices 3,4,5,6)
+        echo "--- Access Points (from InfluxDB) ---"
+        influx_query 'from(bucket:"default") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "uap" and (r._field == "uptime" or r._field == "num_sta")) |> last() |> keep(columns: ["_field","_value","name","model"])' \
+        | python3 -c "
+${PYPARSE}
+devices = collections.defaultdict(dict)
+for c in rows(sys.stdin.read()):
+    if len(c) >= 7:
+        val, field, model, name = c[3], c[4], c[5], c[6]
+        devices[name]['model'] = model
+        devices[name][field] = val
+for name, d in sorted(devices.items()):
+    uptime_s = int(d.get('uptime', 0) or 0)
+    print(f'  {name} ({d.get(\"model\",\"?\")}): uptime={uptime_s//86400}d  clients={d.get(\"num_sta\",\"?\")}')
+"
+        echo ""
+
+        # Switches: name, model, uptime
+        # CSV cols: ,_result,table,_value,model,name  (indices 3,4,5)
+        echo "--- Switches (from InfluxDB) ---"
+        influx_query 'from(bucket:"default") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "usw" and r._field == "uptime") |> last() |> keep(columns: ["_value","name","model"])' \
+        | python3 -c "
+${PYPARSE}
+for c in rows(sys.stdin.read()):
+    if len(c) >= 5:
+        val, model, name = int(c[3] or 0), c[4], c[5]
+        print(f'  {name} ({model}): uptime={val//86400}d')
+"
+        echo ""
+
+        # WAN link speeds
+        # CSV cols: ,_result,table,_value,ifname  (indices 3,4)
+        echo "--- WAN Ports (from InfluxDB) ---"
+        influx_query 'from(bucket:"default") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "usg_wan_ports" and r._field == "speed") |> last() |> keep(columns: ["_value","ifname"])' \
+        | python3 -c "
+${PYPARSE}
+for c in rows(sys.stdin.read()):
+    if len(c) >= 4:
+        speed, iface = c[3], c[4] if len(c) > 4 else '?'
+        print(f'  {iface}: {speed} Mbps')
+"
+        echo ""
+
+        # Device reboots in last 24h (uptime regression)
+        # CSV cols after keep(name,_time): ,_result,table,name,_time  (indices 3,4)
+        echo "--- Device Reboots (last 24h, from InfluxDB) ---"
+        REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> derivative(unit: 30s, nonNegative: false) |> filter(fn: (r) => r._value < -1000) |> keep(columns: ["name","_time"])' \
+        | python3 -c "
+${PYPARSE}
+data = list(rows(sys.stdin.read()))
+if not data:
+    print('None detected')
+else:
+    for c in data:
+        if len(c) >= 4:
+            print(f'  {c[3]} rebooted around {c[4] if len(c) > 4 else \"?\"}')
+    print(f'Total reboots: {len(data)}')
+")
+        echo "$REBOOT_OUTPUT"
+        REBOOT_COUNT=$(echo "$REBOOT_OUTPUT" | grep -c "rebooted" || true)
+        if [ "$REBOOT_COUNT" -gt 0 ]; then
+            log_warning "$REBOOT_COUNT UniFi device reboot(s) detected in last 24h"
+            add_minor_issue "UniFi device reboots in last 24h: $REBOOT_COUNT"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
         else
-            echo "⚠️  No recent metrics found in logs"
-        fi
-
-        if [ -n "$LATEST_EXPORT" ]; then
-            echo "Latest InfluxDB export:"
-            echo "$LATEST_EXPORT"
-            echo ""
-
-            # Check for export errors
-            EXPORT_ERRORS=$(echo "$LATEST_EXPORT" | sed -n 's/.*Err: \([0-9]*\).*/\1/p' | head -1)
-            [ -z "$EXPORT_ERRORS" ] && EXPORT_ERRORS=0
-            REQ_TIME=$(echo "$LATEST_EXPORT" | sed -n 's/.*Req\/Total: \([0-9.]*ms\).*/\1/p' | head -1)
-            [ -z "$REQ_TIME" ] && REQ_TIME="N/A"
-
-            echo "InfluxDB export status:"
-            echo "  - Export errors: $EXPORT_ERRORS"
-            echo "  - Request time: $REQ_TIME"
             echo ""
         fi
 
-        # Check overall health
-        if [ -n "$LATEST_METRIC" ] && [ "$ERROR_COUNT" -eq 0 ] && [ "$TOTAL_DEVICES" -gt 0 ]; then
-            log_success "UnPoller successfully exporting metrics to InfluxDB"
-        elif [ -z "$LATEST_METRIC" ]; then
-            log_warning "No recent metrics found from UnPoller"
-            add_major_issue "UnPoller not recording metrics"
-        elif [ "$ERROR_COUNT" -gt 0 ]; then
-            log_warning "UnPoller reporting errors: $ERROR_COUNT"
-            add_minor_issue "UnPoller has $ERROR_COUNT errors in metric recording"
-        elif [ "$TOTAL_DEVICES" -eq 0 ]; then
-            log_warning "UnPoller not detecting any UniFi devices"
-            add_major_issue "UnPoller shows 0 UniFi devices"
-        fi
+        # AP/SW device count sanity check — count data rows
+        AP_COUNT=$(influx_query 'from(bucket:"default") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "uap" and r._field == "uptime") |> last() |> keep(columns: ["name"])' \
+        | python3 -c "${PYPARSE}
+print(len(list(rows(sys.stdin.read()))))" 2>/dev/null || echo "0")
 
-        # Additional check for recent activity
-        LAST_TIMESTAMP=$(echo "$LATEST_METRIC" | sed -n 's/^\([0-9]\{4\}\/[0-9]\{2\}\/[0-9]\{2\} [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\).*/\1/p' | head -1)
-        if [ -n "$LAST_TIMESTAMP" ]; then
-            echo "Last metric timestamp: $LAST_TIMESTAMP"
-            echo ""
+        SW_COUNT=$(influx_query 'from(bucket:"default") |> range(start: -10m) |> filter(fn: (r) => r._measurement == "usw" and r._field == "uptime") |> last() |> keep(columns: ["name"])' \
+        | python3 -c "${PYPARSE}
+print(len(list(rows(sys.stdin.read()))))" 2>/dev/null || echo "0")
+
+        echo "Device counts visible to UnPoller: ${AP_COUNT} APs, ${SW_COUNT} switches"
+
+        if [ "${AP_COUNT}" -lt 3 ]; then
+            log_warning "UnPoller seeing fewer APs than expected: ${AP_COUNT} (expected 4)"
+            add_minor_issue "UnPoller AP count low: ${AP_COUNT}/4"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
         fi
+        if [ "${SW_COUNT}" -lt 4 ]; then
+            log_warning "UnPoller seeing fewer switches than expected: ${SW_COUNT} (expected 6)"
+            add_minor_issue "UnPoller switch count low: ${SW_COUNT}/6"
+            UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        fi
+    else
+        log_warning "InfluxDB token not available — skipping historical UniFi checks"
+        add_minor_issue "Could not read UnPoller InfluxDB token from secret"
+        UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+    fi
+
+    kill "$INFLUX_PF_PID" 2>/dev/null || true
+
+    if [ "$UNIFI_ISSUES" -eq 0 ]; then
+        log_success "UniFi network infrastructure healthy"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -931,8 +1101,8 @@ log_section "Section 19: Network Connectivity"
     # Check Cloudflare tunnel
     echo ""
     echo "Cloudflare tunnel:"
-    kubectl get pods -n network -l app=cloudflared 2>/dev/null || echo "Cloudflare tunnel not found"
-    CLOUDFLARED_RUNNING=$(kubectl get pods -n network -l app=cloudflared -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    kubectl get pods -n network -l app.kubernetes.io/name=cloudflared 2>/dev/null || echo "Cloudflare tunnel not found"
+    CLOUDFLARED_RUNNING=$(kubectl get pods -n network -l app.kubernetes.io/name=cloudflared -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
     echo "cloudflared running pods: $CLOUDFLARED_RUNNING"
 
     # Check ingress-nginx error rate
@@ -941,9 +1111,11 @@ log_section "Section 19: Network Connectivity"
     echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
 
     # Check NAS connectivity (important for storage)
+    # Use curl (HTTP) as primary check — more reliable than ping across all platforms
+    # (macOS/Linux/WSL all support curl; ping -W semantics differ between platforms)
     echo ""
     echo "NAS connectivity (192.168.31.230):"
-    ping -c 2 -W 2 192.168.31.230 > /dev/null 2>&1 && echo "NAS reachable" || echo "NAS unreachable - check storage integration"
+    curl -s --connect-timeout 2 http://192.168.31.230/ -o /dev/null 2>/dev/null && echo "NAS reachable" || { nc -z -w 2 192.168.31.230 22 2>/dev/null && echo "NAS reachable (SSH)"; } || echo "NAS unreachable - check storage integration"
 
     NETWORK_ISSUES=0
     if [ "$EXTDNS_PODS_READY" != "$EXTDNS_PODS_DESIRED" ]; then
@@ -961,7 +1133,7 @@ log_section "Section 19: Network Connectivity"
         add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
     fi
-    if ! ping -c 1 -W 2 192.168.31.230 > /dev/null 2>&1; then
+    if ! { curl -s --connect-timeout 2 http://192.168.31.230/ -o /dev/null 2>/dev/null || nc -z -w 2 192.168.31.230 22 2>/dev/null; }; then
         log_warning "NAS (192.168.31.230) not reachable from cluster"
         add_major_issue "NAS not reachable - storage backup integration may be broken"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
@@ -1107,6 +1279,79 @@ log_section "Section 22: Home Automation Health"
     kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt
     echo ""
 
+    # --- Zigbee coordinator connectivity (network-based, not USB) ---
+    # Coordinator is a network device at tcp://192.168.32.20:6638 (IoT VLAN)
+    echo "Zigbee coordinator (192.168.32.20:6638):"
+    Z2M_POD=$(kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$Z2M_POD" ]; then
+        # Test coordinator TCP reachability from inside the pod (nc available in z2m container)
+        COORD_REACHABLE=$(kubectl exec -n home-automation "$Z2M_POD" -- sh -c \
+            'nc -z -w 2 192.168.32.20 6638 2>/dev/null && echo reachable || echo unreachable' 2>/dev/null \
+            || echo "unknown (nc not available in pod)")
+        echo "  TCP connectivity: $COORD_REACHABLE"
+        if [ "$COORD_REACHABLE" = "unreachable" ]; then
+            log_critical "Zigbee coordinator not reachable at 192.168.32.20:6638"
+            add_critical_issue "Zigbee coordinator unreachable - all Zigbee devices offline"
+        elif [ "$COORD_REACHABLE" = "reachable" ]; then
+            log_success "Zigbee coordinator reachable"
+        fi
+    else
+        echo "  Cannot check — Zigbee2MQTT pod not running"
+    fi
+    echo ""
+
+    # --- Zigbee device offline detection via state.json ---
+    echo "Zigbee device health (from state.json):"
+    Z2M_DEVICE_STATS=$(kubectl exec -n home-automation "$Z2M_POD" -- sh -c 'cat /data/state.json 2>/dev/null' 2>/dev/null \
+        | python3 - <<'PYEOF'
+import sys, json, datetime
+try:
+    d = json.load(sys.stdin)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    total = len(d)
+    offline_5d, offline_1d = [], []
+    for addr, v in d.items():
+        ls = v.get('last_seen')
+        if ls:
+            try:
+                t = datetime.datetime.fromisoformat(ls.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+                age_d = (now - t).total_seconds() / 86400
+                if age_d > 5:
+                    offline_5d.append((addr, round(age_d, 1)))
+                elif age_d > 1:
+                    offline_1d.append((addr, round(age_d, 1)))
+            except: pass
+    print(f"TOTAL={total}")
+    print(f"OFFLINE_5D={len(offline_5d)}")
+    print(f"OFFLINE_1D={len(offline_1d)}")
+    for addr, days in sorted(offline_5d, key=lambda x: -x[1]):
+        print(f"STALE:{addr}:{days}d")
+except Exception as e:
+    print(f"ERROR={e}")
+PYEOF
+    )
+    Z2M_TOTAL=$(echo "$Z2M_DEVICE_STATS" | grep "^TOTAL=" | cut -d= -f2)
+    Z2M_OFFLINE_5D=$(echo "$Z2M_DEVICE_STATS" | grep "^OFFLINE_5D=" | cut -d= -f2)
+    Z2M_OFFLINE_1D=$(echo "$Z2M_DEVICE_STATS" | grep "^OFFLINE_1D=" | cut -d= -f2)
+    echo "  Total devices: ${Z2M_TOTAL:-?}"
+    echo "  Offline >5 days: ${Z2M_OFFLINE_5D:-?}"
+    echo "  Offline 1-5 days: ${Z2M_OFFLINE_1D:-?}"
+    if [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 0 ]; then
+        echo "  Stale devices:"
+        echo "$Z2M_DEVICE_STATS" | grep "^STALE:" | while IFS=: read _ addr days; do
+            echo "    $addr ($days)"
+        done
+    fi
+    echo ""
+
+    if [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 3 ]; then
+        log_warning "Many Zigbee devices offline >5 days: $Z2M_OFFLINE_5D"
+        add_major_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL}"
+    elif [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 0 ]; then
+        log_warning "Some Zigbee devices offline >5 days: $Z2M_OFFLINE_5D"
+        add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL}"
+    fi
+
     echo "Zigbee2MQTT logs (last 50 lines):"
     Z2M_LOGS=$(kubectl logs -n home-automation deployment/zigbee2mqtt --tail=50 2>&1 || echo "Unable to get logs")
     echo "$Z2M_LOGS"
@@ -1150,6 +1395,23 @@ log_section "Section 22: Home Automation Health"
 
     if [ "$MQTT_ERRORS" -gt 0 ]; then
         add_minor_issue "Mosquitto MQTT broker errors: $MQTT_ERRORS"
+    fi
+
+    # OTBR (OpenThread Border Router) — Thread/Matter network bridge
+    echo ""
+    echo "OTBR (OpenThread Border Router):"
+    OTBR_POD=$(kubectl get pods -n home-automation -l app.kubernetes.io/name=otbr -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$OTBR_POD" ]; then
+        OTBR_RESTARTS=$(kubectl get pod -n home-automation "$OTBR_POD" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+        echo "  OTBR pod: $OTBR_POD, restarts: $OTBR_RESTARTS"
+        if [ "$OTBR_RESTARTS" -gt 3 ]; then
+            log_warning "OTBR pod has restarted $OTBR_RESTARTS times"
+            add_minor_issue "OTBR (OpenThread Border Router) pod restarts: $OTBR_RESTARTS"
+        else
+            log_success "OTBR pod healthy (restarts: $OTBR_RESTARTS)"
+        fi
+    else
+        echo "  OTBR pod not found"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -1433,18 +1695,18 @@ log_section "Section 23a: Office Services Health"
 log_section "Section 24: Database Health"
 {
     echo "PostgreSQL:"
-    kubectl get pods -n databases -l app.kubernetes.io/name=postgresql 2>/dev/null || echo "PostgreSQL not found"
+    kubectl get pods -n databases -l app=postgresql 2>/dev/null || echo "PostgreSQL not found"
     echo ""
-    PG_RUNNING=$(kubectl get pods -n databases -l app.kubernetes.io/name=postgresql -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
+    PG_RUNNING=$(kubectl get pods -n databases -l app=postgresql -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
     PG_LOCKS="0"
 
     # Check PostgreSQL active connections
     if [ "$PG_RUNNING" -gt 0 ]; then
-        PG_CONNECTIONS=$(kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';" 2>/dev/null | tr -d ' ' || echo "unavailable")
+        PG_CONNECTIONS=$(kubectl exec -n databases -l app=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active';" 2>/dev/null | tr -d ' ' || echo "unavailable")
         echo "PostgreSQL active connections: $PG_CONNECTIONS"
 
         # Check for databases with bloat or lock contention (quick check)
-        PG_LOCKS=$(kubectl exec -n databases -l app.kubernetes.io/name=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_locks WHERE NOT granted;" 2>/dev/null | tr -d ' ' || echo "0")
+        PG_LOCKS=$(kubectl exec -n databases -l app=postgresql -- psql -U postgres -t -c "SELECT count(*) FROM pg_locks WHERE NOT granted;" 2>/dev/null | tr -d ' ' || echo "0")
         echo "PostgreSQL waiting locks: $PG_LOCKS"
     fi
     echo ""
@@ -1478,11 +1740,12 @@ log_section "Section 24: Database Health"
     fi
 
     # Redis health (shared cache used by multiple apps including langfuse)
+    # Deployed as a Deployment (not StatefulSet) named "redis" in databases namespace
     echo ""
     echo "Redis:"
-    kubectl get statefulsets -n databases redis 2>/dev/null || echo "Redis not found"
-    REDIS_READY=$(kubectl get statefulset -n databases redis -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-    REDIS_DESIRED=$(kubectl get statefulset -n databases redis -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    kubectl get deployments -n databases redis 2>/dev/null || echo "Redis not found"
+    REDIS_READY=$(kubectl get deployment -n databases redis -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    REDIS_DESIRED=$(kubectl get deployment -n databases redis -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
     echo "Redis pods: $REDIS_READY/$REDIS_DESIRED ready"
     if [ "$REDIS_READY" != "$REDIS_DESIRED" ]; then
         log_warning "Redis not fully ready: $REDIS_READY/$REDIS_DESIRED"
@@ -1491,11 +1754,12 @@ log_section "Section 24: Database Health"
     fi
 
     # InfluxDB health (used by home automation dashboards and UnPoller metrics)
+    # Deployed as StatefulSet named "influxdb-influxdb2" in databases namespace
     echo ""
     echo "InfluxDB:"
-    kubectl get statefulsets -n databases influxdb 2>/dev/null || kubectl get deployments -n databases influxdb 2>/dev/null || echo "InfluxDB not found"
-    INFLUXDB_READY=$(kubectl get statefulset -n databases influxdb -o jsonpath='{.status.readyReplicas}' 2>/dev/null || kubectl get deployment -n databases influxdb -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-    INFLUXDB_DESIRED=$(kubectl get statefulset -n databases influxdb -o jsonpath='{.spec.replicas}' 2>/dev/null || kubectl get deployment -n databases influxdb -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    kubectl get statefulsets -n databases influxdb-influxdb2 2>/dev/null || echo "InfluxDB not found"
+    INFLUXDB_READY=$(kubectl get statefulset -n databases influxdb-influxdb2 -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    INFLUXDB_DESIRED=$(kubectl get statefulset -n databases influxdb-influxdb2 -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
     echo "InfluxDB pods: ${INFLUXDB_READY:-0}/${INFLUXDB_DESIRED:-1} ready"
     if [ "${INFLUXDB_READY:-0}" != "${INFLUXDB_DESIRED:-1}" ] && [ "${INFLUXDB_DESIRED:-1}" -gt 0 ] 2>/dev/null; then
         log_warning "InfluxDB not fully ready: ${INFLUXDB_READY:-0}/${INFLUXDB_DESIRED:-1}"
@@ -1518,19 +1782,72 @@ log_section "Section 24a: Network Infrastructure Services"
         log_critical "AdGuard Home is not running - internal DNS and ad-blocking unavailable"
         add_critical_issue "AdGuard Home pod not running (cluster DNS for IoT/LAN clients at 192.168.55.5 is down)"
         INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    else
+        # Functional DNS check: exec into AdGuard pod and verify HTTP service responds
+        # (API requires auth so we check for any HTTP response — 302/401 means AdGuard is running)
+        ADGUARD_POD=$(kubectl get pods -n network -l app.kubernetes.io/name=adguard-home -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$ADGUARD_POD" ]; then
+            ADGUARD_HTTP=$(kubectl exec -n network "$ADGUARD_POD" -- wget -O/dev/null --server-response http://127.0.0.1:80/ 2>&1 | grep "HTTP/" | head -1 | awk '{print $2}' || echo "000")
+            echo "AdGuard HTTP response code: $ADGUARD_HTTP"
+            if [ "$ADGUARD_HTTP" = "000" ] || [ -z "$ADGUARD_HTTP" ]; then
+                log_warning "AdGuard Home HTTP service not responding inside pod"
+                add_major_issue "AdGuard Home DNS resolution failing at 192.168.55.5 (no HTTP response from pod)"
+                INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+            else
+                log_success "AdGuard Home DNS functional (HTTP response: $ADGUARD_HTTP)"
+            fi
+        fi
     fi
     echo ""
 
     # Ollama Mac Mini AI inference backend at 192.168.30.111
     # All AI apps (open-webui, langfuse, openclaw) depend on this host.
+    # Use curl to Ollama API — more accurate than ping (checks actual service availability)
     echo "Ollama AI backend (Mac Mini at 192.168.30.111):"
-    if ping -c 1 -W 2 192.168.30.111 > /dev/null 2>&1; then
+    if curl -s --connect-timeout 2 http://192.168.30.111:11434/api/version -o /dev/null 2>/dev/null; then
         echo "Ollama host reachable"
         log_success "Ollama AI backend (192.168.30.111) reachable"
     else
         echo "Ollama host unreachable"
         log_warning "Ollama AI backend (192.168.30.111) not reachable - AI features (open-webui, langfuse) may be broken"
         add_major_issue "Ollama host 192.168.30.111 not reachable from cluster - AI inference unavailable"
+        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    fi
+
+    # Ollama port 11435 — Reason model
+    if curl -s --connect-timeout 2 http://192.168.30.111:11435/api/version -o /dev/null 2>/dev/null; then
+        echo "Ollama Reason model (port 11435) reachable"
+        log_success "Ollama Reason model (192.168.30.111:11435) reachable"
+    else
+        echo "Ollama Reason model (port 11435) unreachable"
+        log_warning "Ollama Reason model (192.168.30.111:11435) not reachable"
+        add_major_issue "Ollama Reason model port 11435 not reachable at 192.168.30.111"
+        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    fi
+
+    # Ollama port 11436 — Vision model
+    if curl -s --connect-timeout 2 http://192.168.30.111:11436/api/version -o /dev/null 2>/dev/null; then
+        echo "Ollama Vision model (port 11436) reachable"
+        log_success "Ollama Vision model (192.168.30.111:11436) reachable"
+    else
+        echo "Ollama Vision model (port 11436) unreachable"
+        log_warning "Ollama Vision model (192.168.30.111:11436) not reachable"
+        add_major_issue "Ollama Vision model port 11436 not reachable at 192.168.30.111"
+        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+    fi
+    echo ""
+
+    # k8s-gateway — internal DNS for *.internal.uhl.cool (cluster-local DNS)
+    echo "k8s-gateway:"
+    kubectl get pods -n network -l app.kubernetes.io/name=k8s-gateway 2>/dev/null || echo "k8s-gateway not found"
+    K8SGW_ENDPOINTS=$(kubectl get endpoints -n network k8s-gateway -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || echo "")
+    if [ -n "$K8SGW_ENDPOINTS" ]; then
+        echo "k8s-gateway endpoints: $K8SGW_ENDPOINTS"
+        log_success "k8s-gateway has active endpoints ($K8SGW_ENDPOINTS)"
+    else
+        echo "k8s-gateway: no endpoints found"
+        log_warning "k8s-gateway has no active endpoints - internal DNS resolution may be broken"
+        add_major_issue "k8s-gateway service has no endpoints (internal DNS for cluster services unavailable)"
         INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
     fi
     echo ""
@@ -1574,6 +1891,53 @@ log_section "Section 25: External Services & Connectivity"
 
     if [ "$EXT_ISSUES" -eq 0 ]; then
         log_success "External services connectivity healthy"
+    fi
+
+    # Production app health checks (my-software-production namespace)
+    echo ""
+    echo "=== Production App Health ==="
+    PROD_INGRESSES=$(kubectl get ingress -n my-software-production -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    ing = json.load(sys.stdin)['items']
+    for i in ing:
+        name = i['metadata']['name']
+        for rule in i.get('spec', {}).get('rules', []):
+            host = rule.get('host', '')
+            if host:
+                print(f'{name}:{host}')
+except:
+    pass
+" 2>/dev/null || echo "")
+    PROD_ISSUES=0
+    if [ -z "$PROD_INGRESSES" ]; then
+        echo "  No ingresses found in my-software-production namespace"
+    else
+        for entry in $PROD_INGRESSES; do
+            APP_NAME="${entry%%:*}"
+            HOST="${entry##*:}"
+            echo "Checking $APP_NAME ($HOST):"
+            # External check (full stack via Cloudflare)
+            EXT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "https://$HOST" 2>/dev/null || echo "000")
+            echo "  External (https://$HOST): HTTP $EXT_CODE"
+            if [[ "$EXT_CODE" == "000" ]] || [[ "$EXT_CODE" == "5"* ]]; then
+                log_warning "$APP_NAME external endpoint failing: HTTP $EXT_CODE"
+                add_major_issue "Production app $APP_NAME unreachable externally (https://$HOST): HTTP $EXT_CODE"
+                PROD_ISSUES=$((PROD_ISSUES + 1))
+            fi
+            # Internal check (bypasses Cloudflare, tests ingress → pod)
+            INT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 \
+                -H "Host: $HOST" "http://192.168.55.102" 2>/dev/null || echo "000")
+            echo "  Internal ingress (192.168.55.102, Host: $HOST): HTTP $INT_CODE"
+            if [[ "$INT_CODE" == "000" ]] || [[ "$INT_CODE" == "5"* ]]; then
+                log_warning "$APP_NAME internal ingress failing: HTTP $INT_CODE"
+                add_major_issue "Production app $APP_NAME internal ingress failing (Host: $HOST): HTTP $INT_CODE"
+                PROD_ISSUES=$((PROD_ISSUES + 1))
+            fi
+        done
+        if [ "$PROD_ISSUES" -eq 0 ]; then
+            log_success "Production apps healthy"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -1666,23 +2030,58 @@ log_section "Section 32: Zigbee2MQTT Device Monitoring"
         log_critical "Zigbee2MQTT is not running"
         add_critical_issue "Zigbee2MQTT pod not running - Zigbee devices unavailable"
     else
-        echo "Checking device count..."
-        ZIGBEE_DEVICES=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq 'keys | length' 2>/dev/null || echo "Unable to check")
-        echo "Total Zigbee devices: $ZIGBEE_DEVICES"
+        Z2M_POD32=$(kubectl get pods -n home-automation -l app.kubernetes.io/name=zigbee2mqtt \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+        # --- Coordinator connectivity (network device at tcp://192.168.32.20:6638) ---
+        echo "Zigbee coordinator (192.168.32.20:6638):"
+        if [ -n "$Z2M_POD32" ]; then
+            COORD32=$(kubectl exec -n home-automation "$Z2M_POD32" -- sh -c \
+                'nc -z -w 2 192.168.32.20 6638 2>/dev/null && echo reachable || echo unreachable' 2>/dev/null \
+                || echo "unknown")
+            echo "  TCP connectivity: $COORD32"
+            if [ "$COORD32" = "unreachable" ]; then
+                log_critical "Zigbee coordinator not reachable at 192.168.32.20:6638"
+                add_critical_issue "Zigbee coordinator unreachable - all Zigbee devices offline"
+            fi
+        fi
         echo ""
 
-        # Check for devices offline >5 days
+        # --- Device count and offline detection (via Python for reliable ISO8601 parsing) ---
+        echo "Checking device count..."
+        Z2M_STATS=$(kubectl exec -n home-automation "$Z2M_POD32" -- sh -c \
+            'cat /data/state.json 2>/dev/null' 2>/dev/null \
+            | python3 -c "
+import sys, json, datetime
+try:
+    d = json.load(sys.stdin)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    total = len(d)
+    offline_5d = []
+    for addr, v in d.items():
+        ls = v.get('last_seen')
+        if ls:
+            try:
+                t = datetime.datetime.fromisoformat(ls.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+                if (now - t).total_seconds() > 86400 * 5:
+                    offline_5d.append((addr, round((now - t).total_seconds() / 86400, 1)))
+            except: pass
+    print(f'TOTAL={total}')
+    print(f'OFFLINE_5D={len(offline_5d)}')
+    for a, d in sorted(offline_5d, key=lambda x: -x[1]):
+        print(f'STALE:{a}:{d}d')
+except Exception as e:
+    print(f'ERROR={e}')
+" 2>/dev/null)
+        Z2M_TOTAL32=$(echo "$Z2M_STATS" | grep "^TOTAL=" | cut -d= -f2)
+        Z2M_OFFLINE32=$(echo "$Z2M_STATS" | grep "^OFFLINE_5D=" | cut -d= -f2)
+        echo "Total Zigbee devices: ${Z2M_TOTAL32:-?}"
+        echo ""
+
         echo "Devices offline >5 days:"
-        OFFLINE_DEVICES=$(kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json 2>/dev/null | jq -r '
-            to_entries[] |
-            select(.value.last_seen != null) |
-            select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) |
-            .key
-        ' 2>/dev/null || echo "")
-        if [ -n "$OFFLINE_DEVICES" ]; then
-            OFFLINE_COUNT=$(echo "$OFFLINE_DEVICES" | wc -l | tr -cd '0-9')
-            echo "$OFFLINE_DEVICES" | head -10
-            echo "Total offline >5 days: $OFFLINE_COUNT"
+        if [ -n "$Z2M_OFFLINE32" ] && [ "$Z2M_OFFLINE32" -gt 0 ] 2>/dev/null; then
+            echo "$Z2M_STATS" | grep "^STALE:" | cut -d: -f2- | head -10
+            echo "Total offline >5 days: $Z2M_OFFLINE32"
         else
             echo "None"
         fi
@@ -1693,10 +2092,12 @@ log_section "Section 32: Zigbee2MQTT Device Monitoring"
         echo "Zigbee2MQTT errors (24h): $Z2M_COORD_ERRORS"
 
         Z2M_ISSUES=0
-        if [ -n "$OFFLINE_DEVICES" ] && [ "${OFFLINE_COUNT:-0}" -gt 5 ]; then
-            log_warning "Many Zigbee devices offline >5 days: $OFFLINE_COUNT"
-            add_minor_issue "Zigbee devices offline >5 days: $OFFLINE_COUNT"
+        if [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt 5 ] 2>/dev/null; then
+            log_warning "Many Zigbee devices offline >5 days: $Z2M_OFFLINE32"
+            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32}"
             Z2M_ISSUES=$((Z2M_ISSUES + 1))
+        elif [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt 0 ] 2>/dev/null; then
+            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32}"
         fi
         if [ "$Z2M_COORD_ERRORS" -gt 20 ]; then
             log_warning "High Zigbee2MQTT error count: $Z2M_COORD_ERRORS in 24h"
@@ -1704,7 +2105,7 @@ log_section "Section 32: Zigbee2MQTT Device Monitoring"
             Z2M_ISSUES=$((Z2M_ISSUES + 1))
         fi
         if [ "$Z2M_ISSUES" -eq 0 ]; then
-            log_success "Zigbee2MQTT healthy ($ZIGBEE_DEVICES devices)"
+            log_success "Zigbee2MQTT healthy (${Z2M_TOTAL32:-?} devices)"
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
@@ -1841,6 +2242,67 @@ log_section "Section 33: Battery Health Monitoring"
 log_section "Section 34: Elasticsearch Application Logs Analysis"
 {
     echo "Querying Elasticsearch for error patterns in application logs..."
+    echo ""
+
+    # --- Elasticsearch cluster health check + Fluent-bit check (via port-forward with auth) ---
+    echo "=== Elasticsearch Cluster Health ==="
+    ES_PW_EARLY=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
+    if [ -n "$ES_PW_EARLY" ]; then
+        kubectl port-forward -n monitoring svc/elasticsearch-es-http 9201:9200 > /dev/null 2>&1 &
+        ES_PF_PID=$!
+        sleep 3
+
+        ES_STATUS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
+        echo "Elasticsearch cluster status: $ES_STATUS"
+        if [ "$ES_STATUS" = "red" ]; then
+            log_critical "Elasticsearch cluster status is RED - data loss or unavailability"
+            add_critical_issue "Elasticsearch cluster health is RED"
+        elif [ "$ES_STATUS" = "yellow" ]; then
+            log_warning "Elasticsearch cluster status is YELLOW - some replicas unavailable"
+            add_minor_issue "Elasticsearch cluster health is YELLOW (replica shards unassigned)"
+        elif [ "$ES_STATUS" = "green" ]; then
+            log_success "Elasticsearch cluster status is GREEN"
+        else
+            log_warning "Elasticsearch cluster status unknown: $ES_STATUS"
+        fi
+
+        # --- Fluent-bit log shipping check ---
+        echo ""
+        echo "=== Fluent-bit Log Shipping Check ==="
+        FB_CHECK=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/fluent-bit-*/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        echo "Fluent-bit documents in Elasticsearch: $FB_CHECK"
+        FB_COUNT_INT=$(echo "$FB_CHECK" | tr -cd '0-9' || echo "0")
+        [ -z "$FB_COUNT_INT" ] && FB_COUNT_INT=0
+        if [ "$FB_COUNT_INT" -eq 0 ]; then
+            log_warning "No Fluent-bit log documents found in Elasticsearch"
+            add_major_issue "Fluent-bit: no log documents found in Elasticsearch"
+        else
+            log_success "Fluent-bit log documents present: $FB_COUNT_INT"
+        fi
+
+        kill $ES_PF_PID 2>/dev/null || true
+        wait $ES_PF_PID 2>/dev/null || true
+    else
+        log_warning "Elasticsearch password not accessible - skipping cluster health check"
+    fi
+
+    # Check Fluent-bit pod restarts (independent of ES access)
+    echo ""
+    echo "=== Fluent-bit Pod Health ==="
+    FB_MAX_RESTARTS=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=fluent-bit -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    pods = json.load(sys.stdin)['items']
+    restarts = [cs.get('restartCount', 0) for p in pods for cs in p.get('status', {}).get('containerStatuses', [])]
+    print(max(restarts) if restarts else 0)
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+    echo "Fluent-bit max pod restarts: $FB_MAX_RESTARTS"
+    if [ "$FB_MAX_RESTARTS" -gt 5 ]; then
+        log_warning "Fluent-bit pod has $FB_MAX_RESTARTS restarts"
+        add_minor_issue "Fluent-bit pod restart count high: $FB_MAX_RESTARTS"
+    fi
     echo ""
 
     # Get Elasticsearch password
@@ -2039,6 +2501,59 @@ except Exception as e:
 log_section "Section 36: PVC Capacity Monitoring"
 {
     echo "Checking PVC status..."
+
+    # --- CSI SMB / NAS mount check ---
+    echo "=== CSI SMB (NAS) Volume Check ==="
+    SMB_PV_INFO=$(kubectl get pv -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    pvs = json.load(sys.stdin)['items']
+    smb = [p['metadata']['name'] for p in pvs if p.get('spec',{}).get('csi',{}).get('driver','') == 'smb.csi.k8s.io']
+    print(len(smb))
+    for s in smb:
+        print(' ', s)
+except Exception as e:
+    print(0)
+" 2>/dev/null || echo "0")
+    SMB_COUNT=$(echo "$SMB_PV_INFO" | head -1 | tr -d ' ' || echo "0")
+    echo "SMB PV count: $SMB_COUNT"
+    if [ "$SMB_COUNT" -gt 0 ]; then
+        echo "$SMB_PV_INFO" | tail -n +2
+
+        # Check if any SMB PVCs are not bound
+        SMB_UNBOUND=$(kubectl get pv -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    pvs = json.load(sys.stdin)['items']
+    unbound = [p['metadata']['name'] for p in pvs
+               if p.get('spec',{}).get('csi',{}).get('driver','') == 'smb.csi.k8s.io'
+               and p.get('status',{}).get('phase','') != 'Bound']
+    print(len(unbound))
+    for s in unbound:
+        print(' ', s)
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+        SMB_UNBOUND_COUNT=$(echo "$SMB_UNBOUND" | head -1 | tr -d ' ' || echo "0")
+        if [ "$SMB_UNBOUND_COUNT" -gt 0 ]; then
+            log_warning "SMB PVs not in Bound state: $SMB_UNBOUND_COUNT"
+            add_major_issue "CSI SMB NAS PVs not bound: $SMB_UNBOUND_COUNT volume(s) unbound"
+        else
+            log_success "All SMB PVs bound ($SMB_COUNT volumes)"
+        fi
+
+        # Check csi-driver-smb daemonset health
+        CSI_SMB_DS_DESIRED=$(kubectl get daemonset -n kube-system csi-smb-node -o jsonpath='{.status.desiredNumberScheduled}' 2>/dev/null || echo "0")
+        CSI_SMB_DS_READY=$(kubectl get daemonset -n kube-system csi-smb-node -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
+        echo "csi-smb-node daemonset: $CSI_SMB_DS_READY/$CSI_SMB_DS_DESIRED ready"
+        if [ "$CSI_SMB_DS_DESIRED" -gt 0 ] && [ "$CSI_SMB_DS_READY" != "$CSI_SMB_DS_DESIRED" ]; then
+            log_warning "csi-smb-node daemonset not fully ready: $CSI_SMB_DS_READY/$CSI_SMB_DS_DESIRED"
+            add_major_issue "csi-driver-smb daemonset unhealthy: $CSI_SMB_DS_READY/$CSI_SMB_DS_DESIRED nodes ready"
+        fi
+    else
+        echo "  No SMB CSI PVs found"
+    fi
+    echo ""
 
     # Count PVCs by status
     BOUND_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Bound | wc -l")
