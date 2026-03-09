@@ -551,8 +551,11 @@ kubectl get ingress -A | wc -l
 
 **Commands to Execute:**
 ```bash
-# Check UniFi controller connectivity
+# Check UniFi controller health
 unifictl local health get
+
+# Run comprehensive network diagnostics (5.3.1+)
+unifictl local diagnose network
 
 # Count online devices
 unifictl local device list -o json | jq -r '.data[] | select(.state == 1) | .name' | wc -l
@@ -560,12 +563,21 @@ unifictl local device list -o json | jq -r '.data[] | select(.state == 1) | .nam
 # Check k8s-network VLAN
 unifictl local network list -o json | jq -r '.data[] | select(.vlan == 55) | .name'
 
-# Check client count
+# Check client count (default limit 30; use --limit to raise)
 unifictl local client list --wireless -o json | jq -r '.data | length'
 unifictl local client list --wired -o json | jq -r '.data | length'
+
+# Check WAN health
+unifictl local wan get
+
+# Check for rogue APs
+unifictl local stat rogueap
+
+# Check WiFi connectivity stats
+unifictl local wifi connectivity
 ```
 
-**AI Analysis**: Verify network health, check device connectivity.
+**AI Analysis**: Verify network health, check device connectivity. Use `unifictl local diagnose wifi` for WiFi-specific issues and `unifictl local diagnose client <MAC>` for individual client problems.
 
 ---
 
@@ -1052,7 +1064,10 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.i
 kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=200 --since=24h | grep -iE "authentication.*failed|login.*failed" | head -20
 
 # Check firewall blocks via unifictl (requires local unifictl configured)
-cd /home/mu/code/unifictl && unifictl local events -o json | jq -r '.[] | select(.key | contains("blocked")) | .msg' | head -20
+unifictl local event list -o json | jq -r '.[] | select(.key | contains("blocked")) | .msg' | head -20
+
+# Check system logs for critical issues
+unifictl local log critical
 ```
 
 ---

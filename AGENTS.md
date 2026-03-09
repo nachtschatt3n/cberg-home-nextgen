@@ -306,148 +306,180 @@ unifictl local configure \
 **Network Health & Status:**
 ```bash
 # Overall network health
-unifictl local health
+unifictl local health get
 
 # WAN connectivity status
-unifictl local wan
+unifictl local wan get
 
 # Network events (alerts, warnings)
-unifictl local events
+unifictl local event list
 
 # Recent events filtered
-unifictl local events -o json | jq '.[] | select(.key | contains("EVT_"))'
+unifictl local event list -o json | jq '.[] | select(.key | contains("EVT_"))'
+
+# Comprehensive network diagnostics (multi-endpoint)
+unifictl local diagnose network
+
+# WiFi performance diagnostics
+unifictl local diagnose wifi
+
+# System log critical entries
+unifictl local log critical
 ```
 
 **Device Monitoring:**
 ```bash
 # List all network devices (switches, APs, gateway)
-unifictl local devices
+unifictl local device list
 
 # Filter by device type
-unifictl local devices --filter "SW"      # Switches
-unifictl local devices --filter "AP"      # Access Points
-unifictl local devices --filter "UDM"     # Gateway
-
-# Show unadopted/pending devices
-unifictl local devices --unadopted
+unifictl local device list --filter "SW"      # Switches
+unifictl local device list --filter "AP"      # Access Points
+unifictl local device list --filter "UDM"     # Gateway
 
 # Watch devices in real-time (refresh every 5s)
-unifictl local devices --watch 5
+unifictl local device list --watch 5
 
 # Export device inventory to CSV
-unifictl local devices -o csv > /tmp/devices.csv
+unifictl local device list -o csv > /tmp/devices.csv
+
+# Rogue AP detection
+unifictl local stat rogueap
 ```
 
 **Client Connectivity:**
 ```bash
-# List all connected clients
-unifictl local clients
+# List all connected clients (default limit 30)
+unifictl local client list
 
 # Filter by connection type
-unifictl local clients --wired
-unifictl local clients --wireless
+unifictl local client list --wired
+unifictl local client list --wireless
 
 # Show blocked clients
-unifictl local clients --blocked
+unifictl local client list --blocked
 
 # Watch clients in real-time
-unifictl local clients --watch 5
+unifictl local client list --watch 5
 
 # Top bandwidth consumers
-unifictl local top-clients --limit 20
-unifictl local top-devices --limit 10
+unifictl local top-client list --limit 20
+unifictl local top-device list --limit 10
+
+# Correlate all data for a specific client
+unifictl local correlate client <MAC>
+
+# Diagnose a specific client's connectivity
+unifictl local diagnose client <MAC>
 ```
 
 **Network Configuration:**
 ```bash
 # List VLANs/networks
-unifictl local networks
+unifictl local network list
 
 # List WiFi networks (SSIDs)
-unifictl local wlans
+unifictl local wlan list
 
 # List firewall rules
-unifictl local firewall-rules
+unifictl local firewall-rule list
 
 # List firewall groups
-unifictl local firewall-groups
+unifictl local firewall-group list
 
 # Port profiles (switch port configurations)
-unifictl local port-profiles
+unifictl local port-profile list
+
+# Security settings
+unifictl local security get
 ```
 
 **Traffic Analysis:**
 ```bash
 # DPI (Deep Packet Inspection) summary
-unifictl local dpi
-
-# Traffic statistics
-unifictl local traffic
+unifictl local dpi get
 
 # Top clients by traffic
-unifictl local top-clients --limit 10 -o json
+unifictl local top-client list --limit 10 -o json
+
+# WiFi connectivity statistics
+unifictl local wifi connectivity
+
+# Time-series traffic data for trend analysis
+unifictl local time-series traffic
+unifictl local time-series wifi
 ```
 
 **Device Management:**
 ```bash
 # Get specific device details
-unifictl local device <MAC> --ports
+unifictl local device get <MAC>
 
 # Restart a device
-unifictl local device <MAC> --restart
+unifictl local device restart <MAC>
 
 # Adopt an unadopted device
-unifictl local device <MAC> --adopt
+unifictl local device adopt <MAC>
 
 # Upgrade device firmware
-unifictl local device <MAC> --upgrade
+unifictl local device upgrade <MAC>
 
 # Bulk adopt all unadopted devices
-unifictl local devices --adopt-all
+unifictl local device adopt-all
+
+# Correlate all data for a device or AP
+unifictl local correlate device <MAC>
+unifictl local correlate ap <MAC>
 ```
 
 **Client Management:**
 ```bash
 # Block a client
-unifictl local client <MAC> --block
+unifictl local client block <MAC>
 
 # Unblock a client
-unifictl local client <MAC> --unblock
+unifictl local client unblock <MAC>
 
 # Force reconnect a client
-unifictl local client <MAC> --reconnect
+unifictl local client reconnect <MAC>
+
+# View client connection history
+unifictl local client history <MAC>
 ```
 
 **Troubleshooting Workflows:**
 ```bash
 # Check for network issues
-unifictl local health -o json | jq '.subsystems[] | select(.status != "ok")'
+unifictl local health get -o json | jq '.subsystems[] | select(.status != "ok")'
 
 # Find offline devices
-unifictl local devices -o json | jq -r '.[] | select(.state != 1) | "\(.name): \(.state_txt)"'
+unifictl local device list -o json | jq -r '.[] | select(.state != 1) | "\(.name): \(.state_txt)"'
 
 # Check for high client count on specific AP
-unifictl local devices --filter "Hallway-AP" -o json | jq '.[].num_sta'
+unifictl local device list --filter "Hallway-AP" -o json | jq '.[].num_sta'
 
 # Export all configuration for backup
-unifictl local networks -o csv > /tmp/networks-backup.csv
-unifictl local wlans -o csv > /tmp/wlans-backup.csv
-unifictl local firewall-rules -o csv > /tmp/firewall-backup.csv
+unifictl local network list -o csv > /tmp/networks-backup.csv
+unifictl local wlan list -o csv > /tmp/wlans-backup.csv
+unifictl local firewall-rule list -o csv > /tmp/firewall-backup.csv
 ```
 
 **Output Formats:**
 ```bash
 # Pretty table (default, human-readable)
-unifictl local devices
+unifictl local device list
 
 # JSON (for scripting and jq processing)
-unifictl local devices -o json
+unifictl local device list -o json
 
 # CSV (for spreadsheets and reporting)
-unifictl local devices -o csv
+unifictl local device list -o csv
 
 # Raw API response
-unifictl local devices -o raw
+unifictl local device list -o raw
+
+# LLM-optimized (schema + summaries)
+unifictl local device list -o llm
 ```
 
 ## Longhorn Storage Management
