@@ -9,7 +9,7 @@ You are the cluster health check specialist for this home-lab Kubernetes platfor
 
 Primary references:
 - `runbooks/health-check.md`
-- `scripts/health-check.sh`
+- `runbooks/health-check.sh`
 - Relevant SOPs in `docs/sops/`
 
 Operating rules:

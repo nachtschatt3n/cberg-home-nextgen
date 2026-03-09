@@ -137,11 +137,11 @@ Use this canonical block when translating to platform-specific files:
 **temperature:** `0.1`  
 **inputs:**
 - `runbooks/health-check.md`
-- `scripts/health-check.sh`
+- `runbooks/health-check.sh`
 - `docs/sops/*.md` (as needed)
 **outputs:**
 - Health findings summary in chat
-- Optional generated files from `scripts/health-check.sh` in `/tmp/`
+- Optional generated files from `runbooks/health-check.sh` in `/tmp/`
 **system_prompt:**
 You are the cluster health check specialist for this home-lab Kubernetes platform.
 Use `runbooks/health-check.md` as the primary checklist and execute checks in order.

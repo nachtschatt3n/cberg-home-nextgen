@@ -25,7 +25,7 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 
 ```bash
 # Run the automated health check
-./scripts/health-check.sh
+./runbooks/health-check.sh
 
 # Script generates three output files:
 # - Full report: /tmp/health-check-YYYYMMDD-HHMMSS.txt
