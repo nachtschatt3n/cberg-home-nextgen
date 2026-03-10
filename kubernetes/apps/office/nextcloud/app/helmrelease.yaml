@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: *app
-      version: 8.9.1
+      version: 9.0.3
       sourceRef:
         kind: HelmRepository
         name: nextcloud
@@ -31,7 +31,7 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
-      tag: 32.0.6
+      tag: 33.0.0
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
@@ -213,7 +213,7 @@ spec:
                 path: whiteboard-jwt-secret
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:32.0.6
+          image: nextcloud:33.0.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 33
@@ -391,7 +391,8 @@ spec:
         # Use existing secret (auth.rootPassword, auth.password, and auth.replicationPassword will be ignored).
         # secret must contain the keys mariadb-root-password, mariadb-replication-password and mariadb-password
         existingSecret: nextcloud-config
-        username: nextcloud
+        usernames:
+          - nextcloud
 
       architecture: standalone
 
