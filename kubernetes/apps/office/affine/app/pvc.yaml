@@ -28,7 +28,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: affine-db-data
+  name: affine-pg-data
   namespace: office
 spec:
   accessModes:
