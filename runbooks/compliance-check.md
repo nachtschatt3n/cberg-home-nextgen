@@ -299,7 +299,31 @@ Pass criteria:
 - No unknown external dependency needed for full restore
 - Missing dependencies are tracked as explicit risks with owner
 
-## 8. Report Format
+## 8. New Deployment Compliance
+**Objective**: Ensure new applications follow the "New Deployment Blueprint" and are properly integrated into the cluster's lifecycle management.
+
+### 8.1 Blueprint Alignment
+- [ ] **Naming & Structure**: Verify new deployments follow `docs/sops/new-deployment-blueprint.md` (kebab-case, directory structure).
+- [ ] **Storage Classes**: Verify dynamic data uses `longhorn` and config/static data uses `longhorn-static` (see `docs/sops/longhorn.md`).
+- [ ] **Secrets**: Verify all secrets are in `*.sops.yaml` and encrypted in the repository path.
+
+### 8.2 Inventory & Documentation
+- [ ] **Application Inventory**: Run `python3 runbooks/doc-check.py` and verify Section 3 (Application Documentation) is clean. New apps MUST be in `docs/applications.md`.
+- [ ] **Ingress Integration**: Verify the app has the required annotations/labels for Homepage (checked by `doc-check.py` Section 5).
+
+### 8.3 Health & Version Integration
+- [ ] **Version Tracking**: Verify `python3 runbooks/check-all-versions.py` picks up the new app's `HelmRelease` (automatic for `kubernetes/apps/**/helmrelease.yaml`).
+- [ ] **Operational Health**:
+    - [ ] Verify the app appears in the generic checks of `./runbooks/health-check.sh` (Sections 5-7).
+    - [ ] For **critical** apps, verify they have a dedicated section in `runbooks/health-check.sh` and `runbooks/health-check.md` for deep-dive health (API checks, database connection counts, etc.).
+
+Pass criteria:
+- `doc-check.py` Section 3 is "OK" (no undocumented apps)
+- New app's `HelmRelease` is in `kubernetes/apps/`
+- App is listed in `docs/applications.md`
+- Critical apps have dedicated health check sections
+
+## 9. Report Format
 Record results in this structure:
 
 ```text
@@ -312,6 +336,7 @@ Compliance Check - YYYY-MM-DD
 [PASS|FAIL] Documentation Compliance
 [PASS|FAIL] Longhorn Migration Tracking
 [PASS|FAIL] Full Restore Readiness
+[PASS|FAIL] New Deployment Compliance
 
 Findings:
 1. <severity> <finding>

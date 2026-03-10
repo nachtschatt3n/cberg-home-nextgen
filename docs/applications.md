@@ -10,7 +10,7 @@
 
 | Namespace | App Count |
 |-----------|-----------|
-| ai | 5 |
+| ai | 6 |
 | home-automation | 14 |
 | databases | 8 |
 | monitoring | 11 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~79** |
+| **Total** | **~80** |
 
 ---
 
@@ -37,6 +37,7 @@
 | open-webui | Chat interface for AI models (LLM frontend) | Internal | AI |
 | langfuse | LLM observability, tracing, and analytics | Internal | AI |
 | openclaw | AI agent platform | Internal | AI |
+| anythingllm | Private RAG workspace with local AI | Internal | AI |
 | mcpo | Model Control Plane Orchestrator | Internal | AI |
 | ai-sre | AI-powered SRE tooling | Internal | AI |
 

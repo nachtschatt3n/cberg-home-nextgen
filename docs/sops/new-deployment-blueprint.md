@@ -148,7 +148,15 @@ flux get kustomizations -A
 flux get helmreleases -A
 ```
 
-11. Execute Verification Tests, Health Check, and Security Check sections below.
+11. Run compliance and health check runbooks to ensure proper integration:
+
+```bash
+python3 runbooks/doc-check.py
+python3 runbooks/check-all-versions.py
+./runbooks/health-check.sh
+```
+
+12. Execute Verification Tests, Health Check, and Security Check sections below.
 
 ---
 
@@ -271,6 +279,18 @@ Expected:
 
 Failure hint:
 - Fix probe endpoints, service labels/selectors, or container config and redeploy.
+
+### Test 7: Application Inventory Registration
+
+```bash
+python3 runbooks/doc-check.py | rg -A 5 "Section 3: Application Documentation"
+```
+
+Expected:
+- The new app is correctly listed in `docs/applications.md` and passed the documentation check.
+
+Failure hint:
+- Add the app entry to `docs/applications.md` following the existing format.
 
 ---
 

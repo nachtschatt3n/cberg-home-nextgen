@@ -199,6 +199,14 @@ The script searches for all `helmrelease.yaml` files in:
 kubernetes/apps/**/helmrelease.yaml
 ```
 
+### Discovery of New Applications
+Any new application added to `kubernetes/apps/` that includes a `HelmRelease` manifest is automatically picked up by the version checker during the next run. No manual registration is required in the script.
+
+To verify a new app is tracked:
+1. Deploy the app to `kubernetes/apps/<namespace>/<app>/`.
+2. Run `python3 runbooks/check-all-versions.py`.
+3. Check `runbooks/version-check-current.md` to ensure the app appears in the report.
+
 ### 2. Extracting Chart Information
 
 From each HelmRelease, it extracts:

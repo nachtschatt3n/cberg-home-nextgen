@@ -37,6 +37,13 @@ spec:
                 path: /spec/strategy
                 value:
                   type: Recreate
+          - target:
+              kind: Ingress
+              name: anythingllm
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
 
   values:
     replicaCount: 1

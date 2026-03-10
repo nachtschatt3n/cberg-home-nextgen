@@ -1733,6 +1733,30 @@ kubectl run test-ollama --rm -it --image=busybox --restart=Never -- wget -O- -T 
 - **Critical**: AdGuard Home not running (network DNS broken for IoT/LAN)
 - **Major**: Ollama host unreachable (all AI features degraded)
 
+## Onboarding New Applications
+
+### 1. Generic Health Checks
+Any new application deployed via `HelmRelease` in `kubernetes/apps/` is automatically covered by the following sections in `runbooks/health-check.sh`:
+- **Section 5: Helm Deployments**: Checks if the `HelmRelease` and `Kustomization` are reconciled.
+- **Section 6: Deployments & StatefulSets**: Checks if pods are at desired replicas.
+- **Section 7: Pods Health**: Checks for crash loops, pending states, and high restarts.
+
+### 2. Dedicated Health Checks
+For **critical** applications (e.g., databases, core infrastructure, primary UI), you should add a dedicated section to `runbooks/health-check.sh` and this runbook.
+
+**Steps to add a dedicated check:**
+1.  **Define success criteria**: What constitutes "healthy" for this app? (e.g., API responds with 200, database has <X locks).
+2.  **Add to `runbooks/health-check.sh`**:
+    -   Create a new `log_section` at the end of the script.
+    -   Use `kubectl exec` or `curl` to perform functional checks.
+    -   Use `log_success`, `log_warning`, or `log_critical` based on results.
+    -   Update the summary counters and issue lists.
+3.  **Update `runbooks/health-check.md`**:
+    -   Add a new section with the objective and commands to execute manually.
+
+### 3. Verification
+Run `./runbooks/health-check.sh` and verify the new app's status appears in both the generic sections and (if added) its dedicated section.
+
 ---
 
 ## Report Generation Instructions
