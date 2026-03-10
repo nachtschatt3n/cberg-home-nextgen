@@ -63,8 +63,11 @@ spec:
       OLLAMA_BASE_PATH: "http://192.168.30.111:11435"
       OLLAMA_MODEL_PREF: "gpt-oss:20b"
       OLLAMA_RESPONSE_TIMEOUT: "300000"
-      # Embedding — native built-in (no external model required)
-      EMBEDDING_ENGINE: "native"
+      # Embedding — Ollama nomic-embed-text via Reason instance
+      EMBEDDING_ENGINE: "ollama"
+      EMBEDDING_BASE_PATH: "http://192.168.30.111:11435"
+      EMBEDDING_MODEL_PREF: "nomic-embed-text:latest"
+      EMBEDDING_MODEL_MAX_CHUNK_LENGTH: "8192"
       # Vector DB — embedded LanceDB (zero-config, stored in STORAGE_DIR)
       VECTOR_DB: "lancedb"
 
