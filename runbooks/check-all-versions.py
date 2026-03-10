@@ -260,20 +260,45 @@ class VersionChecker:
     def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest tag from GHCR, Docker Hub, or Quay."""
         try:
-            # For GHCR, use GitHub API
+            # For GHCR, query the OCI registry tags API directly (reflects actual published
+            # images). The GitHub Releases API must NOT be used here because a GitHub release
+            # can be created before the container image is pushed, causing false positives.
             if 'ghcr.io' in repository:
-                # Extract owner/repo from ghcr.io/owner/repo
-                parts = repository.replace('ghcr.io/', '').split('/')
-                if len(parts) >= 2:
-                    owner = parts[0]
-                    repo = parts[1]
-                    api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-                    response = requests.get(api_url, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
-                        tag = data.get('tag_name', '')
-                        if tag:
-                            return tag.lstrip('v')
+                image_path = repository.replace('ghcr.io/', '')
+                # Obtain an anonymous pull token
+                token_resp = requests.get(
+                    f"https://ghcr.io/token?scope=repository:{image_path}:pull",
+                    timeout=10
+                )
+                if token_resp.status_code != 200:
+                    return None
+                token = token_resp.json().get('token', '')
+                headers = {'Authorization': f'Bearer {token}'}
+
+                # Paginate through all tags (GHCR returns ~50 per page)
+                ver_pattern = re.compile(r'^\d+\.\d+\.\d+$')
+                all_ver_tags: List[str] = []
+                next_url: Optional[str] = f"https://ghcr.io/v2/{image_path}/tags/list"
+                while next_url:
+                    resp = requests.get(next_url, headers=headers, timeout=10)
+                    if resp.status_code != 200:
+                        break
+                    all_ver_tags.extend(
+                        t for t in resp.json().get('tags', []) if ver_pattern.match(t)
+                    )
+                    # Follow Link header for next page (path-only, so prepend host)
+                    link = resp.headers.get('Link', '')
+                    m = re.search(r'<(/[^>]+)>;\s*rel="next"', link)
+                    next_url = f"https://ghcr.io{m.group(1)}" if m else None
+
+                if all_ver_tags:
+                    def _ver_key(t: str) -> tuple:
+                        try:
+                            return tuple(int(x) for x in t.split('.'))  # type: ignore[return-value]
+                        except ValueError:
+                            return (0, 0, 0)
+                    all_ver_tags.sort(key=_ver_key, reverse=True)
+                    return all_ver_tags[0]
             
             # For Docker Hub, try Docker Hub API
             elif 'docker.io' in repository or not '/' in repository.split('://')[-1].split('/')[0]:
