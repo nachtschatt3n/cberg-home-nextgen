@@ -55,34 +55,27 @@ data:
           "override_enabled": true,
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
-            "chat": "ollama-gptoss/gpt-oss:20b",
+            "chat": "openai-default/gpt-oss:20b",
             "embedding": "gemini-embedding-001",
             "image": "gpt-image-1",
-            "coding": "ollama-gptoss/gpt-oss:20b",
-            "complex_text_generation": "ollama-gptoss/gpt-oss:20b",
-            "quick_decision_making": "ollama-gptoss/gpt-oss:20b",
-            "quick_text_generation": "ollama-gptoss/gpt-oss:20b",
-            "polish_and_summarize": "ollama-gptoss/gpt-oss:20b"
+            "coding": "openai-default/gpt-oss:20b",
+            "complex_text_generation": "openai-default/gpt-oss:20b",
+            "quick_decision_making": "openai-default/gpt-oss:20b",
+            "quick_text_generation": "openai-default/gpt-oss:20b",
+            "polish_and_summarize": "openai-default/gpt-oss:20b"
           }
         },
         "providers": {
-          "profiles": [
-            {
-              "id": "ollama-gptoss",
-              "type": "openai",
-              "displayName": "Ollama GPT-OSS",
-              "config": {
-                "apiKey": "ollama",
-                "baseURL": "http://192.168.30.111:11435/v1",
-                "oldApiStyle": true
-              }
-            }
-          ],
+          "openai": {
+            "apiKey": "ollama",
+            "baseURL": "http://192.168.30.111:11435/v1",
+            "oldApiStyle": true
+          },
           "defaults": {
-            "fallback": "ollama-gptoss",
-            "text": "ollama-gptoss",
-            "object": "ollama-gptoss",
-            "structured": "ollama-gptoss"
+            "fallback": "openai-default",
+            "text": "openai-default",
+            "object": "openai-default",
+            "structured": "openai-default"
           }
         },
         "storage": {
