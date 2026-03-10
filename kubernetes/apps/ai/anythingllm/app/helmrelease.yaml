@@ -1,0 +1,118 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: anythingllm
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: anythingllm
+      version: "1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: mintplex-labs
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    timeout: 10m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 10m
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+
+  values:
+    replicaCount: 1
+
+    strategy:
+      type: Recreate
+
+    image:
+      repository: mintplexlabs/anythingllm
+      tag: "1.9.0"
+      pullPolicy: IfNotPresent
+
+    podSecurityContext:
+      fsGroup: 1000
+
+    # Plain environment variables via ConfigMap (chart's config block)
+    config:
+      NODE_ENV: "production"
+      ANYTHING_LLM_RUNTIME: "docker"
+      STORAGE_DIR: "/app/server/storage"
+      DISABLE_TELEMETRY: "true"
+      # Ollama LLM — Reason instance (gpt-oss:20b at port 11435)
+      LLM_PROVIDER: "ollama"
+      OLLAMA_BASE_PATH: "http://192.168.30.111:11435"
+      OLLAMA_MODEL_PREF: "gpt-oss:20b"
+      OLLAMA_RESPONSE_TIMEOUT: "300000"
+      # Embedding — native built-in (no external model required)
+      EMBEDDING_ENGINE: "native"
+      # Vector DB — embedded LanceDB (zero-config, stored in STORAGE_DIR)
+      VECTOR_DB: "lancedb"
+
+    # Secret-backed env vars (AUTH_TOKEN, JWT_SECRET) from SOPS secret
+    envFrom:
+      - secretRef:
+          name: anythingllm-secret
+
+    persistentVolume:
+      existingClaim: anythingllm-storage
+
+    service:
+      type: ClusterIP
+      port: 3001
+
+    ingress:
+      enabled: true
+      className: external
+      annotations:
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "AnythingLLM"
+        gethomepage.dev/description: "Private RAG workspace with local AI"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "anythingllm.png"
+        gethomepage.dev/pod-selector: app.kubernetes.io/name=anythingllm
+      labels:
+        gethomepage.dev/enabled: "true"
+      hosts:
+        - host: &host "anythingllm.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - *host
+
+    readinessProbe:
+      httpGet:
+        path: /v1/api/health
+        port: 8888
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      successThreshold: 2
+
+    livenessProbe:
+      httpGet:
+        path: /v1/api/health
+        port: 8888
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 3
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi

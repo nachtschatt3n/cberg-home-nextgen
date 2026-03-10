@@ -10,3 +10,4 @@ resources:
   - ./langfuse/ks.yaml
   - ./ai-sre/ks.yaml
   - ./openclaw/ks.yaml
+  - ./anythingllm/ks.yaml

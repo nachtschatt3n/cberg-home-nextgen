@@ -40,4 +40,5 @@ resources:
   - ./descheduler.yaml
   - ./authentik.yaml
   - ./elastic.yaml
+  - ./mintplex-labs.yaml
   - ./opentelemetry.yaml
