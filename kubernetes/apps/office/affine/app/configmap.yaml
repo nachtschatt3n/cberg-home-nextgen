@@ -56,7 +56,7 @@ data:
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
             "chat": "openai-default/gpt-oss:20b",
-            "embedding": "openai-default/nomic-embed-text:latest",
+            "embedding": "openai-default/text-embedding-3-small",
             "image": "gpt-image-1",
             "coding": "openai-default/gpt-oss:20b",
             "complex_text_generation": "openai-default/gpt-oss:20b",
