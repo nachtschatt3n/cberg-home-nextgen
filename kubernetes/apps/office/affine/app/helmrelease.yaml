@@ -34,6 +34,7 @@ spec:
         strategy: Recreate
         pod:
           annotations:
+            reloader.stakater.com/auto: "true"
             secret.reloader.stakater.com/reload: affine-secret
         initContainers:
           predeploy:
