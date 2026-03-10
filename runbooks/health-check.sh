@@ -374,7 +374,8 @@ log_section "Section 5: Helm Deployments"
     flux get kustomizations -A | head -20
 
     TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
-    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'Applied revision' | grep -v 'NAMESPACE' | wc -l")
+    # Count kustomizations where READY column (col 5) is not True — resilient to mid-reconciliation message changes
+    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | awk '\$5 != \"True\"' | wc -l")
 
     echo ""
     echo "Kustomizations: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
@@ -1185,7 +1186,8 @@ log_section "Section 20: GitOps Status"
     flux get kustomizations -A | head -30
     echo ""
 
-    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'Applied revision' | grep -v 'NAMESPACE' | wc -l")
+    # Count kustomizations where READY column (col 5) is not True — resilient to mid-reconciliation message changes
+    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | awk '\$5 != \"True\"' | wc -l")
     TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
     echo "Kustomization status: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 

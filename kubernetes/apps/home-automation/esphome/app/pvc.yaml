@@ -9,7 +9,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 8Gi
+      storage: 12Gi
   storageClassName: longhorn-static
   volumeName: esphome-config
 
