@@ -55,14 +55,14 @@ data:
           "override_enabled": true,
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
-            "chat": "gpt-oss:20b",
+            "chat": "qwen3:30b-instruct",
             "embedding": "text-embedding-3-small",
             "image": "gpt-image-1",
-            "coding": "gpt-oss:20b",
-            "complex_text_generation": "gpt-oss:20b",
-            "quick_decision_making": "gpt-oss:20b",
-            "quick_text_generation": "gpt-oss:20b",
-            "polish_and_summarize": "gpt-oss:20b"
+            "coding": "qwen3:30b-instruct",
+            "complex_text_generation": "qwen3:30b-instruct",
+            "quick_decision_making": "qwen3:30b-instruct",
+            "quick_text_generation": "qwen3:30b-instruct",
+            "polish_and_summarize": "qwen3:30b-instruct"
           }
         },
         "providers": {
