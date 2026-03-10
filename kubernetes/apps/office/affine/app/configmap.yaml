@@ -55,14 +55,14 @@ data:
           "override_enabled": true,
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
-            "chat": "openai-default/gpt-oss:20b",
-            "embedding": "openai-default/text-embedding-3-small",
+            "chat": "gpt-oss:20b",
+            "embedding": "text-embedding-3-small",
             "image": "gpt-image-1",
-            "coding": "openai-default/gpt-oss:20b",
-            "complex_text_generation": "openai-default/gpt-oss:20b",
-            "quick_decision_making": "openai-default/gpt-oss:20b",
-            "quick_text_generation": "openai-default/gpt-oss:20b",
-            "polish_and_summarize": "openai-default/gpt-oss:20b"
+            "coding": "gpt-oss:20b",
+            "complex_text_generation": "gpt-oss:20b",
+            "quick_decision_making": "gpt-oss:20b",
+            "quick_text_generation": "gpt-oss:20b",
+            "polish_and_summarize": "gpt-oss:20b"
           }
         },
         "providers": {
