@@ -67,7 +67,7 @@ spec:
       EMBEDDING_ENGINE: "ollama"
       EMBEDDING_BASE_PATH: "http://192.168.30.111:11435"
       EMBEDDING_MODEL_PREF: "nomic-embed-text:latest"
-      EMBEDDING_MODEL_MAX_CHUNK_LENGTH: "8192"
+      EMBEDDING_MODEL_MAX_CHUNK_LENGTH: "2048"
       # Vector DB — embedded LanceDB (zero-config, stored in STORAGE_DIR)
       VECTOR_DB: "lancedb"
 
