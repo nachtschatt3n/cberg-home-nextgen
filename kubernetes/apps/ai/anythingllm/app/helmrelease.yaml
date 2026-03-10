@@ -26,6 +26,18 @@ spec:
   uninstall:
     keepHistory: false
 
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: anythingllm
+            patch: |
+              - op: replace
+                path: /spec/strategy
+                value:
+                  type: Recreate
+
   values:
     replicaCount: 1
 
