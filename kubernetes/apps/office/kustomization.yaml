@@ -6,6 +6,7 @@ namespace: office
 components:
   - ../../flux/components/common
 resources:
+ - ./affine/ks.yaml
  - ./actual-budget/ks.yaml
  - ./nextcloud/ks.yaml
  - ./omni-tools/ks.yaml

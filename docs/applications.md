@@ -14,7 +14,7 @@
 | home-automation | 14 |
 | databases | 8 |
 | monitoring | 11 |
-| office | 8 |
+| office | 9 |
 | media | 3 |
 | download | 2 |
 | kube-system | 10 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~78** |
+| **Total** | **~79** |
 
 ---
 
@@ -102,6 +102,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
+| affine | Collaborative knowledge base and workspace | Internal | Office |
 | nextcloud | Self-hosted cloud storage + collaboration | Internal + External | Office |
 | paperless-ngx | Document management with OCR | Internal | Office |
 | paperless-ai | AI document classification (Ollama backend) | None | — |
