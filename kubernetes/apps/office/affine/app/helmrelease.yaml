@@ -179,6 +179,13 @@ spec:
         existingClaim: affine-storage
         globalMounts:
           - path: /root/.affine/storage
+      runtime-config:
+        type: configMap
+        name: affine-configmap
+        globalMounts:
+          - path: /root/.affine/config/config.json
+            subPath: config.json
+            readOnly: true
       tmp:
         type: emptyDir
         globalMounts:
