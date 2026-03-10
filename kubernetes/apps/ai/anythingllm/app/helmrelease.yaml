@@ -77,7 +77,8 @@ spec:
           name: anythingllm-secret
 
     persistentVolume:
-      existingClaim: anythingllm-storage
+      size: 20Gi
+      storageClass: longhorn
 
     service:
       type: ClusterIP
