@@ -39,9 +39,9 @@ data:
         logs_index: logs-generic-default
         mapping:
           mode: otel
-        retry:
+        retry_on_failure:
           enabled: true
-          max_elapsed_time: 5m
+          max_elapsed_time: 300s
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -52,9 +52,9 @@ data:
         metrics_index: metrics-generic.otel-default
         mapping:
           mode: otel
-        retry:
+        retry_on_failure:
           enabled: true
-          max_elapsed_time: 5m
+          max_elapsed_time: 300s
       elasticsearch/traces:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -65,9 +65,9 @@ data:
         traces_index: traces-generic-default
         mapping:
           mode: otel
-        retry:
+        retry_on_failure:
           enabled: true
-          max_elapsed_time: 5m
+          max_elapsed_time: 300s
 
     service:
       extensions: [health_check]
