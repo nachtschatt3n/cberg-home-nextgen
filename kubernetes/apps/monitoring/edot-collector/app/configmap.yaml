@@ -34,7 +34,7 @@ data:
           - https://elasticsearch-es-http.monitoring.svc:9200
         api_key: ${env:ES_API_KEY}
         tls:
-          ca_file: /certs/ca.crt
+          insecure_skip_verify: true
         logs_index: logs-generic-default
         mapping:
           mode: otel
@@ -43,7 +43,7 @@ data:
           - https://elasticsearch-es-http.monitoring.svc:9200
         api_key: ${env:ES_API_KEY}
         tls:
-          ca_file: /certs/ca.crt
+          insecure_skip_verify: true
         metrics_index: metrics-generic.otel-default
         mapping:
           mode: otel
@@ -52,7 +52,7 @@ data:
           - https://elasticsearch-es-http.monitoring.svc:9200
         api_key: ${env:ES_API_KEY}
         tls:
-          ca_file: /certs/ca.crt
+          insecure_skip_verify: true
         traces_index: traces-generic-default
         mapping:
           mode: otel
