@@ -1733,6 +1733,47 @@ kubectl run test-ollama --rm -it --image=busybox --restart=Never -- wget -O- -T 
 - **Critical**: AdGuard Home not running (network DNS broken for IoT/LAN)
 - **Major**: Ollama host unreachable (all AI features degraded)
 
+## 39. Deployment Compliance Check
+
+**Objective**: Verify every user-facing app has AlertManager rules and Elasticsearch log ingestion configured per the new-deployment-blueprint SOP.
+**Success Criteria**: All apps in `ai`, `office`, `home-automation`, `media`, `databases` namespaces have a matching PrometheusRule and logs present in Elasticsearch.
+
+```bash
+# 1. List all PrometheusRules currently registered
+kubectl get prometheusrule -n monitoring -o custom-columns=NAME:.metadata.name --no-headers | sort
+
+# 2. Check which app namespaces have matching alert rules
+for ns in ai office home-automation media databases; do
+  echo "=== $ns ==="
+  kubectl get helmrelease -n $ns -o custom-columns=APP:.metadata.name --no-headers 2>/dev/null | sort | while read app; do
+    rule=$(kubectl get prometheusrule -n monitoring "${app}-alerts" 2>/dev/null && echo "OK" || echo "MISSING")
+    echo "  $app: $rule"
+  done
+done
+
+# 3. Verify Elasticsearch receives logs for the ai namespace apps
+ES_PASS=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &>/dev/null &
+sleep 5
+for app in anythingllm open-webui langfuse; do
+  count=$(curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/fluent-bit-*/_count" \
+    -H "Content-Type: application/json" \
+    -d "{\"query\":{\"bool\":{\"must\":[{\"match\":{\"k8s_namespace_name\":\"ai\"}},{\"match\":{\"k8s_container_name\":\"$app\"}}]}}}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null)
+  echo "  $app log count: $count"
+done
+kill %1 2>/dev/null
+```
+
+**AI Analysis**: Flag any app that is missing a PrometheusRule as a compliance gap. Flag any app with 0 Elasticsearch log entries (if the pod has been running) as a log ingestion issue. Both are mandatory per `docs/sops/new-deployment-blueprint.md`.
+
+**Thresholds:**
+- **Critical**: App with 0 PrometheusRules and 0 logs in Elasticsearch
+- **Warning**: App missing PrometheusRule but logs present
+- **Info**: App with logs but no dedicated alert rule (acceptable for system/infra pods)
+
+---
+
 ## Onboarding New Applications
 
 ### 1. Generic Health Checks
