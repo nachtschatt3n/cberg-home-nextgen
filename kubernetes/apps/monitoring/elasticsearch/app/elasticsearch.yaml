@@ -5,7 +5,7 @@ metadata:
   name: elasticsearch
   namespace: monitoring
 spec:
-  version: 8.15.3
+  version: 8.19.9
   http:
     tls:
       selfSignedCertificate:
