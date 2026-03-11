@@ -13,9 +13,32 @@ spec:
     - name: otel-collector.pipeline.health
       interval: 30s
       rules:
-        # OTel exporter send failures (refused/failed HTTP sends to ES)
+        # ES auth failure — fires when the exporter gets persistent 401/security_exception
+        # from Elasticsearch (bad credentials, rotated secret, API key invalidated).
+        # Uses send_failed metrics which increment on every rejected bulk flush.
+        - alert: EdotCollectorESAuthError
+          expr: |
+            increase(otelcol_exporter_send_failed_log_records{exporter=~"elasticsearch/.*"}[5m]) > 0
+            or
+            increase(otelcol_exporter_send_failed_metric_points{exporter=~"elasticsearch/.*"}[5m]) > 0
+          for: 3m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "edot-collector cannot write to Elasticsearch (auth/connection error)"
+            description: >-
+              edot-collector exporter {{ $labels.exporter }} has been failing to flush
+              to Elasticsearch for 3+ minutes ({{ $value }} records dropped in last 5m).
+              Most likely cause: 401 security_exception — check if the ES password
+              secret was rotated or the user was locked out.
+              Check logs: kubectl logs -n monitoring deployment/edot-collector | grep -i "flush failed"
+              Check secret: kubectl get secret elasticsearch-es-elastic-user -n monitoring
+
+        # General export failures (non-auth: network, ES overload, etc.)
         - alert: OtelCollectorExportFailed
-          expr: increase(otelcol_exporter_send_failed_log_records_total[5m]) > 50
+          expr: increase(otelcol_exporter_send_failed_log_records{exporter=~"elasticsearch/.*"}[5m]) > 500
           for: 10m
           labels:
             severity: warning
