@@ -45,7 +45,7 @@ spec:
                 value:
                   - name: clear-vector-cache
                     image: busybox
-                    command: ["sh", "-c", "rm -rf /storage/vector-cache/* && echo 'Vector cache cleared'"]
+                    command: ["sh", "-c", "rm -rf /storage/vector-cache/* /storage/comkey && echo 'Cache and key files cleared'"]
                     volumeMounts:
                       - name: storage
                         mountPath: /storage
