@@ -33,11 +33,11 @@ spec:
               containerPort: 13133
               protocol: TCP
           env:
-            - name: ES_API_KEY
+            - name: ES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: edot-collector-api-key
-                  key: api_key
+                  name: elasticsearch-es-elastic-user
+                  key: elastic
           resources:
             requests:
               cpu: 100m
@@ -47,9 +47,6 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-              readOnly: true
-            - name: es-certs
-              mountPath: /certs
               readOnly: true
           readinessProbe:
             httpGet:
@@ -69,9 +66,3 @@ spec:
         - name: config
           configMap:
             name: edot-collector-config
-        - name: es-certs
-          secret:
-            secretName: elasticsearch-es-http-certs-public
-            items:
-              - key: tls.crt
-                path: ca.crt

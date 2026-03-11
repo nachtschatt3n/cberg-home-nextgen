@@ -32,7 +32,8 @@ data:
       elasticsearch/logs:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        api_key: ${env:ES_API_KEY}
+        user: elastic
+        password: ${env:ES_PASSWORD}
         tls:
           insecure_skip_verify: true
         logs_index: logs-generic-default
@@ -41,7 +42,8 @@ data:
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        api_key: ${env:ES_API_KEY}
+        user: elastic
+        password: ${env:ES_PASSWORD}
         tls:
           insecure_skip_verify: true
         metrics_index: metrics-generic.otel-default
@@ -50,7 +52,8 @@ data:
       elasticsearch/traces:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        api_key: ${env:ES_API_KEY}
+        user: elastic
+        password: ${env:ES_PASSWORD}
         tls:
           insecure_skip_verify: true
         traces_index: traces-generic-default
