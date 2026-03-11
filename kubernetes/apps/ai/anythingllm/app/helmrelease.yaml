@@ -37,6 +37,18 @@ spec:
                 path: /spec/strategy
                 value:
                   type: Recreate
+              - op: add
+                path: /spec/template/spec/terminationGracePeriodSeconds
+                value: 60
+              - op: add
+                path: /spec/template/spec/initContainers
+                value:
+                  - name: clear-vector-cache
+                    image: busybox
+                    command: ["sh", "-c", "rm -rf /storage/vector-cache/* && echo 'Vector cache cleared'"]
+                    volumeMounts:
+                      - name: storage
+                        mountPath: /storage
           - target:
               kind: Ingress
               name: anythingllm
