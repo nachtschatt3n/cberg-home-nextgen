@@ -19,9 +19,8 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: edot-collector
-          image: docker.elastic.co/elastic/elastic-agent:8.19.9
+          image: otel/opentelemetry-collector-contrib:0.147.0
           args:
-            - otel
             - --config=/config/otel.yml
           ports:
             - name: otlp-grpc
