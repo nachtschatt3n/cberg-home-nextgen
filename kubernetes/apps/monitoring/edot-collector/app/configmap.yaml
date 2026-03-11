@@ -9,10 +9,6 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
-      basicauth/elastic:
-        client_auth:
-          username: elastic
-          password: ${env:ELASTIC_PASSWORD}
 
     receivers:
       otlp:
@@ -36,8 +32,7 @@ data:
       elasticsearch/logs:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        auth:
-          authenticator: basicauth/elastic
+        api_key: ${env:ES_API_KEY}
         tls:
           ca_file: /certs/ca.crt
         logs_index: logs-generic-default
@@ -46,8 +41,7 @@ data:
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        auth:
-          authenticator: basicauth/elastic
+        api_key: ${env:ES_API_KEY}
         tls:
           ca_file: /certs/ca.crt
         metrics_index: metrics-generic.otel-default
@@ -56,8 +50,7 @@ data:
       elasticsearch/traces:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
-        auth:
-          authenticator: basicauth/elastic
+        api_key: ${env:ES_API_KEY}
         tls:
           ca_file: /certs/ca.crt
         traces_index: traces-generic-default
@@ -65,7 +58,7 @@ data:
           mode: otel
 
     service:
-      extensions: [health_check, basicauth/elastic]
+      extensions: [health_check]
       pipelines:
         logs:
           receivers: [otlp]
