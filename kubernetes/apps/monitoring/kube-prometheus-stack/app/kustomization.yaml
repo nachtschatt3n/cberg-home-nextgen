@@ -10,6 +10,7 @@ resources:
   - ./longhorn-alerts.yaml
   - ./authentik-alerts.yaml
   - ./fluent-bit-alerts.yaml
+  - ./anythingllm-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml
   - ./alertmanager-ingress.yaml
