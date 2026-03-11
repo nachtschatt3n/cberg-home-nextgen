@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edot-collector-config
+  namespace: monitoring
+data:
+  otel.yml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+        spike_limit_mib: 100
+      batch:
+        send_batch_size: 1000
+        send_batch_max_size: 1500
+        timeout: 5s
+
+    exporters:
+      elasticsearch/logs:
+        endpoints:
+          - https://elasticsearch-es-http.monitoring.svc:9200
+        user: elastic
+        password: ${env:ELASTIC_PASSWORD}
+        tls:
+          ca_file: /certs/ca.crt
+        logs_index: logs-generic-default
+        mapping:
+          mode: otel
+        retry:
+          enabled: true
+          max_elapsed_time: 5m
+      elasticsearch/metrics:
+        endpoints:
+          - https://elasticsearch-es-http.monitoring.svc:9200
+        user: elastic
+        password: ${env:ELASTIC_PASSWORD}
+        tls:
+          ca_file: /certs/ca.crt
+        metrics_index: metrics-generic.otel-default
+        mapping:
+          mode: otel
+        retry:
+          enabled: true
+          max_elapsed_time: 5m
+      elasticsearch/traces:
+        endpoints:
+          - https://elasticsearch-es-http.monitoring.svc:9200
+        user: elastic
+        password: ${env:ELASTIC_PASSWORD}
+        tls:
+          ca_file: /certs/ca.crt
+        traces_index: traces-generic-default
+        mapping:
+          mode: otel
+        retry:
+          enabled: true
+          max_elapsed_time: 5m
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [elasticsearch/logs]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [elasticsearch/metrics]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [elasticsearch/traces]
+      telemetry:
+        logs:
+          level: info

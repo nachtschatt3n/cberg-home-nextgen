@@ -1,0 +1,85 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-operator
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: opentelemetry-kube-stack
+      version: 0.14.6
+      sourceRef:
+        kind: HelmRepository
+        name: opentelemetry
+        namespace: flux-system
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    crds: CreateReplace
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    clusterName: cberg-home
+
+    opentelemetry-operator:
+      enabled: true
+      admissionWebhooks:
+        certManager:
+          enabled: false
+        autoGenerateCert:
+          enabled: true
+          recreate: true
+      manager:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+    collectors:
+      daemon:
+        enabled: true
+        mode: daemonset
+        tolerations:
+          - effect: NoSchedule
+            operator: Exists
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        presets:
+          logsCollection:
+            enabled: true
+          kubeletMetrics:
+            enabled: true
+          hostMetrics:
+            enabled: true
+          kubernetesAttributes:
+            enabled: true
+          kubernetesEvents:
+            enabled: true
+          clusterMetrics:
+            enabled: true
+        config:
+          exporters:
+            otlp:
+              endpoint: edot-collector.monitoring.svc:4317
+              tls:
+                insecure: true
+          service:
+            pipelines:
+              logs:
+                exporters: [otlp]
+              metrics:
+                exporters: [otlp]
+              traces:
+                exporters: [otlp]

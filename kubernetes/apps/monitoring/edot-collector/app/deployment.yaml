@@ -1,0 +1,78 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edot-collector
+  namespace: monitoring
+  labels:
+    app: edot-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edot-collector
+  template:
+    metadata:
+      labels:
+        app: edot-collector
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: edot-collector
+          image: docker.elastic.co/elastic/elastic-agent:8.19.9
+          args:
+            - otel
+            - --config=/config/otel.yml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-es-elastic-user
+                  key: elastic
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: es-certs
+              mountPath: /certs
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: edot-collector-config
+        - name: es-certs
+          secret:
+            secretName: elasticsearch-es-http-certs-public
+            items:
+              - key: tls.crt
+                path: ca.crt

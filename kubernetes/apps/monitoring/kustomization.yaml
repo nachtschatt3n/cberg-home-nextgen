@@ -13,4 +13,5 @@ resources:
   - ./eck-operator/ks.yaml
   - ./elasticsearch/ks.yaml
   - ./kibana/ks.yaml
-  - ./fluent-bit/ks.yaml
+  - ./edot-collector/ks.yaml
+  - ./otel-operator/ks.yaml
