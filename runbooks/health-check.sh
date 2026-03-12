@@ -2242,12 +2242,71 @@ log_section "Section 33: Battery Health Monitoring"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
-log_section "Section 34: Elasticsearch Application Logs Analysis"
+log_section "Section 34: Elasticsearch & OTel Pipeline Health"
 {
-    echo "Querying Elasticsearch for error patterns in application logs..."
+    echo "Checking Elasticsearch cluster, OTel pipeline, and application log error patterns..."
     echo ""
 
-    # --- Elasticsearch cluster health check + Fluent-bit check (via port-forward with auth) ---
+    # --- OTel Pipeline Component Health (edot-collector + otel-operator) ---
+    echo "=== OTel Pipeline Health ==="
+
+    # edot-collector gateway deployment
+    EDOT_READY=$(kubectl get deployment edot-collector -n monitoring -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    EDOT_DESIRED=$(kubectl get deployment edot-collector -n monitoring -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+    echo "edot-collector: ${EDOT_READY}/${EDOT_DESIRED} ready"
+    if [ "${EDOT_READY}" = "${EDOT_DESIRED}" ] && [ "${EDOT_DESIRED}" != "0" ]; then
+        log_success "edot-collector gateway is running (${EDOT_READY}/${EDOT_DESIRED})"
+    else
+        log_critical "edot-collector gateway not ready (${EDOT_READY}/${EDOT_DESIRED})"
+        add_critical_issue "edot-collector gateway not ready: ${EDOT_READY}/${EDOT_DESIRED}"
+    fi
+
+    # edot-collector pod restarts
+    EDOT_RESTARTS=$(kubectl get pods -n monitoring -l app=edot-collector -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    pods = json.load(sys.stdin)['items']
+    restarts = [cs.get('restartCount', 0) for p in pods for cs in p.get('status', {}).get('containerStatuses', [])]
+    print(max(restarts) if restarts else 0)
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+    echo "edot-collector pod restarts: $EDOT_RESTARTS"
+    if [ "$EDOT_RESTARTS" -gt 5 ]; then
+        log_warning "edot-collector has $EDOT_RESTARTS restarts"
+        add_minor_issue "edot-collector restart count high: $EDOT_RESTARTS"
+    fi
+
+    # otel-operator DaemonSet (daemon collectors per node)
+    OTEL_DAEMON_READY=$(kubectl get daemonset -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    items = json.load(sys.stdin)['items']
+    for ds in items:
+        desired = ds['status'].get('desiredNumberScheduled', 0)
+        ready = ds['status'].get('numberReady', 0)
+        name = ds['metadata']['name']
+        print(f'{name}: {ready}/{desired}')
+except:
+    print('not found')
+" 2>/dev/null || echo "not found")
+    echo "OTel DaemonSet collectors: $OTEL_DAEMON_READY"
+    if echo "$OTEL_DAEMON_READY" | grep -qE "^[^:]+: [0-9]+/[0-9]+$"; then
+        OTEL_R=$(echo "$OTEL_DAEMON_READY" | python3 -c "import sys; parts=sys.stdin.read().strip().split('/'); print(parts[0].split(': ')[1])" 2>/dev/null || echo "0")
+        OTEL_D=$(echo "$OTEL_DAEMON_READY" | python3 -c "import sys; parts=sys.stdin.read().strip().split('/'); print(parts[1])" 2>/dev/null || echo "1")
+        if [ "$OTEL_R" = "$OTEL_D" ] && [ "$OTEL_D" != "0" ]; then
+            log_success "OTel DaemonSet collectors running on all nodes ($OTEL_DAEMON_READY)"
+        else
+            log_warning "OTel DaemonSet collectors not covering all nodes: $OTEL_DAEMON_READY"
+            add_major_issue "OTel DaemonSet not fully ready: $OTEL_DAEMON_READY"
+        fi
+    else
+        log_warning "OTel DaemonSet collectors not found or not running"
+        add_major_issue "OTel DaemonSet collectors not found"
+    fi
+    echo ""
+
+    # --- Elasticsearch Cluster Health ---
     echo "=== Elasticsearch Cluster Health ==="
     ES_PW_EARLY=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
     if [ -n "$ES_PW_EARLY" ]; then
@@ -2269,18 +2328,45 @@ log_section "Section 34: Elasticsearch Application Logs Analysis"
             log_warning "Elasticsearch cluster status unknown: $ES_STATUS"
         fi
 
-        # --- Fluent-bit log shipping check ---
+        # --- OTel data stream ingestion check ---
         echo ""
-        echo "=== Fluent-bit Log Shipping Check ==="
-        FB_CHECK=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/fluent-bit-*/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
-        echo "Fluent-bit documents in Elasticsearch: $FB_CHECK"
-        FB_COUNT_INT=$(echo "$FB_CHECK" | tr -cd '0-9' || echo "0")
-        [ -z "$FB_COUNT_INT" ] && FB_COUNT_INT=0
-        if [ "$FB_COUNT_INT" -eq 0 ]; then
-            log_warning "No Fluent-bit log documents found in Elasticsearch"
-            add_major_issue "Fluent-bit: no log documents found in Elasticsearch"
+        echo "=== OTel Data Stream Ingestion Check ==="
+
+        LOGS_COUNT=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/logs-generic-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        echo "logs-generic-default document count: $LOGS_COUNT"
+        LOGS_COUNT_INT=$(echo "$LOGS_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$LOGS_COUNT_INT" ] && LOGS_COUNT_INT=0
+        if [ "$LOGS_COUNT_INT" -eq 0 ]; then
+            log_warning "No OTel log documents found in logs-generic-default"
+            add_major_issue "OTel: no documents in logs-generic-default data stream"
         else
-            log_success "Fluent-bit log documents present: $FB_COUNT_INT"
+            log_success "OTel log documents present in logs-generic-default: $LOGS_COUNT_INT"
+        fi
+
+        METRICS_COUNT=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/metrics-generic.otel-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        echo "metrics-generic.otel-default document count: $METRICS_COUNT"
+        METRICS_COUNT_INT=$(echo "$METRICS_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$METRICS_COUNT_INT" ] && METRICS_COUNT_INT=0
+        if [ "$METRICS_COUNT_INT" -eq 0 ]; then
+            log_warning "No OTel metric documents found in metrics-generic.otel-default"
+            add_major_issue "OTel: no documents in metrics-generic.otel-default data stream"
+        else
+            log_success "OTel metric documents present in metrics-generic.otel-default: $METRICS_COUNT_INT"
+        fi
+
+        # Recent ingestion check (last 5 minutes)
+        RECENT_LOGS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/logs-generic-default/_count" \
+            -H 'Content-Type: application/json' \
+            -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' 2>/dev/null | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
+        echo "Logs ingested in last 5 minutes: $RECENT_LOGS"
+        RECENT_LOGS_INT=$(echo "$RECENT_LOGS" | tr -cd '0-9' || echo "0")
+        [ -z "$RECENT_LOGS_INT" ] && RECENT_LOGS_INT=0
+        if [ "$RECENT_LOGS_INT" -eq 0 ] && [ "$EDOT_READY" = "$EDOT_DESIRED" ]; then
+            log_warning "No OTel logs ingested in the last 5 minutes (edot-collector is up)"
+            add_major_issue "OTel log ingestion stalled: 0 logs in last 5 minutes"
+        elif [ "$RECENT_LOGS_INT" -gt 0 ]; then
+            log_success "OTel logs flowing: $RECENT_LOGS_INT documents in last 5 minutes"
         fi
 
         kill $ES_PF_PID 2>/dev/null || true
@@ -2289,70 +2375,44 @@ log_section "Section 34: Elasticsearch Application Logs Analysis"
         log_warning "Elasticsearch password not accessible - skipping cluster health check"
     fi
 
-    # Check Fluent-bit pod restarts (independent of ES access)
-    echo ""
-    echo "=== Fluent-bit Pod Health ==="
-    FB_MAX_RESTARTS=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=fluent-bit -o json 2>/dev/null | python3 -c "
-import sys, json
-try:
-    pods = json.load(sys.stdin)['items']
-    restarts = [cs.get('restartCount', 0) for p in pods for cs in p.get('status', {}).get('containerStatuses', [])]
-    print(max(restarts) if restarts else 0)
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-    echo "Fluent-bit max pod restarts: $FB_MAX_RESTARTS"
-    if [ "$FB_MAX_RESTARTS" -gt 5 ]; then
-        log_warning "Fluent-bit pod has $FB_MAX_RESTARTS restarts"
-        add_minor_issue "Fluent-bit pod restart count high: $FB_MAX_RESTARTS"
-    fi
-    echo ""
-
-    # Get Elasticsearch password
+    # Get Elasticsearch password for log error analysis
     ES_PASSWORD=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
 
     if [ -z "$ES_PASSWORD" ]; then
         log_warning "Cannot retrieve Elasticsearch password"
         add_major_issue "Elasticsearch password not accessible"
     else
-        # Port-forward to Elasticsearch
         kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 > /dev/null 2>&1 &
         PF_PID=$!
         sleep 3
 
-        # Get today's index
-        TODAY_INDEX="fluent-bit-$(date +%Y.%m.%d)"
-        echo "Querying index: $TODAY_INDEX"
+        # OTel log data stream -- replaces per-day fluent-bit-YYYY.MM.DD index
+        LOG_DS="logs-generic-default"
+        echo "Querying OTel log data stream: $LOG_DS (last 24h)"
         echo ""
 
-        # Query for error patterns
-        ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+        # Query using OTel severity_text (structured) with body fallback
+        ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
           "query": {
             "bool": {
               "should": [
-                {"match": {"log": "error"}},
-                {"match": {"log": "ERROR"}},
-                {"match": {"log": "fatal"}},
-                {"match": {"log": "FATAL"}},
-                {"match": {"log": "critical"}},
-                {"match": {"log": "CRITICAL"}}
+                {"terms": {"severity_text": ["ERROR", "FATAL", "CRITICAL", "error", "fatal", "critical"]}},
+                {"match": {"body": "error"}},
+                {"match": {"body": "ERROR"}},
+                {"match": {"body": "fatal"}},
+                {"match": {"body": "FATAL"}}
               ],
-              "minimum_should_match": 1
+              "minimum_should_match": 1,
+              "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
           },
           "aggs": {
             "by_namespace": {
-              "terms": {
-                "field": "k8s_namespace_name.keyword",
-                "size": 10
-              }
+              "terms": {"field": "resource.attributes.k8s.namespace.name.keyword", "size": 10}
             },
             "by_pod": {
-              "terms": {
-                "field": "k8s_pod_name.keyword",
-                "size": 10
-              }
+              "terms": {"field": "resource.attributes.k8s.pod.name.keyword", "size": 10}
             }
           }
         }' 2>/dev/null || echo '{"hits":{"total":{"value":0}}}')
@@ -2366,7 +2426,7 @@ except:
     print('0')
 " || echo "0")
 
-        echo "Total errors in logs today: $TOTAL_ERRORS"
+        echo "Total error-level logs in last 24h: $TOTAL_ERRORS"
         echo ""
 
         if [ "$TOTAL_ERRORS" -gt 0 ] && [ "$TOTAL_ERRORS" != "0" ]; then
@@ -2381,7 +2441,6 @@ except:
     print('  Unable to parse data')
 "
             echo ""
-
             echo "Top 5 pods with errors:"
             echo "$ERROR_DATA" | python3 -c "
 import sys, json
@@ -2395,15 +2454,19 @@ except:
             echo ""
         fi
 
-        # Check for specific critical patterns
+        # Critical pattern check -- FATAL severity_text + OOMKilled in body
         echo "Checking for critical error patterns..."
-
-        FATAL_COUNT=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+        FATAL_COUNT=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
           "query": {
-            "query_string": {
-              "query": "*FATAL* OR *OOMKilled*",
-              "default_field": "log"
+            "bool": {
+              "should": [
+                {"terms": {"severity_text": ["FATAL", "fatal"]}},
+                {"match": {"body": "OOMKilled"}},
+                {"match": {"body": "out of memory"}}
+              ],
+              "minimum_should_match": 1,
+              "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
           }
         }' 2>/dev/null | python3 -c "
@@ -2415,17 +2478,14 @@ except:
     print('0')
 " || echo "0")
 
-        echo "  FATAL/OOMKilled errors: $FATAL_COUNT"
+        echo "  FATAL/OOMKilled errors (last 24h): $FATAL_COUNT"
         echo ""
 
-        # Kill port-forward
         kill $PF_PID 2>/dev/null || true
         wait $PF_PID 2>/dev/null || true
 
-        # Categorize by severity
         TOTAL_ERRORS_INT=$(echo "$TOTAL_ERRORS" | tr -cd '0-9' || echo "0")
         [ -z "$TOTAL_ERRORS_INT" ] && TOTAL_ERRORS_INT=0
-
         FATAL_COUNT_INT=$(echo "$FATAL_COUNT" | tr -cd '0-9' || echo "0")
         [ -z "$FATAL_COUNT_INT" ] && FATAL_COUNT_INT=0
 
@@ -2445,6 +2505,7 @@ except:
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
+
 
 log_section "Section 35: Ingress Backend Health"
 {
