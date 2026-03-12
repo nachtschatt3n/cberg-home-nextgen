@@ -1,0 +1,76 @@
+---
+# Bootstraps ILM retention policies for OTel native data streams.
+# Runs once after Elasticsearch is ready; safe to re-run (PUT is idempotent).
+# Retention: logs=14d, metrics=7d, traces=7d
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elasticsearch-otel-ilm-bootstrap
+  namespace: monitoring
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: curlimages/curl:8.18.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: elasticsearch-es-elastic-user
+                  key: elastic
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: es-certs
+              mountPath: /certs
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              ES_URL="https://elasticsearch-es-http.monitoring.svc:9200"
+              CACERT="--cacert /certs/ca.crt"
+              AUTH="-u elastic:${ELASTIC_PASSWORD}"
+
+              # Wait for Elasticsearch to be ready
+              for i in $(seq 1 60); do
+                if curl -sSf $CACERT $AUTH "${ES_URL}" >/dev/null 2>&1; then
+                  echo "Elasticsearch is ready."
+                  break
+                fi
+                echo "Waiting for Elasticsearch ($i/60)..."
+                sleep 5
+              done
+
+              curl -sSf $CACERT $AUTH "${ES_URL}" >/dev/null 2>&1 || {
+                echo "Elasticsearch did not become ready in time." >&2
+                exit 1
+              }
+
+              # Apply ILM policies
+              for policy in logs metrics traces; do
+                echo "Applying ${policy}@lifecycle ..."
+                curl -sSf $CACERT $AUTH \
+                  -H 'Content-Type: application/json' \
+                  -X PUT "${ES_URL}/_ilm/policy/${policy}%40lifecycle" \
+                  --data-binary "@/config/${policy}-lifecycle.json"
+                echo ""
+              done
+
+              echo "OTel ILM policies applied successfully."
+      volumes:
+        - name: config
+          configMap:
+            name: elasticsearch-otel-ilm
+        - name: es-certs
+          secret:
+            secretName: elasticsearch-es-http-certs-public
+            items:
+              - key: tls.crt
+                path: ca.crt

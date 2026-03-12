@@ -6,3 +6,5 @@ components:
 resources:
   - ./secret.sops.yaml
   - ./elasticsearch.yaml
+  - ./otel-ilm-configmap.yaml
+  - ./otel-ilm-job.yaml

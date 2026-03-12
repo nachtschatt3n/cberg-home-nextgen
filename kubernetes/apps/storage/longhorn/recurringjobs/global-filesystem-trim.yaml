@@ -1,0 +1,17 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: global-filesystem-trim
+  namespace: storage
+spec:
+  name: global-filesystem-trim
+  task: filesystem-trim
+  cron: "0 2 * * *"  # Daily at 2 AM (1 hour before backup) — covers all volumes
+  retain: 0
+  concurrency: 2
+  # Applies to every volume in the "default" group (all volumes by default)
+  groups:
+    - default
+  labels:
+    job: global-trim

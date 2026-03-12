@@ -355,10 +355,45 @@ kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmana
 
 Disk capacity thresholds: **Critical** = <15% free, **Major** = 15-25% free. New volume creation will fail silently when a storage pool is full, so this check is important even if all existing volumes appear healthy.
 
+### Recurring Maintenance Schedule
+
+| Time | Job | Scope | Purpose |
+|------|-----|-------|---------|
+| 02:00 | `global-filesystem-trim` | All volumes (default group) | `fstrim` reclaims freed blocks; prevents `actual_size_bytes` growing beyond filesystem usage |
+| Per-volume trim jobs (prometheus, influxdb, etc.) also run at 02:00 | | | Redundant but harmless |
+| 03:00 | `daily-backup-all-volumes` | All volumes (default group) | Remote backup to NAS, retain=7 |
+
+**`LonghornVolumeUsageWarning` alert** fires when `longhorn_volume_actual_size_bytes / capacity ≥ 80%`.
+`actual_size_bytes` counts **all allocated blocks** (filesystem-used + stale/freed blocks + snapshot data).
+Root causes in order of likelihood:
+1. **Stale blocks** — application deleted data but blocks not returned (ES merges, log rotation, Nextcloud cleanup). Fix: run `trimFilesystem` via Longhorn API or UI.
+2. **Snapshot size** — daily backup snapshot captures all blocks at backup time; shrinks naturally the next day after trim + backup cycle.
+3. **Genuine growth** — data approaching capacity; expand the volume.
+
+**Manual trim** (if alert fires before next scheduled trim):
+```bash
+# Via Longhorn UI: Volume → Actions → Trim Filesystem
+# Via API:
+kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
+curl -s -X POST 'http://localhost:8080/v1/volumes/<volume-name>?action=trimFilesystem' \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
 **Manual Investigation** (if storage issues detected):
 ```bash
 # Inspect a specific unhealthy volume
 kubectl describe volume -n storage <volume-name>
+
+# Check snapshot sizes (to distinguish stale-block vs genuine growth)
+kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
+curl -s -X POST 'http://localhost:8080/v1/volumes/<volume-name>?action=snapshotList' \
+  -H 'Content-Type: application/json' -d '{}' | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for s in data.get('data', []):
+    size = int(s.get('size', 0) or 0)
+    print(f\"{s['name']}: {size/1024**3:.2f} GiB\")
+"
 
 # Check Longhorn manager logs for detachment warnings
 kubectl logs -n storage daemonset/longhorn-manager --tail=100 --since=24h | grep -i "detach\|degrad"
@@ -1340,186 +1375,144 @@ echo "- Keep battery stock: CR123A, CR2032, AA, AAA batteries"
 
 ---
 
-## 34. Elasticsearch Application Logs Analysis
+## 34. Elasticsearch & OTel Pipeline Health
 
-**Objective**: Query Elasticsearch for error patterns in application logs
-**Success Criteria**: No recurring critical errors, error rate within acceptable thresholds
+**Objective**: Verify the OTel pipeline (edot-collector gateway + DaemonSet collectors) is running and shipping data to Elasticsearch; query logs for error patterns
+**Success Criteria**: edot-collector running, both OTel data streams non-empty, recent ingestion active, error count within thresholds
 
 **Commands to Execute:**
 ```bash
-# Port-forward to Elasticsearch
+# 1. OTel pipeline component health
+kubectl get deployment edot-collector -n monitoring
+kubectl get pods -n monitoring -l app=edot-collector
+kubectl get daemonset -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator
+
+# 2. Port-forward to Elasticsearch
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
 PF_PID=$!
 sleep 3
-
-# Get Elasticsearch password from secret
 ES_PASSWORD=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 
-# Get today's index name
-TODAY_INDEX="fluent-bit-$(date +%Y.%m.%d)"
+# 3. Cluster health
+curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/_cluster/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Status:', d['status'])"
 
-# Query for error patterns in today's logs
-curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
+# 4. OTel data stream document counts
+curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/logs-generic-default/_count" | python3 -c "import sys,json; print('Logs total:', json.load(sys.stdin)['count'])"
+curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/metrics-generic.otel-default/_count" | python3 -c "import sys,json; print('Metrics total:', json.load(sys.stdin)['count'])"
+
+# 5. Recent ingestion (last 5 minutes)
+curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/logs-generic-default/_count" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' | python3 -c "import sys,json; print('Logs last 5min:', json.load(sys.stdin)['count'])"
+
+# 6. Error pattern query using OTel fields (last 24h)
+# OTel stores severity in severity_text, log body in body, k8s attrs in resource.attributes.*
+curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{
   "size": 0,
   "query": {
     "bool": {
       "should": [
-        {"match": {"log": "error"}},
-        {"match": {"log": "ERROR"}},
-        {"match": {"log": "fatal"}},
-        {"match": {"log": "FATAL"}},
-        {"match": {"log": "critical"}},
-        {"match": {"log": "CRITICAL"}}
+        {"terms": {"severity_text": ["ERROR", "FATAL", "CRITICAL"]}},
+        {"match": {"body": "ERROR"}},
+        {"match": {"body": "FATAL"}}
       ],
-      "minimum_should_match": 1
+      "minimum_should_match": 1,
+      "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
     }
   },
   "aggs": {
-    "by_namespace": {
-      "terms": {
-        "field": "k8s_namespace_name.keyword",
-        "size": 20
-      }
-    },
-    "by_pod": {
-      "terms": {
-        "field": "k8s_pod_name.keyword",
-        "size": 20
-      }
-    },
-    "by_container": {
-      "terms": {
-        "field": "k8s_container_name.keyword",
-        "size": 20
-      }
-    }
+    "by_namespace": {"terms": {"field": "resource.attributes.k8s.namespace.name.keyword", "size": 20}},
+    "by_pod":       {"terms": {"field": "resource.attributes.k8s.pod.name.keyword", "size": 20}},
+    "by_container": {"terms": {"field": "resource.attributes.k8s.container.name.keyword", "size": 20}}
   }
-}' 2>/dev/null | python3 -c "
+}' | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 total = data['hits']['total']['value']
-print(f'Total errors today: {total}')
-print(f'\nTop 10 namespaces with errors:')
-for bucket in data['aggregations']['by_namespace']['buckets'][:10]:
-    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
-print(f'\nTop 10 pods with errors:')
-for bucket in data['aggregations']['by_pod']['buckets'][:10]:
-    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
-print(f'\nTop 10 containers with errors:')
-for bucket in data['aggregations']['by_container']['buckets'][:10]:
-    print(f'  {bucket[\"key\"]}: {bucket[\"doc_count\"]}')
+print(f'Total error-level logs (24h): {total}')
+print('\nTop 10 namespaces:')
+for b in data['aggregations']['by_namespace']['buckets'][:10]:
+    print(f'  {b[\"key\"]}: {b[\"doc_count\"]}')
+print('\nTop 10 pods:')
+for b in data['aggregations']['by_pod']['buckets'][:10]:
+    print(f'  {b[\"key\"]}: {b[\"doc_count\"]}')
 "
 
-# Query for specific known error patterns
-echo ""
-echo "Checking for specific error patterns:"
-
-# kube-apiserver 'empty key' errors
-EMPTY_KEY_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
-  "size": 0,
-  "query": {
-    "query_string": {
-      "query": "*empty key*",
-      "default_field": "log"
-    }
-  }
-}' 2>/dev/null | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(data['hits']['total']['value'])
-" || echo "0")
-
-echo "  kube-apiserver 'empty key' errors: $EMPTY_KEY_ERRORS"
-
-# OOM errors
-OOM_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
-  "size": 0,
-  "query": {
-    "query_string": {
-      "query": "*OOMKilled* OR *out of memory*",
-      "default_field": "log"
-    }
-  }
-}' 2>/dev/null | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(data['hits']['total']['value'])
-" || echo "0")
-
-echo "  OOM/out of memory errors: $OOM_ERRORS"
-
-# Network errors
-NETWORK_ERRORS=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
-  "size": 0,
-  "query": {
-    "query_string": {
-      "query": "*connection refused* OR *timeout* OR *connection reset*",
-      "default_field": "log"
-    }
-  }
-}' 2>/dev/null | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print(data['hits']['total']['value'])
-" || echo "0")
-
-echo "  Network-related errors: $NETWORK_ERRORS"
-
-# Get recent critical errors (last 10)
-echo ""
-echo "Recent critical errors (last 10):"
-curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${TODAY_INDEX}/_search" -H 'Content-Type: application/json' -d '{
-  "size": 10,
+# 7. FATAL/OOMKilled check
+curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{
+  "size": 5,
   "query": {
     "bool": {
       "should": [
-        {"match": {"log": "CRITICAL"}},
-        {"match": {"log": "FATAL"}},
-        {"match": {"log": "OOMKilled"}}
+        {"terms": {"severity_text": ["FATAL"]}},
+        {"match": {"body": "OOMKilled"}},
+        {"match": {"body": "out of memory"}}
       ],
-      "minimum_should_match": 1
+      "minimum_should_match": 1,
+      "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
     }
   },
-  "sort": [
-    {
-      "@timestamp": {
-        "order": "desc"
-      }
-    }
-  ],
-  "_source": ["@timestamp", "log", "k8s_pod_name", "k8s_namespace_name"]
-}' 2>/dev/null | python3 -c "
+  "sort": [{"@timestamp": {"order": "desc"}}],
+  "_source": ["@timestamp", "body", "resource.attributes.k8s.pod.name", "resource.attributes.k8s.namespace.name"]
+}' | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
+print(f'FATAL/OOM hits (24h): {data[\"hits\"][\"total\"][\"value\"]}')
 for hit in data['hits']['hits']:
     src = hit['_source']
-    ts = src.get('@timestamp', 'N/A')
-    pod = src.get('k8s_pod_name', 'N/A')
-    ns = src.get('k8s_namespace_name', 'N/A')
-    log = src.get('log', 'N/A')
-    if len(log) > 100:
-        log = log[:100] + '...'
-    print(f'{ts} [{ns}/{pod}]: {log}')
+    ts  = src.get('@timestamp', 'N/A')
+    ns  = src.get('resource.attributes.k8s.namespace.name', 'N/A')
+    pod = src.get('resource.attributes.k8s.pod.name', 'N/A')
+    msg = str(src.get('body', 'N/A'))[:120]
+    print(f'  {ts} [{ns}/{pod}]: {msg}')
 "
 
-# Kill port-forward
 kill $PF_PID 2>/dev/null || true
 wait $PF_PID 2>/dev/null || true
 ```
 
+**OTel Field Reference** (replaces old Fluent-bit fields):
+| Old Fluent-bit field | OTel field |
+|---|---|
+| `log` | `body` |
+| `severity` / text match | `severity_text` (keyword: ERROR, WARN, FATAL…) |
+| `k8s_namespace_name` | `resource.attributes.k8s.namespace.name` |
+| `k8s_pod_name` | `resource.attributes.k8s.pod.name` |
+| `k8s_container_name` | `resource.attributes.k8s.container.name` |
+| `fluent-bit-YYYY.MM.DD` index | `logs-generic-default` data stream |
+| (metrics) | `metrics-generic.otel-default` data stream |
+
+**ILM Retention** (managed by `elasticsearch-otel-ilm-bootstrap` Job + `otel-ilm-configmap`):
+| Data stream | Policy | Retention |
+|---|---|---|
+| `logs-generic-default` | `logs@lifecycle` | 14 days |
+| `metrics-generic.otel-default` | `metrics@lifecycle` | 7 days |
+| `traces-generic-default` | `traces@lifecycle` | 7 days |
+
+Expected storage at current ingest rate (~2.2 GiB/day metrics, ~360 MiB/day logs): ≈ 20 GiB / 50 GiB volume.
+To check current data stream sizes:
+```bash
+kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
+ES_PASSWORD=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/_cat/indices/.ds-logs*,.ds-metrics*,.ds-traces*?format=json&h=index,store.size,docs.count&s=store.size:desc&bytes=mb" | python3 -c "
+import sys, json
+for i in json.load(sys.stdin):
+    print(f\"{i['index']}: {i['store.size']} MiB, {i['docs.count']} docs\")
+"
+```
+
 **AI Analysis**:
-- Aggregate error counts by namespace, pod, and container
-- Identify recurring error patterns that need attention
-- Distinguish between benign errors (e.g., kube-apiserver 'empty key') and critical issues
-- Flag any OOM, fatal, or critical errors for immediate investigation
-- Compare error rates with baseline to identify anomalies
-- **Note**: Some errors like kube-apiserver "empty key" may be normal background noise and can be tracked for trends rather than treated as critical
+- Verify edot-collector deployment is 1/1 ready and DaemonSet covers all 3 nodes
+- Confirm both OTel data streams have documents and recent ingestion is active (>0 in last 5 min)
+- Aggregate error counts by namespace and pod using OTel field names
+- Flag any FATAL severity_text or OOMKilled body matches for immediate investigation
+- `external-dns` FATAL log entries (Cloudflare sync failures) are a **known false positive** — classify as MINOR; it auto-recovers
 
 **Error Rate Thresholds:**
 - **Normal**: <1000 errors/day (mostly benign)
 - **Monitor**: 1000-5000 errors/day (review error patterns)
 - **Warning**: 5000-10000 errors/day (investigate top error sources)
-- **Critical**: >10000 errors/day or any FATAL/OOMKilled errors
+- **Critical**: >10000 errors/day or any FATAL/OOMKilled errors (excluding external-dns)
 
 ---
 
@@ -1751,14 +1744,15 @@ for ns in ai office home-automation media databases; do
   done
 done
 
-# 3. Verify Elasticsearch receives logs for the ai namespace apps
+# 3. Verify Elasticsearch receives OTel logs for the ai namespace apps
+# Note: OTel uses data stream logs-generic-default with resource.attributes.* fields
 ES_PASS=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &>/dev/null &
 sleep 5
 for app in anythingllm open-webui langfuse; do
-  count=$(curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/fluent-bit-*/_count" \
+  count=$(curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" \
     -H "Content-Type: application/json" \
-    -d "{\"query\":{\"bool\":{\"must\":[{\"match\":{\"k8s_namespace_name\":\"ai\"}},{\"match\":{\"k8s_container_name\":\"$app\"}}]}}}" \
+    -d "{\"query\":{\"bool\":{\"must\":[{\"term\":{\"resource.attributes.k8s.namespace.name\":\"ai\"}},{\"term\":{\"resource.attributes.k8s.container.name\":\"$app\"}}]}}}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null)
   echo "  $app log count: $count"
 done
