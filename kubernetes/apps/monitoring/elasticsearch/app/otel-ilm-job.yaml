@@ -36,7 +36,7 @@ spec:
               set -euo pipefail
               ES_URL="https://elasticsearch-es-http.monitoring.svc:9200"
               CACERT="--cacert /certs/ca.crt"
-              AUTH="-u elastic:${ELASTIC_PASSWORD}"
+              AUTH="-u elastic:$${ELASTIC_PASSWORD}"
 
               # Wait for Elasticsearch to be ready
               for i in $(seq 1 60); do
