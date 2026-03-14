@@ -40,7 +40,7 @@ spec:
 
               # Wait for Elasticsearch to be ready
               for i in $(seq 1 60); do
-                if curl -sSf $CACERT $AUTH "${ES_URL}" >/dev/null 2>&1; then
+                if curl -sSf $CACERT $AUTH "$${ES_URL}" >/dev/null 2>&1; then
                   echo "Elasticsearch is ready."
                   break
                 fi
@@ -48,18 +48,18 @@ spec:
                 sleep 5
               done
 
-              curl -sSf $CACERT $AUTH "${ES_URL}" >/dev/null 2>&1 || {
+              curl -sSf $CACERT $AUTH "$${ES_URL}" >/dev/null 2>&1 || {
                 echo "Elasticsearch did not become ready in time." >&2
                 exit 1
               }
 
               # Apply ILM policies
               for policy in logs metrics traces; do
-                echo "Applying ${policy}@lifecycle ..."
+                echo "Applying $${policy}@lifecycle ..."
                 curl -sSf $CACERT $AUTH \
                   -H 'Content-Type: application/json' \
-                  -X PUT "${ES_URL}/_ilm/policy/${policy}%40lifecycle" \
-                  --data-binary "@/config/${policy}-lifecycle.json"
+                  -X PUT "$${ES_URL}/_ilm/policy/$${policy}%40lifecycle" \
+                  --data-binary "@/config/$${policy}-lifecycle.json"
                 echo ""
               done
 
