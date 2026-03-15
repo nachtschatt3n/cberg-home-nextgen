@@ -47,6 +47,7 @@ All three nodes connect to Basement-SW-24-PoE.
 | UNAS-CBERG (NAS) | 192.168.31.230 | Bulk storage, SMB/NFS shares, backups |
 | Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (Voice/Reason/Vision) |
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
+| AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 
 **Mac Mini M4 Pro:**
@@ -87,7 +88,7 @@ manages all subsequent deployments including upgrades to these components.
 | OS | Talos Linux v1.11.0 (immutable, minimal, Kubernetes-focused) |
 | Container Runtime | Containerd 2.1.4 + Spegel (distributed image caching) |
 | CNI | Cilium v1.18.6 (eBPF networking, load balancing, network policies) |
-| DNS | CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
+| DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
 | Storage | Longhorn v1.10.1 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.19.3 + Let's Encrypt |

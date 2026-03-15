@@ -279,9 +279,10 @@ ping 192.168.31.230
 # Verify cross-VLAN routing
 traceroute {destination-ip}
 
-# Check DNS resolution
+# Check DNS resolution (default DNS server: AdGuard Home at 192.168.55.5)
 nslookup {hostname}
 dig {hostname}
+dig @192.168.55.5 {hostname}
 
 # Check network interfaces on nodes (via kubectl exec or talosctl)
 kubectl exec -n {namespace} {pod} -- ip addr
