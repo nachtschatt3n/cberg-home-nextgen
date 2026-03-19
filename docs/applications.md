@@ -13,7 +13,7 @@
 | ai | 6 |
 | home-automation | 14 |
 | databases | 8 |
-| monitoring | 11 |
+| monitoring | 12 |
 | office | 9 |
 | media | 3 |
 | download | 2 |
@@ -93,7 +93,8 @@
 | elasticsearch | Elasticsearch cluster (via ECK) | Internal | Monitoring |
 | elasticsearch-bootstrap | Initial ES index/ILM configuration job | None | — |
 | elasticsearch-exporter | Prometheus exporter for ES metrics | None | — |
-| fluent-bit | Log shipping from cluster to Elasticsearch | None | — |
+| edot-collector | Log collection and forwarding to Elasticsearch (EDOT) | None | — |
+| otel-operator | OpenTelemetry Operator for collector management | None | — |
 | kibana | Kibana log analytics UI | Internal | Monitoring |
 | unpoller | UniFi metrics exporter for Prometheus | None | — |
 

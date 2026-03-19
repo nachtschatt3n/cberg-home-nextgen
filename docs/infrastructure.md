@@ -18,7 +18,7 @@ and worker).
 | Flux | v2.8.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.18.6 |
-| Storage | Longhorn v1.10.1 |
+| Storage | Longhorn v1.10.2 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
 | Auth | Authentik |
@@ -90,7 +90,7 @@ manages all subsequent deployments including upgrades to these components.
 | CNI | Cilium v1.18.6 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
-| Storage | Longhorn v1.10.1 (distributed, replicated, with backup) |
+| Storage | Longhorn v1.10.2 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.19.3 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward auth for all ingress) |
@@ -136,7 +136,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
-| ai | AI/ML services | ~5 |
+| ai | AI/ML services | ~6 |
 | home-automation | Smart home integrations | ~13 |
 | databases | Database backends | ~8 |
 | monitoring | Observability stack | ~10 |
@@ -163,7 +163,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Talos Linux | v1.11.0 | Cluster OS |
 | Flux | v2.8.0 | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
-| Longhorn | v1.10.1 | Distributed storage |
+| Longhorn | v1.10.2 | Distributed storage |
 | cert-manager | v1.19.3 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |

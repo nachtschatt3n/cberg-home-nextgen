@@ -1,7 +1,7 @@
 # SOP: Monitoring & Observability
 
 > Standard Operating Procedures for the cluster monitoring stack.
-> Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + Fluent-bit).
+> Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
 > Version: `2026.03.01`
 > Last Updated: `2026-03-01`
@@ -25,7 +25,8 @@ alerts, dashboards, and log pipeline health.
 | Alertmanager | Alert routing and notifications | monitoring |
 | Elasticsearch | Log storage (via ECK) | monitoring |
 | Kibana | Log analytics UI | monitoring |
-| Fluent-bit | Log collection and forwarding | monitoring |
+| edot-collector | Log collection and forwarding (EDOT) | monitoring |
+| OTel Operator | OpenTelemetry operator for collector management | monitoring |
 | Uptime Kuma | Service uptime monitoring | monitoring |
 | Headlamp | Kubernetes web UI | monitoring |
 | Unpoller | UniFi metrics exporter | monitoring |
@@ -47,7 +48,7 @@ Source-of-truth manifests:
 
 1. Validate component pod health in `monitoring`.
 2. Check Prometheus targets and active alerts.
-3. Validate Grafana dashboards and log ingestion path (Fluent-bit -> Elasticsearch -> Kibana).
+3. Validate Grafana dashboards and log ingestion path (edot-collector -> Elasticsearch -> Kibana).
 4. Investigate and resolve warnings/events before closing.
 
 ---
@@ -263,7 +264,7 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9
 
 ---
 
-## ELK Stack (Elasticsearch + Kibana + Fluent-bit)
+## ELK Stack (Elasticsearch + Kibana + edot-collector)
 
 ### Elasticsearch Access
 
@@ -282,12 +283,12 @@ curl -k -u elastic:${ELASTIC_PASS} https://localhost:9200/_cluster/health?pretty
 curl -k -u elastic:${ELASTIC_PASS} https://localhost:9200/_cat/indices?v
 
 # Query recent logs
-curl -k -u elastic:${ELASTIC_PASS} https://localhost:9200/fluent-bit-*/_search \
+curl -k -u elastic:${ELASTIC_PASS} https://localhost:9200/logs-generic-default/_search \
   -H "Content-Type: application/json" \
   -d '{"query":{"range":{"@timestamp":{"gte":"now-1h"}}},"size":10,"sort":[{"@timestamp":"desc"}]}'
 ```
 
-**Note:** Fluent-bit and similar minimal containers don't have `cat`, `curl`, or `wget`.
+**Note:** edot-collector and similar minimal containers don't have `cat`, `curl`, or `wget`.
 Always use port-forward from your local machine for Elasticsearch access.
 
 ### Kibana Access
@@ -304,28 +305,27 @@ kubectl port-forward -n monitoring svc/kibana-kb-http 5601:5601 &
 ### Log Investigation Workflow
 
 1. Open Kibana → Discover
-2. Select index pattern `fluent-bit-*`
+2. Select index pattern `logs-generic-default`
 3. Set time range (e.g., last 1 hour)
 4. Filter by `kubernetes.namespace.name: {namespace}`
 5. Search for errors: `log: error OR log: Error OR log: ERROR`
 
-### Fluent-bit
+### edot-collector
 
 ```bash
-# Check Fluent-bit DaemonSet status
-kubectl get daemonset fluent-bit -n monitoring
+# Check edot-collector Deployment status
+kubectl get deployment edot-collector -n monitoring
 
-# Check pods on all nodes
-kubectl get pods -n monitoring -l app.kubernetes.io/name=fluent-bit
+# Check pod
+kubectl get pods -n monitoring -l app.kubernetes.io/name=edot-collector
 
-# View logs (Fluent-bit has minimal utilities — use port-forward for API)
-kubectl logs -n monitoring -l app.kubernetes.io/name=fluent-bit --tail=20
+# View logs (edot-collector has minimal utilities — use port-forward for API)
+kubectl logs -n monitoring -l app.kubernetes.io/name=edot-collector --tail=20
 
-# Check Fluent-bit health API (via port-forward)
-POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=fluent-bit -o name | head -1)
-kubectl port-forward -n monitoring ${POD} 2020:2020 &
-curl http://localhost:2020/api/v1/health
-curl http://localhost:2020/api/v1/metrics
+# Check edot-collector health API (via port-forward)
+POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=edot-collector -o name | head -1)
+kubectl port-forward -n monitoring ${POD} 13133:13133 &
+curl http://localhost:13133/
 ```
 
 ---
@@ -468,17 +468,17 @@ kubectl logs -n monitoring -l app.kubernetes.io/name=prometheus --tail=50 | grep
 kubectl logs -n monitoring -l app.kubernetes.io/name=grafana --tail=50
 ```
 
-### Fluent-bit Not Shipping Logs
+### edot-collector Not Shipping Logs
 
 ```bash
-# Check Fluent-bit output config
-kubectl get configmap -n monitoring fluent-bit -o yaml | grep -A20 "OUTPUT"
+# Check edot-collector configmap
+kubectl get configmap -n monitoring edot-collector -o yaml | grep -A20 "exporters"
 
-# Fluent-bit image is minimal; avoid relying on cat/curl/wget in pod
-POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=fluent-bit -o name | head -1)
-kubectl port-forward -n monitoring ${POD} 2020:2020 &
-curl http://localhost:2020/api/v1/health
-curl http://localhost:2020/api/v1/metrics
+# edot-collector image is minimal; avoid relying on cat/curl/wget in pod
+POD=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=edot-collector -o name | head -1)
+kubectl port-forward -n monitoring ${POD} 13133:13133 &
+curl http://localhost:13133/
+kubectl logs -n monitoring ${POD} --tail=50 | grep -i "error\|warn\|fail"
 ```
 
 ---
@@ -499,17 +499,17 @@ Expected:
 If unclear:
 - Port-forward target service and test `/metrics` manually.
 
-### Diagnose Example 2: Fluent-bit Not Shipping Logs
+### Diagnose Example 2: edot-collector Not Shipping Logs
 
 ```bash
-kubectl get daemonset fluent-bit -n monitoring
-kubectl logs -n monitoring -l app.kubernetes.io/name=fluent-bit --tail=100
-kubectl port-forward -n monitoring $(kubectl get pod -n monitoring -l app.kubernetes.io/name=fluent-bit -o name | head -1) 2020:2020 &
-curl http://localhost:2020/api/v1/health
+kubectl get deployment edot-collector -n monitoring
+kubectl logs -n monitoring -l app.kubernetes.io/name=edot-collector --tail=100
+kubectl port-forward -n monitoring $(kubectl get pod -n monitoring -l app.kubernetes.io/name=edot-collector -o name | head -1) 13133:13133 &
+curl http://localhost:13133/
 ```
 
 Expected:
-- Health/metrics clarify pipeline failure location.
+- Health endpoint and logs clarify pipeline failure location.
 
 If unclear:
 - Verify Elasticsearch cluster health and index status.
