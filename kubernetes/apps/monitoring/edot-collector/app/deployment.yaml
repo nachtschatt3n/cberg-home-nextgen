@@ -15,6 +15,8 @@ spec:
       app: edot-collector
   template:
     metadata:
+      annotations:
+        cberg.dev/rollout-revision: "2026-03-19.1"
       labels:
         app: edot-collector
     spec:
