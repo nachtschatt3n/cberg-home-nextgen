@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.03.20`
+> Last Updated: `2026-03-20`
 > Owner: `Platform`
 
 ---

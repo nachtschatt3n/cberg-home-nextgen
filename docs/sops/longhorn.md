@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.03.20`
+> Last Updated: `2026-03-20`
 > Owner: `Platform`
 
 ---
