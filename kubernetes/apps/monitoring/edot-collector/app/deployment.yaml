@@ -4,6 +4,8 @@ kind: Deployment
 metadata:
   name: edot-collector
   namespace: monitoring
+  annotations:
+    reloader.stakater.com/auto: "true"
   labels:
     app: edot-collector
 spec:
