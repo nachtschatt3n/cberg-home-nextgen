@@ -1840,7 +1840,7 @@ log_section "Section 24a: Network Infrastructure Services"
     fi
     echo ""
 
-    # k8s-gateway — internal DNS for *.internal.uhl.cool (cluster-local DNS)
+    # k8s-gateway — internal DNS for *.internal.${SECRET_DOMAIN} (cluster-local DNS)
     echo "k8s-gateway:"
     kubectl get pods -n network -l app.kubernetes.io/name=k8s-gateway 2>/dev/null || echo "k8s-gateway not found"
     K8SGW_ENDPOINTS=$(kubectl get endpoints -n network k8s-gateway -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || echo "")

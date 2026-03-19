@@ -72,7 +72,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 |-------|-----------|-------|---------|-----------|
 | 1 | Cilium | `cilium/cilium` | 1.17.1 | kube-system |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.45.2 | kube-system |
-| 3 | cert-manager | `jetstack/cert-manager` | v1.19.3 | cert-manager |
+| 3 | cert-manager | `jetstack/cert-manager` | v1.20.0 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.14.0 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.14.0 | flux-system |
 
@@ -91,7 +91,7 @@ manages all subsequent deployments including upgrades to these components.
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
 | Storage | Longhorn v1.10.2 (distributed, replicated, with backup) |
-| Certificate Management | cert-manager v1.19.3 + Let's Encrypt |
+| Certificate Management | cert-manager v1.20.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward auth for all ingress) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
@@ -164,7 +164,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Flux | v2.8.0 | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
 | Longhorn | v1.10.2 | Distributed storage |
-| cert-manager | v1.19.3 | TLS management |
+| cert-manager | v1.20.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |
 | talosctl | 1.11.0 | Talos CLI (server); client v1.12.4 |
