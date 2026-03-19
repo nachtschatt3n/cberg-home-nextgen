@@ -26,7 +26,7 @@ data:
       filter/drop-malformed-json-log-keys:
         error_mode: ignore
         log_conditions:
-          - 'IsString(log.body) and IsMatch(log.body, "(?s)^\\s*\\{.*(?:\\"\\.[^\\"]*\\"\\s*:|\\"[^\\"]*\\.\\.[^\\"]*\\"\\s*:|\\"[^\\"]*\\.\\"\\s*:).*")'
+          - 'IsString(log.body) and IsMatch(log.body, "(?s)^\\s*\\{.*(?:\"\\.[^\"]*\"\\s*:|\"[^\"]*\\.\\.[^\"]*\"\\s*:|\"[^\"]*\\.\"\\s*:).*")'
       batch:
         send_batch_size: 1000
         send_batch_max_size: 1500
