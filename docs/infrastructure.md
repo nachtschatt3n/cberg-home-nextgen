@@ -13,8 +13,8 @@ and worker).
 
 | Attribute | Value |
 |-----------|-------|
-| Kubernetes | v1.34.0 |
-| Talos Linux | v1.11.0 |
+| Kubernetes | v1.34.5 |
+| Talos Linux | v1.11.6 |
 | Flux | v2.8.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.18.6 |
@@ -70,7 +70,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
-| 1 | Cilium | `cilium/cilium` | 1.17.1 | kube-system |
+| 1 | Cilium | `cilium/cilium` | 1.17.1 | kube-system | (bootstrap seed; Flux upgrades to v1.18.6 via HelmRelease) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.45.2 | kube-system |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.20.0 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.14.0 | flux-system |
@@ -85,7 +85,7 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.11.0 (immutable, minimal, Kubernetes-focused) |
+| OS | Talos Linux v1.11.6 (immutable, minimal, Kubernetes-focused) |
 | Container Runtime | Containerd 2.1.4 + Spegel (distributed image caching) |
 | CNI | Cilium v1.18.6 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
@@ -159,8 +159,8 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Kubernetes | v1.34.0 | Container orchestration |
-| Talos Linux | v1.11.0 | Cluster OS |
+| Kubernetes | v1.34.5 | Container orchestration |
+| Talos Linux | v1.11.6 | Cluster OS |
 | Flux | v2.8.0 | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
 | Longhorn | v1.10.2 | Distributed storage |
