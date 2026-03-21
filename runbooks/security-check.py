@@ -900,6 +900,109 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def _nvd_unifi_cves(version: str | None) -> list[dict]:
+    """Query NVD API 2.0 for UniFi Network Application CVEs.
+
+    Returns a list of dicts with keys: id, description, score, fixed_in, affects_current.
+    `affects_current` is True/False when version is known, None when version is unknown.
+    """
+
+    def _parse_ver(v: str) -> tuple:
+        return tuple(int(x) for x in re.split(r"[.\-]", v) if x.isdigit())
+
+    cur = _parse_ver(version) if version else None
+    results: list[dict] = []
+
+    url = (
+        "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        "?keywordSearch=UniFi+Network+Application&resultsPerPage=100"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "homelab-security-check/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+    except Exception:
+        return []
+
+    for vuln in data.get("vulnerabilities", []):
+        cve = vuln.get("cve", {})
+        cve_id = cve.get("id", "")
+        status = cve.get("vulnStatus", "")
+        if status in ("Rejected", "Disputed"):
+            continue
+
+        # English description
+        desc = next(
+            (d.get("value", "")[:180] for d in cve.get("descriptions", []) if d.get("lang") == "en"),
+            "",
+        )
+
+        # CVSS base score (prefer v3.1 → v3.0 → v2)
+        score: float | None = None
+        for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+            metrics = cve.get("metrics", {}).get(key, [])
+            if metrics:
+                score = metrics[0].get("cvssData", {}).get("baseScore")
+                break
+
+        # Walk CPE match entries to find version ranges for UniFi Network Application
+        affects_current: bool | None = None  # None = unknown
+        fixed_in: str | None = None
+
+        for config in cve.get("configurations", []):
+            for node in config.get("nodes", []):
+                for match in node.get("cpeMatch", []):
+                    if not match.get("vulnerable", False):
+                        continue
+                    criteria = match.get("criteria", "").lower()
+                    # Only care about UniFi Network Application CPEs
+                    if "unifi" not in criteria or ("network" not in criteria and "unifi_controller" not in criteria):
+                        continue
+
+                    ve_excl = match.get("versionEndExcluding")
+                    ve_incl = match.get("versionEndIncluding")
+                    vs_incl = match.get("versionStartIncluding")
+                    vs_excl = match.get("versionStartExcluding")
+
+                    if cur is None:
+                        # Version unknown — flag as potentially affected
+                        affects_current = None
+                        fixed_in = ve_excl or (f">{ve_incl}" if ve_incl else None)
+                    else:
+                        in_range = True
+                        if vs_incl:
+                            in_range = cur >= _parse_ver(vs_incl)
+                        elif vs_excl:
+                            in_range = cur > _parse_ver(vs_excl)
+                        if in_range and ve_excl:
+                            in_range = cur < _parse_ver(ve_excl)
+                            if in_range:
+                                fixed_in = ve_excl
+                        elif in_range and ve_incl:
+                            in_range = cur <= _parse_ver(ve_incl)
+                            if in_range:
+                                fixed_in = f">{ve_incl}"
+                        if in_range:
+                            affects_current = True
+
+                if affects_current is True:
+                    break
+            if affects_current is True:
+                break
+
+        # Include if it affects current version, or if version is unknown and CVE has UniFi CPE
+        if affects_current is True or (cur is None and affects_current is None and fixed_in is not None):
+            results.append({
+                "id": cve_id,
+                "description": desc,
+                "score": score,
+                "fixed_in": fixed_in,
+                "affects_current": affects_current,
+            })
+
+    return results
+
+
 def s11_unifi() -> tuple[str, Findings, str]:
     section_header(11, "UniFi Network Security Audit")
     f = Findings()
@@ -912,16 +1015,10 @@ def s11_unifi() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, "  🟡 unifictl session expired")
         return f.worst(), f, f.markdown()
 
-    # --- UniFi Network Application version check ---
-    UNIFI_MIN_SAFE = "7.5.187"
-    UNIFI_CVES = ["CVE-2023-41721", "CVE-2026-22557"]
-
-    def _parse_ver(v: str) -> tuple:
-        return tuple(int(x) for x in re.split(r"[.\-]", v) if x.isdigit())
-
+    # --- UniFi Network Application version check (NVD-backed) ---
     unifi_version: str | None = None
 
-    # Attempt 1: unifictl health JSON (may expose version field)
+    # Attempt 1: unifictl health JSON
     health_json = run("unifictl local health get -o json 2>/dev/null", timeout=10)
     try:
         hdata = json.loads(health_json)
@@ -938,7 +1035,7 @@ def s11_unifi() -> tuple[str, Findings, str]:
     except Exception:
         pass
 
-    # Attempt 2: direct HTTPS sysinfo (works on some controller configs)
+    # Attempt 2: direct HTTPS sysinfo
     if not unifi_version:
         try:
             import ssl
@@ -957,21 +1054,35 @@ def s11_unifi() -> tuple[str, Findings, str]:
         except Exception:
             pass
 
-    cves_str = ", ".join(UNIFI_CVES)
+    ver_label = unifi_version or "unknown"
+    cprint(C.CYAN, f"  Querying NVD for UniFi Network Application CVEs (version: {ver_label})...")
+    nvd_cves = _nvd_unifi_cves(unifi_version)
+
     if unifi_version:
-        try:
-            if _parse_ver(unifi_version) < _parse_ver(UNIFI_MIN_SAFE):
-                f.add(CRITICAL, f"UniFi Network Application {unifi_version} < {UNIFI_MIN_SAFE} — {cves_str}")
-                cprint(C.RED, f"  🔴 UniFi {unifi_version} < {UNIFI_MIN_SAFE} — {cves_str}")
-            else:
-                cprint(C.GREEN, f"  🟢 UniFi Network Application {unifi_version} ≥ {UNIFI_MIN_SAFE}")
-        except Exception:
-            f.add(WARNING, f"Could not parse UniFi version: `{unifi_version}`")
-        lines.append(f"UniFi Network Application: **{unifi_version}** (min required: {UNIFI_MIN_SAFE} for {cves_str})\n")
+        lines.append(f"UniFi Network Application: **{unifi_version}**\n")
     else:
-        f.add(WARNING, f"UniFi Network Application version unknown — verify manually ≥ {UNIFI_MIN_SAFE} ({cves_str})")
-        cprint(C.YELLOW, f"  🟡 UniFi version unknown — check manually ≥ {UNIFI_MIN_SAFE} ({cves_str})")
-        lines.append(f"UniFi Network Application: **unknown** — verify ≥ {UNIFI_MIN_SAFE} for {cves_str}\n")
+        f.add(WARNING, "UniFi Network Application version unknown — NVD check is best-effort")
+        cprint(C.YELLOW, "  🟡 UniFi version unknown — CVE check is best-effort")
+        lines.append("UniFi Network Application: **unknown**\n")
+
+    if nvd_cves:
+        for c in nvd_cves:
+            score_str = f" CVSS {c['score']}" if c["score"] else ""
+            fixed_str = f" fixed in {c['fixed_in']}" if c["fixed_in"] else ""
+            sev = CRITICAL if c["affects_current"] is True else WARNING
+            msg = f"{c['id']}{score_str}{fixed_str} — {c['description']}"
+            f.add(sev, msg)
+            icon = "🔴" if sev == CRITICAL else "🟡"
+            cprint(C.RED if sev == CRITICAL else C.YELLOW,
+                   f"  {icon} {c['id']}{score_str}{fixed_str}")
+            lines.append(f"- {icon} **{c['id']}**{score_str}{fixed_str}: {c['description']}\n")
+    else:
+        if unifi_version:
+            cprint(C.GREEN, f"  🟢 No NVD CVEs found affecting UniFi {unifi_version}")
+            lines.append("🟢 No open CVEs found for this version\n")
+        else:
+            cprint(C.YELLOW, "  🟡 No NVD CVEs matched (version unknown — may be incomplete)")
+            lines.append("🟡 No CVEs matched (version unknown)\n")
 
     device_lines = [l for l in devices_raw.splitlines() if l.strip() and not l.startswith("name")]
     total_dev  = len(device_lines)

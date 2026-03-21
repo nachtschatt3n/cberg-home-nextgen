@@ -788,41 +788,126 @@ class VersionChecker:
 
         return None
 
+    def _nvd_unifi_cves(self, version: Optional[str]) -> List[Dict]:
+        """Query NVD API 2.0 for UniFi Network Application CVEs affecting version."""
+        import urllib.request as _ureq
+
+        def _pv(v: str) -> tuple:
+            return tuple(int(x) for x in re.split(r"[.\-]", v) if x.isdigit())
+
+        cur = _pv(version) if version else None
+        results: List[Dict] = []
+        url = (
+            "https://services.nvd.nist.gov/rest/json/cves/2.0"
+            "?keywordSearch=UniFi+Network+Application&resultsPerPage=100"
+        )
+        try:
+            req = _ureq.Request(url, headers={"User-Agent": "homelab-version-check/1.0"})
+            with _ureq.urlopen(req, timeout=20) as resp:
+                data = json.load(resp)
+        except Exception:
+            return []
+
+        for vuln in data.get("vulnerabilities", []):
+            cve = vuln.get("cve", {})
+            cve_id = cve.get("id", "")
+            if cve.get("vulnStatus", "") in ("Rejected", "Disputed"):
+                continue
+
+            desc = next(
+                (d.get("value", "")[:180] for d in cve.get("descriptions", []) if d.get("lang") == "en"), ""
+            )
+            score: Optional[float] = None
+            for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                m = cve.get("metrics", {}).get(key, [])
+                if m:
+                    score = m[0].get("cvssData", {}).get("baseScore")
+                    break
+
+            affects_current: Optional[bool] = None
+            fixed_in: Optional[str] = None
+
+            for config in cve.get("configurations", []):
+                for node in config.get("nodes", []):
+                    for match in node.get("cpeMatch", []):
+                        if not match.get("vulnerable", False):
+                            continue
+                        criteria = match.get("criteria", "").lower()
+                        if "unifi" not in criteria or (
+                            "network" not in criteria and "unifi_controller" not in criteria
+                        ):
+                            continue
+                        ve_excl = match.get("versionEndExcluding")
+                        ve_incl = match.get("versionEndIncluding")
+                        vs_incl = match.get("versionStartIncluding")
+                        vs_excl = match.get("versionStartExcluding")
+                        if cur is None:
+                            affects_current = None
+                            fixed_in = ve_excl or (f">{ve_incl}" if ve_incl else None)
+                        else:
+                            in_range = True
+                            if vs_incl:
+                                in_range = cur >= _pv(vs_incl)
+                            elif vs_excl:
+                                in_range = cur > _pv(vs_excl)
+                            if in_range and ve_excl:
+                                in_range = cur < _pv(ve_excl)
+                                if in_range:
+                                    fixed_in = ve_excl
+                            elif in_range and ve_incl:
+                                in_range = cur <= _pv(ve_incl)
+                                if in_range:
+                                    fixed_in = f">{ve_incl}"
+                            if in_range:
+                                affects_current = True
+                    if affects_current is True:
+                        break
+                if affects_current is True:
+                    break
+
+            if affects_current is True or (cur is None and affects_current is None and fixed_in is not None):
+                results.append({
+                    "id": cve_id,
+                    "description": desc,
+                    "score": score,
+                    "fixed_in": fixed_in,
+                    "affects_current": affects_current,
+                })
+
+        return results
+
     def check_external_infrastructure(self):
         """Check versions of external infrastructure not managed as Kubernetes HelmReleases."""
         print(f"\n{Colors.BLUE}=== Checking External Infrastructure ==={Colors.RESET}")
-
-        # UniFi Network Application
-        UNIFI_MIN = "7.5.187"
-        UNIFI_CVES = ["CVE-2023-41721", "CVE-2026-22557"]
         print(f"Checking {Colors.CYAN}UniFi Network Application{Colors.RESET} (192.168.30.1:8443)...")
 
         unifi_version = self._get_unifi_version()
-        is_outdated: Optional[bool] = None
+        ver_label = unifi_version or "unknown"
 
-        if unifi_version:
-            try:
-                from packaging.version import Version
-                is_outdated = Version(unifi_version) < Version(UNIFI_MIN)
-            except Exception:
-                pass
+        print(f"  Version detected: {ver_label}")
+        print(f"  Querying NVD for CVEs...")
+        nvd_cves = self._nvd_unifi_cves(unifi_version)
 
-            if is_outdated is True:
-                print(f"  {Colors.RED}⚠ UPDATE REQUIRED: {unifi_version} < {UNIFI_MIN} — {', '.join(UNIFI_CVES)}{Colors.RESET}")
-            elif is_outdated is False:
-                print(f"  {Colors.GREEN}✓ {unifi_version} ≥ {UNIFI_MIN}{Colors.RESET}")
-            else:
-                print(f"  {Colors.YELLOW}? Version {unifi_version} — could not compare{Colors.RESET}")
+        has_critical = any(c["affects_current"] is True for c in nvd_cves)
+
+        if nvd_cves:
+            for c in nvd_cves:
+                score_str = f" CVSS {c['score']}" if c["score"] else ""
+                fixed_str = f" (fixed in {c['fixed_in']})" if c["fixed_in"] else ""
+                color = Colors.RED if c["affects_current"] is True else Colors.YELLOW
+                print(f"  {color}⚠ {c['id']}{score_str}{fixed_str}{Colors.RESET}")
         else:
-            print(f"  {Colors.YELLOW}? Version unknown — verify manually ≥ {UNIFI_MIN} ({', '.join(UNIFI_CVES)}){Colors.RESET}")
+            if unifi_version:
+                print(f"  {Colors.GREEN}✓ No NVD CVEs found affecting {unifi_version}{Colors.RESET}")
+            else:
+                print(f"  {Colors.YELLOW}? No CVEs matched (version unknown){Colors.RESET}")
 
         self.external_infra_results.append({
             "name": "UniFi Network Application",
             "host": "192.168.30.1:8443",
             "current_version": unifi_version,
-            "min_required": UNIFI_MIN,
-            "is_outdated": is_outdated,
-            "cves": UNIFI_CVES,
+            "nvd_cves": nvd_cves,
+            "has_critical": has_critical,
         })
 
     def check_all(self):
@@ -1155,21 +1240,26 @@ class VersionChecker:
         if self.external_infra_results:
             lines.append("## External Infrastructure")
             lines.append("")
-            lines.append("> Components not managed as Kubernetes HelmReleases — tracked separately for CVE coverage.")
+            lines.append("> Components not managed as Kubernetes HelmReleases — CVEs sourced live from NVD API.")
             lines.append("")
-            lines.append("| Component | Host | Current Version | Min Required | Status | CVEs |")
-            lines.append("|-----------|------|-----------------|--------------|--------|------|")
             for ei in self.external_infra_results:
                 ver = ei["current_version"] or "unknown"
-                if ei["is_outdated"] is True:
-                    status = "🔴 UPDATE REQUIRED"
-                elif ei["is_outdated"] is False:
-                    status = "🟢 OK"
+                nvd_cves = ei.get("nvd_cves", [])
+                status = "🔴 VULNERABLE" if ei["has_critical"] else ("🟢 OK" if ei["current_version"] else "🟡 version unknown")
+                lines.append(f"### {ei['name']} (`{ei['host']}`)")
+                lines.append("")
+                lines.append(f"- **Version:** `{ver}`")
+                lines.append(f"- **Status:** {status}")
+                if nvd_cves:
+                    lines.append(f"- **Open CVEs ({len(nvd_cves)}):**")
+                    for c in nvd_cves:
+                        score_str = f" · CVSS {c['score']}" if c["score"] else ""
+                        fixed_str = f" · fixed in `{c['fixed_in']}`" if c["fixed_in"] else ""
+                        icon = "🔴" if c["affects_current"] is True else "🟡"
+                        lines.append(f"  - {icon} **{c['id']}**{score_str}{fixed_str}: {c['description']}")
                 else:
-                    status = "🟡 verify manually"
-                cves = ", ".join(ei["cves"]) if ei["cves"] else "-"
-                lines.append(f"| {ei['name']} | `{ei['host']}` | `{ver}` | `{ei['min_required']}` | {status} | {cves} |")
-            lines.append("")
+                    lines.append("- **Open CVEs:** none found")
+                lines.append("")
             lines.append("---")
             lines.append("")
 
