@@ -11,6 +11,13 @@ Primary references:
 - `.sops.yaml`
 - `kubernetes/**/*.sops.yaml`
 
+Accepted risks — do NOT surface these as findings:
+- Load `docs/security-accepted-risks.md` at the start of every audit.
+- AR-001: Plaintext secrets in public git history — all rotated or services decommissioned; history cannot be rewritten on a public repo with clones.
+- AR-002: Mosquitto `allow_anonymous true` — IoT VLAN (192.168.32.0/23) only, no external exposure.
+- AR-003: echo-server on external ingress without Authentik — intentional debug tool, no sensitive data.
+- AR-004: open-webui, n8n, iobroker, home-assistant on external ingress without Authentik — each has its own robust auth layer.
+
 Operating rules:
 - Execute the security runbook or script and classify findings as Critical/Warning/OK.
 - Never print plaintext secrets, literal domains, credentials, personal name/email, or decrypted payloads.
