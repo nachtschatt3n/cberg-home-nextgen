@@ -912,6 +912,67 @@ def s11_unifi() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, "  🟡 unifictl session expired")
         return f.worst(), f, f.markdown()
 
+    # --- UniFi Network Application version check ---
+    UNIFI_MIN_SAFE = "7.5.187"
+    UNIFI_CVES = ["CVE-2023-41721", "CVE-2026-22557"]
+
+    def _parse_ver(v: str) -> tuple:
+        return tuple(int(x) for x in re.split(r"[.\-]", v) if x.isdigit())
+
+    unifi_version: str | None = None
+
+    # Attempt 1: unifictl health JSON (may expose version field)
+    health_json = run("unifictl local health get -o json 2>/dev/null", timeout=10)
+    try:
+        hdata = json.loads(health_json)
+        for candidate in [
+            hdata.get("version"),
+            hdata.get("server_version"),
+            (hdata.get("meta") or {}).get("server_version"),
+        ]:
+            if candidate:
+                unifi_version = candidate
+                break
+        if not unifi_version and isinstance(hdata.get("data"), list) and hdata["data"]:
+            unifi_version = hdata["data"][0].get("version")
+    except Exception:
+        pass
+
+    # Attempt 2: direct HTTPS sysinfo (works on some controller configs)
+    if not unifi_version:
+        try:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(
+                "https://192.168.30.1:8443/api/s/default/stat/sysinfo",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                sdata = json.load(resp)
+                items = sdata.get("data", [])
+                if items:
+                    unifi_version = items[0].get("version")
+        except Exception:
+            pass
+
+    cves_str = ", ".join(UNIFI_CVES)
+    if unifi_version:
+        try:
+            if _parse_ver(unifi_version) < _parse_ver(UNIFI_MIN_SAFE):
+                f.add(CRITICAL, f"UniFi Network Application {unifi_version} < {UNIFI_MIN_SAFE} — {cves_str}")
+                cprint(C.RED, f"  🔴 UniFi {unifi_version} < {UNIFI_MIN_SAFE} — {cves_str}")
+            else:
+                cprint(C.GREEN, f"  🟢 UniFi Network Application {unifi_version} ≥ {UNIFI_MIN_SAFE}")
+        except Exception:
+            f.add(WARNING, f"Could not parse UniFi version: `{unifi_version}`")
+        lines.append(f"UniFi Network Application: **{unifi_version}** (min required: {UNIFI_MIN_SAFE} for {cves_str})\n")
+    else:
+        f.add(WARNING, f"UniFi Network Application version unknown — verify manually ≥ {UNIFI_MIN_SAFE} ({cves_str})")
+        cprint(C.YELLOW, f"  🟡 UniFi version unknown — check manually ≥ {UNIFI_MIN_SAFE} ({cves_str})")
+        lines.append(f"UniFi Network Application: **unknown** — verify ≥ {UNIFI_MIN_SAFE} for {cves_str}\n")
+
     device_lines = [l for l in devices_raw.splitlines() if l.strip() and not l.startswith("name")]
     total_dev  = len(device_lines)
     unadopted  = [l for l in device_lines if "false" in l.lower()]

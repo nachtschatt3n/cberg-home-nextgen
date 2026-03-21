@@ -53,6 +53,7 @@ class VersionChecker:
         # Check if gh CLI is available
         self.use_gh_cli = self._check_gh_available()
         self.renovate_prs: List[Dict] = []
+        self.external_infra_results: List[Dict] = []
 
     def find_helmreleases(self) -> List[Path]:
         """Find all HelmRelease YAML files."""
@@ -742,6 +743,88 @@ class VersionChecker:
         
         return None
     
+    def _get_unifi_version(self) -> Optional[str]:
+        """Detect UniFi Network Application version via multiple methods."""
+        # Method 1: unifictl health JSON
+        try:
+            result = subprocess.run(
+                ["unifictl", "local", "health", "get", "-o", "json"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                hdata = json.loads(result.stdout.strip())
+                for candidate in [
+                    hdata.get("version"),
+                    hdata.get("server_version"),
+                    (hdata.get("meta") or {}).get("server_version"),
+                ]:
+                    if candidate:
+                        return candidate
+                if isinstance(hdata.get("data"), list) and hdata["data"]:
+                    v = hdata["data"][0].get("version")
+                    if v:
+                        return v
+        except Exception:
+            pass
+
+        # Method 2: direct HTTPS sysinfo (unauthenticated — may fail)
+        try:
+            import ssl
+            import urllib.request
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.Request(
+                "https://192.168.30.1:8443/api/s/default/stat/sysinfo",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                sdata = json.load(resp)
+                items = sdata.get("data", [])
+                if items:
+                    return items[0].get("version")
+        except Exception:
+            pass
+
+        return None
+
+    def check_external_infrastructure(self):
+        """Check versions of external infrastructure not managed as Kubernetes HelmReleases."""
+        print(f"\n{Colors.BLUE}=== Checking External Infrastructure ==={Colors.RESET}")
+
+        # UniFi Network Application
+        UNIFI_MIN = "7.5.187"
+        UNIFI_CVES = ["CVE-2023-41721", "CVE-2026-22557"]
+        print(f"Checking {Colors.CYAN}UniFi Network Application{Colors.RESET} (192.168.30.1:8443)...")
+
+        unifi_version = self._get_unifi_version()
+        is_outdated: Optional[bool] = None
+
+        if unifi_version:
+            try:
+                from packaging.version import Version
+                is_outdated = Version(unifi_version) < Version(UNIFI_MIN)
+            except Exception:
+                pass
+
+            if is_outdated is True:
+                print(f"  {Colors.RED}⚠ UPDATE REQUIRED: {unifi_version} < {UNIFI_MIN} — {', '.join(UNIFI_CVES)}{Colors.RESET}")
+            elif is_outdated is False:
+                print(f"  {Colors.GREEN}✓ {unifi_version} ≥ {UNIFI_MIN}{Colors.RESET}")
+            else:
+                print(f"  {Colors.YELLOW}? Version {unifi_version} — could not compare{Colors.RESET}")
+        else:
+            print(f"  {Colors.YELLOW}? Version unknown — verify manually ≥ {UNIFI_MIN} ({', '.join(UNIFI_CVES)}){Colors.RESET}")
+
+        self.external_infra_results.append({
+            "name": "UniFi Network Application",
+            "host": "192.168.30.1:8443",
+            "current_version": unifi_version,
+            "min_required": UNIFI_MIN,
+            "is_outdated": is_outdated,
+            "cves": UNIFI_CVES,
+        })
+
     def check_all(self):
         """Check all HelmReleases for updates."""
         print(f"{Colors.BLUE}=== Scanning HelmReleases ==={Colors.RESET}")
@@ -768,9 +851,12 @@ class VersionChecker:
                 self.helmreleases.append(hr)
         
         print(f"Parsed {len(self.helmreleases)} HelmReleases\n")
-        
+
+        # Check external infrastructure (non-Kubernetes components)
+        self.check_external_infrastructure()
+
         # Check each HelmRelease
-        print(f"{Colors.BLUE}=== Checking for Updates ==={Colors.RESET}\n")
+        print(f"\n{Colors.BLUE}=== Checking for Updates ==={Colors.RESET}\n")
         
         for hr in self.helmreleases:
             print(f"Checking {Colors.CYAN}{hr['name']}{Colors.RESET} ({hr['namespace']})...")
@@ -1064,6 +1150,29 @@ class VersionChecker:
         lines.append("---")
         lines.append("")
         lines.extend(self._generate_renovate_section())
+
+        # External infrastructure section
+        if self.external_infra_results:
+            lines.append("## External Infrastructure")
+            lines.append("")
+            lines.append("> Components not managed as Kubernetes HelmReleases — tracked separately for CVE coverage.")
+            lines.append("")
+            lines.append("| Component | Host | Current Version | Min Required | Status | CVEs |")
+            lines.append("|-----------|------|-----------------|--------------|--------|------|")
+            for ei in self.external_infra_results:
+                ver = ei["current_version"] or "unknown"
+                if ei["is_outdated"] is True:
+                    status = "🔴 UPDATE REQUIRED"
+                elif ei["is_outdated"] is False:
+                    status = "🟢 OK"
+                else:
+                    status = "🟡 verify manually"
+                cves = ", ".join(ei["cves"]) if ei["cves"] else "-"
+                lines.append(f"| {ei['name']} | `{ei['host']}` | `{ver}` | `{ei['min_required']}` | {status} | {cves} |")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
         lines.append("## Quick Overview Table")
         lines.append("")
         lines.append("| Deployment | Namespace | Chart | Image | App | Complexity |")
