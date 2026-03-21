@@ -14,4 +14,5 @@ resources:
  - ./paperless-gpt/ks.yaml
  - ./paperless-ai/ks.yaml
  - ./penpot/ks.yaml
+ - ./nextcloud-mcp/ks.yaml
  - ./vaultwarden/ks.yaml
