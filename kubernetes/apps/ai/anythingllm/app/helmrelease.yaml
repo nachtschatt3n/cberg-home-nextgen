@@ -114,7 +114,7 @@ spec:
         gethomepage.dev/name: "AnythingLLM"
         gethomepage.dev/description: "Private RAG workspace with local AI"
         gethomepage.dev/group: "AI"
-        gethomepage.dev/icon: "anythingllm.png"
+        gethomepage.dev/icon: "anything-llm.png"
         gethomepage.dev/pod-selector: app.kubernetes.io/name=anythingllm
       labels:
         gethomepage.dev/enabled: "true"

@@ -70,7 +70,7 @@ spec:
           gethomepage.dev/name: "Thread Border Router"
           gethomepage.dev/description: "OpenThread Border Router for SLZB-06P7"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "openthread.png"
+          gethomepage.dev/icon: "thread.png"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:

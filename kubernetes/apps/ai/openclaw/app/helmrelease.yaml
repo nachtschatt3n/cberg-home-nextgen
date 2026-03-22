@@ -506,7 +506,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "OpenClaw"
           gethomepage.dev/group: "AI"
-          gethomepage.dev/icon: "telegram.png"
+          gethomepage.dev/icon: "openclaw.png"
           gethomepage.dev/description: "Telegram AI Assistant - OpenClaw Gateway"
         labels:
           gethomepage.dev/enabled: "true"

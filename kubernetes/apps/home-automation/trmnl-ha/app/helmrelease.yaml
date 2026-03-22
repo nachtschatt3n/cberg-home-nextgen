@@ -59,7 +59,7 @@ spec:
           gethomepage.dev/name: "TRMNL HA"
           gethomepage.dev/description: "Home Assistant screenshots for TRMNL e-ink display"
           gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "https://avatars.githubusercontent.com/u/139822699"
+          gethomepage.dev/icon: "trmnl.png"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
