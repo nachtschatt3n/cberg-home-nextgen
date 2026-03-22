@@ -1,0 +1,72 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traccar-postgres
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    defaultPodOptions: {}
+
+    controllers:
+      main:
+        containers:
+          main:
+            image:
+              repository: postgres
+              tag: "18"
+            env:
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: traccar-secret
+                    key: DATABASE_USER
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: traccar-secret
+                    key: DATABASE_PASS
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: traccar-secret
+                    key: DATABASE_NAME
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: 5432
+
+    persistence:
+      data:
+        type: persistentVolumeClaim
+        existingClaim: traccar-postgres-data
+        globalMounts:
+          - path: /var/lib/postgresql

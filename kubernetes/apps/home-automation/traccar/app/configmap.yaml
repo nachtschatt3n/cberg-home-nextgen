@@ -1,0 +1,30 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traccar-config
+  namespace: home-automation
+data:
+  traccar.xml: |
+    <?xml version='1.0' encoding='UTF-8'?>
+    <!DOCTYPE properties SYSTEM 'http://java.sun.com/dtd/properties.dtd'>
+    <properties>
+
+      <!-- Database -->
+      <entry key='database.driver'>org.postgresql.Driver</entry>
+      <entry key='database.url'>jdbc:postgresql://traccar-postgres:5432/traccar</entry>
+      <entry key='database.user'>traccar</entry>
+      <entry key='database.password'>REPLACE_PASSWORD</entry>
+
+      <!-- Web UI -->
+      <entry key='web.enable'>true</entry>
+      <entry key='web.port'>8082</entry>
+
+      <!-- Osmand protocol (used by airtag-sync) -->
+      <entry key='osmand.enable'>true</entry>
+      <entry key='osmand.port'>5055</entry>
+
+      <!-- Disable open registration after first admin account is created -->
+      <entry key='server.registration'>false</entry>
+
+    </properties>

@@ -17,6 +17,7 @@ resources:
  - ./otbr/ks.yaml
  - ./scrypted-nvr/ks.yaml
  - ./teslamate/ks.yaml
+ - ./traccar/ks.yaml
  - ./trmnl-ha/ks.yaml
  - ./zigbee2mqtt/ks.yaml
 

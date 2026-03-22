@@ -1,0 +1,140 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traccar
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  dependsOn:
+    - name: traccar-postgres
+  values:
+    controllers:
+      main:
+        initContainers:
+          render-config:
+            image:
+              repository: busybox
+              tag: "1.36"
+            command:
+              - sh
+              - -c
+              - |
+                sed "s/REPLACE_PASSWORD/${DATABASE_PASS}/" \
+                  /config-template/traccar.xml > /opt/traccar/conf/traccar.xml
+                echo "Config rendered successfully"
+            env:
+              - name: DATABASE_PASS
+                valueFrom:
+                  secretKeyRef:
+                    name: traccar-secret
+                    key: DATABASE_PASS
+        containers:
+          main:
+            image:
+              repository: traccar/traccar
+              tag: "6.6"
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/server
+                    port: &port 8082
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/server
+                    port: *port
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+      osmand:
+        controller: main
+        type: LoadBalancer
+        loadBalancerIP: "192.168.55.26"
+        ports:
+          osmand:
+            port: 5055
+            protocol: TCP
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Traccar"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "mdi-map-marker-path"
+          gethomepage.dev/description: "AirTag GPS tracking"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: traccar.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - traccar.${SECRET_DOMAIN}
+
+    persistence:
+      config-template:
+        type: configMap
+        name: traccar-config
+        globalMounts:
+          - path: /config-template
+      conf:
+        type: emptyDir
+        globalMounts:
+          - path: /opt/traccar/conf
+      logs:
+        type: emptyDir
+        globalMounts:
+          - path: /opt/traccar/logs
