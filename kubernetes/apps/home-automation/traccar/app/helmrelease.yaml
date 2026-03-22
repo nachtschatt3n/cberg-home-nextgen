@@ -34,12 +34,19 @@ spec:
             image:
               repository: traccar/traccar
               tag: "6.6"
-            # Pass DB password as Java system property so Flux variable substitution
-            # does not interfere ($DATABASE_PASS without braces is ignored by Flux/Kustomize)
+            # $DATABASE_PASS (no braces) is expanded by shell but NOT substituted
+            # by Flux/Kustomize which only processes ${VAR} syntax
             command:
               - /bin/sh
               - -c
-              - cd /opt/traccar && java -Ddatabase.password=$DATABASE_PASS -jar tracker-server.jar conf/traccar.xml
+              - |
+                cd /opt/traccar
+                java -Ddatabase.password=$DATABASE_PASS -jar tracker-server.jar conf/traccar.xml &
+                JAVA_PID=$!
+                # Wait for log file to appear then tail it to stdout
+                sleep 3
+                tail -f logs/tracker-server.log &
+                wait $JAVA_PID
             env:
               - name: TZ
                 value: "Europe/Berlin"

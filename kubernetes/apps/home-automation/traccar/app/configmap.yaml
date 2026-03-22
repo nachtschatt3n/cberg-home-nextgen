@@ -27,4 +27,7 @@ data:
       <!-- Disable open registration after first admin account is created -->
       <entry key='server.registration'>false</entry>
 
+      <!-- Log to file; tailed to stdout by wrapper command -->
+      <entry key='logger.file'>./logs/tracker-server.log</entry>
+
     </properties>
