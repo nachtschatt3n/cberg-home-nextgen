@@ -10,11 +10,11 @@ data:
     <!DOCTYPE properties SYSTEM 'http://java.sun.com/dtd/properties.dtd'>
     <properties>
 
-      <!-- Database -->
+      <!-- Database (password injected via Java system property at runtime) -->
       <entry key='database.driver'>org.postgresql.Driver</entry>
       <entry key='database.url'>jdbc:postgresql://traccar-postgres:5432/traccar</entry>
       <entry key='database.user'>traccar</entry>
-      <entry key='database.password'>REPLACE_PASSWORD</entry>
+      <entry key='database.password'></entry>
 
       <!-- Web UI -->
       <entry key='web.enable'>true</entry>

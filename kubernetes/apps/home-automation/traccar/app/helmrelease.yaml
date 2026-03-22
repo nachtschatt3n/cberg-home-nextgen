@@ -29,33 +29,25 @@ spec:
   values:
     controllers:
       main:
-        initContainers:
-          render-config:
-            image:
-              repository: busybox
-              tag: "1.36"
-            command:
-              - sh
-              - -c
-              - |
-                sed "s/REPLACE_PASSWORD/${DATABASE_PASS}/" \
-                  /config-template/traccar.xml > /opt/traccar/conf/traccar.xml
-                echo "Config rendered successfully"
-            env:
-              - name: DATABASE_PASS
-                valueFrom:
-                  secretKeyRef:
-                    name: traccar-secret
-                    key: DATABASE_PASS
         containers:
           main:
             image:
               repository: traccar/traccar
               tag: "6.6"
-            command: ["/bin/sh", "-c", "echo '=== CONF ===' && ls -la /opt/traccar/conf/ && cat /opt/traccar/conf/traccar.xml && echo '=== JAVA ===' && java -version 2>&1 && cd /opt/traccar && java -jar tracker-server.jar conf/traccar.xml 2>&1; echo 'EXIT CODE: '$?; sleep 3600"]
+            # Pass DB password as Java system property so Flux variable substitution
+            # does not interfere ($DATABASE_PASS without braces is ignored by Flux/Kustomize)
+            command:
+              - /bin/sh
+              - -c
+              - cd /opt/traccar && java -Ddatabase.password=$DATABASE_PASS -jar tracker-server.jar conf/traccar.xml
             env:
               - name: TZ
                 value: "Europe/Berlin"
+              - name: DATABASE_PASS
+                valueFrom:
+                  secretKeyRef:
+                    name: traccar-secret
+                    key: DATABASE_PASS
             probes:
               liveness:
                 enabled: true
@@ -82,6 +74,7 @@ spec:
                 memory: 256Mi
               limits:
                 memory: 1Gi
+
     service:
       main:
         controller: main
@@ -123,15 +116,14 @@ spec:
               - traccar.${SECRET_DOMAIN}
 
     persistence:
-      config-template:
+      traccar-config:
         type: configMap
         name: traccar-config
-        globalMounts:
-          - path: /config-template
-      conf:
-        type: emptyDir
-        globalMounts:
-          - path: /opt/traccar/conf
+        advancedMounts:
+          main:
+            main:
+              - path: /opt/traccar/conf/traccar.xml
+                subPath: traccar.xml
       logs:
         type: emptyDir
         globalMounts:
