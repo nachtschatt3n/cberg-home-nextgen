@@ -34,27 +34,20 @@ spec:
             image:
               repository: traccar/traccar
               tag: "6.6"
-            # $DATABASE_PASS (no braces) is expanded by shell but NOT substituted
-            # by Flux/Kustomize which only processes ${VAR} syntax
+            # Wrapper to surface Traccar's file-based logs to stdout for kubectl logs
             command:
               - /bin/sh
               - -c
               - |
                 cd /opt/traccar
-                java -Ddatabase.password=$DATABASE_PASS -jar tracker-server.jar conf/traccar.xml &
+                java -jar tracker-server.jar conf/traccar.xml &
                 JAVA_PID=$!
-                # Wait for log file to appear then tail it to stdout
                 sleep 3
                 tail -f logs/tracker-server.log &
                 wait $JAVA_PID
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              - name: DATABASE_PASS
-                valueFrom:
-                  secretKeyRef:
-                    name: traccar-secret
-                    key: DATABASE_PASS
             probes:
               liveness:
                 enabled: true
@@ -123,9 +116,10 @@ spec:
               - traccar.${SECRET_DOMAIN}
 
     persistence:
+      # traccar.xml (with DB password) stored in SOPS-encrypted secret
       traccar-config:
-        type: configMap
-        name: traccar-config
+        type: secret
+        name: traccar-secret
         advancedMounts:
           main:
             main:
