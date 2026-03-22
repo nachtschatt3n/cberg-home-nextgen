@@ -81,9 +81,6 @@ spec:
                 memory: 256Mi
               limits:
                 memory: 1Gi
-            securityContext:
-              allowPrivilegeEscalation: false
-
     service:
       main:
         controller: main
