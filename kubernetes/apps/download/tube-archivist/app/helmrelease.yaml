@@ -74,9 +74,28 @@ spec:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: /
-                    port: 8000
+                  exec:
+                    command:
+                      - python
+                      - -c
+                      - |
+                        import os
+                        import sys
+                        import urllib.request
+
+                        urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5).read(1)
+                        needle = b"celery -A task.celery worker"
+                        for pid in os.listdir("/proc"):
+                            if not pid.isdigit():
+                                continue
+                            try:
+                                cmdline = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ")
+                            except OSError:
+                                continue
+                            if needle in cmdline:
+                                sys.exit(0)
+
+                        sys.exit(1)
                   initialDelaySeconds: 60
                   periodSeconds: 30
                   timeoutSeconds: 10
