@@ -1,0 +1,57 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: tube-archivist-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: tube-archivist.pods.health
+    rules:
+    - alert: TubeArchivistPodNotReady
+      annotations:
+        description: Tube Archivist pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. Video ingestion and the UI may be unavailable.
+        summary: Tube Archivist pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="download", pod=~"tube-archivist-.*", condition="true"}
+          unless on(namespace, pod)
+          kube_pod_owner{owner_kind="Job"}
+        ) == 0
+      for: 5m
+      labels:
+        category: download
+        component: tube-archivist
+        severity: critical
+    - alert: TubeArchivistPodCrashLooping
+      annotations:
+        description: Tube Archivist pod {{ $labels.pod }} has restarted {{ $value
+          | printf "%.0f" }} times in the last 15 minutes. Check the web container,
+          Celery worker, and Elasticsearch connectivity.
+        summary: Tube Archivist pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="download", pod=~"tube-archivist-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: download
+        component: tube-archivist
+        severity: critical
+    - alert: TubeArchivistPodRestarted
+      annotations:
+        description: Tube Archivist pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes. This includes worker-loss restarts triggered by
+          the liveness probe.
+        summary: Tube Archivist pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="download", pod=~"tube-archivist-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: download
+        component: tube-archivist
+        severity: warning
