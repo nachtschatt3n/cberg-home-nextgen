@@ -52,7 +52,7 @@ spec:
             image:
               repository: traccar/traccar
               tag: "6.6"
-            command: ["/bin/sh", "-c", "echo 'DEBUG: listing conf:' && ls -la /opt/traccar/conf/ && cat /opt/traccar/conf/traccar.xml && echo 'DEBUG: trying java' && /opt/traccar/jre/bin/java -version 2>&1 && /opt/traccar/jre/bin/java -jar tracker-server.jar conf/traccar.xml 2>&1; echo 'EXIT CODE: '$?; sleep 3600"]
+            command: ["/bin/sh", "-c", "echo '=== CONF ===' && ls -la /opt/traccar/conf/ && cat /opt/traccar/conf/traccar.xml && echo '=== JAVA ===' && java -version 2>&1 && cd /opt/traccar && java -jar tracker-server.jar conf/traccar.xml 2>&1; echo 'EXIT CODE: '$?; sleep 3600"]
             env:
               - name: TZ
                 value: "Europe/Berlin"
