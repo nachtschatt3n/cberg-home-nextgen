@@ -146,15 +146,15 @@ spec:
       interval: 30s
       rules:
         - alert: LonghornBackupFailed
-          expr: longhorn_backup_state == 4
-          for: 1m
+          expr: (longhorn_backup_state == 4) unless on(volume) (longhorn_backup_state == 3)
+          for: 5m
           labels:
             severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn backup failed for volume {{ $labels.volume }}{{ if not $labels.volume }}{{ $labels.backup }}{{ end }}"
-            description: "A backup operation for volume {{ $labels.volume }}{{ if not $labels.volume }}{{ $labels.backup }}{{ end }} (backup: {{ $labels.backup }}) has failed on node {{ $labels.instance }}."
+            summary: "Longhorn backup failed for volume {{ $labels.volume }} with no successful backups"
+            description: "All backups for volume {{ $labels.volume }} are in a failed state — no successful backup exists. Failed backup: {{ $labels.backup }}. Failed backups auto-delete after 24h (failed-backup-ttl)."
             runbook_url: "https://longhorn.io/docs/latest/snapshots-and-backups/"
 
         - alert: LonghornBackupError
