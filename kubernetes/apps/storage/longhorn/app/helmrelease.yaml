@@ -27,7 +27,7 @@ spec:
         guaranteedEngineManagerCPU: 1000
         guaranteedReplicaManagerCPU: 1000
         defaultLonghornStaticStorageClass: longhorn-static
-        backupTarget: "cifs://192.168.31.230/backups"
+        backupTarget: "cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
@@ -45,7 +45,9 @@ spec:
         snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
-        backupConcurrentLimit: 25
+        backupExecutionTimeout: 5
+        defaultBackupBlockSize: 16
+        backupConcurrentLimit: 5
         concurrentVolumeBackupRestorePerNodeLimit: 10
         restoreConcurrentLimit: 2
         failedBackupTTL: 1440
