@@ -12,3 +12,4 @@ resources:
   - ./spegel.yaml
   - ./stakater.yaml
   - ./rybbit.yaml
+  - ./librechat.yaml

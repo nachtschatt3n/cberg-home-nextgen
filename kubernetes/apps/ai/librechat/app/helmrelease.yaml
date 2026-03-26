@@ -1,0 +1,118 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: librechat
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: librechat
+      version: "2.0.2"
+      sourceRef:
+        kind: HelmRepository
+        name: librechat
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    global:
+      librechat:
+        existingSecretName: "librechat-credentials-env"
+        existingSecretApiKey: OPENAI_API_KEY
+
+    librechat:
+      existingSecretName: "librechat-credentials-env"
+
+      configEnv:
+        DOMAIN_CLIENT: "https://librechat.${SECRET_DOMAIN}"
+        DOMAIN_SERVER: "https://librechat.${SECRET_DOMAIN}"
+        ALLOW_EMAIL_LOGIN: "true"
+        ALLOW_REGISTRATION: "true"
+        SEARCH: "true"
+
+      configYamlContent: |
+        version: 1.1.5
+        endpoints:
+          custom:
+            - name: "Ollama"
+              apiKey: "ollama"
+              baseURL: "http://192.168.30.111:11435/v1"
+              models:
+                default:
+                  - "llama3.2"
+                fetch: true
+              titleConvo: true
+              titleModel: "current_model"
+              summarize: false
+
+      imageVolume:
+        enabled: true
+        size: 10Gi
+        accessModes: ReadWriteOnce
+        storageClassName: longhorn
+
+    ingress:
+      enabled: true
+      className: external
+      annotations:
+        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        nginx.ingress.kubernetes.io/enable-websocket: "true"
+        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+        nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "LibreChat"
+        gethomepage.dev/description: "AI chat interface"
+        gethomepage.dev/group: "AI"
+        gethomepage.dev/icon: "librechat.png"
+      labels:
+        gethomepage.dev/enabled: "true"
+      hosts:
+        - host: &host "librechat.${SECRET_DOMAIN}"
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - *host
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+    mongodb:
+      enabled: true
+      auth:
+        enabled: false
+      databases:
+        - LibreChat
+      persistence:
+        size: 10Gi
+
+    meilisearch:
+      enabled: true
+      persistence:
+        enabled: true
+        storageClass: longhorn
+      image:
+        tag: "v1.7.3"
+      auth:
+        existingMasterKeySecret: "librechat-credentials-env"
+
+    redis:
+      enabled: false

@@ -11,6 +11,7 @@ resources:
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
+  - ./librechat-alerts.yaml
   - ./tube-archivist-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml

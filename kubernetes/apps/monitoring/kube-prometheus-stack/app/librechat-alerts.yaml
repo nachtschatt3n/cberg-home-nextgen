@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: librechat-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: librechat.pods.health
+    rules:
+    - alert: LibreChatPodNotReady
+      annotations:
+        description: LibreChat pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The chat service may be unavailable.
+        summary: LibreChat pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="ai", pod=~"librechat-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: ai
+        component: librechat
+        severity: critical
+    - alert: LibreChatPodCrashLooping
+      annotations:
+        description: LibreChat pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Check logs for configuration or
+          database connection errors.
+        summary: LibreChat pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"librechat-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: ai
+        component: librechat
+        severity: critical
+    - alert: LibreChatPodRestarted
+      annotations:
+        description: LibreChat pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes. Monitor for repeated restarts.
+        summary: LibreChat pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"librechat-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: ai
+        component: librechat
+        severity: warning

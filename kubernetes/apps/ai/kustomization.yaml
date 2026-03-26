@@ -11,3 +11,4 @@ resources:
   - ./ai-sre/ks.yaml
   - ./openclaw/ks.yaml
   - ./anythingllm/ks.yaml
+  - ./librechat/ks.yaml
