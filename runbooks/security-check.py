@@ -770,7 +770,7 @@ def s9_certificates() -> tuple[str, Findings, str]:
     lines = []
 
     # cert-manager TLS secret
-    raw = kubectl("get secret uhl-cool-production-tls -n cert-manager "
+    raw = kubectl(f"get secret {domain}-production-tls -n cert-manager "
                   "-o jsonpath='{.data.tls\\.crt}'")
     if raw:
         import base64, ssl
