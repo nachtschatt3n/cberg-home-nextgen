@@ -48,7 +48,7 @@ spec:
         DOMAIN_CLIENT: "https://librechat.${SECRET_DOMAIN}"
         DOMAIN_SERVER: "https://librechat.${SECRET_DOMAIN}"
         ALLOW_EMAIL_LOGIN: "true"
-        ALLOW_REGISTRATION: "true"
+        ALLOW_REGISTRATION: "false"
         SEARCH: "true"
 
       configYamlContent: |
