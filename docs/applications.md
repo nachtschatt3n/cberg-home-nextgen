@@ -11,10 +11,10 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 6 |
-| home-automation | 14 |
+| home-automation | 16 |
 | databases | 8 |
 | monitoring | 12 |
-| office | 9 |
+| office | 10 |
 | media | 3 |
 | download | 2 |
 | kube-system | 10 |
@@ -63,6 +63,8 @@
 | mqttx-web | Web-based MQTT client | Internal | Home Automation |
 | matter-server | Matter and Thread protocol server | Internal (cluster) | — |
 | otbr | OpenThread Border Router (Matter/Thread) | Internal (cluster) | — |
+| traccar | GPS/location tracking server | Internal | Home Automation |
+| trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 
 ---
 
@@ -113,6 +115,7 @@
 | actual-budget | Personal finance management | Internal | Office |
 | penpot | Design and prototyping platform | Internal | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
+| nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
 
 ---
 

@@ -63,7 +63,23 @@ spec:
                 echo ""
               done
 
-              echo "OTel ILM policies applied successfully."
+              # Set Data Stream Lifecycle (DSL) retention on OTel data streams.
+              # DSL overrides ILM for these streams; must be set explicitly.
+              echo "Setting DSL retention: logs-generic-default=14d ..."
+              curl -sSf $CACERT $AUTH \
+                -H 'Content-Type: application/json' \
+                -X PUT "$${ES_URL}/_data_stream/logs-generic-default/_lifecycle" \
+                -d '{"data_retention":"14d"}'
+              echo ""
+
+              echo "Setting DSL retention: metrics-generic.otel-default=7d ..."
+              curl -sSf $CACERT $AUTH \
+                -H 'Content-Type: application/json' \
+                -X PUT "$${ES_URL}/_data_stream/metrics-generic.otel-default/_lifecycle" \
+                -d '{"data_retention":"7d"}'
+              echo ""
+
+              echo "OTel ILM policies and DSL retention applied successfully."
       volumes:
         - name: config
           configMap:

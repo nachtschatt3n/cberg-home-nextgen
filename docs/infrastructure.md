@@ -137,7 +137,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
 | ai | AI/ML services | ~6 |
-| home-automation | Smart home integrations | ~13 |
+| home-automation | Smart home integrations | ~16 |
 | databases | Database backends | ~8 |
 | monitoring | Observability stack | ~10 |
 | office | Productivity and document management | ~8 |
@@ -150,7 +150,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | default | Dashboard (Homepage) + utilities | ~2 |
 | flux-system | Flux GitOps operator | 1 |
 | backup | External backup integrations | 1 |
-| my-software-development | Custom app development | ~4 |
+| my-software-development | Custom app development | ~3 |
 | my-software-production | Custom app production | ~2 |
 
 ---
