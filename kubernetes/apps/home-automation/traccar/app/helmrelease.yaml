@@ -40,7 +40,7 @@ spec:
               - -c
               - |
                 cd /opt/traccar
-                java -jar tracker-server.jar conf/traccar.xml &
+                ./jre/bin/java -jar tracker-server.jar conf/traccar.xml &
                 JAVA_PID=$!
                 sleep 3
                 tail -f logs/tracker-server.log &
