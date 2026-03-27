@@ -26,6 +26,9 @@ spec:
   values:
     controllers:
       paperclip:
+        pod:
+          securityContext:
+            fsGroup: 1000
         containers:
           app:
             image:
