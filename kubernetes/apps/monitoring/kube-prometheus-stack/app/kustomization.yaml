@@ -12,6 +12,7 @@ resources:
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
   - ./librechat-alerts.yaml
+  - ./next-ai-draw-io-alerts.yaml
   - ./tube-archivist-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml

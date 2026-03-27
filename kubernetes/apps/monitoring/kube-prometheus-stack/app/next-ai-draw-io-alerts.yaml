@@ -1,0 +1,53 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: next-ai-draw-io-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: next-ai-draw-io.pods.health
+    rules:
+    - alert: NextAIDrawIOPodNotReady
+      annotations:
+        description: next-ai-draw-io pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The diagram service may be unavailable.
+        summary: next-ai-draw-io pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="ai", pod=~"next-ai-draw-io-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: ai
+        component: next-ai-draw-io
+        severity: critical
+    - alert: NextAIDrawIOPodCrashLooping
+      annotations:
+        description: next-ai-draw-io pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes.
+        summary: next-ai-draw-io pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"next-ai-draw-io-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: ai
+        component: next-ai-draw-io
+        severity: critical
+    - alert: NextAIDrawIOPodRestarted
+      annotations:
+        description: next-ai-draw-io pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes. Monitor for repeated restarts.
+        summary: next-ai-draw-io pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"next-ai-draw-io-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: ai
+        component: next-ai-draw-io
+        severity: warning
