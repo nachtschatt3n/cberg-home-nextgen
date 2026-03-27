@@ -739,7 +739,7 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
         "music-assistant-alexa-stream", "absenty", "absenty-dev", "andreamosteller",
         "echo-server",  # accepted: intentional test endpoint
         "open-webui", "n8n", "iobroker", "tube-archivist", "jellyfin", "penpot",
-        "home-assistant",
+        "home-assistant", "traccar", "librechat-librechat",
     }
 
     for entry in external:

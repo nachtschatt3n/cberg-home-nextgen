@@ -105,6 +105,8 @@ The following services are on the external ingress class without Authentik forwa
 | librechat | ai | Built-in user auth (registration controlled by admin) |
 | tube-archivist | download | Built-in user auth required |
 | traccar | home-automation | Built-in user auth; GPS data access requires login |
+| penpot | office | Built-in user auth; registration disabled (`disable-registration` flag), only pre-existing accounts can log in |
+| jellyfin | media | Built-in user auth required before any media access |
 | absenty (dev) | my-software-development | Built-in app auth; development instance |
 | absenty (prod) | my-software-production | Built-in app auth; employee-facing service |
 | andreamosteller (prod) | my-software-production | Intentionally public portfolio/website — no auth required |
@@ -121,3 +123,26 @@ The following services are on the external ingress class without Authentik forwa
 The `headlamp` ServiceAccount is bound to `cluster-admin` via `clusterrolebinding/headlamp-admin`. No long-lived token Secret exists in the cluster.
 
 **Why accepted:** Headlamp is a Kubernetes cluster administration UI. Full cluster read/write access is the intended and required permission scope for the tool to function. The ingress is protected by Authentik forward auth on the internal ingress class, limiting access to authenticated users only. The risk surface is equivalent to granting a cluster admin user access to the dashboard.
+
+---
+
+## AR-009 — Privileged Containers and hostNetwork Pods for Hardware Access
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — hardware device access required by design
+
+The following containers run with elevated privileges or `hostNetwork: true`:
+
+| App | Namespace | Privilege Level | Justification |
+|-----|-----------|----------------|---------------|
+| frigate-nvr | home-automation | Privileged | Direct access to capture cards (`/dev/video*`) and GPU for NVR hardware transcoding |
+| otbr | home-automation | Privileged | Network interface manipulation required for OpenThread Border Router (Thread radio) |
+| scrypted | home-automation | Privileged + uid=0 | Hardware transcoding, device passthrough, and SYS_ADMIN for camera NVR/proxy |
+| jellyfin | media | Privileged + SYS_ADMIN | iGPU hardware transcoding via Intel Quick Sync |
+| makemkv | media | Privileged | Raw device access for Blu-ray/DVD drive passthrough |
+| node-red | home-automation | uid=0 | PVC volume permission compatibility (see AR-006) |
+| icloud-docker-mu | backup | uid=0 | File operations on mounted iCloud sync volume |
+
+**hostNetwork pods** (home-assistant, esphome, matter-server, music-assistant-server, otbr): Required for LAN device discovery protocols (mDNS, multicast, Zigbee/Thread/Matter device communication). Standard pattern for home-automation workloads.
+
+**Why accepted:** All privileged containers are in `home-automation` and `media` namespaces where direct hardware access is a functional requirement. No purely application workloads (databases, office tools) run with elevated privileges. All pods are on the internal cluster network with no direct external exposure.

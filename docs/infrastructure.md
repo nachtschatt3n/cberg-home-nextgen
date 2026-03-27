@@ -13,7 +13,7 @@ and worker).
 
 | Attribute | Value |
 |-----------|-------|
-| Kubernetes | v1.34.6 |
+| Kubernetes | v1.34.0 |
 | Talos Linux | v1.11.6 |
 | Flux | v2.5.0 |
 | Nodes | 3 × Intel NUC14 Pro |
@@ -161,7 +161,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Kubernetes | v1.34.6 | Container orchestration |
+| Kubernetes | v1.34.0 | Container orchestration |
 | Talos Linux | v1.11.6 | Cluster OS |
 | Flux | v2.5.0 (pinned; see note above) | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
@@ -169,7 +169,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | cert-manager | v1.20.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |
-| talosctl | 1.11.0 | Talos CLI (server); client v1.12.4 |
+| talosctl | v1.12.4 | CLI (client); cluster OS v1.11.6 — see overview table |
 | talhelper | 3.1.3 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |
