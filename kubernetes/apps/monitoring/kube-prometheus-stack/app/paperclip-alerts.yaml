@@ -1,0 +1,82 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: paperclip-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: paperclip.pods.health
+    rules:
+    - alert: PaperclipPodNotReady
+      annotations:
+        description: Paperclip pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The agent orchestration service may be unavailable.
+        summary: Paperclip pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="ai", pod=~"paperclip-[^p].*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: ai
+        component: paperclip
+        severity: critical
+    - alert: PaperclipPodCrashLooping
+      annotations:
+        description: Paperclip pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes.
+        summary: Paperclip pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: ai
+        component: paperclip
+        severity: critical
+    - alert: PaperclipPodRestarted
+      annotations:
+        description: Paperclip pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes.
+        summary: Paperclip pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: ai
+        component: paperclip
+        severity: warning
+  - interval: 30s
+    name: paperclip.postgresql.health
+    rules:
+    - alert: PaperclipPostgresqlPodNotReady
+      annotations:
+        description: Paperclip PostgreSQL pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The database may be unavailable.
+        summary: Paperclip PostgreSQL pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="ai", pod=~"paperclip-postgresql-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: ai
+        component: paperclip-postgresql
+        severity: critical
+    - alert: PaperclipPostgresqlPodCrashLooping
+      annotations:
+        description: Paperclip PostgreSQL pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes.
+        summary: Paperclip PostgreSQL pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-postgresql-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: ai
+        component: paperclip-postgresql
+        severity: critical

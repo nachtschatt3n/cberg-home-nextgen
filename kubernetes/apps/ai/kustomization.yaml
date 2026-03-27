@@ -13,3 +13,4 @@ resources:
   - ./anythingllm/ks.yaml
   - ./librechat/ks.yaml
   - ./next-ai-draw-io/ks.yaml
+  - ./paperclip/ks.yaml

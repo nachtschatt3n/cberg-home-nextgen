@@ -1,0 +1,117 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: paperclip
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: false
+    remediation:
+      retries: 1
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      paperclip:
+        containers:
+          app:
+            image:
+              repository: reeoss/paperclipai-paperclip
+              tag: latest
+            env:
+              - name: HOST
+                value: "0.0.0.0"
+              - name: NODE_ENV
+                value: "production"
+              - name: PAPERCLIP_PORT
+                value: "3100"
+              - name: PAPERCLIP_PUBLIC_URL
+                value: "https://paperclip.${SECRET_DOMAIN}"
+              - name: PAPERCLIP_HOME
+                value: "/paperclip"
+            envFrom:
+              - secretRef:
+                  name: paperclip-secret
+            probes:
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 3100
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  failureThreshold: 6
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: 3100
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+    service:
+      main:
+        controller: paperclip
+        ports:
+          http:
+            port: 3100
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Paperclip"
+          gethomepage.dev/description: "AI agent orchestration — multi-agent company management"
+          gethomepage.dev/group: "AI"
+          gethomepage.dev/icon: "paperclip.png"
+          gethomepage.dev/pod-selector: app.kubernetes.io/name=paperclip
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host "paperclip.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+
+    persistence:
+      data:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /paperclip
