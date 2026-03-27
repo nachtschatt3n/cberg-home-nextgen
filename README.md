@@ -9,8 +9,8 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 <div align="center">
 
 [![Talos](https://img.shields.io/badge/Talos-v1.11.6-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.5-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
-[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.8.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.6-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
+[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.5.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
 

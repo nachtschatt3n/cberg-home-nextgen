@@ -13,9 +13,9 @@ and worker).
 
 | Attribute | Value |
 |-----------|-------|
-| Kubernetes | v1.34.5 |
+| Kubernetes | v1.34.6 |
 | Talos Linux | v1.11.6 |
-| Flux | v2.8.0 |
+| Flux | v2.5.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.18.6 |
 | Storage | Longhorn v1.10.2 |
@@ -96,6 +96,8 @@ manages all subsequent deployments including upgrades to these components.
 | Identity Provider | Authentik (forward auth for all ingress) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
 
+> **Note:** Flux distribution is pinned to v2.5.0 due to a CRD incompatibility between flux-operator v0.14.0 and Flux v2.6+. The `flux` CLI tool (mise) is v2.8.0 but the running cluster distribution is v2.5.0.
+
 ---
 
 ## Storage
@@ -159,9 +161,9 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Kubernetes | v1.34.5 | Container orchestration |
+| Kubernetes | v1.34.6 | Container orchestration |
 | Talos Linux | v1.11.6 | Cluster OS |
-| Flux | v2.8.0 | GitOps operator |
+| Flux | v2.5.0 (pinned; see note above) | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
 | Longhorn | v1.10.2 | Distributed storage |
 | cert-manager | v1.20.0 | TLS management |
