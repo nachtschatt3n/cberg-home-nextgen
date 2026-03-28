@@ -54,11 +54,12 @@ spec:
                 else
                   echo "mise already installed, skipping"
                 fi
-                if [ ! -f /paperclip/.local/bin/zsh ]; then
-                  echo "Installing zsh-static to /paperclip/.local/bin..."
+                if [ ! -f /paperclip/.local/bin/zsh ] || [ ! -d /paperclip/.local/share/zsh ]; then
+                  echo "Installing zsh-static and function files to /paperclip/.local..."
                   mkdir -p /paperclip/.local/bin
                   cp /bin/zsh-static /paperclip/.local/bin/zsh
                   chmod +x /paperclip/.local/bin/zsh
+                  cp -r /usr/share/zsh /paperclip/.local/share/zsh
                   echo "zsh installed: $(/paperclip/.local/bin/zsh --version)"
                 else
                   echo "zsh already installed, skipping"
@@ -70,7 +71,18 @@ spec:
                 else
                   echo "oh-my-zsh already installed, skipping"
                 fi
-                if [ ! -f /paperclip/.zshrc ]; then
+                if true; then
+                  echo "Writing /paperclip/.zshenv..."
+                  ZSH_VERSION=$(/paperclip/.local/bin/zsh --version | awk '{print $2}')
+                  cat > /paperclip/.zshenv << ZSHENV
+                export FPATH="/paperclip/.local/share/zsh/${ZSH_VERSION}/functions:/paperclip/.local/share/zsh/vendor-functions:/paperclip/.local/share/zsh/vendor-completions"
+                export HOME="/paperclip"
+                ZSHENV
+                  echo ".zshenv written"
+                else
+                  echo ".zshenv already exists, skipping"
+                fi
+                if true; then
                   echo "Writing /paperclip/.zshrc..."
                   cat > /paperclip/.zshrc << 'ZSHRC'
                 export ZSH="/paperclip/.oh-my-zsh"
@@ -80,7 +92,6 @@ spec:
                 export PATH="/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:$PATH"
                 export MISE_DATA_DIR="/paperclip/.mise"
                 export MISE_CACHE_DIR="/paperclip/.cache/mise"
-                export HOME="/paperclip"
                 ZSHRC
                   echo ".zshrc written"
                 else
