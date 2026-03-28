@@ -10,7 +10,7 @@
 
 | Namespace | App Count |
 |-----------|-----------|
-| ai | 7 |
+| ai | 9 |
 | home-automation | 16 |
 | databases | 8 |
 | monitoring | 12 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~80** |
+| **Total** | **~82** |
 
 ---
 
@@ -41,6 +41,8 @@
 | anythingllm | Private RAG workspace with local AI | Internal | AI |
 | mcpo | Model Control Plane Orchestrator | Internal | AI |
 | ai-sre | AI-powered SRE tooling | Internal | AI |
+| next-ai-draw-io | AI-assisted diagram editor (natural language → diagrams) | Internal | AI |
+| paperclip | AI agent orchestration — multi-agent company management | Internal | AI |
 
 **External Ollama:** Mac Mini M4 Pro at `192.168.30.111` (not deployed in cluster)
 
