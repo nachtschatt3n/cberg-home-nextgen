@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: ghcr.io/dayuanjiang/next-ai-draw-io
-              tag: sha-67b0d77
+              tag: 0.4.13
             env:
               - name: AI_PROVIDER
                 value: "ollama"
