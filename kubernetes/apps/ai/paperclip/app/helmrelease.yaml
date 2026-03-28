@@ -43,6 +43,8 @@ spec:
                   echo "mise already installed, skipping"
                   exit 0
                 fi
+                echo "Installing curl..."
+                apt-get update -qq && apt-get install -y -qq curl
                 echo "Installing mise to /paperclip/.mise-bin..."
                 mkdir -p /paperclip/.mise-bin
                 curl -fsSL https://mise.run | MISE_INSTALL_PATH=/paperclip/.mise-bin/mise sh
