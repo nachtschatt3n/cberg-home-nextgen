@@ -78,6 +78,7 @@ spec:
                 # Patch oh-my-zsh to suppress unavailable module errors in zsh-static
                 sed -i 's/^zmodload zsh\/system$/zmodload zsh\/system 2>\/dev\/null || true/' /paperclip/.oh-my-zsh/lib/async_prompt.zsh 2>/dev/null || true
                 sed -i "s/regexp-replace 'functions\[VCS_INFO_formats\]'$/regexp-replace 'functions[VCS_INFO_formats]' 2>\/dev\/null/" /paperclip/.oh-my-zsh/lib/vcs_info.zsh 2>/dev/null || true
+                sed -i 's/if \[\[ "\$byte" =~ "\$dont_escape" \]\]/if [[ "$byte" == ${~dont_escape} ]]/' /paperclip/.oh-my-zsh/lib/functions.zsh 2>/dev/null || true
                 if true; then
                   echo "Writing /paperclip/.zshenv..."
                   printf 'export FPATH="/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' > /paperclip/.zshenv
