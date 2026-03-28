@@ -63,6 +63,7 @@ spec:
                   cp "$ZSH_BIN" /paperclip/.local/bin/zsh
                   chmod +x /paperclip/.local/bin/zsh
                   cp -r /usr/share/zsh /paperclip/.local/share/zsh
+                  chmod -R a-w /paperclip/.local/share/zsh
                   echo "zsh installed: $(/paperclip/.local/bin/zsh --version)"
                 else
                   echo "zsh already installed, skipping"
@@ -84,12 +85,18 @@ spec:
                 if true; then
                   echo "Writing /paperclip/.zshrc..."
                   cat > /paperclip/.zshrc << 'ZSHRC'
-                # Add all zsh function subdirs recursively to fpath (no trailing slashes)
+                # Provide a secure (non-group-writable) fake compaudit so compinit
+                # does not strip our zsh function dirs from fpath due to fsGroup permissions
+                _sf=/tmp/zsh-secure-funcs
+                mkdir -p "$_sf" && chmod 755 "$_sf"
+                printf "compaudit () { return 0 }\n" > "$_sf/compaudit"
+                chmod 644 "$_sf/compaudit"
+                # Build fpath: secure stub first, then all zsh function subdirs
+                fpath=($_sf)
                 for _d in /paperclip/.local/share/zsh/functions /paperclip/.local/share/zsh/functions/**; do
-                  [[ -d $_d ]] && fpath=($_d $fpath)
+                  [[ -d $_d ]] && fpath+=($_d)
                 done
                 fpath+=(/paperclip/.local/share/zsh/vendor-completions)
-                autoload -Uz compdump compinstall
                 export ZSH="/paperclip/.oh-my-zsh"
                 DISABLE_AUTO_UPDATE=true
                 ZSH_THEME="robbyrussell"
@@ -98,8 +105,6 @@ spec:
                 export PATH="/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:$PATH"
                 export MISE_DATA_DIR="/paperclip/.mise"
                 export MISE_CACHE_DIR="/paperclip/.cache/mise"
-                # Suppress exit-time completion dump errors from zsh-static
-                compdump() {}
                 ZSHRC
                   echo ".zshrc written"
                 else
