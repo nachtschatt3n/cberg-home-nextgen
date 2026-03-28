@@ -76,6 +76,18 @@ spec:
                 else
                   echo "oh-my-zsh already installed, skipping"
                 fi
+                if [ ! -f /paperclip/.local/bin/gh ]; then
+                  echo "Installing gh CLI..."
+                  GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+                  curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | \
+                    tar -xz -C /tmp
+                  cp /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /paperclip/.local/bin/gh
+                  chmod +x /paperclip/.local/bin/gh
+                  rm -rf /tmp/gh_${GH_VERSION}_linux_amd64
+                  echo "gh installed: $(/paperclip/.local/bin/gh --version)"
+                else
+                  echo "gh already installed, skipping"
+                fi
                 if [ ! -f /paperclip/.local/bin/unifictl ]; then
                   echo "Installing rust and unifictl..."
                   RUSTUP_HOME=/paperclip/.rustup CARGO_HOME=/paperclip/.cargo \
