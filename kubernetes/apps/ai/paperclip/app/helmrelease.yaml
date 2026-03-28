@@ -43,9 +43,10 @@ spec:
                 [ -f /paperclip/.mise-bin/mise ] || NEED_APT=1
                 [ -f /paperclip/.local/bin/zsh ] || NEED_APT=1
                 [ -d /paperclip/.local/share/zsh ] || NEED_APT=1
+                [ -f /paperclip/.local/bin/unifictl ] || NEED_APT=1
                 if [ "$NEED_APT" = "1" ]; then
                   echo "Updating apt and installing dependencies..."
-                  apt-get update -qq && apt-get install -y -qq curl zsh-static git
+                  apt-get update -qq && apt-get install -y -qq curl zsh-static git build-essential
                 fi
                 if [ ! -f /paperclip/.mise-bin/mise ]; then
                   echo "Installing mise to /paperclip/.mise-bin..."
@@ -74,6 +75,16 @@ spec:
                   echo "oh-my-zsh installed"
                 else
                   echo "oh-my-zsh already installed, skipping"
+                fi
+                if [ ! -f /paperclip/.local/bin/unifictl ]; then
+                  echo "Installing rust and unifictl..."
+                  RUSTUP_HOME=/paperclip/.rustup CARGO_HOME=/paperclip/.cargo \
+                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --quiet
+                  RUSTUP_HOME=/paperclip/.rustup CARGO_HOME=/paperclip/.cargo \
+                    /paperclip/.cargo/bin/cargo install unifictl@5.3.1 --root /paperclip/.local
+                  echo "unifictl installed: $(/paperclip/.local/bin/unifictl --version)"
+                else
+                  echo "unifictl already installed, skipping"
                 fi
                 # Patch oh-my-zsh to suppress unavailable module errors in zsh-static
                 sed -i 's/^zmodload zsh\/system$/zmodload zsh\/system 2>\/dev\/null || true/' /paperclip/.oh-my-zsh/lib/async_prompt.zsh 2>/dev/null || true
