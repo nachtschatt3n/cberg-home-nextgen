@@ -57,7 +57,8 @@ spec:
                 if [ ! -f /paperclip/.local/bin/zsh ] || [ ! -d /paperclip/.local/share/zsh ]; then
                   echo "Installing zsh-static and function files to /paperclip/.local..."
                   mkdir -p /paperclip/.local/bin
-                  cp /bin/zsh-static /paperclip/.local/bin/zsh
+                  ZSH_BIN=$(find /usr/bin /bin -name 'zsh*' -type f 2>/dev/null | head -1)
+                  cp "$ZSH_BIN" /paperclip/.local/bin/zsh
                   chmod +x /paperclip/.local/bin/zsh
                   cp -r /usr/share/zsh /paperclip/.local/share/zsh
                   echo "zsh installed: $(/paperclip/.local/bin/zsh --version)"
