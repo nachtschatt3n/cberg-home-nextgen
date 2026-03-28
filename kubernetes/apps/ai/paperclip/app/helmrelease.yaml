@@ -29,6 +29,27 @@ spec:
         pod:
           securityContext:
             fsGroup: 1000
+        initContainers:
+          mise-install:
+            image:
+              repository: node
+              tag: lts-slim
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -e
+                if [ -f /paperclip/.mise-bin/mise ]; then
+                  echo "mise already installed, skipping"
+                  exit 0
+                fi
+                echo "Installing mise to /paperclip/.mise-bin..."
+                mkdir -p /paperclip/.mise-bin
+                curl -fsSL https://mise.run | MISE_INSTALL_PATH=/paperclip/.mise-bin/mise sh
+                echo "mise installed: $(/paperclip/.mise-bin/mise --version)"
+            env:
+              - name: HOME
+                value: "/paperclip"
         containers:
           app:
             image:
@@ -45,6 +66,10 @@ spec:
                 value: "https://paperclip.${SECRET_DOMAIN}"
               - name: PAPERCLIP_HOME
                 value: "/paperclip"
+              - name: MISE_DATA_DIR
+                value: "/paperclip/.mise"
+              - name: PATH
+                value: "/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             envFrom:
               - secretRef:
                   name: paperclip-secret
