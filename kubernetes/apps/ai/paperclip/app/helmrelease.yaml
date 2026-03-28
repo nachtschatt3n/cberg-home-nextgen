@@ -42,6 +42,7 @@ spec:
                 NEED_APT=0
                 [ -f /paperclip/.mise-bin/mise ] || NEED_APT=1
                 [ -f /paperclip/.local/bin/zsh ] || NEED_APT=1
+                [ -d /paperclip/.local/share/zsh ] || NEED_APT=1
                 if [ "$NEED_APT" = "1" ]; then
                   echo "Updating apt and installing dependencies..."
                   apt-get update -qq && apt-get install -y -qq curl zsh-static git
