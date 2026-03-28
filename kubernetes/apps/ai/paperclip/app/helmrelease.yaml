@@ -57,7 +57,7 @@ spec:
                 fi
                 if [ ! -f /paperclip/.local/bin/zsh ] || [ ! -d /paperclip/.local/share/zsh ]; then
                   echo "Installing zsh-static and function files to /paperclip/.local..."
-                  mkdir -p /paperclip/.local/bin
+                  mkdir -p /paperclip/.local/bin /paperclip/.local/share
                   ZSH_BIN=$(dpkg -L zsh-static 2>/dev/null | grep -E 'zsh' | grep -v man | grep -v share | head -1)
                   echo "zsh binary found at: $ZSH_BIN"
                   cp "$ZSH_BIN" /paperclip/.local/bin/zsh
