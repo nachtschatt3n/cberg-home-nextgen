@@ -83,7 +83,7 @@ spec:
           gethomepage.dev/name: "AI Draw.io"
           gethomepage.dev/description: "Create and edit diagrams using natural language AI"
           gethomepage.dev/group: "AI"
-          gethomepage.dev/icon: "drawio.png"
+          gethomepage.dev/icon: "draw-io.png"
           gethomepage.dev/pod-selector: app.kubernetes.io/name=next-ai-draw-io
         labels:
           gethomepage.dev/enabled: "true"

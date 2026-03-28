@@ -213,7 +213,7 @@ spec:
           gethomepage.dev/name: "Paperclip"
           gethomepage.dev/description: "AI agent orchestration — multi-agent company management"
           gethomepage.dev/group: "AI"
-          gethomepage.dev/icon: "paperclip.png"
+          gethomepage.dev/icon: "mdi-paperclip"
           gethomepage.dev/pod-selector: app.kubernetes.io/name=paperclip
         labels:
           gethomepage.dev/enabled: "true"

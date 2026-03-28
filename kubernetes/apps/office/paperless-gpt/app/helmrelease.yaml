@@ -113,7 +113,7 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Paperless-GPT"
-          gethomepage.dev/group: "Office"
+          gethomepage.dev/group: "AI"
           gethomepage.dev/icon: "paperless.png"
           gethomepage.dev/description: "AI-powered document processing for paperless-ngx"
           nginx.ingress.kubernetes.io/proxy-body-size: 64m
