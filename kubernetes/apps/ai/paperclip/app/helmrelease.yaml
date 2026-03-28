@@ -84,17 +84,22 @@ spec:
                 if true; then
                   echo "Writing /paperclip/.zshrc..."
                   cat > /paperclip/.zshrc << 'ZSHRC'
-                # Add all zsh function subdirs to fpath so compinit/autoloads work
-                for _d in /paperclip/.local/share/zsh/functions/*/; do
-                  fpath=($_d $fpath)
+                # Add all zsh function subdirs recursively to fpath (no trailing slashes)
+                for _d in /paperclip/.local/share/zsh/functions /paperclip/.local/share/zsh/functions/**; do
+                  [[ -d $_d ]] && fpath=($_d $fpath)
                 done
+                fpath+=(/paperclip/.local/share/zsh/vendor-completions)
+                autoload -Uz compdump compinstall
                 export ZSH="/paperclip/.oh-my-zsh"
+                DISABLE_AUTO_UPDATE=true
                 ZSH_THEME="robbyrussell"
                 plugins=(git)
                 source $ZSH/oh-my-zsh.sh
                 export PATH="/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:$PATH"
                 export MISE_DATA_DIR="/paperclip/.mise"
                 export MISE_CACHE_DIR="/paperclip/.cache/mise"
+                # Suppress exit-time completion dump errors from zsh-static
+                compdump() {}
                 ZSHRC
                   echo ".zshrc written"
                 else
