@@ -84,6 +84,10 @@ spec:
                 if true; then
                   echo "Writing /paperclip/.zshrc..."
                   cat > /paperclip/.zshrc << 'ZSHRC'
+                # Add all zsh function subdirs to fpath so compinit/autoloads work
+                for _d in /paperclip/.local/share/zsh/functions/*/; do
+                  fpath=($_d $fpath)
+                done
                 export ZSH="/paperclip/.oh-my-zsh"
                 ZSH_THEME="robbyrussell"
                 plugins=(git)
