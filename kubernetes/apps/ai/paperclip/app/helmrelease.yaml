@@ -75,6 +75,9 @@ spec:
                 else
                   echo "oh-my-zsh already installed, skipping"
                 fi
+                # Patch oh-my-zsh to suppress unavailable module errors in zsh-static
+                sed -i 's/^zmodload zsh\/system$/zmodload zsh\/system 2>\/dev\/null || true/' /paperclip/.oh-my-zsh/lib/async_prompt.zsh 2>/dev/null || true
+                sed -i "s/regexp-replace 'functions\[VCS_INFO_formats\]'$/regexp-replace 'functions[VCS_INFO_formats]' 2>\/dev\/null/" /paperclip/.oh-my-zsh/lib/vcs_info.zsh 2>/dev/null || true
                 if true; then
                   echo "Writing /paperclip/.zshenv..."
                   printf 'export FPATH="/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' > /paperclip/.zshenv
@@ -99,6 +102,7 @@ spec:
                 fpath+=(/paperclip/.local/share/zsh/vendor-completions)
                 export ZSH="/paperclip/.oh-my-zsh"
                 DISABLE_AUTO_UPDATE=true
+                DISABLE_AUTO_TITLE=true
                 ZSH_THEME="robbyrussell"
                 plugins=(git)
                 source $ZSH/oh-my-zsh.sh
