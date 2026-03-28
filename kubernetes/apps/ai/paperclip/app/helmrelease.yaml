@@ -76,8 +76,7 @@ spec:
                 fi
                 if true; then
                   echo "Writing /paperclip/.zshenv..."
-                  ZSH_FUNCS=$(ls -d /paperclip/.local/share/zsh/[0-9]*/functions 2>/dev/null | head -1)
-                  printf 'export FPATH="%s:/paperclip/.local/share/zsh/vendor-functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' "$ZSH_FUNCS" > /paperclip/.zshenv
+                  printf 'export FPATH="/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' > /paperclip/.zshenv
                   echo ".zshenv written"
                 else
                   echo ".zshenv already exists, skipping"
@@ -124,6 +123,8 @@ spec:
                 value: "/paperclip"
               - name: PATH
                 value: "/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              - name: FPATH
+                value: "/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"
             envFrom:
               - secretRef:
                   name: paperclip-secret
