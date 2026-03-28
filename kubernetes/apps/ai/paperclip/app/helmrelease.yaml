@@ -95,10 +95,10 @@ spec:
                 mkdir -p "$_sf" && chmod 755 "$_sf"
                 printf "compaudit () { return 0 }\n" > "$_sf/compaudit"
                 chmod 644 "$_sf/compaudit"
-                # Build fpath: secure stub first, then all zsh function subdirs
+                # Build fpath: secure stub first, then all zsh function subdirs (recursive)
                 fpath=($_sf)
-                for _d in /paperclip/.local/share/zsh/functions /paperclip/.local/share/zsh/functions/**; do
-                  [[ -d $_d ]] && fpath+=($_d)
+                for _d in /paperclip/.local/share/zsh/functions/**/; do
+                  fpath+=($_d)
                 done
                 fpath+=(/paperclip/.local/share/zsh/vendor-completions)
                 export ZSH="/paperclip/.oh-my-zsh"
