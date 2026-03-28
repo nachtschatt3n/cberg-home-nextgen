@@ -39,16 +39,53 @@ spec:
               - -c
               - |
                 set -e
-                if [ -f /paperclip/.mise-bin/mise ]; then
-                  echo "mise already installed, skipping"
-                  exit 0
+                NEED_APT=0
+                [ -f /paperclip/.mise-bin/mise ] || NEED_APT=1
+                [ -f /paperclip/.local/bin/zsh ] || NEED_APT=1
+                if [ "$NEED_APT" = "1" ]; then
+                  echo "Updating apt and installing dependencies..."
+                  apt-get update -qq && apt-get install -y -qq curl zsh-static git
                 fi
-                echo "Installing curl..."
-                apt-get update -qq && apt-get install -y -qq curl
-                echo "Installing mise to /paperclip/.mise-bin..."
-                mkdir -p /paperclip/.mise-bin
-                curl -fsSL https://mise.run | MISE_INSTALL_PATH=/paperclip/.mise-bin/mise sh
-                echo "mise installed: $(/paperclip/.mise-bin/mise --version)"
+                if [ ! -f /paperclip/.mise-bin/mise ]; then
+                  echo "Installing mise to /paperclip/.mise-bin..."
+                  mkdir -p /paperclip/.mise-bin
+                  curl -fsSL https://mise.run | MISE_INSTALL_PATH=/paperclip/.mise-bin/mise sh
+                  echo "mise installed: $(/paperclip/.mise-bin/mise --version)"
+                else
+                  echo "mise already installed, skipping"
+                fi
+                if [ ! -f /paperclip/.local/bin/zsh ]; then
+                  echo "Installing zsh-static to /paperclip/.local/bin..."
+                  mkdir -p /paperclip/.local/bin
+                  cp /bin/zsh-static /paperclip/.local/bin/zsh
+                  chmod +x /paperclip/.local/bin/zsh
+                  echo "zsh installed: $(/paperclip/.local/bin/zsh --version)"
+                else
+                  echo "zsh already installed, skipping"
+                fi
+                if [ ! -d /paperclip/.oh-my-zsh ]; then
+                  echo "Installing oh-my-zsh to /paperclip/.oh-my-zsh..."
+                  git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /paperclip/.oh-my-zsh
+                  echo "oh-my-zsh installed"
+                else
+                  echo "oh-my-zsh already installed, skipping"
+                fi
+                if [ ! -f /paperclip/.zshrc ]; then
+                  echo "Writing /paperclip/.zshrc..."
+                  cat > /paperclip/.zshrc << 'ZSHRC'
+                export ZSH="/paperclip/.oh-my-zsh"
+                ZSH_THEME="robbyrussell"
+                plugins=(git)
+                source $ZSH/oh-my-zsh.sh
+                export PATH="/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:$PATH"
+                export MISE_DATA_DIR="/paperclip/.mise"
+                export MISE_CACHE_DIR="/paperclip/.cache/mise"
+                export HOME="/paperclip"
+                ZSHRC
+                  echo ".zshrc written"
+                else
+                  echo ".zshrc already exists, skipping"
+                fi
             env:
               - name: HOME
                 value: "/paperclip"
@@ -75,7 +112,7 @@ spec:
               - name: HOME
                 value: "/paperclip"
               - name: PATH
-                value: "/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                value: "/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             envFrom:
               - secretRef:
                   name: paperclip-secret
