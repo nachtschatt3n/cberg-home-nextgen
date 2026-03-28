@@ -76,11 +76,8 @@ spec:
                 fi
                 if true; then
                   echo "Writing /paperclip/.zshenv..."
-                  ZSH_VERSION=$(/paperclip/.local/bin/zsh --version | awk '{print $2}')
-                  cat > /paperclip/.zshenv << ZSHENV
-                export FPATH="/paperclip/.local/share/zsh/${ZSH_VERSION}/functions:/paperclip/.local/share/zsh/vendor-functions:/paperclip/.local/share/zsh/vendor-completions"
-                export HOME="/paperclip"
-                ZSHENV
+                  ZSH_FUNCS=$(ls -d /paperclip/.local/share/zsh/[0-9]*/functions 2>/dev/null | head -1)
+                  printf 'export FPATH="%s:/paperclip/.local/share/zsh/vendor-functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' "$ZSH_FUNCS" > /paperclip/.zshenv
                   echo ".zshenv written"
                 else
                   echo ".zshenv already exists, skipping"
