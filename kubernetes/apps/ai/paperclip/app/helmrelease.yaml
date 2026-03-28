@@ -70,6 +70,10 @@ spec:
                 value: "/paperclip"
               - name: MISE_DATA_DIR
                 value: "/paperclip/.mise"
+              - name: MISE_CACHE_DIR
+                value: "/paperclip/.cache/mise"
+              - name: HOME
+                value: "/paperclip"
               - name: PATH
                 value: "/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             envFrom:
