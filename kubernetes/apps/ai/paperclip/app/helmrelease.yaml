@@ -171,6 +171,16 @@ spec:
             envFrom:
               - secretRef:
                   name: paperclip-secret
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                    - /bin/bash
+                    - -c
+                    - |
+                      apt-get update -qq && apt-get install -y -qq \
+                        build-essential libssl-dev libreadline-dev \
+                        zlib1g-dev libpq-dev libsqlite3-dev 2>/dev/null || true
             probes:
               readiness:
                 enabled: true
