@@ -137,13 +137,19 @@ spec:
                   GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
                   GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
                   mkdir -p /paperclip/.local/bin
+                  # LD_LIBRARY_PATH is set inside the wrapper only — NOT as a container env var —
+                  # so gcc can find its own shared deps (libgmp, libmpc, libmpfr, libisl) without
+                  # poisoning the app container's runtime linker with an incompatible glibc.
+                  TOOLROOT_LIBS="/paperclip/toolroot/lib/x86_64-linux-gnu:/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
                   if [ -n "$GCC_REAL" ]; then
-                    printf '#!/bin/sh\nexec %s --sysroot=/paperclip/toolroot "$@"\n' "$GCC_REAL" \
+                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GCC_REAL" \
                       | tee /paperclip/.local/bin/gcc /paperclip/.local/bin/cc > /dev/null
                     chmod +x /paperclip/.local/bin/gcc /paperclip/.local/bin/cc
                   fi
                   if [ -n "$GPP_REAL" ]; then
-                    printf '#!/bin/sh\nexec %s --sysroot=/paperclip/toolroot "$@"\n' "$GPP_REAL" \
+                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GPP_REAL" \
                       | tee /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ > /dev/null
                     chmod +x /paperclip/.local/bin/g++ /paperclip/.local/bin/c++
                   fi
@@ -190,7 +196,6 @@ spec:
                 export MISE_DATA_DIR="/paperclip/.mise"
                 export MISE_CACHE_DIR="/paperclip/.cache/mise"
                 export GCC_EXEC_PREFIX="/paperclip/toolroot/usr/"
-                export LD_LIBRARY_PATH="/paperclip/toolroot/lib/x86_64-linux-gnu:/paperclip/toolroot/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
                 ZSHRC
                   echo ".zshrc written"
                 else
@@ -227,8 +232,6 @@ spec:
                 value: "/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"
               - name: GCC_EXEC_PREFIX
                 value: "/paperclip/toolroot/usr/"
-              - name: LD_LIBRARY_PATH
-                value: "/paperclip/toolroot/lib/x86_64-linux-gnu:/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
             envFrom:
               - secretRef:
                   name: paperclip-secret
