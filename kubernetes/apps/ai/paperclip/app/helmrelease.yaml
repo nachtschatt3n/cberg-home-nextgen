@@ -113,16 +113,20 @@ spec:
                 if [ ! -f /paperclip/.local/bin/gcc ]; then
                   echo "Building sysroot at /paperclip/toolroot..."
                   mkdir -p /tmp/pkgs /paperclip/toolroot
+                  # Always update apt here — NEED_APT may have been 0 (tools already installed),
+                  # so apt-get install was skipped above and gcc-N is not in the container dpkg db.
                   apt-get update -qq
+                  # Detect the versioned gcc/g++/cpp packages via apt-cache (works even when
+                  # the package is not yet installed in this container run).
+                  GCC_PKG=$(apt-cache depends gcc 2>/dev/null | awk '/Depends: gcc-[0-9]/{print $2; exit}')
+                  GPP_PKG=$(apt-cache depends g++ 2>/dev/null | awk '/Depends: g\+\+-[0-9]/{print $2; exit}')
+                  CPP_PKG=$(apt-cache depends cpp 2>/dev/null | awk '/Depends: cpp-[0-9]/{print $2; exit}')
+                  echo "Downloading: gcc=$GCC_PKG g++=$GPP_PKG cpp=$CPP_PKG"
                   cd /tmp/pkgs
-                  # Include libc6 + libc6-dev: provides libc_nonshared.a, crt1.o, linker scripts
-                  # and libc.so.6 — the exact files the linker needs via its hardcoded paths.
                   apt-get download \
                     gcc g++ make \
                     binutils binutils-x86-64-linux-gnu binutils-common \
-                    $(dpkg -l 'gcc-[0-9]*'  2>/dev/null | awk '/^ii/{print $2}' | grep -v '\-dev\|-doc' | sort -V | tail -1) \
-                    $(dpkg -l 'g++-[0-9]*'  2>/dev/null | awk '/^ii/{print $2}' | grep -v '\-dev\|-doc' | sort -V | tail -1) \
-                    $(dpkg -l 'cpp-[0-9]*'  2>/dev/null | awk '/^ii/{print $2}' | grep -v '\-dev\|-doc' | sort -V | tail -1) \
+                    ${GCC_PKG:+$GCC_PKG} ${GPP_PKG:+$GPP_PKG} ${CPP_PKG:+$CPP_PKG} \
                     libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
                     libctf0 libctf-nobfd0 libbinutils \
                     libc6 libc6-dev linux-libc-dev \
@@ -132,35 +136,36 @@ spec:
                     dpkg -x "$deb" /paperclip/toolroot/ 2>/dev/null || true
                   done
                   rm -rf /tmp/pkgs
-                  # Create wrapper scripts that inject --sysroot; mkmf/extconf.rb just uses
-                  # $CC and $CXX so these wrappers make gem compilation transparent.
+                  # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
+                  # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
+                  # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
                   GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
                   GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
+                  GCC_B=$(dirname "$(find /paperclip/toolroot/usr/libexec/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
+                  TOOLROOT_LIBS="/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
                   mkdir -p /paperclip/.local/bin
-                  # LD_LIBRARY_PATH is set inside the wrapper only — NOT as a container env var —
-                  # so gcc can find its own shared deps (libgmp, libmpc, libmpfr, libisl) without
-                  # poisoning the app container's runtime linker with an incompatible glibc.
-                  TOOLROOT_LIBS="/paperclip/toolroot/lib/x86_64-linux-gnu:/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
-                  if [ -n "$GCC_REAL" ]; then
-                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GCC_REAL" \
+                  if [ -n "$GCC_REAL" ] && [ -n "$GCC_B" ]; then
+                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GCC_REAL" "$GCC_B" \
                       | tee /paperclip/.local/bin/gcc /paperclip/.local/bin/cc > /dev/null
                     chmod +x /paperclip/.local/bin/gcc /paperclip/.local/bin/cc
+                    echo "gcc wrapper -> $GCC_REAL (B=$GCC_B)"
+                  else
+                    echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL GCC_B=$GCC_B" >&2
                   fi
-                  if [ -n "$GPP_REAL" ]; then
-                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GPP_REAL" \
+                  if [ -n "$GPP_REAL" ] && [ -n "$GCC_B" ]; then
+                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GPP_REAL" "$GCC_B" \
                       | tee /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ > /dev/null
                     chmod +x /paperclip/.local/bin/g++ /paperclip/.local/bin/c++
                   fi
                   MAKE_REAL=/paperclip/toolroot/usr/bin/make
                   [ -f "$MAKE_REAL" ] && cp "$MAKE_REAL" /paperclip/.local/bin/make && chmod +x /paperclip/.local/bin/make || true
-                  # Copy remaining binutils (no sysroot needed — they use -rpath, not linker scripts)
                   for bin in as ld ld.bfd ar nm strip objdump; do
                     src=/paperclip/toolroot/usr/bin/$bin
                     [ -f "$src" ] && cp "$src" /paperclip/.local/bin/ && chmod +x "/paperclip/.local/bin/$bin" || true
                   done
-                  echo "Sysroot built and wrappers created at /paperclip/.local/bin/gcc|cc|g++|make"
+                  [ -f /paperclip/.local/bin/gcc ] && echo "Sysroot ready: $(cat /paperclip/.local/bin/gcc | grep exec)" || echo "ERROR: gcc wrapper missing after build" >&2
                 else
                   echo "Build toolchain already present, skipping"
                 fi
