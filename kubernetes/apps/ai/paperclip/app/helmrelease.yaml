@@ -32,8 +32,8 @@ spec:
         initContainers:
           mise-install:
             image:
-              repository: ubuntu
-              tag: "24.04"
+              repository: node
+              tag: lts-slim
             command:
               - /bin/sh
               - -c
