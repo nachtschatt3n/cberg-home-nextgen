@@ -121,14 +121,18 @@ spec:
                   GCC_PKG=$(apt-cache depends gcc 2>/dev/null | awk '/Depends: gcc-[0-9]/{print $2; exit}')
                   GPP_PKG=$(apt-cache depends g++ 2>/dev/null | awk '/Depends: g\+\+-[0-9]/{print $2; exit}')
                   CPP_PKG=$(apt-cache depends cpp 2>/dev/null | awk '/Depends: cpp-[0-9]/{print $2; exit}')
-                  echo "Downloading: gcc=$GCC_PKG g++=$GPP_PKG cpp=$CPP_PKG"
+                  # libgcc-N-dev provides crtbeginS.o and libgcc.a needed for native gem linking
+                  LIBGCC_DEV_PKG=$(echo "$GCC_PKG" | sed 's/^gcc-/libgcc-/')"-dev"
+                  echo "Downloading: gcc=$GCC_PKG g++=$GPP_PKG cpp=$CPP_PKG libgcc-dev=$LIBGCC_DEV_PKG"
                   cd /tmp/pkgs
                   apt-get download \
                     gcc g++ make \
                     binutils binutils-x86-64-linux-gnu binutils-common \
                     ${GCC_PKG:+$GCC_PKG} ${GPP_PKG:+$GPP_PKG} ${CPP_PKG:+$CPP_PKG} \
+                    ${LIBGCC_DEV_PKG:+$LIBGCC_DEV_PKG} \
                     libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
                     libctf0 libctf-nobfd0 libbinutils \
+                    libjansson4 libsframe1 \
                     libc6 libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev \
                     libpq-dev libsqlite3-dev 2>/dev/null || true
@@ -141,30 +145,42 @@ spec:
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
                   GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
                   GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
-                  GCC_B=$(dirname "$(find /paperclip/toolroot/usr/libexec/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
+                  # cc1 lives in usr/lib/gcc/... on Debian and usr/libexec/gcc/... on Ubuntu
+                  CC1_DIR=$(dirname "$(find /paperclip/toolroot/usr/lib/gcc /paperclip/toolroot/usr/libexec/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
                   TOOLROOT_LIBS="/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
                   mkdir -p /paperclip/.local/bin
-                  if [ -n "$GCC_REAL" ] && [ -n "$GCC_B" ]; then
-                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GCC_REAL" "$GCC_B" \
+                  if [ -n "$GCC_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ]; then
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="/paperclip/toolroot/usr/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GCC_REAL" "$CC1_DIR" \
                       | tee /paperclip/.local/bin/gcc /paperclip/.local/bin/cc > /dev/null
                     chmod +x /paperclip/.local/bin/gcc /paperclip/.local/bin/cc
-                    echo "gcc wrapper -> $GCC_REAL (B=$GCC_B)"
+                    echo "gcc wrapper -> $GCC_REAL (cc1 at $CC1_DIR)"
                   else
-                    echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL GCC_B=$GCC_B" >&2
+                    echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL CC1_DIR=$CC1_DIR" >&2
                   fi
-                  if [ -n "$GPP_REAL" ] && [ -n "$GCC_B" ]; then
-                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GPP_REAL" "$GCC_B" \
+                  if [ -n "$GPP_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ]; then
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="/paperclip/toolroot/usr/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$TOOLROOT_LIBS" "$GPP_REAL" "$CC1_DIR" \
                       | tee /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ > /dev/null
                     chmod +x /paperclip/.local/bin/g++ /paperclip/.local/bin/c++
                   fi
                   MAKE_REAL=/paperclip/toolroot/usr/bin/make
                   [ -f "$MAKE_REAL" ] && cp "$MAKE_REAL" /paperclip/.local/bin/make && chmod +x /paperclip/.local/bin/make || true
-                  for bin in as ld ld.bfd ar nm strip objdump; do
+                  for bin in as ar nm strip objdump; do
                     src=/paperclip/toolroot/usr/bin/$bin
                     [ -f "$src" ] && cp "$src" /paperclip/.local/bin/ && chmod +x "/paperclip/.local/bin/$bin" || true
                   done
+                  # ld needs its private libs (libbfd, libjansson, libsframe) — use a wrapper
+                  # that scopes LD_LIBRARY_PATH only to the linker invocation, not the app runtime
+                  LD_REAL=/paperclip/toolroot/usr/bin/ld.bfd
+                  if [ -f "$LD_REAL" ]; then
+                    printf '#!/bin/sh\nexport LD_LIBRARY_PATH="/paperclip/toolroot/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s "$@"\n' "$LD_REAL" \
+                      | tee /paperclip/.local/bin/ld /paperclip/.local/bin/ld.bfd > /dev/null
+                    chmod +x /paperclip/.local/bin/ld /paperclip/.local/bin/ld.bfd
+                    echo "ld wrapper -> $LD_REAL"
+                  else
+                    echo "WARNING: ld.bfd not found in toolroot" >&2
+                  fi
                   [ -f /paperclip/.local/bin/gcc ] && echo "Sysroot ready: $(cat /paperclip/.local/bin/gcc | grep exec)" || echo "ERROR: gcc wrapper missing after build" >&2
                 else
                   echo "Build toolchain already present, skipping"
@@ -235,8 +251,6 @@ spec:
                 value: "/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               - name: FPATH
                 value: "/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"
-              - name: GCC_EXEC_PREFIX
-                value: "/paperclip/toolroot/usr/"
             envFrom:
               - secretRef:
                   name: paperclip-secret
