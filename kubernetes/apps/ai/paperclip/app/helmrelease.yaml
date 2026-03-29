@@ -46,7 +46,7 @@ spec:
                 [ -f /paperclip/.local/bin/unifictl ] || NEED_APT=1
                 if [ "$NEED_APT" = "1" ]; then
                   echo "Updating apt and installing dependencies..."
-                  apt-get update -qq && apt-get install -y -qq curl zsh-static git build-essential
+                  apt-get update -qq && apt-get install -y -qq curl zsh-static git build-essential openssh-client
                 fi
                 if [ ! -f /paperclip/.mise-bin/mise ]; then
                   echo "Installing mise to /paperclip/.mise-bin..."
@@ -85,9 +85,10 @@ spec:
                   chmod +x /paperclip/.local/bin/gh
                   rm -rf /tmp/gh_${GH_VERSION}_linux_amd64
                   echo "gh installed: $(/paperclip/.local/bin/gh --version)"
-                else
-                  echo "gh already installed, skipping"
                 fi
+                # Always ensure gh uses HTTPS (SSH may not be available in container)
+                /paperclip/.local/bin/gh config set git_protocol https --host github.com 2>/dev/null || true
+                echo "gh git_protocol set to https"
                 if [ ! -f /paperclip/.local/bin/unifictl ]; then
                   echo "Installing rust and unifictl..."
                   RUSTUP_HOME=/paperclip/.rustup CARGO_HOME=/paperclip/.cargo \
