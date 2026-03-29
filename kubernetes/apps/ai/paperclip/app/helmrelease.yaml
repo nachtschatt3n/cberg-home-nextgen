@@ -103,6 +103,42 @@ spec:
                 sed -i 's/^zmodload zsh\/system$/zmodload zsh\/system 2>\/dev\/null || true/' /paperclip/.oh-my-zsh/lib/async_prompt.zsh 2>/dev/null || true
                 sed -i "s/regexp-replace 'functions\[VCS_INFO_formats\]'$/regexp-replace 'functions[VCS_INFO_formats]' 2>\/dev\/null/" /paperclip/.oh-my-zsh/lib/vcs_info.zsh 2>/dev/null || true
                 sed -i 's/if \[\[ "\$byte" =~ "\$dont_escape" \]\]/if [[ "$byte" == $${~dont_escape} ]]/' /paperclip/.oh-my-zsh/lib/functions.zsh 2>/dev/null || true
+                # Extract C build toolchain into PV so the non-root app container can compile native gems.
+                # Uses dpkg -x (no install, no root needed at runtime) so all files land at the right
+                # relative paths. Shared libs unique to gcc (libgmp, libmpc, libmpfr, libisl, libzstd,
+                # libctf) are also downloaded and extracted — they are not present in slim app images.
+                if [ ! -f /paperclip/.local/bin/gcc ]; then
+                  echo "Extracting build toolchain to /paperclip/.local..."
+                  mkdir -p /tmp/pkgs /tmp/extracted
+                  apt-get update -qq
+                  cd /tmp/pkgs
+                  # Download debs without installing (init container already has them installed)
+                  apt-get download \
+                    gcc make binutils binutils-x86-64-linux-gnu binutils-common \
+                    $(dpkg -l 'gcc-[0-9]*' 2>/dev/null | awk '/^ii/{print $2}' | head -1) \
+                    $(dpkg -l 'cpp-[0-9]*' 2>/dev/null | awk '/^ii/{print $2}' | head -1) \
+                    libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
+                    libctf0 libctf-nobfd0 libbinutils \
+                    libssl-dev libreadline-dev zlib1g-dev \
+                    libpq-dev libsqlite3-dev 2>/dev/null || true
+                  # Extract each deb preserving its full usr/* tree
+                  for deb in /tmp/pkgs/*.deb; do
+                    dpkg -x "$deb" /tmp/extracted/ 2>/dev/null || true
+                  done
+                  # Merge usr/{bin,lib,include} into /paperclip/.local
+                  mkdir -p /paperclip/.local/bin /paperclip/.local/lib /paperclip/.local/include
+                  [ -d /tmp/extracted/usr/bin ]     && cp -rn /tmp/extracted/usr/bin/.     /paperclip/.local/bin/     || true
+                  [ -d /tmp/extracted/usr/lib ]     && cp -rn /tmp/extracted/usr/lib/.     /paperclip/.local/lib/     || true
+                  [ -d /tmp/extracted/usr/include ] && cp -rn /tmp/extracted/usr/include/. /paperclip/.local/include/ || true
+                  # Ensure plain gcc/cc symlinks exist
+                  GCC_BIN=$(ls /paperclip/.local/bin/gcc-* 2>/dev/null | head -1)
+                  [ -n "$GCC_BIN" ] && [ ! -f /paperclip/.local/bin/gcc ] && ln -sf "$GCC_BIN" /paperclip/.local/bin/gcc || true
+                  [ ! -f /paperclip/.local/bin/cc ] && ln -sf /paperclip/.local/bin/gcc /paperclip/.local/bin/cc || true
+                  rm -rf /tmp/pkgs /tmp/extracted
+                  echo "Build toolchain extracted to /paperclip/.local"
+                else
+                  echo "Build toolchain already present, skipping"
+                fi
                 if true; then
                   echo "Writing /paperclip/.zshenv..."
                   printf 'export FPATH="/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"\nexport HOME="/paperclip"\n' > /paperclip/.zshenv
@@ -134,6 +170,11 @@ spec:
                 export PATH="/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:$PATH"
                 export MISE_DATA_DIR="/paperclip/.mise"
                 export MISE_CACHE_DIR="/paperclip/.cache/mise"
+                export GCC_EXEC_PREFIX="/paperclip/.local/"
+                export LD_LIBRARY_PATH="/paperclip/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+                export LIBRARY_PATH="/paperclip/.local/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+                export C_INCLUDE_PATH="/paperclip/.local/include"
+                export CPATH="/paperclip/.local/include"
                 ZSHRC
                   echo ".zshrc written"
                 else
@@ -168,19 +209,19 @@ spec:
                 value: "/paperclip/.local/bin:/paperclip/.mise-bin:/paperclip/.mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               - name: FPATH
                 value: "/paperclip/.local/share/zsh/functions:/paperclip/.local/share/zsh/vendor-completions"
+              - name: GCC_EXEC_PREFIX
+                value: "/paperclip/.local/"
+              - name: LD_LIBRARY_PATH
+                value: "/paperclip/.local/lib"
+              - name: LIBRARY_PATH
+                value: "/paperclip/.local/lib"
+              - name: C_INCLUDE_PATH
+                value: "/paperclip/.local/include"
+              - name: CPATH
+                value: "/paperclip/.local/include"
             envFrom:
               - secretRef:
                   name: paperclip-secret
-            lifecycle:
-              postStart:
-                exec:
-                  command:
-                    - /bin/bash
-                    - -c
-                    - |
-                      apt-get update -qq && apt-get install -y -qq \
-                        build-essential libssl-dev libreadline-dev \
-                        zlib1g-dev libpq-dev libsqlite3-dev 2>/dev/null || true
             probes:
               readiness:
                 enabled: true
