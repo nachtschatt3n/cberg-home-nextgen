@@ -127,22 +127,31 @@ spec:
                   # Install all build packages (init runs as root); apt-get install is more reliable
                   # than apt-get download because it handles deps and won't silently skip packages
                   # due to version mismatches (e.g. libsframe0 on bookworm vs libsframe1 on trixie).
-                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+                  LOGF=/paperclip/toolchain.log
+                  echo "=== toolchain install log ===" > "$LOGF"
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
                     gcc g++ make \
                     ${GCC_PKG:+$GCC_PKG} ${GPP_PKG:+$GPP_PKG} ${CPP_PKG:+$CPP_PKG} \
-                    ${LIBGCC_DEV_PKG:+$LIBGCC_DEV_PKG} \
                     binutils binutils-x86-64-linux-gnu binutils-common \
                     libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
                     libctf0 libctf-nobfd0 libbinutils \
-                    libjansson4 libsframe0 \
+                    libjansson4 \
                     libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev \
-                    libpq-dev libsqlite3-dev 2>/dev/null || true
+                    libpq-dev libsqlite3-dev >> "$LOGF" 2>&1 || echo "WARN: bulk install had errors" >> "$LOGF"
+                  # libgcc-N-dev (crtbeginS.o + libgcc.a) installed separately with full output
+                  echo "--- installing ${LIBGCC_DEV_PKG} ---" >> "$LOGF"
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+                    ${LIBGCC_DEV_PKG:+$LIBGCC_DEV_PKG} >> "$LOGF" 2>&1 && \
+                    echo "OK: ${LIBGCC_DEV_PKG} installed" >> "$LOGF" || \
+                    echo "FAIL: ${LIBGCC_DEV_PKG} install failed" >> "$LOGF"
+                  echo "--- dpkg -L ${LIBGCC_DEV_PKG} ---" >> "$LOGF"
+                  dpkg -L "${LIBGCC_DEV_PKG}" >> "$LOGF" 2>&1 || true
                   # Copy installed package files into toolroot (preserving full paths for --sysroot)
                   TOOLROOT_PKGS="gcc g++ make binutils binutils-x86-64-linux-gnu binutils-common \
                     ${GCC_PKG} ${GPP_PKG} ${CPP_PKG} ${LIBGCC_DEV_PKG} \
                     libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
-                    libctf0 libctf-nobfd0 libbinutils libjansson4 libsframe0 \
+                    libctf0 libctf-nobfd0 libbinutils libjansson4 \
                     libc6 libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev libpq-dev libsqlite3-dev"
                   for pkg in $TOOLROOT_PKGS; do
@@ -150,6 +159,20 @@ spec:
                       [ -f "$f" ] && install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                     done
                   done
+                  # Directly copy crt objects and libgcc.a from known system path as safety net
+                  GCC_VER="${GCC_PKG#gcc-}"
+                  SYS_GCC_DIR="/usr/lib/gcc/x86_64-linux-gnu/${GCC_VER}"
+                  TOOLROOT_GCC_DIR="/paperclip/toolroot/usr/lib/gcc/x86_64-linux-gnu/${GCC_VER}"
+                  mkdir -p "$TOOLROOT_GCC_DIR"
+                  echo "--- direct copy from $SYS_GCC_DIR ---" >> "$LOGF"
+                  for f in crtbeginS.o crtbegin.o crtbeginT.o crtend.o crtendS.o libgcc.a libgcc_eh.a libgcc_s.so; do
+                    if [ -f "$SYS_GCC_DIR/$f" ]; then
+                      cp "$SYS_GCC_DIR/$f" "$TOOLROOT_GCC_DIR/" && echo "Copied: $f" >> "$LOGF"
+                    else
+                      echo "MISSING: $SYS_GCC_DIR/$f" >> "$LOGF"
+                    fi
+                  done
+                  echo "--- crtbeginS.o present: $([ -f $TOOLROOT_GCC_DIR/crtbeginS.o ] && echo YES || echo NO) ---" >> "$LOGF"
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
