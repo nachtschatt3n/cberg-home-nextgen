@@ -112,7 +112,7 @@ spec:
                 # mkmf/extconf.rb compile native gems with zero extra flags.
                 if [ ! -f /paperclip/.local/bin/gcc ]; then
                   echo "Building sysroot at /paperclip/toolroot..."
-                  mkdir -p /tmp/pkgs /paperclip/toolroot
+                  mkdir -p /paperclip/toolroot
                   # Always update apt here — NEED_APT may have been 0 (tools already installed),
                   # so apt-get install was skipped above and gcc-N is not in the container dpkg db.
                   apt-get update -qq
@@ -123,23 +123,33 @@ spec:
                   CPP_PKG=$(apt-cache depends cpp 2>/dev/null | awk '/Depends: cpp-[0-9]/{print $2; exit}')
                   # libgcc-N-dev provides crtbeginS.o and libgcc.a needed for native gem linking
                   LIBGCC_DEV_PKG=$(echo "$GCC_PKG" | sed 's/^gcc-/libgcc-/')"-dev"
-                  echo "Downloading: gcc=$GCC_PKG g++=$GPP_PKG cpp=$CPP_PKG libgcc-dev=$LIBGCC_DEV_PKG"
-                  cd /tmp/pkgs
-                  apt-get download \
+                  echo "Installing: gcc=$GCC_PKG g++=$GPP_PKG cpp=$CPP_PKG libgcc-dev=$LIBGCC_DEV_PKG"
+                  # Install all build packages (init runs as root); apt-get install is more reliable
+                  # than apt-get download because it handles deps and won't silently skip packages
+                  # due to version mismatches (e.g. libsframe0 on bookworm vs libsframe1 on trixie).
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
                     gcc g++ make \
-                    binutils binutils-x86-64-linux-gnu binutils-common \
                     ${GCC_PKG:+$GCC_PKG} ${GPP_PKG:+$GPP_PKG} ${CPP_PKG:+$CPP_PKG} \
                     ${LIBGCC_DEV_PKG:+$LIBGCC_DEV_PKG} \
+                    binutils binutils-x86-64-linux-gnu binutils-common \
                     libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
                     libctf0 libctf-nobfd0 libbinutils \
-                    libjansson4 libsframe1 \
-                    libc6 libc6-dev linux-libc-dev \
+                    libjansson4 libsframe0 \
+                    libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev \
                     libpq-dev libsqlite3-dev 2>/dev/null || true
-                  for deb in /tmp/pkgs/*.deb; do
-                    dpkg -x "$deb" /paperclip/toolroot/ 2>/dev/null || true
+                  # Copy installed package files into toolroot (preserving full paths for --sysroot)
+                  TOOLROOT_PKGS="gcc g++ make binutils binutils-x86-64-linux-gnu binutils-common \
+                    ${GCC_PKG} ${GPP_PKG} ${CPP_PKG} ${LIBGCC_DEV_PKG} \
+                    libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
+                    libctf0 libctf-nobfd0 libbinutils libjansson4 libsframe0 \
+                    libc6 libc6-dev linux-libc-dev \
+                    libssl-dev libreadline-dev zlib1g-dev libpq-dev libsqlite3-dev"
+                  for pkg in $TOOLROOT_PKGS; do
+                    dpkg -L "$pkg" 2>/dev/null | while IFS= read -r f; do
+                      [ -f "$f" ] && install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
+                    done
                   done
-                  rm -rf /tmp/pkgs
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
