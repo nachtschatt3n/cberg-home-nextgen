@@ -186,6 +186,13 @@ spec:
                   find /usr/include/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
+                  # Recreate top-level symlinks in /usr/include (e.g. asm -> x86_64-linux-gnu/asm).
+                  # find -type f skips these, but gcc needs them to resolve <asm/types.h> etc.
+                  find /usr/include -maxdepth 1 -type l 2>/dev/null | while IFS= read -r link; do
+                    target=$(readlink "$link" 2>/dev/null)
+                    name=$(basename "$link")
+                    ln -sfn "$target" "/paperclip/toolroot/usr/include/$name" 2>/dev/null || true
+                  done
                   echo "--- crtbeginS.o: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- stdio.h: $([ -f /paperclip/toolroot/usr/include/stdio.h ] && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- libgcc_s.so.1: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
