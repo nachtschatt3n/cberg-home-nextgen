@@ -112,6 +112,10 @@ spec:
                 # mkmf/extconf.rb compile native gems with zero extra flags.
                 if [ ! -f /paperclip/.local/bin/gcc ]; then
                   echo "Building sysroot at /paperclip/toolroot..."
+                  # Wipe stale toolroot from previous image versions before rebuilding.
+                  # Without this, gcc-N binaries from a previous distro upgrade linger and
+                  # confuse the version-detection glob (sort -V picks the wrong gcc).
+                  rm -rf /paperclip/toolroot
                   mkdir -p /paperclip/toolroot
                   # Always update apt here — NEED_APT may have been 0 (tools already installed),
                   # so apt-get install was skipped above and gcc-N is not in the container dpkg db.
@@ -205,8 +209,12 @@ spec:
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
-                  GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
-                  GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
+                  # Derive GCC_REAL from the detected package name (e.g. gcc-12 → gcc-12 binary)
+                  # rather than globbing, to avoid picking up stale binaries from prior image versions.
+                  GCC_REAL=/paperclip/toolroot/usr/bin/${GCC_PKG}
+                  GPP_REAL=/paperclip/toolroot/usr/bin/${GPP_PKG}
+                  [ -f "$GCC_REAL" ] || GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
+                  [ -f "$GPP_REAL" ] || GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
                   # cc1 lives in usr/lib/gcc/... on Debian and usr/libexec/gcc/... on Ubuntu
                   CC1_DIR=$(dirname "$(find /paperclip/toolroot/usr/lib/gcc /paperclip/toolroot/usr/libexec/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
                   TOOLROOT_LIBS="/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
