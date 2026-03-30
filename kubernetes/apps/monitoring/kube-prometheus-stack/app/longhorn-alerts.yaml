@@ -53,7 +53,7 @@ spec:
       interval: 30s
       rules:
         - alert: LonghornVolumeDetached
-          expr: longhorn_volume_state == 0
+          expr: longhorn_volume_state{state="detached"} == 1
           for: 2m
           labels:
             severity: warning
@@ -65,7 +65,7 @@ spec:
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
 
         - alert: LonghornVolumeDegraded
-          expr: longhorn_volume_robustness == 2
+          expr: longhorn_volume_robustness{robustness="degraded"} == 1
           for: 2m
           labels:
             severity: warning
@@ -77,7 +77,7 @@ spec:
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
 
         - alert: LonghornVolumeFaulted
-          expr: longhorn_volume_robustness == 3
+          expr: longhorn_volume_robustness{robustness="faulted"} == 1
           for: 30s
           labels:
             severity: critical

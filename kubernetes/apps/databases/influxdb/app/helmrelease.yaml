@@ -221,6 +221,12 @@ spec:
       continuous_queries: {}
       tls: {}
 
+    # Bucket retention policies (set via API, not configurable via helm values for InfluxDB v2):
+    #   - default (UniFi Poller / influxdata org): 30 days
+    #   - iobroker (ioBroker IoT / cberg org):    365 days
+    # To reconfigure: kubectl port-forward -n databases svc/influxdb-influxdb2 8086:80
+    # then PATCH /api/v2/buckets/{id} with retentionRules everySeconds value.
+
     # Allow executing custom init scripts
     #
     # If the container finds any files with the extensions .sh or .iql inside of the
