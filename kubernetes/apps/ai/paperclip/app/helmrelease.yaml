@@ -169,7 +169,14 @@ spec:
                   find /usr/lib/gcc/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
+                  # libgcc_s.so.1 is in /lib on Debian bookworm (non-merged /usr)
+                  # and referenced by the libgcc_s.so linker script as a bare filename;
+                  # copy it into toolroot so ld can find it during native gem linking
+                  find /lib -name "libgcc_s.so*" -type f 2>/dev/null | while IFS= read -r f; do
+                    install -D "$f" "/paperclip/toolroot/usr/lib/x86_64-linux-gnu/$(basename $f)" 2>/dev/null || true
+                  done
                   echo "--- crtbeginS.o present: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
+                  echo "--- libgcc_s.so.1 present: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
