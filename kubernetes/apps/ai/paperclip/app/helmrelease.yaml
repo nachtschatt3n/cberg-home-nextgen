@@ -142,6 +142,7 @@ spec:
                     libjansson4 \
                     libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev \
+                    libyaml-dev \
                     libpq-dev libsqlite3-dev >> "$LOGF" 2>&1 || echo "WARN: bulk install had errors" >> "$LOGF"
                   # Copy toolchain files into toolroot using find + cp -L to dereference
                   # symlink chains. The dpkg -L approach was unreliable on Debian bookworm:
