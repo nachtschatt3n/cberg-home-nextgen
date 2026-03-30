@@ -176,6 +176,11 @@ spec:
                   find /usr/lib/gcc/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
+                  # Debian trixie+ moves cc1 and other gcc internals to /usr/libexec/gcc/
+                  echo "--- find-copy /usr/libexec/gcc/ ---" >> "$LOGF"
+                  find /usr/libexec/gcc/ -type f 2>/dev/null | while IFS= read -r f; do
+                    install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
+                  done
                   # Copy all system headers so gcc --sysroot can find stdio.h etc.
                   echo "--- find-copy /usr/include/ ---" >> "$LOGF"
                   find /usr/include/ -type f 2>/dev/null | while IFS= read -r f; do
