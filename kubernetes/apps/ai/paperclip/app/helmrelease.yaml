@@ -163,20 +163,45 @@ spec:
                       [ -f "$f" ] && install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                     done
                   done
-                  # find-based copy for all of /usr/lib/gcc/ (handles any version, avoids
+                  # find-based copy for gcc lib dir (handles any version, avoids
                   # dpkg -L arch-suffix issues with libgcc-N-dev:amd64)
                   echo "--- find-copy /usr/lib/gcc/ ---" >> "$LOGF"
                   find /usr/lib/gcc/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
-                  # libgcc_s.so.1 is in /lib on Debian bookworm (non-merged /usr)
-                  # and referenced by the libgcc_s.so linker script as a bare filename;
-                  # copy it into toolroot so ld can find it during native gem linking
-                  find /lib -name "libgcc_s.so*" -type f 2>/dev/null | while IFS= read -r f; do
-                    install -D "$f" "/paperclip/toolroot/usr/lib/x86_64-linux-gnu/$(basename $f)" 2>/dev/null || true
+                  # Copy all system headers so gcc --isysroot can find stdio.h etc.
+                  # dpkg -L alone can't be relied on for this (multi-arch, symlink issues)
+                  echo "--- find-copy /usr/include/ ---" >> "$LOGF"
+                  find /usr/include/ -type f 2>/dev/null | while IFS= read -r f; do
+                    install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
-                  echo "--- crtbeginS.o present: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
-                  echo "--- libgcc_s.so.1 present: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
+                  # libgcc_s.so.1: in /lib on non-merged-usr systems, /usr/lib on merged-usr;
+                  # copy to toolroot usr/lib so ld finds it as a bare -lgcc_s reference
+                  find /lib /usr/lib -maxdepth 3 -name "libgcc_s.so*" -type f 2>/dev/null | \
+                    while IFS= read -r f; do
+                      install -D "$f" "/paperclip/toolroot/usr/lib/x86_64-linux-gnu/$(basename $f)" 2>/dev/null || true
+                    done
+                  echo "--- crtbeginS.o: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
+                  echo "--- stdio.h: $([ -f /paperclip/toolroot/usr/include/stdio.h ] && echo YES || echo NO) ---" >> "$LOGF"
+                  echo "--- libgcc_s.so.1: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
+                  # Patch linker scripts in the toolroot so --sysroot is applied to GROUP paths.
+                  # GNU ld only applies --sysroot to paths prefixed with '=' in linker scripts.
+                  # Without '=', paths like /usr/lib/.../libc_nonshared.a are treated as absolute
+                  # (pointing to the host system, not the toolroot), causing "file not found" errors
+                  # when the app container has no libc6-dev installed.
+                  echo "--- patching linker scripts for sysroot-relative paths ---" >> "$LOGF"
+                  find /paperclip/toolroot -name "*.so" -type f 2>/dev/null | while IFS= read -r f; do
+                    grep -q "GROUP" "$f" 2>/dev/null || continue
+                    # Add = prefix to bare absolute paths inside GROUP ( ... ) directives.
+                    # Matches paths starting with /lib, /usr/lib, /lib64 that are not already = prefixed.
+                    sed -i \
+                      -e 's|GROUP ( /|GROUP ( =/|g' \
+                      -e 's| /lib\([/ ]\)| =/lib\1|g' \
+                      -e 's| /usr/lib\([/ ]\)| =/usr/lib\1|g' \
+                      -e 's| /lib64\([/ ]\)| =/lib64\1|g' \
+                      "$f" 2>/dev/null || true
+                    echo "  patched: $f" >> "$LOGF"
+                  done
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
