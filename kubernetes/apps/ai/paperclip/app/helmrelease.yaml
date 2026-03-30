@@ -210,28 +210,43 @@ spec:
                   # Create wrapper scripts with --sysroot so ld resolves linker-script absolute
                   # paths (libc_nonshared.a etc.) against the toolroot, not /usr/...
                   # LD_LIBRARY_PATH is set inside wrapper only to avoid poisoning the app runtime.
-                  # Derive GCC_REAL from the detected package name (e.g. gcc-12 → gcc-12 binary)
-                  # rather than globbing, to avoid picking up stale binaries from prior image versions.
+                  # Ensure ld-linux-x86-64.so.2 exists in toolroot/lib64.
+                  # The libc.so linker script AS_NEEDED path (=/lib64/ld-linux-x86-64.so.2)
+                  # resolves to /paperclip/toolroot/lib64/ with --sysroot. On merged-usr systems
+                  # /lib64/ld-linux-x86-64.so.2 is a symlink; find the real file and copy it.
+                  mkdir -p /paperclip/toolroot/lib64
+                  for _ldlinux in /lib64/ld-linux-x86-64.so.2 /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2; do
+                    _real=$(readlink -f "$_ldlinux" 2>/dev/null)
+                    if [ -f "$_real" ]; then
+                      cp -f "$_real" /paperclip/toolroot/lib64/ld-linux-x86-64.so.2 2>/dev/null && break || true
+                    fi
+                  done
+                  [ -f /paperclip/toolroot/lib64/ld-linux-x86-64.so.2 ] && \
+                    echo "ld-linux: OK" >> "$LOGF" || echo "WARN: ld-linux-x86-64.so.2 missing from toolroot/lib64" >> "$LOGF"
+                  # Derive GCC_REAL from the detected package name to avoid picking up stale binaries.
                   GCC_REAL=/paperclip/toolroot/usr/bin/${GCC_PKG}
                   GPP_REAL=/paperclip/toolroot/usr/bin/${GPP_PKG}
                   [ -f "$GCC_REAL" ] || GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
                   [ -f "$GPP_REAL" ] || GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
-                  # cc1 lives in usr/lib/gcc/... on Debian and usr/libexec/gcc/... on Ubuntu
-                  CC1_DIR=$(dirname "$(find /paperclip/toolroot/usr/lib/gcc /paperclip/toolroot/usr/libexec/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
+                  # Debian trixie moved cc1 to usr/libexec/gcc/ but kept crt*.o in usr/lib/gcc/.
+                  # GCC_EXEC_PREFIX must point to the libexec dir (finds cc1 at runtime).
+                  # -B must point to the lib/gcc dir (finds crtbeginS.o, libgcc.a, etc.).
+                  CC1_DIR=$(dirname "$(find /paperclip/toolroot/usr/libexec/gcc /paperclip/toolroot/usr/lib/gcc -name cc1 2>/dev/null | head -1)" 2>/dev/null)
+                  GCC_LIB_DIR=$(dirname "$(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1)" 2>/dev/null)
                   TOOLROOT_LIBS="/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
                   mkdir -p /paperclip/.local/bin
-                  if [ -n "$GCC_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ]; then
-                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="/paperclip/toolroot/usr/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GCC_REAL" "$CC1_DIR" \
+                  if [ -n "$GCC_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ] && [ -n "$GCC_LIB_DIR" ] && [ "$GCC_LIB_DIR" != "." ]; then
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$CC1_DIR" "$TOOLROOT_LIBS" "$GCC_REAL" "$GCC_LIB_DIR" \
                       | tee /paperclip/.local/bin/gcc /paperclip/.local/bin/cc > /dev/null
                     chmod +x /paperclip/.local/bin/gcc /paperclip/.local/bin/cc
-                    echo "gcc wrapper -> $GCC_REAL (cc1 at $CC1_DIR)"
+                    echo "gcc wrapper -> $GCC_REAL (cc1=$CC1_DIR lib=$GCC_LIB_DIR)"
                   else
-                    echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL CC1_DIR=$CC1_DIR" >&2
+                    echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL CC1_DIR=$CC1_DIR GCC_LIB_DIR=$GCC_LIB_DIR" >&2
                   fi
-                  if [ -n "$GPP_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ]; then
-                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="/paperclip/toolroot/usr/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$TOOLROOT_LIBS" "$GPP_REAL" "$CC1_DIR" \
+                  if [ -n "$GPP_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ] && [ -n "$GCC_LIB_DIR" ] && [ "$GCC_LIB_DIR" != "." ]; then
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$CC1_DIR" "$TOOLROOT_LIBS" "$GPP_REAL" "$GCC_LIB_DIR" \
                       | tee /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ > /dev/null
                     chmod +x /paperclip/.local/bin/g++ /paperclip/.local/bin/c++
                   fi
