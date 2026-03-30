@@ -424,6 +424,6 @@ spec:
         type: persistentVolumeClaim
         storageClass: longhorn
         accessMode: ReadWriteOnce
-        size: 5Gi
+        size: 15Gi
         globalMounts:
           - path: /paperclip
