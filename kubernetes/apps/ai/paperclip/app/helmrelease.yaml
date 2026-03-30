@@ -186,13 +186,22 @@ spec:
                   find /usr/include/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
-                  # Recreate top-level symlinks in /usr/include (e.g. asm -> x86_64-linux-gnu/asm).
-                  # find -type f skips these, but gcc needs them to resolve <asm/types.h> etc.
+                  # Recreate top-level symlinks in /usr/include (e.g. ncurses.h -> curses.h).
+                  # find -type f skips these; copy any that exist in the init container.
                   find /usr/include -maxdepth 1 -type l 2>/dev/null | while IFS= read -r link; do
                     target=$(readlink "$link" 2>/dev/null)
                     name=$(basename "$link")
                     ln -sfn "$target" "/paperclip/toolroot/usr/include/$name" 2>/dev/null || true
                   done
+                  # On Debian trixie, linux-libc-dev:all no longer provides arch-specific asm/
+                  # headers or the /usr/include/asm symlink pointing to them. Create a fallback
+                  # asm -> asm-generic symlink, which is correct for user-space compilation
+                  # (Ruby gems, etc. use <asm/types.h> which maps fine to asm-generic).
+                  if [ ! -e /paperclip/toolroot/usr/include/asm ] && \
+                     [ -d /paperclip/toolroot/usr/include/asm-generic ]; then
+                    ln -sfn asm-generic /paperclip/toolroot/usr/include/asm
+                    echo "  created fallback: asm -> asm-generic" >> "$LOGF"
+                  fi
                   echo "--- crtbeginS.o: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- stdio.h: $([ -f /paperclip/toolroot/usr/include/stdio.h ] && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- libgcc_s.so.1: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
