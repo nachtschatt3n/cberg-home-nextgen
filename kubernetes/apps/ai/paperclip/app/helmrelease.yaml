@@ -143,48 +143,44 @@ spec:
                     libc6-dev linux-libc-dev \
                     libssl-dev libreadline-dev zlib1g-dev \
                     libpq-dev libsqlite3-dev >> "$LOGF" 2>&1 || echo "WARN: bulk install had errors" >> "$LOGF"
-                  # libgcc-N-dev (crtbeginS.o + libgcc.a) installed separately with full output
-                  echo "--- installing ${LIBGCC_DEV_PKG} ---" >> "$LOGF"
-                  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-                    ${LIBGCC_DEV_PKG:+$LIBGCC_DEV_PKG} >> "$LOGF" 2>&1 && \
-                    echo "OK: ${LIBGCC_DEV_PKG} installed" >> "$LOGF" || \
-                    echo "FAIL: ${LIBGCC_DEV_PKG} install failed" >> "$LOGF"
-                  echo "--- dpkg -L ${LIBGCC_DEV_PKG} ---" >> "$LOGF"
-                  dpkg -L "${LIBGCC_DEV_PKG}" >> "$LOGF" 2>&1 || true
-                  # Copy installed package files into toolroot (preserving full paths for --sysroot).
-                  # Use dpkg -L with :amd64 suffix and find-based fallback for gcc files since
-                  # dpkg -L without arch suffix may fail on multi-arch Debian systems.
-                  for pkg in gcc "g++" make binutils-x86-64-linux-gnu binutils-common \
-                             libgmp10 libmpc3 libmpfr6 libisl23 libzstd1 \
-                             libctf0 libctf-nobfd0 libbinutils libjansson4 \
-                             libc6 libc6-dev linux-libc-dev \
-                             libssl-dev libreadline-dev zlib1g-dev libpq-dev libsqlite3-dev \
-                             "${GCC_PKG}" "${GPP_PKG}" "${CPP_PKG}" "${LIBGCC_DEV_PKG}"; do
-                    dpkg -L "${pkg}:amd64" 2>/dev/null | while IFS= read -r f; do
-                      [ -f "$f" ] && install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
+                  # Copy toolchain files into toolroot using find + cp -L to dereference
+                  # symlink chains. The dpkg -L approach was unreliable on Debian bookworm:
+                  # gcc/ld binaries are multi-hop symlinks (gcc-12 → x86_64-linux-gnu-gcc-12)
+                  # and install -D silently fails to follow them correctly.
+                  # cp -L copies the dereferenced content to the destination name.
+                  echo "--- cp-copy /usr/bin ---" >> "$LOGF"
+                  mkdir -p /paperclip/toolroot/usr/bin
+                  find /usr/bin -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | \
+                    while IFS= read -r f; do
+                      cp -Lf "$f" "/paperclip/toolroot/usr/bin/$(basename "$f")" 2>/dev/null || true
                     done
-                    dpkg -L "${pkg}" 2>/dev/null | while IFS= read -r f; do
-                      [ -f "$f" ] && install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
+                  echo "--- cp-copy /usr/lib/x86_64-linux-gnu ---" >> "$LOGF"
+                  mkdir -p /paperclip/toolroot/usr/lib/x86_64-linux-gnu
+                  find /usr/lib/x86_64-linux-gnu -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | \
+                    while IFS= read -r f; do
+                      cp -Lf "$f" "/paperclip/toolroot/usr/lib/x86_64-linux-gnu/$(basename "$f")" 2>/dev/null || true
                     done
-                  done
-                  # find-based copy for gcc lib dir (handles any version, avoids
-                  # dpkg -L arch-suffix issues with libgcc-N-dev:amd64)
+                  echo "--- cp-copy /lib/x86_64-linux-gnu ---" >> "$LOGF"
+                  mkdir -p /paperclip/toolroot/lib/x86_64-linux-gnu
+                  find /lib/x86_64-linux-gnu -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | \
+                    while IFS= read -r f; do
+                      cp -Lf "$f" "/paperclip/toolroot/lib/x86_64-linux-gnu/$(basename "$f")" 2>/dev/null || true
+                    done
+                  echo "--- cp-copy /lib64 ---" >> "$LOGF"
+                  mkdir -p /paperclip/toolroot/lib64
+                  find /lib64 -maxdepth 1 \( -type f -o -type l \) 2>/dev/null | \
+                    while IFS= read -r f; do
+                      cp -Lf "$f" "/paperclip/toolroot/lib64/$(basename "$f")" 2>/dev/null || true
+                    done
                   echo "--- find-copy /usr/lib/gcc/ ---" >> "$LOGF"
                   find /usr/lib/gcc/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
-                  # Copy all system headers so gcc --isysroot can find stdio.h etc.
-                  # dpkg -L alone can't be relied on for this (multi-arch, symlink issues)
+                  # Copy all system headers so gcc --sysroot can find stdio.h etc.
                   echo "--- find-copy /usr/include/ ---" >> "$LOGF"
                   find /usr/include/ -type f 2>/dev/null | while IFS= read -r f; do
                     install -D "$f" "/paperclip/toolroot$f" 2>/dev/null || true
                   done
-                  # libgcc_s.so.1: in /lib on non-merged-usr systems, /usr/lib on merged-usr;
-                  # copy to toolroot usr/lib so ld finds it as a bare -lgcc_s reference
-                  find /lib /usr/lib -maxdepth 3 -name "libgcc_s.so*" -type f 2>/dev/null | \
-                    while IFS= read -r f; do
-                      install -D "$f" "/paperclip/toolroot/usr/lib/x86_64-linux-gnu/$(basename $f)" 2>/dev/null || true
-                    done
                   echo "--- crtbeginS.o: $(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1 | grep -q . && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- stdio.h: $([ -f /paperclip/toolroot/usr/include/stdio.h ] && echo YES || echo NO) ---" >> "$LOGF"
                   echo "--- libgcc_s.so.1: $([ -f /paperclip/toolroot/usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ] && echo YES || echo NO) ---" >> "$LOGF"
