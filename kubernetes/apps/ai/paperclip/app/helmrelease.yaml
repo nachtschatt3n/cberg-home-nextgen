@@ -32,8 +32,8 @@ spec:
         initContainers:
           mise-install:
             image:
-              repository: node
-              tag: lts-slim
+              repository: debian
+              tag: trixie-slim
             command:
               - /bin/sh
               - -c
