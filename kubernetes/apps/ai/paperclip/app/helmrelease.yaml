@@ -235,18 +235,24 @@ spec:
                   GCC_LIB_DIR=$(dirname "$(find /paperclip/toolroot/usr/lib/gcc -name crtbeginS.o 2>/dev/null | head -1)" 2>/dev/null)
                   TOOLROOT_LIBS="/paperclip/toolroot/usr/lib/x86_64-linux-gnu"
                   mkdir -p /paperclip/.local/bin
+                  # GCC_EXEC_PREFIX must be the PARENT of the arch/version dir, because gcc
+                  # appends "x86_64-linux-gnu/14/" automatically. If we set it to the full
+                  # CC1_DIR, gcc double-appends and looks in a non-existent path.
+                  # E.g.: CC1_DIR = .../libexec/gcc/x86_64-linux-gnu/14
+                  #       correct GCC_EXEC_PREFIX = .../libexec/gcc/  (two levels up)
+                  CC1_PREFIX=$(dirname "$(dirname "$CC1_DIR")")/
                   if [ -n "$GCC_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ] && [ -n "$GCC_LIB_DIR" ] && [ "$GCC_LIB_DIR" != "." ]; then
-                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$CC1_DIR" "$TOOLROOT_LIBS" "$GCC_REAL" "$GCC_LIB_DIR" \
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$CC1_PREFIX" "$TOOLROOT_LIBS" "$GCC_REAL" "$GCC_LIB_DIR" \
                       | tee /paperclip/.local/bin/gcc /paperclip/.local/bin/cc > /dev/null
                     chmod +x /paperclip/.local/bin/gcc /paperclip/.local/bin/cc
-                    echo "gcc wrapper -> $GCC_REAL (cc1=$CC1_DIR lib=$GCC_LIB_DIR)"
+                    echo "gcc wrapper -> $GCC_REAL (prefix=$CC1_PREFIX lib=$GCC_LIB_DIR)"
                   else
                     echo "ERROR: gcc wrapper not created: GCC_REAL=$GCC_REAL CC1_DIR=$CC1_DIR GCC_LIB_DIR=$GCC_LIB_DIR" >&2
                   fi
                   if [ -n "$GPP_REAL" ] && [ -n "$CC1_DIR" ] && [ "$CC1_DIR" != "." ] && [ -n "$GCC_LIB_DIR" ] && [ "$GCC_LIB_DIR" != "." ]; then
-                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s/"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
-                      "$CC1_DIR" "$TOOLROOT_LIBS" "$GPP_REAL" "$GCC_LIB_DIR" \
+                    printf '#!/bin/sh\nexport GCC_EXEC_PREFIX="%s"\nexport LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec %s -B %s --sysroot=/paperclip/toolroot "$@"\n' \
+                      "$CC1_PREFIX" "$TOOLROOT_LIBS" "$GPP_REAL" "$GCC_LIB_DIR" \
                       | tee /paperclip/.local/bin/g++ /paperclip/.local/bin/c++ > /dev/null
                     chmod +x /paperclip/.local/bin/g++ /paperclip/.local/bin/c++
                   fi
