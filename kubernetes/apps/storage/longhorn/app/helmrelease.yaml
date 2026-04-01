@@ -24,8 +24,8 @@ spec:
         createDefaultDiskLabeledNodes: false
         defaultReplicaCount: 2
         defaultDataLocality: best-effort
-        guaranteedEngineManagerCPU: 1000
-        guaranteedReplicaManagerCPU: 1000
+        guaranteedEngineManagerCPU: 500
+        guaranteedReplicaManagerCPU: 500
         defaultLonghornStaticStorageClass: longhorn-static
         backupTarget: "cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
