@@ -24,8 +24,9 @@ spec:
         createDefaultDiskLabeledNodes: false
         defaultReplicaCount: 2
         defaultDataLocality: best-effort
-        guaranteedEngineManagerCPU: 500
-        guaranteedReplicaManagerCPU: 500
+        # Reserve less CPU per instance-manager pod to reduce artificial
+        # cluster overcommit while still keeping non-zero headroom for Longhorn.
+        guaranteedInstanceManagerCpu: 8
         defaultLonghornStaticStorageClass: longhorn-static
         backupTarget: "cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
