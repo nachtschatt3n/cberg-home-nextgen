@@ -1,0 +1,7 @@
+---
+apiVersion: longhorn.io/v1beta2
+kind: Setting
+metadata:
+  name: guaranteed-instance-manager-cpu
+  namespace: storage
+value: '{"v1":"8","v2":"8"}'

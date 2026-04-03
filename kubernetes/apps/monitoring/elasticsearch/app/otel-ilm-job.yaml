@@ -7,6 +7,8 @@ kind: Job
 metadata:
   name: elasticsearch-otel-ilm-bootstrap
   namespace: monitoring
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
 spec:
   ttlSecondsAfterFinished: 86400
   backoffLimit: 5
