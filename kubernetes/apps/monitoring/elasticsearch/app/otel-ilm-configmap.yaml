@@ -22,7 +22,7 @@ data:
             }
           },
           "delete": {
-            "min_age": "14d",
+            "min_age": "7d",
             "actions": {
               "delete": {}
             }

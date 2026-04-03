@@ -9,8 +9,8 @@ spec:
   task: backup
   # Run at 3:00 AM daily (UTC)
   cron: "0 3 * * *"
-  # Keep last 7 daily backups
-  retain: 7
+  # Keep only the latest daily backup
+  retain: 1
   # Default concurrency (2 volumes at a time)
   concurrency: 2
   # Apply to all volumes with this label

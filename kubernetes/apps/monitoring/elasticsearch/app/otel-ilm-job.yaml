@@ -1,7 +1,7 @@
 ---
 # Bootstraps ILM retention policies for OTel native data streams.
 # Runs once after Elasticsearch is ready; safe to re-run (PUT is idempotent).
-# Retention: logs=14d, metrics=7d, traces=7d
+# Retention: logs=7d, metrics=7d, traces=7d
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -65,11 +65,11 @@ spec:
 
               # Set Data Stream Lifecycle (DSL) retention on OTel data streams.
               # DSL overrides ILM for these streams; must be set explicitly.
-              echo "Setting DSL retention: logs-generic-default=14d ..."
+              echo "Setting DSL retention: logs-generic-default=7d ..."
               curl -sSf $CACERT $AUTH \
                 -H 'Content-Type: application/json' \
                 -X PUT "$${ES_URL}/_data_stream/logs-generic-default/_lifecycle" \
-                -d '{"data_retention":"14d"}'
+                -d '{"data_retention":"7d"}'
               echo ""
 
               echo "Setting DSL retention: metrics-generic.otel-default=7d ..."
