@@ -84,7 +84,9 @@ spec:
       interval: 30s
       rules:
         - alert: EdotCollectorDown
-          expr: absent(up{job="edot-collector"}) or up{job="edot-collector"} == 0
+          expr: |
+            kube_deployment_status_replicas_available{deployment="edot-collector",namespace="monitoring"}
+            < kube_deployment_spec_replicas{deployment="edot-collector",namespace="monitoring"}
           for: 5m
           labels:
             severity: critical
