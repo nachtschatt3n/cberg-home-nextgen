@@ -30,3 +30,4 @@ spec:
     - name: kube-prometheus-stack-values
       kind: ConfigMap
       valuesKey: values.yaml
+      optional: false
