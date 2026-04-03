@@ -6,6 +6,12 @@ data:
   values.yaml: |
     crds:
       enabled: true
+    defaultRules:
+      rules:
+        kubeApiserverAvailability: false
+        kubeControllerManager: false
+        kubelet: false
+        kubeSchedulerAlerting: false
     cleanPrometheusOperatorObjectNames: true
     alertmanager:
       enabled: true
