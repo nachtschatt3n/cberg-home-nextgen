@@ -9,6 +9,11 @@ data:
     crds:
       enabled: true
     defaultRules:
+      disabled:
+        KubeAPIDown: true
+        KubeControllerManagerDown: true
+        KubeSchedulerDown: true
+        KubeletDown: true
       rules:
         kubeApiserverAvailability: false
         kubeControllerManager: false
