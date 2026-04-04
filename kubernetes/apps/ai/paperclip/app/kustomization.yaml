@@ -5,3 +5,4 @@ resources:
   - secret.sops.yaml
   - postgresql.yaml
   - helmrelease.yaml
+  - backup-cleanup.yaml

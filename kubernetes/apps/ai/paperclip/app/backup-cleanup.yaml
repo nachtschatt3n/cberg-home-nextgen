@@ -1,0 +1,53 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: paperclip-backup-cleanup
+  namespace: ai
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            fsGroup: 1000
+          containers:
+            - name: cleanup
+              image: debian:trixie-slim
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  cd /paperclip/instances/default/data/backups 2>/dev/null || exit 0
+                  cutoff=$(date -d "7 days ago" +%Y%m%d)
+                  deleted=0
+                  for f in *.sql; do
+                    [ -f "$f" ] || continue
+                    fdate=$(echo "$f" | sed 's/paperclip-\([0-9]*\)-.*/\1/')
+                    if [ "$fdate" -lt "$cutoff" ] 2>/dev/null; then
+                      rm "$f"
+                      deleted=$((deleted + 1))
+                    fi
+                  done
+                  remaining=$(ls -1 *.sql 2>/dev/null | wc -l)
+                  echo "Cleaned $deleted backups older than $cutoff, $remaining remaining"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /paperclip
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: paperclip-data
