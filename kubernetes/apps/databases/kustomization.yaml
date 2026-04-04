@@ -13,6 +13,7 @@ resources:
   - ./phpmyadmin/ks.yaml
   - ./pgadmin/ks.yaml
   - ./redisinsight/ks.yaml
+  - ./memgraph/ks.yaml
 
 ---
 apiVersion: v1

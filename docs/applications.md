@@ -83,6 +83,7 @@
 | phpmyadmin | phpMyAdmin — MySQL/MariaDB admin UI | Internal | Databases |
 | pgadmin | pgAdmin — PostgreSQL admin UI | Internal | Databases |
 | redisinsight | RedisInsight — Redis GUI | Internal | Databases |
+| memgraph | Memgraph — in-memory graph database (Cypher/Bolt) with Lab web UI | Internal | Databases |
 
 ---
 
