@@ -184,25 +184,9 @@ spec:
         memory: 8Gi
         gpu.intel.com/i915: 1
 
-    # -- Configure liveness probe for Jellyfin.
-    livenessProbe:
-      initialDelaySeconds: 30
-      tcpSocket:
-        port: http
-      successThreshold: 1
-      failureThreshold: 3
-      timeoutSeconds: 30
-      periodSeconds: 10
-
-    # -- Configure readiness probe for Jellyfin.
-    readinessProbe:
-      initialDelaySeconds: 30
-      tcpSocket:
-        port: http
-      successThreshold: 1
-      failureThreshold: 3
-      timeoutSeconds: 30
-      periodSeconds: 10
+    # Probes are managed by the chart in 3.x
+    livenessProbe: {}
+    readinessProbe: {}
 
     # -- Additional volumes to mount in the Jellyfin pod.
     volumes: []
