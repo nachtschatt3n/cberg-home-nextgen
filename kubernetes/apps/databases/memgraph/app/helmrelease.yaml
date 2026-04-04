@@ -143,7 +143,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Memgraph Lab"
           gethomepage.dev/group: "Databases"
-          gethomepage.dev/icon: "memgraph.png"
+          gethomepage.dev/icon: "https://avatars.githubusercontent.com/u/36494539"
           gethomepage.dev/description: "Graph database visualization and querying"
         labels:
           gethomepage.dev/enabled: "true"
