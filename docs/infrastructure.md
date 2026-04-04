@@ -14,11 +14,11 @@ and worker).
 | Attribute | Value |
 |-----------|-------|
 | Kubernetes | v1.34.0 |
-| Talos Linux | v1.11.6 |
+| Talos Linux | v1.11.0 |
 | Flux | v2.5.0 |
 | Nodes | 3 × Intel NUC14 Pro |
-| CNI | Cilium v1.18.6 |
-| Storage | Longhorn v1.10.2 |
+| CNI | Cilium v1.19.2 |
+| Storage | Longhorn v1.11.1 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
 | Auth | Authentik |
@@ -31,9 +31,9 @@ All nodes serve as both control plane and worker nodes (hyper-converged).
 
 | Node | Model | CPU | Memory | Storage | Network | IP |
 |------|-------|-----|---------|---------|---------|-----|
-| k8s-nuc14-01 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.x |
-| k8s-nuc14-02 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.x |
-| k8s-nuc14-03 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.x |
+| k8s-nuc14-01 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.11 |
+| k8s-nuc14-02 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.12 |
+| k8s-nuc14-03 | Intel NUC14 Pro | 18 cores | ~64 GB | NVMe SSD | 2.5 GbE | 192.168.55.13 |
 
 Node IPs are assigned from the k8s-network VLAN (192.168.55.0/24, VLAN 55) via DHCP.
 All three nodes connect to Basement-SW-24-PoE.
@@ -70,7 +70,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
-| 1 | Cilium | `cilium/cilium` | 1.17.1 | kube-system | (bootstrap seed; Flux upgrades to v1.18.6 via HelmRelease) |
+| 1 | Cilium | `cilium/cilium` | 1.17.1 | kube-system | (bootstrap seed; Flux upgrades to v1.19.2 via HelmRelease) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.45.2 | kube-system |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.20.0 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.14.0 | flux-system |
@@ -87,11 +87,11 @@ manages all subsequent deployments including upgrades to these components.
 |-----------|---------|
 | OS | Talos Linux v1.11.6 (immutable, minimal, Kubernetes-focused) |
 | Container Runtime | Containerd 2.1.4 + Spegel (distributed image caching) |
-| CNI | Cilium v1.18.6 (eBPF networking, load balancing, network policies) |
+| CNI | Cilium v1.19.2 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
-| Storage | Longhorn v1.10.2 (distributed, replicated, with backup) |
-| Certificate Management | cert-manager v1.20.0 + Let's Encrypt |
+| Storage | Longhorn v1.11.1 (distributed, replicated, with backup) |
+| Certificate Management | cert-manager v1.20.1 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward auth for all ingress) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
@@ -138,11 +138,11 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
-| ai | AI/ML services | ~6 |
+| ai | AI/ML services | ~9 |
 | home-automation | Smart home integrations | ~16 |
 | databases | Database backends | ~8 |
 | monitoring | Observability stack | ~10 |
-| office | Productivity and document management | ~8 |
+| office | Productivity and document management | ~10 |
 | media | Media servers | ~3 |
 | download | Download managers | ~2 |
 | kube-system | Core cluster infrastructure | ~10 |
@@ -162,14 +162,14 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.34.0 | Container orchestration |
-| Talos Linux | v1.11.6 | Cluster OS |
+| Talos Linux | v1.11.0 | Cluster OS |
 | Flux | v2.5.0 (pinned; see note above) | GitOps operator |
 | Cilium | v1.18.6 | CNI / network |
 | Longhorn | v1.10.2 | Distributed storage |
-| cert-manager | v1.20.0 | TLS management |
+| cert-manager | v1.20.1 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |
-| talosctl | v1.12.4 | CLI (client); cluster OS v1.11.6 — see overview table |
+| talosctl | v1.12.4 | CLI (client); cluster OS v1.11.0 — see overview table |
 | talhelper | 3.1.3 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |

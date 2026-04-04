@@ -30,3 +30,4 @@ docs/*-current.md
 # Bootstrap
 /config.yaml
 cloudflared.json
+.kube/
