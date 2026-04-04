@@ -160,3 +160,9 @@ spec:
           main:
             main:
               - path: /app/OPENAPI
+      public-images:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /app/public/images
