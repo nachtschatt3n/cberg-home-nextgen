@@ -5,49 +5,57 @@
 
 ---
 
-## Ollama AI Endpoints
+## Ollama AI Endpoint
 
-Ollama runs on Mac Mini M4 Pro (`192.168.30.111`) with three dedicated instances using
+Single Ollama instance on Mac Mini M4 Pro (`192.168.30.111:11434`) using
 Metal Performance Shaders (MPS) for GPU acceleration.
 
-### Instances
+### Models
 
-| Instance | Port | Model | Purpose |
-|---------|------|-------|---------|
-| Voice | 11434 | `qwen3:4b-instruct` | Voice/audio processing |
-| Reason | 11435 | `gpt-oss:20b` | General reasoning and text processing |
-| Vision | 11436 | `qwen3-vl:8b-instruct` | Vision/image processing |
+| Model | Purpose |
+|-------|---------|
+| `gemma4:26b` | All LLM tasks (chat, reasoning, vision, voice). Multimodal. |
+| `nomic-embed-text:latest` | Text embeddings |
 
 ### API Formats
 
 **Native Ollama API (preferred):**
 ```
-Base URL: http://192.168.30.111:{PORT}/api
+Base URL: http://192.168.30.111:11434/api
 Endpoints: /api/chat, /api/generate
 API Key: Not required
-Model format: gpt-oss:20b (colon, not slash)
+Model name: gemma4:26b (exact, not gemma4 or gemma4:26b-instruct)
 ```
 
 **OpenAI-compatible (for apps that require it):**
 ```
-Base URL: http://192.168.30.111:{PORT}/v1
+Base URL: http://192.168.30.111:11434/v1
 Endpoints: /v1/chat/completions
 ```
 
-### Model Naming Convention
-
-- ✅ Correct: `gpt-oss:20b`, `qwen3:4b-instruct`, `qwen3-vl:8b-instruct`
-- ❌ Wrong: `openai/gpt-oss-20b`, `qwen/qwen3-4b-2507`
-
 ### Application Configuration
 
-| App | Instance | Endpoint | Model | Provider Config |
-|-----|---------|---------|-------|-----------------|
-| paperless-ai | Reason | `http://192.168.30.111:11435/api` | `qwen3:4b-instruct` | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
-| paperless-gpt | Reason | `http://192.168.30.111:11435/api` | `gpt-oss:20b` | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL` |
-| frigate-nvr | Vision | `http://192.168.30.111:11436/api` | `qwen3-vl:8b-instruct` | `OPENAI_BASE_URL` |
-| openclaw | Reason | `http://192.168.30.111:11435/api` | `gpt-oss:20b` | App-specific |
-| open-webui | In-cluster | `http://ollama-ipex.ai.svc.cluster.local:11434` | Various | In-cluster IPEX instance |
+| App | Endpoint | Model | Provider Config |
+|-----|---------|-------|-----------------|
+| anythingllm | `http://192.168.30.111:11434` | `gemma4:26b` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
+| openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b` | `OLLAMA_BASE`, `OLLAMA_MODEL` |
+| next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` |
+| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b` (fetch=true) | Custom endpoint "Ollama" |
+| open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` |
+| paperless-gpt | `http://192.168.30.111:11434/v1` | `gemma4:26b` (LLM + vision) | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL` |
+| paperless-ai | `http://192.168.30.111:11434/v1` | `gemma4:26b` | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
+| affine | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
+| frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b` (in encrypted config) | `OPENAI_BASE_URL` |
+| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` (**manual update needed**) |
+| n8n | (UI-configured) | `gemma4:26b` | n8n UI: `ollamaApi` credential (**manual update needed**) |
+| n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials |
+| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b` (all integrations) | HA UI (**manual update needed**) |
+| paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret |
+
+**Home Assistant cloud AI integrations (UI-configured, no change):**
+- OpenAI (ChatGPT): conversation, AI task, TTS (`gpt-4o-mini-tts`), STT
+- Google Generative AI: conversation, TTS, AI task, STT
+- Google Translate: TTS
 
 ### Testing Endpoints
 

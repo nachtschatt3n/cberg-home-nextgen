@@ -298,8 +298,8 @@ spec:
                 node - <<'NODE'
                   const fs = require('fs');
                   const path = '/home/node/.openclaw/openclaw.json';
-                  const modelName = process.env.OLLAMA_MODEL || 'gpt-oss:20b';
-                  const ollamaBase = process.env.OLLAMA_BASE || 'http://192.168.30.111:11435/v1';
+                  const modelName = process.env.OLLAMA_MODEL || 'gemma4:26b';
+                  const ollamaBase = process.env.OLLAMA_BASE || 'http://192.168.30.111:11434/v1';
                   const ollamaKey = process.env.OLLAMA_API_KEY || 'ollama';
                   const displayModel = modelName.includes('/') ? modelName : 'ollama/' + modelName;
                   const modelId = displayModel;
@@ -421,9 +421,9 @@ spec:
               - name: GATEWAY_PORT
                 value: "18789"
               - name: OLLAMA_BASE
-                value: "http://192.168.30.111:11435/v1"
+                value: "http://192.168.30.111:11434/v1"
               - name: OLLAMA_MODEL
-                value: "gpt-oss:20b"
+                value: "gemma4:26b"
               - name: OLLAMA_API_KEY
                 value: "ollama"
               # GitHub token for mise and git operations

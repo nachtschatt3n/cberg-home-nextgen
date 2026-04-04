@@ -55,20 +55,20 @@ data:
           "override_enabled": true,
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
-            "chat": "qwen3:30b-instruct",
-            "embedding": "text-embedding-3-small",
+            "chat": "gemma4:26b",
+            "embedding": "nomic-embed-text:latest",
             "image": "gpt-image-1",
-            "coding": "qwen3:30b-instruct",
-            "complex_text_generation": "qwen3:30b-instruct",
-            "quick_decision_making": "qwen3:30b-instruct",
-            "quick_text_generation": "qwen3:30b-instruct",
-            "polish_and_summarize": "qwen3:30b-instruct"
+            "coding": "gemma4:26b",
+            "complex_text_generation": "gemma4:26b",
+            "quick_decision_making": "gemma4:26b",
+            "quick_text_generation": "gemma4:26b",
+            "polish_and_summarize": "gemma4:26b"
           }
         },
         "providers": {
           "openai": {
             "apiKey": "ollama",
-            "baseURL": "http://192.168.30.111:11435/v1",
+            "baseURL": "http://192.168.30.111:11434/v1",
             "oldApiStyle": true
           },
           "defaults": {

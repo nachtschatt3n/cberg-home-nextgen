@@ -35,9 +35,9 @@ spec:
               - name: AI_PROVIDER
                 value: "ollama"
               - name: AI_MODEL
-                value: "gpt-oss:20b"
+                value: "gemma4:26b"
               - name: OLLAMA_BASE_URL
-                value: "http://192.168.30.111:11435/api"
+                value: "http://192.168.30.111:11434/api"
             probes:
               liveness:
                 enabled: true

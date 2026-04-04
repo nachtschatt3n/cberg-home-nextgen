@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.04.04`
+> Last Updated: `2026-04-04`
 > Owner: `Platform`
 
 ---
@@ -18,10 +18,12 @@ applications, and how to verify end-to-end connectivity and model behavior.
 
 ## Overview
 
-AI inference runs on Mac Mini M4 Pro (`192.168.30.111`) with three dedicated Ollama instances
-using Metal Performance Shaders (MPS) for GPU acceleration.
+AI inference runs on Mac Mini M4 Pro (`192.168.30.111`) with a single Ollama instance on
+port 11434, using Metal Performance Shaders (MPS) for GPU acceleration.
 
-In-cluster AI services (Open WebUI, Langfuse, etc.) connect to these external endpoints.
+Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
+
+In-cluster AI services (Open WebUI, Langfuse, etc.) connect to this external endpoint.
 
 ---
 
@@ -31,17 +33,19 @@ N/A for dedicated Authentik-style blueprints.
 
 Declarative source-of-truth for AI integrations is maintained in application manifests under:
 - `kubernetes/apps/ai/`
-- `kubernetes/apps/office/` (Paperless-AI / Paperless-GPT)
-- `kubernetes/apps/home-automation/` (Frigate AI settings)
+- `kubernetes/apps/office/` (Paperless-AI / Paperless-GPT / AFFiNE / Nextcloud)
+- `kubernetes/apps/home-automation/` (Frigate AI settings, Home Assistant, n8n)
 
 ---
 
 ## Operational Instructions
 
-1. Choose the correct Ollama instance and model.
-2. Update the target app manifest/secret in Git with endpoint + model configuration.
-3. Commit and push changes to trigger Flux reconciliation.
-4. Validate app logs and endpoint connectivity.
+1. All apps use the single endpoint: `http://192.168.30.111:11434`
+2. Use `gemma4:26b` for all LLM tasks (chat, reasoning, vision, voice).
+3. Use `nomic-embed-text:latest` for embeddings.
+4. Update the target app manifest/secret in Git with endpoint + model configuration.
+5. Commit and push changes to trigger Flux reconciliation.
+6. Validate app logs and endpoint connectivity.
 
 ---
 
@@ -52,9 +56,9 @@ Declarative source-of-truth for AI integrations is maintained in application man
 ```yaml
 env:
   - name: OLLAMA_HOST
-    value: "http://192.168.30.111:11435"
+    value: "http://192.168.30.111:11434"
   - name: OLLAMA_MODEL
-    value: "gpt-oss:20b"
+    value: "gemma4:26b"
 ```
 
 ### Example 2: OpenAI-Compatible Configuration
@@ -62,32 +66,37 @@ env:
 ```yaml
 env:
   - name: OPENAI_BASE_URL
-    value: "http://192.168.30.111:11435/v1"
+    value: "http://192.168.30.111:11434/v1"
   - name: OPENAI_MODEL
-    value: "gpt-oss:20b"
+    value: "gemma4:26b"
 ```
 
 ---
 
-## Ollama Instances
+## Ollama Endpoint
 
-| Instance | Port | Model | Purpose |
-|---------|------|-------|---------|
-| Voice | 11434 | `qwen3:4b-instruct` | Voice/audio processing |
-| Reason | 11435 | `gpt-oss:20b` | General reasoning and text |
-| Vision | 11436 | `qwen3-vl:8b-instruct` | Vision/image analysis |
+| Endpoint | Port | Purpose |
+|---------|------|---------|
+| `http://192.168.30.111:11434` | 11434 | All AI inference |
 
-**Base URL pattern:** `http://192.168.30.111:{PORT}/api`
+### Models
+
+| Model | Purpose |
+|-------|---------|
+| `gemma4:26b` | All LLM tasks — chat, reasoning, vision, voice. Multimodal (text + image). |
+| `nomic-embed-text:latest` | Text embeddings |
+
+**Important:** The model name in API calls must be exactly `gemma4:26b` (not `gemma4` or `gemma4:26b-instruct`).
 
 ---
 
 ## Native API Format (Preferred)
 
-- Base URL: `http://192.168.30.111:{PORT}/api` (no trailing slash, no `/v1`)
+- Base URL: `http://192.168.30.111:11434/api` (no trailing slash, no `/v1`)
 - Endpoints: `/api/chat`, `/api/generate`
 - API key: not required for native Ollama API
-- Model names must use Ollama format: `gpt-oss:20b`, `qwen3:4b-instruct`, `qwen3-vl:8b-instruct`
-- Avoid OpenAI-style model IDs such as `openai/gpt-oss-20b`
+- Model name: `gemma4:26b` (exact)
+- Embedding model: `nomic-embed-text:latest`
 
 Use OpenAI-compatible `/v1` endpoints only for apps that require OpenAI API format.
 
@@ -96,23 +105,18 @@ Use OpenAI-compatible `/v1` endpoints only for apps that require OpenAI API form
 ## Testing Endpoints
 
 ```bash
-# Test Voice instance
+# Test LLM (text)
 curl -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3:4b-instruct", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
 
-# Test Reason instance
-curl -X POST http://192.168.30.111:11435/api/chat \
+# Test embeddings
+curl -X POST http://192.168.30.111:11434/api/embed \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-oss:20b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "nomic-embed-text:latest", "input": "Hello world"}'
 
-# Test Vision instance
-curl -X POST http://192.168.30.111:11436/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-vl:8b-instruct", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
-
-# List available models on an instance
-curl http://192.168.30.111:11435/api/tags
+# List available models
+curl http://192.168.30.111:11434/api/tags
 ```
 
 **Expected response:** JSON with `model`, `message.content`, and timing fields.
@@ -126,30 +130,27 @@ curl http://192.168.30.111:11435/api/tags
 SSH into Mac Mini and use Ollama CLI, or use the Ollama API:
 
 ```bash
-# Pull model via API (runs on Mac Mini)
-curl http://192.168.30.111:11435/api/pull \
+# Pull model via API
+curl http://192.168.30.111:11434/api/pull \
   -H "Content-Type: application/json" \
-  -d '{"name": "llama3.2:3b", "stream": false}'
+  -d '{"name": "gemma4:26b", "stream": false}'
 
 # Check pull status
-curl http://192.168.30.111:11435/api/tags
+curl http://192.168.30.111:11434/api/tags
 ```
 
 ### Checking Model Status
 
 ```bash
-# List models on each instance
-for port in 11434 11435 11436; do
-  echo "=== Port $port ==="
-  curl -s http://192.168.30.111:${port}/api/tags | python3 -c \
-    "import sys, json; models = json.load(sys.stdin)['models']; [print(m['name'], m['size']) for m in models]"
-done
+# List models on the instance
+curl -s http://192.168.30.111:11434/api/tags | python3 -c \
+  "import sys, json; models = json.load(sys.stdin)['models']; [print(m['name'], m['size']) for m in models]"
 ```
 
 ### Deleting a Model
 
 ```bash
-curl -X DELETE http://192.168.30.111:11435/api/delete \
+curl -X DELETE http://192.168.30.111:11434/api/delete \
   -H "Content-Type: application/json" \
   -d '{"name": "old-model:tag"}'
 ```
@@ -160,7 +161,7 @@ curl -X DELETE http://192.168.30.111:11435/api/delete \
 
 ### Open WebUI (`ai/open-webui`)
 
-Chat interface for AI models. Connects to in-cluster IPEX Ollama instance.
+Chat interface for AI models.
 
 ```bash
 # Check Open WebUI is running
@@ -173,8 +174,8 @@ kubectl logs -n ai -l app.kubernetes.io/name=open-webui --tail=50
 # https://openwebui.${SECRET_DOMAIN}
 ```
 
-**Configuration:** Open WebUI uses the in-cluster IPEX Ollama instance
-(`http://ollama-ipex.ai.svc.cluster.local:11434`), not the Mac Mini directly.
+**Configuration:** `kubernetes/apps/ai/open-webui/app/helmrelease.yaml`
+**Endpoint:** `http://192.168.30.111:11434`
 
 ### Langfuse (`ai/langfuse`)
 
@@ -205,15 +206,131 @@ kubectl get pods -n ai -l app.kubernetes.io/name=mcpo
 
 ### AI-SRE (`ai/ai-sre`)
 
-AI-powered SRE tooling. Uses Reason instance on port 11435.
+MCP-based SRE tooling for cluster operations. Does not perform LLM inference directly.
 
 ```bash
 kubectl get pods -n ai -l app.kubernetes.io/name=ai-sre
 ```
 
+### Paperclip (`ai/paperclip`)
+
+AI agent orchestration platform. Uses OpenAI cloud API (key in SOPS secret).
+
+```bash
+kubectl get pods -n ai -l app.kubernetes.io/name=paperclip
+```
+
+**Configuration:** `kubernetes/apps/ai/paperclip/app/secret.sops.yaml` (OPENAI_API_KEY)
+
 ---
 
 ## App-Specific AI Configurations
+
+### Home Assistant (`home-automation/home-assistant`)
+
+Home Assistant uses Ollama plus cloud AI APIs.
+Configuration is managed through the HA UI (stored in `.storage/core.config_entries`),
+not in git-managed manifests. **Requires manual update.**
+
+| Integration | Endpoint | Model | Use Case |
+|------------|----------|-------|----------|
+| Ollama (all tasks) | `http://192.168.30.111:11434` | `gemma4:26b` | Voice, AI tasks, vision |
+| OpenAI (ChatGPT) | Cloud | `gpt-4o-mini-tts` (TTS) | Conversation, AI Task, TTS, STT |
+| Google Generative AI | Cloud | (default) | Conversation, TTS, AI Task, STT |
+| Google Translate | Cloud | - | TTS |
+
+### AnythingLLM (`ai/anythingllm`)
+
+RAG chat and document embedding.
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | `http://192.168.30.111:11434` |
+| LLM Model | `gemma4:26b` |
+| Embedding Model | `nomic-embed-text:latest` |
+| Config | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
+
+**Configuration:** `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:80-89`
+
+### LibreChat (`ai/librechat`)
+
+Chat interface with multi-provider support.
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | `http://192.168.30.111:11434/v1` |
+| Default Model | `gemma4:26b` (fetch=true for dynamic model list) |
+| Config | Custom endpoint "Ollama" with OpenAI-compatible API |
+
+**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml:63-72`
+
+### Next AI Draw.io (`ai/next-ai-draw-io`)
+
+AI-powered diagram generation.
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | `http://192.168.30.111:11434/api` |
+| Model | `gemma4:26b` |
+| Config | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` (native `/api`) |
+
+**Configuration:** `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:35-40`
+
+### AFFiNE (`office/affine`)
+
+Collaborative workspace with AI copilot features.
+
+| Setting | Value |
+|---------|-------|
+| Endpoint | `http://192.168.30.111:11434/v1` |
+| LLM Model | `gemma4:26b` (coding, text gen, summarize, decisions) |
+| Embedding Model | `nomic-embed-text:latest` |
+| Config | OpenAI-compatible provider in copilot configmap |
+
+**Configuration:** `kubernetes/apps/office/affine/app/configmap.yaml:58-72`
+
+### Nextcloud (`office/nextcloud`)
+
+Nextcloud uses the `integration_openai` app plus `context_chat` for RAG with embeddings.
+All configured through the Nextcloud admin UI. **Requires manual update.**
+
+| Integration | Model | Use Case |
+|------------|-------|----------|
+| integration_openai | `gemma4:26b` | Text gen, chat, summary, translate, proofread, headlines, topics |
+| context_chat | `nomic-embed-text:latest` | RAG embeddings for file-based context chat |
+
+**Configuration:** NC admin UI > `integration_openai` app settings
+- Endpoint: `http://192.168.30.111:11434/v1`
+- Default model: `gemma4:26b`
+- NC apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai` (4.3.0)
+
+```bash
+# Check Nextcloud AI config
+kubectl exec -n office deploy/nextcloud -- php occ config:list --private 2>/dev/null | python3 -c "
+import sys, json; data = json.load(sys.stdin)
+for k, v in data.get('apps', {}).get('integration_openai', {}).items():
+    print(f'{k} = {v}')
+"
+```
+
+### n8n (`home-automation/n8n`)
+
+n8n has AI provider credentials configured via its workflow UI (stored in SQLite DB on PVC).
+**Requires manual update.**
+
+| Credential | Provider | Model |
+|------------|----------|-------|
+| ollamaApi | Ollama (`http://192.168.30.111:11434`) | `gemma4:26b` |
+| openAiApi | OpenAI Cloud | (default cloud models) |
+| anthropicApi | Anthropic Cloud | (available, usage varies by workflow) |
+
+**Configuration:** n8n UI > Credentials (stored in `/home/node/.n8n/database.sqlite`)
+
+```bash
+# Check n8n AI credentials (via string extraction)
+kubectl exec -n home-automation deploy/n8n -- cat /home/node/.n8n/database.sqlite 2>/dev/null \
+  | strings | grep -iE 'ollamaApi|openAiApi|anthropicApi' | head -10
+```
 
 ### Paperless-AI (`office/paperless-ai`)
 
@@ -221,9 +338,9 @@ Document classification using Ollama.
 
 | Setting | Value |
 |---------|-------|
-| Instance | Reason (11435) |
-| Model | `qwen3:4b-instruct` |
-| Config | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL: "http://192.168.30.111:11435/api"` |
+| Endpoint | `http://192.168.30.111:11434/v1` |
+| Model | `gemma4:26b` |
+| Config | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
 
 ```bash
 kubectl get pods -n office -l app.kubernetes.io/name=paperless-ai
@@ -236,11 +353,10 @@ AI tagging and summarization for Paperless-ngx.
 
 | Setting | Value |
 |---------|-------|
-| Instance | Reason (11435) |
-| LLM Model | `gpt-oss:20b` |
-| Vision Model | `qwen3-vl:8b-instruct` |
-| Vision Endpoint | `http://192.168.30.111:11435/api` (same Reason instance) |
-| Config | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL: "http://192.168.30.111:11435/api"` |
+| Endpoint | `http://192.168.30.111:11434/v1` |
+| LLM Model | `gemma4:26b` |
+| Vision Model | `gemma4:26b` (multimodal) |
+| Config | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL` |
 
 ```bash
 kubectl logs -n office -l app.kubernetes.io/name=paperless-gpt --tail=50
@@ -248,14 +364,13 @@ kubectl logs -n office -l app.kubernetes.io/name=paperless-gpt --tail=50
 
 ### Frigate NVR AI (`home-automation/frigate-nvr`)
 
-AI object detection using Vision instance.
+AI-powered camera event descriptions.
 
 | Setting | Value |
 |---------|-------|
-| Instance | Vision (11436) |
-| Model | `qwen3-vl:8b-instruct` |
-| Endpoint | `http://192.168.30.111:11436/api` |
-| Config | `OPENAI_BASE_URL` env var (`/v1` may be required by some OpenAI-only clients) |
+| Endpoint | `http://192.168.30.111:11434/v1` |
+| Model | `gemma4:26b` (in encrypted configmap, **requires manual update**) |
+| Config | `OPENAI_BASE_URL` env var |
 
 ```bash
 kubectl logs -n home-automation -l app.kubernetes.io/name=frigate-nvr --tail=50 | grep -i ai
@@ -265,49 +380,50 @@ kubectl logs -n home-automation -l app.kubernetes.io/name=frigate-nvr --tail=50 
 
 ## Integrating a New App with Ollama
 
-### Step 1: Choose the Right Instance
+### Step 1: Choose the Model
 
-| Use Case | Instance | Port | Model |
-|---------|---------|------|-------|
-| Text processing, reasoning | Reason | 11435 | `gpt-oss:20b` |
-| Image/vision analysis | Vision | 11436 | `qwen3-vl:8b-instruct` |
-| Voice/audio | Voice | 11434 | `qwen3:4b-instruct` |
+| Use Case | Model | Notes |
+|---------|-------|-------|
+| Text processing, reasoning, chat | `gemma4:26b` | Multimodal — handles text and images |
+| Image/vision analysis | `gemma4:26b` | No separate vision model needed |
+| Voice/audio | `gemma4:26b` | Same model for all tasks |
+| Text embeddings | `nomic-embed-text:latest` | For RAG, search, similarity |
 
 ### Step 2: Configure the App
 
-Most apps support either native Ollama API or OpenAI-compatible API.
-Prefer native `/api` unless the app explicitly requires OpenAI-compatible `/v1`.
+All apps use `http://192.168.30.111:11434`. Prefer native `/api` unless the app
+explicitly requires OpenAI-compatible `/v1`.
 
 **Native Ollama API:**
 ```yaml
 env:
   - name: OLLAMA_HOST
-    value: "http://192.168.30.111:11435"
+    value: "http://192.168.30.111:11434"
   - name: OLLAMA_MODEL
-    value: "gpt-oss:20b"
+    value: "gemma4:26b"
 ```
 
 **OpenAI-compatible API:**
 ```yaml
 env:
   - name: OPENAI_BASE_URL
-    value: "http://192.168.30.111:11435/v1"
+    value: "http://192.168.30.111:11434/v1"
   - name: OPENAI_API_KEY
     value: "not-required"
   - name: OPENAI_MODEL
-    value: "gpt-oss:20b"
+    value: "gemma4:26b"
 ```
 
 ### Step 3: Update Integration Documentation
 
-Update `docs/integration.md` → "Application Configuration" table with the new app.
+Update `docs/integration.md` → "Application Configuration" table and `docs/ai-usage-map.md`.
 
 ### Step 4: Test
 
 ```bash
 # Test that the app can reach the Ollama endpoint
 kubectl exec -n {namespace} {pod} -- \
-  wget -qO- http://192.168.30.111:11435/api/tags 2>&1 | head -20
+  wget -qO- http://192.168.30.111:11434/api/tags 2>&1 | head -20
 ```
 
 ---
@@ -319,7 +435,7 @@ kubectl exec -n {namespace} {pod} -- \
 ```bash
 # Test connectivity from a test pod (if app pod lacks wget/curl)
 kubectl run test-ai --rm -it --image=alpine -n {namespace} -- \
-  wget -qO- http://192.168.30.111:11435/api/tags
+  wget -qO- http://192.168.30.111:11434/api/tags
 
 # Check Mac Mini is reachable
 ping 192.168.30.111
@@ -331,35 +447,31 @@ ping 192.168.30.111
 ### Model Not Found Error
 
 ```bash
-# List available models on the instance
-curl http://192.168.30.111:11435/api/tags | python3 -c \
+# List available models
+curl http://192.168.30.111:11434/api/tags | python3 -c \
   "import sys, json; [print(m['name']) for m in json.load(sys.stdin)['models']]"
 
 # Pull the model if missing
-curl -X POST http://192.168.30.111:11435/api/pull \
+curl -X POST http://192.168.30.111:11434/api/pull \
   -H "Content-Type: application/json" \
-  -d '{"name": "gpt-oss:20b"}'
+  -d '{"name": "gemma4:26b"}'
 ```
 
 ### Slow Response Times
 
-- Check Mac Mini load: high memory usage from other models may slow inference
-- Consider using a smaller model (e.g., `qwen3:4b-instruct` instead of `gpt-oss:20b`)
-- Ensure only needed models are loaded (Ollama loads models on demand)
+- Check Mac Mini load: `gemma4:26b` is 26B params, ensure adequate memory
+- Ollama loads models on demand and keeps them warm with `keep_alive`
+- Only `gemma4:26b` and `nomic-embed-text:latest` should be loaded
 
 ### Wrong Endpoint Format
 
 Apps expecting OpenAI format need `/v1/` path, not `/api/`:
 ```
-OpenAI format: http://192.168.30.111:11435/v1/chat/completions
-Ollama native: http://192.168.30.111:11435/api/chat
+OpenAI format: http://192.168.30.111:11434/v1/chat/completions
+Ollama native: http://192.168.30.111:11434/api/chat
 ```
 
-Model naming also differs. Use Ollama model IDs with colon separators:
-```
-Correct: gpt-oss:20b, qwen3:4b-instruct, qwen3-vl:8b-instruct
-Incorrect: openai/gpt-oss-20b, qwen/qwen3-4b-2507
-```
+Model name must be exactly `gemma4:26b` (not `gemma4` or `gemma4:26b-instruct`).
 
 ---
 
@@ -368,14 +480,11 @@ Incorrect: openai/gpt-oss-20b, qwen/qwen3-4b-2507
 ### Test 1: Endpoint Reachability
 
 ```bash
-for port in 11434 11435 11436; do
-  echo -n "Port $port: "
-  curl -sf http://192.168.30.111:${port}/api/tags > /dev/null && echo "OK" || echo "FAIL"
-done
+curl -sf http://192.168.30.111:11434/api/tags > /dev/null && echo "OK" || echo "FAIL"
 ```
 
 Expected:
-- All required ports print `OK`.
+- Prints `OK`.
 
 If failed:
 - Check network reachability to `192.168.30.111` and service status on Mac Mini.
@@ -383,9 +492,9 @@ If failed:
 ### Test 2: Model Invocation
 
 ```bash
-curl -sS -X POST http://192.168.30.111:11435/api/chat \
+curl -sS -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-oss:20b","messages":[{"role":"user","content":"ping"}],"stream":false}'
+  -d '{"model":"gemma4:26b","messages":[{"role":"user","content":"ping"}],"stream":false}'
 ```
 
 Expected:
@@ -402,7 +511,7 @@ If failed:
 
 ```bash
 kubectl run test-ai --rm -it --image=alpine -n {namespace} -- \
-  wget -qO- http://192.168.30.111:11435/api/tags
+  wget -qO- http://192.168.30.111:11434/api/tags
 ```
 
 Expected:
@@ -414,27 +523,33 @@ If unclear:
 ### Diagnose Example 2: Model Not Found in App
 
 ```bash
-curl -s http://192.168.30.111:11435/api/tags | python3 -c \
+curl -s http://192.168.30.111:11434/api/tags | python3 -c \
   "import sys, json; [print(m['name']) for m in json.load(sys.stdin).get('models',[])]"
 ```
 
 Expected:
-- Requested model appears exactly with Ollama naming format.
+- `gemma4:26b` and `nomic-embed-text:latest` appear in the list.
 
 If unclear:
-- Pull the model on the target Ollama instance and retest.
+- Pull the model and retest.
 
 ---
 
 ## Health Check
 
 ```bash
-# Check all Ollama instances are reachable
-for port in 11434 11435 11436; do
-  echo -n "Port $port: "
-  curl -sf http://192.168.30.111:${port}/api/tags > /dev/null \
-    && echo "OK" || echo "UNREACHABLE"
-done
+# Check Ollama endpoint is reachable
+curl -sf http://192.168.30.111:11434/api/tags > /dev/null \
+  && echo "Ollama: OK" || echo "Ollama: UNREACHABLE"
+
+# Verify required models are available
+curl -s http://192.168.30.111:11434/api/tags | python3 -c "
+import sys, json
+models = [m['name'] for m in json.load(sys.stdin)['models']]
+for required in ['gemma4:26b', 'nomic-embed-text:latest']:
+    status = 'OK' if required in models else 'MISSING'
+    print(f'{required}: {status}')
+"
 
 # Check all AI namespace pods are running
 kubectl get pods -n ai
