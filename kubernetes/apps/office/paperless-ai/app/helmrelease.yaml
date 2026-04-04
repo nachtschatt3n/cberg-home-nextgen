@@ -126,6 +126,8 @@ spec:
           gethomepage.dev/icon: "paperless.png"
           gethomepage.dev/description: "AI-powered document processing with semantic search"
           nginx.ingress.kubernetes.io/proxy-body-size: 64m
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
