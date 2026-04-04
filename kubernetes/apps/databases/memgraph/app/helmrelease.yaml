@@ -22,15 +22,20 @@ spec:
     remediation:
       retries: 3
   values:
-    defaultPodOptions:
-      securityContext:
-        sysctls:
-          - name: vm.max_map_count
-            value: "262144"
     controllers:
       memgraph:
         strategy: Recreate
         initContainers:
+          init-sysctl:
+            image:
+              repository: busybox
+              tag: latest
+            command:
+              - sh
+              - -c
+              - sysctl -w vm.max_map_count=262144
+            securityContext:
+              privileged: true
           init-chown:
             image:
               repository: busybox
