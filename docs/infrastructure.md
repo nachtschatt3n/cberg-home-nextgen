@@ -85,7 +85,7 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.11.6 (immutable, minimal, Kubernetes-focused) |
+| OS | Talos Linux v1.11.0 (immutable, minimal, Kubernetes-focused) |
 | Container Runtime | Containerd 2.1.4 + Spegel (distributed image caching) |
 | CNI | Cilium v1.19.2 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
@@ -141,7 +141,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | ai | AI/ML services | ~9 |
 | home-automation | Smart home integrations | ~16 |
 | databases | Database backends | ~8 |
-| monitoring | Observability stack | ~10 |
+| monitoring | Observability stack | ~12 |
 | office | Productivity and document management | ~10 |
 | media | Media servers | ~3 |
 | download | Download managers | ~2 |
@@ -164,8 +164,8 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Kubernetes | v1.34.0 | Container orchestration |
 | Talos Linux | v1.11.0 | Cluster OS |
 | Flux | v2.5.0 (pinned; see note above) | GitOps operator |
-| Cilium | v1.18.6 | CNI / network |
-| Longhorn | v1.10.2 | Distributed storage |
+| Cilium | v1.19.2 | CNI / network |
+| Longhorn | v1.11.1 | Distributed storage |
 | cert-manager | v1.20.1 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.34.0 | CLI |

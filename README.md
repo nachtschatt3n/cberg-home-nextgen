@@ -8,7 +8,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 <div align="center">
 
-[![Talos](https://img.shields.io/badge/Talos-v1.11.6-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
+[![Talos](https://img.shields.io/badge/Talos-v1.11.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
 [![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.5.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
@@ -53,13 +53,13 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 - **Operating System**: [Talos Linux v1.11.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration
 - **Container Runtime**: [Containerd 2.1.4](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
-- **Networking**: [Cilium v1.18.6](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
-- **Storage**: [Longhorn v1.10.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
+- **Networking**: [Cilium v1.19.2](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
+- **Storage**: [Longhorn v1.11.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
 - **GitOps**: [Flux v2.8.0](https://github.com/fluxcd/flux2) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
-- **Certificate Management**: [cert-manager v1.19.3](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
+- **Certificate Management**: [cert-manager v1.20.1](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
 ### GitOps Workflow
 

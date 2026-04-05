@@ -30,13 +30,12 @@ Ports 11435 and 11436 are no longer in use.
 | Paperless-GPT | office | `gemma4:26b` (LLM + vision) | OpenAI `/v1` | `kubernetes/apps/office/paperless-gpt/app/helmrelease.yaml:48,55-56` |
 | Paperless-AI | office | `gemma4:26b` | OpenAI `/v1` | `kubernetes/apps/office/paperless-ai/app/helmrelease.yaml:52-53` |
 | AFFiNE | office | `gemma4:26b` (coding, text, summarize) | OpenAI `/v1` | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
-| Frigate NVR | home-automation | (model in encrypted configmap) | OpenAI `/v1` | `kubernetes/apps/home-automation/frigate-nvr/app/helmrelease.yaml:34` |
-| Nextcloud | office | `gpt-oss:20b` | OpenAI `/v1` | NC UI: `integration_openai` app (**needs manual update to `gemma4:26b`**) |
+| Frigate NVR | home-automation | `gemma4:26b` (in encrypted configmap) | OpenAI `/v1` | `kubernetes/apps/home-automation/frigate-nvr/app/helmrelease.yaml:34` |
+| Nextcloud | office | `gemma4:26b` | OpenAI `/v1` | NC UI: `integration_openai` app (updated 2026-04-04) |
 | Nextcloud | office | `nomic-embed-text:latest` (context_chat RAG) | OpenAI `/v1` | NC UI: `context_chat` app |
-| n8n | home-automation | `gpt-oss:20b`, `deepseek-r1:1.5b` | Ollama (UI) | n8n SQLite DB (**needs manual update to `gemma4:26b`**) |
-| Home Assistant | home-automation | `qwen3:4b-instruct` (voice) | Native Ollama | HA UI (**needs manual update to `gemma4:26b`**) |
-| Home Assistant | home-automation | `gpt-oss:20b` (AI tasks) | Native Ollama | HA UI (**needs manual update to `gemma4:26b`**) |
-| Home Assistant | home-automation | `qwen3-vl:8b-instruct` (vision) | Native Ollama | HA UI (**needs manual update to `gemma4:26b`**) |
+| n8n | home-automation | `gemma4:26b` | Ollama (UI) | n8n SQLite DB (updated 2026-04-04) |
+| Home Assistant | home-automation | `gemma4:26b` (all integrations) | Native Ollama | HA UI (updated 2026-04-04) |
+| Headlamp | kube-system | `gemma4:26b` | OpenAI `/v1` | Headlamp UI: AI Assistant plugin (updated 2026-04-05) |
 
 ---
 
@@ -64,17 +63,18 @@ Ports 11435 and 11436 are no longer in use.
 
 ---
 
-## Manual Updates Required (UI-Configured Apps)
+## UI-Configured Apps (Manual Updates Completed 2026-04-04)
 
 These apps store their Ollama config in their own databases/UI, not in git manifests.
-Update them manually after pushing the git changes.
+All have been updated to `gemma4:26b` on `:11434`.
 
-| App | What to Change | Details |
-|-----|---------------|---------|
-| **Home Assistant** | Update all 3 Ollama integrations | Change model to `gemma4:26b`, change Reason (11435) and Vision (11436) endpoints to `http://192.168.30.111:11434` |
-| **Nextcloud** | Update `integration_openai` settings | Change URL to `http://192.168.30.111:11434/v1`, change model to `gemma4:26b` |
-| **n8n** | Update Ollama credential + workflow nodes | Change endpoint to `http://192.168.30.111:11434`, update model references in workflows |
-| **Frigate NVR** | Update model in encrypted configmap | Decrypt `configmap.sops.yaml`, change model to `gemma4:26b`, re-encrypt |
+| App | Status | Notes |
+|-----|--------|-------|
+| **Home Assistant** | Done | All 3 Ollama integrations updated via HA UI |
+| **Nextcloud** | Done | `integration_openai` settings updated via `occ config:app:set` |
+| **n8n** | Done | Ollama credential and workflow nodes updated via n8n UI |
+| **Frigate NVR** | Done | `configmap.sops.yaml` decrypted, updated, re-encrypted in git |
+| **Headlamp** | Done | AI Assistant plugin model updated via Headlamp UI |
 
 ---
 
@@ -105,7 +105,7 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, Paperless-GPT, Paperless-AI, AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n |
+| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, Paperless-GPT, Paperless-AI, AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings) |
 
 ---
@@ -114,5 +114,5 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Endpoint | Git-Managed Apps | UI-Configured Apps | Total |
 |----------|------------------|--------------------|-------|
-| Mac Mini :11434 | 9 | 3 (HA, Nextcloud, n8n) | 12 |
+| Mac Mini :11434 | 9 | 4 (HA, Nextcloud, n8n, Headlamp) | 13 |
 | Cloud APIs | 1 (Paperclip) | 5 (HA x3, n8n x2) | 6 |

@@ -10,7 +10,7 @@
 **Severity at time of discovery:** Critical
 **Status:** Accepted — all secrets rotated or services decommissioned
 
-Five secrets were committed in plaintext to the public repository history between 2025-06 and 2025-11. All have been remediated:
+Six secrets were committed in plaintext to the public repository history. All have been remediated:
 
 | Commit | Service | Secret | Remediation |
 |--------|---------|--------|-------------|
@@ -19,10 +19,11 @@ Five secrets were committed in plaintext to the public repository history betwee
 | `bb2bf972` | pgAdmin | Admin + master password | Rotated 2026-03-19, pod restarted 2026-03-20 |
 | `6b335828` | Rybbit | `BETTER_AUTH_SECRET` JWT key | Service decommissioned |
 | `4aa30e55` | Bytebot | PostgreSQL password + DB URL | Service decommissioned |
+| `0f86a14a` | Longhorn | Telegram bot token | Rotated 2026-04-05 via BotFather |
 
 History cannot be rewritten on a public repo with potential clones. Rotation is the remediation. Risk accepted.
 
-**Root cause:** Files named `.sops.tmp.yaml` committed before encryption ran. Mitigated by `.gitignore` rule covering `*.sops.tmp.yaml`.
+**Root cause:** Files named `.sops.tmp.yaml` committed before encryption ran, or files committed before SOPS encryption was applied. Mitigated by `.gitignore` rule covering `*.sops.tmp.yaml`.
 
 ---
 
@@ -145,4 +146,8 @@ The following containers run with elevated privileges or `hostNetwork: true`:
 
 **hostNetwork pods** (home-assistant, esphome, matter-server, music-assistant-server, otbr): Required for LAN device discovery protocols (mDNS, multicast, Zigbee/Thread/Matter device communication). Standard pattern for home-automation workloads.
 
-**Why accepted:** All privileged containers are in `home-automation` and `media` namespaces where direct hardware access is a functional requirement. No purely application workloads (databases, office tools) run with elevated privileges. All pods are on the internal cluster network with no direct external exposure.
+| openclaw | ai | uid=0 init container | Init container `install-openclaw` runs as root for package installation; main app runs as uid=1000 |
+| paperclip | ai | uid=0 (tools container) | Sidecar `tools` container runs as root for system utilities |
+| memgraph | databases | Privileged init container | `init-sysctl` sets vm.max_map_count; requires privilege escalation for kernel tuning |
+
+**Why accepted:** All privileged containers are in `home-automation`, `media`, `ai`, and `databases` namespaces where direct hardware access or system tuning is a functional requirement. All pods are on the internal cluster network with no direct external exposure.

@@ -46,10 +46,11 @@ Endpoints: /v1/chat/completions
 | paperless-ai | `http://192.168.30.111:11434/v1` | `gemma4:26b` | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
 | affine | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
 | frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b` (in encrypted config) | `OPENAI_BASE_URL` |
-| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` (**manual update needed**) |
-| n8n | (UI-configured) | `gemma4:26b` | n8n UI: `ollamaApi` credential (**manual update needed**) |
+| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |
+| n8n | (UI-configured) | `gemma4:26b` | n8n UI: `ollamaApi` credential |
 | n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials |
-| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b` (all integrations) | HA UI (**manual update needed**) |
+| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b` (all integrations) | HA UI |
+| headlamp | `http://192.168.30.111:11434` | `gemma4:26b` | Headlamp UI: AI Assistant plugin |
 | paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret |
 
 **Home Assistant cloud AI integrations (UI-configured, no change):**
