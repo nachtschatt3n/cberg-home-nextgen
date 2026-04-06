@@ -61,17 +61,17 @@ Endpoints: /v1/chat/completions
 ### Testing Endpoints
 
 ```bash
-# Test Reason endpoint
-curl -X POST http://192.168.30.111:11435/api/chat \
+# Test chat endpoint
+curl -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-oss:20b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
 
-# Test Vision endpoint
-curl -X POST http://192.168.30.111:11436/api/chat \
+# Test OpenAI-compatible endpoint
+curl -X POST http://192.168.30.111:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-vl:8b-instruct", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}]}'
 
-# List available models (Voice instance)
+# List available models
 curl http://192.168.30.111:11434/api/tags
 ```
 

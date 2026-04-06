@@ -45,17 +45,15 @@ All three nodes connect to Basement-SW-24-PoE.
 | Device | IP | Role |
 |--------|----|------|
 | UNAS-CBERG (NAS) | 192.168.31.230 | Bulk storage, SMB/NFS shares, backups |
-| Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (Voice/Reason/Vision) |
+| Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (gemma4:26b multimodal) |
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 
 **Mac Mini M4 Pro:**
-- Three Ollama instances with Metal Performance Shaders (MPS) acceleration
-- Voice: port 11434 (`qwen3:4b-instruct`)
-- Reason: port 11435 (`gpt-oss:20b`)
-- Vision: port 11436 (`qwen3-vl:8b-instruct`)
-- Native Ollama API at `http://192.168.30.111:{PORT}/api`
+- Single Ollama instance with Metal Performance Shaders (MPS) acceleration
+- Port 11434: `gemma4:26b` (multimodal — chat, reasoning, vision, voice) + `nomic-embed-text:latest` (embeddings)
+- Native Ollama API at `http://192.168.30.111:11434/api`
 
 **NAS (UNAS-CBERG):**
 - 10 GbE SFP+ connection on Servers VLAN (192.168.31.0/24)

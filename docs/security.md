@@ -236,7 +236,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=100 | gre
 
 ## TLS / cert-manager
 
-cert-manager v1.20.0 manages TLS certificates via Let's Encrypt.
+cert-manager v1.20.1 manages TLS certificates via Let's Encrypt.
 
 **Deployment:** `kubernetes/apps/cert-manager/cert-manager/`
 

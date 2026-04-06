@@ -12,7 +12,7 @@
 |-----------|-----------|
 | ai | 9 |
 | home-automation | 16 |
-| databases | 8 |
+| databases | 9 |
 | monitoring | 12 |
 | office | 10 |
 | media | 3 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~82** |
+| **Total** | **~83** |
 
 ---
 
