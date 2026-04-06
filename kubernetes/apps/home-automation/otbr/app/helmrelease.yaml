@@ -42,7 +42,7 @@ spec:
               - name: DEVICE
                 value: "/tmp/ttyOTBR"
               - name: BAUDRATE
-                value: "460800"
+                value: "115200"
               - name: BACKBONE_IF
                 value: "enp86s0"
               - name: OTBR_REST_PORT
