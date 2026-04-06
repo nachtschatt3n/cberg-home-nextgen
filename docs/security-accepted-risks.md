@@ -151,3 +151,27 @@ The following containers run with elevated privileges or `hostNetwork: true`:
 | memgraph | databases | Privileged init container | `init-sysctl` sets vm.max_map_count; requires privilege escalation for kernel tuning |
 
 **Why accepted:** All privileged containers are in `home-automation`, `media`, `ai`, and `databases` namespaces where direct hardware access or system tuning is a functional requirement. All pods are on the internal cluster network with no direct external exposure.
+
+---
+
+## AR-010 — Bundled MariaDB Instances Using Frozen Legacy Image
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — functional, internal-only, migration deferred
+
+Two application charts bundle MariaDB instances using `bitnamilegacy/mariadb:latest`, a frozen archive registry that will never receive security patches:
+
+| App | Namespace | Pod | MariaDB Version | Database | Tables |
+|-----|-----------|-----|-----------------|----------|--------|
+| Nextcloud | office | `nextcloud-mariadb-0` | 11.8.2 | nextcloud | 199 |
+| Paperless-NGX | office | `paperless-ngx-mariadb-0` | 11.8.2 | paperless | 72 |
+
+Both parent charts (Nextcloud 9.0.4, Paperless-NGX 0.24.1) default to the `bitnamilegacy/mariadb` image in their bundled MariaDB subchart values. The modern replacement is `bitnami/mariadb` (MariaDB 12.x).
+
+**Why accepted:**
+- Both instances are internal-only with no external ingress exposure
+- The legacy image is frozen but stable — no new vulnerabilities are being introduced by code changes
+- Migration to `bitnami/mariadb` requires a MariaDB 11.8 → 12.x major version jump with dump/restore
+- The standalone MariaDB in `databases/` was already upgraded to chart 25.0.6 (MariaDB 12.0.2) in February 2026
+
+**Future action:** Migrate both bundled instances to `bitnami/mariadb` during a planned maintenance window. This requires mysqldump of each database, switching the image override, and restoring data.
