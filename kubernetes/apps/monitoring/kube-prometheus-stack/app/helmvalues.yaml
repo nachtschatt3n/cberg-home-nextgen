@@ -244,6 +244,21 @@ data:
             - port: metrics
               path: /metrics
               interval: 30s
+      additionalScrapeConfigs:
+        - job_name: findmy-traccar-sync
+          scrape_interval: 60s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["192.168.30.111:9101"]
+              labels:
+                instance: mac-mini
+        - job_name: bank-refresh
+          scrape_interval: 60s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["192.168.30.111:9100"]
+              labels:
+                instance: mac-mini
     prometheusOperator:
       resources:
         requests:
