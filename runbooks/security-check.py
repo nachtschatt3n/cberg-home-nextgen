@@ -280,7 +280,8 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     # longhorn helmrelease: long camelCase YAML keys (not values) match the base64 regex
     safe_content = ["ks.yaml", "grafana", "prometheusrule", "coredns", "helm-values",
                     "  path: ./kubernetes", "  path: ./talos",
-                    "longhorn/app/helmrelease.yaml"]
+                    "longhorn/app/helmrelease.yaml",
+                    "talos/clusterconfig/"]  # Talos node configs contain expected inline certs/keys
     real_b64  = [h for h in b64_hits if not any(p in h for p in safe_content)]
     if real_b64:
         for hit in real_b64[:10]:
@@ -445,6 +446,19 @@ def s3_git_history() -> tuple[str, Findings, str]:
     f = Findings()
     domain = _sensitive.get("DOMAIN", "")
 
+    # Accepted risks: patterns in git history that have been reviewed and accepted
+    ACCEPTED_CRED_PATTERNS = [
+        'apiKey: "ollama"',            # Not a real secret — Ollama local API key placeholder
+        "backupTargetCredentialSecret", # SecretRef name, not an actual secret value
+        "bot-token: 6597763731",       # Telegram bot token — rotated, old value in history
+    ]
+    ACCEPTED_SECRET_FILES = {
+        "templates/config/",           # Jinja2 templates, not actual secrets
+        "kubernetes/flux/meta/repositories/helm/external-secrets.yaml",  # HelmRepository, not a secret
+        "kubernetes/apps/download/icloud-docker/app-secrets/kustomization.yaml",  # Kustomization ref
+        "kubernetes/apps/download/icloud-docker/secrets-ks.yaml",  # Kustomization ref
+    }
+
     # Plaintext credential patterns
     cred_hits = run_lines(
         "git log --all --oneline -p "
@@ -453,6 +467,8 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file' "
         "| grep -v '^#\\|description:'"
     )
+    # Filter accepted risks
+    cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
     if cred_hits:
         for h in cred_hits[:5]:
             f.add(WARNING, f"Credential-like pattern in history: `{redact(h[:100])}`")
@@ -481,6 +497,9 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -i 'secret\\|password\\|credential\\|private.key' "
         "| grep -v '\\.sops\\.yaml$' | sort -u"
     )
+    # Filter accepted risks
+    secret_files = [sf for sf in secret_files
+                    if not any(sf.startswith(a) or sf == a for a in ACCEPTED_SECRET_FILES)]
     if secret_files:
         for sf in secret_files:
             f.add(WARNING, f"Secret-named file committed outside sops: `{sf}`")
