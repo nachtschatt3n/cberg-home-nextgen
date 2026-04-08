@@ -34,6 +34,16 @@ spec:
             image:
               repository: ghcr.io/ownbee/hass-otbr-docker
               tag: v0.3.0
+            command:
+              - /bin/bash
+              - -c
+              - |
+                # Patch otbr-agent startup to remove backbone router args
+                # Talos kernel lacks CONFIG_IPV6_MROUTE, causing InitMulticastRouterSock crash
+                SCRIPT="/etc/s6-overlay/s6-rc.d/otbr-agent/run"
+                sed -i 's/-B "${backbone_if}"//' "$SCRIPT"
+                sed -i 's|"trel://${trel_if}"||' "$SCRIPT"
+                exec /init
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -44,7 +54,7 @@ spec:
               - name: BAUDRATE
                 value: "115200"
               - name: BACKBONE_IF
-                value: ""
+                value: "enp86s0"
               - name: OTBR_REST_PORT
                 value: "8081"
             securityContext:
