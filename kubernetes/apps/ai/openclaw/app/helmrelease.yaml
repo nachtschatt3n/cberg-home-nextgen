@@ -309,6 +309,7 @@ spec:
                       bind: 'lan',
                       port: 18789,
                       trustedProxies: ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'],
+                      controlUi: { allowedOrigins: ['https://openclaw.' + (process.env.OPENCLAW_DOMAIN || 'uhl.cool')] },
                     },
                     agents: {
                       defaults: {
@@ -354,6 +355,8 @@ spec:
                   cfg.gateway.bind = cfg.gateway.bind || 'lan';
                   cfg.gateway.port = cfg.gateway.port || 18789;
                   cfg.gateway.trustedProxies = ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'];
+                  cfg.gateway.controlUi = cfg.gateway.controlUi || {};
+                  cfg.gateway.controlUi.allowedOrigins = ['https://openclaw.' + process.env.OPENCLAW_DOMAIN];
 
                   // Update agents defaults
                   cfg.agents = cfg.agents || {};
@@ -426,6 +429,8 @@ spec:
                 value: "gemma4:26b"
               - name: OLLAMA_API_KEY
                 value: "ollama"
+              - name: OPENCLAW_DOMAIN
+                value: "${SECRET_DOMAIN}"
               # GitHub token for mise and git operations
               - name: GITHUB_TOKEN
                 valueFrom:
