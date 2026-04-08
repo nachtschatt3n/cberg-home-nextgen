@@ -176,14 +176,12 @@ dig {hostname}
 
 Configure once:
 ```bash
-cd /home/mu/code/unifictl
-unifictl local configure \
-  --url https://192.168.30.1:8443 \
-  --username admin \
-  --password '<PASSWORD>' \
+unifictl login \
+  --controller-url https://192.168.30.1:8443 \
+  --username cli-adm \
   --site default \
-  --scope local \
-  --verify-tls false
+  --scope user
+# (enter password when prompted)
 ```
 
 Common commands:

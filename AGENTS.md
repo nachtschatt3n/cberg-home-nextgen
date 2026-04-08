@@ -294,14 +294,12 @@ kubectl exec -n {namespace} {pod} -- ip route
 **Prerequisites:**
 ```bash
 # Configure unifictl for local controller access (run once)
-cd /home/mu/code/unifictl
-unifictl local configure \
-  --url https://192.168.30.1:8443 \
-  --username admin \
-  --password '<PASSWORD>' \
+unifictl login \
+  --controller-url https://192.168.30.1:8443 \
+  --username cli-adm \
   --site default \
-  --scope local \
-  --verify-tls false
+  --scope user
+# (enter password when prompted)
 ```
 
 **Network Health & Status:**

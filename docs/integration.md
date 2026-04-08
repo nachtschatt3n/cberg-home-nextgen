@@ -234,13 +234,12 @@ python3 runbooks/check-all-versions.py
 
 ```bash
 # One-time setup
-unifictl local configure \
-  --url https://192.168.30.1:8443 \
-  --username admin \
-  --password '<PASSWORD>' \
+unifictl login \
+  --controller-url https://192.168.30.1:8443 \
+  --username cli-adm \
   --site default \
-  --scope local \
-  --verify-tls false
+  --scope user
+# (enter password when prompted)
 ```
 
 ### Key Commands
