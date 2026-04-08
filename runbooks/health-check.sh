@@ -1817,25 +1817,14 @@ log_section "Section 24a: Network Infrastructure Services"
         INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
     fi
 
-    # Ollama port 11435 — Reason model
-    if curl -s --connect-timeout 2 http://192.168.30.111:11435/api/version -o /dev/null 2>/dev/null; then
-        echo "Ollama Reason model (port 11435) reachable"
-        log_success "Ollama Reason model (192.168.30.111:11435) reachable"
+    # Ollama (single instance, gemma 4 — no separate reason/vision ports needed)
+    if curl -s --connect-timeout 2 http://192.168.30.111:11434/api/version -o /dev/null 2>/dev/null; then
+        echo "Ollama (port 11434) reachable"
+        log_success "Ollama (192.168.30.111:11434) reachable"
     else
-        echo "Ollama Reason model (port 11435) unreachable"
-        log_warning "Ollama Reason model (192.168.30.111:11435) not reachable"
-        add_major_issue "Ollama Reason model port 11435 not reachable at 192.168.30.111"
-        INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-    fi
-
-    # Ollama port 11436 — Vision model
-    if curl -s --connect-timeout 2 http://192.168.30.111:11436/api/version -o /dev/null 2>/dev/null; then
-        echo "Ollama Vision model (port 11436) reachable"
-        log_success "Ollama Vision model (192.168.30.111:11436) reachable"
-    else
-        echo "Ollama Vision model (port 11436) unreachable"
-        log_warning "Ollama Vision model (192.168.30.111:11436) not reachable"
-        add_major_issue "Ollama Vision model port 11436 not reachable at 192.168.30.111"
+        echo "Ollama (port 11434) unreachable"
+        log_warning "Ollama (192.168.30.111:11434) not reachable"
+        add_major_issue "Ollama port 11434 not reachable at 192.168.30.111"
         INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
     fi
     echo ""

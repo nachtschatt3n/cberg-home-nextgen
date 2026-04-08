@@ -227,10 +227,8 @@ and Renovate schedule accurately.
 **Commands:**
 
 ```bash
-# Check Ollama endpoints documented
+# Check Ollama endpoint documented (single port, gemma 4)
 grep "192.168.30.111:11434" docs/integration.md
-grep "192.168.30.111:11435" docs/integration.md
-grep "192.168.30.111:11436" docs/integration.md
 
 # Check Homepage groups in helmrelease
 grep -E "^        -" kubernetes/apps/default/homepage/app/helmrelease.yaml \
@@ -246,7 +244,7 @@ wc -l docs/integration.md
 
 **Expected results:**
 - `docs/integration.md` exists
-- All three Ollama endpoint ports (11434, 11435, 11436) documented
+- Ollama endpoint port 11434 documented (single instance with gemma 4)
 - Renovate schedule matches `.github/renovate.json5`
 
 **Severity:**

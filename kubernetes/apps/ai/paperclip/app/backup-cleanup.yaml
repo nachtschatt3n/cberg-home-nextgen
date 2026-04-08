@@ -49,6 +49,16 @@ spec:
         spec:
           serviceAccountName: paperclip-backup-cleanup
           restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - paperclip
+                  topologyKey: kubernetes.io/hostname
           containers:
             - name: cleanup
               image: registry.k8s.io/kubectl:v1.34.0
