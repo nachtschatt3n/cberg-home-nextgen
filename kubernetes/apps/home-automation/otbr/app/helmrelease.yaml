@@ -44,11 +44,9 @@ spec:
               - name: BAUDRATE
                 value: "115200"
               - name: BACKBONE_IF
-                value: "enp86s0"
+                value: ""
               - name: OTBR_REST_PORT
                 value: "8081"
-              - name: OTBR_ENABLE_BACKBONE_ROUTER
-                value: "0"
             securityContext:
               privileged: true
             resources:
