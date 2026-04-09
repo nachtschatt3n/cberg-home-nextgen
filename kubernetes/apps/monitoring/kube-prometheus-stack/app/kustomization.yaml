@@ -21,3 +21,4 @@ resources:
   - ./alertmanager-outpost-ingress.yaml
   - ./memgraph-alerts.yaml
   - ./macos-apps-alerts.yaml
+  - ./macos-scrapeconfigs.yaml

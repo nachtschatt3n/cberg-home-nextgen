@@ -1,0 +1,28 @@
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: findmy-traccar-sync
+  namespace: monitoring
+spec:
+  scrapeInterval: 60s
+  metricsPath: /metrics
+  staticConfigs:
+    - targets:
+        - "192.168.30.111:9101"
+      labels:
+        instance: mac-mini
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: bank-refresh
+  namespace: monitoring
+spec:
+  scrapeInterval: 60s
+  metricsPath: /metrics
+  staticConfigs:
+    - targets:
+        - "192.168.30.111:9100"
+      labels:
+        instance: mac-mini
