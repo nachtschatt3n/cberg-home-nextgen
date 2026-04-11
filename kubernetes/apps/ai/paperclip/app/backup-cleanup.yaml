@@ -61,7 +61,7 @@ spec:
                   topologyKey: kubernetes.io/hostname
           containers:
             - name: cleanup
-              image: registry.k8s.io/kubectl:v1.34.0
+              image: docker.io/bitnami/kubectl:1.34.0
               command:
                 - /bin/bash
                 - -c
