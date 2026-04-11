@@ -116,6 +116,13 @@ Also update the `talosImageURL` installer hash if you regenerate schematic via f
 
 ### Step 2 — Enhance `machine-sysctls.yaml`
 
+Patterns merged from:
+- [tyriis/home-ops talconfig.yaml](https://github.com/tyriis/home-ops/blob/main/talos/utility/talconfig.yaml) — `tcp_fastopen`, `vm.nr_hugepages` (deferred)
+- [marcolongol/homelab-cluster machine-sysctls.yaml](https://github.com/marcolongol/homelab-cluster/blob/main/talos/patches/global/machine-sysctls.yaml) — BBR, conntrack, fd limits, keepalives
+- [OneUptime: Tune Network Performance](https://oneuptime.com/blog/post/2026-03-03-tune-network-performance-on-talos-linux/view) — conntrack sizing rationale
+- [Talos discussion #12313](https://github.com/siderolabs/talos/discussions/12313) — conntrack table full prevention
+- [Kubernetes sysctl docs](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/) — allowed safe sysctls
+
 Replace the file with:
 
 ```yaml
@@ -127,6 +134,7 @@ machine:
     fs.inotify.max_user_instances: "8192"     # Watchdog
 
     # --- File descriptors (new) — Elasticsearch, Nextcloud, Postgres ---
+    # Source: marcolongol/homelab-cluster, common Elasticsearch requirements
     fs.file-max: "2097152"
     fs.nr_open: "1048576"
 
@@ -138,22 +146,23 @@ machine:
     net.core.netdev_max_backlog: "5000"
     net.core.netdev_budget: "600"
     net.core.netdev_budget_usecs: "8000"
-    net.core.somaxconn: "65535"               # NEW — listen() backlog
-    net.core.default_qdisc: "fq"              # NEW — pairs with BBR
+    net.core.somaxconn: "65535"               # NEW — listen() backlog (marcolongol)
+    net.core.default_qdisc: "fq"              # NEW — pairs with BBR (oneuptime)
 
     # --- TCP tuning (existing + new) ---
     net.ipv4.tcp_rmem: "4096 87380 16777216"
     net.ipv4.tcp_wmem: "4096 65536 16777216"
-    net.ipv4.tcp_congestion_control: "bbr"    # NEW — Google BBR
-    net.ipv4.tcp_fastopen: "3"                # NEW — client + server TFO
-    net.ipv4.ip_local_port_range: "1024 65535" # NEW
-    net.ipv4.tcp_max_syn_backlog: "8192"       # NEW
-    net.ipv4.tcp_fin_timeout: "30"             # NEW
-    net.ipv4.tcp_keepalive_time: "600"         # NEW
-    net.ipv4.tcp_keepalive_intvl: "60"         # NEW
-    net.ipv4.tcp_keepalive_probes: "3"         # NEW
+    net.ipv4.tcp_congestion_control: "bbr"    # NEW — Google BBR (oneuptime, marcolongol)
+    net.ipv4.tcp_fastopen: "3"                # NEW — client + server TFO (tyriis)
+    net.ipv4.ip_local_port_range: "1024 65535" # NEW (marcolongol)
+    net.ipv4.tcp_max_syn_backlog: "8192"       # NEW (marcolongol)
+    net.ipv4.tcp_fin_timeout: "30"             # NEW (marcolongol)
+    net.ipv4.tcp_keepalive_time: "600"         # NEW (marcolongol)
+    net.ipv4.tcp_keepalive_intvl: "60"         # NEW (marcolongol)
+    net.ipv4.tcp_keepalive_probes: "3"         # NEW (marcolongol)
 
     # --- Conntrack (new) — prevents silent drops under load ---
+    # Source: siderolabs/talos discussion #12313, oneuptime blog
     net.netfilter.nf_conntrack_max: "1048576"
     net.netfilter.nf_conntrack_buckets: "262144"
     net.netfilter.nf_conntrack_tcp_timeout_established: "86400"
@@ -161,15 +170,20 @@ machine:
     # --- Memory (existing + new) ---
     vm.dirty_ratio: "10"
     vm.dirty_background_ratio: "5"
-    vm.max_map_count: "262144"                # NEW — required by Elasticsearch
-    vm.swappiness: "10"                        # NEW — no swap, but explicit
-    vm.vfs_cache_pressure: "50"                # NEW — balance VFS cache
+    vm.max_map_count: "262144"                # NEW — required by Elasticsearch (elastic.co docs)
+    vm.swappiness: "10"                        # NEW — no swap, but explicit (marcolongol)
+    vm.vfs_cache_pressure: "50"                # NEW — balance VFS cache (marcolongol)
 
     # --- Process limits (new) ---
-    kernel.pid_max: "4194304"
+    kernel.pid_max: "4194304"                  # marcolongol
 ```
 
 ### Step 3 — Update `machine-kubelet.yaml`
+
+Pattern reference:
+- [tyriis/home-ops](https://github.com/tyriis/home-ops/blob/main/talos/utility/talconfig.yaml) — `serializeImagePulls: false`, `defaultRuntimeSeccompProfileEnabled`
+- [Kubernetes kubelet config reference](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/) — `systemReserved`, `kubeReserved`, `maxParallelImagePulls`
+- [Kubernetes Reserve Compute Resources](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/) — rationale for system/kube reservations
 
 ```yaml
 # kubernetes/bootstrap/talos/patches/global/machine-kubelet.yaml
@@ -179,8 +193,9 @@ machine:
       validSubnets:
         - 192.168.55.0/24
     extraConfig:
-      # Reserve resources so kubelet/containerd don't starve under burst load
-      # NUC14 has 18 CPUs / 62 GiB — 1 CPU + 2 GiB is ~5% overhead
+      # Reserve resources so kubelet/containerd don't starve under burst load.
+      # NUC14 has 18 CPUs / 62 GiB — 1 CPU + 2 GiB is ~5% overhead.
+      # Ref: https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/
       systemReserved:
         cpu: 500m
         memory: 1Gi
@@ -189,7 +204,7 @@ machine:
         cpu: 500m
         memory: 1Gi
         ephemeral-storage: 2Gi
-      # Parallel image pulls (speed up cold-start after upgrade)
+      # Parallel image pulls (speed up cold-start after upgrade). Ref: tyriis/home-ops
       serializeImagePulls: false
       maxParallelImagePulls: 5
 ```
@@ -214,13 +229,19 @@ machine:
 
 ### Step 5 — Verify `machine-intelgpu.yaml` content
 
+Pattern reference:
+- [tyriis/home-ops talconfig.yaml](https://github.com/tyriis/home-ops/blob/main/talos/utility/talconfig.yaml) — exact same `apparmor=0`, `init_on_alloc=0`, `intel_iommu=on`, `iommu=pt`, `mitigations=off`, `security=none`, `talos.auditd.disabled=1` set
+- [Intel GuC/HuC firmware guide](https://gist.github.com/Brainiarc7/aa43570f512906e882ad6cdd835efe57) — `i915.enable_guc=3` enables both GuC submission and HuC authentication
+- [Talos performance tuning docs](https://docs.siderolabs.com/talos/v1.12/configure-your-talos-cluster/system-configuration/performance-tuning) — official Talos recommendations
+- [Arch Wiki: Intel graphics](https://wiki.archlinux.org/title/Intel_graphics) — GuC/HuC caveats
+
 The existing file at `kubernetes/bootstrap/talos/patches/global/machine-intelgpu.yaml` should contain:
 
 ```yaml
 machine:
   install:
     extraKernelArgs:
-      - i915.enable_guc=3                     # Meteor Lake GPU (GuC firmware loading)
+      - i915.enable_guc=3                     # Meteor Lake GPU (GuC + HuC firmware loading)
       - apparmor=0                             # Perf: disable LSM AppArmor
       - init_on_alloc=0                        # Perf: disable memory init on alloc
       - init_on_free=0                         # Perf: disable memory init on free
@@ -686,12 +707,51 @@ git push
 
 ## 12) References
 
+### Official Talos documentation
 - [Talos v1.12.0 release notes](https://github.com/siderolabs/talos/releases/tag/v1.12.0) — What's new, kernel 6.18, K8s 1.35
 - [Talos v1.12.6 release notes](https://github.com/siderolabs/talos/releases/tag/v1.12.6) — Latest patch
-- [Talos performance tuning docs](https://docs.siderolabs.com/talos/v1.12/configure-your-talos-cluster/system-configuration/performance-tuning)
+- [Talos performance tuning (v1.12)](https://docs.siderolabs.com/talos/v1.12/configure-your-talos-cluster/system-configuration/performance-tuning) — Official perf guide
+- [Talos performance tuning (v1.11)](https://docs.siderolabs.com/talos/v1.11/configure-your-talos-cluster/system-configuration/performance-tuning) — Current version
 - [Talos upgrade guide](https://www.talos.dev/v1.12/talos-guides/upgrading-talos/)
+- [Talos discussion #12313: conntrack table full](https://github.com/siderolabs/talos/discussions/12313) — Why we tune conntrack
+- [Talos issue #8332: kube-proxy IPVS + externalIP](https://github.com/siderolabs/talos/issues/8332) — Why kube-proxy is disabled
+- [siderolabs/pkgs kernel config (main)](https://raw.githubusercontent.com/siderolabs/pkgs/main/kernel/build/config-amd64) — Kernel options (v1.12+)
+- [siderolabs/pkgs kernel config (v1.11.0)](https://raw.githubusercontent.com/siderolabs/pkgs/v1.11.0/kernel/build/config-amd64) — Kernel options (v1.11)
+
+### Community Talos homelab repos (pattern sources)
+- [tyriis/home-ops](https://github.com/tyriis/home-ops/blob/main/talos/utility/talconfig.yaml) — Source for most kernel args (`mitigations=off`, `init_on_alloc=0`, `intel_iommu=on`, `iommu=pt`, `apparmor=0`, `security=none`, `talos.auditd.disabled=1`), `tcp_fastopen`, `serializeImagePulls: false`
+- [marcolongol/homelab-cluster](https://github.com/marcolongol/homelab-cluster/blob/main/talos/patches/global/machine-sysctls.yaml) — Source for BBR, conntrack sizing, TCP keepalives, file descriptors, pid_max, `ip_local_port_range`, vm/swappiness/vfs_cache_pressure
+- [onedr0p/cluster-template](https://github.com/onedr0p/cluster-template) — General structure and `cluster.sample.yaml` patterns
+
+### Tuning guides (external)
+- [OneUptime: Tune Kernel Parameters on Talos](https://oneuptime.com/blog/post/2026-03-03-tune-kernel-parameters-on-talos-linux/view)
+- [OneUptime: Tune Network Performance on Talos](https://oneuptime.com/blog/post/2026-03-03-tune-network-performance-on-talos-linux/view)
+- [OneUptime: Configure Extra Kernel Arguments](https://oneuptime.com/blog/post/2026-03-03-configure-extra-kernel-arguments-in-talos-linux/view)
+- [OneUptime: Set Machine Sysctls](https://oneuptime.com/blog/post/2026-03-03-set-machine-sysctls-in-talos-linux/view)
+- [OneUptime: Kernel Module Parameters](https://oneuptime.com/blog/post/2026-03-03-set-machine-kernel-module-parameters-in-talos-linux/view)
+- [OneUptime: Talos on Intel NUC](https://oneuptime.com/blog/post/2026-03-03-set-up-talos-linux-on-intel-nuc/view)
+
+### Kernel and GPU references
+- [Intel GuC/HuC firmware guide](https://gist.github.com/Brainiarc7/aa43570f512906e882ad6cdd835efe57) — `i915.enable_guc=3` rationale
+- [Intel GuC/HuC PDF](https://cdrdv2-public.intel.com/609249/609249-final-enabling-intel-guc-huc-advanced-gpu-features-v1-1-1.pdf) — Official Intel doc
+- [Arch Wiki: Intel graphics](https://wiki.archlinux.org/title/Intel_graphics) — i915 driver tuning
+- [drm/i915 kernel docs](https://docs.kernel.org/gpu/i915.html) — Upstream driver reference
+- [Phoronix: GuC firmware for ADL-P](https://www.phoronix.com/news/GuC-Firmware-ADL-P-Linux-5.19) — Context for `enable_guc=3`
+
+### Kubernetes references
+- [Using sysctls in a Kubernetes Cluster](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/) — Allowed safe sysctls
+- [Kubelet config (v1beta1)](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/) — `systemReserved`, `kubeReserved`, `maxParallelImagePulls`
+- [Reserve Compute Resources](https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/) — Rationale for node reservations
+
+### Longhorn v2 (deferred, see section 12 Longhorn note)
+- [Longhorn v2 data engine](https://longhorn.io/docs/1.11.1/v2-data-engine/) — Overview
+- [Longhorn v2 prerequisites](https://longhorn.io/docs/1.11.1/v2-data-engine/prerequisites/) — Kernel modules, hugepages, CPU
+- [Longhorn v2 features](https://longhorn.io/docs/1.11.1/v2-data-engine/features/) — Feature support matrix (still Tech Preview)
+
+### Local repo files
 - `runbooks/health-check.sh` — Post-upgrade verification
 - `runbooks/security-check.py` — Security validation
+- `runbooks/check-all-versions.py` — Talos version check (added in session 2026-04-11)
 - `docs/sops/longhorn.md` — Longhorn storage SOP (replica concepts)
 - `docs/sops/backup.md` — Backup verification procedure
 - `kubernetes/bootstrap/talos/talconfig.yaml` — Source of truth
