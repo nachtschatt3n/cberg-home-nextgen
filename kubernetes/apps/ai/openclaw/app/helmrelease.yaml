@@ -309,7 +309,7 @@ spec:
                       bind: 'lan',
                       port: 18789,
                       trustedProxies: ['10.69.0.35', '10.0.0.0/8', '192.168.0.0/16', '172.16.0.0/12', '127.0.0.1', 'localhost', '::1'],
-                      controlUi: { allowedOrigins: ['https://openclaw.' + (process.env.OPENCLAW_DOMAIN || 'uhl.cool')] },
+                      controlUi: { allowedOrigins: ['https://openclaw.' + (process.env.OPENCLAW_DOMAIN || 'example.com')] },
                     },
                     agents: {
                       defaults: {
