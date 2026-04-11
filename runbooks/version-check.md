@@ -28,6 +28,9 @@ The version checking system scans all HelmReleases in the repository and checks 
 4. **Update Complexity Assessment**: Classifies updates as major/minor/patch
 5. **Breaking Changes Detection**: Identifies potential breaking changes from release notes
 6. **Renovate PRs**: Lists open Renovate bot PRs with type and merge status
+7. **External Infrastructure**: Checks non-Kubernetes components:
+   - **Talos Linux**: Current version per node (via `talosctl`) vs latest stable release from `siderolabs/talos` GitHub
+   - **UniFi Network Application**: Version + NVD CVE scan
 
 ## Tools
 
@@ -44,7 +47,7 @@ A comprehensive Python script that:
   - Registry APIs (Docker Hub, GHCR, Quay.io) for image tags
 - Generates a detailed markdown report with update indicators
 
-**Requirements:** Python 3.8+, `pyyaml`, `requests`, `packaging`, Helm CLI
+**Requirements:** Python 3.8+, `pyyaml`, `requests`, `packaging`, Helm CLI, `talosctl` (for Talos version check)
 
 **GitHub Authentication:**
 - **Preferred:** GitHub CLI (`gh`) - automatically authenticated, no rate limits

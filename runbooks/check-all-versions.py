@@ -22,6 +22,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import urlparse
+import urllib.request
 import sys
 from packaging import version
 
@@ -876,10 +877,119 @@ class VersionChecker:
 
         return results
 
+    def _get_talos_node_versions(self) -> Dict[str, Optional[str]]:
+        """Query Talos nodes for their current version via talosctl."""
+        nodes = ["192.168.55.11", "192.168.55.12", "192.168.55.13"]
+        versions: Dict[str, Optional[str]] = {}
+        for node in nodes:
+            try:
+                out = subprocess.run(
+                    ["talosctl", "version", "--nodes", node, "--short"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                # Parse lines looking for "Tag:" under "Server:"
+                tag = None
+                in_server = False
+                for line in out.stdout.splitlines():
+                    if line.startswith("Server:"):
+                        in_server = True
+                        continue
+                    if in_server and "Tag:" in line:
+                        tag = line.split("Tag:", 1)[1].strip()
+                        break
+                versions[node] = tag
+            except Exception:
+                versions[node] = None
+        return versions
+
+    def _get_latest_talos_release(self) -> Optional[str]:
+        """Fetch the latest stable Talos release tag from GitHub."""
+        try:
+            req = urllib.request.Request(
+                "https://api.github.com/repos/siderolabs/talos/releases/latest",
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "cberg-version-check"},
+            )
+            token = os.environ.get("GITHUB_TOKEN")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+                return data.get("tag_name")
+        except Exception as e:
+            print(f"  {Colors.YELLOW}⚠ Failed to fetch latest Talos release: {e}{Colors.RESET}")
+            return None
+
+    def check_talos_versions(self):
+        """Check Talos versions on all cluster nodes."""
+        print(f"\nChecking {Colors.CYAN}Talos Linux{Colors.RESET} (cluster nodes)...")
+
+        node_versions = self._get_talos_node_versions()
+        latest = self._get_latest_talos_release()
+
+        if latest:
+            print(f"  Latest stable Talos: {latest}")
+        else:
+            print(f"  {Colors.YELLOW}Latest stable Talos: unknown{Colors.RESET}")
+
+        # Determine cluster version (use lowest across nodes, or unknown)
+        node_tags = [v for v in node_versions.values() if v]
+        cluster_version: Optional[str] = None
+        mixed = False
+        if node_tags:
+            unique = set(node_tags)
+            mixed = len(unique) > 1
+            # Prefer the lowest version for update reporting
+            try:
+                cluster_version = sorted(unique, key=lambda v: self.parse_version(v) or (0, 0, 0))[0]
+            except Exception:
+                cluster_version = sorted(unique)[0]
+
+        has_update = False
+        update_type: Optional[str] = None
+        if cluster_version and latest:
+            cv = self.parse_version(cluster_version)
+            lv = self.parse_version(latest)
+            if cv and lv and cv < lv:
+                has_update = True
+                if cv[0] < lv[0]:
+                    update_type = "MAJOR"
+                elif cv[1] < lv[1]:
+                    update_type = "MINOR"
+                else:
+                    update_type = "PATCH"
+
+        for node, ver in node_versions.items():
+            label = ver or "unreachable"
+            status_color = Colors.GREEN if ver else Colors.YELLOW
+            print(f"  {node}: {status_color}{label}{Colors.RESET}")
+
+        if mixed:
+            print(f"  {Colors.YELLOW}⚠ Mixed Talos versions across nodes{Colors.RESET}")
+        if has_update:
+            print(f"  {Colors.YELLOW}⚠ Update available: {cluster_version} → {latest} ({update_type}){Colors.RESET}")
+        elif cluster_version and latest and not has_update:
+            print(f"  {Colors.GREEN}✓ Running latest stable Talos{Colors.RESET}")
+
+        self.external_infra_results.append({
+            "name": "Talos Linux",
+            "host": "cluster nodes",
+            "current_version": cluster_version,
+            "latest_version": latest,
+            "has_update": has_update,
+            "update_type": update_type,
+            "mixed_versions": mixed,
+            "node_versions": node_versions,
+            "nvd_cves": [],
+            "has_critical": False,
+        })
+
     def check_external_infrastructure(self):
         """Check versions of external infrastructure not managed as Kubernetes HelmReleases."""
         print(f"\n{Colors.BLUE}=== Checking External Infrastructure ==={Colors.RESET}")
-        print(f"Checking {Colors.CYAN}UniFi Network Application{Colors.RESET} (192.168.30.1:8443)...")
+
+        self.check_talos_versions()
+
+        print(f"\nChecking {Colors.CYAN}UniFi Network Application{Colors.RESET} (192.168.30.1:8443)...")
 
         unifi_version = self._get_unifi_version()
         ver_label = unifi_version or "unknown"
@@ -1225,9 +1335,14 @@ class VersionChecker:
                                     if item.get('breaking_changes') and 
                                     len(item['breaking_changes']) > 0)
         
+        # Count infrastructure updates (Talos etc.)
+        infra_updates = sum(1 for ei in self.external_infra_results if ei.get("has_update"))
+
         lines.append(f"- **Total Deployments:** {len(self.results)}")
         lines.append(f"- **Chart Updates Available:** {chart_updates}")
         lines.append(f"- **Image Updates Available:** {image_updates}")
+        if infra_updates:
+            lines.append(f"- **Infrastructure Updates Available:** {infra_updates}")
         lines.append(f"- **Update Breakdown:** 🔴 {major_updates} major | 🟡 {minor_updates} minor | 🟢 {patch_updates} patch")
         if breaking_changes_count > 0:
             lines.append(f"- **⚠️ Breaking Changes Detected:** {breaking_changes_count} updates with potential breaking changes")
@@ -1245,11 +1360,38 @@ class VersionChecker:
             for ei in self.external_infra_results:
                 ver = ei["current_version"] or "unknown"
                 nvd_cves = ei.get("nvd_cves", [])
-                status = "🔴 VULNERABLE" if ei["has_critical"] else ("🟢 OK" if ei["current_version"] else "🟡 version unknown")
+                has_update = ei.get("has_update", False)
+                update_type = ei.get("update_type")
+                latest_version = ei.get("latest_version")
+
+                if ei["has_critical"]:
+                    status = "🔴 VULNERABLE"
+                elif has_update:
+                    icon = {"MAJOR": "🔴", "MINOR": "🟡", "PATCH": "🟢"}.get(update_type, "🟡")
+                    status = f"{icon} {update_type} update available"
+                elif ei["current_version"]:
+                    status = "🟢 OK"
+                else:
+                    status = "🟡 version unknown"
+
                 lines.append(f"### {ei['name']} (`{ei['host']}`)")
                 lines.append("")
-                lines.append(f"- **Version:** `{ver}`")
+                if has_update and latest_version:
+                    lines.append(f"- **Version:** `{ver}` → `{latest_version}`")
+                else:
+                    lines.append(f"- **Version:** `{ver}`")
                 lines.append(f"- **Status:** {status}")
+
+                # Show per-node versions for Talos
+                node_versions = ei.get("node_versions")
+                if node_versions:
+                    lines.append("- **Nodes:**")
+                    for n, v in sorted(node_versions.items()):
+                        v_label = v or "unreachable"
+                        lines.append(f"  - `{n}`: `{v_label}`")
+                if ei.get("mixed_versions"):
+                    lines.append("- ⚠ **Mixed versions across nodes**")
+
                 if nvd_cves:
                     lines.append(f"- **Open CVEs ({len(nvd_cves)}):**")
                     for c in nvd_cves:
@@ -1257,7 +1399,7 @@ class VersionChecker:
                         fixed_str = f" · fixed in `{c['fixed_in']}`" if c["fixed_in"] else ""
                         icon = "🔴" if c["affects_current"] is True else "🟡"
                         lines.append(f"  - {icon} **{c['id']}**{score_str}{fixed_str}: {c['description']}")
-                else:
+                elif "nvd_cves" in ei and ei["name"] != "Talos Linux":
                     lines.append("- **Open CVEs:** none found")
                 lines.append("")
             lines.append("---")
