@@ -42,6 +42,20 @@ Source-of-truth manifests:
 - `kubernetes/apps/monitoring/`
 - Related dashboards/config in Grafana and alerting rules under the same path.
 
+### External (macOS) Scrape Targets
+
+Two macOS menu bar apps on the Mac Mini (`192.168.30.111`) expose Prometheus metrics.
+Scraped via `ScrapeConfig` CRDs (not `additionalScrapeConfigs`):
+
+| App | Port | Metrics path | ScrapeConfig |
+|-----|------|-------------|--------------|
+| findmy-traccar-sync | 9101 | `/metrics` | `macos-scrapeconfigs.yaml` |
+| bank-refresh | 9100 | `/metrics` | `macos-scrapeconfigs.yaml` |
+
+Alert rules: `macos-apps-alerts.yaml` (FindMyTraccarSyncDown, BankRefreshDown, etc.)
+
+Source: `kubernetes/apps/monitoring/kube-prometheus-stack/app/macos-scrapeconfigs.yaml`
+
 ---
 
 ## Operational Instructions

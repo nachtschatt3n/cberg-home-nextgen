@@ -49,6 +49,7 @@ Endpoints: /v1/chat/completions
 | nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |
 | n8n | (UI-configured) | `gemma4:26b` | n8n UI: `ollamaApi` credential |
 | n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials |
+| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b` (edge) + `gemma4:26b` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` |
 | home-assistant | `http://192.168.30.111:11434` | `gemma4:26b` (all integrations) | HA UI |
 | headlamp | `http://192.168.30.111:11434` | `gemma4:26b` | Headlamp UI: AI Assistant plugin |
 | paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret |

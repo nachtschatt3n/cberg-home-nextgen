@@ -686,6 +686,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
         REPO_ROOT / "kubernetes" / "apps" / "office" / "paperless-ai" / "app" / "helmrelease.yaml",
         REPO_ROOT / "kubernetes" / "apps" / "office" / "paperless-gpt" / "app" / "helmrelease.yaml",
         REPO_ROOT / "kubernetes" / "apps" / "home-automation" / "frigate-nvr" / "app" / "helmrelease.yaml",
+        REPO_ROOT / "kubernetes" / "apps" / "home-automation" / "ha-ai-harness" / "app" / "helmrelease.yaml",
     ]
     bad_model_format: list[str] = []
     for app_path in ollama_apps:

@@ -65,7 +65,7 @@
 | teslamate | Tesla data logger and analytics | Internal | Home Automation |
 | mqttx-web | Web-based MQTT client | Internal | Home Automation |
 | matter-server | Matter and Thread protocol server | Internal (cluster) | — |
-| otbr | OpenThread Border Router (Matter/Thread) | Internal (cluster) | — |
+| otbr | OpenThread Border Router (Matter/Thread) — **suspended**: Talos kernel lacks `CONFIG_IPV6_MROUTE`, re-enable after Talos v1.12 upgrade (see `docs/sops/talos-upgrade.md`) | Internal (cluster) | — |
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
