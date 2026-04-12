@@ -440,9 +440,12 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     # Infrastructure apps that are intentionally not listed in applications.md
     INFRA_SKIP = {
         "cilium", "coredns", "csi-driver-smb", "descheduler", "intel-device-plugin",
+        "intel-device-plugin-operator", "intel-device-plugin-gpu",
         "metrics-server", "node-feature-discovery", "reloader", "spegel",
         "eck-operator", "elasticsearch-bootstrap", "echo-server", "flux-operator",
-        "cert-manager", "_template", "mosquitto", "otbr", "matter-server",
+        "flux-instance", "cert-manager", "_template", "mosquitto", "otbr",
+        "matter-server", "external-ingress-nginx", "internal-ingress-nginx",
+        "opencode-PROJECT_NAME",
     }
 
     undocumented = []
