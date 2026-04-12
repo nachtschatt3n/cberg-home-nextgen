@@ -29,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/harness-home-server
-              tag: latest
+              tag: v0.1.0-alpha
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -48,6 +48,18 @@ spec:
                   secretKeyRef:
                     name: ha-ai-harness-secret
                     key: auth_token
+              - name: ADMIN_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: ha-ai-harness-secret
+                    key: admin_password
+              - name: SECRET_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: ha-ai-harness-secret
+                    key: secret_key
+              - name: CORS_ORIGINS
+                value: "https://ha-harness.${SECRET_DOMAIN}"
             resources:
               requests:
                 cpu: 100m
@@ -59,10 +71,12 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/harness-home-frontend
-              tag: latest
+              tag: v0.1.0-alpha
             env:
               - name: TZ
                 value: "Europe/Berlin"
+              - name: VITE_ALLOWED_HOSTS
+                value: "all"
             resources:
               requests:
                 cpu: 50m
