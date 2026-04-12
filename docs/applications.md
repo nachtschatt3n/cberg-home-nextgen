@@ -11,7 +11,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 9 |
-| home-automation | 16 |
+| home-automation | 17 |
 | databases | 9 |
 | monitoring | 12 |
 | office | 10 |
@@ -68,6 +68,7 @@
 | otbr | OpenThread Border Router (Matter/Thread) | Internal (cluster) | — |
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
+| ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
 
 ---
 

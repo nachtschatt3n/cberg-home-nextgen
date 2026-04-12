@@ -5,6 +5,7 @@ components:
   - ../../flux/components/common
 resources:
  - ./esphome/ks.yaml
+ - ./ha-ai-harness/ks.yaml
  - ./frigate-nvr/ks.yaml
  - ./home-assistant/ks.yaml
  - ./iobroker/ks.yaml

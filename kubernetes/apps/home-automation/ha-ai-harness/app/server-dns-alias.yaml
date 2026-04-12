@@ -1,0 +1,14 @@
+# ExternalName service so the frontend Vite proxy can resolve 'server:8765'
+# (vite.config.ts hardcodes http://server:8765 as the backend proxy target)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: home-automation
+spec:
+  type: ExternalName
+  externalName: ha-ai-harness-server.home-automation.svc.cluster.local
+  ports:
+    - port: 8765
+      targetPort: 8765

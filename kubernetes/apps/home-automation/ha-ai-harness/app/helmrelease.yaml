@@ -1,0 +1,125 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ha-ai-harness
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      server:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/harness-home-server
+              tag: latest
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: OLLAMA_URL
+                value: "http://192.168.30.111:11434"
+              - name: EDGE_MODEL
+                value: "gemma4:e2b"
+              - name: DENSE_MODEL
+                value: "gemma4:26b"
+              - name: AUDIT_DB_PATH
+                value: "/data/audit.db"
+              - name: RELOAD
+                value: "false"
+              - name: DEV_AUTH_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: ha-ai-harness-secret
+                    key: auth_token
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+      frontend:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/harness-home-frontend
+              tag: latest
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
+
+    service:
+      server:
+        controller: server
+        ports:
+          http:
+            port: 8765
+      frontend:
+        controller: frontend
+        ports:
+          http:
+            port: 5173
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "HA AI Harness"
+          gethomepage.dev/description: "AI assistant for Home Assistant"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "home-assistant.png"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: "ha-harness.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: frontend
+                  port: http
+
+    persistence:
+      data:
+        enabled: true
+        type: persistentVolumeClaim
+        existingClaim: ha-ai-harness-data
+        advancedMounts:
+          server:
+            app:
+              - path: /data
+      config:
+        enabled: true
+        type: persistentVolumeClaim
+        existingClaim: ha-ai-harness-config
+        advancedMounts:
+          server:
+            app:
+              - path: /app/config
