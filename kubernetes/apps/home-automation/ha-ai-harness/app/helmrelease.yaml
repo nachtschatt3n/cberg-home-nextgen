@@ -72,11 +72,21 @@ spec:
             image:
               repository: ghcr.io/nachtschatt3n/harness-home-frontend
               tag: 0.1.0-alpha
+            command:
+              - sh
+              - -c
+              - |
+                node << 'JSEOF'
+                const fs = require('fs');
+                let c = fs.readFileSync('/app/vite.config.ts', 'utf8');
+                c = c.replace("host: '0.0.0.0',", "host: '0.0.0.0',\n    allowedHosts: 'all',");
+                fs.writeFileSync('/app/vite.config.ts', c);
+                console.log('vite: allowedHosts patched');
+                JSEOF
+                npm run dev -- --host 0.0.0.0
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              - name: VITE_ALLOWED_HOSTS
-                value: "all"
             resources:
               requests:
                 cpu: 50m
