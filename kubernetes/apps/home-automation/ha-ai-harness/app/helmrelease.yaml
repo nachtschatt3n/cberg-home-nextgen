@@ -79,7 +79,7 @@ spec:
                 node << 'JSEOF'
                 const fs = require('fs');
                 let c = fs.readFileSync('/app/vite.config.ts', 'utf8');
-                c = c.replace("host: '0.0.0.0',", "host: '0.0.0.0',\n    allowedHosts: 'all',");
+                c = c.replace("host: '0.0.0.0',", "host: '0.0.0.0',\n    allowedHosts: true,");
                 fs.writeFileSync('/app/vite.config.ts', c);
                 console.log('vite: allowedHosts patched');
                 JSEOF
