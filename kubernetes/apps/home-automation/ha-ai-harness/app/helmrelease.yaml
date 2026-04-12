@@ -59,7 +59,7 @@ spec:
                     name: ha-ai-harness-secret
                     key: secret_key
               - name: CORS_ORIGINS
-                value: "https://ha-harness.${SECRET_DOMAIN}"
+                value: '["https://ha-harness.${SECRET_DOMAIN}"]'
             resources:
               requests:
                 cpu: 100m
