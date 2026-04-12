@@ -634,16 +634,14 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
     if not content:
         return f.worst(), f, f.markdown()
 
-    # Check Ollama endpoint ports documented
-    ollama_ports = {"11434": "Voice", "11435": "Reason", "11436": "Vision"}
+    # Check Ollama endpoint documented (single instance, gemma 4, port 11434 only)
     ollama_host = "192.168.30.111"
-    for port, role in ollama_ports.items():
-        pattern = f"{ollama_host}:{port}"
-        if pattern not in content:
-            f.add(WARNING, f"Ollama {role} endpoint `{pattern}` not in docs/integration.md")
-            cprint(C.YELLOW, f"  {WARNING} Ollama {role} endpoint not documented")
-        else:
-            cprint(C.GREEN, f"  {OK} Ollama {role} ({pattern}) documented")
+    ollama_pattern = f"{ollama_host}:11434"
+    if ollama_pattern not in content:
+        f.add(WARNING, f"Ollama endpoint `{ollama_pattern}` not in docs/integration.md")
+        cprint(C.YELLOW, f"  {WARNING} Ollama endpoint not documented")
+    else:
+        cprint(C.GREEN, f"  {OK} Ollama ({ollama_pattern}) documented")
 
     # Check Homepage groups in helmrelease match integration doc
     hr_path = REPO_ROOT / "kubernetes" / "apps" / "default" / "homepage" / "app" / "helmrelease.yaml"
@@ -1044,9 +1042,19 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                 cprint(C.GREEN, f"  {OK} {runbook.name}: paired with {script}")
                 lines.append(f"- {OK} `{runbook.name}`: paired with `{script}`\n")
             else:
-                f.add(WARNING, f"Runbook `{runbook.name}` has no matching script (.py or .sh)")
-                cprint(C.YELLOW, f"  {WARNING} {runbook.name}: no matching script")
-                lines.append(f"- {WARNING} `{runbook.name}`: no script found\n")
+                # Known manual/procedure-only runbooks that intentionally have no script
+                MANUAL_RUNBOOKS = {
+                    "compliance-check.md",           # Manual checklist
+                    "longhorn-name-migration.md",    # Reference procedure
+                    "longhorn-name-migration-pending.md",  # Auto-generated list
+                }
+                if runbook.name in MANUAL_RUNBOOKS:
+                    cprint(C.GREEN, f"  {OK} {runbook.name}: manual procedure (no script expected)")
+                    lines.append(f"- {OK} `{runbook.name}`: manual procedure\n")
+                else:
+                    f.add(WARNING, f"Runbook `{runbook.name}` has no matching script (.py or .sh)")
+                    cprint(C.YELLOW, f"  {WARNING} {runbook.name}: no matching script")
+                    lines.append(f"- {WARNING} `{runbook.name}`: no script found\n")
 
     # Check sensitive output files are gitignored (security/doc audit outputs)
     gitignore = read_file(REPO_ROOT / ".gitignore")

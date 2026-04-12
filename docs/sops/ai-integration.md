@@ -250,7 +250,7 @@ RAG chat and document embedding.
 | Embedding Model | `nomic-embed-text:latest` |
 | Config | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
 
-**Configuration:** `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:80-89`
+**Configuration:** `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml` (env vars at ~line 81)
 
 ### LibreChat (`ai/librechat`)
 
@@ -262,7 +262,7 @@ Chat interface with multi-provider support.
 | Default Model | `gemma4:26b` (fetch=true for dynamic model list) |
 | Config | Custom endpoint "Ollama" with OpenAI-compatible API |
 
-**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml:63-72`
+**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml` (custom endpoint at ~line 65)
 
 ### Next AI Draw.io (`ai/next-ai-draw-io`)
 
@@ -274,7 +274,7 @@ AI-powered diagram generation.
 | Model | `gemma4:26b` |
 | Config | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` (native `/api`) |
 
-**Configuration:** `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:35-40`
+**Configuration:** `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml` (env vars at ~line 36)
 
 ### AFFiNE (`office/affine`)
 
@@ -287,7 +287,7 @@ Collaborative workspace with AI copilot features.
 | Embedding Model | `nomic-embed-text:latest` |
 | Config | OpenAI-compatible provider in copilot configmap |
 
-**Configuration:** `kubernetes/apps/office/affine/app/configmap.yaml:58-72`
+**Configuration:** `kubernetes/apps/office/affine/app/configmap.yaml` (copilot section at ~line 52)
 
 ### Nextcloud (`office/nextcloud`)
 
