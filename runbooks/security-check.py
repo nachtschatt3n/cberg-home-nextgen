@@ -12,6 +12,7 @@ Usage:
 Output:
     runbooks/security-check-current.md
 """
+from __future__ import annotations
 
 import json
 import os
