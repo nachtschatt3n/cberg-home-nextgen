@@ -12,33 +12,13 @@ Output:
 """
 
 import fnmatch
-import glob
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Resolve unifictl binary (installed via cargo in mise, not in default PATH)
-# ---------------------------------------------------------------------------
-
-def _find_unifictl() -> str:
-    """Find unifictl binary — check PATH first, then mise cargo install path."""
-    found = shutil.which("unifictl")
-    if found:
-        return found
-    # Check mise cargo install locations
-    home = Path.home()
-    candidates = sorted(home.glob(".local/share/mise/installs/cargo-unifictl/*/bin/unifictl"), reverse=True)
-    if candidates:
-        return str(candidates[0])
-    return "unifictl"  # fallback — will fail with "command not found"
-
-UNIFICTL = _find_unifictl()
 
 # ---------------------------------------------------------------------------
 # Colour helpers
@@ -340,7 +320,7 @@ def s2_network_docs() -> tuple[str, Findings, str]:
     cprint(C.CYAN, f"  Documented VLANs: {sorted(documented_vlan_ids)}")
 
     # Fetch live VLANs from UniFi
-    vlan_cmd = f"{UNIFICTL} local network list -o json"
+    vlan_cmd = "unifictl local network list -o json"
     vlan_rc, live_vlan_raw, vlan_err = run_cmd(vlan_cmd, timeout=15)
     if vlan_rc == 0 and live_vlan_raw and (live_vlan_raw.startswith("[") or live_vlan_raw.startswith("{")):
         try:
@@ -390,7 +370,7 @@ def s2_network_docs() -> tuple[str, Findings, str]:
             lines.append("Live VLAN check: skipped (unifictl query failed)\n")
 
     # Fetch live WiFi SSIDs from UniFi
-    wlan_cmd = f"{UNIFICTL} local wlan list -o json"
+    wlan_cmd = "unifictl local wlan list -o json"
     wlan_rc, live_wlan_raw, wlan_err = run_cmd(wlan_cmd, timeout=15)
     if wlan_rc == 0 and live_wlan_raw and (live_wlan_raw.startswith("[") or live_wlan_raw.startswith("{")):
         try:
