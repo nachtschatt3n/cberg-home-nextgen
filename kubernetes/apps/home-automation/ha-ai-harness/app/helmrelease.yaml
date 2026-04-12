@@ -64,15 +64,25 @@ spec:
               - sh
               - -c
               - |
-                node -e "
-                const fs=require('fs');
-                let c=fs.readFileSync('/app/vite.config.ts','utf8');
-                if(!c.includes('allowedHosts')){
-                  c=c.replace(/(server\s*:\s*\{)/,'$1\n    allowedHosts: \"all\",');
-                  fs.writeFileSync('/app/vite.config.ts',c);
-                  console.log('vite.config.ts: allowedHosts patched');
-                }
-                " && npm run dev -- --host 0.0.0.0
+                cat > /app/vite.config.ts << 'VITE_EOF'
+                import { defineConfig } from 'vite'
+                import vue from '@vitejs/plugin-vue'
+
+                export default defineConfig({
+                  plugins: [vue()],
+                  server: {
+                    host: '0.0.0.0',
+                    allowedHosts: 'all',
+                    proxy: {
+                      '/api': { target: 'http://server:8765', changeOrigin: true },
+                      '/ws': { target: 'ws://server:8765', ws: true, changeOrigin: true },
+                      '/health': { target: 'http://server:8765', changeOrigin: true },
+                    },
+                  },
+                  test: { environment: 'happy-dom' },
+                })
+                VITE_EOF
+                npm run dev -- --host 0.0.0.0
             env:
               - name: TZ
                 value: "Europe/Berlin"
