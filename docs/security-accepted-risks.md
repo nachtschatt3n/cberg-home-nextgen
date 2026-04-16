@@ -1,7 +1,7 @@
 # Security Accepted Risks
 
 > Risks reviewed and explicitly accepted. Do not surface these in automated audits as actionable items.
-> Last reviewed: 2026-03-21
+> Last reviewed: 2026-04-16
 
 ---
 
@@ -151,6 +151,17 @@ The following containers run with elevated privileges or `hostNetwork: true`:
 | memgraph | databases | Privileged init container | `init-sysctl` sets vm.max_map_count; requires privilege escalation for kernel tuning |
 
 **Why accepted:** All privileged containers are in `home-automation`, `media`, `ai`, and `databases` namespaces where direct hardware access or system tuning is a functional requirement. All pods are on the internal cluster network with no direct external exposure.
+
+---
+
+## AR-011 — flux-operator cluster-admin ClusterRoleBinding
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — standard GitOps pattern
+
+The `flux-operator` ServiceAccount is bound to `cluster-admin`. This is surfaced by RBAC audits as a wildcard permission finding.
+
+**Why accepted:** Flux requires cluster-wide read/write access to reconcile all namespaces and resource types. This is the standard and recommended Flux deployment pattern. The operator only acts on git-committed manifests gated by branch protection and webhook authentication. The risk surface is equivalent to any GitOps controller and is mitigated by the Flux webhook `secretRef` and GitHub branch protections.
 
 ---
 

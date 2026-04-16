@@ -282,7 +282,11 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     safe_content = ["ks.yaml", "grafana", "prometheusrule", "coredns", "helm-values",
                     "  path: ./kubernetes", "  path: ./talos",
                     "longhorn/app/helmrelease.yaml",
-                    "talos/clusterconfig/"]  # Talos node configs contain expected inline certs/keys
+                    "talos/clusterconfig/",  # Talos node configs contain expected inline certs/keys
+                    "factory.talos.dev",     # Talos installer image URLs
+                    "ghcr.io/siderolabs/installer",  # Talos installer images
+                    "nodeAffinityPreset", "podAffinityPreset",  # Bitnami chart affinity YAML keys
+                    ]
     real_b64  = [h for h in b64_hits if not any(p in h for p in safe_content)]
     if real_b64:
         for hit in real_b64[:10]:
@@ -789,8 +793,9 @@ def s9_certificates() -> tuple[str, Findings, str]:
     domain = _sensitive.get("DOMAIN", "")
     lines = []
 
-    # cert-manager TLS secret
-    raw = kubectl(f"get secret {domain}-production-tls -n cert-manager "
+    # cert-manager TLS secret (domain dots become dashes in cert-manager secret names)
+    secret_name = f"{domain.replace('.', '-')}-production-tls"
+    raw = kubectl(f"get secret {secret_name} -n cert-manager "
                   "-o jsonpath='{.data.tls\\.crt}'")
     if raw:
         import base64, ssl
@@ -1073,6 +1078,20 @@ def s11_unifi() -> tuple[str, Findings, str]:
                     unifi_version = items[0].get("version")
         except Exception:
             pass
+
+    # Attempt 3: parse UDM/gateway firmware version from device list table output
+    if not unifi_version and devices_raw:
+        for line in devices_raw.splitlines():
+            if "udm" in line.lower().split():
+                parts = line.split()
+                # Table columns: name model type ip mac version state adopted
+                # Find the version field (format: X.X.X.NNNNN)
+                for part in parts:
+                    if re.match(r'\d+\.\d+\.\d+\.\d+', part):
+                        unifi_version = part
+                        break
+                if unifi_version:
+                    break
 
     ver_label = unifi_version or "unknown"
     cprint(C.CYAN, f"  Querying NVD for UniFi Network Application CVEs (version: {ver_label})...")
