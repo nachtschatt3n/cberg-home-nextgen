@@ -811,16 +811,16 @@ print(f\"CPU: {r['requests']['cpu']} / {r['limits']['cpu']}, Memory: {r['request
 
 ### Container Debugging Limitations
 
-fluent-bit and other minimal containers don't have common utilities:
+edot-collector and other minimal containers don't have common utilities:
 ```bash
-# These will FAIL in fluent-bit pods:
-kubectl exec -n monitoring fluent-bit-xxx -- cat /file  # No cat
-kubectl exec -n monitoring fluent-bit-xxx -- curl url   # No curl
-kubectl exec -n monitoring fluent-bit-xxx -- wget url   # No wget
+# These will FAIL in edot-collector pods:
+kubectl exec -n monitoring edot-collector-xxx -- cat /file  # No cat
+kubectl exec -n monitoring edot-collector-xxx -- curl url   # No curl
+kubectl exec -n monitoring edot-collector-xxx -- wget url   # No wget
 
 # Use port-forward instead for HTTP endpoints:
-kubectl port-forward -n monitoring {pod-name} 2020:2020 &
-curl http://localhost:2020/api/v1/health
+kubectl port-forward -n monitoring {pod-name} 4318:4318 &
+curl http://localhost:4318/v1/health
 ```
 
 ## Authentik Blueprint Management

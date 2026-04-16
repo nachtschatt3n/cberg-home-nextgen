@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.03.11`
-> Last Updated: `2026-03-11`
+> Version: `2026.04.16`
+> Last Updated: `2026-04-16`
 > Owner: `Platform`
 
 ---
@@ -33,7 +33,7 @@ It defines where the app should live, how it should be configured, and how to ve
 | Homepage | All user-facing web apps must include Homepage annotations + label |
 | Monitoring | Every new app must have rollout health checks and logs/events verification |
 | AlertManager | Every new app must have a PrometheusRule in `kubernetes/apps/monitoring/kube-prometheus-stack/app/` covering pod readiness, crash looping, and restarts |
-| Elasticsearch | Every new app's logs must be verified present in Elasticsearch after first deployment (`k8s_namespace_name` + `k8s_container_name` query on `fluent-bit-*`) |
+| Elasticsearch | Every new app's logs must be verified present in Elasticsearch after first deployment (`resource.attributes.k8s.namespace.name` + `resource.attributes.k8s.container.name` query on `logs-generic-default`) |
 | Code standards | 2-space indentation (except Python/Shell at 4), kebab-case files/dirs, snake_case vars/functions |
 
 Namespace rules:
@@ -137,9 +137,9 @@ Use `longhorn-static` only when a pre-created, manually managed volume is requir
    - Register in `kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml`.
    - See `kubernetes/apps/monitoring/kube-prometheus-stack/app/anythingllm-alerts.yaml` as reference.
 9. Verify Elasticsearch log ingestion (mandatory):
-   - fluent-bit ships all pod logs automatically — no config change needed.
-   - After first deployment, confirm logs are present via Kibana (`fluent-bit-*` index, filter by `k8s_namespace_name` and `k8s_container_name`).
-   - Or query directly: `curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/fluent-bit-*/_count" -d '{"query":{"bool":{"must":[{"match":{"k8s_namespace_name":"{namespace}"}},{"match":{"k8s_container_name":"{app}"}}]}}}'`
+   - edot-collector ships all pod logs automatically — no config change needed.
+   - After first deployment, confirm logs are present via Kibana (`logs-generic-default` data stream, filter by `resource.attributes.k8s.namespace.name` and `resource.attributes.k8s.container.name`).
+   - Or query directly: `curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" -d '{"query":{"bool":{"must":[{"match":{"resource.attributes.k8s.namespace.name":"{namespace}"}},{"match":{"resource.attributes.k8s.container.name":"{app}"}}]}}}'`
 10. Run local validation commands:
 
 ```bash
@@ -317,19 +317,19 @@ Failure hint:
 ES_PASS=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
 sleep 5
-curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/fluent-bit-*/_count" \
+curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" \
   -H "Content-Type: application/json" \
-  -d '{"query":{"bool":{"must":[{"match":{"k8s_namespace_name":"{namespace}"}},{"match":{"k8s_container_name":"{app}"}}]}}}'
+  -d '{"query":{"bool":{"must":[{"match":{"resource.attributes.k8s.namespace.name":"{namespace}"}},{"match":{"resource.attributes.k8s.container.name":"{app}"}}]}}}'
 kill %1
 ```
 
 Expected:
 - `count` field is greater than 0 (logs are present in Elasticsearch).
-- No config changes needed — fluent-bit ships all pod logs automatically.
+- No config changes needed — edot-collector ships all pod logs automatically.
 
 Failure hint:
-- Check fluent-bit DaemonSet health in `monitoring` namespace.
-- Verify no `fluentbit.io/exclude: "true"` annotation on the pod.
+- Check edot-collector Deployment health in `monitoring` namespace.
+- Verify no log exclusion annotation on the pod.
 
 ### Test 9: Application Inventory Registration
 
@@ -356,7 +356,7 @@ Failure hint:
 | Pods crash looping | Secret/config/runtime mismatch | Check pod events/logs and verify SOPS secrets |
 | Metrics missing | No ServiceMonitor or label mismatch | Validate ServiceMonitor selector and service labels |
 | No AlertManager alerts for app | Missing PrometheusRule or wrong label | Create `{app}-alerts.yaml` with `release: kube-prometheus-stack` label |
-| Logs missing in Kibana | fluent-bit issue or pod excluded | Check fluent-bit DaemonSet and pod annotations |
+| Logs missing in Kibana | edot-collector issue or pod excluded | Check edot-collector Deployment in `monitoring` namespace and pod annotations |
 
 ---
 
@@ -405,7 +405,7 @@ kubectl get prometheusrule -n monitoring {app}-alerts
 # Elasticsearch: logs are present
 ES_PASS=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &>/dev/null &
-sleep 5 && curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/fluent-bit-*/_count" -H "Content-Type: application/json" -d '{"query":{"bool":{"must":[{"match":{"k8s_namespace_name":"{namespace}"}},{"match":{"k8s_container_name":"{app}"}}]}}}' && kill %1 2>/dev/null
+sleep 5 && curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" -H "Content-Type: application/json" -d '{"query":{"bool":{"must":[{"match":{"resource.attributes.k8s.namespace.name":"{namespace}"}},{"match":{"resource.attributes.k8s.container.name":"{app}"}}]}}}' && kill %1 2>/dev/null
 ```
 
 Quality criteria:
@@ -484,3 +484,4 @@ Rollback success criteria:
 |---------|------|--------|
 | `2026.03.01` | `2026-03-01` | Initial version |
 | `2026.03.11` | `2026-03-11` | Add mandatory AlertManager PrometheusRule and Elasticsearch log verification steps |
+| `2026.04.16` | `2026-04-16` | Update logging references from fluent-bit to edot-collector / OTel field mappings |

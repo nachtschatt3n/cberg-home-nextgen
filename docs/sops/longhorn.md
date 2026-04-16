@@ -18,7 +18,7 @@ persistent storage in the cluster.
 
 ## Overview
 
-Longhorn v1.10.2 provides distributed block storage with replication across all 3 cluster nodes.
+Longhorn v1.11.1 provides distributed block storage with replication across all 3 cluster nodes.
 
 | Setting | Value |
 |---------|-------|

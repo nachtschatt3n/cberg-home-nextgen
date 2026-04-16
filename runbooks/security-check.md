@@ -260,18 +260,18 @@ ES_PASS=$(kubectl get secret elasticsearch-es-elastic-user -n monitoring \
 
 echo "=== Authentik failed login attempts (last 7 days) ==="
 curl -sk -u "elastic:${ES_PASS}" \
-  "https://localhost:9200/fluent-bit-*/_search" \
+  "https://localhost:9200/logs-generic-default/_search" \
   -H 'Content-Type: application/json' -d '{
     "size": 50,
     "query": {
       "bool": {
         "must": [
-          {"match": {"kubernetes.namespace_name": "kube-system"}},
+          {"match": {"resource.attributes.k8s.namespace.name": "kube-system"}},
           {"bool": {"should": [
-            {"match_phrase": {"log": "Login failed"}},
-            {"match_phrase": {"log": "Failed to authenticate"}},
-            {"match_phrase": {"log": "invalid_grant"}},
-            {"match_phrase": {"log": "FAILED_LOGIN"}}
+            {"match_phrase": {"body": "Login failed"}},
+            {"match_phrase": {"body": "Failed to authenticate"}},
+            {"match_phrase": {"body": "invalid_grant"}},
+            {"match_phrase": {"body": "FAILED_LOGIN"}}
           ]}}
         ],
         "filter": {"range": {"@timestamp": {"gte": "now-7d"}}}
@@ -292,7 +292,7 @@ if buckets:
     for b in buckets:
         print(f'  {b[\"key\"]}: {b[\"doc_count\"]} failures')
 for h in d['hits']['hits'][:10]:
-    log = h['_source'].get('log', '')[:120].replace(domain, '[DOMAIN]')
+    log = h['_source'].get('body', '')[:120].replace(domain, '[DOMAIN]')
     print(f'  {log}')
 " 2>/dev/null
 
@@ -327,23 +327,23 @@ ES_PASS=$(kubectl get secret elasticsearch-es-elastic-user -n monitoring \
 
 echo "=== Attack pattern hits in ingress logs (last 24h) ==="
 curl -sk -u "elastic:${ES_PASS}" \
-  "https://localhost:9200/fluent-bit-*/_search" \
+  "https://localhost:9200/logs-generic-default/_search" \
   -H 'Content-Type: application/json' -d '{
     "size": 100,
     "query": {
       "bool": {
         "must": [
-          {"match": {"kubernetes.namespace_name": "network"}},
+          {"match": {"resource.attributes.k8s.namespace.name": "network"}},
           {"bool": {"should": [
-            {"match_phrase": {"log": "../"}},
-            {"match_phrase": {"log": "etc/passwd"}},
-            {"match_phrase": {"log": "SELECT "}},
-            {"match_phrase": {"log": "<script"}},
-            {"match_phrase": {"log": "wp-login"}},
-            {"match_phrase": {"log": ".env"}},
-            {"match_phrase": {"log": "phpMyAdmin"}},
-            {"match_phrase": {"log": "cmd.exe"}},
-            {"match_phrase": {"log": "/bin/sh"}}
+            {"match_phrase": {"body": "../"}},
+            {"match_phrase": {"body": "etc/passwd"}},
+            {"match_phrase": {"body": "SELECT "}},
+            {"match_phrase": {"body": "<script"}},
+            {"match_phrase": {"body": "wp-login"}},
+            {"match_phrase": {"body": ".env"}},
+            {"match_phrase": {"body": "phpMyAdmin"}},
+            {"match_phrase": {"body": "cmd.exe"}},
+            {"match_phrase": {"body": "/bin/sh"}}
           ]}}
         ],
         "filter": {"range": {"@timestamp": {"gte": "now-24h"}}}
@@ -364,26 +364,26 @@ if buckets:
     for b in buckets:
         print(f'  {b[\"key\"]}: {b[\"doc_count\"]} hits')
 for h in d['hits']['hits'][:10]:
-    log = h['_source'].get('log', '')[:120].replace(domain, '[DOMAIN]')
+    log = h['_source'].get('body', '')[:120].replace(domain, '[DOMAIN]')
     print(f'  {log}')
 " 2>/dev/null
 
 echo ""
 echo "=== 5xx error rate by service (last 24h) ==="
 curl -sk -u "elastic:${ES_PASS}" \
-  "https://localhost:9200/fluent-bit-*/_search" \
+  "https://localhost:9200/logs-generic-default/_search" \
   -H 'Content-Type: application/json' -d '{
     "size": 0,
     "query": {
       "bool": {
-        "must": [{"match": {"kubernetes.namespace_name": "network"}}],
+        "must": [{"match": {"resource.attributes.k8s.namespace.name": "network"}}],
         "filter": [
           {"range": {"@timestamp": {"gte": "now-24h"}}},
-          {"regexp": {"log": "\" [5][0-9]{2} "}}
+          {"regexp": {"body": "\" [5][0-9]{2} "}}
         ]
       }
     },
-    "aggs": {"by_service": {"terms": {"field": "kubernetes.container_name.keyword", "size": 10}}}
+    "aggs": {"by_service": {"terms": {"field": "resource.attributes.k8s.container.name", "size": 10}}}
   }' | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
