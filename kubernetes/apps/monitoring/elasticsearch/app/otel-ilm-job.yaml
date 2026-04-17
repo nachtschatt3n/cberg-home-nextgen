@@ -55,6 +55,14 @@ spec:
                 exit 1
               }
 
+              # Single-node: set default replicas to 0 to avoid permanent YELLOW
+              echo "Setting default replicas to 0 (single-node cluster)..."
+              curl -sSf $CACERT $AUTH \
+                -H 'Content-Type: application/json' \
+                -X PUT "$${ES_URL}/_index_template/single-node-defaults" \
+                -d '{"index_patterns":["*"],"priority":1,"template":{"settings":{"number_of_replicas":0}}}'
+              echo ""
+
               # Apply ILM policies
               for policy in logs metrics traces; do
                 echo "Applying $${policy}@lifecycle ..."
