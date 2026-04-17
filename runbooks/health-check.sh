@@ -188,7 +188,7 @@ ES_PORT=9202
 
 es_init() {
     # Kill any leftover port-forward on our port
-    fuser -k ${ES_PORT}/tcp 2>/dev/null || true
+    lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
     sleep 0.3
 
     # Get password
@@ -234,9 +234,60 @@ es_cleanup() {
         kill "$ES_PF_PID" 2>/dev/null || true
         wait "$ES_PF_PID" 2>/dev/null || true
     fi
-    fuser -k ${ES_PORT}/tcp 2>/dev/null || true
+    lsof -ti:${ES_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
 }
-trap es_cleanup EXIT
+
+# ── Prometheus enrichment helpers ─────────────────────────────────────────────
+# Shared Prometheus session for metric queries. Informational only.
+PROM_AVAILABLE="false"
+PROM_PF_PID=""
+PROM_PORT=9094
+
+prom_init() {
+    lsof -ti:${PROM_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
+    sleep 0.3
+
+    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus \
+        ${PROM_PORT}:9090 >/dev/null 2>&1 &
+    PROM_PF_PID=$!
+
+    for i in $(seq 1 10); do
+        if curl -s -m 2 "http://localhost:${PROM_PORT}/-/healthy" >/dev/null 2>&1; then
+            PROM_AVAILABLE="true"
+            echo "  Prometheus enrichment: connected on port ${PROM_PORT}"
+            return
+        fi
+        sleep 1
+    done
+    echo "  Prometheus enrichment: connection failed, skipping"
+}
+
+prom_query() {
+    local promql="$1"
+    if [ "$PROM_AVAILABLE" != "true" ]; then
+        echo ""
+        return 1
+    fi
+    local encoded
+    encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$promql")
+    curl -s -m 10 "http://localhost:${PROM_PORT}/api/v1/query?query=${encoded}" \
+        2>/dev/null || { echo ""; return 1; }
+}
+
+prom_cleanup() {
+    if [ -n "$PROM_PF_PID" ]; then
+        kill "$PROM_PF_PID" 2>/dev/null || true
+        wait "$PROM_PF_PID" 2>/dev/null || true
+    fi
+    lsof -ti:${PROM_PORT} 2>/dev/null | xargs kill 2>/dev/null || true
+}
+
+# Combined cleanup — replaces the es_cleanup trap
+_all_cleanup() {
+    es_cleanup
+    prom_cleanup
+}
+trap _all_cleanup EXIT
 
 # Verify cluster access
 log_section "Phase 1: Preparation"
@@ -252,8 +303,9 @@ fi
 NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
 log_info "Nodes: $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' ', ')"
 
-# Initialize ES enrichment session
+# Initialize ES and Prometheus enrichment sessions
 es_init
+prom_init
 
 echo "" | tee -a "$OUTPUT_FILE"
 
@@ -522,6 +574,27 @@ log_section "Section 6: Deployments & StatefulSets"
         log_warning "Workloads not at desired replicas - Deployments: $BAD_DEPLOYS, StatefulSets: $BAD_STS"
         add_major_issue "Workloads not ready - Deployments: $BAD_DEPLOYS, StatefulSets: $BAD_STS"
     fi
+
+    # Prometheus enrichment: unavailable replicas detail
+    PROM_UNAVAIL=$(prom_query 'kube_deployment_status_replicas_unavailable > 0')
+    if [ -n "$PROM_UNAVAIL" ]; then
+        PROM_UNAVAIL_SUMMARY=$(echo "$PROM_UNAVAIL" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    if results:
+        parts = [f\"{r['metric'].get('namespace','?')}/{r['metric'].get('deployment','?')}({r['value'][1]})\" for r in results[:10]]
+        print('Prom: unavailable replicas — ' + ', '.join(parts))
+    else:
+        print('Prom: all deployments at desired replica count')
+except: pass
+" 2>/dev/null)
+        if [ -n "$PROM_UNAVAIL_SUMMARY" ]; then
+            echo "  $PROM_UNAVAIL_SUMMARY"
+            log_info "$PROM_UNAVAIL_SUMMARY"
+        fi
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 7: Pods Health"
@@ -552,6 +625,27 @@ log_section "Section 7: Pods Health"
             add_critical_issue "Pods Pending: $PENDING"
         fi
     fi
+
+    # Prometheus enrichment: pod restart rate (catches churn before hitting crash loop threshold)
+    PROM_RESTARTS=$(prom_query 'topk(10, sum by (namespace, pod) (rate(kube_pod_container_status_restarts_total[15m]))) > 0')
+    if [ -n "$PROM_RESTARTS" ]; then
+        RESTART_SUMMARY=$(echo "$PROM_RESTARTS" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    if results:
+        parts = [f\"{r['metric'].get('namespace','?')}/{r['metric'].get('pod','?')}(\" + f\"{float(r['value'][1])*60:.2f}/min)\" for r in results[:5]]
+        print('Prom: pods restarting (15m rate) — ' + ', '.join(parts))
+    else:
+        print('Prom: no pod restart churn detected (15m)')
+except: pass
+" 2>/dev/null)
+        if [ -n "$RESTART_SUMMARY" ]; then
+            echo "  $RESTART_SUMMARY"
+            log_info "$RESTART_SUMMARY"
+        fi
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 8: Prometheus & Monitoring"
@@ -572,6 +666,40 @@ log_section "Section 8: Prometheus & Monitoring"
     else
         log_critical "Monitoring issue - Prometheus: $PROM_RUNNING, Alertmanager: $AM_RUNNING"
         add_critical_issue "Monitoring system not running - Prom: $PROM_RUNNING, AM: $AM_RUNNING"
+    fi
+
+    # Prometheus enrichment: scrape target health (up == 0)
+    # Only flag if a critical job is down (allowlist prevents false positives from optional targets)
+    PROM_DOWN=$(prom_query 'up == 0')
+    if [ -n "$PROM_DOWN" ]; then
+        DOWN_SUMMARY=$(echo "$PROM_DOWN" | python3 -c "
+import sys, json
+CRITICAL_JOBS = {'kubelet','kube-state-metrics','edot-collector','findmy-traccar-sync','bank-refresh','kube-apiserver','cilium-operator'}
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    critical = [r for r in results if r['metric'].get('job','') in CRITICAL_JOBS]
+    all_down = [f\"{r['metric'].get('job','?')}({r['metric'].get('instance','?')})\" for r in results[:10]]
+    if results:
+        print(f\"Prom: {len(results)} scrape target(s) down — \" + ', '.join(all_down))
+        if critical:
+            names = ', '.join(f\"{r['metric'].get('job','?')}\" for r in critical)
+            print(f\"CRITICAL_JOBS_DOWN:{names}\")
+except: pass
+" 2>/dev/null)
+        if [ -n "$DOWN_SUMMARY" ]; then
+            FIRST_LINE=$(echo "$DOWN_SUMMARY" | head -1)
+            CRIT_LINE=$(echo "$DOWN_SUMMARY" | grep "CRITICAL_JOBS_DOWN:" | head -1)
+            echo "  $FIRST_LINE"
+            log_info "$FIRST_LINE"
+            if [ -n "$CRIT_LINE" ]; then
+                CRIT_JOBS=${CRIT_LINE#CRITICAL_JOBS_DOWN:}
+                log_warning "Critical scrape targets down: $CRIT_JOBS"
+                add_minor_issue "Prometheus scrape targets down: $CRIT_JOBS"
+            fi
+        fi
+    else
+        log_success "All Prometheus scrape targets healthy"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -876,6 +1004,43 @@ log_section "Section 14: Resource Utilization"
     else
         log_critical "Resource pressure detected on: $PRESSURE"
         add_critical_issue "Resource pressure on nodes: $PRESSURE"
+    fi
+
+    # Prometheus enrichment: per-node CPU and memory via kubelet metrics (informational)
+    PROM_NODE_CPU=$(prom_query 'sum by (node) (rate(container_cpu_usage_seconds_total{container!=""}[5m])) / on(node) group_left() sum by (node) (kube_node_status_capacity{resource="cpu"}) * 100')
+    if [ -n "$PROM_NODE_CPU" ]; then
+        CPU_SUMMARY=$(echo "$PROM_NODE_CPU" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    parts = [f\"{r['metric'].get('node','?')}:{float(r['value'][1]):.1f}%\" for r in results]
+    if parts:
+        print('Prom node CPU (5m): ' + ', '.join(parts))
+except: pass
+" 2>/dev/null)
+        if [ -n "$CPU_SUMMARY" ]; then
+            echo "  $CPU_SUMMARY"
+            log_info "$CPU_SUMMARY"
+        fi
+    fi
+
+    PROM_NODE_MEM=$(prom_query 'sum by (node) (container_memory_working_set_bytes{container!=""}) / on(node) group_left() sum by (node) (kube_node_status_capacity{resource="memory"}) * 100')
+    if [ -n "$PROM_NODE_MEM" ]; then
+        MEM_SUMMARY=$(echo "$PROM_NODE_MEM" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    parts = [f\"{r['metric'].get('node','?')}:{float(r['value'][1]):.1f}%\" for r in results]
+    if parts:
+        print('Prom node memory: ' + ', '.join(parts))
+except: pass
+" 2>/dev/null)
+        if [ -n "$MEM_SUMMARY" ]; then
+            echo "  $MEM_SUMMARY"
+            log_info "$MEM_SUMMARY"
+        fi
     fi
 
     # Check for nodes not in Ready condition (kubelet stopped, network partition, etc.)
@@ -2437,6 +2602,66 @@ except:
     fi
     echo ""
 
+    # --- Prometheus enrichment: OTel pipeline metrics ---
+    echo "=== OTel Pipeline Metrics (Prometheus) ==="
+    OTEL_FAIL=$(prom_query 'sum(rate(otelcol_exporter_send_failed_metric_points[5m])) + sum(rate(otelcol_exporter_send_failed_log_records[5m]))')
+    FAIL_RATE="0"
+    if [ -n "$OTEL_FAIL" ]; then
+        FAIL_RATE=$(echo "$OTEL_FAIL" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    if r and len(r) > 0:
+        print(f'{float(r[0][\"value\"][1]):.3f}')
+    else:
+        print('0')
+except: print('0')
+" 2>/dev/null)
+    fi
+    echo "OTel export failure rate (5m): ${FAIL_RATE}/sec"
+    if [ "$(echo "$FAIL_RATE > 0" | bc 2>/dev/null)" = "1" ]; then
+        log_warning "OTel exporter has failures: $FAIL_RATE/sec"
+        add_minor_issue "OTel exporter failures: $FAIL_RATE/sec over 5m"
+    else
+        log_success "OTel exporter has no failures (5m)"
+    fi
+
+    # Queue saturation (any exporter >80% full)
+    OTEL_QUEUE=$(prom_query 'max(otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8')
+    if [ -n "$OTEL_QUEUE" ]; then
+        QUEUE_HIGH=$(echo "$OTEL_QUEUE" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    if r:
+        print(f'{float(r[0][\"value\"][1])*100:.1f}')
+except: pass
+" 2>/dev/null)
+        if [ -n "$QUEUE_HIGH" ]; then
+            echo "OTel exporter queue saturation: ${QUEUE_HIGH}%"
+            log_warning "OTel exporter queue >80% full: ${QUEUE_HIGH}%"
+            add_minor_issue "OTel exporter queue saturation: ${QUEUE_HIGH}%"
+        fi
+    fi
+
+    # Dropped logs (memory limiter kicking in)
+    OTEL_DROP=$(prom_query 'sum(rate(otelcol_processor_dropped_log_records_total[5m]))')
+    if [ -n "$OTEL_DROP" ]; then
+        DROP_RATE=$(echo "$OTEL_DROP" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    if r:
+        print(f'{float(r[0][\"value\"][1]):.3f}')
+except: print('0')
+" 2>/dev/null)
+        if [ -n "$DROP_RATE" ] && [ "$(echo "$DROP_RATE > 0" | bc 2>/dev/null)" = "1" ]; then
+            echo "OTel dropped log rate (5m): $DROP_RATE/sec"
+            log_info "OTel processor dropping logs: $DROP_RATE/sec"
+        fi
+    fi
+    echo ""
+
     # --- Elasticsearch Cluster Health ---
     echo "=== Elasticsearch Cluster Health ==="
     ES_PW_EARLY=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
@@ -2483,6 +2708,27 @@ except:
             add_major_issue "OTel: no documents in metrics-generic.otel-default data stream"
         else
             log_success "OTel metric documents present in metrics-generic.otel-default: $METRICS_COUNT_INT"
+        fi
+
+        # ES metric ingestion verification: how many distinct metric names in last 5 minutes?
+        METRIC_NAMES=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/metrics-generic.otel-default/_search?size=0" \
+            -H 'Content-Type: application/json' \
+            -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}},"aggs":{"names":{"cardinality":{"field":"_metric_names_hash"}}}}' 2>/dev/null | \
+            python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('aggregations',{}).get('names',{}).get('value', 0))
+except: print(0)
+" 2>/dev/null || echo "0")
+        echo "Distinct metric names arriving (5m): $METRIC_NAMES"
+        METRIC_NAMES_INT=$(echo "$METRIC_NAMES" | tr -cd '0-9' || echo "0")
+        [ -z "$METRIC_NAMES_INT" ] && METRIC_NAMES_INT=0
+        if [ "$METRIC_NAMES_INT" -lt 5 ]; then
+            log_warning "Only $METRIC_NAMES_INT distinct metric names in last 5m (ingestion may be stalled)"
+            add_minor_issue "ES metric ingestion appears stalled: $METRIC_NAMES_INT distinct names in 5m"
+        else
+            log_success "ES metric ingestion healthy: $METRIC_NAMES_INT distinct metric names in 5m"
         fi
 
         # Recent ingestion check (last 5 minutes)
