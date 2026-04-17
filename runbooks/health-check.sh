@@ -3210,6 +3210,99 @@ except Exception as e:
 } >> "$OUTPUT_FILE" 2>&1
 
 echo "" | tee -a "$OUTPUT_FILE"
+log_section "Section 40: Infrastructure Device Health (Kuma)"
+{
+    echo "=== Querying Uptime Kuma via Prometheus ==="
+
+    # Category map — hostname/name patterns → category + severity
+    # CRITICAL (major issue): named infra that breaks the house
+    # BRIDGE (minor): smart home bridges (usability, not essential)
+    # SHELLY (info): individual Shelly devices
+    # CAMERA (minor): security cameras
+    # TEMP (info): synthetic temperature probes
+    # OTHER (info): unclassified
+
+    DOWN=$(prom_query 'monitor_status{monitor_type!="group"} == 0')
+    if [ -z "$DOWN" ]; then
+        log_info "Kuma query failed — skipping infrastructure device check"
+    else
+        echo "$DOWN" | python3 -c "
+import sys, json, re
+
+CATEGORY_RULES = [
+    (r'Solarfocus|openDTU|Tibber Pulse|Zigbee (Router|coordinator)|SLZB|UNAS|NUC Talos|DreamMachine|Switch (48|24|5|8)|AP (Hallway|Upstairs|Basement)|Pi-KVM', 'CRITICAL', 'major'),
+    (r'Homatic|DIRIGERA|Philips Hue|Nuki|Somfy|Harmony|Pioneer', 'BRIDGE', 'minor'),
+    (r'^Shelly', 'SHELLY', 'info'),
+    (r'Wyze Cam', 'CAMERA', 'minor'),
+    (r'Temp|CPU Temp|GPU Temp|SSD Temp', 'TEMP', 'info'),
+]
+
+def classify(name):
+    for pat, cat, sev in CATEGORY_RULES:
+        if re.search(pat, name, re.I):
+            return cat, sev
+    return 'OTHER', 'info'
+
+try:
+    d = json.load(sys.stdin)
+    results = d['data']['result']
+    by_cat = {}
+    for r in results:
+        name = r['metric'].get('monitor_name', '?')
+        host = r['metric'].get('monitor_hostname') or r['metric'].get('monitor_url') or '?'
+        cat, sev = classify(name)
+        by_cat.setdefault(cat, []).append((name, host, sev))
+
+    for cat in ['CRITICAL', 'BRIDGE', 'CAMERA', 'SHELLY', 'TEMP', 'OTHER']:
+        if cat in by_cat:
+            print(f'CATEGORY:{cat}:{len(by_cat[cat])}')
+            for name, host, sev in by_cat[cat][:10]:
+                # sanitize colons in fields to keep downstream IFS=: parsing intact
+                safe_name = name.replace(':', '-')
+                safe_host = host.replace(':', '-')
+                print(f'  DOWN:{sev}:{safe_name}:{safe_host}')
+except Exception as e:
+    print(f'parse_error: {e}')
+" > /tmp/kuma_down.txt 2>/dev/null
+
+        CRIT_CNT=$(grep -c "^  DOWN:major:" /tmp/kuma_down.txt 2>/dev/null; true)
+        BRIDGE_CNT=$(grep -c "^  DOWN:minor:" /tmp/kuma_down.txt 2>/dev/null; true)
+        INFO_CNT=$(grep -c "^  DOWN:info:" /tmp/kuma_down.txt 2>/dev/null; true)
+        CRIT_CNT=${CRIT_CNT:-0}
+        BRIDGE_CNT=${BRIDGE_CNT:-0}
+        INFO_CNT=${INFO_CNT:-0}
+
+        cat /tmp/kuma_down.txt
+        echo ""
+
+        if [ "${CRIT_CNT:-0}" -gt 0 ]; then
+            while IFS=: read -r _ _ name host; do
+                name="${name# }"
+                add_major_issue "Kuma: $name down ($host)"
+                log_warning "Critical device down: $name ($host)"
+            done < <(grep "^  DOWN:major:" /tmp/kuma_down.txt)
+        fi
+
+        if [ "${BRIDGE_CNT:-0}" -gt 0 ]; then
+            while IFS=: read -r _ _ name host; do
+                name="${name# }"
+                add_minor_issue "Kuma: $name down ($host)"
+            done < <(grep "^  DOWN:minor:" /tmp/kuma_down.txt)
+        fi
+
+        if [ "${INFO_CNT:-0}" -gt 0 ]; then
+            log_info "Kuma: $INFO_CNT Shelly/temp/other devices down (informational)"
+        fi
+
+        if [ "${CRIT_CNT:-0}" -eq 0 ] && [ "${BRIDGE_CNT:-0}" -eq 0 ] && [ "${INFO_CNT:-0}" -eq 0 ]; then
+            log_success "All Kuma monitors healthy"
+        fi
+        rm -f /tmp/kuma_down.txt
+    fi
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
+
+echo "" | tee -a "$OUTPUT_FILE"
 log_section "Issues Summary by Severity"
 
 {
