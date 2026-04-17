@@ -1242,7 +1242,7 @@ log_section "Section 22: Home Automation Health"
     echo ""
 
     echo "Home Assistant detailed logs (last 100 lines):"
-    HA_LOGS=$(kubectl logs -n home-automation deployment/home-assistant --tail=100 2>&1 || echo "Unable to get logs")
+    HA_LOGS=$(kubectl logs -n home-automation deployment/home-assistant --since=24h 2>&1 || echo "Unable to get logs")
     echo "$HA_LOGS"
     echo ""
 
