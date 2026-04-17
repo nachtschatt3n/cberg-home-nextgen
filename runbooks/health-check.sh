@@ -178,6 +178,66 @@ filter_infra_false_positives() {
     grep -vE "$exclude"
 }
 
+# ── Elasticsearch enrichment helpers ──────────────────────────────────────────
+# Shared ES session for supplementary log analysis (7-day window).
+# All ES enrichment is informational only — never creates critical/major issues.
+ES_AVAILABLE="false"
+ES_PF_PID=""
+ES_PASSWORD_SHARED=""
+ES_PORT=9202
+
+es_init() {
+    # Kill any leftover port-forward on our port
+    fuser -k ${ES_PORT}/tcp 2>/dev/null || true
+    sleep 0.3
+
+    # Get password
+    ES_PASSWORD_SHARED=$(kubectl get secret elasticsearch-es-elastic-user -n monitoring \
+        -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d 2>/dev/null)
+    if [ -z "$ES_PASSWORD_SHARED" ]; then
+        echo "  ES enrichment: password unavailable, skipping"
+        return
+    fi
+
+    # Start port-forward
+    kubectl port-forward -n monitoring svc/elasticsearch-es-http ${ES_PORT}:9200 \
+        >/dev/null 2>&1 &
+    ES_PF_PID=$!
+
+    # Wait for port to open (max 10 attempts)
+    for i in $(seq 1 10); do
+        if curl -k -s -m 2 -u "elastic:${ES_PASSWORD_SHARED}" \
+            "https://localhost:${ES_PORT}/" >/dev/null 2>&1; then
+            ES_AVAILABLE="true"
+            echo "  ES enrichment: connected on port ${ES_PORT}"
+            return
+        fi
+        sleep 1
+    done
+    echo "  ES enrichment: connection failed, skipping"
+}
+
+es_query() {
+    local query_body="$1"
+    if [ "$ES_AVAILABLE" != "true" ]; then
+        echo ""
+        return 1
+    fi
+    curl -k -s -m 15 -u "elastic:${ES_PASSWORD_SHARED}" \
+        -X POST "https://localhost:${ES_PORT}/logs-generic-default/_search" \
+        -H 'Content-Type: application/json' \
+        -d "$query_body" 2>/dev/null || { echo ""; return 1; }
+}
+
+es_cleanup() {
+    if [ -n "$ES_PF_PID" ]; then
+        kill "$ES_PF_PID" 2>/dev/null || true
+        wait "$ES_PF_PID" 2>/dev/null || true
+    fi
+    fuser -k ${ES_PORT}/tcp 2>/dev/null || true
+}
+trap es_cleanup EXIT
+
 # Verify cluster access
 log_section "Phase 1: Preparation"
 if kubectl cluster-info &>> "$OUTPUT_FILE"; then
@@ -191,6 +251,9 @@ fi
 # Get node list for later use
 NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
 log_info "Nodes: $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' ', ')"
+
+# Initialize ES enrichment session
+es_init
 
 echo "" | tee -a "$OUTPUT_FILE"
 
@@ -693,6 +756,38 @@ log_section "Section 11: Container Logs Analysis"
     else
         log_critical "High error count in infrastructure logs: $TOTAL_ERRORS"
         add_critical_issue "High infrastructure error count: $TOTAL_ERRORS"
+    fi
+
+    # ES enrichment: 7-day error context for infra namespaces
+    ES_INFRA=$(es_query '{
+      "size": 0,
+      "query": {"bool": {
+        "should": [
+          {"wildcard": {"body.text": "*ERROR*"}},
+          {"wildcard": {"body.text": "*FATAL*"}}
+        ],
+        "minimum_should_match": 1,
+        "filter": [
+          {"range": {"@timestamp": {"gte": "now-7d"}}},
+          {"terms": {"resource.attributes.k8s.namespace.name": ["kube-system", "flux-system", "cert-manager", "monitoring"]}}
+        ]
+      }},
+      "aggs": {"by_ns": {"terms": {"field": "resource.attributes.k8s.namespace.name", "size": 10}}}
+    }')
+    if [ -n "$ES_INFRA" ]; then
+        ES_INFRA_SUMMARY=$(echo "$ES_INFRA" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    total = d['hits']['total']['value']
+    parts = [f\"{b['key']}:{b['doc_count']}\" for b in d['aggregations']['by_ns']['buckets']]
+    print(f'ES 7d context: {total} total errors — ' + ', '.join(parts))
+except: print('')
+" 2>/dev/null)
+        if [ -n "$ES_INFRA_SUMMARY" ]; then
+            echo "  $ES_INFRA_SUMMARY"
+            log_info "$ES_INFRA_SUMMARY"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -1415,6 +1510,53 @@ PYEOF
         fi
     else
         echo "  OTBR pod not found"
+    fi
+
+    # ES enrichment: 7-day HA error trends by pod
+    ES_HA=$(es_query '{
+      "size": 0,
+      "query": {"bool": {
+        "should": [
+          {"wildcard": {"body.text": "*ERROR*"}},
+          {"wildcard": {"body.text": "*FATAL*"}}
+        ],
+        "minimum_should_match": 1,
+        "filter": [
+          {"range": {"@timestamp": {"gte": "now-7d"}}},
+          {"term": {"resource.attributes.k8s.namespace.name": "home-automation"}}
+        ]
+      }},
+      "aggs": {
+        "by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}},
+        "last_24h": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}},
+        "per_day": {"date_histogram": {"field": "@timestamp", "calendar_interval": "day"}}
+      }
+    }')
+    if [ -n "$ES_HA" ]; then
+        ES_HA_SUMMARY=$(echo "$ES_HA" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    total = d['hits']['total']['value']
+    last24 = d['aggregations']['last_24h']['doc_count']
+    days = d['aggregations']['per_day']['buckets']
+    daily_avg = total / max(len(days), 1)
+    trend = 'stable'
+    if last24 > daily_avg * 1.5 and last24 > 50:
+        trend = 'UP ↑'
+    elif last24 < daily_avg * 0.5:
+        trend = 'down ↓'
+    pods = ', '.join(f\"{b['key'].split('-')[0]}:{b['doc_count']}\" for b in d['aggregations']['by_pod']['buckets'][:5])
+    print(f'ES 7d trend: {total} total, {int(daily_avg)}/day avg, last 24h: {last24} ({trend})')
+    if pods:
+        print(f'  Top error sources: {pods}')
+except: pass
+" 2>/dev/null)
+        if [ -n "$ES_HA_SUMMARY" ]; then
+            echo ""
+            echo "  $ES_HA_SUMMARY" | head -2
+            while IFS= read -r line; do log_info "$line"; done <<< "$ES_HA_SUMMARY"
+        fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -2398,10 +2540,10 @@ except:
           },
           "aggs": {
             "by_namespace": {
-              "terms": {"field": "resource.attributes.k8s.namespace.name.keyword", "size": 10}
+              "terms": {"field": "resource.attributes.k8s.namespace.name", "size": 10}
             },
             "by_pod": {
-              "terms": {"field": "resource.attributes.k8s.pod.name.keyword", "size": 10}
+              "terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}
             }
           }
         }' 2>/dev/null || echo '{"hits":{"total":{"value":0}}}')
@@ -2760,6 +2902,66 @@ CRIT_COUNT="${#CRITICAL_ISSUES_LIST[@]}"
 MAJOR_COUNT="${#MAJOR_ISSUES_LIST[@]}"
 MINOR_COUNT="${#MINOR_ISSUES_LIST[@]}"
 set -u
+
+echo "" | tee -a "$OUTPUT_FILE"
+log_section "ES Log Insights (7-day analysis)"
+{
+    if [ "$ES_AVAILABLE" = "true" ]; then
+        echo "=== Top Error Producers (7d) ==="
+        ES_TOP=$(es_query '{
+          "size": 0,
+          "query": {"bool": {
+            "should": [
+              {"wildcard": {"body.text": "*ERROR*"}},
+              {"wildcard": {"body.text": "*FATAL*"}}
+            ],
+            "minimum_should_match": 1,
+            "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}]
+          }},
+          "aggs": {
+            "by_namespace": {
+              "terms": {"field": "resource.attributes.k8s.namespace.name", "size": 15},
+              "aggs": {
+                "last_24h": {"filter": {"range": {"@timestamp": {"gte": "now-24h"}}}}
+              }
+            }
+          }
+        }')
+        if [ -n "$ES_TOP" ]; then
+            echo "$ES_TOP" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    total = d['hits']['total']['value']
+    buckets = d['aggregations']['by_namespace']['buckets']
+    print(f'Total errors (7d): {total}')
+    print()
+    print(f'{\"Namespace\":<30} {\"7d total\":>10} {\"Last 24h\":>10} {\"Trend\":>10}')
+    print('-' * 65)
+    for b in buckets:
+        ns = b['key']
+        ns_total = b['doc_count']
+        ns_24h = b['last_24h']['doc_count']
+        daily_avg = ns_total / 7
+        if ns_24h > daily_avg * 2 and ns_24h > 20:
+            trend = '↑ SPIKE'
+        elif ns_24h < daily_avg * 0.3:
+            trend = '↓ low'
+        else:
+            trend = '→ stable'
+        print(f'{ns:<30} {ns_total:>10,} {ns_24h:>10,} {trend:>10}')
+except Exception as e:
+    print(f'ES query parse error: {e}')
+" 2>/dev/null
+            log_info "ES Log Insights completed"
+        else
+            echo "  ES query failed"
+        fi
+    else
+        echo "  Elasticsearch unavailable — skipping log insights"
+    fi
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
 
 echo "" | tee -a "$OUTPUT_FILE"
 log_section "Issues Summary by Severity"

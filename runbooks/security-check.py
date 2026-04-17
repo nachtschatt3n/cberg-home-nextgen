@@ -220,7 +220,7 @@ class ElasticPortForward:
         auth = b64.b64encode(f"elastic:{self._password}".encode()).decode()
         data = json.dumps(body).encode()
         req = urllib.request.Request(
-            "https://localhost:9200/fluent-bit-*/_search",
+            "https://localhost:9200/logs-generic-default/_search",
             data=data,
             headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"},
         )
@@ -240,7 +240,7 @@ class ElasticPortForward:
 # ---------------------------------------------------------------------------
 
 def section_header(n: int, title: str) -> None:
-    cprint(C.BLUE, f"\n[{n}/11] {title}")
+    cprint(C.BLUE, f"\n[{n}/12] {title}")
 
 
 def s1_sops_coverage() -> tuple[str, Findings, str]:
@@ -575,16 +575,16 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
     body = {
         "size": 50,
         "query": {"bool": {"must": [
-            {"match": {"kubernetes.namespace_name": "kube-system"}},
+            {"term": {"resource.attributes.k8s.namespace.name": "kube-system"}},
             {"bool": {"should": [
-                {"match_phrase": {"log": "Login failed"}},
-                {"match_phrase": {"log": "Failed to authenticate"}},
-                {"match_phrase": {"log": "invalid_grant"}},
-                {"match_phrase": {"log": "FAILED_LOGIN"}},
-                {"match_phrase": {"log": "Unsuccessful login"}},
+                {"match_phrase": {"body.text": "Login failed"}},
+                {"match_phrase": {"body.text": "Failed to authenticate"}},
+                {"match_phrase": {"body.text": "invalid_grant"}},
+                {"match_phrase": {"body.text": "FAILED_LOGIN"}},
+                {"match_phrase": {"body.text": "Unsuccessful login"}},
             ]}},
         ], "filter": {"range": {"@timestamp": {"gte": "now-7d"}}}}},
-        "aggs": {"by_ip": {"terms": {"field": "clientAddress.keyword", "size": 10}}},
+        "aggs": {"by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}}},
     }
 
     data = es.query(body)
@@ -594,23 +594,56 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     total = data["hits"]["total"]["value"]
-    buckets = data.get("aggregations", {}).get("by_ip", {}).get("buckets", [])
+    buckets = data.get("aggregations", {}).get("by_pod", {}).get("buckets", [])
 
     lines = [f"Failed login events (7d): **{total}**\n"]
     if total == 0:
-        cprint(C.GREEN, "  🟢 No failed login events in 7 days")
+        cprint(C.GREEN, f"  🟢 No failed login events in 7 days")
     else:
-        # Check for brute force: >20 failures from one IP
+        # Check for brute force: >20 failures from one pod
         for b in buckets:
             if b["doc_count"] > 20:
-                f.add(CRITICAL, f"Brute force: {b['count']} failures from `{b['key']}`")
+                f.add(CRITICAL, f"Brute force: {b['doc_count']} failures from `{b['key']}`")
                 cprint(C.RED, f"  🔴 Brute force: {b['doc_count']} failures from {b['key']}")
             else:
                 f.add(WARNING, f"Failed logins from `{b['key']}`: {b['doc_count']}")
                 cprint(C.YELLOW, f"  🟡 {b['doc_count']} failures from {b['key']}")
-        lines.append("Top source IPs:\n")
+        lines.append("Top sources:\n")
         for b in buckets:
             lines.append(f"- {b['key']}: {b['doc_count']}\n")
+
+    # Cross-app auth failure detection (401/403 across all namespaces)
+    auth_body = {
+        "size": 0,
+        "query": {"bool": {
+            "should": [
+                {"match_phrase": {"body.text": "401"}},
+                {"match_phrase": {"body.text": "Unauthorized"}},
+                {"match_phrase": {"body.text": "authentication failed"}},
+                {"match_phrase": {"body.text": "token expired"}},
+            ],
+            "minimum_should_match": 1,
+            "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}],
+        }},
+        "aggs": {
+            "by_namespace": {"terms": {"field": "resource.attributes.k8s.namespace.name", "size": 15}},
+        },
+    }
+    auth_data = es.query(auth_body)
+    if auth_data:
+        auth_total = auth_data["hits"]["total"]["value"]
+        auth_buckets = auth_data.get("aggregations", {}).get("by_namespace", {}).get("buckets", [])
+        if auth_total > 0:
+            lines.append(f"\n**Cross-app auth failures (7d):** {auth_total}\n")
+            for b in auth_buckets:
+                lines.append(f"- {b['key']}: {b['doc_count']}\n")
+                if b["doc_count"] > 500:
+                    f.add(WARNING, f"High auth failure count in `{b['key']}`: {b['doc_count']} (7d)")
+                    cprint(C.YELLOW, f"  🟡 High auth failures in {b['key']}: {b['doc_count']}")
+            if not any(b["doc_count"] > 500 for b in auth_buckets):
+                cprint(C.GREEN, f"  🟢 Cross-app auth failures within normal range ({auth_total} total)")
+        else:
+            cprint(C.GREEN, "  🟢 No cross-app auth failures detected")
 
     return f.worst(), f, "\n".join(lines)
 
@@ -622,21 +655,21 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
     body = {
         "size": 50,
         "query": {"bool": {"must": [
-            {"match": {"kubernetes.namespace_name": "network"}},
+            {"term": {"resource.attributes.k8s.namespace.name": "network"}},
             {"bool": {"should": [
-                {"match_phrase": {"log": "../"}},
-                {"match_phrase": {"log": "etc/passwd"}},
-                {"match_phrase": {"log": "SELECT "}},
-                {"match_phrase": {"log": "<script"}},
-                {"match_phrase": {"log": "wp-login"}},
-                {"match_phrase": {"log": ".env"}},
-                {"match_phrase": {"log": "phpMyAdmin"}},
-                {"match_phrase": {"log": "cmd.exe"}},
-                {"match_phrase": {"log": "/bin/sh"}},
-                {"match_phrase": {"log": "UNION SELECT"}},
+                {"match_phrase": {"body.text": "../"}},
+                {"match_phrase": {"body.text": "etc/passwd"}},
+                {"match_phrase": {"body.text": "SELECT "}},
+                {"match_phrase": {"body.text": "<script"}},
+                {"match_phrase": {"body.text": "wp-login"}},
+                {"match_phrase": {"body.text": ".env"}},
+                {"match_phrase": {"body.text": "phpMyAdmin"}},
+                {"match_phrase": {"body.text": "cmd.exe"}},
+                {"match_phrase": {"body.text": "/bin/sh"}},
+                {"match_phrase": {"body.text": "UNION SELECT"}},
             ]}},
         ], "filter": {"range": {"@timestamp": {"gte": "now-24h"}}}}},
-        "aggs": {"by_ip": {"terms": {"field": "remote_addr.keyword", "size": 10}}},
+        "aggs": {"by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}}},
     }
 
     data = es.query(body)
@@ -646,7 +679,7 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     total = data["hits"]["total"]["value"]
-    buckets = data.get("aggregations", {}).get("by_ip", {}).get("buckets", [])
+    buckets = data.get("aggregations", {}).get("by_pod", {}).get("buckets", [])
 
     lines = [f"Attack pattern hits (24h): **{total}**\n"]
     if total == 0:
@@ -654,15 +687,17 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
     else:
         for b in buckets:
             if b["doc_count"] > 100:
-                f.add(CRITICAL, f"Active scanner: {b['doc_count']} attack patterns from `{b['key']}`")
-                cprint(C.RED, f"  🔴 {b['doc_count']} hits from {b['key']}")
+                f.add(CRITICAL, f"Active scanner: {b['doc_count']} attack patterns via `{b['key']}`")
+                cprint(C.RED, f"  🔴 {b['doc_count']} hits via {b['key']}")
             else:
-                f.add(WARNING, f"{b['doc_count']} attack patterns from `{b['key']}`")
-                cprint(C.YELLOW, f"  🟡 {b['doc_count']} hits from {b['key']}")
-        lines.append("Top source IPs:\n")
+                f.add(WARNING, f"{b['doc_count']} attack patterns via `{b['key']}`")
+                cprint(C.YELLOW, f"  🟡 {b['doc_count']} hits via {b['key']}")
+        lines.append("Top ingress pods:\n")
         for b in buckets:
             lines.append(f"- {b['key']}: {b['doc_count']}\n")
-        sample = [redact(h["_source"].get("log", "")[:120]) for h in data["hits"]["hits"][:5]]
+        sample = [redact(h["_source"].get("body", {}).get("text", "")[:120] if isinstance(h["_source"].get("body"), str)
+                        else h["_source"].get("body", {}).get("text", "").get("text", "")[:120])
+                  for h in data["hits"]["hits"][:5]]
         lines.append("Sample requests:\n")
         for s in sample:
             lines.append(f"- `{s}`\n")
@@ -670,8 +705,67 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def s6a_error_rate_spikes(es: ElasticPortForward) -> tuple[str, Findings, str]:
+    section_header(7, "Error Rate Spike Detection (ES)")
+    f = Findings()
+    lines: list[str] = []
+
+    body = {
+        "size": 0,
+        "query": {"bool": {
+            "should": [
+                {"wildcard": {"body.text": "*ERROR*"}},
+                {"wildcard": {"body.text": "*FATAL*"}},
+            ],
+            "minimum_should_match": 1,
+            "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}],
+        }},
+        "aggs": {
+            "by_namespace": {
+                "terms": {"field": "resource.attributes.k8s.namespace.name", "size": 20},
+                "aggs": {
+                    "last_1h": {"filter": {"range": {"@timestamp": {"gte": "now-1h"}}}},
+                },
+            },
+        },
+    }
+
+    data = es.query(body)
+    if data is None:
+        f.add(WARNING, "Elasticsearch unavailable — skipping spike detection")
+        cprint(C.YELLOW, "  🟡 Elasticsearch query failed")
+        return f.worst(), f, f.markdown()
+
+    total_7d = data["hits"]["total"]["value"]
+    hourly_avg = total_7d / 168 if total_7d > 0 else 0  # 7 days = 168 hours
+    buckets = data.get("aggregations", {}).get("by_namespace", {}).get("buckets", [])
+
+    spiking = []
+    for b in buckets:
+        ns = b["key"]
+        ns_total = b["doc_count"]
+        ns_last_1h = b["last_1h"]["doc_count"]
+        ns_hourly_avg = ns_total / 168
+        if ns_hourly_avg > 0 and ns_last_1h > 3 * ns_hourly_avg and ns_last_1h > 10:
+            spiking.append((ns, ns_last_1h, ns_hourly_avg))
+
+    if spiking:
+        lines.append(f"**Error rate spikes detected** (last 1h vs 7d hourly avg):\n")
+        for ns, last_1h, avg in spiking:
+            ratio = last_1h / avg if avg > 0 else 0
+            f.add(WARNING, f"Error spike in `{ns}`: {last_1h} errors/1h vs {avg:.1f}/h avg ({ratio:.1f}x)")
+            cprint(C.YELLOW, f"  🟡 Spike: {ns} — {last_1h} errors/h (avg {avg:.1f}/h, {ratio:.1f}x)")
+            lines.append(f"- `{ns}`: {last_1h} errors/1h vs {avg:.1f}/h avg ({ratio:.1f}x)\n")
+    else:
+        cprint(C.GREEN, f"  🟢 No error rate spikes (total 7d errors: {total_7d}, avg {hourly_avg:.0f}/h)")
+        lines.append(f"No spikes. Total 7d errors: {total_7d}, avg {hourly_avg:.0f}/h\n")
+
+    lines.append(f.markdown())
+    return f.worst(), f, "\n".join(lines)
+
+
 def s7_rbac_pod_security() -> tuple[str, Findings, str]:
-    section_header(7, "RBAC & Pod Security Audit")
+    section_header(8, "RBAC & Pod Security Audit")
     f = Findings()
     lines = []
 
@@ -741,7 +835,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
 
 
 def s8_external_exposure() -> tuple[str, Findings, str]:
-    section_header(8, "External Exposure Inventory")
+    section_header(9, "External Exposure Inventory")
     f = Findings()
     domain = _sensitive.get("DOMAIN", "")
 
@@ -788,7 +882,7 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
 
 
 def s9_certificates() -> tuple[str, Findings, str]:
-    section_header(9, "Certificate Integrity")
+    section_header(10, "Certificate Integrity")
     f = Findings()
     domain = _sensitive.get("DOMAIN", "")
     lines = []
@@ -845,7 +939,7 @@ def s9_certificates() -> tuple[str, Findings, str]:
 
 
 def s10_flux_posture() -> tuple[str, Findings, str]:
-    section_header(10, "Flux Security Posture")
+    section_header(11, "Flux Security Posture")
     f = Findings()
     lines = []
 
@@ -1029,7 +1123,7 @@ def _nvd_unifi_cves(version: str | None) -> list[dict]:
 
 
 def s11_unifi() -> tuple[str, Findings, str]:
-    section_header(11, "UniFi Network Security Audit")
+    section_header(12, "UniFi Network Security Audit")
     f = Findings()
     lines = []
 
@@ -1195,6 +1289,7 @@ SECTION_NAMES = [
     "CVE / Vulnerability Check",
     "Authentik Login Analysis",
     "External Attack Patterns",
+    "Error Rate Spike Detection (ES)",
     "RBAC & Pod Security",
     "External Exposure Inventory",
     "Certificate Integrity",
@@ -1282,8 +1377,9 @@ def main() -> int:
     with ElasticPortForward() as es:
         results.append(s5_authentik_logins(es))
         results.append(s6_attack_patterns(es))
+        results.append(s6a_error_rate_spikes(es))
 
-    # Sections 7-11: no Elasticsearch
+    # Sections 8-12: no Elasticsearch
     results.append(s7_rbac_pod_security())
     results.append(s8_external_exposure())
     results.append(s9_certificates())
