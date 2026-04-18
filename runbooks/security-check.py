@@ -868,6 +868,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "databases/superset",             # apache/superset image default (runs as root)
         "databases/superset-celerybeat",  # same image
         "databases/superset-worker",      # same image
+        "databases/superset-init-db",     # Helm hook Job — runs DB migrations as root
     }
     # Workloads with legitimate hostNetwork (mDNS/Matter/device discovery that
     # requires host network namespace — not a containerized service).
@@ -879,9 +880,20 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "home-automation/music-assistant-server", # Cast/Chromecast discovery via mDNS
     }
     def _pod_base(ns_name: str) -> str:
-        # Strip K8s pod suffix (`-abcde-12345`) → `namespace/deployment`
+        # Strip K8s pod suffix → `namespace/deployment`.
+        # Try (in order) Deployment (`-<replicasethash>-<podhash>`),
+        # then StatefulSet (`-0`/`-1`/...), then Job (`-<5-char-random>`).
+        # First successful transformation wins so we don't over-strip name parts.
         import re
-        return re.sub(r"-[a-f0-9]+-[a-z0-9]+$", "", ns_name)
+        for pat in (
+            r"-[a-f0-9]{6,}-[a-z0-9]{5}$",   # Deployment: hex replicaset hash + 5-char suffix
+            r"-\d+$",                         # StatefulSet: trailing index
+            r"-[a-z0-9]{5}$",                 # Job: 5-char random suffix
+        ):
+            new = re.sub(pat, "", ns_name)
+            if new != ns_name:
+                return new
+        return ns_name
 
     pods = kubectl_json("get pods -A")
     if pods:
