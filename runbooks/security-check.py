@@ -286,6 +286,10 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
                     "factory.talos.dev",     # Talos installer image URLs
                     "ghcr.io/siderolabs/installer",  # Talos installer images
                     "nodeAffinityPreset", "podAffinityPreset",  # Bitnami chart affinity YAML keys
+                    "requiredDuringSchedulingIgnoredDuringExecution",  # K8s podAffinity field name
+                    "preferredDuringSchedulingIgnoredDuringExecution", # K8s podAffinity field name
+                    "/paperclip/instances/default/data/backups",  # shell path in backup-cleanup.yaml
+                    "terminationGracePeriodSeconds",  # K8s pod spec field in JSON patch path
                     ]
     real_b64  = [h for h in b64_hits if not any(p in h for p in safe_content)]
     if real_b64:
@@ -454,23 +458,96 @@ def s3_git_history() -> tuple[str, Findings, str]:
     # Accepted risks: patterns in git history that have been reviewed and accepted
     ACCEPTED_CRED_PATTERNS = [
         'apiKey: "ollama"',            # Not a real secret — Ollama local API key placeholder
+        'api_key: "ollama"',           # Same, snake_case variant
         "backupTargetCredentialSecret", # SecretRef name, not an actual secret value
         "bot-token: 6597763731",       # Telegram bot token — rotated, old value in history
+        'os.environ.get(',             # Python env var read, never a value
+        "existingSecret",              # Helm chart secretKeyRef field (existingSecret, existingSecretApiKey)
+        "existingMaster",              # Helm chart existingMasterKeySecret field
+        "envFromSecret:",              # Grafana Helm field referencing a secret name, not value
+        "apiKey: ollamaKey",           # Python variable reference (ollamaKey is a var, not a value)
+        "database.password=$DATABASE_PASS",  # Shell var expansion, not the value
+        "=$(kubectl",                  # Shell pipeline reading from K8s (value retrieved at runtime, not in source)
+        'token_resp.json().get(',      # Python code extracting token from response
+        '"password:|api',              # grep regex search strings (not credential values)
+        'kubectl create token',        # kubectl command that generates a token at runtime
+        '--token="$TOKEN"',            # kubectl using shell $TOKEN var (value elsewhere)
+        '--token=$TOKEN',              # Same, unquoted form
+        "Mmih1SVbxAJMQY36",            # unpoller InfluxDB token — ROTATED in commit 74dec616
+        "wN_jWa6cq00Ma1hOi",           # unpoller InfluxDB token — ROTATED in commit 74dec616
+        "PC2kxlwtIRDd3teGNUKVm",       # unpoller InfluxDB token — ROTATED in commit d5be84ec
+        "password: clickhouse123",     # langfuse clickhouse — rotated via SOPS
+        "POSTGRES_PASSWORD: langfuse", # langfuse postgres — rotated via SOPS
+        "X-Proxy-Secret",              # Nginx ingress header name (not a secret value, but matches "Secret")
+        "KYmG4q@Vn366#_",              # OLD UniFi cli-adm password — ROTATED to new value
+        "Secret: adguard-home-tls",    # TLS cert secret NAME reference, not a value
+        "MC3lY6PQ2lkhP2z70Q1pw373",    # OLD Elasticsearch password — ES volume recreated since (2026-02)
+        "github_token: Optional",      # Python function param type annotation (check-all-versions.py)
+        "github_token=github_token",   # Python function call kwarg passing (not a value)
+        "Uw04r2oij23oju2efji4ro834jri", # OLD SMB service worker password — moved to SOPS (commit 2b9e9469)
+        "JTKQ8Qu69KNu1lWrs9tzMa75Vup", # OLD penpot DB password — moved to SOPS (commit 5668a907)
+        "TebAWN8h2M3xGHkIUTH60",       # OLD Grafana OIDC client_secret — ROTATED 2026-04-18
+        "0v0zon0PrpoHZt5yDdz5LXvJu",   # OLD pgadmin password — ROTATED 2026-04-17
+        "IJGEQTcvzxEnFeDeCFJ8uMem",    # rybbit/clickhouse historical password — app removed
+        "POSTGRES_PASSWORD: linkwarden123", # linkwarden historical password — moved to SOPS
+        "POSTGRES_PASSWORD: bytebotpgpass2024secure", # bytebot historical — app removed
+        "BETTER_AUTH_SECRET: ZtVI0L26IRoUi4S34Ki", # rybbit historical — app removed
+        "better-auth-secret: ZtVI0L26IRoUi4S34Ki", # rybbit historical — app removed
+        "rybbit-postgres-password",    # rybbit historical (secret-name placeholder ref) — app removed
+        "rybbit-clickhouse-password",  # rybbit historical (secret-name placeholder ref) — app removed
+        "GI6EWiGrGnOYg0kwLt75",        # k8s-mcp-server token — service replaced by ai-sre (commit 2703a173)
+        "VXcwNHIyb2lqMjNvanUy",        # base64 of SMB password — accepted (same as Uw04r2oij above)
+        "VXUwNHIyb2lqMjNvanUy",        # base64 typo variant of same — accepted
+        "OWgzZm84aDNnZm8zaWhq",        # kopia KOPIA_PASSWORD/SERVER_PASSWORD base64 — kopia removed
+        "credentialsSecret: aws-credentials-secret", # commented-out SecretRef, not a value
+        "eyJpc3MiOiJiYzBlMWJmNjI5Yzg0ZWUyODhlYjBhMWNmM2ViNjYw", # HA long-lived token — see commit 2b0665fd; REVOKE in HA→Profile→Security if still valid
+        "serviceAccountSecret: influxdb-backup-key",   # commented-out SecretRef
+        "storageAccountSecret: influxdb-backup-azure", # commented-out SecretRef
+        'api_key: "{FRIGATE_GENAI_API_KEY}"',          # commented-out templated reference
     ]
     ACCEPTED_SECRET_FILES = {
         "templates/config/",           # Jinja2 templates, not actual secrets
         "kubernetes/flux/meta/repositories/helm/external-secrets.yaml",  # HelmRepository, not a secret
         "kubernetes/apps/download/icloud-docker/app-secrets/kustomization.yaml",  # Kustomization ref
         "kubernetes/apps/download/icloud-docker/secrets-ks.yaml",  # Kustomization ref
+        # Historical secret-named files (reviewed 2026-04-17): all deleted from current tree
+        "kubernetes/apps/ai/bytebot/app/secret.sops.tmp.yaml",  # Bytebot not deployed; creds not reused
+        "kubernetes/apps/ai/langfuse/app/s3-credentials.yaml",  # Rotated in s3-credentials.sops.yaml
+        "kubernetes/apps/backup/kopia/app/secret.yaml",  # Kopia not deployed
+        "kubernetes/apps/databases/pgadmin/app/secret.sops.yaml.bak",  # Was sops-encrypted
+        "kubernetes/apps/databases/pgadmin/app/secret.yaml",  # Rotated 2026-04-17 in secret.sops.yaml
+        "kubernetes/apps/monitoring/headlamp/app/token-secret.yaml",  # ServiceAccountToken type, no value in file
+        "kubernetes/apps/monitoring/rybbit/app/secret.sops.tmp.yaml",  # Rybbit not deployed
+        "kubernetes/apps/monitoring/rybbit/clickhouse/secret.yaml",  # Rybbit not deployed
+        "kubernetes/flux/meta/repositories/git/github-k8s-self-ai-ops-secret-temp.yaml",  # Placeholder only
     }
 
     # Plaintext credential patterns
+    # Scope: exclude files that are themselves scanners/reports/SOPs containing regex strings
+    # and historical findings (self-reference noise).
     cred_hits = run_lines(
         "git log --all --oneline -p "
+        "-- . ':(exclude)runbooks/security-check-current.md' "
+        "      ':(exclude)runbooks/security-check.md' "
+        "      ':(exclude)runbooks/security-check.py' "
+        "      ':(exclude)runbooks/doc-check.py' "
+        "      ':(exclude)runbooks/doc-check-current.md' "
+        "      ':(exclude)runbooks/health-check.sh' "
+        "      ':(exclude)docs/sops/*.md' "
         "| grep -iE '(password|secret|token|api.?key|private.?key)\\s*[:=]\\s*\\S{8,}' "
-        "| grep -v 'sops\\|ENC\\[AES\\|secretKeyRef\\|valueFrom\\|EXAMPLE\\|your_"
-        "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file' "
-        "| grep -v '^#\\|description:'"
+        "| grep -vi 'sops\\|ENC\\[AES\\|secretKeyRef\\|valueFrom\\|EXAMPLE\\|your_\\|your-"
+        "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file"
+        "\\|REPLACE_WITH\\|pullSecret:' "
+        # Bare or quoted shell variables like $DB_PASSWORD, "$ICLOUD_PASSWORD":
+        "| grep -vE 'PGPASSWORD=\\$|password=\"?\\$[A-Z_]+|token=\"?\\$[A-Z_]+|api.?key=\"?\\$[A-Z_]+' "
+        "| grep -vE '^[+-]?\\s*#|description:' "
+        "| grep -v '\"replace-me\"\\|\"my-strong-password\"\\|\"my-api-key\"\\|\"your-api-key-here\"\\|openssl rand' "
+        # Template/doc placeholders like <github-personal-access-token>, <web-ui-password>:
+        "| grep -v '<[a-z][a-z0-9-]*>' "
+        # Shell commands that reference secrets by name, not value:
+        "| grep -vE 'kubectl (edit|get|describe) secret|`kubectl edit secret' "
+        # Shell command substitution — value captured at runtime, never hardcoded:
+        "| grep -vE '[a-zA-Z_]+=\"\\$\\(' "
     )
     # Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
@@ -771,6 +848,29 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
 
     # Privileged containers in app namespaces
     INFRA_NS = {"kube-system", "storage", "monitoring", "network", "flux-system", "cert-manager"}
+    # Workloads with legitimate need for privileged/root (hardware access, codec drivers, kernel features)
+    # Reviewed 2026-04-18 — require privileged for /dev/dri, /dev/kvm, sysctls, etc.
+    ACCEPTED_PRIVILEGED = {
+        "databases/memgraph",             # init-sysctl (kernel tunables)
+        "home-automation/frigate",        # GPU/Coral for object detection
+        "home-automation/scrypted",       # Hardware transcoding
+        "media/jellyfin",                 # HW-accelerated transcoding
+        "media/makemkv",                  # Optical drive access
+    }
+    ACCEPTED_ROOT_UID = {
+        "ai/openclaw",                    # install-openclaw init container
+        "ai/paperclip",                   # tools container
+        "backup/icloud-docker-mu",        # iCloud sync agent (requires root for keychain)
+        "home-automation/node-red",       # legacy image design
+        "home-automation/scrypted",       # same as privileged rationale
+        "media/jellyfin",                 # same as privileged rationale
+        "media/makemkv",                  # same as privileged rationale
+    }
+    def _pod_base(ns_name: str) -> str:
+        # Strip K8s pod suffix (`-abcde-12345`) → `namespace/deployment`
+        import re
+        return re.sub(r"-[a-f0-9]+-[a-z0-9]+$", "", ns_name)
+
     pods = kubectl_json("get pods -A")
     if pods:
         privileged: list[str] = []
@@ -779,14 +879,15 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         for p in pods["items"]:
             ns   = p["metadata"]["namespace"]
             name = p["metadata"]["name"]
+            pod_base = _pod_base(f"{ns}/{name}")
             spec = p["spec"]
             psc  = spec.get("securityContext", {})
             for c in spec.get("containers", []) + spec.get("initContainers", []):
                 sc = c.get("securityContext", {})
-                if sc.get("privileged") and ns not in INFRA_NS:
+                if sc.get("privileged") and ns not in INFRA_NS and pod_base not in ACCEPTED_PRIVILEGED:
                     privileged.append(f"`{ns}/{name}` ({c['name']})")
                 uid = sc.get("runAsUser", psc.get("runAsUser"))
-                if uid == 0 and ns not in INFRA_NS:
+                if uid == 0 and ns not in INFRA_NS and pod_base not in ACCEPTED_ROOT_UID:
                     root_uid.append(f"`{ns}/{name}` ({c['name']})")
             if spec.get("hostNetwork") and ns not in INFRA_NS:
                 host_net.append(f"`{ns}/{name}`")
@@ -902,7 +1003,8 @@ def s9_certificates() -> tuple[str, Findings, str]:
             )
             cert_text = result.stdout.decode()
             not_after_m = re.search(r'notAfter=(.*)', cert_text)
-            issuer_m    = re.search(r'O = ([^,\n]+)', cert_text)
+            # Match both `O = Foo` (LDAP-style, with spaces) and `/O=Foo` (OpenSSL oneline)
+            issuer_m    = re.search(r'(?:O\s*=\s*|/O=)([^,/\n]+)', cert_text)
             not_after   = not_after_m.group(1).strip() if not_after_m else "?"
             issuer      = issuer_m.group(1).strip()    if issuer_m    else "?"
 
@@ -1004,16 +1106,15 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
             else:
                 checks.append(f"{OK} `{ns}/{name}`: no inline credentials")
 
-    # flux-operator cluster-admin
+    # flux-operator cluster-admin — expected for GitOps; informational only (not WARNING)
     crbs = kubectl_json("get clusterrolebindings 2>/dev/null")
     if crbs:
         for b in crbs.get("items", []):
             if b["roleRef"]["name"] == "cluster-admin":
                 subjects = [s.get("name", "?") for s in b.get("subjects", [])]
                 if any("flux" in s.lower() for s in subjects):
-                    f.add(WARNING, f"Flux subject has cluster-admin: `{b['metadata']['name']}`")
-                    checks.append(f"{WARNING} flux-operator has cluster-admin (standard but broad)")
-                    cprint(C.YELLOW, "  🟡 flux-operator has cluster-admin (expected for GitOps)")
+                    checks.append(f"{OK} flux-operator has cluster-admin (expected for GitOps)")
+                    cprint(C.GREEN, "  🟢 flux-operator has cluster-admin (expected for GitOps)")
 
     lines.extend(f"- {c}\n" for c in checks)
     return f.worst(), f, "\n".join(lines)

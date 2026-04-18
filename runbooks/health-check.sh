@@ -129,10 +129,18 @@ safe_count() {
 #   3. Document in AI_weekly_health_check.MD (Section 31 for HA, relevant section for others)
 
 # Home Assistant log patterns that are not real errors
+# See docs/troubleshooting/ha-upstream-integration-issues.md for upstream issues
 HA_FALSE_POSITIVES=(
     "Flic Hub"                      # Expected offline device (no longer in use)
     "dynamic_energy_cost"           # Transient startup warning - Tibber JWT init delay (confirmed 2026-02-15)
     "does not generate unique IDs"  # music_assistant duplicate entity IDs - cosmetic, no functional impact (confirmed 2026-02-15)
+    "tesla_wall_connector"          # Device on WiFi edge - intermittent timeouts, accepted (2026-04-17)
+    "WallConnectorConnectionTimeout" # Same as above - backoff library error form
+    "pymiele.pymiele"               # Upstream Miele Cloud SSE bug (pymiele 0.6.1 latest, no fix yet, 2026-04-17)
+    "miele.coordinator.*Timeout"    # Secondary coordinator timeout from pymiele SSE issue
+    "tibber.realtime"               # Tibber backend 502s - not a local issue (2026-04-17)
+    "tibber.home.*Error in rt_subscribe" # Same Tibber backend issue
+    "disconnected due to inactivity" # Benign websocket inactivity disconnects
 )
 
 # Kubernetes event patterns that are normal operations (not actionable warnings)
@@ -1101,8 +1109,10 @@ log_section "Section 15: Backup System"
             log_warning "iCloud sync pod is not running (phase: $ICLOUD_PHASE)"
             add_minor_issue "icloud-docker-mu pod not running (phase: $ICLOUD_PHASE)"
         else
-            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --tail=50 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | wc -l")
-            echo "  iCloud log errors (last 50 lines): $ICLOUD_LOG_ERRORS"
+            # Filter out known Apple API flakiness (throttles, 530 CF errors, PCS cookie refresh — all normal for iCloud)
+            # Scope to last 24h only; iCloud-docker has sparse logs and old errors shouldn't keep reappearing.
+            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs' | wc -l")
+            echo "  iCloud log errors (last 24h, filtered): $ICLOUD_LOG_ERRORS"
             if [ "$ICLOUD_LOG_ERRORS" -gt 5 ]; then
                 log_warning "iCloud sync pod has errors in recent logs: $ICLOUD_LOG_ERRORS"
                 add_minor_issue "icloud-docker-mu recent log errors: $ICLOUD_LOG_ERRORS"
@@ -1607,12 +1617,15 @@ PYEOF
     fi
     echo ""
 
-    if [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 3 ]; then
-        log_warning "Many Zigbee devices offline >5 days: $Z2M_OFFLINE_5D"
-        add_major_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL}"
+    # Baseline: 23 stale entries from decommissioned devices (as of 2026-04-17) — see docs/troubleshooting/ha-upstream-integration-issues.md
+    # These are state.json records of physically removed/replaced devices, not live Zigbee failures.
+    # Trip only if count exceeds baseline by a clear margin OR increases unexpectedly.
+    Z2M_OFFLINE_BASELINE=23
+    if [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt $((Z2M_OFFLINE_BASELINE + 5)) ]; then
+        log_warning "Zigbee devices offline >5 days above baseline: $Z2M_OFFLINE_5D (baseline: $Z2M_OFFLINE_BASELINE)"
+        add_major_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL} (baseline $Z2M_OFFLINE_BASELINE)"
     elif [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 0 ]; then
-        log_warning "Some Zigbee devices offline >5 days: $Z2M_OFFLINE_5D"
-        add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL}"
+        log_info "Zigbee stale state entries: $Z2M_OFFLINE_5D (baseline $Z2M_OFFLINE_BASELINE — decommissioned devices)"
     fi
 
     echo "Zigbee2MQTT logs (last 50 lines):"
@@ -1861,14 +1874,32 @@ except Exception as e:
         [ -z "$STREAMING_COUNT" ] && STREAMING_COUNT=0
         [ -z "$TOTAL_CAMERAS" ] && TOTAL_CAMERAS=0
 
+        # Cameras under hardware maintenance (won't be counted as failures)
+        # See docs/troubleshooting/ha-upstream-integration-issues.md for rationale
+        CAMERA_MAINTENANCE="guest_room"  # Hardware maintenance through 2026-04-30
+
+        # Filter out maintenance cameras from the DOWN list
+        DOWN_CAMERAS_REAL=""
+        CAMERAS_DOWN_REAL=0
+        if [ -n "$DOWN_CAMERAS" ]; then
+            for cam in $(echo "$DOWN_CAMERAS" | tr ',' ' '); do
+                cam=$(echo "$cam" | xargs)
+                if echo "$CAMERA_MAINTENANCE" | grep -qw "$cam"; then
+                    log_info "Camera under maintenance (skipped): $cam"
+                else
+                    DOWN_CAMERAS_REAL="${DOWN_CAMERAS_REAL:+$DOWN_CAMERAS_REAL, }$cam"
+                    CAMERAS_DOWN_REAL=$((CAMERAS_DOWN_REAL + 1))
+                fi
+            done
+        fi
+
         echo "Cameras streaming: $STREAMING_COUNT/$TOTAL_CAMERAS"
 
-        if [ "$STREAMING_COUNT" -eq "$TOTAL_CAMERAS" ] && [ "$TOTAL_CAMERAS" -gt 0 ]; then
-            log_success "All $TOTAL_CAMERAS cameras streaming"
+        if [ "$CAMERAS_DOWN_REAL" -eq 0 ] && [ "$TOTAL_CAMERAS" -gt 0 ]; then
+            log_success "All expected cameras streaming ($STREAMING_COUNT/$TOTAL_CAMERAS — maintenance excluded)"
         elif [ "$STREAMING_COUNT" -gt 0 ]; then
-            CAMERAS_DOWN=$((TOTAL_CAMERAS - STREAMING_COUNT))
-            log_warning "Cameras down: $CAMERAS_DOWN/$TOTAL_CAMERAS ($DOWN_CAMERAS)"
-            add_major_issue "Frigate cameras not streaming: $DOWN_CAMERAS ($CAMERAS_DOWN of $TOTAL_CAMERAS)"
+            log_warning "Cameras down: $CAMERAS_DOWN_REAL/$TOTAL_CAMERAS ($DOWN_CAMERAS_REAL)"
+            add_major_issue "Frigate cameras not streaming: $DOWN_CAMERAS_REAL ($CAMERAS_DOWN_REAL of $TOTAL_CAMERAS)"
         elif [ "$TOTAL_CAMERAS" -gt 0 ]; then
             log_critical "All $TOTAL_CAMERAS cameras are down"
             add_critical_issue "All Frigate cameras are down (0/$TOTAL_CAMERAS streaming)"
@@ -1893,15 +1924,24 @@ except Exception as e:
             add_major_issue "Frigate MQTT availability unknown: $FRIGATE_AVAILABLE"
         fi
 
-        # Check for camera crash loops in logs
+        # Check for camera crash loops in logs (skip cameras under maintenance)
         echo ""
         echo "=== Camera Crash Loops (recent logs) ==="
         CRASH_CAMERAS=$(kubectl logs -n home-automation -l app.kubernetes.io/name=frigate --tail=500 2>&1 | grep "crashed unexpectedly" | sed 's/.*for //' | sed 's/\..*//' | sort | uniq -c | sort -rn)
         if [ -n "$CRASH_CAMERAS" ]; then
             echo "$CRASH_CAMERAS"
-            CRASH_COUNT=$(echo "$CRASH_CAMERAS" | wc -l | tr -cd '0-9')
-            if [ "$CRASH_COUNT" -gt 0 ]; then
-                add_minor_issue "Frigate camera crash loops detected: $(echo "$CRASH_CAMERAS" | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')"
+            # Filter out maintenance cameras
+            CRASH_NAMES=$(echo "$CRASH_CAMERAS" | awk '{print $2}')
+            CRASH_REAL=""
+            for cam in $CRASH_NAMES; do
+                if echo "$CAMERA_MAINTENANCE" | grep -qw "$cam"; then
+                    log_info "Camera crash loop (maintenance, skipped): $cam"
+                else
+                    CRASH_REAL="${CRASH_REAL:+$CRASH_REAL,}$cam"
+                fi
+            done
+            if [ -n "$CRASH_REAL" ]; then
+                add_minor_issue "Frigate camera crash loops detected: $CRASH_REAL"
             fi
         else
             echo "  No crash loops detected"
@@ -2391,12 +2431,14 @@ except Exception as e:
         echo "Zigbee2MQTT errors (24h): $Z2M_COORD_ERRORS"
 
         Z2M_ISSUES=0
-        if [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt 5 ] 2>/dev/null; then
-            log_warning "Many Zigbee devices offline >5 days: $Z2M_OFFLINE32"
-            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32}"
+        # Baseline: 23 stale entries from decommissioned devices — see docs/troubleshooting/ha-upstream-integration-issues.md
+        Z2M_OFFLINE_BASELINE=23
+        if [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt $((Z2M_OFFLINE_BASELINE + 5)) ] 2>/dev/null; then
+            log_warning "Zigbee devices offline >5 days above baseline: $Z2M_OFFLINE32 (baseline: $Z2M_OFFLINE_BASELINE)"
+            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32} (baseline $Z2M_OFFLINE_BASELINE)"
             Z2M_ISSUES=$((Z2M_ISSUES + 1))
         elif [ -n "$Z2M_OFFLINE32" ] && [ "${Z2M_OFFLINE32:-0}" -gt 0 ] 2>/dev/null; then
-            add_minor_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE32/${Z2M_TOTAL32}"
+            log_info "Zigbee stale state entries: $Z2M_OFFLINE32 (baseline $Z2M_OFFLINE_BASELINE — decommissioned devices)"
         fi
         if [ "$Z2M_COORD_ERRORS" -gt 20 ]; then
             log_warning "High Zigbee2MQTT error count: $Z2M_COORD_ERRORS in 24h"
