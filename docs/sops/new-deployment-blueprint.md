@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.04.16`
-> Last Updated: `2026-04-16`
+> Version: `2026.04.18`
+> Last Updated: `2026-04-18`
 > Owner: `Platform`
 
 ---
@@ -112,7 +112,112 @@ spec:
   storageClassName: longhorn
 ```
 
-Use `longhorn-static` only when a pre-created, manually managed volume is required.
+**Longhorn volume naming rule** (mandatory for `longhorn-static`):
+
+- **Default: use `longhorn` (dynamic).** PVCs get auto-generated UUID PV names — this is fine for app data that can be recreated from backup.
+- **Use `longhorn-static` when you want a stable, speaking volume name** (reviewed/grep-able/backup-auditable). The PV **must not** be a UUID — it must match the PVC's `volumeName` exactly.
+- **The Longhorn Volume, the PV, the PVC's `volumeName`, the PV's `volumeHandle`, and the PVC name must all be the SAME speaking identifier.** Convention: `{app}-{purpose}-data` (e.g. `pgadmin-data`, `superset-postgresql-data`).
+
+Three-file pattern when using `longhorn-static` (see `kubernetes/apps/databases/pgadmin/app/` or `kubernetes/apps/databases/superset/app/` for working references):
+
+```yaml
+# longhorn-volume.yaml — the physical Longhorn volume (create first)
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: {app}-data       # speaking name, NOT a UUID
+  namespace: storage
+spec:
+  size: "21474836480"    # bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+---
+# pv.yaml — Kubernetes PersistentVolume bound to the Longhorn volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {app}-data       # MUST match Longhorn volume name
+spec:
+  capacity: { storage: 20Gi }
+  storageClassName: longhorn-static
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeHandle: {app}-data   # MUST match Longhorn volume name (anchor 3)
+    volumeAttributes: { numberOfReplicas: "2", staleReplicaTimeout: "30" }
+---
+# data-pvc.yaml — PVC bound by name to the PV
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {app}-data
+  namespace: {namespace}
+spec:
+  storageClassName: longhorn-static
+  volumeName: {app}-data   # MUST match PV name
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 20Gi } }
+```
+
+Never skip the speaking name and fall back to a UUID PV — that defeats the purpose of `longhorn-static` (manual control, visibility, backup naming).
+
+---
+
+Authentik SSO blueprint (mandatory for apps with user login):
+
+All Authentik providers **must** be declared in the SOPS-encrypted blueprint ConfigMap at `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`. **UI-only configuration is forbidden** — it is not reviewable, not restorable, and drifts silently.
+
+- **Forward-auth (proxy) providers** for apps without their own auth (e.g. Longhorn UI, Prometheus): use `authentik_providers_proxy.proxyprovider`. See existing `esphome-blueprint.yaml`, `longhorn-forward-auth-blueprint.yaml` as templates.
+- **OAuth2/OIDC providers** for apps with their own user model (e.g. Grafana, Superset, pgAdmin): use `authentik_providers_oauth2.oauth2provider`. See existing `grafana-oauth2-blueprint.yaml`, `superset-oauth2-blueprint.yaml` as templates.
+
+OAuth2 blueprint entry shape:
+
+```yaml
+- id: {app}-oauth2-provider
+  model: authentik_providers_oauth2.oauth2provider
+  state: present
+  identifiers:
+    name: {app}                    # upsert target — matches existing UI provider if present
+  attrs:
+    name: {app}
+    client_id: <same as in app secret>
+    client_secret: <same as in app secret — SOPS protects this ConfigMap>
+    client_type: confidential
+    authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"   # default-provider-authorization-implicit-consent
+    invalidation_flow:  "b8a97e00-f02f-48d9-b854-b26bf837779c"   # default-provider-invalidation-flow
+    redirect_uris:
+      - matching_mode: strict
+        url: "https://{app}.${SECRET_DOMAIN}/<callback-path>"
+    signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+    property_mappings:
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+- id: {app}-application
+  model: authentik_core.application
+  state: present
+  identifiers:
+    slug: {app}
+  attrs:
+    name: {App display name}
+    slug: {app}
+    provider: !KeyOf {app}-oauth2-provider
+    meta_launch_url: "https://{app}.${SECRET_DOMAIN}"
+    meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/{app}.png"
+```
+
+**Keep `client_secret` synchronized** between the blueprint (source of truth) and the app's own SOPS Secret (runtime config). When rotating, update BOTH in the same commit.
+
+**Per-app redirect URI paths** (common patterns — match what the chart/app expects):
+- Grafana: `/login/generic_oauth`
+- pgAdmin: `/oauth2/callback`
+- Superset: `/oauth-authorized/authentik`
+
+Using `state: present` with `identifiers.name` makes the blueprint idempotent — it upserts an existing UI-created provider in place rather than duplicating. No data loss.
 
 ---
 
@@ -123,31 +228,36 @@ Use `longhorn-static` only when a pre-created, manually managed volume is requir
 3. Define app deployment (`helmrelease.yaml`) and wire it into `kustomization.yaml`.
 4. Create secrets as `*.sops.yaml` and encrypt in repository path before commit.
 5. Configure storage class:
-   - `longhorn` for normal app/stateful workloads.
-   - `longhorn-static` only for explicit pre-provisioned volume workflows.
+   - `longhorn` for normal app/stateful workloads (UUID PV names acceptable).
+   - `longhorn-static` for stable speaking names — write all three files (`longhorn-volume.yaml`, `pv.yaml`, `{app}-data-pvc.yaml`) with the **same speaking identifier** (Longhorn Volume name = PV name = PV `volumeHandle` = PVC `volumeName` = PVC name). Never use UUIDs. See the Storage blueprint section above and `kubernetes/apps/databases/pgadmin/app/` for a reference.
 6. Configure ingress and Homepage metadata for user-facing web apps (annotations + label).
-7. Add monitoring coverage:
+7. If the app has user login, declare the Authentik provider in the blueprint ConfigMap (`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`):
+   - Forward-auth proxy providers for apps without their own auth.
+   - OAuth2/OIDC providers for apps with their own user model.
+   - Add a new `*-blueprint.yaml` key per the Authentik SSO blueprint section above. `client_secret` lives in the SOPS ConfigMap AND in the app's own SOPS Secret — keep both in sync.
+   - Never configure providers via the Authentik UI only — blueprints are authoritative.
+8. Add monitoring coverage:
    - Ensure app health endpoints/probes are set.
    - Add `ServiceMonitor` when required.
    - Confirm logs/events are observable.
-8. Create AlertManager PrometheusRule (mandatory):
+9. Create AlertManager PrometheusRule (mandatory):
    - Add `kubernetes/apps/monitoring/kube-prometheus-stack/app/{app}-alerts.yaml`.
    - Include rules for: pod not ready (critical, 5m), crash looping (critical, 5m), pod restarted (warning, 1m).
    - Required labels: `release: kube-prometheus-stack`, `app.kubernetes.io/name: kube-prometheus-stack`, `app.kubernetes.io/part-of: kube-prometheus-stack`.
    - Register in `kubernetes/apps/monitoring/kube-prometheus-stack/app/kustomization.yaml`.
    - See `kubernetes/apps/monitoring/kube-prometheus-stack/app/anythingllm-alerts.yaml` as reference.
-9. Verify Elasticsearch log ingestion (mandatory):
+10. Verify Elasticsearch log ingestion (mandatory):
    - edot-collector ships all pod logs automatically — no config change needed.
    - After first deployment, confirm logs are present via Kibana (`logs-generic-default` data stream, filter by `resource.attributes.k8s.namespace.name` and `resource.attributes.k8s.container.name`).
    - Or query directly: `curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" -d '{"query":{"bool":{"must":[{"match":{"resource.attributes.k8s.namespace.name":"{namespace}"}},{"match":{"resource.attributes.k8s.container.name":"{app}"}}]}}}'`
-10. Run local validation commands:
+11. Run local validation commands:
 
 ```bash
 task template:configure -- --strict
 kubeconform -summary -fail-on error kubernetes/apps/{namespace}/{app}
 ```
 
-11. Commit and push changes to trigger Flux webhook flow:
+12. Commit and push changes to trigger Flux webhook flow:
 
 ```bash
 git add kubernetes/apps/{namespace}/{app}/ docs/applications.md
@@ -155,7 +265,7 @@ git commit -m "feat({app}): deploy to {namespace}"
 git push
 ```
 
-12. Validate webhook-driven GitOps execution (no manual reconcile):
+13. Validate webhook-driven GitOps execution (no manual reconcile):
 
 ```bash
 kubectl get receiver github-receiver -n flux-system
@@ -164,7 +274,7 @@ flux get kustomizations -A
 flux get helmreleases -A
 ```
 
-13. Run compliance and health check runbooks to ensure proper integration:
+14. Run compliance and health check runbooks to ensure proper integration:
 
 ```bash
 python3 runbooks/doc-check.py
@@ -172,7 +282,7 @@ python3 runbooks/check-all-versions.py
 ./runbooks/health-check.sh
 ```
 
-14. Execute Verification Tests, Health Check, and Security Check sections below.
+15. Execute Verification Tests, Health Check, and Security Check sections below.
 
 ---
 
@@ -485,3 +595,4 @@ Rollback success criteria:
 | `2026.03.01` | `2026-03-01` | Initial version |
 | `2026.03.11` | `2026-03-11` | Add mandatory AlertManager PrometheusRule and Elasticsearch log verification steps |
 | `2026.04.16` | `2026-04-16` | Update logging references from fluent-bit to edot-collector / OTel field mappings |
+| `2026.04.18` | `2026-04-18` | Add speaking-name rule for `longhorn-static` volumes; mandate Authentik provider declarations via SOPS-encrypted blueprint ConfigMap (forward-auth + OAuth2/OIDC) |
