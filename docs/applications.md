@@ -12,7 +12,7 @@
 |-----------|-----------|
 | ai | 9 |
 | home-automation | 17 |
-| databases | 9 |
+| databases | 10 |
 | monitoring | 12 |
 | office | 10 |
 | media | 3 |
@@ -85,6 +85,7 @@
 | pgadmin | pgAdmin — PostgreSQL admin UI | Internal | Databases |
 | redisinsight | RedisInsight — Redis GUI | Internal | Databases |
 | memgraph | Memgraph — in-memory graph database (Cypher/Bolt) with Lab web UI | Internal | Databases |
+| superset | Apache Superset — data exploration and visualization (bundled PG + Redis) | Internal | Databases |
 
 ---
 

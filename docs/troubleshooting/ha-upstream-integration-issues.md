@@ -61,6 +61,24 @@ ERROR (MainThread) [homeassistant.components.miele.coordinator] Timeout fetching
 
 ---
 
+## ha_hatch (Hatch Rest baby device) — MQTT signature mismatch *(UPSTREAM BUG — ACCEPTED)*
+
+**Symptom** (HA logs, every ~10s):
+```
+ERROR [hatch_rest_api.util_bootstrap] MQTT connection failed with exception
+  function takes exactly 17 arguments (18 given)
+ERROR [custom_components.ha_hatch.hatch_data_update_coordinator]
+  function takes exactly 17 arguments (18 given)
+```
+
+**Root cause:** The `hatch_rest_api` Python library (pinned by the `ha_hatch` custom integration) calls an internal MQTT-client function with 18 positional args, but the currently-installed `paho-mqtt` version expects 17. This is a dependency-signature skew between the library and the current Python/MQTT environment — an upstream packaging bug, not something we can fix locally without forking.
+
+**Decision:** Accept until `hatch_rest_api` releases a fix. Added to `HA_FALSE_POSITIVES` in `runbooks/health-check.sh` so the error count isn't noised by this single integration's retry loop.
+
+**When to revisit:** HA Core release notes mention `hatch_rest_api` bump, or PyPI shows a newer version at https://pypi.org/project/hatch-rest-api/ resolving the signature issue. Quick check: `pip index versions hatch-rest-api`.
+
+---
+
 ## Tibber Realtime — 502 Bad Gateway *(UPSTREAM BACKEND — ACCEPTED)*
 
 **Symptom** (HA logs):

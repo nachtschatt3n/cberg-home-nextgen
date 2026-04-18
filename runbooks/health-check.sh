@@ -141,6 +141,8 @@ HA_FALSE_POSITIVES=(
     "tibber.realtime"               # Tibber backend 502s - not a local issue (2026-04-17)
     "tibber.home.*Error in rt_subscribe" # Same Tibber backend issue
     "disconnected due to inactivity" # Benign websocket inactivity disconnects
+    "hatch_rest_api.util_bootstrap" # ha_hatch custom integration — upstream signature mismatch, no fix yet (2026-04-19)
+    "ha_hatch.hatch_data_update_coordinator" # Same — secondary coordinator error from hatch_rest_api
 )
 
 # Kubernetes event patterns that are normal operations (not actionable warnings)
