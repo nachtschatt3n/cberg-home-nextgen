@@ -34,10 +34,12 @@ spec:
     envFromSecrets:
       - superset-secrets
 
-    # Install postgres + redis + OAuth drivers (absent from stock apache/superset image)
+    # Install postgres + redis + OAuth drivers into the Superset venv
+    # (absent from stock apache/superset:5.0.0; plain `pip install` would target
+    # system python, not /app/.venv where Superset actually runs)
     bootstrapScript: |
       #!/bin/bash
-      pip install \
+      /app/.venv/bin/pip install \
         psycopg2-binary==2.9.6 \
         redis==4.5.4 \
         authlib==1.3.0
