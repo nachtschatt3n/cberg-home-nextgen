@@ -91,7 +91,18 @@ ERROR (MainThread) [tibber.realtime] Watchdog: Connection is down
 
 ---
 
-## Samsung FamilyHub Fridge — SmartThings auth failure *(USER ACTION NEEDED)*
+## Samsung FamilyHub Fridge — SmartThings auth failure *(FORK DEPLOYED, PR OPEN — USER ACTION: switch to OAuth mode)*
+
+**Status 2026-04-18:** forked the community integration, implemented OAuth-via-HA-core-smartthings auto-refresh, deployed to the live HA pod, submitted PR upstream.
+
+- Fork: https://github.com/nachtschatt3n/smartthings_fridge_camera (branch `feat/oauth-via-ha-core-smartthings`)
+- Upstream PR: https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/23
+- Live HA version: `0.1.0` (synced from fork, 2026-04-18)
+- Config entry: migrated v1→v2 automatically, currently `auth_mode: pat` (will keep erroring until the user switches to OAuth via UI)
+
+**Next step for you:** HA UI → **Settings → Devices & Services → Samsung Fridge Camera → Reconfigure → choose "Reuse HA core SmartThings OAuth (recommended)"**. After saving, the integration will reuse the HA core SmartThings OAuth2 credentials (with auto-refresh) and no further token rotation is needed.
+
+
 
 **Symptom** (HA logs, at startup or when polling tries to resume):
 ```
