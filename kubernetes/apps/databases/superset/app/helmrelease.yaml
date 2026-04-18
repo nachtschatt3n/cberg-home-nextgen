@@ -135,16 +135,22 @@ spec:
           memory: 2Gi
 
     # --- Celery workers (async SQL, email reports) ---
+    # Celery spawns N worker processes per pod (default = CPU count = 18 on nuc14);
+    # OOM at 1Gi → either bump to 2Gi or cap concurrency. Cap concurrency for lower idle cost.
     supersetWorker:
       replicaCount: 1
       podAnnotations:
         secret.reloader.stakater.com/reload: "superset-secrets"
+      command:
+        - /bin/sh
+        - -c
+        - . /app/pythonpath/superset_bootstrap.sh; celery --app=superset.tasks.celery_app:app worker --concurrency=4
       resources:
         requests:
           cpu: 100m
-          memory: 256Mi
+          memory: 512Mi
         limits:
-          memory: 1Gi
+          memory: 2Gi
 
     # --- Celery beat (scheduler for alerts/reports) ---
     supersetCeleryBeat:
