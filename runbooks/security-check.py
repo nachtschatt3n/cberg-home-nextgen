@@ -865,6 +865,9 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "home-automation/scrypted",       # same as privileged rationale
         "media/jellyfin",                 # same as privileged rationale
         "media/makemkv",                  # same as privileged rationale
+        "databases/superset",             # apache/superset image default (runs as root)
+        "databases/superset-celerybeat",  # same image
+        "databases/superset-worker",      # same image
     }
     def _pod_base(ns_name: str) -> str:
         # Strip K8s pod suffix (`-abcde-12345`) → `namespace/deployment`

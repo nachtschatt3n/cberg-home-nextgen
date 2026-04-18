@@ -58,7 +58,7 @@ spec:
             "remote_app": {
                 "client_id": os.environ["OIDC_CLIENT_ID"],
                 "client_secret": os.environ["OIDC_CLIENT_SECRET"],
-                "server_metadata_url": "https://auth.uhl.cool/application/o/superset/.well-known/openid-configuration",
+                "server_metadata_url": "https://auth.${SECRET_DOMAIN}/application/o/superset/.well-known/openid-configuration",
                 "client_kwargs": {"scope": "openid email profile"},
             },
         }]
@@ -140,7 +140,7 @@ spec:
         username: admin
         firstname: Admin
         lastname: User
-        email: admin@uhl.cool
+        email: admin@${SECRET_DOMAIN}
         password: placeholder   # overridden by ADMIN_PASSWORD env from Secret
 
     # Expose via our ingress.yaml, not chart's built-in
