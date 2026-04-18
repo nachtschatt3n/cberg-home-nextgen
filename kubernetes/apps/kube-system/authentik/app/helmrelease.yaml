@@ -97,16 +97,11 @@ spec:
             - sh
             - -c
             - |
-              cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
-              cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
-              cp /blueprints-source/headlamp-blueprint.yaml /blueprints/headlamp-blueprint.yaml
-              cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
-              cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
-              cp /blueprints-source/nocodb-blueprint.yaml /blueprints/nocodb-blueprint.yaml
-              cp /blueprints-source/phpmyadmin-blueprint.yaml /blueprints/phpmyadmin-blueprint.yaml
-              cp /blueprints-source/prometheus-alertmanager-blueprint.yaml /blueprints/prometheus-alertmanager-blueprint.yaml
-              cp /blueprints-source/uptime-kuma-blueprint.yaml /blueprints/uptime-kuma-blueprint.yaml
-              echo "All blueprints copied successfully"
+              # Copy every blueprint from the ConfigMap — allows adding new blueprints
+              # without editing this init container. Trailing `|| true` handles empty source.
+              cp /blueprints-source/*.yaml /blueprints/ || true
+              echo "All blueprints copied:"
+              ls /blueprints/
           volumeMounts:
             - name: blueprints-source
               mountPath: /blueprints-source
@@ -218,16 +213,11 @@ spec:
             - sh
             - -c
             - |
-              cp /blueprints-source/esphome-blueprint.yaml /blueprints/esphome-blueprint.yaml
-              cp /blueprints-source/frigate-blueprint.yaml /blueprints/frigate-blueprint.yaml
-              cp /blueprints-source/headlamp-blueprint.yaml /blueprints/headlamp-blueprint.yaml
-              cp /blueprints-source/homepage-blueprint.yaml /blueprints/homepage-blueprint.yaml
-              cp /blueprints-source/longhorn-forward-auth-blueprint.yaml /blueprints/longhorn-forward-auth-blueprint.yaml
-              cp /blueprints-source/nocodb-blueprint.yaml /blueprints/nocodb-blueprint.yaml
-              cp /blueprints-source/phpmyadmin-blueprint.yaml /blueprints/phpmyadmin-blueprint.yaml
-              cp /blueprints-source/prometheus-alertmanager-blueprint.yaml /blueprints/prometheus-alertmanager-blueprint.yaml
-              cp /blueprints-source/uptime-kuma-blueprint.yaml /blueprints/uptime-kuma-blueprint.yaml
-              echo "All blueprints copied successfully"
+              # Copy every blueprint from the ConfigMap — allows adding new blueprints
+              # without editing this init container. Trailing `|| true` handles empty source.
+              cp /blueprints-source/*.yaml /blueprints/ || true
+              echo "All blueprints copied:"
+              ls /blueprints/
           volumeMounts:
             - name: blueprints-source
               mountPath: /blueprints-source
