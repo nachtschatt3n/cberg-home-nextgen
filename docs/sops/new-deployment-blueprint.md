@@ -3,7 +3,7 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.04.18b`
+> Version: `2026.04.18c`
 > Last Updated: `2026-04-18`
 > Owner: `Platform`
 
@@ -555,6 +555,48 @@ If 404, fall back to:
 
 Keep the value bare (no `si-` quotes or URL) — Homepage's resolver handles the prefix.
 
+### 9. Python WSGI apps behind TLS-terminating ingress
+
+Flask, Django, and other WSGI apps see the request as `http://` internally because nginx-ingress terminates TLS at the edge. Any URL the app generates from the request (OAuth `redirect_uri`, absolute asset URLs, `url_for(_external=True)`, cookie `secure` flags) will come out wrong unless the app trusts the ingress's `X-Forwarded-*` headers.
+
+Symptoms:
+- OAuth provider returns "Redirect URI mismatch / invalid redirect_uri"
+- Mixed-content warnings when app loads static assets
+- Cookies not set or not sent (`secure` flag misdecided)
+- Links in emails have wrong scheme/host
+
+Fix per framework:
+
+```python
+# Flask / Flask-AppBuilder (Superset, Airflow)
+ENABLE_PROXY_FIX = True
+PROXY_FIX_CONFIG = {"x_for": 1, "x_proto": 1, "x_host": 1, "x_port": 1, "x_prefix": 1}
+```
+
+```python
+# Django
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+```
+
+```python
+# FastAPI / Uvicorn
+# launch with --proxy-headers --forwarded-allow-ips='*'
+```
+
+```ruby
+# Rails
+config.force_ssl = true   # also trusts X-Forwarded-Proto by default
+```
+
+```yaml
+# n8n / Node apps reading process.env
+N8N_PROTOCOL: https
+WEBHOOK_URL: https://n8n.${SECRET_DOMAIN}/
+```
+
+Our `internal` / `external` nginx ingress controllers already set `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For`, `X-Real-IP` — no ingress-side config needed.
+
 ---
 
 ## Troubleshooting
@@ -577,6 +619,7 @@ Keep the value bare (no `si-` quotes or URL) — Homepage's resolver handles the
 | Helm chart with bundled Postgres needs custom PG driver | Image lacks `psycopg2` / other connector | Use chart's `bootstrapScript` value — install into the runtime venv path (e.g. Superset: `uv pip install --python /app/.venv/bin/python psycopg2-binary==X`) |
 | Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |
 | Celery-based app OOM-kills on fat nodes | Default concurrency = CPU count (18 on nuc14) → huge memory | Set explicit `--concurrency=N` in container `command` and bump memory limit |
+| OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust ingress's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #9 |
 
 ---
 
@@ -707,3 +750,4 @@ Rollback success criteria:
 | `2026.04.16` | `2026-04-16` | Update logging references from fluent-bit to edot-collector / OTel field mappings |
 | `2026.04.18` | `2026-04-18` | Add speaking-name rule for `longhorn-static` volumes; mandate Authentik provider declarations via SOPS-encrypted blueprint ConfigMap (forward-auth + OAuth2/OIDC) |
 | `2026.04.18b` | `2026-04-18` | Add "Known Gotchas" section (Bitnami legacy images, Flux targetNamespace override, Helm configFromSecret pitfall, venv pip for modern Python images, Celery concurrency, Authentik copy-blueprints wildcard, PromRule Succeeded-phase exclusion, Homepage icon verification) |
+| `2026.04.18c` | `2026-04-18` | Add Known Gotcha #9: Python WSGI apps behind TLS-terminating ingress — enable framework ProxyFix (Flask/Django/FastAPI/Rails/n8n variants) so OAuth redirect_uri and self-referencing URLs use `https://` |
