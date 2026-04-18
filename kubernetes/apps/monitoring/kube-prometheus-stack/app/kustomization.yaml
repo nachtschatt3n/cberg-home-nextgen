@@ -22,3 +22,4 @@ resources:
   - ./memgraph-alerts.yaml
   - ./macos-apps-alerts.yaml
   - ./macos-scrapeconfigs.yaml
+  - ./superset-alerts.yaml

@@ -1,0 +1,79 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: superset-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: superset.pods.health
+      rules:
+        - alert: SupersetPodNotReady
+          annotations:
+            description: Superset pod {{ $labels.pod }} has been not ready for more than 5 minutes. Dashboards and SQL Lab may be unavailable.
+            summary: Superset pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="databases", pod=~"superset-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: databases
+            component: superset
+            severity: critical
+        - alert: SupersetPodCrashLooping
+          annotations:
+            description: Superset pod {{ $labels.pod }} has restarted {{ $value | printf "%.0f" }} times in the last 15 minutes. Check logs for init, OIDC, or DB migration errors.
+            summary: Superset pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="databases", pod=~"superset-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: databases
+            component: superset
+            severity: critical
+        - alert: SupersetPodRestarted
+          annotations:
+            description: Superset pod {{ $labels.pod }} has restarted at least once in the last 15 minutes. Monitor for repeated restarts.
+            summary: Superset pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="databases", pod=~"superset-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: databases
+            component: superset
+            severity: warning
+    - interval: 1m
+      name: superset.backends.health
+      rules:
+        - alert: SupersetPostgresDown
+          annotations:
+            description: Superset metadata PostgreSQL pod {{ $labels.pod }} is not ready. Superset cannot start or persist dashboard state.
+            summary: Superset PostgreSQL backend is down
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="databases", pod=~"superset-postgresql-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: databases
+            component: superset-postgresql
+            severity: critical
+        - alert: SupersetRedisDown
+          annotations:
+            description: Superset Redis pod {{ $labels.pod }} is not ready. Celery workers and cache will degrade.
+            summary: Superset Redis backend is down
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="databases", pod=~"superset-redis-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: databases
+            component: superset-redis
+            severity: warning

@@ -14,6 +14,7 @@ resources:
   - ./pgadmin/ks.yaml
   - ./redisinsight/ks.yaml
   - ./memgraph/ks.yaml
+  - ./superset/ks.yaml
 
 ---
 apiVersion: v1

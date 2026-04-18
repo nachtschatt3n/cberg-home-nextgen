@@ -41,3 +41,4 @@ resources:
   - ./elastic.yaml
   - ./mintplex-labs.yaml
   - ./opentelemetry.yaml
+  - ./apache-superset.yaml

@@ -1,0 +1,151 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: superset
+  namespace: databases
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: superset
+      version: 0.15.2
+      sourceRef:
+        kind: HelmRepository
+        name: apache-superset
+        namespace: flux-system
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+      strategy: rollback
+  values:
+    image:
+      repository: apache/superset
+      tag: 5.0.0
+      pullPolicy: IfNotPresent
+
+    # Inject OIDC client creds + SECRET_KEY from SOPS-encrypted Secret
+    extraSecretEnv:
+      SUPERSET_SECRET_KEY: placeholder   # overridden via envFromSecret below
+    envFromSecret: superset-secrets
+    envFromSecrets: []
+
+    # Superset Python config (OIDC + role mapping)
+    # Chart generates a ConfigMap `superset-config` and mounts as /app/pythonpath/{key}
+    configOverrides:
+      oidc.py: |
+        import os
+        from flask_appbuilder.security.manager import AUTH_OAUTH
+
+        AUTH_TYPE = AUTH_OAUTH
+        AUTH_USER_REGISTRATION = True
+        AUTH_USER_REGISTRATION_ROLE = "Gamma"
+        AUTH_ROLES_SYNC_AT_LOGIN = True
+        AUTH_ROLES_MAPPING = {
+            "superset-admins": ["Admin"],
+            "superset-users":  ["Gamma"],
+        }
+
+        OAUTH_PROVIDERS = [{
+            "name": "authentik",
+            "icon": "fa-key",
+            "token_key": "access_token",
+            "remote_app": {
+                "client_id": os.environ["OIDC_CLIENT_ID"],
+                "client_secret": os.environ["OIDC_CLIENT_SECRET"],
+                "server_metadata_url": "https://auth.uhl.cool/application/o/superset/.well-known/openid-configuration",
+                "client_kwargs": {"scope": "openid email profile"},
+            },
+        }]
+
+        FEATURE_FLAGS = {"EMBEDDED_SUPERSET": False, "ALERT_REPORTS": True}
+
+    # --- Bundled PostgreSQL (metadata DB) — binds to pre-created longhorn-static PVC ---
+    postgresql:
+      enabled: true
+      auth:
+        username: superset
+        database: superset
+        existingSecret: superset-secrets
+        secretKeys:
+          adminPasswordKey: postgres-password
+          userPasswordKey: postgresql-password
+      primary:
+        persistence:
+          enabled: true
+          existingClaim: superset-postgresql-data
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 1Gi
+
+    # --- Bundled Redis (broker/cache) ---
+    redis:
+      enabled: true
+      auth:
+        enabled: true
+        existingSecret: superset-secrets
+        existingSecretPasswordKey: redis-password
+      master:
+        persistence:
+          enabled: false
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+
+    # --- Superset web/UI pods ---
+    supersetNode:
+      replicaCount: 1
+      strategy:
+        type: Recreate
+      podAnnotations:
+        secret.reloader.stakater.com/reload: "superset-secrets"
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+
+    # --- Celery workers (async SQL, email reports) ---
+    supersetWorker:
+      replicaCount: 1
+      podAnnotations:
+        secret.reloader.stakater.com/reload: "superset-secrets"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+
+    # --- Celery beat (scheduler for alerts/reports) ---
+    supersetCeleryBeat:
+      enabled: true
+      podAnnotations:
+        secret.reloader.stakater.com/reload: "superset-secrets"
+
+    # --- init/boot: creates admin user, initdb, runs migrations ---
+    init:
+      createAdmin: true
+      adminUser:
+        username: admin
+        firstname: Admin
+        lastname: User
+        email: admin@uhl.cool
+        password: placeholder   # overridden by ADMIN_PASSWORD env from Secret
+
+    # Expose via our ingress.yaml, not chart's built-in
+    service:
+      type: ClusterIP
+      port: 8088
+    ingress:
+      enabled: false

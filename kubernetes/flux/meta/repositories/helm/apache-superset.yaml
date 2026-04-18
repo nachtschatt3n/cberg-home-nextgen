@@ -1,0 +1,10 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: apache-superset
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://apache.github.io/superset/
+  timeout: 3m

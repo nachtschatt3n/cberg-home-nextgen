@@ -1,0 +1,34 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: superset
+  namespace: databases
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Superset"
+    gethomepage.dev/description: "Data exploration & visualization"
+    gethomepage.dev/group: "Databases"
+    gethomepage.dev/icon: "apache-superset.png"
+    gethomepage.dev/pod-selector: "app=superset"
+  labels:
+    gethomepage.dev/enabled: "true"
+spec:
+  ingressClassName: internal
+  rules:
+    - host: superset.${SECRET_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: superset
+                port:
+                  number: 8088
+  tls:
+    - hosts:
+        - superset.${SECRET_DOMAIN}
+      secretName: superset-tls
