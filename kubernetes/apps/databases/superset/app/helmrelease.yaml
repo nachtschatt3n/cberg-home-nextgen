@@ -66,8 +66,12 @@ spec:
         FEATURE_FLAGS = {"EMBEDDED_SUPERSET": False, "ALERT_REPORTS": True}
 
     # --- Bundled PostgreSQL (metadata DB) — binds to pre-created longhorn-static PVC ---
+    # Bitnami removed old tags from docker.io/bitnami/*; use bitnamilegacy mirror.
     postgresql:
       enabled: true
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/postgresql
       auth:
         username: superset
         database: superset
@@ -87,8 +91,12 @@ spec:
             memory: 1Gi
 
     # --- Bundled Redis (broker/cache) ---
+    # Same Bitnami image-mirror workaround as above.
     redis:
       enabled: true
+      image:
+        registry: docker.io
+        repository: bitnamilegacy/redis
       auth:
         enabled: true
         existingSecret: superset-secrets
