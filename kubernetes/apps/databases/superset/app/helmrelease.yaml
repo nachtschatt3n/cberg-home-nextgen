@@ -29,11 +29,18 @@ spec:
       tag: 5.0.0
       pullPolicy: IfNotPresent
 
-    # Inject OIDC client creds + SECRET_KEY from SOPS-encrypted Secret
-    extraSecretEnv:
-      SUPERSET_SECRET_KEY: placeholder   # overridden via envFromSecret below
+    # Pull creds + SECRET_KEY + DB/Redis connection from SOPS-encrypted Secret
     envFromSecret: superset-secrets
     envFromSecrets: []
+
+    # Install postgres + redis drivers (absent from stock apache/superset image)
+    bootstrapScript: |
+      #!/bin/bash
+      pip install \
+        psycopg2-binary==2.9.6 \
+        redis==4.5.4 \
+        authlib==1.3.0
+      if [ ! -f ~/bootstrap ]; then echo "Running Superset with UID $(id -u)" > ~/bootstrap; fi
 
     # Superset Python config (OIDC + role mapping)
     # Chart generates a ConfigMap `superset-config` and mounts as /app/pythonpath/{key}
