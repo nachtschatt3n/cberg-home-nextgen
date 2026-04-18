@@ -35,12 +35,12 @@ spec:
       - superset-secrets
 
     # Install postgres + redis + OAuth drivers into the Superset venv.
-    # apache/superset:5.0.0 has its runtime in /app/.venv but no pip inside the
-    # venv — the only way to install into the venv's site-packages is to invoke
-    # `python -m pip` using the venv's python binary.
+    # apache/superset:5.0.0 uses `uv` for package management (no pip inside the venv).
+    # `uv pip install --python /app/.venv/bin/python` targets the runtime venv's
+    # site-packages, matching where the app imports from.
     bootstrapScript: |
       #!/bin/bash
-      /app/.venv/bin/python -m pip install \
+      uv pip install --python /app/.venv/bin/python \
         psycopg2-binary==2.9.6 \
         redis==4.5.4 \
         authlib==1.3.0
