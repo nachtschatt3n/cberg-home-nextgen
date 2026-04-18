@@ -500,7 +500,7 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "VXUwNHIyb2lqMjNvanUy",        # base64 typo variant of same — accepted
         "OWgzZm84aDNnZm8zaWhq",        # kopia KOPIA_PASSWORD/SERVER_PASSWORD base64 — kopia removed
         "credentialsSecret: aws-credentials-secret", # commented-out SecretRef, not a value
-        "eyJpc3MiOiJiYzBlMWJmNjI5Yzg0ZWUyODhlYjBhMWNmM2ViNjYw", # HA long-lived token — see commit 2b0665fd; REVOKE in HA→Profile→Security if still valid
+        "eyJpc3MiOiJiYzBlMWJmNjI5Yzg0ZWUyODhlYjBhMWNmM2ViNjYw", # HA long-lived token from deleted script commit 2b0665fd — CONFIRMED REVOKED 2026-04-18 (verified via HA UI)
         "serviceAccountSecret: influxdb-backup-key",   # commented-out SecretRef
         "storageAccountSecret: influxdb-backup-azure", # commented-out SecretRef
         'api_key: "{FRIGATE_GENAI_API_KEY}"',          # commented-out templated reference

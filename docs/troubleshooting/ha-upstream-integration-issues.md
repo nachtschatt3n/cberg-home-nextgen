@@ -1,12 +1,14 @@
-# Home Assistant — Known Upstream Integration Issues
+# Home Assistant — Known Integration Issues
 
-Tracks integration errors that are **not cluster issues** — either upstream service problems or known integration bugs. These noise up the health check's error count but require no local action beyond awareness.
+Tracks HA integration errors that are either **upstream service problems** (no local action possible) or **known issues requiring user action** (integration config change, token refresh, etc.). These all noise up the health check's error count.
 
-**Last reviewed:** 2026-04-17 (HA Core 2026.4.2)
+**Last reviewed:** 2026-04-18 (HA Core 2026.4.2)
+
+> **Quick summary**: sections below marked *(UPSTREAM — ACCEPTED)* need no action. Sections marked *(USER ACTION NEEDED)* require a manual fix.
 
 ---
 
-## Tesla Wall Connector — Intermittent timeouts (ACCEPTED)
+## Tesla Wall Connector — Intermittent timeouts *(UPSTREAM — ACCEPTED)*
 
 **Symptom** (HA logs):
 ```
@@ -33,7 +35,7 @@ ERROR (MainThread) [homeassistant.components.tesla_wall_connector.coordinator]
 
 ---
 
-## Miele — pymiele SSE TransferEncodingError (UPSTREAM BUG, NO FIX YET)
+## Miele — pymiele SSE TransferEncodingError *(UPSTREAM BUG, NO FIX YET — ACCEPTED)*
 
 **Symptom** (HA logs):
 ```
@@ -59,7 +61,7 @@ ERROR (MainThread) [homeassistant.components.miele.coordinator] Timeout fetching
 
 ---
 
-## Tibber Realtime — 502 Bad Gateway (UPSTREAM BACKEND)
+## Tibber Realtime — 502 Bad Gateway *(UPSTREAM BACKEND — ACCEPTED)*
 
 **Symptom** (HA logs):
 ```
@@ -86,6 +88,43 @@ ERROR (MainThread) [tibber.realtime] Watchdog: Connection is down
 - If errors persist >24h without recovery → check https://status.tibber.com/
 - If pytibber bumps to a major version (0.38+) that changes API contract
 - If MQTT Pulse feed also drops (then investigate local — MQTT broker, Pulse bridge power)
+
+---
+
+## Samsung FamilyHub Fridge — SmartThings auth failure *(USER ACTION NEEDED)*
+
+**Symptom** (HA logs, only at startup — no polling retry between restarts):
+```
+ERROR [custom_components.samsung_familyhub_fridge.api] SmartThings authentication failed
+  (HTTP 401). Token may have expired — SmartThings personal access tokens expire after 24 hours
+ERROR [custom_components.samsung_familyhub_fridge.api] Authentication failed while fetching
+  File ID refresher data: SmartThings token expired or is invalid. Please re-authenticate
+  with a new token.
+```
+
+**Root cause:** the `samsung_familyhub_fridge` custom integration (community-maintained, not HA core) uses a **SmartThings Personal Access Token (PAT)** for auth. Samsung's PATs expire after **24 hours** — the integration has no refresh flow, so every HA restart >24h after token generation fails auth and the integration runs with stale data.
+
+**Why this can't be "accepted":** the integration isn't actually polling — fridge camera feed, inventory, and sensor data are all stale until the token is refreshed. Not a noise issue; it's a real functional break.
+
+**Fix:**
+1. Generate a new PAT at https://account.smartthings.com/tokens (scope: `r:devices:*` + `r:locations:*`)
+2. Home Assistant → **Settings → Devices & Services** → Samsung FamilyHub Fridge → **Reconfigure**
+3. Paste the new PAT
+4. Restart HA and verify no 401 errors in logs
+
+**Longer term:** replace with the official SmartThings integration (HA core) which uses OAuth with automatic refresh — supports most SmartThings-paired Samsung appliances but may lack FamilyHub-specific features (camera feed). Or fork the custom integration to implement OAuth flow.
+
+**When to revisit:** every PAT refresh cycle (manual — there is no notification). Consider setting a 21-day calendar reminder.
+
+---
+
+## Historical HA long-lived token leak *(REVOKED — NOT AN ONGOING ISSUE)*
+
+A HA long-lived access token (`iss: bc0e1bf629c84ee288eb0a1cf3eb6609`) was committed in plaintext in a now-deleted script `add_shelly_devices_to_hass.sh` (commit `2b0665fd`, 2025-04-17). The repo is public.
+
+**Verification (2026-04-18):** HA → Profile → Security shows only 2 long-lived tokens (`ai-harness`, `ai-harness-test`, both created last week). The leaked token is **not present** — either revoked or never re-created after the HA rebuild. No action required.
+
+Security scanner `runbooks/security-check.py` has the token's iss claim in `ACCEPTED_CRED_PATTERNS` so the pattern doesn't flag on every scan.
 
 ---
 
