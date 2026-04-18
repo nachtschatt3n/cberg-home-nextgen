@@ -55,12 +55,27 @@ spec:
                 exit 1
               }
 
-              # Single-node: set default replicas to 0 to avoid permanent YELLOW
-              echo "Setting default replicas to 0 (single-node cluster)..."
+              # Single-node cluster — make replica count elastic with number of data nodes:
+              # auto_expand_replicas=0-1 means 0 replicas on 1-node (GREEN), 1 replica on 2+-node.
+              # Using this instead of a hardcoded `number_of_replicas: 0` template because
+              # Elastic-managed templates (metrics-otel@template, logs@template — priority 100-500)
+              # beat any low-priority catch-all template we define. Per-index settings are applied
+              # regardless of which template created the index.
+              echo "Setting auto_expand_replicas=0-1 on ALL existing indices..."
+              curl -sSf $CACERT $AUTH \
+                -H 'Content-Type: application/json' \
+                -X PUT "$${ES_URL}/_all/_settings" \
+                -d '{"index":{"auto_expand_replicas":"0-1"}}'
+              echo ""
+
+              # Also keep the legacy catch-all template (priority 1) as a safety net for
+              # non-Elastic indices created outside composed templates. Sets the SAME
+              # auto_expand_replicas so freshly-created indices inherit it on their first write.
+              echo "Upserting single-node-defaults index template..."
               curl -sSf $CACERT $AUTH \
                 -H 'Content-Type: application/json' \
                 -X PUT "$${ES_URL}/_index_template/single-node-defaults" \
-                -d '{"index_patterns":["*"],"priority":1,"template":{"settings":{"number_of_replicas":0}}}'
+                -d '{"index_patterns":["*"],"priority":1,"template":{"settings":{"index":{"auto_expand_replicas":"0-1"}}}}'
               echo ""
 
               # Apply ILM policies
@@ -95,6 +110,22 @@ spec:
 
               set_dsl "logs-generic-default"
               set_dsl "metrics-generic.otel-default"
+
+              # Override Elastic-managed @custom component templates so rolled-over
+              # backing indices inherit auto_expand_replicas=0-1 automatically.
+              # Elastic's templates (metrics-otel@template priority=120, logs@template,
+              # traces-otel@template, etc.) all compose in <kind>@custom as their final
+              # extension point — empty by default. Putting our setting there makes it
+              # win the template composition (last-wins) without touching upstream
+              # Elastic templates that may change on version upgrades.
+              echo "Overriding @custom component templates with auto_expand_replicas=0-1..."
+              for kind in metrics logs traces metrics-otel logs-otel traces-otel; do
+                curl -sSf $CACERT $AUTH \
+                  -H 'Content-Type: application/json' \
+                  -X PUT "$${ES_URL}/_component_template/$${kind}@custom" \
+                  -d '{"template":{"settings":{"index":{"auto_expand_replicas":"0-1"}}}}'
+                echo ""
+              done
 
               echo "OTel ILM policies and DSL retention applied successfully."
       volumes:
