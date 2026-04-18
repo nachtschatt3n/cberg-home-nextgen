@@ -869,6 +869,15 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "databases/superset-celerybeat",  # same image
         "databases/superset-worker",      # same image
     }
+    # Workloads with legitimate hostNetwork (mDNS/Matter/device discovery that
+    # requires host network namespace — not a containerized service).
+    # Reviewed 2026-04-18.
+    ACCEPTED_HOST_NETWORK = {
+        "home-automation/esphome",              # ESPHome mDNS + discovery
+        "home-automation/home-assistant",       # HA integration discovery (mDNS, SSDP, Zeroconf)
+        "home-automation/matter-server",        # Matter protocol requires host network
+        "home-automation/music-assistant-server", # Cast/Chromecast discovery via mDNS
+    }
     def _pod_base(ns_name: str) -> str:
         # Strip K8s pod suffix (`-abcde-12345`) → `namespace/deployment`
         import re
@@ -892,7 +901,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
                 uid = sc.get("runAsUser", psc.get("runAsUser"))
                 if uid == 0 and ns not in INFRA_NS and pod_base not in ACCEPTED_ROOT_UID:
                     root_uid.append(f"`{ns}/{name}` ({c['name']})")
-            if spec.get("hostNetwork") and ns not in INFRA_NS:
+            if spec.get("hostNetwork") and ns not in INFRA_NS and pod_base not in ACCEPTED_HOST_NETWORK:
                 host_net.append(f"`{ns}/{name}`")
             if spec.get("hostPID") and ns not in INFRA_NS:
                 f.add(WARNING, f"hostPID: `{ns}/{name}`")
