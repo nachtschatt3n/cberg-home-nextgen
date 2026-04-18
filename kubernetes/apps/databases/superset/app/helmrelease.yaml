@@ -53,6 +53,12 @@ spec:
         import os
         from flask_appbuilder.security.manager import AUTH_OAUTH
 
+        # Behind TLS-terminating nginx ingress: trust X-Forwarded-* headers so
+        # Flask builds OAuth callback URLs with the external https scheme
+        # (otherwise redirect_uri is sent as http://... and Authentik rejects it).
+        ENABLE_PROXY_FIX = True
+        PROXY_FIX_CONFIG = {"x_for": 1, "x_proto": 1, "x_host": 1, "x_port": 1, "x_prefix": 1}
+
         AUTH_TYPE = AUTH_OAUTH
         AUTH_USER_REGISTRATION = True
         AUTH_USER_REGISTRATION_ROLE = "Gamma"
