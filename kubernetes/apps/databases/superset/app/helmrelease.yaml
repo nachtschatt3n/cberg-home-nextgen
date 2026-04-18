@@ -29,11 +29,12 @@ spec:
       tag: 5.0.0
       pullPolicy: IfNotPresent
 
-    # Pull creds + SECRET_KEY + DB/Redis connection from SOPS-encrypted Secret
-    envFromSecret: superset-secrets
-    envFromSecrets: []
+    # Keep chart's default config Secret (contains bootstrap script + superset_config.py scaffold);
+    # add our OIDC/DB/Redis creds via a second envFrom reference.
+    envFromSecrets:
+      - superset-secrets
 
-    # Install postgres + redis drivers (absent from stock apache/superset image)
+    # Install postgres + redis + OAuth drivers (absent from stock apache/superset image)
     bootstrapScript: |
       #!/bin/bash
       pip install \
