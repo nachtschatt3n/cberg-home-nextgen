@@ -93,28 +93,48 @@ ERROR (MainThread) [tibber.realtime] Watchdog: Connection is down
 
 ## Samsung FamilyHub Fridge — SmartThings auth failure *(USER ACTION NEEDED)*
 
-**Symptom** (HA logs, only at startup — no polling retry between restarts):
+**Symptom** (HA logs, at startup or when polling tries to resume):
 ```
 ERROR [custom_components.samsung_familyhub_fridge.api] SmartThings authentication failed
   (HTTP 401). Token may have expired — SmartThings personal access tokens expire after 24 hours
-ERROR [custom_components.samsung_familyhub_fridge.api] Authentication failed while fetching
-  File ID refresher data: SmartThings token expired or is invalid. Please re-authenticate
-  with a new token.
 ```
 
-**Root cause:** the `samsung_familyhub_fridge` custom integration (community-maintained, not HA core) uses a **SmartThings Personal Access Token (PAT)** for auth. Samsung's PATs expire after **24 hours** — the integration has no refresh flow, so every HA restart >24h after token generation fails auth and the integration runs with stale data.
+### Root cause — verified
 
-**Why this can't be "accepted":** the integration isn't actually polling — fridge camera feed, inventory, and sensor data are all stale until the token is refreshed. Not a noise issue; it's a real functional break.
+**Samsung changed SmartThings PAT policy on 2024-12-30:** new PATs expire after **24 hours**; older PATs created before that date may retain expiration up to 50 years. This is an intentional Samsung policy, not an integration bug.
 
-**Fix:**
-1. Generate a new PAT at https://account.smartthings.com/tokens (scope: `r:devices:*` + `r:locations:*`)
-2. Home Assistant → **Settings → Devices & Services** → Samsung FamilyHub Fridge → **Reconfigure**
-3. Paste the new PAT
-4. Restart HA and verify no 401 errors in logs
+**Integration**: `samsung_familyhub_fridge` v0.0.1 by [@ibielopolskyi](https://github.com/ibielopolskyi/smartthings_fridge_camera) (community HACS; not HA core).
 
-**Longer term:** replace with the official SmartThings integration (HA core) which uses OAuth with automatic refresh — supports most SmartThings-paired Samsung appliances but may lack FamilyHub-specific features (camera feed). Or fork the custom integration to implement OAuth flow.
+Investigation of the integration source (2026-04-18) shows:
 
-**When to revisit:** every PAT refresh cycle (manual — there is no notification). Consider setting a 21-day calendar reminder.
+- `auth.py` defines `SmartThingsOAuth` (PKCE flow, refreshable) and `SamsungAccountAuth` (headless email/password) classes
+- **But** `config_flow.py` only accepts a plain `token` string — OAuth/Samsung Account flows are helpers not wired into the UI
+- Latest (PR #17, merged 2026-04-10) adds 401/403 detection → triggers HA's built-in re-auth flow (UI prompt), but still does **not** auto-refresh tokens
+
+So even on the newest version, the user has to manually re-enter a token whenever it expires.
+
+### Options (in order of least-to-most work)
+
+1. **Short-term patch** (what most users do): re-enter a PAT every 24h via HA reauth UI. Tedious but works.
+2. **Use a grandfathered PAT**: if you have one created before 2024-12-30 at https://account.smartthings.com/tokens, it still honors its original expiration (up to 50 years). Check `smartthings.com/tokens` — tokens created before the policy change list their expiration date.
+3. **Upgrade the custom integration to latest** (0.0.1 → main branch via HACS re-download): gets the 401 detection + re-auth UI prompt. Still manual refresh, but you get notified.
+4. **Generate OAuth access token externally**, paste into HA. Requires:
+   - Run `smartthings apps:create` (SmartThings CLI) → get `client_id` + `client_secret`
+   - Use the integration's `SmartThingsOAuth` helper (or your own script) to do PKCE flow → get `access_token` + `refresh_token`
+   - Paste `access_token` into HA. Still expires in 24h (OAuth access tokens are also short-lived); would need a cron job calling `/oauth/token` with refresh_token and updating HA config entry.
+5. **Switch to HA core SmartThings integration**: OAuth with automatic refresh built-in (supported officially). **Loses**: fridge camera feed, inventory, FamilyHub-specific door sensors — these aren't in HA core's SmartThings integration.
+6. **Fork and contribute auto-refresh upstream**: `auth.py` has `refresh(refresh_token)` already implemented; wire it into `DataCoordinator._async_update_data()` in `api.py` to refresh on 401 and call `update_token(...)` on the hub. Merge via PR to the repo.
+
+### Recommendation
+
+For now: **option 3** (upgrade to latest version) is the lowest effort — gets you notified when expiry hits instead of silent data staleness. Combine with **option 2** (hunt for a grandfathered PAT) if any of your previously-created PATs pre-date 2024-12-30.
+
+For durable fix: **option 6** is the right investment if the fridge camera/inventory features matter — `auth.py` already has the building blocks. Otherwise option 5 accepts feature loss for reliability.
+
+**When to revisit:** whenever the 401 returns. Sources:
+- [Samsung PAT policy change discussion (SmartThings Community)](https://community.smartthings.com/t/old-personal-access-token-stopped-working-after-the-expiration-change/293450)
+- [Integration repo](https://github.com/ibielopolskyi/smartthings_fridge_camera)
+- [PR #17 — auth refresh & OAuth flow](https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/17)
 
 ---
 
