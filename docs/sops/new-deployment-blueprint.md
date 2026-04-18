@@ -3,7 +3,7 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.04.18`
+> Version: `2026.04.18b`
 > Last Updated: `2026-04-18`
 > Owner: `Platform`
 
@@ -465,6 +465,98 @@ Failure hint:
 
 ---
 
+## Known Gotchas (learned the hard way)
+
+Common pitfalls when onboarding a new Helm-based app into this cluster. Check these before debugging pod-level errors.
+
+### 1. Bitnami images — always use `bitnamilegacy/*`
+
+Bitnami deleted all pre-2026 image tags from `docker.io/bitnami/*` in late 2025; the tags live in `docker.io/bitnamilegacy/*` with identical content. Helm charts using Bitnami subcharts (postgresql, redis, mongodb, etc.) still reference the old tags and will fail with `image not found` unless overridden.
+
+Fix pattern for any chart with Bitnami dependencies:
+```yaml
+postgresql:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+redis:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis
+```
+
+### 2. Flux `targetNamespace` overrides per-manifest namespaces
+
+Flux Kustomizations with `targetNamespace: {app-ns}` apply that namespace to **every resource** in the kustomize build, silently including resources whose manifest declares a different namespace (e.g. `longhorn.io/v1beta2/Volume` targeted at `storage`). Result: a broken duplicate in the app namespace that's never attached.
+
+Workaround: keep cross-namespace resources (like Longhorn Volume CRs) OUT of `app/kustomization.yaml` and apply them once manually. Document the rule in the kustomization file itself with a comment explaining why it's absent.
+
+### 3. Helm chart `configFromSecret` / `envFromSecret` replace defaults
+
+Many charts (Apache Superset included) support these values to point the chart at an existing Secret for config/env. But using them **replaces** (not merges) the chart's default secret which often contains additional keys (e.g. the chart's bootstrap script, default env vars like `DB_HOST`). Result: init containers break with missing env vars or missing bootstrap files.
+
+Two fix patterns:
+- Use **`envFromSecrets`** (plural) to ADD your Secret alongside the chart's default. Chart's default secret stays intact.
+- Or put everything the chart's default provided INTO your Secret (e.g. copy `DB_HOST`, `DB_PORT`, `REDIS_HOST`, etc. into your SOPS-encrypted Secret).
+
+### 4. Python apps: install drivers into the actual runtime venv
+
+Images packaged with a venv (e.g. `apache/superset:5.0.0` uses `/app/.venv`) need pip installs to target that venv, not the system Python. Modern Apache images use `uv` — not pip — and the venv may have NO pip binary inside.
+
+Correct bootstrap pattern for Superset-like images:
+```bash
+uv pip install --python /app/.venv/bin/python <packages>
+```
+
+`pip install` alone → installs to system Python, invisible to the app.
+`/app/.venv/bin/pip install` → fails if venv has no pip.
+
+### 5. Celery/async workers: cap concurrency on fat nodes
+
+Celery defaults worker concurrency to CPU count. On nuc14 nodes (18 threads), that's 18 processes × ~100-200MB each = 2-4GB just idle. Either:
+
+- Set explicit `--concurrency=N` in the container's `command` (tune to actual workload)
+- Bump memory `limits` to match worst case
+
+Symptom: `Exit Code: 137 (OOMKilled)` on worker pods after the image loads.
+
+### 6. Authentik blueprints — `copy-blueprints` init must wildcard
+
+The Authentik HelmRelease in this cluster has a custom `copy-blueprints` init container that copies files from the ConfigMap volume (read-only) into an emptyDir (writable) that the worker mounts. If that init uses a hardcoded list of `cp` commands (as it did originally), adding a new blueprint YAML to the ConfigMap is silently ignored.
+
+Correct init command:
+```bash
+cp /blueprints-source/*.yaml /blueprints/ || true
+```
+
+### 7. PrometheusRule for apps with init-db Jobs
+
+`kube_pod_status_ready{condition="true"} == 0` matches **Completed** (Succeeded-phase) Job pods — they have `ready=false` by design. Without exclusion, alerts fire immediately after the init job finishes.
+
+Correct expression:
+```promql
+sum by (namespace, pod) (
+  kube_pod_status_ready{..., condition="true"}
+  unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+) == 0
+```
+
+### 8. Homepage icon verification
+
+The repo convention uses `gethomepage.dev/icon: "foo.png"` which Homepage resolves against dashboard-icons repos — but not every app has a PNG there. Before committing, verify:
+
+```bash
+curl -sI "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main/png/<name>.png" | head -1
+```
+
+If 404, fall back to:
+- **Simple Icons**: `si-<simpleicons-slug>` (e.g. `si-apachesuperset`) — check at https://simpleicons.org
+- **Material Design Icons**: `mdi-<name>` (e.g. `mdi-database-eye`) — check at https://pictogrammers.com/library/mdi
+
+Keep the value bare (no `si-` quotes or URL) — Homepage's resolver handles the prefix.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely Cause | Action |
@@ -477,6 +569,14 @@ Failure hint:
 | Metrics missing | No ServiceMonitor or label mismatch | Validate ServiceMonitor selector and service labels |
 | No AlertManager alerts for app | Missing PrometheusRule or wrong label | Create `{app}-alerts.yaml` with `release: kube-prometheus-stack` label |
 | Logs missing in Kibana | edot-collector issue or pod excluded | Check edot-collector Deployment in `monitoring` namespace and pod annotations |
+| PodNotReady alert fires for Completed Job pods | `kube_pod_status_ready{condition="true"}` is 0 for Succeeded pods | Add `unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1` to the expr |
+| `bitnami/*` image 404 pulling | Bitnami deleted pre-2026 tags from Docker Hub | Override `image.repository` to `bitnamilegacy/*` (same tag lives there) |
+| Longhorn Volume CR created in wrong namespace | Flux `targetNamespace` overrode `namespace: storage` | Keep `longhorn-volume.yaml` out of `app/kustomization.yaml`; apply once manually with `kubectl apply` (see Storage blueprint section) |
+| Authentik blueprint not picked up after ConfigMap change | `copy-blueprints` init hardcoded file list in authentik HelmRelease | Ensure init uses `cp /blueprints-source/*.yaml /blueprints/` wildcard — any new key in the ConfigMap is auto-copied |
+| Homepage icon broken (404) | Dashboard-icons repo doesn't ship that app | Use `si-<name>` (Simple Icons) or `mdi-<name>` (Material Design) prefix — verify URL before committing with `curl -sI https://cdn.simpleicons.org/<name>` |
+| Helm chart with bundled Postgres needs custom PG driver | Image lacks `psycopg2` / other connector | Use chart's `bootstrapScript` value — install into the runtime venv path (e.g. Superset: `uv pip install --python /app/.venv/bin/python psycopg2-binary==X`) |
+| Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |
+| Celery-based app OOM-kills on fat nodes | Default concurrency = CPU count (18 on nuc14) → huge memory | Set explicit `--concurrency=N` in container `command` and bump memory limit |
 
 ---
 
@@ -606,3 +706,4 @@ Rollback success criteria:
 | `2026.03.11` | `2026-03-11` | Add mandatory AlertManager PrometheusRule and Elasticsearch log verification steps |
 | `2026.04.16` | `2026-04-16` | Update logging references from fluent-bit to edot-collector / OTel field mappings |
 | `2026.04.18` | `2026-04-18` | Add speaking-name rule for `longhorn-static` volumes; mandate Authentik provider declarations via SOPS-encrypted blueprint ConfigMap (forward-auth + OAuth2/OIDC) |
+| `2026.04.18b` | `2026-04-18` | Add "Known Gotchas" section (Bitnami legacy images, Flux targetNamespace override, Helm configFromSecret pitfall, venv pip for modern Python images, Celery concurrency, Authentik copy-blueprints wildcard, PromRule Succeeded-phase exclusion, Homepage icon verification) |

@@ -11,7 +11,7 @@ metadata:
     gethomepage.dev/name: "Superset"
     gethomepage.dev/description: "Data exploration & visualization"
     gethomepage.dev/group: "Databases"
-    gethomepage.dev/icon: "apache-superset.png"
+    gethomepage.dev/icon: "si-apachesuperset"
     gethomepage.dev/pod-selector: "app=superset"
   labels:
     gethomepage.dev/enabled: "true"
