@@ -109,16 +109,16 @@ ERROR (MainThread) [tibber.realtime] Watchdog: Connection is down
 
 ---
 
-## Samsung FamilyHub Fridge — SmartThings auth failure *(FORK DEPLOYED, PR OPEN — USER ACTION: switch to OAuth mode)*
+## Samsung FamilyHub Fridge — OAuth auto-refresh *(OAUTH MODE LIVE — camera-feed endpoint limitation)*
 
-**Status 2026-04-18:** forked the community integration, implemented OAuth-via-HA-core-smartthings auto-refresh, deployed to the live HA pod, submitted PR upstream.
+**Status 2026-04-19:** fork deployed, config entry migrated to `auth_mode: oauth`, **zero 401 errors** since switch. OAuth2Session auto-refresh confirmed working end-to-end.
 
 - Fork: https://github.com/nachtschatt3n/smartthings_fridge_camera (branch `feat/oauth-via-ha-core-smartthings`)
-- Upstream PR: https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/23
-- Live HA version: `0.1.0` (synced from fork, 2026-04-18)
-- Config entry: migrated v1→v2 automatically, currently `auth_mode: pat` (will keep erroring until the user switches to OAuth via UI)
-
-**Next step for you:** HA UI → **Settings → Devices & Services → Samsung Fridge Camera → Reconfigure → choose "Reuse HA core SmartThings OAuth (recommended)"**. After saving, the integration will reuse the HA core SmartThings OAuth2 credentials (with auto-refresh) and no further token rotation is needed.
+- Upstream PR: https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/23 (follow-up fix `af4afad` for reauth/reconfigure flow compatibility added)
+- Live HA version: `0.1.0` (synced from fork)
+- Config entry `01KNWFCMT2W8DNTWWEJMY01VGZ`: `auth_mode: oauth`, `linked_smartthings_entry_id: 01JWKXKXB3MFTHCDPVH7CDECVX`, `device_id: 0bd9c671-e43c-b212-afd8-9d79707188a7`
+- Remaining issue: the *in-fridge camera feed* endpoint returns `HTTP 400 "No samsung id available"`. This is a Samsung-specific API quirk — the camera view-inside capability requires an OEM token obtained via Samsung Account login (`SamsungAccountAuth` class in `auth.py`), not the standard SmartThings OAuth token. All OTHER fridge data (17 entities: temps, doors, ice maker, power, water filter) works fine via HA core smartthings.
+- Follow-up (lower priority): extend the fork to optionally authenticate via Samsung Account for the camera endpoint only, keeping SmartThings OAuth for the generic data. Not urgent — the HA core smartthings integration already covers everything except the camera feed.
 
 
 
