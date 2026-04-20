@@ -1,0 +1,157 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sure
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: sure
+      version: 0.6.9
+      sourceRef:
+        kind: HelmRepository
+        name: sure
+        namespace: flux-system
+  install:
+    timeout: 20m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 20m
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  dependsOn:
+    - name: sure-pg
+    - name: sure-redis
+  values:
+    image:
+      repository: ghcr.io/we-promise/sure
+      # tag defaults to Chart.appVersion (v0.6.9)
+      pullPolicy: IfNotPresent
+
+    # ---------------- Rails config ----------------
+    rails:
+      env: production
+      # Chart loads SECRET_KEY_BASE + ACTIVE_RECORD_ENCRYPTION_* directly from this Secret
+      existingSecret: sure-secret
+      encryptionEnv:
+        enabled: true
+      settings:
+        SELF_HOSTED: "true"
+        ONBOARDING_STATE: "open"
+        AI_DEBUG_MODE: "false"
+      # Explicit, minimal extra env. The DATABASE_URL/REDIS_URL helpers auto-resolve
+      # to "" once CNPG + Redis subcharts are disabled, so we inject them ourselves
+      # via extraEnvVars (below).
+      extraEnv: {}
+      extraEnvVars:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: REDIS_URL
+        - name: OIDC_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OIDC_CLIENT_ID
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OIDC_CLIENT_SECRET
+        - name: OIDC_ISSUER
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OIDC_ISSUER
+      externalAssistant:
+        enabled: false
+
+    # ---------------- Disable bundled DB / Redis (Path C) ----------------
+    # We run our own Postgres (office/sure/postgres-helmrelease.yaml) and
+    # Redis (redis-helmrelease.yaml) via bjw-s app-template. This keeps the
+    # cluster free of CloudNativePG + OT-Redis-Operator just for one app.
+    cnpg:
+      enabled: false
+      cluster:
+        enabled: false
+    cloudnative-pg:
+      enabled: false
+    redisOperator:
+      enabled: false
+      managed:
+        enabled: false
+    redisSimple:
+      enabled: false
+
+    # ---------------- Migrations ----------------
+    migrations:
+      strategy: job
+
+    # ---------------- Web (Rails server) ----------------
+    web:
+      enabled: true
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 1536Mi
+      # Mount PVC for Active Storage uploads (transaction attachments etc.)
+      extraVolumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: sure-storage
+      extraVolumeMounts:
+        - name: uploads
+          mountPath: /rails/storage
+
+    # ---------------- Worker (Sidekiq) ----------------
+    worker:
+      enabled: true
+      replicas: 1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      extraVolumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: sure-storage
+      extraVolumeMounts:
+        - name: uploads
+          mountPath: /rails/storage
+
+    # ---------------- Ingress (internal, Homepage-registered) ----------------
+    ingress:
+      enabled: true
+      className: internal
+      annotations:
+        gethomepage.dev/enabled: "true"
+        gethomepage.dev/name: "Sure"
+        gethomepage.dev/group: "Office"
+        gethomepage.dev/icon: "si-maybefinance"
+        gethomepage.dev/description: "Personal finance — accounts, budgets, investments"
+      hosts:
+        - host: sure.${SECRET_DOMAIN}
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - hosts:
+            - sure.${SECRET_DOMAIN}
+          secretName: sure-tls

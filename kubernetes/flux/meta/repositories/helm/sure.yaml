@@ -1,0 +1,10 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: sure
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://we-promise.github.io/sure/
+  timeout: 3m

@@ -1,0 +1,81 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: sure-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: sure.pods.health
+      rules:
+        - alert: SurePodNotReady
+          annotations:
+            description: Sure pod {{ $labels.pod }} has been not ready for more than 5 minutes. Web UI, background jobs, or data sync may be unavailable.
+            summary: Sure pod {{ $labels.pod }} is not ready
+          # Exclude Completed migration Job pods (they show ready=false but are expected)
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="office", pod=~"sure-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            category: office
+            component: sure
+            severity: critical
+        - alert: SurePodCrashLooping
+          annotations:
+            description: Sure pod {{ $labels.pod }} has restarted {{ $value | printf "%.0f" }} times in the last 15 minutes. Check logs for migration, OIDC, or DB connectivity errors.
+            summary: Sure pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="office", pod=~"sure-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: office
+            component: sure
+            severity: critical
+        - alert: SurePodRestarted
+          annotations:
+            description: Sure pod {{ $labels.pod }} has restarted at least once in the last 15 minutes. Monitor for repeated restarts.
+            summary: Sure pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="office", pod=~"sure-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: office
+            component: sure
+            severity: warning
+    - interval: 1m
+      name: sure.backends.health
+      rules:
+        - alert: SurePostgresDown
+          annotations:
+            description: Sure PostgreSQL pod {{ $labels.pod }} is not ready. Sure web and worker cannot start or persist data.
+            summary: Sure PostgreSQL backend is down
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="office", pod=~"sure-pg-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: office
+            component: sure-postgres
+            severity: critical
+        - alert: SureRedisDown
+          annotations:
+            description: Sure Redis pod {{ $labels.pod }} is not ready. Sidekiq workers will queue with no backpressure and cache will degrade.
+            summary: Sure Redis backend is down
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="office", pod=~"sure-redis-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: office
+            component: sure-redis
+            severity: warning

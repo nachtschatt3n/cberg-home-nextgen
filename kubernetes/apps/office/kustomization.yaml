@@ -16,3 +16,4 @@ resources:
  - ./penpot/ks.yaml
  - ./nextcloud-mcp/ks.yaml
  - ./vaultwarden/ks.yaml
+ - ./sure/ks.yaml
