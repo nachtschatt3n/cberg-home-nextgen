@@ -355,7 +355,8 @@ kubectl get pods -n kube-system -l app=csi-smb-controller
 ## Solarfocus Pellet Heater (VNC → MQTT)
 
 **Deployment:** `kubernetes/apps/home-automation/solarfocus-scraper/`
-**Source:** `apps/solarfocus-scraper/`
+**Source:** [`github.com/nachtschatt3n/solarfocus-scraper`](https://github.com/nachtschatt3n/solarfocus-scraper) (separate public repo — MIT)
+**Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper:latest`
 
 The heater (Solarfocus pellet^top) exposes no Modbus, so we drive its VNC
 touchscreen, OCR the visible values with Tesseract, and publish to MQTT
