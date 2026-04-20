@@ -15,6 +15,7 @@ resources:
   - ./next-ai-draw-io-alerts.yaml
   - ./paperclip-alerts.yaml
   - ./tube-archivist-alerts.yaml
+  - ./solarfocus-scraper-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml
   - ./alertmanager-ingress.yaml

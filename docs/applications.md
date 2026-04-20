@@ -11,7 +11,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 9 |
-| home-automation | 17 |
+| home-automation | 18 |
 | databases | 10 |
 | monitoring | 12 |
 | office | 10 |
@@ -57,6 +57,7 @@
 | node-red | Flow-based automation and integrations | Internal | Home Automation |
 | frigate-nvr | AI-powered network video recorder (Coral TPU) | Internal | Home Automation |
 | scrypted-nvr | Additional video management platform | Internal | Home Automation |
+| solarfocus-scraper | Solarfocus pellet^top heater scraper (VNC + OCR → MQTT with HA auto-discovery) | Internal (metrics + status UI) | — |
 | zigbee2mqtt | Zigbee device integration via MQTT | Internal | Home Automation |
 | mosquitto | MQTT broker for IoT communications | Internal (cluster) | — |
 | music-assistant-server | Multi-room audio management | Internal | Home Automation |

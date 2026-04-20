@@ -21,6 +21,7 @@ resources:
  # support, or after building a custom kernel extension with CONFIG_IPV6_MROUTE=y.
  # - ./otbr/ks.yaml
  - ./scrypted-nvr/ks.yaml
+ - ./solarfocus-scraper/ks.yaml
  - ./teslamate/ks.yaml
  - ./traccar/ks.yaml
  - ./trmnl-ha/ks.yaml

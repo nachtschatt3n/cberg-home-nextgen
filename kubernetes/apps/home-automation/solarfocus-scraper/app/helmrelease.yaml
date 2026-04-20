@@ -1,0 +1,136 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: solarfocus-scraper
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      scraper:
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/solarfocus-scraper
+              tag: latest
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: VNC_HOST
+                valueFrom:
+                  secretKeyRef:
+                    name: solarfocus-scraper-secret
+                    key: VNC_HOST
+              - name: VNC_PORT
+                valueFrom:
+                  secretKeyRef:
+                    name: solarfocus-scraper-secret
+                    key: VNC_PORT
+              - name: VNC_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: solarfocus-scraper-secret
+                    key: VNC_PASSWORD
+              - name: MQTT_HOST
+                value: "mosquitto-internal.home-automation.svc.cluster.local"
+              - name: MQTT_PORT
+                value: "1883"
+              - name: MQTT_TOPIC_PREFIX
+                value: "solarfocus"
+              - name: MQTT_DISCOVERY_PREFIX
+                value: "homeassistant"
+              - name: MQTT_DEVICE_ID
+                value: "solarfocus_pellettop"
+              - name: SCRAPE_INTERVAL_SECONDS
+                value: "300"
+              - name: VNC_CONNECT_TIMEOUT_SECONDS
+                value: "10"
+              - name: CLICK_DELAY_SECONDS
+                value: "1.5"
+              - name: METRICS_PORT
+                value: "8080"
+              - name: LOG_LEVEL
+                value: "INFO"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  initialDelaySeconds: 60
+                  periodSeconds: 60
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+                  initialDelaySeconds: 60
+                  periodSeconds: 60
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+
+    service:
+      app:
+        controller: scraper
+        ports:
+          metrics:
+            port: 8080
+
+    serviceMonitor:
+      app:
+        serviceName: solarfocus-scraper
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 30s
+            scrapeTimeout: 15s
+        labels:
+          release: kube-prometheus-stack
+
+    persistence:
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

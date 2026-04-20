@@ -348,3 +348,65 @@ Used by:
 kubectl get pods -n kube-system -l app=csi-smb-node
 kubectl get pods -n kube-system -l app=csi-smb-controller
 ```
+
+
+---
+
+## Solarfocus Pellet Heater (VNC → MQTT)
+
+**Deployment:** `kubernetes/apps/home-automation/solarfocus-scraper/`
+**Source:** `apps/solarfocus-scraper/`
+
+The heater (Solarfocus pellet^top) exposes no Modbus, so we drive its VNC
+touchscreen, OCR the visible values with Tesseract, and publish to MQTT
+with Home Assistant auto-discovery.
+
+### Architecture
+
+- **State machine** over 9 UI screens (main, auswahlmenü, kundenmenü,
+  betriebsstundenzähler p1–p3, kessel, heizkreise OG, heizkreise
+  Fussbodenheizung, warmwasser). Each screen is fingerprinted by a
+  sha256 hash of a small static region (title text, version string);
+  forward edges are click coordinates; back edges use the top-left back
+  arrow (overridable per screen via `back_xy`).
+- **Coordinator** singleton serialises cycles (`try_begin_cycle()` gates
+  concurrent `run_cycle` calls to `busy`) and owns the last screenshot
+  + all value records for the status page.
+- **36 sensors** published as individual MQTT topics under
+  `solarfocus/<field>`; HA auto-discovers them via retained configs on
+  `homeassistant/sensor/solarfocus_pellettop/<field>/config`.
+
+### Endpoints (ClusterIP, port 8080)
+
+| Path | Purpose |
+|------|---------|
+| `/` or `/status` | Live HTML page: current screen, last capture PNG, all values with timestamps, state-machine graph |
+| `/screenshot.png` | Raw PNG of the latest captured screen |
+| `/metrics` | Prometheus format — scraped by the bundled ServiceMonitor |
+| `/healthz` | 200 while last cycle finished within `2×SCRAPE_INTERVAL + 60s` |
+
+### MQTT topic tree
+
+| Topic | Payload | Retained |
+|-------|---------|----------|
+| `solarfocus/<field>` | sensor value (string) | no |
+| `solarfocus/scraper/status` | ok \| busy \| navigation_failed \| sanity_failed \| paused | yes |
+| `solarfocus/scraper/last_run` | ISO8601 timestamp | yes |
+| `solarfocus/scraper/pause` | on \| off — read at start of each cycle | yes |
+| `solarfocus/scraper/pause/set` | on \| off — HA writes here, scraper mirrors to `pause` | no |
+| `solarfocus/scraper/last_error_image` | base64 PNG, published on navigation_failed | yes |
+
+### Operational notes
+
+- **VNC is single-connection**. When someone uses the heater's physical
+  touchscreen, VNC connect fails; the scraper reports `status=busy` and
+  publishes nothing for that cycle (not an error — expected).
+- **Pause**: the `switch.solarfocus_pellet_heater_scraper_pause` HA entity
+  toggles the retained `solarfocus/scraper/pause` topic. Useful when
+  servicing the heater via VNC from a laptop.
+- **Navigation failures** capture the full screenshot as base64 and
+  publish it to `solarfocus/scraper/last_error_image` so you can see
+  what the heater was showing when the cycle bailed — usually means a
+  firmware redraw shifted something, re-calibrate the affected screen's
+  hash via `python main.py calibrate <screen>`.
+

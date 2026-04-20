@@ -1,0 +1,95 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: solarfocus-scraper-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: solarfocus-scraper.scraper.health
+    rules:
+    - alert: SolarfocusScraperDown
+      annotations:
+        description: Solarfocus scraper /metrics target has been down for >5 minutes.
+          The pellet-heater values stop updating in Home Assistant when this fires.
+        summary: Solarfocus scraper is unreachable
+      expr: |
+        up{job="solarfocus-scraper"} == 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: critical
+    - alert: SolarfocusScraperStale
+      annotations:
+        description: Last successful scrape cycle finished more than 15 minutes ago.
+          VNC may be busy (someone is using the heater touchscreen) or the heater
+          is unreachable from the IoT VLAN.
+        summary: Solarfocus scraper hasn't completed a cycle recently
+      expr: |
+        time() - solarfocus_scraper_last_run_timestamp_seconds > 900
+      for: 5m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: warning
+    - alert: SolarfocusScraperFailing
+      annotations:
+        description: '{{ $value | printf "%.0f" }} navigation_failed or sanity_failed
+          cycles in the last 30 minutes. Check the captured screenshot at
+          solarfocus/scraper/last_error_image and re-calibrate the affected screen.'
+        summary: Solarfocus scraper failing repeatedly
+      expr: |
+        sum(increase(solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"}[30m])) > 3
+      for: 5m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: warning
+
+  - interval: 30s
+    name: solarfocus-scraper.pods.health
+    rules:
+    - alert: SolarfocusScraperPodNotReady
+      annotations:
+        description: Solarfocus scraper pod {{ $labels.pod }} has been not ready for
+          more than 5 minutes.
+        summary: Solarfocus scraper pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="home-automation", pod=~"solarfocus-scraper-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: critical
+    - alert: SolarfocusScraperPodCrashLooping
+      annotations:
+        description: Solarfocus scraper pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes.
+        summary: Solarfocus scraper pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"solarfocus-scraper-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: critical
+    - alert: SolarfocusScraperPodRestarted
+      annotations:
+        description: Solarfocus scraper pod {{ $labels.pod }} has restarted at least
+          once in the last 15 minutes. Monitor for repeated restarts.
+        summary: Solarfocus scraper pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"solarfocus-scraper-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: home-automation
+        component: solarfocus-scraper
+        severity: warning
