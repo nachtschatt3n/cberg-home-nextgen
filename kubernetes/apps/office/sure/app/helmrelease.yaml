@@ -31,7 +31,9 @@ spec:
   values:
     image:
       repository: ghcr.io/we-promise/sure
-      # tag defaults to Chart.appVersion (v0.6.9)
+      # Chart.appVersion is "v0.6.9" but the image is published as "0.6.9"
+      # (no leading v). Pin explicitly to avoid ImagePullBackOff.
+      tag: "0.6.9"
       pullPolicy: IfNotPresent
 
     # ---------------- Rails config ----------------
