@@ -318,31 +318,42 @@ class VersionChecker:
                             if current_parsed:
                                 preferred_major = current_parsed[0]
                         
-                        # Filter for semantic version tags (x.y.z format, with optional v prefix)
-                        # Matches: 1.2.3, v1.2.3, 0.107.65, v0.107.65
-                        version_pattern = re.compile(r'^v?\d+\.\d+\.\d+$')
+                        # Filter for semantic version tags (x.y.z or x.y.z.N, with
+                        # optional v prefix and optional -<hex> build-suffix).
+                        # Matches:
+                        #   1.2.3, v1.2.3, 0.107.65
+                        #   1.43.1.10611 (Plex-style 4-part)
+                        #   1.43.1.10611-1e34174b1 (Plex-style with git hash suffix)
+                        version_pattern = re.compile(r'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?$')
                         version_tags = [tag for tag in data['results'] if version_pattern.match(tag.get('name', ''))]
                         if version_tags:
-                            # Sort by version number (not by last_updated)
+                            # Sort by version number (not by last_updated).
+                            # Supports 3- or 4-part versions; ignores -<hash> suffix for ordering.
                             def version_key(tag):
-                                name = tag['name'].lstrip('vV')  # Remove v prefix for comparison
+                                name = tag['name'].lstrip('vV').split('-', 1)[0]  # drop build-hash suffix
                                 parts = name.split('.')
                                 try:
-                                    return (int(parts[0]), int(parts[1]), int(parts[2]))
-                                except (ValueError, IndexError):
-                                    return (0, 0, 0)
+                                    nums = [int(p) for p in parts]
+                                except ValueError:
+                                    return (0, 0, 0, 0)
+                                # Pad to 4 so 3-part and 4-part tags sort consistently
+                                while len(nums) < 4:
+                                    nums.append(0)
+                                return tuple(nums[:4])
                             version_tags.sort(key=version_key, reverse=True)
-                            
+
                             # If we have a preferred major version, prefer tags from that major version
                             if preferred_major is not None:
                                 same_major = [tag for tag in version_tags if version_key(tag)[0] == preferred_major]
                                 if same_major:
                                     return same_major[0].get('name', '')
-                            
+
                             # Otherwise return the highest version overall
                             return version_tags[0].get('name', '')
-                        # Fallback: return first tag if no version tags found
-                        return data['results'][0].get('name', '')
+                        # If no version-shaped tags matched, return None rather than
+                        # falling back to whatever's first (which is usually "latest"
+                        # and produces a nonsense "→ latest ⚪ UNKNOWN" comparison).
+                        return None
             
             # For Quay.io, use Quay API
             elif 'quay.io' in repository:
