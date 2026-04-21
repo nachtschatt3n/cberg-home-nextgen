@@ -154,6 +154,17 @@ spec:
       extraVolumeMounts:
         - name: uploads
           mountPath: /rails/storage
+      # Co-schedule worker onto the same node as web so both can mount the RWO
+      # sure-storage Longhorn PVC. Without this, rollouts deadlock on Multi-Attach.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: sure
+                  app.kubernetes.io/instance: sure
+                  app.kubernetes.io/component: web
+              topologyKey: kubernetes.io/hostname
 
     # ---------------- Ingress (internal, Homepage-registered) ----------------
     ingress:
