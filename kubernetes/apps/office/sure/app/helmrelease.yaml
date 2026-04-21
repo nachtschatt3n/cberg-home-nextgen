@@ -77,6 +77,23 @@ spec:
             secretKeyRef:
               name: sure-secret
               key: OIDC_ISSUER
+        # Built-in assistant → OpenAI-compatible Ollama on Mac Mini (docs/sops/ai-integration.md).
+        # Keeps ASSISTANT_TYPE unset so family.assistant_type stays "builtin".
+        - name: OPENAI_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OPENAI_ACCESS_TOKEN
+        - name: OPENAI_URI_BASE
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OPENAI_URI_BASE
+        - name: OPENAI_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: sure-secret
+              key: OPENAI_MODEL
       externalAssistant:
         enabled: false
 
