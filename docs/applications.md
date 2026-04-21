@@ -14,7 +14,7 @@
 | home-automation | 18 |
 | databases | 10 |
 | monitoring | 12 |
-| office | 10 |
+| office | 11 |
 | media | 3 |
 | download | 2 |
 | kube-system | 10 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 2 |
-| **Total** | **~83** |
+| **Total** | **~84** |
 
 ---
 
@@ -119,7 +119,8 @@
 | paperless-ai | AI document classification (Ollama backend) | None | — |
 | paperless-gpt | AI tagging/summarization for Paperless | None | — |
 | vaultwarden | Bitwarden-compatible password manager | Internal + External | Office |
-| actual-budget | Personal finance management | Internal | Office |
+| actual-budget | Personal finance management (budgeting, envelope method) | Internal | Office |
+| sure | Personal finance (accounts, budgets, investments, AI assistant) | Internal | Office |
 | penpot | Design and prototyping platform | Internal | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |

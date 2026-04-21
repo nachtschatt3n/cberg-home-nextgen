@@ -28,6 +28,19 @@ spec:
   dependsOn:
     - name: sure-pg
     - name: sure-redis
+  # Post-render patch: the Sure chart hard-codes ingress metadata.labels
+  # and doesn't expose a values pass-through, so we inject the Homepage
+  # discovery label here (doc-check.py enforces both annotation + label).
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Ingress
+              name: sure
+            patch: |
+              - op: add
+                path: /metadata/labels/gethomepage.dev~1enabled
+                value: "true"
   values:
     image:
       repository: ghcr.io/we-promise/sure
