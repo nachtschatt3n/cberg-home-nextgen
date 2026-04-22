@@ -113,9 +113,11 @@ spec:
         - name: OPENAI_REQUEST_TIMEOUT
           value: "300"
         # Consumed by zz_bank_refresh_overrides.rb (sure-overrides-initializer
-        # ConfigMap): clamps AutoCategorizeJob batches so a single request fits
-        # inside OPENAI_REQUEST_TIMEOUT on Ollama.
+        # ConfigMap): clamps AutoCategorizeJob / AutoDetectMerchantsJob batches
+        # so a single LLM request fits inside OPENAI_REQUEST_TIMEOUT on Ollama.
         - name: AUTO_CATEGORIZE_BATCH_SIZE
+          value: "5"
+        - name: AUTO_DETECT_MERCHANTS_BATCH_SIZE
           value: "5"
       externalAssistant:
         enabled: false

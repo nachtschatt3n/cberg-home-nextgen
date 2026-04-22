@@ -6,12 +6,12 @@ metadata:
   namespace: office
 data:
   # Rails initializer mounted into /rails/config/initializers on web + worker.
-  # Purpose: the upstream rule action chunks into 20-tx batches, which blows
-  # past Sure's OpenAI HTTP timeout when the backend is a slow local LLM
-  # (Ollama gemma4:26b on Mac Mini). We re-chunk at the common choke point
-  # so every AutoCategorizeJob sends <= AUTO_CATEGORIZE_BATCH_SIZE transactions.
+  # Purpose: the upstream rule actions chunk LLM work into 20-tx batches,
+  # which blows past Sure's OpenAI HTTP timeout when the backend is a slow
+  # local LLM (Ollama gemma4:26b on Mac Mini). We re-chunk at the common
+  # Family choke points so every job sends <= <N>_BATCH_SIZE transactions.
   # OPENAI_REQUEST_TIMEOUT (already env-configurable upstream) widens the
-  # per-request window. Together they keep auto-categorization healthy on
+  # per-request window. Together they keep AI enrichment healthy on
   # self-hosted CPU-only inference.
   zz_bank_refresh_overrides.rb: |
     Rails.application.config.after_initialize do
@@ -21,6 +21,14 @@ data:
           ids = transactions.respond_to?(:pluck) ? transactions.pluck(:id) : transactions.map(&:id)
           ids.each_slice(batch) do |slice|
             AutoCategorizeJob.perform_later(self, transaction_ids: slice, rule_run_id: rule_run_id)
+          end
+        end
+
+        def auto_detect_transaction_merchants_later(transactions, rule_run_id: nil)
+          batch = ENV.fetch("AUTO_DETECT_MERCHANTS_BATCH_SIZE", 5).to_i
+          ids = transactions.respond_to?(:pluck) ? transactions.pluck(:id) : transactions.map(&:id)
+          ids.each_slice(batch) do |slice|
+            AutoDetectMerchantsJob.perform_later(self, transaction_ids: slice, rule_run_id: rule_run_id)
           end
         end
       end
