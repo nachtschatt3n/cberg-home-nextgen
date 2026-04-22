@@ -107,6 +107,16 @@ spec:
             secretKeyRef:
               name: sure-secret
               key: OPENAI_MODEL
+        # Widen the OpenAI HTTP client timeout (upstream default 60s) so
+        # slow local LLM inference (Ollama gemma4:26b) finishes before
+        # Net::ReadTimeout. Read once per-request in Provider::Openai.
+        - name: OPENAI_REQUEST_TIMEOUT
+          value: "300"
+        # Consumed by zz_bank_refresh_overrides.rb (sure-overrides-initializer
+        # ConfigMap): clamps AutoCategorizeJob batches so a single request fits
+        # inside OPENAI_REQUEST_TIMEOUT on Ollama.
+        - name: AUTO_CATEGORIZE_BATCH_SIZE
+          value: "5"
       externalAssistant:
         enabled: false
 
@@ -146,9 +156,16 @@ spec:
         - name: uploads
           persistentVolumeClaim:
             claimName: sure-storage
+        - name: rails-overrides
+          configMap:
+            name: sure-overrides-initializer
       extraVolumeMounts:
         - name: uploads
           mountPath: /rails/storage
+        - name: rails-overrides
+          mountPath: /rails/config/initializers/zz_bank_refresh_overrides.rb
+          subPath: zz_bank_refresh_overrides.rb
+          readOnly: true
 
     # ---------------- Worker (Sidekiq) ----------------
     worker:
@@ -164,9 +181,16 @@ spec:
         - name: uploads
           persistentVolumeClaim:
             claimName: sure-storage
+        - name: rails-overrides
+          configMap:
+            name: sure-overrides-initializer
       extraVolumeMounts:
         - name: uploads
           mountPath: /rails/storage
+        - name: rails-overrides
+          mountPath: /rails/config/initializers/zz_bank_refresh_overrides.rb
+          subPath: zz_bank_refresh_overrides.rb
+          readOnly: true
       # Co-schedule worker onto the same node as web so both can mount the RWO
       # sure-storage Longhorn PVC. Without this, rollouts deadlock on Multi-Attach.
       affinity:

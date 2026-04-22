@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - ./pvc.yaml
   - ./secret.sops.yaml
+  - ./initializer-configmap.yaml
   - ./postgres-helmrelease.yaml
   - ./redis-helmrelease.yaml
   - ./helmrelease.yaml
