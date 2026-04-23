@@ -504,6 +504,8 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "serviceAccountSecret: influxdb-backup-key",   # commented-out SecretRef
         "storageAccountSecret: influxdb-backup-azure", # commented-out SecretRef
         'api_key: "{FRIGATE_GENAI_API_KEY}"',          # commented-out templated reference
+        'VNC_PASSWORD = env(',                         # solarfocus-scraper main.py: Python env-var READ (VNC_PASSWORD = env("VNC_PASSWORD", ""))
+        'password=VNC_PASSWORD',                       # solarfocus-scraper main.py: vnc_api.connect(..., password=VNC_PASSWORD) — variable reference, not a value
     ]
     ACCEPTED_SECRET_FILES = {
         "templates/config/",           # Jinja2 templates, not actual secrets

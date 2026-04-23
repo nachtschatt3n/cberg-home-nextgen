@@ -31,3 +31,34 @@ tasks:
     preconditions:
       - test -f {{.KUBECONFIG}}
       - which flux
+
+  kubeconform:
+    desc: Validate all manifests in kubernetes/apps/ with the CRD schemas
+    summary: |
+      Runs kubeconform against kubernetes/apps/ with:
+
+      - Default upstream Kubernetes schemas.
+      - Community CRD schemas (datreeio/CRDs-catalog) so Longhorn,
+        Flux, Authentik, Cilium, CNPG, etc. resolve instead of
+        returning "could not find schema for X".
+      - Ignore patterns for non-manifest YAML files that don't define
+        a `kind:` (Kustomize native kustomization.yaml / kustomizeconfig.yaml,
+        Helm values files, Authentik blueprints, cloudflared configs) and
+        for strategic-merge patch-*.yaml files that don't carry a full spec.
+
+      Replaces the raw `kubeconform -summary kubernetes/apps/` invocation
+      that was showing 2 invalid + 383 "errors" (all false positives from
+      missing CRD schemas and non-manifest YAMLs).
+    vars:
+      CATALOG: '{{`https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json`}}'
+      TARGET: '{{.CLI_ARGS | default "kubernetes/apps/"}}'
+    cmd: |
+      kubeconform -summary \
+        -schema-location default \
+        -schema-location '{{.CATALOG}}' \
+        -ignore-filename-pattern '(^|/)(kustomization|kustomizeconfig|helm-values|authentik-blueprint)\.yaml$' \
+        -ignore-filename-pattern 'network/external/cloudflared/configs/' \
+        -ignore-filename-pattern '(^|/)patch-[^/]+\.yaml$' \
+        {{.TARGET}}
+    preconditions:
+      - which kubeconform
