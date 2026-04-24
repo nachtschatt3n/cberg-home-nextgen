@@ -213,7 +213,9 @@ spec:
         gethomepage.dev/enabled: "true"
         gethomepage.dev/name: "Sure"
         gethomepage.dev/group: "Office"
-        gethomepage.dev/icon: "si-maybefinance"
+        # simpleicons 404s on "maybefinance"; dashboard-icons has no entry.
+        # Use the Sure project's own favicon from its GitHub repo.
+        gethomepage.dev/icon: "https://raw.githubusercontent.com/we-promise/sure/main/public/favicon.ico"
         gethomepage.dev/description: "Personal finance — accounts, budgets, investments"
       hosts:
         - host: sure.${SECRET_DOMAIN}

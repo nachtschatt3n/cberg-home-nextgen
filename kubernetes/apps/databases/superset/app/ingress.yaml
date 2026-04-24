@@ -11,7 +11,9 @@ metadata:
     gethomepage.dev/name: "Superset"
     gethomepage.dev/description: "Data exploration & visualization"
     gethomepage.dev/group: "Databases"
-    gethomepage.dev/icon: "si-apachesuperset"
+    # dashboard-icons catalog has no Superset entry; simpleicons 404s on
+    # "apachesuperset". Use the Apache project's own logo PNG directly.
+    gethomepage.dev/icon: "https://raw.githubusercontent.com/apache/superset/master/superset-frontend/src/assets/images/superset-logo-horiz.png"
     gethomepage.dev/pod-selector: "app=superset"
   labels:
     gethomepage.dev/enabled: "true"

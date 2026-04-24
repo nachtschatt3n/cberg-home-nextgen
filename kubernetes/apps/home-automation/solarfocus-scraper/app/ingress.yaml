@@ -9,7 +9,9 @@ metadata:
     gethomepage.dev/name: "Solarfocus"
     gethomepage.dev/description: "Solarfocus pellet boiler status"
     gethomepage.dev/group: "Home Automation"
-    gethomepage.dev/icon: "solarfocus.png"
+    # dashboard-icons has no solarfocus entry and no public vendor logo
+    # is reliably reachable; use a Material Design Icon for a pellet boiler.
+    gethomepage.dev/icon: "mdi-fire"
     external-dns.alpha.kubernetes.io/hostname: "solarfocus.${SECRET_DOMAIN}"
     # Authentik forward auth annotations
     nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-solarfocus-scraper-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
