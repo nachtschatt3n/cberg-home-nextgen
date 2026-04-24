@@ -111,7 +111,7 @@ spec:
         # slow local LLM inference (Ollama gemma4:26b) finishes before
         # Net::ReadTimeout. Read once per-request in Provider::Openai.
         - name: OPENAI_REQUEST_TIMEOUT
-          value: "300"
+          value: "900"
         # Consumed by zz_bank_refresh_overrides.rb (sure-overrides-initializer
         # ConfigMap): clamps AutoCategorizeJob / AutoDetectMerchantsJob batches
         # so a single LLM request fits inside OPENAI_REQUEST_TIMEOUT on Ollama.
