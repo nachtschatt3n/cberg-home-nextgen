@@ -26,4 +26,5 @@ resources:
  - ./traccar/ks.yaml
  - ./trmnl-ha/ks.yaml
  - ./zigbee2mqtt/ks.yaml
+ - ./rainbow-rescue/ks.yaml
 

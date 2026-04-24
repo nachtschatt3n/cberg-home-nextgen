@@ -1,0 +1,91 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rainbow-rescue
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      rainbow-rescue:
+        replicas: 1
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/rainbow-rescue
+              tag: latest
+              pullPolicy: Always
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: &port 80
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                  timeoutSeconds: 1
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false  # nginx writes to /var/cache/nginx + /var/run
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-rainbow-rescue
+      securityContext:
+        runAsNonRoot: false  # nginx:alpine starts as root then drops to nginx user
+        seccompProfile: { type: RuntimeDefault }
+    service:
+      app:
+        controller: rainbow-rescue
+        ports:
+          http:
+            port: *port
+    ingress:
+      app:
+        className: internal
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Rainbow Rescue"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "rainbow.png"
+          gethomepage.dev/description: "Offline-capable PWA voice controller for the kids party hunt"
+        hosts:
+          - host: "rainbow-rescue.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                service:
+                  identifier: app
+                  port: http
+        tls:
+          - hosts:
+              - "rainbow-rescue.${SECRET_DOMAIN}"

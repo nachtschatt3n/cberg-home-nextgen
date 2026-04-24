@@ -25,3 +25,4 @@ resources:
   - ./macos-scrapeconfigs.yaml
   - ./superset-alerts.yaml
   - ./sure-alerts.yaml
+  - ./rainbow-rescue-alerts.yaml

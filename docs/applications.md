@@ -11,7 +11,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 9 |
-| home-automation | 18 |
+| home-automation | 19 |
 | databases | 10 |
 | monitoring | 12 |
 | office | 11 |
@@ -70,6 +70,7 @@
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
+| rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal | Home Automation |
 
 ---
 

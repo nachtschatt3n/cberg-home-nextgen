@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: rainbow-rescue-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 30s
+      name: rainbow-rescue.pods.health
+      rules:
+        - alert: RainbowRescuePodNotReady
+          annotations:
+            description: Rainbow Rescue pod {{ $labels.pod }} has been not ready for
+              more than 5 minutes. The PWA voice controller may be unavailable.
+            summary: Rainbow Rescue pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="home-automation", pod=~"rainbow-rescue-.*", condition="true"}
+            ) == 0
+          for: 5m
+          labels:
+            category: home-automation
+            component: rainbow-rescue
+            severity: critical
+        - alert: RainbowRescuePodCrashLooping
+          annotations:
+            description: Rainbow Rescue pod {{ $labels.pod }} has restarted {{ $value
+              | printf "%.0f" }} times in the last 15 minutes. Check nginx container
+              logs for startup errors.
+            summary: Rainbow Rescue pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"rainbow-rescue-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: home-automation
+            component: rainbow-rescue
+            severity: critical
+        - alert: RainbowRescuePodRestarted
+          annotations:
+            description: Rainbow Rescue pod {{ $labels.pod }} has restarted at least
+              once in the last 15 minutes. Monitor for repeated restarts.
+            summary: Rainbow Rescue pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"rainbow-rescue-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: home-automation
+            component: rainbow-rescue
+            severity: warning
