@@ -11,7 +11,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 9 |
-| home-automation | 19 |
+| home-automation | 18 |
 | databases | 10 |
 | monitoring | 12 |
 | office | 11 |
@@ -25,7 +25,7 @@
 | flux-system | 1 |
 | backup | 1 |
 | my-software-development | 3 |
-| my-software-production | 2 |
+| my-software-production | 3 |
 | **Total** | **~84** |
 
 ---
@@ -70,7 +70,6 @@
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
-| rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal | Home Automation |
 
 ---
 
@@ -234,6 +233,7 @@
 |-----|---------|---------|
 | absenty | Absence/time tracking app (production) | External |
 | andreamosteller | Portfolio site (production) | External |
+| rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal |
 
 ---
 

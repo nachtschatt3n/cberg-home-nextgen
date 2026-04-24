@@ -6,11 +6,11 @@ metadata:
   name: &app rainbow-rescue
   namespace: flux-system
 spec:
-  targetNamespace: home-automation
+  targetNamespace: my-software-production
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
-  path: ./kubernetes/apps/home-automation/rainbow-rescue/app
+  path: ./kubernetes/apps/my-software-production/rainbow-rescue/app
   prune: true
   sourceRef:
     kind: GitRepository

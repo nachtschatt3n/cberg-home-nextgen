@@ -20,11 +20,11 @@ spec:
             summary: Rainbow Rescue pod {{ $labels.pod }} is not ready
           expr: |
             sum by (namespace, pod) (
-              kube_pod_status_ready{namespace="home-automation", pod=~"rainbow-rescue-.*", condition="true"}
+              kube_pod_status_ready{namespace="my-software-production", pod=~"rainbow-rescue-.*", condition="true"}
             ) == 0
           for: 5m
           labels:
-            category: home-automation
+            category: my-software-production
             component: rainbow-rescue
             severity: critical
         - alert: RainbowRescuePodCrashLooping
@@ -34,10 +34,10 @@ spec:
               logs for startup errors.
             summary: Rainbow Rescue pod {{ $labels.pod }} is crash looping
           expr: |
-            rate(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"rainbow-rescue-.*"}[15m]) * 900 > 2
+            rate(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"rainbow-rescue-.*"}[15m]) * 900 > 2
           for: 5m
           labels:
-            category: home-automation
+            category: my-software-production
             component: rainbow-rescue
             severity: critical
         - alert: RainbowRescuePodRestarted
@@ -46,9 +46,9 @@ spec:
               once in the last 15 minutes. Monitor for repeated restarts.
             summary: Rainbow Rescue pod {{ $labels.pod }} restarted
           expr: |
-            increase(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"rainbow-rescue-.*"}[15m]) > 0
+            increase(kube_pod_container_status_restarts_total{namespace="my-software-production", pod=~"rainbow-rescue-.*"}[15m]) > 0
           for: 1m
           labels:
-            category: home-automation
+            category: my-software-production
             component: rainbow-rescue
             severity: warning
