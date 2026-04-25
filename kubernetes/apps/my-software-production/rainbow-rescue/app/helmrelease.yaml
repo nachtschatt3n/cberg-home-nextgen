@@ -31,8 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/rainbow-rescue
-              tag: latest
-              pullPolicy: Always
+              tag: sha-cc6dfaa
             probes:
               liveness: &probes
                 enabled: true
