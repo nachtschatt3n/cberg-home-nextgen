@@ -31,7 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/rainbow-rescue
-              tag: sha-9768aa1
+              tag: 0.1.0
             probes:
               liveness: &probes
                 enabled: true
@@ -81,7 +81,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Rainbow Rescue"
           gethomepage.dev/group: "Software Development"
-          gethomepage.dev/icon: "rainbow.png"
+          gethomepage.dev/icon: "mdi-rainbow-#ffb4e7"
           gethomepage.dev/description: "Offline-capable PWA voice controller for the kids party hunt"
         hosts:
           - host: "rainbow-rescue.${SECRET_DOMAIN}"
