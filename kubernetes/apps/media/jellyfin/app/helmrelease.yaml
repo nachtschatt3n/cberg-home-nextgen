@@ -184,9 +184,23 @@ spec:
         memory: 8Gi
         gpu.intel.com/i915: 1
 
-    # Probes are managed by the chart in 3.x
-    livenessProbe: {}
-    readinessProbe: {}
+    # Liveness uses tcpSocket so SQLite contention during library scans
+    # does not kill the pod. /health blocks under DB load.
+    livenessProbe:
+      tcpSocket:
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 5
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 5
 
     # -- Additional volumes to mount in the Jellyfin pod.
     volumes: []
