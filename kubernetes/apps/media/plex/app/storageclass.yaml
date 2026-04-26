@@ -4,7 +4,10 @@ kind: StorageClass
 metadata:
   name: "cifs-plex-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# subdir is the share root and apps share this filesystem with Jellyfin; reclaim
+# MUST stay Retain so a PVC delete cannot recursively wipe the share. See
+# docs/sops/storage-safety.md (2026-04-26 incident).
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
