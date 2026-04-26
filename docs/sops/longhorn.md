@@ -14,6 +14,8 @@
 This SOP defines storage class usage, volume provisioning and troubleshooting for Longhorn-managed
 persistent storage in the cluster.
 
+> **Scope note**: this SOP covers Longhorn-only (block-level, single-PVC blast radius). For CIFS / SMB / NFS storage classes (which can wipe an entire shared filesystem on `kubectl delete pvc`), the governing SOP is `docs/sops/storage-safety.md`. Read that before any destructive operation on a CIFS/SMB/NFS PVC.
+
 ---
 
 ## Overview

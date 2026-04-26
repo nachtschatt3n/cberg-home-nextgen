@@ -129,6 +129,28 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
 - All secrets and sensitive data must be encrypted using SOPS before committing
 - Ensure no credentials, API keys, or configuration details are exposed in the repository
 
+## Storage Safety — DESTRUCTIVE PVC OPERATIONS
+
+**Source of truth: `docs/sops/storage-safety.md`. Read it before any storage delete.**
+
+On 2026-04-26, a routine `kubectl delete pvc` on a `cifs-jellyfin-media`-class PVC (subdir=`/`, reclaim=`Delete`) recursively wiped ~4.7 TB of the SMB share in 17 minutes. This must not happen again.
+
+**Hard rules (verbatim in `.claude/agents/cluster-ops-agent.md` and the SOP):**
+
+1. **No CIFS/SMB/NFS PVC deletes without 3-step pre-flight.** Inspect `spec.csi.volumeAttributes.subdir`, `spec.persistentVolumeReclaimPolicy`, and the StorageClass before the action. If `subdir` is `/`/empty/`..`-traversed AND `reclaimPolicy` is `Delete`: **STOP**. Patch the PV to `Retain` first, or surface to the user with inventory and ask explicit go/no-go.
+2. **"Tear down the Job + PVC" is not routine for shared-fs PVCs.** Blast radius is set by the StorageClass, not the brief.
+3. **Catastrophic classes** (full share wipe on PVC delete): `cifs-jellyfin-media`, `cifs-plex-media`. **Severe** (per-app share wipe): `cifs-frigate-media`, `cifs-scrypted-media`, `cifs-icloud-docker-mu`, `cifs-jdownloader-media`, `cifs-makemkv-media`, `cifs-tube-archivist-media`, `cifs-nextcloud-data`, `cifs-paperless-{consume,export,log,media}`. Full table with sources/subdirs in `docs/sops/storage-safety.md`.
+4. **Sub-agent dispatch propagates these rules verbatim.** Do not assume a sub-agent will self-discover the risk.
+5. **New StorageClasses must not pair `subdir: /` with `reclaim: Delete`.** Prefer `Retain` for any class pointing at user data. Update the table in `docs/sops/storage-safety.md` in the same PR.
+
+Pre-flight one-liner:
+
+```bash
+PV=$(kubectl -n $NS get pvc $PVC -o jsonpath='{.spec.volumeName}') && \
+  kubectl get pv $PV -o jsonpath='{.spec.csi.volumeAttributes}' | jq && \
+  echo "reclaim=$(kubectl get pv $PV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}')"
+```
+
 ## Best Practices
 - Use kubectl and talosctl commands to debug cluster state rather than console output
 - Prefer YAML schemas for configuration files over JSON where possible
