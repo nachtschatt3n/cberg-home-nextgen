@@ -4,7 +4,8 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-log"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -34,7 +35,8 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -64,7 +66,8 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-export"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
@@ -94,7 +97,8 @@ kind: StorageClass
 metadata:
   name: "cifs-paperless-consume"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:

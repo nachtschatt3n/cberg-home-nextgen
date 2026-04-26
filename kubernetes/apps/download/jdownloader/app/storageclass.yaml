@@ -4,7 +4,8 @@ kind: StorageClass
 metadata:
   name: "cifs-jdownloader-media"
 provisioner: smb.csi.k8s.io
-reclaimPolicy: Delete
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
