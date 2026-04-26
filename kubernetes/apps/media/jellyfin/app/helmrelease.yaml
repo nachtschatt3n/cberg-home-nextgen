@@ -184,15 +184,17 @@ spec:
         memory: 8Gi
         gpu.intel.com/i915: 1
 
-    # Liveness uses tcpSocket so SQLite contention during library scans
+    # Generous timeouts so SQLite contention during library scans
     # does not kill the pod. /health blocks under DB load.
+    # 6 failures * 30s period = 180s grace before kubelet kills.
     livenessProbe:
-      tcpSocket:
+      httpGet:
+        path: /health
         port: http
       initialDelaySeconds: 30
       periodSeconds: 30
-      timeoutSeconds: 5
-      failureThreshold: 5
+      timeoutSeconds: 10
+      failureThreshold: 6
     readinessProbe:
       httpGet:
         path: /health
