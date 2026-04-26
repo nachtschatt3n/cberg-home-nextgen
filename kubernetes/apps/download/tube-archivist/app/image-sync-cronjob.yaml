@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tube-archivist-image-sync
+  namespace: download
+spec:
+  schedule: "30 * * * *" # hourly, offset from nfo-sync (which runs at :00)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+            - name: sync-images
+              image: python:3.11-slim
+              command: ["python", "/app/sync_images.py"]
+              env:
+                - name: TA_URL
+                  value: "http://tube-archivist:8000"
+                - name: YOUTUBE_ROOT
+                  value: "/youtube"
+              volumeMounts:
+                - name: script-volume
+                  mountPath: /app/sync_images.py
+                  subPath: sync_images.py
+                - name: media
+                  mountPath: /youtube
+          restartPolicy: OnFailure
+          volumes:
+            - name: script-volume
+              configMap:
+                name: tube-archivist-image-sync
+            - name: media
+              persistentVolumeClaim:
+                claimName: tube-archivist-youtube

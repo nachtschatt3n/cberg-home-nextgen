@@ -1,0 +1,65 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tube-archivist-image-sync
+  namespace: download
+data:
+  sync_images.py: |
+    import os
+    import sys
+    import urllib.request
+    import urllib.error
+
+    TA_URL = os.environ.get("TA_URL", "http://tube-archivist:8000")
+    YOUTUBE_ROOT = os.environ.get("YOUTUBE_ROOT", "/youtube")
+
+    # cache filename suffix -> destination filename in the channel directory
+    # Jellyfin/Kodi conventions: folder.jpg = poster, backdrop.jpg = fanart
+    MAPPING = {
+        "_thumb.jpg":  "folder.jpg",
+        "_tvart.jpg":  "backdrop.jpg",
+        "_banner.jpg": "banner.jpg",
+    }
+
+    def fetch(url, dest):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r:
+                if r.status != 200:
+                    return False
+                with open(dest, "wb") as f:
+                    f.write(r.read())
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                print(f"  HTTP {e.code} fetching {url}")
+            return False
+        except Exception as e:
+            print(f"  ERR {url}: {e}")
+            return False
+
+    def main():
+        if not os.path.isdir(YOUTUBE_ROOT):
+            print(f"YOUTUBE_ROOT {YOUTUBE_ROOT} not mounted")
+            sys.exit(1)
+
+        copied = skipped = missing_src = 0
+        for entry in sorted(os.listdir(YOUTUBE_ROOT)):
+            ch_dir = os.path.join(YOUTUBE_ROOT, entry)
+            if not entry.startswith("UC") or not os.path.isdir(ch_dir):
+                continue
+            for src_suffix, dst_name in MAPPING.items():
+                dst = os.path.join(ch_dir, dst_name)
+                if os.path.exists(dst):
+                    skipped += 1
+                    continue
+                src_url = f"{TA_URL}/cache/channels/{entry}{src_suffix}"
+                if fetch(src_url, dst):
+                    print(f"  {entry}: + {dst_name}")
+                    copied += 1
+                else:
+                    missing_src += 1
+        print(f"Done. copied={copied}  skipped(existing)={skipped}  source-missing/404={missing_src}")
+
+    if __name__ == "__main__":
+        main()
