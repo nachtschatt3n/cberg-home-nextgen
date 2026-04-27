@@ -797,6 +797,134 @@ data:
   # Read-only walk: each Movies/<X>/ folder, if both `<X>.nfo` and `movie.nfo`
   # exist, delete `movie.nfo`.
   # =========================================================================
+  # =========================================================================
+  # metadata_coverage.py — server-side metadata coverage check
+  # =========================================================================
+  # Queries Plex (per section) + Jellyfin and reports coverage %.
+  # On-disk audit (audit.py) shows nfo/poster files exist; this shows whether
+  # Plex/Jellyfin actually parsed + indexed them. Result emitted as JSON on
+  # last stdout line; dashboard reads via kubectl-equivalent API.
+  # =========================================================================
+  metadata_coverage.py: |
+    """Plex + Jellyfin server-side metadata coverage report.
+
+    Required env (from media-manager-tokens secret):
+      PLEX_URL, PLEX_TOKEN, PLEX_SECTION_IDS  (comma-separated)
+      JELLYFIN_URL, JELLYFIN_API_KEY
+
+    Output: structured log lines (`coverage-section`, `coverage-jellyfin`)
+    AND a final compact JSON on the last stdout line that the dashboard
+    parses. Dashboard reads via pod-log kubectl API.
+    """
+    import json, os, sys, time, urllib.request, urllib.error
+    sys.path.insert(0, "/app")
+    from common import log_event
+
+    def http_get_json(url, headers=None):
+        req = urllib.request.Request(url, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                if r.status != 200: return None
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            log_event("coverage-http-error", severity="warn", code=e.code)
+            return None
+        except Exception as e:
+            log_event("coverage-http-error", severity="warn", error=type(e).__name__)
+            return None
+
+    def plex_section(plex_url, token, sid):
+        # Plex returns XML by default; ask for JSON via Accept header.
+        url = f"{plex_url}/library/sections/{sid}/all?X-Plex-Token={token}"
+        data = http_get_json(url, headers={"Accept": "application/json"})
+        if not data:
+            return None
+        container = data.get("MediaContainer", {})
+        items = container.get("Metadata", []) or []
+        total = len(items)
+        summary = sum(1 for i in items if (i.get("summary") or "").strip())
+        thumb   = sum(1 for i in items if (i.get("thumb") or "").strip())
+        art     = sum(1 for i in items if (i.get("art") or "").strip())
+        title   = container.get("title1") or container.get("librarySectionTitle") or ""
+        return {
+            "section_id": sid,
+            "title": title,
+            "total": total,
+            "with_summary": summary,
+            "with_thumb": thumb,
+            "with_art": art,
+            "summary_pct": round(100*summary/total, 1) if total else 0.0,
+            "thumb_pct":   round(100*thumb/total, 1)   if total else 0.0,
+            "art_pct":     round(100*art/total, 1)     if total else 0.0,
+        }
+
+    def plex_unmatched(plex_url, token, sid):
+        """Item count Plex marks as 'unmatched' in this section."""
+        url = f"{plex_url}/library/sections/{sid}/unmatched?X-Plex-Token={token}"
+        data = http_get_json(url, headers={"Accept": "application/json"})
+        if not data:
+            return 0
+        return len(data.get("MediaContainer", {}).get("Metadata", []) or [])
+
+    def jellyfin_items(jf_url, key):
+        # Jellyfin: query Items recursively, including Movies + Series at top level.
+        url = (f"{jf_url}/Items?Recursive=true"
+               f"&IncludeItemTypes=Movie,Series"
+               f"&Fields=Overview,ImageTags,BackdropImageTags"
+               f"&Limit=10000")
+        data = http_get_json(url, headers={"X-Emby-Token": key})
+        if not data:
+            return None
+        items = data.get("Items", []) or []
+        total = len(items)
+        overview = sum(1 for i in items if (i.get("Overview") or "").strip())
+        primary  = sum(1 for i in items if (i.get("ImageTags") or {}).get("Primary"))
+        backdrop = sum(1 for i in items if i.get("BackdropImageTags"))
+        return {
+            "total":               total,
+            "with_overview":       overview,
+            "with_primary_image":  primary,
+            "with_backdrop_image": backdrop,
+            "overview_pct":  round(100*overview/total, 1) if total else 0.0,
+            "primary_pct":   round(100*primary/total, 1)  if total else 0.0,
+            "backdrop_pct":  round(100*backdrop/total, 1) if total else 0.0,
+        }
+
+    def main():
+        plex_url = os.environ.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
+        plex_token = os.environ.get("PLEX_TOKEN", "")
+        plex_sids = [s.strip() for s in os.environ.get("PLEX_SECTION_IDS", "").split(",") if s.strip()]
+        jf_url = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
+        jf_key = os.environ.get("JELLYFIN_API_KEY", "")
+
+        result = {"timestamp": int(time.time()), "plex": [], "jellyfin": None}
+
+        if plex_token and plex_sids:
+            for sid in plex_sids:
+                sec = plex_section(plex_url, plex_token, sid)
+                if sec:
+                    sec["unmatched"] = plex_unmatched(plex_url, plex_token, sid)
+                    result["plex"].append(sec)
+                    log_event("coverage-section", server="plex", **{
+                        k: v for k, v in sec.items() if k != "title"
+                    })
+        else:
+            log_event("coverage-skipped", server="plex", reason="missing-token-or-sections", severity="warn")
+
+        if jf_key:
+            jf = jellyfin_items(jf_url, jf_key)
+            if jf:
+                result["jellyfin"] = jf
+                log_event("coverage-jellyfin", **jf)
+        else:
+            log_event("coverage-skipped", server="jellyfin", reason="missing-key", severity="warn")
+
+        # Final line: compact JSON that the dashboard parses
+        print("COVERAGE_RESULT_JSON " + json.dumps(result, separators=(',', ':')))
+
+    if __name__ == "__main__":
+        main()
+
   cleanup_nfos.py: |
     """Periodic cleanup: delete redundant `movie.nfo` Plex/Jellyfin auto-writes.
 

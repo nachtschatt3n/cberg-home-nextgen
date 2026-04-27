@@ -43,6 +43,7 @@ data:
     TRIGGERS = {
         "audit":     ("media", "media-library-audit"),
         "rescan":    ("media", "media-rescan"),
+        "coverage":  ("media", "media-metadata-coverage"),
     }
 
     def k8s_get(path):
@@ -123,6 +124,80 @@ data:
         except Exception as e:
             return f"unable to fetch logs: {type(e).__name__}"
 
+    # ---- Server-side metadata coverage (Plex + Jellyfin) ----
+    def latest_coverage():
+        """Read the latest media-metadata-coverage Job's pod logs and extract
+        the COVERAGE_RESULT_JSON line. Returns parsed dict or None."""
+        jobs = [j for j in list_jobs("media")
+                if j["metadata"]["name"].startswith("media-metadata-coverage")]
+        if not jobs:
+            return None
+        # Pick the newest succeeded
+        for job in jobs:
+            if not job.get("status", {}).get("succeeded"):
+                continue
+            job_name = job["metadata"]["name"]
+            try:
+                pods = k8s_get(f"/api/v1/namespaces/media/pods?labelSelector=job-name={job_name}")
+                if not pods.get("items"):
+                    continue
+                pod_name = pods["items"][0]["metadata"]["name"]
+                log_url = f"/api/v1/namespaces/media/pods/{pod_name}/log"
+                req = urllib.request.Request(K8S_HOST + log_url, headers=AUTH_HEADERS)
+                with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
+                    text = r.read().decode("utf-8", errors="replace")
+                for line in reversed(text.splitlines()):
+                    line = line.strip()
+                    if line.startswith("COVERAGE_RESULT_JSON "):
+                        try:
+                            return json.loads(line[len("COVERAGE_RESULT_JSON "):])
+                        except (json.JSONDecodeError, ValueError):
+                            return None
+                return None
+            except Exception:
+                continue
+        return None
+
+    def render_coverage(cov):
+        if not cov:
+            return ('<i>no coverage data yet — click "Refresh coverage" to run a check, '
+                    'or wait for the hourly CronJob</i>')
+        from datetime import datetime as _dt
+        ts_str = _dt.utcfromtimestamp(cov.get("timestamp", 0)).strftime("%Y-%m-%d %H:%M:%S UTC") if cov.get("timestamp") else ""
+        rows = [f'<p class="meta">Last check: {escape(ts_str)}</p>']
+        # Plex sections
+        rows.append('<h3 style="margin-top:1rem;font-weight:500;">Plex</h3>')
+        plex_secs = cov.get("plex") or []
+        if plex_secs:
+            rows.append('<table><tr><th>Section</th><th>Items</th>'
+                        '<th>With summary</th><th>With poster</th><th>With fanart</th>'
+                        '<th>Unmatched</th></tr>')
+            for s in plex_secs:
+                title = s.get("title") or f"Section {s.get('section_id')}"
+                rows.append(f'<tr><td>{escape(title)}</td>'
+                            f'<td>{s.get("total", 0)}</td>'
+                            f'<td>{s.get("summary_pct", 0)}%</td>'
+                            f'<td>{s.get("thumb_pct", 0)}%</td>'
+                            f'<td>{s.get("art_pct", 0)}%</td>'
+                            f'<td>{s.get("unmatched", 0)}</td></tr>')
+            rows.append('</table>')
+        else:
+            rows.append('<p class="meta"><i>no Plex data (check PLEX_TOKEN + PLEX_SECTION_IDS in secret)</i></p>')
+        # Jellyfin
+        rows.append('<h3 style="margin-top:1rem;font-weight:500;">Jellyfin</h3>')
+        jf = cov.get("jellyfin")
+        if jf:
+            rows.append('<table><tr><th>Items</th><th>With overview</th>'
+                        '<th>With poster</th><th>With backdrop</th></tr>')
+            rows.append(f'<tr><td>{jf.get("total", 0)}</td>'
+                        f'<td>{jf.get("overview_pct", 0)}%</td>'
+                        f'<td>{jf.get("primary_pct", 0)}%</td>'
+                        f'<td>{jf.get("backdrop_pct", 0)}%</td></tr>')
+            rows.append('</table>')
+        else:
+            rows.append('<p class="meta"><i>no Jellyfin data (check JELLYFIN_API_KEY in secret)</i></p>')
+        return ''.join(rows)
+
     # ---- Intake queue (live `ls /intake`) ----
     def intake_queue():
         if not INTAKE_ROOT.is_dir():
@@ -172,6 +247,7 @@ data:
       <h2>Triggers</h2>
       <form method="post" action="/trigger/audit"><button>Run Audit</button></form>
       <form method="post" action="/trigger/rescan"><button>Rescan Plex + Jellyfin</button></form>
+      <form method="post" action="/trigger/coverage"><button>Refresh coverage</button></form>
       <p class="meta">Triggers create a Kubernetes Job from the matching CronJob template.</p>
 
       <div class="grid" style="margin-top: 2rem;">
@@ -192,7 +268,15 @@ data:
         </div>
       </div>
 
-      <h2 style="margin-top: 2rem;">Latest audit summary</h2>
+      <h2 style="margin-top: 2rem;">Server-side metadata coverage</h2>
+      <p class="meta">Plex + Jellyfin actually-indexed metadata percentages.
+        Refreshes hourly via the <code>media-metadata-coverage</code> CronJob,
+        or on demand via the button above. Compare to the on-disk audit below
+        — these can differ when servers haven't rescanned recently or items
+        are unmatched.</p>
+      {coverage}
+
+      <h2 style="margin-top: 2rem;">Latest on-disk audit summary</h2>
       <pre>{audit}</pre>
     </body></html>
     """
@@ -244,13 +328,15 @@ data:
                 jobs = list_jobs("media")
                 jobs = [j for j in jobs if j["metadata"]["name"].startswith(
                     ("media-library", "media-organize", "media-sidecar",
-                     "media-cleanup", "media-rescan"))]
+                     "media-cleanup", "media-rescan", "media-metadata-coverage"))]
                 jobs.sort(key=lambda j: j.get("status", {}).get("startTime", ""), reverse=True)
+                cov = latest_coverage()
                 html = PAGE.format(
                     now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
                     intake_count=len(items),
                     intake_rows=render_intake(items),
                     jobs_rows=render_jobs(jobs[:10]),
+                    coverage=render_coverage(cov),
                     audit=escape(latest_audit_summary()),
                 )
                 self._send(200, html.encode("utf-8"))

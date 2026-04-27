@@ -1,0 +1,56 @@
+---
+# Hourly server-side metadata coverage check.
+# Queries Plex (per section) + Jellyfin and reports coverage %.
+# Last stdout line is `COVERAGE_RESULT_JSON {...}` which the dashboard parses
+# via the kubectl pod-log API. Read-only on both servers.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-metadata-coverage
+  namespace: media
+spec:
+  schedule: "0 * * * *"   # hourly, on the hour
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3   # keep last 3 so dashboard can show trend
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: coverage
+              image: python:3.11-slim
+              command: ["python", "/app/metadata_coverage.py"]
+              env:
+                - name: PLEX_URL
+                  value: "http://plex-plex-media-server.media.svc.cluster.local:32400"
+                - name: JELLYFIN_URL
+                  value: "http://jellyfin.media.svc.cluster.local:8096"
+                - name: PLEX_TOKEN
+                  valueFrom:
+                    secretKeyRef: { name: media-manager-tokens, key: PLEX_TOKEN, optional: true }
+                - name: PLEX_SECTION_IDS
+                  valueFrom:
+                    secretKeyRef: { name: media-manager-tokens, key: PLEX_SECTION_IDS, optional: true }
+                - name: JELLYFIN_API_KEY
+                  valueFrom:
+                    secretKeyRef: { name: media-manager-tokens, key: JELLYFIN_API_KEY, optional: true }
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts

@@ -11,6 +11,7 @@ resources:
   - ./sidecar-cronjob.yaml
   - ./cleanup-cronjob.yaml
   - ./cleanup-nfos-cronjob.yaml
+  - ./coverage-cronjob.yaml
   - ./rescan-cronjob.yaml
   - ./dashboard-rbac.yaml
   - ./dashboard-configmap.yaml
