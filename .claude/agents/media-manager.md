@@ -123,7 +123,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 
 - **Multi-part DVDRips** with `-a.avi`/`-b.avi` suffixes (or numeric `cd1`/`cd2`) are the **same movie split across CDs**. Detection: same year, same release tag, sequential single-letter or 1-digit suffix. Resolution: merge into one folder using Plex multi-part naming `<title> (Year) - cd1.avi` / `- cd2.avi` (https://support.plex.tv/articles/200381043-multi-part-movies/).
 - **Plex/Jellyfin auto-write `movie.nfo`** alongside any existing `<folder>.nfo`. Both servers read either. Keep `<folder>.nfo` as the canonical (matches our SOP); periodically delete stale `movie.nfo` to avoid drift.
-- **Same-title-different-content collisions** — when a folder has the right name but `ffprobe` shows wrong runtime, the content was wrongly placed. Use known canonical runtimes to disambiguate (e.g., Civil War 147 min vs First Avenger 124 min).
+- **Same-title-different-content collisions** — when a folder has the right name but `ffprobe` shows wrong runtime, the content was wrongly placed. Use known canonical runtimes (TMDb's `runtime` field, IMDb, etc.) to disambiguate. A 20+ minute delta between two folders with similar names = likely two different movies in the same naming pattern.
 - **`<folder>.nfo` and inner `<folder>.mkv` should match folder name.** After any rename, also rename inner files to match. Audit catches drift.
 - **Year-mismatch between folder and nfo** signals one of:
   1. Folder year is `(1080)`/`(720)` (resolution) → nfo year is the truth, rename folder.
