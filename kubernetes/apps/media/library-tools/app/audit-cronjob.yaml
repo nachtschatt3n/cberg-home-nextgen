@@ -19,20 +19,36 @@ spec:
             runAsGroup: 1000
             fsGroup: 1000
           restartPolicy: Never
+          # Init container provides a static ffprobe binary in /tools.
+          # Static build = no runtime apt-get, no shared-library juggling,
+          # no privilege needed in the main container. Image is purpose-built
+          # for "drop a static ffmpeg binary into a sidecar volume".
+          initContainers:
+            - name: install-ffprobe
+              image: mwader/static-ffmpeg:7.1
+              command: ["sh", "-c", "cp /ffprobe /tools/ffprobe && chmod +x /tools/ffprobe"]
+              volumeMounts:
+                - name: tools
+                  mountPath: /tools
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
           containers:
             - name: audit
               image: python:3.11-slim
-              command:
-                - /bin/sh
-                - -ec
-                - |
-                  apt-get update -qq && \
-                    apt-get install -y --no-install-recommends ffmpeg >/dev/null
-                  python /app/audit.py
+              command: ["python", "/app/audit.py"]
               env:
                 - name: MEDIA_ROOT
                   value: "/data/data"
+                - name: PATH
+                  value: "/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
               volumeMounts:
+                - name: tools
+                  mountPath: /tools
+                  readOnly: true
                 - name: scripts
                   mountPath: /app
                 - name: media
@@ -45,6 +61,8 @@ spec:
                 limits:
                   memory: 1Gi
           volumes:
+            - name: tools
+              emptyDir: {}
             - name: scripts
               configMap:
                 name: library-tools-scripts
