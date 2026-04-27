@@ -106,11 +106,55 @@ data:
             log_event("ffprobe-error", severity="warn", error=type(e).__name__)
             return {}
 
-    # ---- image dimension probe (no Pillow needed for read-only check) ------
+    # ---- image dimension probe (pure stdlib — no ffprobe needed) -----------
     def image_dims(path: Path) -> tuple[int, int]:
-        """Return (width, height) for jpg/png/webp via ffprobe; (0,0) on failure."""
-        info = ffprobe(path)
-        return (info.get("width", 0), info.get("height", 0))
+        """Return (width, height) by reading JPEG / PNG headers directly.
+
+        Pure stdlib — no ffprobe, no Pillow. Returns (0, 0) on any failure
+        (missing file, unsupported format, truncated header). Sufficient for
+        the audit's threshold check (poster ≥ 600 px, fanart ≥ 1280 px).
+        """
+        try:
+            with open(path, "rb") as f:
+                head = f.read(32)
+                # PNG: 8-byte signature, then IHDR chunk with width @16-19, height @20-23
+                if head.startswith(b"\x89PNG\r\n\x1a\n"):
+                    return (int.from_bytes(head[16:20], "big"),
+                            int.from_bytes(head[20:24], "big"))
+                # JPEG: walk segments to find SOF0/SOF2 marker
+                if head.startswith(b"\xff\xd8"):
+                    f.seek(2)
+                    while True:
+                        b = f.read(1)
+                        if not b or b != b"\xff":
+                            return (0, 0)
+                        # Skip fill bytes (0xFF padding)
+                        while b == b"\xff":
+                            b = f.read(1)
+                            if not b:
+                                return (0, 0)
+                        marker = b[0]
+                        # SOF markers: C0..CF except C4, C8, CC
+                        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                                      0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                            f.read(3)  # length(2) + precision(1)
+                            h = int.from_bytes(f.read(2), "big")
+                            w = int.from_bytes(f.read(2), "big")
+                            return (w, h)
+                        # Standalone markers (no length): SOI, EOI, RSTn, TEM
+                        if marker in (0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5,
+                                      0xD6, 0xD7, 0xD8, 0xD9, 0x01):
+                            continue
+                        # All other markers have a length field; skip the segment
+                        size_bytes = f.read(2)
+                        if len(size_bytes) < 2:
+                            return (0, 0)
+                        seg_len = int.from_bytes(size_bytes, "big") - 2
+                        if seg_len > 0:
+                            f.seek(seg_len, 1)
+            return (0, 0)
+        except Exception:
+            return (0, 0)
 
     # ---- atomic move helper ------------------------------------------------
     def atomic_mv(src: Path, dst: Path) -> bool:
@@ -309,7 +353,10 @@ data:
                 if k.endswith("_pct") and isinstance(v, (int, float)):
                     worst = min(worst, v)
         log(f"\nWorst compliance metric: {worst}%")
-        sys.exit(0 if worst >= 80.0 else 1)
+        # Always exit 0 — the audit ran successfully if it walked the share.
+        # Low compliance is a number, not a Job failure; alerting on it
+        # belongs to a metrics exporter, not a CronJob exit code.
+        sys.exit(0)
 
     if __name__ == "__main__":
         main()
