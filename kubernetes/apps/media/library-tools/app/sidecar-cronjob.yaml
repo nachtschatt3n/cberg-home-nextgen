@@ -1,0 +1,60 @@
+---
+# Suspended CronJob — invoked on-demand to fetch missing .nfo + poster + fanart
+# for ONE item. See media-manager sub-agent + dashboard for invocation.
+#
+#   kubectl -n media create job --from=cronjob/media-sidecar media-sidecar-<id>
+# (with ITEM_PATH, ITEM_KIND, TMDB_QUERY, TMDB_YEAR overridden via patch)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-sidecar
+  namespace: media
+spec:
+  schedule: "0 0 31 2 *"   # never
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: sidecar
+              image: python:3.11-slim
+              command: ["python", "/app/sidecar.py"]
+              env:
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+                - name: TMDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: TMDB_API_KEY
+                      optional: true
+                # Overridden per-invocation:
+                # ITEM_PATH, ITEM_KIND, TMDB_QUERY, TMDB_YEAR
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb

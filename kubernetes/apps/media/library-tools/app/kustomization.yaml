@@ -1,0 +1,17 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./intake-pvc.yaml
+  - ./scripts-configmap.yaml
+  - ./audit-cronjob.yaml
+  - ./organize-cronjob.yaml
+  - ./sidecar-cronjob.yaml
+  - ./cleanup-cronjob.yaml
+  - ./rescan-cronjob.yaml
+  - ./dashboard-rbac.yaml
+  - ./dashboard-configmap.yaml
+  - ./dashboard-deployment.yaml
+  - ./dashboard-service.yaml
+  - ./dashboard-ingress.yaml

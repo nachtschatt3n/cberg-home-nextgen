@@ -1,0 +1,287 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-dashboard
+  namespace: media
+data:
+  dashboard.py: |
+    """Media library status dashboard.
+
+    Read-only status page + POST endpoints for the most-used trigger actions.
+    Authenticates against the in-cluster Kubernetes API via the pod's
+    ServiceAccount token. Does not store any secrets locally.
+
+    Privacy: file listings of `/intake` are shown live to the authenticated
+    viewer (the user). They are never logged, persisted, or written into the
+    repository. Title text in the UI is rendered from filesystem state at
+    request time only.
+    """
+    import json
+    import os
+    import time
+    import urllib.parse
+    import urllib.request
+    import urllib.error
+    import ssl
+    from datetime import datetime
+    from pathlib import Path
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from html import escape
+
+    # ---- Kubernetes in-cluster API helpers ----
+    K8S_HOST = "https://kubernetes.default.svc"
+    SA_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+    SA_TOKEN = (SA_DIR / "token").read_text().strip()
+    SA_CA = SA_DIR / "ca.crt"
+    SSL_CTX = ssl.create_default_context(cafile=str(SA_CA))
+    AUTH_HEADERS = {"Authorization": f"Bearer {SA_TOKEN}"}
+
+    INTAKE_ROOT = Path(os.environ.get("INTAKE_ROOT", "/intake"))
+
+    # CronJob templates the dashboard can fire
+    TRIGGERS = {
+        "audit":     ("media", "media-library-audit"),
+        "rescan":    ("media", "media-rescan"),
+    }
+
+    def k8s_get(path):
+        req = urllib.request.Request(K8S_HOST + path, headers=AUTH_HEADERS)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
+            return json.loads(r.read())
+
+    def k8s_post(path, body):
+        data = json.dumps(body).encode()
+        headers = {**AUTH_HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(K8S_HOST + path, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=15) as r:
+            return r.status, r.read()
+
+    def list_jobs(namespace):
+        """Return recent jobs sorted by start time (newest first)."""
+        try:
+            data = k8s_get(f"/apis/batch/v1/namespaces/{namespace}/jobs")
+        except Exception:
+            return []
+        items = data.get("items", [])
+        items.sort(key=lambda j: j.get("status", {}).get("startTime", ""), reverse=True)
+        return items[:10]
+
+    def get_cronjob(namespace, name):
+        return k8s_get(f"/apis/batch/v1/namespaces/{namespace}/cronjobs/{name}")
+
+    def trigger_job(namespace, cronjob_name):
+        """Create a Job from a CronJob's spec.jobTemplate (kubectl-equivalent)."""
+        cj = get_cronjob(namespace, cronjob_name)
+        job_id = f"{cronjob_name}-manual-{int(time.time())}"
+        body = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job_id,
+                "namespace": namespace,
+                "labels": {**(cj["spec"]["jobTemplate"]["metadata"].get("labels", {}) if cj["spec"]["jobTemplate"].get("metadata") else {}),
+                           "triggered-by": "media-dashboard"},
+                "annotations": {
+                    "cronjob.kubernetes.io/instantiate": "manual",
+                },
+                "ownerReferences": [{
+                    "apiVersion": "batch/v1",
+                    "kind": "CronJob",
+                    "name": cj["metadata"]["name"],
+                    "uid": cj["metadata"]["uid"],
+                    "blockOwnerDeletion": True,
+                    "controller": True,
+                }],
+            },
+            "spec": cj["spec"]["jobTemplate"]["spec"],
+        }
+        return k8s_post(f"/apis/batch/v1/namespaces/{namespace}/jobs", body)
+
+    # ---- Latest audit summary ----
+    def latest_audit_summary():
+        """Read the latest audit Job's pod logs and extract the summary block."""
+        jobs = [j for j in list_jobs("media")
+                if j["metadata"]["name"].startswith("media-library-audit")]
+        if not jobs:
+            return "no audit runs found"
+        job = jobs[0]
+        job_name = job["metadata"]["name"]
+        try:
+            pods = k8s_get(f"/api/v1/namespaces/media/pods?labelSelector=job-name={job_name}")
+            if not pods.get("items"):
+                return f"job {job_name}: no pod yet"
+            pod_name = pods["items"][0]["metadata"]["name"]
+            log_url = f"/api/v1/namespaces/media/pods/{pod_name}/log?tailLines=80"
+            req = urllib.request.Request(K8S_HOST + log_url, headers=AUTH_HEADERS)
+            with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
+                text = r.read().decode("utf-8", errors="replace")
+            # Extract the "## Summary" block onward
+            if "## Summary" in text:
+                return text[text.index("## Summary"):]
+            return text[-2000:]
+        except Exception as e:
+            return f"unable to fetch logs: {type(e).__name__}"
+
+    # ---- Intake queue (live `ls /intake`) ----
+    def intake_queue():
+        if not INTAKE_ROOT.is_dir():
+            return [{"name": "(intake mount missing)", "size": "-", "age": "-"}]
+        entries = []
+        for entry in sorted(INTAKE_ROOT.iterdir()):
+            try:
+                st = entry.stat()
+                size = st.st_size if entry.is_file() else sum(
+                    f.stat().st_size for f in entry.rglob("*") if f.is_file())
+                age_h = (time.time() - st.st_mtime) / 3600
+                entries.append({
+                    "name":    entry.name,
+                    "kind":    "dir" if entry.is_dir() else "file",
+                    "size":    f"{size / 1e9:.2f} GB" if size > 1e9 else f"{size / 1e6:.1f} MB",
+                    "age_h":   round(age_h, 1),
+                })
+            except OSError:
+                continue
+        return entries
+
+    # ---- HTML rendering ----
+    PAGE = """<!doctype html>
+    <html><head><meta charset="utf-8"><title>Media Library Dashboard</title>
+    <style>
+      body {{ font-family: system-ui, sans-serif; margin: 1rem 2rem; color: #222; }}
+      h1, h2 {{ font-weight: 500; }}
+      .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem; }}
+      table {{ border-collapse: collapse; width: 100%; font-size: 0.9rem; }}
+      th, td {{ padding: 4px 8px; border-bottom: 1px solid #eee; text-align: left; }}
+      th {{ background: #f7f7f7; }}
+      pre {{ background: #1e1e1e; color: #ddd; padding: 1rem; overflow-x: auto;
+             font-size: 0.85rem; line-height: 1.4; border-radius: 6px; max-height: 400px; }}
+      form {{ display: inline-block; margin-right: 0.5rem; }}
+      button {{ padding: 6px 14px; cursor: pointer; border: 1px solid #888;
+                background: #fafafa; border-radius: 4px; font-size: 0.9rem; }}
+      button:hover {{ background: #eee; }}
+      .badge {{ display: inline-block; padding: 2px 6px; border-radius: 3px;
+                font-size: 0.75rem; color: #fff; }}
+      .ok {{ background: #2a7; }} .warn {{ background: #c80; }} .fail {{ background: #c33; }}
+      .meta {{ color: #888; font-size: 0.8rem; }}
+    </style></head>
+    <body>
+      <h1>Media Library Dashboard</h1>
+      <p class="meta">Updated {now} — namespace <code>media</code>. Triggers run as ServiceAccount <code>media-dashboard</code>.</p>
+
+      <h2>Triggers</h2>
+      <form method="post" action="/trigger/audit"><button>Run Audit</button></form>
+      <form method="post" action="/trigger/rescan"><button>Rescan Plex + Jellyfin</button></form>
+      <p class="meta">Triggers create a Kubernetes Job from the matching CronJob template.</p>
+
+      <div class="grid" style="margin-top: 2rem;">
+        <div>
+          <h2>Intake queue ({intake_count} items)</h2>
+          <table>
+            <tr><th>Item</th><th>Kind</th><th>Size</th><th>Age (h)</th></tr>
+            {intake_rows}
+          </table>
+          <p class="meta">Live <code>ls /intake</code>. Items remain until the agent moves them.</p>
+        </div>
+        <div>
+          <h2>Recent jobs</h2>
+          <table>
+            <tr><th>Name</th><th>Status</th><th>Started</th></tr>
+            {jobs_rows}
+          </table>
+        </div>
+      </div>
+
+      <h2 style="margin-top: 2rem;">Latest audit summary</h2>
+      <pre>{audit}</pre>
+    </body></html>
+    """
+
+    def render_intake(items):
+        if not items:
+            return "<tr><td colspan='4'><i>queue empty</i></td></tr>"
+        return "\n".join(
+            f"<tr><td>{escape(i['name'])}</td>"
+            f"<td>{escape(i.get('kind', ''))}</td>"
+            f"<td>{escape(str(i.get('size', '-')))}</td>"
+            f"<td>{escape(str(i.get('age_h', '-')))}</td></tr>"
+            for i in items
+        )
+
+    def render_jobs(jobs):
+        if not jobs:
+            return "<tr><td colspan='3'><i>no recent jobs</i></td></tr>"
+        rows = []
+        for j in jobs:
+            name = j["metadata"]["name"]
+            status = j.get("status", {})
+            if status.get("succeeded"):
+                badge = '<span class="badge ok">ok</span>'
+            elif status.get("failed"):
+                badge = '<span class="badge fail">fail</span>'
+            elif status.get("active"):
+                badge = '<span class="badge warn">running</span>'
+            else:
+                badge = '<span class="badge warn">pending</span>'
+            start = status.get("startTime", "—")
+            rows.append(f"<tr><td>{escape(name)}</td><td>{badge}</td><td>{escape(start)}</td></tr>")
+        return "\n".join(rows)
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            print(f"{self.address_string()} - {fmt % args}", flush=True)
+
+        def _send(self, code, body, ctype="text/html; charset=utf-8"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path in ("/", "/index.html"):
+                items = intake_queue()
+                jobs = list_jobs("media")
+                jobs = [j for j in jobs if j["metadata"]["name"].startswith(
+                    ("media-library", "media-organize", "media-sidecar",
+                     "media-cleanup", "media-rescan"))]
+                jobs.sort(key=lambda j: j.get("status", {}).get("startTime", ""), reverse=True)
+                html = PAGE.format(
+                    now=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    intake_count=len(items),
+                    intake_rows=render_intake(items),
+                    jobs_rows=render_jobs(jobs[:10]),
+                    audit=escape(latest_audit_summary()),
+                )
+                self._send(200, html.encode("utf-8"))
+            elif self.path == "/healthz":
+                self._send(200, b"ok", "text/plain")
+            else:
+                self._send(404, b"not found", "text/plain")
+
+        def do_POST(self):
+            if self.path.startswith("/trigger/"):
+                key = self.path[len("/trigger/"):]
+                if key not in TRIGGERS:
+                    self._send(400, b"unknown trigger", "text/plain")
+                    return
+                ns, cron = TRIGGERS[key]
+                try:
+                    code, _ = trigger_job(ns, cron)
+                    if 200 <= code < 300:
+                        self.send_response(303)
+                        self.send_header("Location", "/")
+                        self.end_headers()
+                        return
+                    self._send(500, f"k8s returned {code}".encode(), "text/plain")
+                except urllib.error.HTTPError as e:
+                    self._send(e.code, str(e).encode(), "text/plain")
+                except Exception as e:
+                    self._send(500, f"{type(e).__name__}: {e}".encode(), "text/plain")
+            else:
+                self._send(404, b"not found", "text/plain")
+
+    if __name__ == "__main__":
+        port = int(os.environ.get("PORT", "8080"))
+        print(f"media-dashboard listening on :{port}", flush=True)
+        HTTPServer(("0.0.0.0", port), Handler).serve_forever()

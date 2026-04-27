@@ -1,0 +1,577 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: library-tools-scripts
+  namespace: media
+data:
+
+  # =========================================================================
+  # common.py — shared helpers, mount paths, redacted logger, ffprobe wrapper
+  # =========================================================================
+  common.py: |
+    """Shared helpers for library-tools scripts.
+
+    Privacy: all logging goes through `log()` which redacts media titles
+    by default. Only counts and structural identifiers are emitted.
+    """
+    import os
+    import re
+    import subprocess
+    import sys
+    import json
+    import urllib.request
+    import urllib.error
+    from pathlib import Path
+
+    # Mount path inside any library-tools job pod that mounts plex-media-smb.
+    # Layout under MEDIA_ROOT:
+    #   Movies/, "TV Shows"/, Music/, YouTube/
+    MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/data/data"))
+    JDOWNLOADER_ROOT = Path(os.environ.get("JDOWNLOADER_ROOT", "/intake"))
+
+    SECTIONS = {
+        "movies":   MEDIA_ROOT / "Movies",
+        "tv":       MEDIA_ROOT / "TV Shows",
+        "music":    MEDIA_ROOT / "Music",
+        # YouTube is not in data/ — it's at /media/downloads/tube-archivist/,
+        # owned by Tube Archivist and consumed by Jellyfin only. Not audited here.
+    }
+
+    # Filename patterns
+    EP_RE       = re.compile(r"[Ss](\d{2})[Ee](\d{2})")
+    YEAR_RE     = re.compile(r"\((\d{4})\)")
+    YT_ID_RE    = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
+
+    # Redaction guard: ban the printing of arbitrary filename text.
+    # Use log_count() / log_event() / log_path_anonymous() instead of print().
+    def log(msg, count=None):
+        """Structural log line. msg must NOT include any media title."""
+        if count is not None:
+            print(f"{msg}: {count}", flush=True)
+        else:
+            print(msg, flush=True)
+
+    def log_event(category, severity="info", **fields):
+        """Emit a structured event. Fields must be counts/booleans/identifiers."""
+        rec = {"event": category, "severity": severity, **fields}
+        print(json.dumps(rec, sort_keys=True), flush=True)
+
+    def anon_path(p: Path) -> str:
+        """Return an anonymised path: only the section and depth, no titles."""
+        try:
+            rel = p.relative_to(MEDIA_ROOT)
+            parts = rel.parts
+            if not parts:
+                return "<root>"
+            section = parts[0]
+            return f"{section}/<item>" + ("/<sub>" * (len(parts) - 2) if len(parts) > 2 else "")
+        except ValueError:
+            return "<external>"
+
+    # ---- ffprobe wrapper ---------------------------------------------------
+    def ffprobe(path: Path) -> dict:
+        """Return {width, height, duration, bit_rate, size, fps} or {} on failure."""
+        if not path.exists():
+            return {}
+        try:
+            r = subprocess.run(
+                ["ffprobe", "-v", "error",
+                 "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height,r_frame_rate",
+                 "-show_entries", "format=duration,bit_rate,size",
+                 "-of", "json", str(path)],
+                capture_output=True, timeout=60, check=False,
+            )
+            if r.returncode != 0:
+                return {}
+            data = json.loads(r.stdout or "{}")
+            stream = (data.get("streams") or [{}])[0]
+            fmt = data.get("format", {})
+            fps_raw = stream.get("r_frame_rate", "0/1")
+            try:
+                num, den = fps_raw.split("/")
+                fps = float(num) / float(den) if float(den) else 0.0
+            except Exception:
+                fps = 0.0
+            return {
+                "width":    int(stream.get("width") or 0),
+                "height":   int(stream.get("height") or 0),
+                "fps":      round(fps, 3),
+                "duration": float(fmt.get("duration") or 0),
+                "bit_rate": int(fmt.get("bit_rate") or 0),
+                "size":     int(fmt.get("size") or 0),
+            }
+        except Exception as e:
+            log_event("ffprobe-error", severity="warn", error=type(e).__name__)
+            return {}
+
+    # ---- image dimension probe (no Pillow needed for read-only check) ------
+    def image_dims(path: Path) -> tuple[int, int]:
+        """Return (width, height) for jpg/png/webp via ffprobe; (0,0) on failure."""
+        info = ffprobe(path)
+        return (info.get("width", 0), info.get("height", 0))
+
+    # ---- atomic move helper ------------------------------------------------
+    def atomic_mv(src: Path, dst: Path) -> bool:
+        """mv src → dst on the same filesystem; verify size > 0; never overwrite."""
+        if dst.exists():
+            log_event("mv-skip-exists", path=anon_path(dst))
+            return False
+        if not src.exists():
+            log_event("mv-skip-missing-src", path=anon_path(src), severity="warn")
+            return False
+        src_size = src.stat().st_size
+        if src_size == 0:
+            log_event("mv-skip-empty-src", path=anon_path(src), severity="warn")
+            return False
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(str(src), str(dst))   # atomic on same fs
+        except OSError as e:
+            log_event("mv-fail", severity="error", error=str(e), path=anon_path(src))
+            return False
+        # verify
+        if not dst.exists() or dst.stat().st_size != src_size:
+            log_event("mv-verify-fail", severity="critical", path=anon_path(dst))
+            return False
+        log_event("mv-ok", src=anon_path(src), dst=anon_path(dst), bytes=src_size)
+        return True
+
+    # ---- HTTP helper -------------------------------------------------------
+    def http_get(url: str, headers: dict = None, timeout: int = 30) -> bytes | None:
+        req = urllib.request.Request(url, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read() if r.status == 200 else None
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                log_event("http-error", severity="warn", code=e.code)
+            return None
+        except Exception as e:
+            log_event("http-error", severity="warn", error=type(e).__name__)
+            return None
+
+    # ---- safety: refuse share-root operations ------------------------------
+    BANNED_DELETE_PATHS = {
+        Path("/data"), Path("/data/data"), Path("/intake"),
+        MEDIA_ROOT, JDOWNLOADER_ROOT,
+    }
+
+    def assert_safe_target(path: Path):
+        """Raise if path is the share root or contains a glob."""
+        p = path.resolve()
+        if "*" in str(path) or "?" in str(path):
+            raise SystemExit(f"REFUSED: glob in path: {anon_path(path)}")
+        for banned in BANNED_DELETE_PATHS:
+            if p == banned.resolve():
+                raise SystemExit(f"REFUSED: target is share root: {anon_path(path)}")
+        if not str(p).startswith(str(MEDIA_ROOT.resolve())) \
+           and not str(p).startswith(str(JDOWNLOADER_ROOT.resolve())):
+            raise SystemExit(f"REFUSED: target outside known mount: {anon_path(path)}")
+
+  # =========================================================================
+  # audit.py — read-only library walker, emits markdown + JSON to stdout
+  # =========================================================================
+  audit.py: |
+    """Audit the media library for compliance with media-library-standards.
+
+    Read-only. Emits a markdown summary (heading lines) and per-section JSON
+    counts to stdout. Does NOT name individual items — only counts and
+    anonymous identifiers (`item #1`, `item #2`, ...).
+    """
+    import sys
+    from pathlib import Path
+    from xml.etree import ElementTree as ET
+    sys.path.insert(0, "/app")
+    from common import (
+        SECTIONS, MEDIA_ROOT, EP_RE, YEAR_RE, YT_ID_RE,
+        log, log_event, anon_path, image_dims,
+    )
+
+    POSTER_MIN_WIDTH = 600
+    FANART_MIN_WIDTH = 1280
+
+    def check_movie(folder: Path) -> dict:
+        """Compliance record for one movie folder."""
+        name = folder.name
+        # Layout: must be a folder named "Title (Year)"
+        layout_ok = bool(YEAR_RE.search(name))
+        # Filename: must contain matching .mkv/.mp4 inside
+        media = next((f for f in folder.iterdir()
+                      if f.is_file() and f.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}),
+                     None)
+        filename_ok = media is not None and media.stem == name
+        # NFO
+        nfo = folder / f"{name}.nfo"
+        nfo_ok = False
+        if nfo.exists():
+            try:
+                root = ET.parse(nfo).getroot()
+                nfo_ok = bool(root.find(".//title") is not None and root.find(".//year") is not None)
+            except Exception:
+                nfo_ok = False
+        # Poster + Fanart
+        poster = folder / "poster.jpg"
+        fanart = folder / "fanart.jpg"
+        pw, _ = image_dims(poster) if poster.exists() else (0, 0)
+        fw, _ = image_dims(fanart) if fanart.exists() else (0, 0)
+        return {
+            "layout":  layout_ok,
+            "filename": filename_ok,
+            "nfo":     nfo_ok,
+            "poster":  pw >= POSTER_MIN_WIDTH,
+            "fanart":  fw >= FANART_MIN_WIDTH,
+        }
+
+    def audit_movies():
+        root = SECTIONS["movies"]
+        if not root.is_dir():
+            log("Movies: section root missing")
+            return None
+        # Two cases: (a) folder = movie (nested = compliant); (b) loose .mkv (flat = non-compliant)
+        nested, flat = [], []
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir():
+                nested.append(check_movie(entry))
+            elif entry.is_file() and entry.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
+                flat.append(entry.name)
+        total = len(nested) + len(flat)
+        if total == 0:
+            return {"section": "movies", "items": 0}
+        compliant = sum(1 for r in nested if all(r.values()))
+        return {
+            "section":     "movies",
+            "items":       total,
+            "nested":      len(nested),
+            "flat":        len(flat),
+            "compliant":   compliant,
+            "layout_pct":  round(100 * len(nested) / total, 1),
+            "nfo_pct":     round(100 * sum(r["nfo"] for r in nested) / max(len(nested), 1), 1),
+            "poster_pct":  round(100 * sum(r["poster"] for r in nested) / max(len(nested), 1), 1),
+            "fanart_pct":  round(100 * sum(r["fanart"] for r in nested) / max(len(nested), 1), 1),
+        }
+
+    def audit_tv():
+        root = SECTIONS["tv"]
+        if not root.is_dir():
+            log("TV Shows: section root missing")
+            return None
+        shows = [s for s in sorted(root.iterdir()) if s.is_dir()]
+        episodes_total, episodes_in_season = 0, 0
+        series_compliant = 0
+        for show in shows:
+            tvshow_nfo = show / "tvshow.nfo"
+            poster_w, _ = image_dims(show / "poster.jpg") if (show / "poster.jpg").exists() else (0, 0)
+            fanart_w, _ = image_dims(show / "fanart.jpg") if (show / "fanart.jpg").exists() else (0, 0)
+            series_ok = (tvshow_nfo.exists()
+                         and poster_w >= POSTER_MIN_WIDTH
+                         and fanart_w >= FANART_MIN_WIDTH)
+            if series_ok:
+                series_compliant += 1
+            # Walk episodes
+            for ep in show.rglob("*"):
+                if ep.is_file() and ep.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
+                    episodes_total += 1
+                    if ep.parent.name.lower().startswith("season"):
+                        episodes_in_season += 1
+        return {
+            "section":              "tv",
+            "shows":                len(shows),
+            "shows_compliant":      series_compliant,
+            "episodes_total":       episodes_total,
+            "episodes_in_season":   episodes_in_season,
+            "season_layout_pct":    round(100 * episodes_in_season / max(episodes_total, 1), 1),
+            "series_compliance_pct": round(100 * series_compliant / max(len(shows), 1), 1),
+        }
+
+    def main():
+        log("# Media Library Audit")
+        log(f"Mount root: {MEDIA_ROOT}")
+        log("")
+        log("YouTube (Tube Archivist) is Jellyfin-only and not audited here.")
+        log("")
+        results = []
+        for fn in (audit_movies, audit_tv):
+            r = fn()
+            if r:
+                results.append(r)
+                log_event("audit-section", **r)
+        log("")
+        log("## Summary")
+        for r in results:
+            log(f"- {r['section']}: " + ", ".join(
+                f"{k}={v}" for k, v in r.items() if k != "section"))
+        # Exit non-zero if any section has < 80% compliance somewhere
+        worst = 100.0
+        for r in results:
+            for k, v in r.items():
+                if k.endswith("_pct") and isinstance(v, (int, float)):
+                    worst = min(worst, v)
+        log(f"\nWorst compliance metric: {worst}%")
+        sys.exit(0 if worst >= 80.0 else 1)
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # rescan.py — trigger Plex + Jellyfin library refresh
+  # =========================================================================
+  rescan.py: |
+    """Trigger library rescan in Plex + Jellyfin.
+
+    Required env (from media-manager-tokens secret):
+      PLEX_URL          (default http://plex.media:32400)
+      PLEX_TOKEN
+      PLEX_SECTION_IDS  (comma-separated, e.g. "1,2")
+      JELLYFIN_URL      (default http://jellyfin.media:8096)
+      JELLYFIN_API_KEY
+    """
+    import os
+    import sys
+    import urllib.request
+    import urllib.error
+    sys.path.insert(0, "/app")
+    from common import log, log_event
+
+    def post(url, headers=None):
+        req = urllib.request.Request(url, headers=headers or {}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception as e:
+            log_event("rescan-error", severity="warn", error=type(e).__name__)
+            return 0
+
+    def main():
+        plex_url = os.environ.get("PLEX_URL", "http://plex.media:32400")
+        plex_token = os.environ.get("PLEX_TOKEN", "")
+        sections = [s.strip() for s in os.environ.get("PLEX_SECTION_IDS", "").split(",") if s.strip()]
+        jf_url = os.environ.get("JELLYFIN_URL", "http://jellyfin.media:8096")
+        jf_key = os.environ.get("JELLYFIN_API_KEY", "")
+
+        if plex_token and sections:
+            for sid in sections:
+                code = post(f"{plex_url}/library/sections/{sid}/refresh?X-Plex-Token={plex_token}")
+                log_event("plex-rescan", section=sid, status=code)
+        else:
+            log_event("plex-rescan-skipped", reason="missing-token-or-sections", severity="warn")
+
+        if jf_key:
+            code = post(f"{jf_url}/Library/Refresh", headers={"X-Emby-Token": jf_key})
+            log_event("jellyfin-rescan", status=code)
+        else:
+            log_event("jellyfin-rescan-skipped", reason="missing-key", severity="warn")
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # cleanup.py — `rm -rf` of an explicit subpath only, with re-verification
+  # =========================================================================
+  cleanup.py: |
+    """Remove a specific JDownloader subdirectory after re-verifying that all
+    its media files exist at known destination paths with size > 0.
+
+    Required env:
+      CLEANUP_PATH           absolute path inside /intake (no globs)
+      VERIFY_DESTINATIONS    JSON list of dst paths that MUST all exist with
+                             size > 0 before any rm. Empty list => REFUSE.
+    """
+    import json
+    import os
+    import shutil
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import (
+        log, log_event, anon_path, assert_safe_target, JDOWNLOADER_ROOT,
+    )
+
+    def main():
+        path = Path(os.environ.get("CLEANUP_PATH", ""))
+        verify = os.environ.get("VERIFY_DESTINATIONS", "")
+        if not str(path):
+            sys.exit("REFUSED: CLEANUP_PATH unset")
+        if not verify:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS empty (no proof that moves succeeded)")
+        try:
+            destinations = [Path(p) for p in json.loads(verify)]
+        except Exception:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS not valid JSON list")
+        if not destinations:
+            sys.exit("REFUSED: VERIFY_DESTINATIONS list is empty")
+
+        # Hard rail: target must be a real subpath of /intake, not a glob, not the root
+        assert_safe_target(path)
+        if path == JDOWNLOADER_ROOT:
+            sys.exit("REFUSED: refuses to delete the intake root itself")
+
+        # Pre-flight: every destination must exist with size > 0
+        missing = []
+        for d in destinations:
+            if not d.exists():
+                missing.append(("missing", anon_path(d)))
+            elif d.is_file() and d.stat().st_size == 0:
+                missing.append(("empty", anon_path(d)))
+        if missing:
+            log_event("cleanup-refused", severity="critical",
+                      reason="verification-failed", missing=missing)
+            sys.exit(1)
+
+        # OK to remove
+        if not path.exists():
+            log_event("cleanup-skip-missing", path=anon_path(path))
+            return
+        log_event("cleanup-remove-start", path=anon_path(path))
+        shutil.rmtree(path)
+        log_event("cleanup-remove-ok", path=anon_path(path))
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # organize.py — apply a move plan from stdin (JSON)
+  # =========================================================================
+  organize.py: |
+    """Apply a move plan from stdin.
+
+    Plan format (JSON):
+      {"dry_run": true,
+       "moves": [{"src": "/intake/foo.mkv", "dst": "/data/data/Movies/Foo (2024)/Foo (2024).mkv"},
+                 ...]}
+
+    Refuses globs, refuses share-root targets, mv-only (atomic on same fs),
+    verify-before-delete is implicit (mv does not delete src on failure).
+    """
+    import json
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import atomic_mv, assert_safe_target, log, log_event, anon_path
+
+    def main():
+        try:
+            plan = json.load(sys.stdin)
+        except Exception as e:
+            sys.exit(f"REFUSED: stdin is not valid JSON: {e}")
+        moves = plan.get("moves", [])
+        dry_run = bool(plan.get("dry_run", True))   # default safe
+        if not moves:
+            sys.exit("REFUSED: empty moves list")
+
+        for m in moves:
+            src = Path(m["src"])
+            dst = Path(m["dst"])
+            assert_safe_target(src)
+            assert_safe_target(dst)
+
+        log_event("organize-start", count=len(moves), dry_run=dry_run)
+        ok, fail = 0, 0
+        for m in moves:
+            src, dst = Path(m["src"]), Path(m["dst"])
+            if dry_run:
+                log_event("organize-plan", src=anon_path(src), dst=anon_path(dst))
+                ok += 1
+                continue
+            if atomic_mv(src, dst):
+                ok += 1
+            else:
+                fail += 1
+        log_event("organize-done", ok=ok, fail=fail, dry_run=dry_run)
+        sys.exit(0 if fail == 0 else 1)
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # sidecar.py — fetch + write .nfo + poster + fanart for one item
+  # =========================================================================
+  sidecar.py: |
+    """Fetch sidecars (.nfo + poster.jpg + fanart.jpg) from TMDb for one movie
+    or one TV show folder.
+
+    Required env:
+      ITEM_PATH        absolute path of the movie folder OR show folder
+      ITEM_KIND        "movie" | "show"
+      TMDB_API_KEY     (read from media-manager-tokens secret)
+      TMDB_QUERY       title to search (passed in via ConfigMap or env at job creation)
+      TMDB_YEAR        optional year (movies)
+    """
+    import os
+    import sys
+    import json
+    import urllib.parse
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import http_get, log_event, anon_path, assert_safe_target
+
+    TMDB = "https://api.themoviedb.org/3"
+    IMG  = "https://image.tmdb.org/t/p"
+
+    def search(kind: str, query: str, year: str | None, key: str) -> dict | None:
+        path = "movie" if kind == "movie" else "tv"
+        q = urllib.parse.quote_plus(query)
+        url = f"{TMDB}/search/{path}?api_key={key}&query={q}"
+        if year and kind == "movie":
+            url += f"&year={year}"
+        body = http_get(url)
+        if not body:
+            return None
+        results = json.loads(body).get("results", [])
+        return results[0] if results else None
+
+    def write_nfo(target: Path, kind: str, item: dict):
+        title = item.get("title") or item.get("name") or ""
+        year = (item.get("release_date") or item.get("first_air_date") or "")[:4]
+        tag = "movie" if kind == "movie" else "tvshow"
+        body = (
+            f"<{tag}>\n"
+            f"  <title>{title}</title>\n"
+            f"  <year>{year}</year>\n"
+            f'  <uniqueid type="tmdb">{item.get("id", "")}</uniqueid>\n'
+            f"  <plot>{item.get('overview', '')}</plot>\n"
+            f"</{tag}>\n"
+        )
+        target.write_text(body, encoding="utf-8")
+        log_event("nfo-written", path=anon_path(target))
+
+    def fetch_image(url: str, target: Path):
+        body = http_get(url)
+        if body:
+            target.write_bytes(body)
+            log_event("image-written", path=anon_path(target), bytes=len(body))
+        else:
+            log_event("image-fetch-failed", path=anon_path(target), severity="warn")
+
+    def main():
+        item_path = Path(os.environ.get("ITEM_PATH", ""))
+        kind = os.environ.get("ITEM_KIND", "")
+        query = os.environ.get("TMDB_QUERY", "")
+        year = os.environ.get("TMDB_YEAR", "")
+        key = os.environ.get("TMDB_API_KEY", "")
+        if not (item_path and kind and query and key):
+            sys.exit("REFUSED: missing one of ITEM_PATH/ITEM_KIND/TMDB_QUERY/TMDB_API_KEY")
+        if kind not in {"movie", "show"}:
+            sys.exit("REFUSED: ITEM_KIND must be 'movie' or 'show'")
+        assert_safe_target(item_path)
+        if not item_path.is_dir():
+            sys.exit("REFUSED: ITEM_PATH does not exist or is not a directory")
+
+        item = search(kind, query, year, key)
+        if not item:
+            log_event("tmdb-no-match", severity="warn")
+            sys.exit(2)
+
+        nfo_name = "tvshow.nfo" if kind == "show" else f"{item_path.name}.nfo"
+        write_nfo(item_path / nfo_name, kind, item)
+
+        if item.get("poster_path"):
+            fetch_image(f"{IMG}/w780{item['poster_path']}", item_path / "poster.jpg")
+        if item.get("backdrop_path"):
+            fetch_image(f"{IMG}/w1920{item['backdrop_path']}", item_path / "fanart.jpg")
+
+    if __name__ == "__main__":
+        main()

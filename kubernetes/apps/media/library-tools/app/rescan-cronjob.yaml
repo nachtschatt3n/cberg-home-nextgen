@@ -1,0 +1,65 @@
+---
+# Suspended CronJob — invoked on-demand to call Plex + Jellyfin rescan APIs.
+# Tokens read from media-manager-tokens secret (optional — script logs and
+# skips if absent so the cluster doesn't fail to come up before user supplies).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-rescan
+  namespace: media
+spec:
+  schedule: "0 0 31 2 *"   # never
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: rescan
+              image: python:3.11-slim
+              command: ["python", "/app/rescan.py"]
+              env:
+                - name: PLEX_URL
+                  value: "http://plex.media.svc.cluster.local:32400"
+                - name: JELLYFIN_URL
+                  value: "http://jellyfin.media.svc.cluster.local:8096"
+                - name: PLEX_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_TOKEN
+                      optional: true
+                - name: PLEX_SECTION_IDS
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_SECTION_IDS
+                      optional: true
+                - name: JELLYFIN_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: JELLYFIN_API_KEY
+                      optional: true
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts

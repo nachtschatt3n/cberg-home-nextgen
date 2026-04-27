@@ -1,0 +1,27 @@
+---
+# library-tools mounts the JDownloader share read-write so it can move finished
+# downloads into the library and clean up emptied subdirs. The same physical
+# share is also mounted by the JDownloader pod (in download namespace) — CIFS
+# tolerates shared access. RWM lets jobs land on any cluster node.
+#
+# Hard rule: this PVC is against the cifs-jdownloader-media StorageClass which
+# is "Severe" per docs/sops/storage-safety.md (per-app share wipe on PVC delete
+# with reclaim=Delete). reclaimPolicy is Retain on the SC, so PVC delete is safe.
+# Even so, never delete this PVC without the storage-safety pre-flight.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jdownloader-intake
+  namespace: media
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: cifs-jdownloader-media

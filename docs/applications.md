@@ -134,6 +134,8 @@
 | jellyfin | Open-source media server | Internal | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
+| library-tools | Audit + organize + sidecar + rescan + cleanup Jobs for the shared media library; ConfigMap-of-Python pattern. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
+| media-dashboard | Internal status dashboard with live intake queue + recent jobs + trigger buttons (audit, rescan, TA bridge). Part of `library-tools`. | Internal | Media |
 
 ---
 
@@ -141,8 +143,8 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| tube-archivist | YouTube content archival and management | Internal | Download |
-| jdownloader | Download manager | Internal | Download |
+| tube-archivist | YouTube content archival and management. Hourly NFO + image sync CronJobs write Kodi-style sidecars next to each video; Jellyfin scans this tree directly. Plex is intentionally not configured for YouTube. | Internal | Download |
+| jdownloader | Download manager. Intake source for the `media-manager` sub-agent. | Internal | Download |
 
 ---
 

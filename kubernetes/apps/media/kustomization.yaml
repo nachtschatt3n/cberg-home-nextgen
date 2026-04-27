@@ -9,6 +9,7 @@ resources:
   - ./jellyfin/ks.yaml
   - ./plex/ks.yaml
   - ./makemkv/ks.yaml
+  - ./library-tools/ks.yaml
 
 ---
 apiVersion: v1

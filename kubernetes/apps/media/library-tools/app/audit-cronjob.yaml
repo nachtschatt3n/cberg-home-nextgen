@@ -1,0 +1,53 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-library-audit
+  namespace: media
+spec:
+  schedule: "15 4 * * *"   # daily at 04:15 local
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: audit
+              image: python:3.11-slim
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  apt-get update -qq && \
+                    apt-get install -y --no-install-recommends ffmpeg >/dev/null
+                  python /app/audit.py
+              env:
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb   # read-only mount; uses Plex's PVC

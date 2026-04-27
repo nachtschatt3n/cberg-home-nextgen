@@ -1,0 +1,64 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: library-tools-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - interval: 1m
+      name: library-tools.cronjobs
+      rules:
+        - alert: MediaLibraryAuditFailed
+          annotations:
+            summary: Media library audit CronJob failed
+            description: |
+              The media-library-audit CronJob in namespace media has failed
+              (Job {{ $labels.job_name }}). Compliance counts are stale.
+              Check `kubectl -n media logs job/{{ $labels.job_name }}`.
+          expr: |
+            kube_job_failed{namespace="media", job_name=~"media-library-audit.*"} > 0
+          for: 5m
+          labels:
+            category: media
+            component: library-tools
+            severity: warning
+        - alert: MediaLibraryAuditStale
+          annotations:
+            summary: No successful media library audit in the last 36 hours
+            description: |
+              media-library-audit has not completed successfully in 36h. The
+              CronJob runs daily; this likely means scheduling, image-pull, or
+              SMB mount problems. Check the CronJob status.
+          expr: |
+            time() - max(kube_job_status_succeeded{namespace="media", job_name=~"media-library-audit.*"} > 0)
+              * on(job_name) group_left() max(kube_job_status_completion_time{namespace="media", job_name=~"media-library-audit.*"})
+              > 36 * 3600
+          for: 30m
+          labels:
+            category: media
+            component: library-tools
+            severity: warning
+    - interval: 1m
+      name: library-tools.dashboard
+      rules:
+        - alert: MediaDashboardDown
+          annotations:
+            summary: Media dashboard pod not ready
+            description: |
+              media-dashboard pod {{ $labels.pod }} has been not ready for
+              more than 10 minutes. The dashboard is the only UI surface for
+              the media-manager workflow.
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="media", pod=~"media-dashboard-.*", condition="true"}
+            ) == 0
+          for: 10m
+          labels:
+            category: media
+            component: media-dashboard
+            severity: warning

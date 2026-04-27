@@ -168,6 +168,13 @@ Application inventory and service-level context:
 Infrastructure and topology reference:
 - `docs/infrastructure.md`
 
+Media library curation (Plex / Jellyfin / Tube Archivist layout, naming, sidecar standards, intake-from-jdownloader workflow, audit thresholds):
+- `docs/sops/media-library-standards.md`
+- Sub-agent: `.claude/agents/media-manager.md`
+- Operator runbook: `runbooks/media-manager.md`
+
+**Media privacy rule (public repo):** never name specific media titles (movies, TV shows, music artists/albums/tracks, YouTube channels) in any committed artifact — commit messages, docs, runbook outputs, audit reports, PR bodies. Use placeholders (`<movie>`, `<show>`, `Title (Year)`, `Show - SXXEYY`). Counts (`+26 episodes`) are fine; names are not.
+
 ## New Deployment Blueprint
 
 Use `docs/sops/new-deployment-blueprint.md` as the default SOP for any new application rollout.
