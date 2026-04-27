@@ -112,6 +112,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 7. **Drop trailing single-digit numbers** (`Powerman 1`, `Topfighter 2`) — TMDb often has the canonical title without the number.
 8. **Drop articles** (`Der`, `Die`, `Das`, `The`, `A`, `An`) as a fallback.
 9. **Never use `\b(fr)\b` or any 2-letter stopword in noise regex** — it eats real words like `Fremde`, `Fragtime`, `From`. Whitelist instead.
+10. **For ad-hoc TV-show queries via `TMDB_QUERY` env, hand-format the query** — TMDb's TV index is more brittle than its movie index. `MrRobot` returns nothing, `Mr. Robot` returns the show; `Bobo Siebenschlaefer` returns nothing, `Bobo Siebenschläfer` (umlaut) returns it. The script's umlaut ladder runs only when the query goes through `tmdb_smart()`; explicit overrides skip it. When you set `TMDB_QUERY` manually, use the proper title with periods, spaces, and umlauts.
 
 ### Folder-name pitfalls
 
@@ -125,6 +126,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 - **Plex/Jellyfin auto-write `movie.nfo`** alongside any existing `<folder>.nfo`. Both servers read either. Keep `<folder>.nfo` as the canonical (matches our SOP); periodically delete stale `movie.nfo` to avoid drift.
 - **Same-title-different-content collisions** — when a folder has the right name but `ffprobe` shows wrong runtime, the content was wrongly placed. Use known canonical runtimes (TMDb's `runtime` field, IMDb, etc.) to disambiguate. A 20+ minute delta between two folders with similar names = likely two different movies in the same naming pattern.
 - **`<folder>.nfo` and inner `<folder>.mkv` should match folder name.** After any rename, also rename inner files to match. Audit catches drift.
+- **Folder rename = 4-step atomic operation.** A folder rename is never just `mv folder/`. The full sequence is: (1) rename the folder, (2) rename the inner media file to `<new_basename><ext>`, (3) rename `<old_basename>.nfo` → `<new_basename>.nfo`, (4) parse the .nfo XML and update `<title>`/`<originaltitle>`/`<sorttitle>`/`<year>`/`<premiered>` to match, (5) **delete any stale `movie.nfo`** in the folder so Plex/Jellyfin can't pick up the pre-rename metadata. Skipping any step leaves the servers reading old data and producing wrong matches at next scan.
 - **Year-mismatch between folder and nfo** signals one of:
   1. Folder year is `(1080)`/`(720)` (resolution) → nfo year is the truth, rename folder.
   2. Off-by-one (release date crossed calendar year) → both arguably correct, leave alone.
@@ -138,6 +140,7 @@ The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 ### Audit + alert design
 
 - **Audit Job exits 0 if it walked the share** (regardless of compliance numbers). Compliance is a metric, not a job-failure signal. Alerting on low compliance belongs in Prometheus rules over a metric, not on `kube_job_failed`.
+- **`tmdb-no-match` is a soft outcome, not a Job failure.** `sidecar.py` logs the warn and returns cleanly (exit 0) when TMDb can't match. The audit script surfaces the missing sidecar; the Job firing `KubeJobFailed` for every TMDb miss is pager noise. Same convention applies to any new "fetch from external API" Jobs.
 - **`_duplicates/` counts as 1 false-positive item** in the audit (folder doesn't match canonical naming). Filter folders starting with `_` in audit walks.
 - **Folders with malformed `.nfo` XML** show up as missing-nfo even though file exists. Worth a separate counter.
 

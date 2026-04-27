@@ -177,6 +177,31 @@ Compliance percentages below the threshold trigger a Prometheus alert if they pe
 
 **Fix**: ffprobe both, identify by canonical runtime (look up the actual movie's runtime; a 23-minute delta is a strong signal you have two different cuts/movies), rename folders to match actual content. Disambiguate via swap (rename one to a temp name, then rename other to free name, then rename temp back).
 
+### Renaming a movie folder leaves Plex showing the old metadata
+
+**Symptom**: rename a folder + inner `.mkv` + inner `<basename>.nfo`, trigger a Plex/Jellyfin rescan, but the item still shows the old title or wrong description.
+
+**Cause**: the folder also contains a stale `movie.nfo` (or `tvshow.nfo` for shows) left behind from a prior session. Plex and Jellyfin both fall back to those filenames when the new `<basename>.nfo` doesn't fully satisfy them, and pick up the pre-rename metadata.
+
+**Fix**: rename = 5-step operation.
+1. `mv folder/`
+2. rename inner media file to `<new_basename><ext>`
+3. rename `<old_basename>.nfo` → `<new_basename>.nfo`
+4. parse the .nfo XML and update `<title>`, `<originaltitle>`, `<sorttitle>`, `<year>`, `<premiered>`
+5. `rm movie.nfo` (or `tvshow.nfo`) if it exists alongside
+
+Skipping step 5 is the most common cause of "I renamed it but Plex still shows the old name."
+
+### KubeJobFailed for `media-sidecar-show-NNN` with single line `tmdb-no-match`
+
+**Symptom**: a sidecar Job ran, exited non-zero, and fired `KubeJobFailed`. Logs show only `{"event": "tmdb-no-match"}`.
+
+**Cause** (two layers):
+1. **Bad query string**: `MrRobot` (no period/space) and `Bobo Siebenschlaefer` (umlaut written as `ae`) don't match TMDb's TV index. Use proper title formatting: `Mr. Robot`, `Bobo Siebenschläfer`.
+2. **Script convention** (fixed in commit `a6d473de`): `sidecar.py` used to `sys.exit(2)` on no-match, which fires the alert. It now logs the warn and exits 0; the audit script reports the missing sidecar as compliance drift instead.
+
+**Fix**: re-run the Job with the correctly-formatted query; verify the script in the cluster matches the repo. Old Failed Jobs that triggered the alert can be deleted (`kubectl -n media delete job <name>`); the alert clears.
+
 ### Wrong TMDb match (German anime BDRiP releases)
 
 **Symptom**: a folder name like `<title> GERMAN 5 1 AC3 ANiME BDRiP (1080)` returns no TMDb match.
