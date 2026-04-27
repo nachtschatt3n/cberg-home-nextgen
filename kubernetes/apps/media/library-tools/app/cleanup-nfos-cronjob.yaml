@@ -1,0 +1,55 @@
+---
+# Periodic dedup of Plex/Jellyfin-auto-written `movie.nfo` files in Movies/.
+# Both servers write `movie.nfo` during library scans alongside any existing
+# `<folder>.nfo`. Standard says: keep `<folder>.nfo`, drop the auto-generated
+# `movie.nfo`. Runs weekly, also fireable on demand.
+#
+# Safe by construction (see cleanup_nfos.py):
+#   - Only deletes the literal filename `movie.nfo`
+#   - Only when a sibling `<folder>.nfo` exists
+#   - Only inside Movies/, skips `_*` housekeeping folders
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-cleanup-nfos
+  namespace: media
+spec:
+  schedule: "30 4 * * 0"   # weekly, Sundays at 04:30 (after audit at 04:15)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: cleanup-nfos
+              image: python:3.11-slim
+              command: ["python", "/app/cleanup_nfos.py"]
+              env:
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb

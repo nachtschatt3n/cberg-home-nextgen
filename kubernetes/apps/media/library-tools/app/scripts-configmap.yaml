@@ -40,7 +40,10 @@ data:
 
     # Filename patterns
     EP_RE       = re.compile(r"[Ss](\d{2})[Ee](\d{2})")
-    YEAR_RE     = re.compile(r"\((\d{4})\)")
+    # Year regex MUST constrain to 1900-2099. A naive `(\d{4})` matches
+    # `(1080)` / `(720)` / `(2160)` — resolution leaked into the folder name —
+    # which silently breaks year-restricted TMDb queries downstream.
+    YEAR_RE     = re.compile(r"\((19[0-9]{2}|20[0-9]{2})\)")
     YT_ID_RE    = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
 
     # Redaction guard: ban the printing of arbitrary filename text.
@@ -196,6 +199,111 @@ data:
             log_event("http-error", severity="warn", error=type(e).__name__)
             return None
 
+    # ---- TMDb query helpers (German-first, exact-match scoring) -------------
+    # Documented in docs/sops/media-library-standards.md ("TMDb integration")
+    # and .claude/agents/media-manager.md ("TMDb query ladder").
+    import urllib.parse as _urllib_parse
+
+    # Release tokens stripped from raw folder names before TMDb query.
+    # CRITICAL: do NOT add 2-letter language codes here (e.g. `fr`, `it`) — they
+    # eat real words like `Fremde`, `Fragtime`, `From`, `Italienisch`.
+    _NOISE = re.compile(
+        r'\b(german|deutsch|dl|dual|english|spanish|italian|'
+        r'bdrip|brrip|webrip|web-?dl|hdtv|hdrip|dvdrip|dvdr|bluray|blu-ray|'
+        r'x264|x265|h\.?264|h\.?265|hevc|xvid|divx|aac|ac3|dts|dts-?hd|dtshd|atmos|truehd|dubbed|'
+        r'1080p|720p|2160p|480p|360p|4k|uhd|hdr|sdr|10bit|8bit|hd|sd|ws|web|'
+        r'unrated|extended|extreme|director\'?s?|dc|uncut|repack|proper|'
+        r'internal|limited|read-?nfo|readnfo|crucial|opium|fme|wayne|sauerkraut|'
+        r'empire|tk|fnd|spicy|zerotwo|anime|bimbambino|aniem|ast4u|gds|fsk|'
+        r'remastered|remaster|criterion|imax|theatrical|complete|special|edition|platinum|teil|'
+        r'\.|-|_)+\s*',
+        re.IGNORECASE,
+    )
+
+    def umlaut_fix(s: str) -> str:
+        """German romanisation: ae→ä, oe→ö, ue→ü."""
+        return (s.replace('ae','ä').replace('oe','ö').replace('ue','ü')
+                 .replace('Ae','Ä').replace('Oe','Ö').replace('Ue','Ü'))
+
+    def clean_tmdb_query(folder_name: str):
+        """Extract (clean_title, year_or_None) suitable for TMDb search."""
+        m = YEAR_RE.search(folder_name)   # honours 1900-2099 constraint
+        if m:
+            year = int(m.group(1))
+            raw = folder_name[:m.start()] + folder_name[m.end():]
+        else:
+            year = None
+            raw = folder_name
+        # Strip [bracket junk] and (NN) parenthetical sequence numbers
+        raw = re.sub(r'\[[^\]]*\]', ' ', raw)
+        raw = re.sub(r'\(\d{1,4}\)', ' ', raw)
+        # Strip user prefix patterns: "A01 Title", "tm-foo", etc.
+        raw = re.sub(r'^[A-Za-z]\d{1,2}\s+', '', raw)
+        raw = re.sub(r'^(tm-|muhhd-|d-|dung-|tk-)\s*', '', raw, flags=re.IGNORECASE)
+        # Replace separators with spaces
+        title = raw.replace('.', ' ').replace('_', ' ').replace('-', ' ')
+        # Strip release tokens
+        while True:
+            new = _NOISE.sub(' ', title)
+            if new == title: break
+            title = new
+        return ' '.join(title.split()).strip(), year
+
+    def tmdb_best_match(query: str, results: list) -> dict | None:
+        """Strict scoring: exact > startswith > contains > popularity.
+
+        Without this, `results[0]` is sorted by TMDb's relevance which
+        favours the most *popular* match — `<franchise>` query returns
+        `<franchise>: <newer-sequel>` because the sequel is currently
+        more popular than the original.
+        """
+        if not results: return None
+        ql = query.lower().strip()
+        scored = []
+        for r in results:
+            title = (r.get('title') or r.get('name') or '').lower().strip()
+            pop = r.get('popularity', 0)
+            if title == ql: score = 10000 + pop
+            elif title.startswith(ql + ' ') or title.startswith(ql + ':'): score = 5000 + pop
+            elif ql in title: score = 1000 + pop
+            else: score = pop
+            scored.append((score, r))
+        scored.sort(key=lambda x: -x[0])
+        return scored[0][1]
+
+    def tmdb_search(kind: str, query: str, year: int | None = None,
+                    language: str | None = None, api_key: str = '') -> list:
+        """Single TMDb search call. kind ∈ {movie, tv}.
+        api_key MUST be a v3 key (32-char hex). v4 Bearer JWT returns 401."""
+        if not query or not api_key: return []
+        path = "movie" if kind == "movie" else "tv"
+        q = _urllib_parse.quote_plus(query)
+        url = f"https://api.themoviedb.org/3/search/{path}?api_key={api_key}&query={q}"
+        if year and kind == "movie": url += f"&year={year}"
+        if language: url += f"&language={language}"
+        body = http_get(url)
+        if not body: return []
+        try: return (json.loads(body).get('results') or [])
+        except (json.JSONDecodeError, ValueError): return []
+
+    def tmdb_smart(kind: str, folder_name: str, api_key: str,
+                   prefer_lang: str = 'de-DE') -> dict | None:
+        """Multi-strategy TMDb lookup with German preference + exact-match scoring.
+        Returns the best matching item or None."""
+        title, year = clean_tmdb_query(folder_name)
+        if not title: return None
+        candidates = [(title, "clean")]
+        u = umlaut_fix(title)
+        if u != title: candidates.append((u, "umlaut"))
+        # Try year-restricted first (most accurate when year present), then loose
+        for q, _label in candidates:
+            for y in (year, None) if year else (None,):
+                for lang in (prefer_lang, None):
+                    results = tmdb_search(kind, q, y, lang, api_key)
+                    item = tmdb_best_match(q, results)
+                    if item: return item
+        return None
+
     # ---- safety: refuse share-root operations ------------------------------
     BANNED_DELETE_PATHS = {
         Path("/data"), Path("/data/data"), Path("/intake"),
@@ -274,10 +382,39 @@ data:
             log("Movies: section root missing")
             return None
         # Two cases: (a) folder = movie (nested = compliant); (b) loose .mkv (flat = non-compliant)
+        # Filter `_*` folders (e.g. _duplicates/, _archive/) — they're operator
+        # housekeeping, not library content. Otherwise they show as
+        # 1 false-positive non-compliant item per audit run.
         nested, flat = [], []
+        movie_nfo_orphan = 0      # Plex/Jellyfin auto-write — should be deduped
+        drift_count = 0           # nfo year ≠ folder year (ignoring 1080/720 since YEAR_RE blocks those now)
+        inner_basename_mismatch = 0
         for entry in sorted(root.iterdir()):
+            if entry.name.startswith('_'):
+                continue
             if entry.is_dir():
-                nested.append(check_movie(entry))
+                rec = check_movie(entry)
+                nested.append(rec)
+                # Bonus checks (don't affect compliance %, just surfaced)
+                if (entry / "movie.nfo").exists() and (entry / f"{entry.name}.nfo").exists():
+                    movie_nfo_orphan += 1
+                # Drift: parse nfo, compare to folder
+                nfo_path = entry / f"{entry.name}.nfo"
+                if nfo_path.exists():
+                    try:
+                        from xml.etree import ElementTree as _ET
+                        nfo_root = _ET.parse(nfo_path).getroot()
+                        nfo_year = (nfo_root.findtext('.//year') or '').strip()
+                        m = YEAR_RE.search(entry.name)
+                        if m and nfo_year and abs(int(nfo_year) - int(m.group(1))) > 5:
+                            drift_count += 1
+                    except Exception:
+                        pass
+                # Inner-file basename consistency
+                for inner in entry.iterdir():
+                    if inner.is_file() and inner.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
+                        if inner.stem != entry.name and "- cd" not in inner.stem:
+                            inner_basename_mismatch += 1
             elif entry.is_file() and entry.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
                 flat.append(entry.name)
         total = len(nested) + len(flat)
@@ -285,15 +422,18 @@ data:
             return {"section": "movies", "items": 0}
         compliant = sum(1 for r in nested if all(r.values()))
         return {
-            "section":     "movies",
-            "items":       total,
-            "nested":      len(nested),
-            "flat":        len(flat),
-            "compliant":   compliant,
-            "layout_pct":  round(100 * len(nested) / total, 1),
-            "nfo_pct":     round(100 * sum(r["nfo"] for r in nested) / max(len(nested), 1), 1),
-            "poster_pct":  round(100 * sum(r["poster"] for r in nested) / max(len(nested), 1), 1),
-            "fanart_pct":  round(100 * sum(r["fanart"] for r in nested) / max(len(nested), 1), 1),
+            "section":              "movies",
+            "items":                total,
+            "nested":               len(nested),
+            "flat":                 len(flat),
+            "compliant":            compliant,
+            "layout_pct":           round(100 * len(nested) / total, 1),
+            "nfo_pct":              round(100 * sum(r["nfo"] for r in nested) / max(len(nested), 1), 1),
+            "poster_pct":           round(100 * sum(r["poster"] for r in nested) / max(len(nested), 1), 1),
+            "fanart_pct":           round(100 * sum(r["fanart"] for r in nested) / max(len(nested), 1), 1),
+            "movie_nfo_orphan":     movie_nfo_orphan,
+            "drift":                drift_count,
+            "inner_basename_mismatch": inner_basename_mismatch,
         }
 
     def audit_tv():
@@ -301,7 +441,8 @@ data:
         if not root.is_dir():
             log("TV Shows: section root missing")
             return None
-        shows = [s for s in sorted(root.iterdir()) if s.is_dir()]
+        # Filter `_*` housekeeping folders (same reason as audit_movies)
+        shows = [s for s in sorted(root.iterdir()) if s.is_dir() and not s.name.startswith('_')]
         episodes_total, episodes_in_season = 0, 0
         series_compliant = 0
         for show in shows:
@@ -368,11 +509,15 @@ data:
     """Trigger library rescan in Plex + Jellyfin.
 
     Required env (from media-manager-tokens secret):
-      PLEX_URL          (default http://plex.media:32400)
+      PLEX_URL          (default http://plex-plex-media-server.media.svc.cluster.local:32400)
       PLEX_TOKEN
-      PLEX_SECTION_IDS  (comma-separated, e.g. "1,2")
-      JELLYFIN_URL      (default http://jellyfin.media:8096)
+      PLEX_SECTION_IDS  (comma-separated, e.g. "1,2,3")
+      JELLYFIN_URL      (default http://jellyfin.media.svc.cluster.local:8096)
       JELLYFIN_API_KEY
+
+    Note: the Plex chart names its service `plex-plex-media-server`, NOT `plex`.
+    Defaults below match the actual cluster service names — overriding via env
+    is supported but rarely needed.
     """
     import os
     import sys
@@ -393,10 +538,10 @@ data:
             return 0
 
     def main():
-        plex_url = os.environ.get("PLEX_URL", "http://plex.media:32400")
+        plex_url = os.environ.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
         plex_token = os.environ.get("PLEX_TOKEN", "")
         sections = [s.strip() for s in os.environ.get("PLEX_SECTION_IDS", "").split(",") if s.strip()]
-        jf_url = os.environ.get("JELLYFIN_URL", "http://jellyfin.media:8096")
+        jf_url = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
         jf_key = os.environ.get("JELLYFIN_API_KEY", "")
 
         if plex_token and sections:
@@ -543,43 +688,41 @@ data:
     Required env:
       ITEM_PATH        absolute path of the movie folder OR show folder
       ITEM_KIND        "movie" | "show"
-      TMDB_API_KEY     (read from media-manager-tokens secret)
-      TMDB_QUERY       title to search (passed in via ConfigMap or env at job creation)
-      TMDB_YEAR        optional year (movies)
+      TMDB_API_KEY     **MUST be a v3 API key** (32-char hex) — the v4 Bearer
+                       JWT is sent as Authorization header and does NOT work
+                       as the `?api_key=` query param. Wrong key → HTTP 401.
+                       Get the v3 key from https://www.themoviedb.org/settings/api
+      TMDB_QUERY       title to search (omit to derive from folder name via
+                       common.clean_tmdb_query; useful for batch retry)
+      TMDB_YEAR        optional year (movies). Year-restricted queries are
+                       ~99% accurate when the year is right.
+
+    Strategy: tmdb_smart() in common.py applies the German-first +
+    umlaut-fallback + exact-match-scoring ladder. Eliminates the popularity
+    bug where `<franchise>` query returned `<franchise>: <newer-sequel>`.
     """
     import os
     import sys
-    import json
-    import urllib.parse
     from pathlib import Path
     sys.path.insert(0, "/app")
-    from common import http_get, log_event, anon_path, assert_safe_target
+    from common import (
+        http_get, log_event, anon_path, assert_safe_target,
+        tmdb_smart, tmdb_search, tmdb_best_match,
+    )
 
-    TMDB = "https://api.themoviedb.org/3"
-    IMG  = "https://image.tmdb.org/t/p"
-
-    def search(kind: str, query: str, year: str | None, key: str) -> dict | None:
-        path = "movie" if kind == "movie" else "tv"
-        q = urllib.parse.quote_plus(query)
-        url = f"{TMDB}/search/{path}?api_key={key}&query={q}"
-        if year and kind == "movie":
-            url += f"&year={year}"
-        body = http_get(url)
-        if not body:
-            return None
-        results = json.loads(body).get("results", [])
-        return results[0] if results else None
+    IMG = "https://image.tmdb.org/t/p"
 
     def write_nfo(target: Path, kind: str, item: dict):
         title = item.get("title") or item.get("name") or ""
         year = (item.get("release_date") or item.get("first_air_date") or "")[:4]
         tag = "movie" if kind == "movie" else "tvshow"
+        plot = (item.get('overview') or '').replace('<', '&lt;')
         body = (
             f"<{tag}>\n"
             f"  <title>{title}</title>\n"
             f"  <year>{year}</year>\n"
             f'  <uniqueid type="tmdb">{item.get("id", "")}</uniqueid>\n'
-            f"  <plot>{item.get('overview', '')}</plot>\n"
+            f"  <plot>{plot}</plot>\n"
             f"</{tag}>\n"
         )
         target.write_text(body, encoding="utf-8")
@@ -599,26 +742,96 @@ data:
         query = os.environ.get("TMDB_QUERY", "")
         year = os.environ.get("TMDB_YEAR", "")
         key = os.environ.get("TMDB_API_KEY", "")
-        if not (item_path and kind and query and key):
-            sys.exit("REFUSED: missing one of ITEM_PATH/ITEM_KIND/TMDB_QUERY/TMDB_API_KEY")
+        if not (item_path and kind and key):
+            sys.exit("REFUSED: missing one of ITEM_PATH/ITEM_KIND/TMDB_API_KEY")
         if kind not in {"movie", "show"}:
             sys.exit("REFUSED: ITEM_KIND must be 'movie' or 'show'")
         assert_safe_target(item_path)
         if not item_path.is_dir():
             sys.exit("REFUSED: ITEM_PATH does not exist or is not a directory")
 
-        item = search(kind, query, year, key)
+        # Two paths:
+        # 1. Explicit TMDB_QUERY supplied (manual override) → year-restricted
+        #    single search with exact-match scoring.
+        # 2. No explicit query → use tmdb_smart() to derive from folder name
+        #    with the full strategy ladder (German-first, umlauts, prefix
+        #    stripping, etc.). This is the smart-retry mode.
+        if query:
+            year_int = int(year) if year and year.isdigit() else None
+            results = tmdb_search(kind, query, year_int, 'de-DE', key)
+            if not results:
+                results = tmdb_search(kind, query, year_int, None, key)
+            item = tmdb_best_match(query, results)
+        else:
+            item = tmdb_smart(kind, item_path.name, key)
+
         if not item:
             log_event("tmdb-no-match", severity="warn")
             sys.exit(2)
 
         nfo_name = "tvshow.nfo" if kind == "show" else f"{item_path.name}.nfo"
+        # Drop any pre-existing nfos so we don't end up with both
+        # <folder>.nfo and movie.nfo (Plex/Jellyfin auto-write `movie.nfo`).
+        for f in item_path.iterdir():
+            if f.is_file() and f.suffix.lower() == '.nfo':
+                try: f.unlink()
+                except OSError: pass
         write_nfo(item_path / nfo_name, kind, item)
 
         if item.get("poster_path"):
             fetch_image(f"{IMG}/w780{item['poster_path']}", item_path / "poster.jpg")
         if item.get("backdrop_path"):
             fetch_image(f"{IMG}/w1920{item['backdrop_path']}", item_path / "fanart.jpg")
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
+  # cleanup_nfos.py — delete redundant `movie.nfo` next to `<folder>.nfo`
+  # =========================================================================
+  # Plex/Jellyfin auto-write `movie.nfo` during library scans alongside any
+  # existing `<folder>.nfo`. Both readers tolerate either, but having both
+  # creates drift over time. This script keeps `<folder>.nfo` (the SOP
+  # canonical) and removes the auto-generated duplicate.
+  #
+  # Read-only walk: each Movies/<X>/ folder, if both `<X>.nfo` and `movie.nfo`
+  # exist, delete `movie.nfo`.
+  # =========================================================================
+  cleanup_nfos.py: |
+    """Periodic cleanup: delete redundant `movie.nfo` Plex/Jellyfin auto-writes.
+
+    No env required. Safe by construction:
+      - Only deletes the literal filename `movie.nfo`
+      - Only when a sibling `<folder>.nfo` exists in the same directory
+      - Only inside MEDIA_ROOT/Movies (skips _* folders)
+      - Reports counts; never lists titles
+    """
+    import os, sys
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import SECTIONS, log, log_event
+
+    def main():
+        root = SECTIONS["movies"]
+        if not root.is_dir():
+            sys.exit("REFUSED: Movies section root missing")
+        deleted = inspected = 0
+        for d in sorted(os.listdir(root)):
+            full = root / d
+            if not full.is_dir() or d.startswith('_'):
+                continue
+            inspected += 1
+            movie_nfo = full / "movie.nfo"
+            folder_nfo = full / f"{d}.nfo"
+            if movie_nfo.exists() and folder_nfo.exists():
+                try:
+                    movie_nfo.unlink()
+                    deleted += 1
+                except OSError as e:
+                    log_event("nfo-cleanup-fail", severity="warn", error=type(e).__name__)
+        log_event("nfo-cleanup-done", inspected=inspected, deleted=deleted)
+        log(f"Deleted {deleted} redundant movie.nfo files (kept canonical <folder>.nfo)")
+        sys.exit(0)
 
     if __name__ == "__main__":
         main()

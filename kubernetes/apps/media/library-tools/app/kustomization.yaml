@@ -10,6 +10,7 @@ resources:
   - ./organize-cronjob.yaml
   - ./sidecar-cronjob.yaml
   - ./cleanup-cronjob.yaml
+  - ./cleanup-nfos-cronjob.yaml
   - ./rescan-cronjob.yaml
   - ./dashboard-rbac.yaml
   - ./dashboard-configmap.yaml
