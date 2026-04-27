@@ -766,8 +766,10 @@ data:
             item = tmdb_smart(kind, item_path.name, key)
 
         if not item:
+            # Soft outcome: TMDb couldn't match this query. The audit script
+            # surfaces it; not a Job failure (KubeJobFailed alert noise).
             log_event("tmdb-no-match", severity="warn")
-            sys.exit(2)
+            return
 
         nfo_name = "tvshow.nfo" if kind == "show" else f"{item_path.name}.nfo"
         # Drop any pre-existing nfos so we don't end up with both
