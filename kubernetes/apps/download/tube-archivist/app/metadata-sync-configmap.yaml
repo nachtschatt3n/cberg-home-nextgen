@@ -102,55 +102,77 @@ data:
         year = pub_str[:4]
         return pub_str, year
 
-    def create_nfo(video_data, file_path):
+    def create_nfo(video_data, file_path, season=None, episode_num=None):
+        """Write per-video NFO using <episodedetails> schema.
+
+        Was <movie> originally; Jellyfin's TV-shows library Nfo reader doesn't
+        parse <movie> for items inside a Series, so episode-level metadata
+        (plot, premiere date) was being dropped. <episodedetails> fixes this.
+
+        season  = year from published date (each year = one Season)
+        episode_num = ordinal within year (sorted by upload date ascending)
+        """
         source = video_data['_source']
-        
-        root = ET.Element("movie")
-        
+
+        root = ET.Element("episodedetails")
+
         title = source.get('title', 'Unknown')
         ET.SubElement(root, "title").text = title
         ET.SubElement(root, "originaltitle").text = title
-        ET.SubElement(root, "sorttitle").text = title
-        
-        desc = source.get('description', '')
-        ET.SubElement(root, "plot").text = desc
-        ET.SubElement(root, "outline").text = desc
-        ET.SubElement(root, "lockdata").text = "true"
-        
-        published_raw = source.get('published', '')
-        date_str, year_str = format_date(published_raw)
-        
-        if date_str:
-            ET.SubElement(root, "premiered").text = date_str
-            ET.SubElement(root, "year").text = year_str
-            
+
+        # showtitle = channel name; required for Jellyfin Series association
         channel_name = None
         channel_data = source.get('channel')
         if isinstance(channel_data, dict):
             channel_name = channel_data.get('channel_name')
         if not channel_name:
             channel_name = source.get('channel_name', '')
-        
-        ET.SubElement(root, "studio").text = channel_name
-        ET.SubElement(root, "director").text = channel_name
-        
+        if channel_name:
+            ET.SubElement(root, "showtitle").text = channel_name
+
+        # Season + episode: year-as-season, ordinal-within-year-as-episode
+        if season is not None:
+            ET.SubElement(root, "season").text = str(season)
+        if episode_num is not None:
+            ET.SubElement(root, "episode").text = str(episode_num)
+
+        desc = source.get('description', '')
+        ET.SubElement(root, "plot").text = desc
+        ET.SubElement(root, "outline").text = desc
+        # NOTE: lockdata=true tells Jellyfin not to refresh from internet
+        # downloaders. Safe because we set the TA library to only use
+        # the TubeArchivist metadata fetcher (no TheMovieDb fallback).
+        ET.SubElement(root, "lockdata").text = "true"
+
+        published_raw = source.get('published', '')
+        date_str, year_str = format_date(published_raw)
+
+        if date_str:
+            # <aired> is preferred for Episode items in Jellyfin/Kodi
+            ET.SubElement(root, "aired").text = date_str
+            ET.SubElement(root, "premiered").text = date_str
+            ET.SubElement(root, "year").text = year_str
+
+        if channel_name:
+            ET.SubElement(root, "studio").text = channel_name
+
         vid_id = video_data['_id']
         # uniqueid is preferred by modern Kodi/Jellyfin
         uid = ET.SubElement(root, "uniqueid", type="youtube", default="true")
         uid.text = vid_id
-        
+
         # Legacy ID tag
         ET.SubElement(root, "id").text = vid_id
-        
+
         ET.SubElement(root, "genre").text = "YouTube"
-        
+
         # Write NFO
         tree = ET.ElementTree(root)
         if hasattr(ET, 'indent'):
             ET.indent(tree, space="  ", level=0)
-        
+
         nfo_path = os.path.splitext(file_path)[0] + ".nfo"
-        
+
         # Check if update is needed could be added here, but overwriting ensures freshness
         try:
             tree.write(nfo_path, encoding="utf-8", xml_declaration=True)
@@ -195,41 +217,84 @@ data:
         print("Starting NFO sync...")
         videos = get_all_videos()
         print(f"Retrieved {len(videos)} videos from Elasticsearch.")
-        
+
         if not videos:
             return
-    
-        file_map = build_file_map(VIDEO_ROOT)
-        
-        count = 0
-        processed_channels = set()
 
+        file_map = build_file_map(VIDEO_ROOT)
+
+        # Phase 1: collect all videos that have matching files on disk,
+        # plus their (folder, year, sort_key) so we can group + assign
+        # episode numbers.
+        matched = []
         for video in videos:
             vid_id = video['_id']
-            if vid_id in file_map:
-                file_path = file_map[vid_id]
-                create_nfo(video, file_path)
-                
-                # Handle Channel NFO
-                folder_path = os.path.dirname(file_path)
-                
-                # Extract channel name from nested dictionary or root
+            if vid_id not in file_map:
+                continue
+            file_path = file_map[vid_id]
+            folder = os.path.dirname(file_path)
+            published_raw = video['_source'].get('published', '')
+            date_str, year_str = format_date(published_raw)
+            try:
+                year = int(year_str) if year_str else 0
+            except (TypeError, ValueError):
+                year = 0
+            # Sort key: numeric timestamp where possible, else date string
+            try:
+                sort_key = float(published_raw) if published_raw else 0
+            except (TypeError, ValueError):
+                sort_key = date_str or ''
+            matched.append({
+                'video': video,
+                'file_path': file_path,
+                'folder': folder,
+                'year': year,
+                'sort_key': sort_key,
+            })
+
+        # Phase 2: sort by (folder, year, sort_key) so each (folder, year)
+        # group is contiguous and ordered ascending by upload date.
+        # Coerce sort_key to a comparable type (all string for safety).
+        matched.sort(key=lambda v: (v['folder'], v['year'], str(v['sort_key'])))
+
+        # Phase 3: assign episode numbers per (folder, year) group.
+        current_group = None
+        episode_counter = 0
+        for entry in matched:
+            group = (entry['folder'], entry['year'])
+            if group != current_group:
+                current_group = group
+                episode_counter = 0
+            episode_counter += 1
+            entry['episode_num'] = episode_counter
+
+        # Phase 4: write episode .nfo (with season+episode) + tvshow.nfo per channel.
+        count = 0
+        processed_channels = set()
+        for entry in matched:
+            video = entry['video']
+            file_path = entry['file_path']
+            folder = entry['folder']
+            season = entry['year'] if entry['year'] else None
+            episode_num = entry['episode_num']
+
+            create_nfo(video, file_path, season=season, episode_num=episode_num)
+
+            # Channel-level nfo (write once per folder)
+            if folder not in processed_channels:
                 channel_name = None
                 channel_data = video['_source'].get('channel')
-                
                 if isinstance(channel_data, dict):
                     channel_name = channel_data.get('channel_name')
-                
                 if not channel_name:
                     channel_name = video['_source'].get('channel_name')
-                
-                if channel_name and folder_path not in processed_channels:
-                    create_show_nfo(folder_path, channel_name)
-                    processed_channels.add(folder_path)
+                if channel_name:
+                    create_show_nfo(folder, channel_name)
+                    processed_channels.add(folder)
 
-                count += 1
-        
-        print(f"Sync completed. Processed {count} videos.")
+            count += 1
+
+        print(f"Sync completed. Processed {count} videos across {len(processed_channels)} channels.")
     
     if __name__ == "__main__":
         main()
