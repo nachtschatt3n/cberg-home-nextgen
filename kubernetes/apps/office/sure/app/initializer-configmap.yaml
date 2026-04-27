@@ -32,4 +32,19 @@ data:
           end
         end
       end
+
+      # Upstream RuleRun#complete_job! does an unconditional decrement!(:pending_jobs_count)
+      # which trips the `>= 0` validation when a Sidekiq retry replays a job whose
+      # rule_run was already finalized — the job then loops in the retry queue forever.
+      # Make it idempotent: skip if already success, only decrement when > 0.
+      RuleRun.class_eval do
+        def complete_job!(modified_count: 0)
+          with_lock do
+            return if status == "success"
+            increment!(:transactions_modified, modified_count) if modified_count > 0
+            decrement!(:pending_jobs_count) if pending_jobs_count > 0
+            update!(status: "success") if pending_jobs_count <= 0
+          end
+        end
+      end
     end
