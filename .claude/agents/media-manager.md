@@ -90,6 +90,64 @@ Same physical bytes, three logical views. Never confuse the path the user mentio
 10. **Concurrency.** Pause Plex/Jellyfin scheduled scans (or take the libraries off-line via cluster-ops-agent) before bulk reorg of >50 items, then trigger a single rescan after.
 11. **Public repo redaction** — never print Plex tokens, Jellyfin API keys, NAS hostname, `${SECRET_DOMAIN}`, or any decrypted SOPS material in agent output. **Never name specific media titles** (movies, TV shows, music artists/albums/tracks, YouTube channels). See the Operating environment section for the full rule.
 
+## Hard-won patterns (from real bulk-organise session)
+
+These come from a session that organised 564 movies + 807 TV episodes from 0% sidecar coverage to 96.9%. Don't relearn the lessons.
+
+### TMDb query ladder (try in this order)
+
+The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
+
+1. **Year-restricted query is gold.** When folder has `(YYYY)`, pass it as `&year=`. ~99% accurate when year is correct.
+2. **Strict scoring beats popularity.** When TMDb returns multiple results, pick by: exact title match (10000 + popularity) > title startswith query (5000 + pop) > query in title (1000 + pop) > popularity. **Popularity-only picks "Doctor Strange in the Multiverse of Madness" for query "Doctor Strange" because it's newer/more-popular.**
+3. **Always try `language=de-DE` first** for this user's library (German-centric).
+4. **Strip release noise** before query — `german`, `dl`, `bdrip`, `x264`, `1080p`, `wayne`, `internal`, `proper`, `extended`, `dc`, `german`, `dual`, `dts`, `aac`, etc. Whitelist real words.
+5. **Strip user prefix patterns**:
+   - `Walt Disneys X` / `Disneys X` / `Disney X` → strip prefix, search `X`
+   - `<Letter><digit><digit> Title` (e.g. `A01 Asterix der Gallier`) → strip the `A01 ` prefix
+   - `Star Trek Collection - NN Star Trek N` → just `Star Trek` + year (year disambiguates)
+   - `<Actor> - <Subtitle>` (e.g. `Jackie Chan - Drunken Master`) → search subtitle alone
+   - Custom-release lower prefixes: `tm-`, `muhhd-`, `d-`, `dung-`, `tk-` → strip
+6. **Umlaut substitution** for German titles: `ae→ä`, `oe→ö`, `ue→ü`. Try both forms.
+7. **Drop trailing single-digit numbers** (`Powerman 1`, `Topfighter 2`) — TMDb often has the canonical title without the number.
+8. **Drop articles** (`Der`, `Die`, `Das`, `The`, `A`, `An`) as a fallback.
+9. **Never use `\b(fr)\b` or any 2-letter stopword in noise regex** — it eats real words like `Fremde`, `Fragtime`, `From`. Whitelist instead.
+
+### Folder-name pitfalls
+
+- **`(1080)` / `(720)` looks like a year** but is the resolution. Year regex must constrain to `(19[0-9]{2}|20[0-9]{2})`. Otherwise `Movie (1080)` parses as year=1080 and TMDb returns wrong matches.
+- **Numbers inside titles get eaten** if the regex matches `\d+` greedily. Always require word-boundary or paren-bracket.
+- **The `_duplicates/` folder is visible to Plex/Jellyfin** — the `_` prefix only excludes from your audit. Plex/Jellyfin walk it and may auto-index entries. Either move `_archive/` outside the library tree or document an exclusion in each library's UI config.
+
+### File / content patterns
+
+- **Multi-part DVDRips** with `-a.avi`/`-b.avi` suffixes (or numeric `cd1`/`cd2`) are the **same movie split across CDs**. Detection: same year, same release tag, sequential single-letter or 1-digit suffix. Resolution: merge into one folder using Plex multi-part naming `<title> (Year) - cd1.avi` / `- cd2.avi` (https://support.plex.tv/articles/200381043-multi-part-movies/).
+- **Plex/Jellyfin auto-write `movie.nfo`** alongside any existing `<folder>.nfo`. Both servers read either. Keep `<folder>.nfo` as the canonical (matches our SOP); periodically delete stale `movie.nfo` to avoid drift.
+- **Same-title-different-content collisions** — when a folder has the right name but `ffprobe` shows wrong runtime, the content was wrongly placed. Use known canonical runtimes to disambiguate (e.g., Civil War 147 min vs First Avenger 124 min).
+- **`<folder>.nfo` and inner `<folder>.mkv` should match folder name.** After any rename, also rename inner files to match. Audit catches drift.
+- **Year-mismatch between folder and nfo** signals one of:
+  1. Folder year is `(1080)`/`(720)` (resolution) → nfo year is the truth, rename folder.
+  2. Off-by-one (release date crossed calendar year) → both arguably correct, leave alone.
+  3. Wide gap (>5 years) → likely wrong nfo, refresh from TMDb with stricter query.
+
+### Image + ffprobe gotchas
+
+- **`mwader/static-ffmpeg` is FROM scratch** — no shell, can't `cp`. To get ffprobe in a non-trivial pod, either: (a) `apt install ffmpeg` in init container running as root + copy binary + libs to shared volume, or (b) skip ffprobe entirely — JPEG/PNG dimensions can be parsed in pure stdlib (`common.image_dims()` does this). The audit-cronjob uses (b).
+- **TMDb image endpoints**: `image.tmdb.org/t/p/w780` for posters (good for 600+ px wide check), `w1920` for backdrops (good for 1280+ px check). Don't request `original` unless needed — bigger payloads slow down bulk runs.
+
+### Audit + alert design
+
+- **Audit Job exits 0 if it walked the share** (regardless of compliance numbers). Compliance is a metric, not a job-failure signal. Alerting on low compliance belongs in Prometheus rules over a metric, not on `kube_job_failed`.
+- **`_duplicates/` counts as 1 false-positive item** in the audit (folder doesn't match canonical naming). Filter folders starting with `_` in audit walks.
+- **Folders with malformed `.nfo` XML** show up as missing-nfo even though file exists. Worth a separate counter.
+
+### Operational tactics
+
+- **TMDb rate limit (~50 req/sec) is generous.** 26 letter Jobs in parallel × ~30 movies × ~6 query strategies = ~5,000 requests; completes in minutes. Don't over-throttle.
+- **Bulk renames have hidden failure modes**: collision pairs (target name already exists), wrong-content folders (`Movie A` content in `Movie B` folder due to earlier mis-rename). Always ffprobe-verify after a bulk pass.
+- **The 95% threshold is real diminishing returns.** Last 5% is genuine TMDb gaps + folder-name typos that need user intervention. Don't over-engineer past 95%.
+- **Letter-coded options work well with this user.** When surfacing >2 choices, use `(a)`, `(b)`, `(c)` and they reply with the letter(s) directly (e.g. `do A B C`). Execute in declared order, surface results between if needed.
+
 ## Standard workflow — JDownloader intake
 
 1. **List intake** via a debug pod that mounts `jdownloader-downloads`:

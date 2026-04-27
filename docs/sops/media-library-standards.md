@@ -85,8 +85,9 @@ data/
 
 ### Naming rules
 
-- **Movies**: filename = folder name = `Title (Year)`. Year in parens. Drop release suffixes (e.g. `.GERMAN.DL.720p.WEB.h264-WAYNE`, `.BDRip.x264-BLOODY`).
+- **Movies**: filename = folder name = `Title (Year)`. Year in parens (4 digits, **must be in range 1900–2099** — `(1080)` / `(720)` looks like a year but is the resolution; year regex must constrain to `(19[0-9]{2}|20[0-9]{2})`). Drop release suffixes (e.g. `.GERMAN.DL.720p.WEB.h264-WAYNE`, `.BDRip.x264-BLOODY`).
 - **TV episodes**: `Show Name - S01E01 - Episode Title.mkv` inside `TV Shows/<Show>/Season 01/`. Episode title is preferred; if unknown, `Show Name - S01E01.mkv` is acceptable.
+- **Multi-part movies** (DVDRips split across CDs, originally `-a.avi`/`-b.avi`): merge into one folder using **Plex multi-part naming**: `Title (Year)/Title (Year) - cd1.avi`, `... - cd2.avi`. Plex+Jellyfin treat them as one continuous movie (https://support.plex.tv/articles/200381043-multi-part-movies/).
 - **YouTube**: filename shape is whatever Tube Archivist writes (`<channel>_YYYYMMDD_<title>.mp4`). Jellyfin scans `/media/downloads/tube-archivist/UC*/` directly — no rename or migration needed.
 - **Umlauts**: use proper `ä`, `ö`, `ü`. CIFS on this NAS handles UTF-8 cleanly — do not transliterate to `ae`/`oe`/`ue`.
 - **Sidecars**: same basename as the media file:
@@ -99,6 +100,11 @@ data/
 - Plex local-asset matching docs: <https://support.plex.tv/articles/200220677-local-media-assets-movies/> and <https://support.plex.tv/articles/200220717-local-media-assets-tv-shows/>.
 - Jellyfin movies docs: <https://jellyfin.org/docs/general/server/media/movies/> and shows: <https://jellyfin.org/docs/general/server/media/shows/>.
 - NFO schema (Kodi/XBMC): minimum movie fields `<title>`, `<year>`, optional `<uniqueid type="tmdb">`. Minimum episode fields `<season>`, `<episode>`, `<title>`, `<aired>`. Minimum series `tvshow.nfo`: `<title>`, `<year>`, optional `<uniqueid type="tvdb">`.
+- **One nfo per folder.** Plex/Jellyfin auto-write `movie.nfo` alongside any existing `<folder>.nfo` during their library scans. Both servers read either, but having two creates drift. **Standard: keep `<folder>.nfo` (matches the SOP), periodically delete the auto-generated `movie.nfo`.** A scheduled cleanup is in the audit CronJob's plan.
+
+### TMDb integration (the v3-vs-v4 trap)
+
+`sidecar.py` calls `https://api.themoviedb.org/3/search/...?api_key=<KEY>&query=...`. The `&api_key=` URL parameter requires a **v3 API key** (32-char hex string). TMDb's newer **v4 Read Access Token** is a JWT-style long string and is sent as `Authorization: Bearer <TOKEN>` — it does NOT work as a query param and returns HTTP 401. When populating `media-manager-tokens.sops.yaml`, use the **"API Key (v3 auth)"** field from <https://www.themoviedb.org/settings/api>, not the v4 token.
 
 ### Dedup / quality decisions (German scene ranking)
 

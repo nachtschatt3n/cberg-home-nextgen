@@ -132,6 +132,58 @@ Compliance percentages below the threshold trigger a Prometheus alert if they pe
 | Plex doesn't pick up local poster | Item must be in its own folder. Re-check layout compliance for that item. |
 | TA channel missing in Jellyfin | TA `:00`/`:30` jobs haven't completed yet — check `kubectl -n download get jobs \| grep tube-archivist`. Then trigger a Jellyfin rescan. |
 | Agent reports "0 items moved" but downloads dir not empty | Items still match no classification rule — agent asks via `AskUserQuestion`; check there are no pending questions. |
+| TMDb sidecar fetch returns HTTP 401 | Token in `media-manager-tokens.sops.yaml` is the v4 Bearer JWT. `sidecar.py` uses v3 query-param API. Replace with the short "API Key (v3 auth)" from <https://www.themoviedb.org/settings/api>. |
+| `_duplicates/` items showing up in Plex/Jellyfin Movies library | The `_` prefix only excludes `audit.py`; servers walk it. Either move `_duplicates/` outside `Movies/`, or add an exclusion path in each library's UI. |
+
+## Common gotchas (from real bulk-organise session)
+
+### Wrong TMDb match ("Doctor Strange" → "Doctor Strange in the Multiverse of Madness")
+
+**Symptom**: `sidecar.py` returns a TMDb match for a sequel/related movie, not the title queried.
+
+**Cause**: TMDb's search endpoint returns multiple results sorted by relevance, but our retry scripts ranked by **popularity**, which favors newer/blockbuster sequels.
+
+**Fix**: use the smarter scoring in newer scripts — exact title match (10000 + popularity) > startswith (5000 + pop) > contains (1000 + pop) > popularity. Re-fetch the offending item with a year-restricted query (`&year=YYYY` is very accurate when year is correct).
+
+### Resolution mistaken for year (`Movie (1080)`)
+
+**Symptom**: a folder named `Movie (1080)` shows up after the migration script. The audit reports year mismatches between folder year (1080) and nfo year (real).
+
+**Cause**: original filename had no year token, so `(1080)` (resolution leak) was caught by an over-permissive `\((\d{4})\)` regex.
+
+**Fix**: rename folder to use the nfo's real year. The `media-cleanup-nfos` Job (in this session) auto-handled folders where folder year ∈ {360, 480, 720, 1080, 1440, 2160} by reading the nfo's `<year>` and renaming.
+
+### Multi-part DVDRip detection (`Movie -a.avi` + `Movie -b.avi`)
+
+**Symptom**: two folders for what looks like the same movie, or one folder with both `-a` and `-b` files inside.
+
+**Cause**: pre-2010s German DVDRips were commonly split across two CDs. Both halves are needed for the full movie.
+
+**Fix**: merge into one folder using **Plex multi-part naming**: `<title> (Year)/<title> (Year) - cd1.avi` and `... - cd2.avi`. Plex+Jellyfin play them as one continuous movie.
+
+### Auto-generated `movie.nfo` alongside `<folder>.nfo`
+
+**Symptom**: each folder has TWO nfo files: `<folder>.nfo` (your canonical) and `movie.nfo` (Plex/Jellyfin auto-write).
+
+**Cause**: both servers write `movie.nfo` during their library scans when the existing nfo doesn't satisfy them, OR when the user clicks "Refresh metadata" in the UI.
+
+**Fix**: keep `<folder>.nfo` (matches the SOP), delete `movie.nfo` periodically. The cleanup is now part of the standard NFO maintenance pass.
+
+### Same-name folders containing different movies
+
+**Symptom**: two folders named e.g. `The First Avenger Civil War (2016)` and `The First Avenger Civil War` (no year), `ffprobe` shows different runtimes.
+
+**Cause**: a previous bulk-rename mis-matched movie content to the wrong canonical name. Common pair: a sequel got the parent franchise's name.
+
+**Fix**: ffprobe both, identify by canonical runtime (Civil War 147 min, First Avenger 124 min), rename folders to match actual content. Disambiguate via swap (rename one to a temp name, then rename other to free name, then rename temp back).
+
+### Wrong TMDb match (German anime BDRiP releases)
+
+**Symptom**: `Das Koenigreich der Katzen GERMAN 5 1 AC3 ANiME BDRiP (1080)` returns no TMDb match.
+
+**Cause**: filename has so many release tokens that the cleaned query is dominated by `5 1 ANiME (1080)` noise.
+
+**Fix**: aggressive noise-token stripping (extend the noise regex), strip `Walt Disneys` prefix, try with `language=de-DE`, drop trailing single-digit numbers (audio channel artifacts).
 
 ## See also
 
