@@ -36,11 +36,11 @@ These came from a prior session that successfully organised hundreds of files on
 - All CLI is project-local and managed by `mise` (see `.mise.toml`). Run tools from the repo root so mise activates the right versions: `kubectl`, `flux`, `talosctl`, `helm`, `kustomize`, `kubeconform`, `sops`, `age`, `yq`, `jq`, `task`, `unifictl`.
 - Environment is preset by mise: `KUBECONFIG`, `TALOSCONFIG`, `SOPS_AGE_KEY_FILE`, `KUBERNETES_DIR`. Do not export overrides.
 - This repo is **public**. Never print secret domains, tokens, credentials, decrypted payloads, the NAS hostname (`${NAS_HOSTNAME}`), `${SECRET_DOMAIN}`, or anything from `*.sops.yaml` plaintext.
-- **Never emit specific media titles in any persisted artifact.** This includes:
-  - Agent output, log lines, commit messages, docs, runbook outputs, PR descriptions
-  - **Kubernetes resource names** (Job names, ConfigMap names, label values, annotations) — `kubectl get jobs` history persists for the cluster's lifetime and is visible to anyone with namespace read access. Use sequential identifiers (`media-organize-show-001-<unix-ts>`, never `media-organize-<showname>-<ts>`)
-  - **Filenames you create on disk** (debug pod scripts, temp files, audit-report side-files)
-  Covers movie titles, TV show names, season/episode titles, music artist/album/track names, YouTube channel names, and channel IDs. The repo is public *and* the cluster's `kubectl get` history is shared; listing what the user owns is both a privacy leak and a copyright-exposure vector. Use placeholders (`<movie>`, `<show>`, `<channel>`, `Title (Year)`, `Show - SXXEYY`) in everything that gets persisted. Counts are fine (`+26 episodes`); names are not. When you must reference a specific item back to the user (e.g. an `AskUserQuestion`), do so in the live prompt only — do not write the title into a runbook, SOP example, commit message, or any kubectl resource you create.
+- **Never write specific media titles into committed artifacts.** This rule is scoped to anything that lands in the public repo or other long-lived shared state:
+  - **Forbidden**: commit messages, files in `docs/`, `runbooks/`, `kubernetes/apps/**`, `.claude/agents/**`; PR/issue bodies; the audit report `runbooks/media-library-current.md` (gitignored, but treat as committable); agent-authored SOPs.
+  - **Forbidden in cluster persistent state**: Kubernetes Job/ConfigMap/Pod resource *names* and label/annotation *values* — `kubectl get jobs` history is visible to anyone with namespace read access. Use sequential or hash identifiers (`media-organize-show-001-<unix-ts>`, never `media-organize-<showname>-<ts>`).
+  - **OK**: live conversation with the user, kubectl exec/log output displayed in chat, dashboard UI rendering live filesystem state, on-disk filenames (Plex/Jellyfin need the title in the filename to scan correctly), TMDb query strings inside an ephemeral Job's env (which auto-deletes via `ttlSecondsAfterFinished`).
+  Covers movie titles, TV show names, season/episode titles, music artist/album/track names, YouTube channel names, and channel IDs. Counts (`+26 episodes`) are fine in any context. The line is "would this artifact be visible to a stranger reading the public repo or running `kubectl get jobs -n media`?" If yes → use a placeholder. If no → use the title freely.
 
 ## Primary references
 
@@ -190,5 +190,5 @@ When asked to "add a new Tube Archivist channel" or "fix YouTube metadata": conf
 - Never run direct cluster mutations as a substitute for delegating to `cluster-ops-agent`.
 - Never `rm` a path computed from a glob on the share root.
 - Never delete a source until the destination is verified `size > 0`.
-- Never name specific media titles in any persisted artifact (commit message, doc, runbook output, PR body, audit JSON committed to the repo).
+- Never name specific media titles in committed artifacts (commit messages, docs, runbooks, K8s resource names, PR bodies). Live chat and kubectl exec output are fine.
 - Always ask before destructive or shared-state actions (replace, mass-delete, namespace-wide rescan).
