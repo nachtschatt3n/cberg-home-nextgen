@@ -99,14 +99,14 @@ These come from a session that organised 564 movies + 807 TV episodes from 0% si
 The naive query (folder name + year) hits ~60%. The full ladder gets to 95%+:
 
 1. **Year-restricted query is gold.** When folder has `(YYYY)`, pass it as `&year=`. ~99% accurate when year is correct.
-2. **Strict scoring beats popularity.** When TMDb returns multiple results, pick by: exact title match (10000 + popularity) > title startswith query (5000 + pop) > query in title (1000 + pop) > popularity. **Popularity-only picks "Doctor Strange in the Multiverse of Madness" for query "Doctor Strange" because it's newer/more-popular.**
+2. **Strict scoring beats popularity.** When TMDb returns multiple results, pick by: exact title match (10000 + popularity) > title startswith query (5000 + pop) > query in title (1000 + pop) > popularity. **Popularity-only picks the newest sequel for a parent-franchise query** (e.g. searching `<franchise>` returns `<franchise>: <newer-sequel>` because that's currently more popular).
 3. **Always try `language=de-DE` first** for this user's library (German-centric).
 4. **Strip release noise** before query — `german`, `dl`, `bdrip`, `x264`, `1080p`, `wayne`, `internal`, `proper`, `extended`, `dc`, `german`, `dual`, `dts`, `aac`, etc. Whitelist real words.
 5. **Strip user prefix patterns**:
-   - `Walt Disneys X` / `Disneys X` / `Disney X` → strip prefix, search `X`
-   - `<Letter><digit><digit> Title` (e.g. `A01 Asterix der Gallier`) → strip the `A01 ` prefix
-   - `Star Trek Collection - NN Star Trek N` → just `Star Trek` + year (year disambiguates)
-   - `<Actor> - <Subtitle>` (e.g. `Jackie Chan - Drunken Master`) → search subtitle alone
+   - `<Distributor> X` (e.g. `Walt Disneys X`, `Disneys X`, `Disney X`) → strip prefix, search `X`
+   - `<Letter><digit><digit> Title` (e.g. user-added `A01 ` series prefix) → strip the leading code
+   - `<Collection> - NN <Item> N` collection patterns → drop the collection prefix, use just the item name + year (year disambiguates)
+   - `<Actor> - <Subtitle>` (e.g. `<actor name> - <real movie title>`) → search subtitle alone
    - Custom-release lower prefixes: `tm-`, `muhhd-`, `d-`, `dung-`, `tk-` → strip
 6. **Umlaut substitution** for German titles: `ae→ä`, `oe→ö`, `ue→ü`. Try both forms.
 7. **Drop trailing single-digit numbers** (`Powerman 1`, `Topfighter 2`) — TMDb often has the canonical title without the number.

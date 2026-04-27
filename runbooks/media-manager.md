@@ -137,9 +137,9 @@ Compliance percentages below the threshold trigger a Prometheus alert if they pe
 
 ## Common gotchas (from real bulk-organise session)
 
-### Wrong TMDb match ("Doctor Strange" → "Doctor Strange in the Multiverse of Madness")
+### Wrong TMDb match (search returns sequel for query of the original)
 
-**Symptom**: `sidecar.py` returns a TMDb match for a sequel/related movie, not the title queried.
+**Symptom**: `sidecar.py` returns a TMDb match for a sequel/related movie, not the title queried — e.g. searching for `<franchise>` returns `<franchise>: <newer-sequel>`.
 
 **Cause**: TMDb's search endpoint returns multiple results sorted by relevance, but our retry scripts ranked by **popularity**, which favors newer/blockbuster sequels.
 
@@ -171,19 +171,19 @@ Compliance percentages below the threshold trigger a Prometheus alert if they pe
 
 ### Same-name folders containing different movies
 
-**Symptom**: two folders named e.g. `The First Avenger Civil War (2016)` and `The First Avenger Civil War` (no year), `ffprobe` shows different runtimes.
+**Symptom**: two folders named the same except for the year, `ffprobe` shows different runtimes inside each.
 
-**Cause**: a previous bulk-rename mis-matched movie content to the wrong canonical name. Common pair: a sequel got the parent franchise's name.
+**Cause**: a previous bulk-rename mis-matched movie content to the wrong canonical name. Common pair: a sequel got the parent franchise's name applied to it.
 
-**Fix**: ffprobe both, identify by canonical runtime (Civil War 147 min, First Avenger 124 min), rename folders to match actual content. Disambiguate via swap (rename one to a temp name, then rename other to free name, then rename temp back).
+**Fix**: ffprobe both, identify by canonical runtime (look up the actual movie's runtime; a 23-minute delta is a strong signal you have two different cuts/movies), rename folders to match actual content. Disambiguate via swap (rename one to a temp name, then rename other to free name, then rename temp back).
 
 ### Wrong TMDb match (German anime BDRiP releases)
 
-**Symptom**: `Das Koenigreich der Katzen GERMAN 5 1 AC3 ANiME BDRiP (1080)` returns no TMDb match.
+**Symptom**: a folder name like `<title> GERMAN 5 1 AC3 ANiME BDRiP (1080)` returns no TMDb match.
 
-**Cause**: filename has so many release tokens that the cleaned query is dominated by `5 1 ANiME (1080)` noise.
+**Cause**: filename has so many release tokens that the cleaned query is dominated by audio-channel + container noise (`5 1 ANiME (1080)`).
 
-**Fix**: aggressive noise-token stripping (extend the noise regex), strip `Walt Disneys` prefix, try with `language=de-DE`, drop trailing single-digit numbers (audio channel artifacts).
+**Fix**: aggressive noise-token stripping (extend the noise regex), strip distributor prefixes, try with `language=de-DE`, drop trailing single-digit numbers (audio channel artifacts), recognise `(1080)` as resolution-not-year.
 
 ## See also
 
