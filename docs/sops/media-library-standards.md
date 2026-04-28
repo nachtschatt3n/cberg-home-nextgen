@@ -1,5 +1,10 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
+> Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
+> Version: `2026.04.27`
+> Last Updated: `2026-04-27`
+> Owner: `media-manager`
+
 | Field | Value |
 |---|---|
 | **Version** | 2026.04.27 |
