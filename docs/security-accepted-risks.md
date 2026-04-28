@@ -62,8 +62,12 @@ The following apps are on the external ingress class without Authentik forward a
 | n8n | home-automation | Built-in user auth + 2FA support |
 | iobroker | home-automation | Built-in user auth |
 | home-assistant | home-automation | Built-in user auth with MFA support |
+| nextcloud-notify-push | office | Companion WebSocket endpoint for the Nextcloud client push protocol — Authentik forward-auth would break the long-lived WS handshake that mobile/desktop clients require. Auth is enforced upstream by Nextcloud (token-bound to user session). |
+| nextcloud-whiteboard-proxy | office | Internal Yjs/CRDT websocket relay for the Nextcloud Whiteboard app — token-gated by Nextcloud session; Authentik forward-auth incompatible with the protocol upgrade. |
+| music-assistant-alexa-api | home-automation | Smart-speaker companion endpoint expected to be reachable by Alexa cloud webhooks — adding Authentik would block the upstream callback. Requests are HMAC-validated by the app. |
+| music-assistant-alexa-stream | home-automation | Audio stream endpoint consumed by Alexa devices over HTTP range requests — must remain unauthenticated at the proxy layer; bound to ephemeral signed URLs by the app. |
 
-**Why accepted:** All four applications have robust application-level authentication. Adding Authentik forward auth on top would create double-auth friction for legitimate users with no meaningful security gain, as all apps require login before any functionality is accessible.
+**Why accepted:** The first four apps have robust application-level authentication and adding Authentik would double-prompt without security gain. The four `nextcloud-*` / `music-assistant-*` endpoints are protocol/companion endpoints where forward-auth would break the upstream integration; auth is enforced one layer up (Nextcloud session, signed URL, or HMAC).
 
 ---
 
@@ -111,8 +115,10 @@ The following services are on the external ingress class without Authentik forwa
 | absenty (dev) | my-software-development | Built-in app auth; development instance |
 | absenty (prod) | my-software-production | Built-in app auth; employee-facing service |
 | andreamosteller (prod) | my-software-production | Intentionally public portfolio/website — no auth required |
+| langfuse | ai | Built-in user auth; SSO/email login required before any project/observability data access |
+| paperless-ngx | office | Built-in user auth; document library inaccessible without login |
 
-**Why accepted:** All services with private data require authentication before access. `andreamosteller` is a public-facing website with no authentication by design.
+**Why accepted:** All services with private data require authentication before access. `andreamosteller` is a public-facing website with no authentication by design. `langfuse` and `paperless-ngx` ship robust first-party auth and adding Authentik on top would double-prompt with no incremental security benefit (same rationale as AR-004).
 
 ---
 
@@ -186,3 +192,20 @@ Both parent charts (Nextcloud 9.0.4, Paperless-NGX 0.24.1) default to the `bitna
 - The standalone MariaDB in `databases/` was already upgraded to chart 25.0.6 (MariaDB 12.0.2) in February 2026
 
 **Future action:** Migrate both bundled instances to `bitnami/mariadb` during a planned maintenance window. This requires mysqldump of each database, switching the image override, and restoring data.
+
+---
+
+## AR-012 — flux-webhook External Ingress Without Authentik Forward Auth
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — HMAC-gated by design; Authentik forward auth would break webhook delivery
+
+The `flux-webhook` ingress (`flux-system/webhook-receiver`) is exposed on the external ingress class without Authentik forward auth.
+
+**Why accepted:**
+- The webhook must be reachable by GitHub's outbound webhook delivery system. Authentik forward auth would intercept the request with a 302 to the IdP login page, which GitHub's webhook poster cannot follow — every push event would fail.
+- Authentication is enforced at the application layer by the Flux Receiver: each request is validated against an HMAC-SHA256 signature using a shared secret bound to the GitHub repository's webhook configuration. Requests with missing or invalid `X-Hub-Signature-256` headers are rejected before any reconciliation runs.
+- Path is scoped: the receiver only accepts pushes that match the configured GitRepository resource and triggers a reconcile of the configured Kustomization tree. No arbitrary command execution, no payload introspection beyond the commit SHA.
+- Risk surface: an attacker would need both the public webhook URL and the HMAC secret to forge a request, at which point they could only trigger an early reconcile of the already-committed `main` — not inject code.
+
+**Mitigation:** Rotate the HMAC secret if the repo or webhook configuration is compromised. Webhook secret stored encrypted in `kubernetes/apps/flux-system/webhooks/app/*.sops.yaml`.
