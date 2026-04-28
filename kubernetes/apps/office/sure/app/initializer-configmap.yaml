@@ -48,3 +48,23 @@ data:
         end
       end
     end
+
+    # Disable the upstream `refresh_demo_family` cron entry (config/schedule.yml ->
+    # DemoFamilyRefreshJob). We do not run the demo-family feature, and the job
+    # raises `KeyError: "key not found: \"email\""` on every fire, polluting the
+    # Sidekiq retry queue. Sidekiq-Cron's ScheduleLoader registers its own
+    # `on(:startup)` when the gem loads (during the `sidekiq.rb` initializer);
+    # this hook is registered afterwards and therefore runs *after* schedule.yml
+    # has been loaded into Redis, so we can safely destroy the entry by name.
+    Sidekiq.configure_server do |config|
+      config.on(:startup) do
+        if defined?(Sidekiq::Cron::Job)
+          if (job = Sidekiq::Cron::Job.find("refresh_demo_family"))
+            job.destroy
+            Rails.logger.info("[zz_bank_refresh_overrides] Removed Sidekiq cron entry refresh_demo_family")
+          end
+        end
+      rescue => e
+        Rails.logger.error("[zz_bank_refresh_overrides] Failed to remove refresh_demo_family cron: #{e.message}")
+      end
+    end
