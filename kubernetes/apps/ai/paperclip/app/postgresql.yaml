@@ -1,4 +1,36 @@
 ---
+# Longhorn-static PV bound to a specific Longhorn Volume restored from backup
+# on 2026-04-30 (Stage A salvage corruption). Underlying Volume CR recreated
+# out-of-band from backup-8c99b2ddb933420b. PV name kept UUID-style to match
+# the existing cluster state and Longhorn Volume name (volumeHandle).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pvc-773cc06e-4984-4bcf-ae38-64fe77f68a5c
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 5Gi
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: paperclip-postgresql-data
+    namespace: ai
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      dataEngine: v1
+      dataLocality: disabled
+      fsType: ext4
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    volumeHandle: pvc-773cc06e-4984-4bcf-ae38-64fe77f68a5c
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  volumeMode: Filesystem
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -10,10 +42,7 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: longhorn
-  # Bound to a specific Longhorn volume restored from backup on 2026-04-30
-  # (Stage A salvage corruption). Matching PV created out-of-band; see
-  # commit history. TODO: migrate to longhorn-static with PV in git.
+  storageClassName: longhorn-static
   volumeName: pvc-773cc06e-4984-4bcf-ae38-64fe77f68a5c
 ---
 apiVersion: apps/v1

@@ -26,6 +26,34 @@ spec:
   storageClassName: longhorn
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pvc-27866fc8-77df-4fe6-8397-e69f3fa0fa7d
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 20Gi
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: affine-pg-data
+    namespace: office
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      dataEngine: v1
+      dataLocality: disabled
+      fsType: ext4
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    volumeHandle: pvc-27866fc8-77df-4fe6-8397-e69f3fa0fa7d
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  volumeMode: Filesystem
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: affine-pg-data
@@ -36,8 +64,5 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: longhorn
-  # Bound to a specific Longhorn volume restored from backup on 2026-04-30
-  # (Stage A salvage corruption). Matching PV created out-of-band; see
-  # commit history. TODO: migrate to longhorn-static with PV in git.
+  storageClassName: longhorn-static
   volumeName: pvc-27866fc8-77df-4fe6-8397-e69f3fa0fa7d
