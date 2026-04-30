@@ -18,3 +18,8 @@ machine:
       # Parallel image pulls (faster cold-start). Ref: tyriis/home-ops
       serializeImagePulls: false
       maxParallelImagePulls: 5
+      # Default 110 was tight on node 03 post-upgrade (descheduler ignorePvcPods=true
+      # leaves storage replicas pinned). Pod CIDR is /24 (~250 IPs/node), hardware has
+      # 18 vCPU + 62 GiB; 200 leaves comfortable headroom. Triggered KubeletTooManyPods
+      # alert at 98% in 2026-04-30 audit.
+      maxPods: 200
