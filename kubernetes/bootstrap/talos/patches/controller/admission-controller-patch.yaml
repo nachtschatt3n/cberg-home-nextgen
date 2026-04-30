@@ -1,9 +1,0 @@
-# Strategic-merge equivalent of removing /cluster/apiServer/admissionControl.
-# Talos v1.12+ uses multi-document machineconfig where JSON6902 patches are not
-# supported, so we use strategic merge with the $patch directive to replace
-# (clear) the list. The "$patch" key is quoted to prevent talhelper's
-# Go-template engine from interpreting $patch as a variable substitution.
-cluster:
-  apiServer:
-    admissionControl:
-      "$patch": replace
