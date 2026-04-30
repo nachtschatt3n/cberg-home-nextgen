@@ -17,15 +17,16 @@ resources:
   - ./superset/ks.yaml
 patches:
   # PSA override: privileged required for postgres init-sysctl etc.
-  # Cluster default is baseline; this lifts only this namespace.
+  # Target name must be `not-used` because the namespace transformer
+  # runs AFTER patches — see flux/components/common/namespace.yaml.
   - target:
       kind: Namespace
-      name: databases
+      name: not-used
     patch: |-
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: databases
+        name: not-used
         labels:
           pod-security.kubernetes.io/enforce: privileged
           pod-security.kubernetes.io/audit: privileged

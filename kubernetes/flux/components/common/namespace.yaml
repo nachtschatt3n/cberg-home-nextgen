@@ -6,15 +6,15 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
-    # All namespaces default to enforce=privileged. Per-NS tightening tracked
-    # in #40 + #42: kustomize patches: blocks in each kustomization.yaml are
-    # in place but don't currently apply (kustomize component+namespace-
-    # transformer ordering quirk). Once #42 is fixed, the per-NS overrides
-    # will tighten 9 namespaces to baseline (ai, backup, cert-manager,
-    # default, download, my-software-{dev,prod}, network, office) while
-    # 6 stay privileged (databases, home-automation, kube-system, media,
-    # monitoring, storage).
-    # See docs/sops/talos-upgrade.md for the 2026-04-30 incident root cause.
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
+    # Default PSA = baseline. Per-NS lifts to "privileged" via kustomize
+    # patches in each apps/<ns>/kustomization.yaml — the patch target
+    # MUST be `name: not-used` because the kustomize namespace transformer
+    # runs AFTER patches, so at patch time the resource is still named
+    # `not-used` from this component.
+    # Privileged (7): databases, home-automation, kube-system, media,
+    #   monitoring, storage, download (ES IPC_LOCK).
+    # Baseline (8): ai, backup, cert-manager, default, my-software-{dev,prod},
+    #   network, office.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

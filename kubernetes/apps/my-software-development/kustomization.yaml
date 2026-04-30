@@ -9,15 +9,7 @@ resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
   - ./opencode-andreamosteller/ks.yaml
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: my-software-development
-  labels:
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: restricted
-    pod-security.kubernetes.io/warn-version: latest
+# PSA = baseline (cluster default). Inline Namespace resource was silently
+# ignored by kustomize — to lift to restricted, add a patches: block
+# targeting `name: not-used` (see databases/kustomization.yaml as template)
+# AFTER auditing all dev apps for compliance (no privileged caps, runAsNonRoot, etc.).

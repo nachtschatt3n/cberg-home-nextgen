@@ -9,15 +9,7 @@ resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
   - ./rainbow-rescue/ks.yaml
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: my-software-production
-  labels:
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: restricted
-    pod-security.kubernetes.io/warn-version: latest
+# PSA = baseline (cluster default). Inline Namespace resource was silently
+# ignored by kustomize. rainbow-rescue currently uses CHOWN/SETUID/SETGID/
+# DAC_OVERRIDE caps — baseline-allowed but NOT restricted-allowed. Tighten
+# to restricted only after switching the chart to runAsNonRoot+drop-all.
