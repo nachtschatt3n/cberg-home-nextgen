@@ -24,11 +24,7 @@ spec:
   values:
     controllers:
       otbr:
-        # SUSPENDED: otbr-agent crashes with InitMulticastRouterSock() "Protocol
-        # not available" because Talos kernel lacks CONFIG_IPV6_MROUTE.
-        # Re-enable when Talos adds IPv6 multicast routing support or a custom
-        # kernel extension is built. See commit history for attempted workarounds.
-        replicas: 0
+        replicas: 1
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
