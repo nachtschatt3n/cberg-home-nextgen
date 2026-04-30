@@ -30,6 +30,19 @@ spec:
           securityContext:
             fsGroup: 1000
         initContainers:
+          wait-for-postgres:
+            image:
+              repository: busybox
+              tag: stable
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z paperclip-postgresql 5432; do
+                  echo "waiting for paperclip-postgresql:5432..."
+                  sleep 2
+                done
+                echo "postgres reachable"
           mise-install:
             image:
               repository: debian

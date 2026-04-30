@@ -37,6 +37,32 @@ spec:
             reloader.stakater.com/auto: "true"
             secret.reloader.stakater.com/reload: affine-secret
         initContainers:
+          wait-for-postgres:
+            image:
+              repository: busybox
+              tag: stable
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z affine-pg 5432; do
+                  echo "waiting for affine-pg:5432..."
+                  sleep 2
+                done
+                echo "postgres reachable"
+          wait-for-redis:
+            image:
+              repository: busybox
+              tag: stable
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z affine-redis 6379; do
+                  echo "waiting for affine-redis:6379..."
+                  sleep 2
+                done
+                echo "redis reachable"
           predeploy:
             image:
               repository: ghcr.io/toeverything/affine
