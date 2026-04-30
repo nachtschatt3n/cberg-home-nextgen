@@ -486,6 +486,7 @@ spec:
       https: false
       timeout: 5s
 
+      # renovate: image=xperimental/nextcloud-exporter
       image:
         repository: xperimental/nextcloud-exporter
         tag: 0.9.0

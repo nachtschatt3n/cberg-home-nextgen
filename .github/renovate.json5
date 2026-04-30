@@ -12,7 +12,9 @@
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Renovate Dashboard 🤖",
   "suppressNotifications": ["prEditedNotification", "prIgnoreNotification"],
-  "schedule": ["every weekend"],
+  // Run weekdays before 6am local + weekend window. Weekend-only schedule
+  // was leaving up to a week of drift in the dashboard between scans.
+  "schedule": ["before 6am on monday", "before 6am on thursday", "every weekend"],
   "ignorePaths": ["**/*.sops.*"],
   "flux": {
     "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"]
@@ -193,6 +195,12 @@
     {
       "matchManagers": ["github-actions"],
       "addLabels": ["renovate/github-action"]
+    },
+    {
+      // Jellyfin tags use 4-segment date-build format (e.g., 10.11.8.20260405-192842)
+      // which Renovate's strict semver rejects. Loose versioning lets it track.
+      "matchPackageNames": ["docker.io/jellyfin/jellyfin"],
+      "versioning": "loose"
     }
   ],
   "customManagers": [
@@ -204,6 +212,19 @@
         "datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( repository=(?<registryUrl>\\S+))?\\n.+(:\\s|=)(&\\S+\\s)?(?<currentValue>\\S+)",
       ],
       "datasourceTemplate": "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}"
+    },
+    {
+      // The native helm-values manager only matches top-level image.repository/tag
+      // pairs. Sub-chart values (e.g. metrics.image.*, postgresql.image.*) need
+      // explicit annotations. Add `# renovate: image=<repo>` above any nested
+      // repository: line and this regex picks it up as a Docker datasource.
+      "customType": "regex",
+      "description": ["Sub-chart nested image refs annotated with `# renovate: image=...`"],
+      "fileMatch": ["(^|/)kubernetes/.+\\.ya?ml(?:\\.j2)?$"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*image=(?<depName>\\S+)\\s*\\n\\s*repository:\\s*\\S+\\s*\\n\\s*tag:\\s*[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"
+      ],
+      "datasourceTemplate": "docker"
     }
   ]
 }
