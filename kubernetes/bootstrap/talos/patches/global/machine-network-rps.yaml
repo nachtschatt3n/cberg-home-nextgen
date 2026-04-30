@@ -1,13 +1,9 @@
 machine:
-  files:
-    # Enable RPS (Receive Packet Steering) to distribute network interrupts across all CPUs
-    # This prevents a single CPU from being overwhelmed during high network I/O
-    - path: /var/etc/udev/rules.d/50-rps.rules
-      permissions: 0644
-      op: create
-      content: |
-        # Enable RPS on all network interfaces
-        # Set rps_cpus to use all CPUs (3ffff = all 18 logical CPUs on Core Ultra 5 125H, verified 2026-04-30)
-        # This distributes RX packet processing across multiple cores
-        SUBSYSTEM=="net", ACTION=="add", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo 3ffff > $$i; done'"
-        SUBSYSTEM=="net", ACTION=="add", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_flow_cnt; do echo 4096 > $$i; done'"
+  udev:
+    rules:
+      # Enable RPS (Receive Packet Steering) on all network interfaces.
+      # Match both 'add' (interface creation) and 'change' (boot-time replay)
+      # so the rule fires regardless of when udev processes existing interfaces
+      # post-Talos-bootstrap. mask 3ffff = all 18 logical CPUs on Core Ultra 5 125H.
+      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo 3ffff > $i; done'"
+      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_flow_cnt; do echo 4096 > $i; done'"
