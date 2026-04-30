@@ -1,9 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Upgrade Talos Linux from v1.11.0 → v1.12.6 and apply missing performance patches (intelgpu, udev, enhanced sysctls, kubelet reservations, RPS fix). Unblocks OTBR (Thread border router) via `CONFIG_IPV6_MROUTE=y` now present in v1.12.x kernels. Keeps `powersave` CPU governor for home-lab power profile.
-> Version: `2026.04.12`
-> Last Updated: `2026-04-12`
+> Version: `2026.04.30`
+> Last Updated: `2026-04-30`
 > Owner: `homelab-ops`
+
+> **Reader's note (2026-04-30):** Sections 1–12 are the canonical reference for a single-minor Talos upgrade. The cluster has since been taken to Talos `v1.13.0` + Kubernetes `v1.36.0` via two stages — see **§13 Stage A → Stage B path (v1.11.0 → v1.13.0)** for the multi-minor traversal procedure and the lessons learned during that run.
 
 ---
 
@@ -778,6 +780,204 @@ If a latency-sensitive workload later demands it, prefer `intel_idle.max_cstate=
 
 ---
 
+## 13) Stage A → Stage B path (v1.11.0 → v1.13.0)
+
+> **Status:** Executed 2026-04-30. Cluster is now on Talos `v1.13.0` + Kubernetes `v1.36.0`. The single-step path in sections 1–12 above remains the canonical reference for one-minor upgrades; this section documents the actual two-stage traversal that crosses **two** minor versions and the lessons learned.
+
+### 13.1 Strategy & rationale
+
+Talos enforces single-minor traversal — there is no supported direct path from `v1.11.x → v1.13.x`. The same constraint applies to Kubernetes (`v1.34 → v1.36` must go through `v1.35`). The cluster therefore upgraded in two stages, back-to-back inside one maintenance window:
+
+| Stage | Talos | Kubernetes | Notes |
+|-------|-------|------------|-------|
+| A | `v1.11.0` → `v1.12.7` | `v1.34.x` → `v1.35.4` | Performance sweep from sections 2–6 was applied here. |
+| B | `v1.12.7` → `v1.13.0` | `v1.35.4` → `v1.36.0` | Pure version bump. No new patches. |
+
+**Mandatory settle gate between A and B**: ≥10 minutes with all Flux kustomizations `Ready`, all pods running, all Longhorn volumes `healthy`. If Stage B has to be deferred (suspect alerts, replica rebuild lag, or operator on-call constraints), `v1.12.7` is a safe long-term resting point — leave the cluster there and run Stage B in a follow-up window.
+
+**Do not skip the gate.** Back-to-back `apply-config` cycles across all three nodes within a few minutes was observed to cause etcd churn → brief cluster `NotReady` (lesson #12 below).
+
+### 13.2 Operational instructions (delta vs. sections 4–9)
+
+The single-step procedure already covers regenerating configs, the rolling node upgrade, and `upgrade-k8s`. For the two-stage path, run that procedure **twice** with the following deltas:
+
+#### Stage A — execute sections 1–9 as written, with three additions
+
+1. The performance patches from sections 2–6 (sysctls, kubelet reservations, RPS mask, `machine-intelgpu.yaml`, `machine-udev.yaml`) are wired in during Stage A. Stage B does not touch them.
+2. `machine-intelgpu.yaml` also wires the Longhorn v2 OS prerequisites (`hugepages=1024` kernel arg, plus `vfio_pci` and `uio_pci_generic` kernel modules). These are inert until Longhorn v2 is enabled but must be in the schematic from Stage A onward — re-doing the schematic mid-cycle is error-prone.
+3. After Stage A passes Test 1–9 (section 6) and the settle gate has elapsed, proceed to Stage B in the same window.
+
+#### Stage B — minimal config change, same rolling pattern
+
+```yaml
+# kubernetes/bootstrap/talos/talconfig.yaml
+talosVersion: v1.13.0          # was v1.12.7
+kubernetesVersion: v1.36.0     # was v1.35.4
+```
+
+Regenerate, commit, push, then run the same rolling upgrade (one node at a time, wait for Ready + Longhorn healthy between each) followed by `task talos:upgrade-k8s`. Re-run section 6 verification tests at the end.
+
+#### Bumping the `talosctl` client
+
+`talosctl` is roughly `n±1` compatible with the cluster. After Stage B the repo-pinned `talosctl 1.12.4` will succeed for `apply-config` against a `v1.13` cluster but **fails** on `upgrade-k8s` (lesson #6 below). Before Stage B's `upgrade-k8s` step, merge the Renovate PR that bumps `talosctl` to a `v1.13.x` client and run `mise install`. Re-run `mise exec -- talosctl version --short` to confirm the client is now `v1.13.x`.
+
+### 13.3 Pitfalls and lessons learned (Stage A + Stage B)
+
+The numbered items below are observed regressions or footguns from the actual run. They extend section 7 (Troubleshooting) — items there still apply, these are additional.
+
+#### 1. `talosctl reboot --mode powercycle` stuck on node 03
+
+`talosctl reboot --mode powercycle --nodes 192.168.55.13` returned successfully but `talosctl get machinestatus` reported `stage: rebooting` indefinitely; cri/etcd/kubelet/trustd never restarted. Observed twice during this upgrade, both times on `k8s-nuc14-03` only.
+
+**Recovery:** re-issue `talosctl reboot --mode default --nodes 192.168.55.13 --wait`. The graceful default reboot completes and the node returns to `Ready`.
+
+Full reproduction notes, dmesg, and analysis are in `docs/troubleshooting/talos-powercycle-stuck.md` — do not duplicate here.
+
+#### 2. KSPP filters `install.extraKernelArgs` in v1.12+
+
+In Talos `v1.12+`, kernel args set in `machine.install.extraKernelArgs` are silently dropped by the KSPP (Kernel Self-Protection Project) filter for any arg KSPP considers redundant or conflicting. Examples seen: `i915.enable_guc=3`, `intel_iommu=on`. Verify with:
+
+```bash
+mise exec -- talosctl read /proc/cmdline -n 192.168.55.11
+```
+
+If args are missing, **move them into the schematic itself** at https://factory.talos.dev (extension config / kernel args field in the schematic) rather than the install patch. The schematic-injected cmdline survives KSPP filtering.
+
+#### 3. `grubUseUKICmdline` default flips on v1.12+
+
+When kernel args are set via the schematic, the v1.12+ default for `install.grubUseUKICmdline` causes grub to override the schematic-injected cmdline. Fix:
+
+```yaml
+machine:
+  install:
+    grubUseUKICmdline: false
+```
+
+Set this explicitly any time you rely on schematic-side kernel args.
+
+#### 4. JSON6902 patches in multi-doc machineconfig fail in v1.12+
+
+The previously-working `admission-controller-patch.yaml` (a JSON6902 `op: add` injecting Pod Security Admission config into the kube-apiserver static pod manifest) breaks in `v1.12+`. The patch silently fails to apply, leaving PSA defaults in place.
+
+**Resolution applied this cluster:** removed the JSON6902 patch entirely and switched to per-namespace PSA labels via kustomize patches. See:
+- `kubernetes/flux/components/common/namespace.yaml` — base namespace template
+- `patches:` blocks in each `kubernetes/apps/<ns>/kustomization.yaml` — per-namespace PSA enforcement
+
+#### 5. `talhelper` Go-template ate `$patch` and `$i`
+
+`talhelper` runs the patch YAML through Go templating before handing it to Talos. Tokens like `$patch` (kustomize directive) and `$i` (shell variable in udev RUN) get interpreted as missing template vars and emit empty strings, breaking the patch. Quote them:
+
+```yaml
+# inside the udev RPS rule patch
+RUN+="/bin/sh -c 'for i in /sys/...; do echo 3ffff > '$i'; done'"
+# becomes (escaped for talhelper)
+RUN+="/bin/sh -c 'for i in /sys/...; do echo 3ffff > '$$i'; done'"
+```
+
+Use `'$patch'` and `'$$i'` (or equivalent escaping) wherever a literal dollar-prefixed token appears in patch YAML.
+
+#### 6. talosctl client compatibility window
+
+`talosctl 1.12.4` against a `v1.13` cluster: `apply-config` works, `upgrade-k8s` fails. Cluster-side gRPC API contract changed.
+
+**Rule of thumb:** keep the client within `n±1` of the cluster. Bump the Renovate `talosctl` PR before running `upgrade-k8s` against a freshly-bumped cluster.
+
+#### 7. Drain rate-limiter errors during node 01 (Stage B)
+
+During Stage B's first node (`k8s-nuc14-01`), the drain phase hit a rate-limiter error from the eviction API. Workaround applied:
+
+```bash
+mise exec -- task talos:upgrade-node IP=192.168.55.11 EXTRA_FLAGS="--drain=false"
+```
+
+Pods that would have been evicted by drain are subsequently evicted by `descheduler` and standard kubelet eviction once the node returns Ready. Longhorn replicas re-attach normally. Reserve `--drain=false` for the case where drain is itself the failure point — do not use it as a default.
+
+#### 8. PV cascade-deleted despite `Retain` on backup-restore
+
+When restoring a Longhorn volume from backup using the operator's `fromBackup` flow, an intermediate failure can cause the operator to delete the failed `Volume` CR **and** the bound `PersistentVolume` together — even when `reclaimPolicy: Retain` is set on the PV. This nullifies the documented expectation that `Retain` protects the PV.
+
+**Resolution applied this cluster:** pre-create the `PersistentVolume` and `PersistentVolumeClaim` manifests pointing to the desired restored volume name, then create the Longhorn `Volume` CR from backup with that exact name. The PVC binds to the pre-existing PV instead of the operator generating a new one. This isolates the restore from the operator's PV lifecycle.
+
+#### 9. Intel device-plugin operator `--devices` argument format
+
+`--devices=gpu,npu` (single flag, comma-separated) crashes the `intel-device-plugin-operator` immediately on startup. Use one flag per device:
+
+```yaml
+controllerExtraArgs:
+  - --devices=gpu
+  - --devices=npu
+```
+
+#### 10. NPU plugin DaemonSet unscheduled — missing NFD label
+
+`node-feature-discovery` does not auto-emit `intel.feature.node.kubernetes.io/npu=true` for Meteor Lake NPUs out of the box, which leaves the NPU plugin DaemonSet unscheduled. Add an explicit `NodeFeatureRule` matching PCI class `0x1200` + vendor `0x8086`:
+
+- `kubernetes/apps/kube-system/node-feature-discovery/rules/intel-npu-device.yaml`
+
+After NFD reconciles, `kubectl get nodes -L intel.feature.node.kubernetes.io/npu` shows the label and the plugin DaemonSet schedules normally.
+
+#### 11. OTBR helmrelease hardcoded `replicas: 0`
+
+Discovered during the post-Stage-A re-enable of OTBR: the helmrelease values had `replicas: 0` hardcoded from a previous incident. Setting the field back to `1` is required — uncommenting the kustomization entry is not sufficient.
+
+#### 12. `apply-config` back-to-back caused etcd churn
+
+Issuing `talosctl apply-config` against all three nodes within a few seconds (no per-node health gate) caused etcd leader election storms and a brief cluster `NotReady`. Always serial across nodes with a health gate (node `Ready` + etcd member healthy) between each `apply-config`.
+
+```bash
+mise exec -- kubectl get nodes
+mise exec -- talosctl etcd members --nodes 192.168.55.11
+# wait for full membership before touching the next node
+```
+
+#### 13. Hugepages cmdline lost after apply-config churn (node 02)
+
+After the etcd-churn incident in #12, `k8s-nuc14-02` came back without `hugepages=1024` on `/proc/cmdline`. Re-upgrading the node with the same schematic restored it. Always verify per-node post-window:
+
+```bash
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
+  echo "=== $ip ==="
+  mise exec -- talosctl read /proc/cmdline -n $ip | tr ' ' '\n' | grep -E 'hugepages|i915|intel_iommu|mitigations'
+  mise exec -- talosctl read /proc/meminfo -n $ip | grep HugePages_Total
+done
+```
+
+**Expected per node:** `hugepages=1024` on cmdline, `HugePages_Total: 1024` in meminfo. Anything else means the node booted from an older install — re-run `task talos:upgrade-node` for that IP with the current schematic.
+
+### 13.4 Verification (post Stage B)
+
+Re-run section 6 tests with the updated expected values:
+
+| Test | Expected after Stage B |
+|------|-----------------------|
+| Test 1 — Talos version | All three nodes report `Tag: v1.13.0` |
+| Test 2 — `/proc/cmdline` | Contains all schematic-side args (#2 above) including `hugepages=1024` |
+| Test 3 — `CONFIG_IPV6_MROUTE` | Still `=y` (kernel 6.18+) |
+| Test 4 — sysctls | Unchanged from Stage A |
+| Test 5 — kubelet reservations | Unchanged from Stage A |
+| Test 6 — RPS mask | `3ffff` |
+| Test 8 — Longhorn | `Degraded volumes: 0` |
+| Test 9 — alerts | `Firing alerts: 0` |
+
+Add the hugepages-per-node check from #13 above, plus:
+
+```bash
+mise exec -- kubectl version --short
+# Server Version expected: v1.36.0
+```
+
+### 13.5 Rollback in two-stage mode
+
+The single-step rollback in section 11 still applies, but with one nuance: rolling back **across two minor versions** (e.g. `v1.13.0 → v1.11.x`) is not supported in one operation. To unwind from a failed Stage B:
+
+1. **Stop at v1.12.7.** Revert the Stage B commit only. `talosctl rollback --nodes <ip>` per node returns each to the v1.12.7 image (Talos keeps the previous installed image).
+2. **Only continue rolling back to v1.11.x if Stage A also needs to be reverted.** This is a fresh full-window operation, not a hot rollback — replica rebuild on every node, K8s downgrade, full verification.
+
+In practice, if Stage B fails: stop at `v1.12.7`, file the issue, plan Stage B retry for a later window. Do **not** chain a v1.13→v1.11 rollback inside the same window.
+
+---
+
 ## Version History
 
+- `2026.04.30`: Documented the actual Stage A → Stage B path (`v1.11.0 → v1.12.7 → v1.13.0`, K8s `v1.34 → v1.35.4 → v1.36.0`) executed in this cluster. Added 13 lessons learned: powercycle-stuck on node 03 (cross-link to `docs/troubleshooting/talos-powercycle-stuck.md`), KSPP filtering of `install.extraKernelArgs` in v1.12+, `grubUseUKICmdline` default flip, JSON6902 PSA patch breaking, `talhelper` `$patch`/`$i` escaping, `talosctl` client `n±1` compatibility window, drain rate-limiter workaround, Longhorn `Retain` PV cascade-delete on backup-restore, intel-device-plugin operator `--devices` flag format, NPU NFD rule requirement, OTBR `replicas: 0` hardcode, etcd churn from concurrent `apply-config`, hugepages cmdline loss recovery. Section 2–6 perf sweep reframed as "applied during Stage A 2026-04-30". Longhorn v2 OS prereqs (hugepages=1024, `vfio_pci`, `uio_pci_generic`) recorded as wired in during Stage A via `machine-intelgpu.yaml`.
 - `2026.04.12`: Initial SOP — Talos v1.11.0 → v1.12.6 upgrade path combined with performance tuning sweep. Unblocks OTBR via `CONFIG_IPV6_MROUTE=y`. Keeps `powersave` governor.
