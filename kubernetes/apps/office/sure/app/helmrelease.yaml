@@ -108,10 +108,13 @@ spec:
               name: sure-secret
               key: OPENAI_MODEL
         # Widen the OpenAI HTTP client timeout (upstream default 60s) so
-        # slow local LLM inference (Ollama gemma4:26b) finishes before
-        # Net::ReadTimeout. Read once per-request in Provider::Openai.
+        # slow local LLM inference (Ollama on Mac Mini) finishes before
+        # Net::ReadTimeout. Bumped from 900 → 1800 to leave headroom for
+        # larger merchant-detection models that produce reliable URLs
+        # (gemma4:26b returns names but rarely URLs, so the auto-detector
+        # silently skips). Read once per-request in Provider::Openai.
         - name: OPENAI_REQUEST_TIMEOUT
-          value: "900"
+          value: "1800"
         # Consumed by zz_bank_refresh_overrides.rb (sure-overrides-initializer
         # ConfigMap): clamps AutoCategorizeJob / AutoDetectMerchantsJob batches
         # so a single LLM request fits inside OPENAI_REQUEST_TIMEOUT on Ollama.
