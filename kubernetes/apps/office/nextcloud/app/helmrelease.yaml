@@ -204,6 +204,32 @@ spec:
       #      secretKeyRef:
       #        name: nextcloud
       #        key: secret_key
+      # initContainers wait for stateful deps to be reachable on cold-start /
+      # node-reboot. Without these, nextcloud-fpm starts before mariadb/redis,
+      # hits a connect error, enters CrashLoopBackOff, and recovery takes 5+
+      # minutes (kubelet exponential backoff) instead of seconds.
+      # See docs/sops/container-dependencies.md.
+      extraInitContainers:
+        - name: wait-for-mariadb
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z nextcloud-mariadb 3306; do
+                echo "waiting for nextcloud-mariadb:3306..."
+                sleep 2
+              done
+        - name: wait-for-redis
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z nextcloud-redis-master 6379; do
+                echo "waiting for nextcloud-redis-master:6379..."
+                sleep 2
+              done
       extraVolumes:
         - name: whiteboard-jwt
           secret:
