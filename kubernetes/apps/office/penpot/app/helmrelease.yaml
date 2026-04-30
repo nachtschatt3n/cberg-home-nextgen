@@ -35,6 +35,43 @@ spec:
               - op: add
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
+          # Inject wait-for initContainers into the backend Deployment.
+          # The penpot chart does not expose an extraInitContainers / initContainers
+          # values key on backend|frontend|exporter, so we patch the rendered
+          # Deployment via Flux's Kustomize post-renderer.
+          # Pattern: docs/sops/container-dependencies.md (busybox + nc -z loop).
+          - target:
+              kind: Deployment
+              name: penpot-backend
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: penpot-backend
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-postgresql
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z penpot-postgresql 5432; do
+                              echo "waiting for penpot-postgresql:5432..."
+                              sleep 2
+                            done
+                      - name: wait-for-valkey
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z penpot-valkey-primary 6379; do
+                              echo "waiting for penpot-valkey-primary:6379..."
+                              sleep 2
+                            done
   values:
     # Global configuration
     global:
