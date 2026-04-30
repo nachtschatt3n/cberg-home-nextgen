@@ -7,7 +7,7 @@ machine:
       op: create
       content: |
         # Enable RPS on all network interfaces
-        # Set rps_cpus to use all CPUs (ffff = all 16 CPUs for NUC14)
+        # Set rps_cpus to use all CPUs (3ffff = all 18 logical CPUs on Core Ultra 5 125H, verified 2026-04-30)
         # This distributes RX packet processing across multiple cores
-        SUBSYSTEM=="net", ACTION=="add", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo ffff > $$i; done'"
+        SUBSYSTEM=="net", ACTION=="add", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo 3ffff > $$i; done'"
         SUBSYSTEM=="net", ACTION=="add", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_flow_cnt; do echo 4096 > $$i; done'"

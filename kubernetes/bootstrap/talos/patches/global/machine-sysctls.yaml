@@ -1,17 +1,41 @@
 machine:
   sysctls:
+    # --- File watching ---
     fs.inotify.max_user_watches: "1048576" # Watchdog
     fs.inotify.max_user_instances: "8192"  # Watchdog
-    net.core.rmem_max: "16777216" # Cloudflared | QUIC | Increased for high throughput
-    net.core.wmem_max: "16777216" # Cloudflared | QUIC | Increased for high throughput
-    # Network performance tuning to prevent NIC overload
-    net.core.netdev_max_backlog: "5000" # Increase backlog queue size
-    net.core.rmem_default: "262144" # Default receive buffer
-    net.core.wmem_default: "262144" # Default send buffer
-    net.ipv4.tcp_rmem: "4096 87380 16777216" # TCP receive buffer sizes
-    net.ipv4.tcp_wmem: "4096 65536 16777216" # TCP send buffer sizes
-    # NFS tuning - prevent hung tasks
-    net.core.netdev_budget: "600" # Packets processed per NAPI poll
-    net.core.netdev_budget_usecs: "8000" # Max time per NAPI poll (microseconds)
-    vm.dirty_ratio: "10" # Start blocking writes at 10% dirty memory
-    vm.dirty_background_ratio: "5" # Start background writeback at 5%
+    # --- File descriptors (Elasticsearch, Nextcloud, Postgres) ---
+    fs.file-max: "2097152"
+    fs.nr_open: "1048576"
+    # --- Network core ---
+    net.core.rmem_max: "16777216" # Cloudflared | QUIC | high throughput
+    net.core.wmem_max: "16777216"
+    net.core.rmem_default: "262144"
+    net.core.wmem_default: "262144"
+    net.core.netdev_max_backlog: "5000"
+    net.core.netdev_budget: "600"
+    net.core.netdev_budget_usecs: "8000"
+    net.core.somaxconn: "65535"               # listen() backlog
+    net.core.default_qdisc: "fq"              # pairs with BBR
+    # --- TCP tuning ---
+    net.ipv4.tcp_rmem: "4096 87380 16777216"
+    net.ipv4.tcp_wmem: "4096 65536 16777216"
+    net.ipv4.tcp_congestion_control: "bbr"    # Google BBR
+    net.ipv4.tcp_fastopen: "3"                # client + server TFO
+    net.ipv4.ip_local_port_range: "1024 65535"
+    net.ipv4.tcp_max_syn_backlog: "8192"
+    net.ipv4.tcp_fin_timeout: "30"
+    net.ipv4.tcp_keepalive_time: "600"
+    net.ipv4.tcp_keepalive_intvl: "60"
+    net.ipv4.tcp_keepalive_probes: "3"
+    # --- Conntrack (prevents silent drops under load) ---
+    net.netfilter.nf_conntrack_max: "1048576"
+    net.netfilter.nf_conntrack_buckets: "262144"
+    net.netfilter.nf_conntrack_tcp_timeout_established: "86400"
+    # --- Memory ---
+    vm.dirty_ratio: "10"
+    vm.dirty_background_ratio: "5"
+    vm.max_map_count: "262144"                # Elasticsearch requirement
+    vm.swappiness: "10"                        # explicit (no swap configured)
+    vm.vfs_cache_pressure: "50"
+    # --- Process limits ---
+    kernel.pid_max: "4194304"

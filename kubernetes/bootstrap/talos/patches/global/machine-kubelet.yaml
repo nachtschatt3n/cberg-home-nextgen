@@ -3,3 +3,18 @@ machine:
     nodeIP:
       validSubnets:
         - 192.168.55.0/24
+    extraConfig:
+      # Reserve resources so kubelet/containerd don't starve under burst load.
+      # NUC14 has 18 logical CPUs / 62 GiB — 1 CPU + 2 GiB total reservation is ~5% overhead.
+      # Ref: https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/
+      systemReserved:
+        cpu: 500m
+        memory: 1Gi
+        ephemeral-storage: 2Gi
+      kubeReserved:
+        cpu: 500m
+        memory: 1Gi
+        ephemeral-storage: 2Gi
+      # Parallel image pulls (faster cold-start). Ref: tyriis/home-ops
+      serializeImagePulls: false
+      maxParallelImagePulls: 5

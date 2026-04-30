@@ -1,27 +1,15 @@
 machine:
-  # schematic: &schematic
-  #   customization:
-  #     extraKernelArgs:
-  #       # - talos.logging.kernel=udp://vector-aggregator.monitoring.${internalDomain}:6050/   # Logging
-  #       - talos.auditd.disabled=1  # Less security, faster computer
-  #       - net.ifnames=0            # Expected names
-  #       - mitigations=off          # Less security, faster computer
-  #       - apparmor=0               # Less security, faster computer
-  #       - security=none            # Less security, faster computer
-  #       - init_on_alloc=0          # Less security, faster computer
-  #       - init_on_free=0           # Less security, faster computer
-  #       - intel_iommu=on           # PCI Passthrough
-  #       - iommu=pt                 # PCI Passthrough
-  #     systemExtensions:
-  #       officialExtensions:
-  #         - siderolabs/intel-ucode
-  #         - siderolabs/i915
-  #         - siderolabs/realtek-firmware
-  #         - siderolabs/intel-ice-firmware
-  #         - siderolabs/lldpd
+  kernel:
+    modules:
+      # Longhorn v2 SPDK target prereqs (loaded but idle until Longhorn v2 is enabled)
+      - name: vfio_pci
+      - name: uio_pci_generic
   install:
+    # Talos v1.12+ defaults grubUseUKICmdline to true for new installs which
+    # conflicts with extraKernelArgs. Force grub-style cmdline so our args apply.
+    grubUseUKICmdline: false
     extraKernelArgs:
-      - i915.enable_guc=3                   # Meteor Lake CPU / iGPU
+      - i915.enable_guc=3                   # Meteor Lake CPU / iGPU (GuC + HuC firmware)
       - apparmor=0                          # Less security, faster puter
       - init_on_alloc=0                     # Less security, faster puter
       - init_on_free=0                      # Less security, faster puter
@@ -31,3 +19,4 @@ machine:
       - security=none                       # Less security, faster puter
       - sysctl.kernel.kexec_load_disabled=1 # Meteor Lake CPU / iGPU
       - talos.auditd.disabled=1             # Less security, faster puter
+      - hugepages=1024                      # Longhorn v2 prereq (2 GiB of 2 MiB hugepages)

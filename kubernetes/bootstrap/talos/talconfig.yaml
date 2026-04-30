@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/budimanjojo/talhelper/master/pkg/config/schemas/talconfig.json
 ---
 # renovate: datasource=docker depName=ghcr.io/siderolabs/installer
-talosVersion: v1.11.6
+talosVersion: v1.12.7
 # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
-kubernetesVersion: v1.34.7
+kubernetesVersion: v1.35.4
 
 clusterName: kubernetes
 endpoint: https://192.168.55.10:6443
@@ -30,7 +30,7 @@ nodes:
       serial: "S5GXNS0X201738E"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
+    talosImageURL: factory.talos.dev/installer/15242e0412de311c547bae8b7c759f88087395793a5173328d95819aeb9b37ea
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -50,7 +50,7 @@ nodes:
       serial: "S5GXNS0X207008P"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
+    talosImageURL: factory.talos.dev/installer/15242e0412de311c547bae8b7c759f88087395793a5173328d95819aeb9b37ea
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -70,7 +70,7 @@ nodes:
       serial: "S6Z1NU0XC43615L"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/2a7386b4b12ff4a1a6df239fce0000cbffd5093db3e105329ee9b0535af9e3eb
+    talosImageURL: factory.talos.dev/installer/15242e0412de311c547bae8b7c759f88087395793a5173328d95819aeb9b37ea
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -88,15 +88,21 @@ nodes:
 # Global patches
 patches:
   - "@./patches/global/machine-files.yaml"
+  - "@./patches/global/machine-intelgpu.yaml"
   - "@./patches/global/machine-kubelet.yaml"
   - "@./patches/global/machine-network.yaml"
   - "@./patches/global/machine-network-rps.yaml"
   - "@./patches/global/machine-sysctls.yaml"
   - "@./patches/global/machine-time.yaml"
+  - "@./patches/global/machine-udev.yaml"
 
 # Controller patches
 controlPlane:
   patches:
-    - "@./patches/controller/admission-controller-patch.yaml"
+    # admission-controller-patch.yaml temporarily disabled — was JSON6902 (op: remove
+    # /cluster/apiServer/admissionControl), which Talos v1.12+ rejects on multi-doc
+    # machineconfig. talhelper's Go-template engine also chokes on $patch escaping.
+    # Default Talos admissionControl is acceptable; revisit if a specific plugin
+    # needs disabling.
     - "@./patches/controller/cluster.yaml"
 
