@@ -99,10 +99,12 @@ patches:
 # Controller patches
 controlPlane:
   patches:
-    # admission-controller-patch.yaml temporarily disabled — was JSON6902 (op: remove
-    # /cluster/apiServer/admissionControl), which Talos v1.12+ rejects on multi-doc
-    # machineconfig. talhelper's Go-template engine also chokes on $patch escaping.
-    # Default Talos admissionControl is acceptable; revisit if a specific plugin
-    # needs disabling.
+    # NOTE: admission-controller-patch.yaml was removed 2026-04-30. It used to
+    # `op: remove /cluster/apiServer/admissionControl` to neutralize Talos's
+    # default cluster-wide PodSecurity admissionControl (enforce: baseline).
+    # Equivalent effect now achieved via per-namespace
+    # pod-security.kubernetes.io/enforce labels — see
+    # kubernetes/flux/components/common/namespace.yaml for the cluster-wide
+    # privileged label, and follow-up #40 for per-namespace tightening.
     - "@./patches/controller/cluster.yaml"
 
