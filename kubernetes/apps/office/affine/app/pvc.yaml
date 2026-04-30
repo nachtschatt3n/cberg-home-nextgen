@@ -37,3 +37,7 @@ spec:
     requests:
       storage: 20Gi
   storageClassName: longhorn
+  # Bound to a specific Longhorn volume restored from backup on 2026-04-30
+  # (Stage A salvage corruption). Matching PV created out-of-band; see
+  # commit history. TODO: migrate to longhorn-static with PV in git.
+  volumeName: pvc-27866fc8-77df-4fe6-8397-e69f3fa0fa7d
