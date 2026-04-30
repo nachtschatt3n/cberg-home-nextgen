@@ -5,5 +5,5 @@ machine:
       # Match both 'add' (interface creation) and 'change' (boot-time replay)
       # so the rule fires regardless of when udev processes existing interfaces
       # post-Talos-bootstrap. mask 3ffff = all 18 logical CPUs on Core Ultra 5 125H.
-      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo 3ffff > $i; done'"
-      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_flow_cnt; do echo 4096 > $i; done'"
+      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_cpus; do echo 3ffff > $$i; done'"
+      - SUBSYSTEM=="net", ACTION=="add|change", RUN+="/bin/sh -c 'for i in /sys/class/net/%k/queues/rx-*/rps_flow_cnt; do echo 4096 > $$i; done'"
