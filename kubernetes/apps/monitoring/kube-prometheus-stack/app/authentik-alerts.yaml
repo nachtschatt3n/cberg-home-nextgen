@@ -188,7 +188,7 @@ spec:
         category: authentication
         component: authentik-database
         severity: warning
-  - interval: 1h
+  - interval: 30s
     name: authentik.blueprint.sync
     rules:
     - alert: AuthentikBlueprintOutpostMismatch
