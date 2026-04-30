@@ -6,11 +6,12 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/prune: disabled
   labels:
-    # Talos v1.12+ enforces PodSecurity Admission baseline by default.
-    # Several apps in this cluster require privileged + hostPath
-    # (longhorn-manager, cilium, prometheus-node-exporter, frigate, etc).
-    # Restoring v1.11 effective posture (no enforcement). Tighten per-namespace
-    # later if desired — see https://kubernetes.io/docs/concepts/security/pod-security-admission/
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
+    # Default PSA posture: baseline (audited 2026-04-30 — no privileged or
+    # hostNetwork pods in most namespaces). Six namespaces have explicit
+    # per-NS overrides back to 'privileged' because their workloads genuinely
+    # require it: databases, home-automation, kube-system, media, monitoring,
+    # storage. See per-NS kustomization.yaml `patches:` blocks.
+    # https://kubernetes.io/docs/concepts/security/pod-security-admission/
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
