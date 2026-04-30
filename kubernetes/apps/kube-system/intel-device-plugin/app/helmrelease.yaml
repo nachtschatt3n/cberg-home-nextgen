@@ -29,4 +29,5 @@ spec:
       namespace: kube-system
   values:
     controllerExtraArgs: |
-      - --devices=gpu,npu
+      - --devices=gpu
+      - --devices=npu
