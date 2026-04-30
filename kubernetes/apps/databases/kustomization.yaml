@@ -15,16 +15,18 @@ resources:
   - ./redisinsight/ks.yaml
   - ./memgraph/ks.yaml
   - ./superset/ks.yaml
-
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: databases
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/warn-version: latest
+patches:
+  # PSA override: privileged required for postgres init-sysctl etc.
+  # Cluster default is baseline; this lifts only this namespace.
+  - target:
+      kind: Namespace
+      name: databases
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: databases
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged

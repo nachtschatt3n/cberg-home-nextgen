@@ -5,13 +5,7 @@ metadata:
   name: not-used
   annotations:
     kustomize.toolkit.fluxcd.io/prune: disabled
-  labels:
-    # Default PSA posture: baseline (audited 2026-04-30 — no privileged or
-    # hostNetwork pods in most namespaces). Six namespaces have explicit
-    # per-NS overrides back to 'privileged' because their workloads genuinely
-    # require it: databases, home-automation, kube-system, media, monitoring,
-    # storage. See per-NS kustomization.yaml `patches:` blocks.
-    # https://kubernetes.io/docs/concepts/security/pod-security-admission/
-    pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/audit: baseline
-    pod-security.kubernetes.io/warn: baseline
+  # PSA labels applied per-namespace via kustomize patches: in each
+  # kubernetes/apps/<ns>/kustomization.yaml. Common template carries no PSA
+  # labels so kustomize component-merge doesn't override the per-NS choice.
+  # See docs/sops/talos-upgrade.md for the 2026-04-30 incident root cause.

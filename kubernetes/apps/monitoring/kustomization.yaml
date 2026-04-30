@@ -15,19 +15,18 @@ resources:
   - ./kibana/ks.yaml
   - ./edot-collector/ks.yaml
   - ./otel-operator/ks.yaml
-
----
-# Override the cluster-default PSA baseline back to privileged.
-# Required because: prometheus-node-exporter DS uses hostNetwork +
-# hostPath /proc /sys for metrics collection.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: monitoring
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/warn-version: latest
+patches:
+  # PSA override: privileged required for prometheus-node-exporter
+  # DaemonSet (hostNetwork + hostPath /proc /sys).
+  - target:
+      kind: Namespace
+      name: monitoring
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: monitoring
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged

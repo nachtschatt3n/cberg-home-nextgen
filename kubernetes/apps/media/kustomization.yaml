@@ -10,16 +10,17 @@ resources:
   - ./plex/ks.yaml
   - ./makemkv/ks.yaml
   - ./library-tools/ks.yaml
-
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: media
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/warn-version: latest
+patches:
+  # PSA override: privileged required for jellyfin/plex /dev/dri access.
+  - target:
+      kind: Namespace
+      name: media
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: media
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged

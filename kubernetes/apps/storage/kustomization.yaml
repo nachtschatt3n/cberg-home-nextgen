@@ -8,20 +8,19 @@ components:
 resources:
   - ./longhorn/ks.yaml
   - ./longhorn/recurringjobs-ks.yaml
-
----
-# Override the cluster-default PSA baseline back to privileged.
-# Required because: longhorn-manager, instance-manager, csi-driver,
-# share-manager all need privileged + hostPath. This was the
-# 2026-04-30 upgrade incident root cause when PSA baseline was new default.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: storage
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/warn-version: latest
+patches:
+  # PSA override: privileged required for longhorn-manager, instance-manager,
+  # csi-driver, share-manager (privileged + hostPath). This was the
+  # 2026-04-30 upgrade incident root cause when PSA baseline was new default.
+  - target:
+      kind: Namespace
+      name: storage
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: storage
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged

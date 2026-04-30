@@ -16,19 +16,18 @@ resources:
   - ./node-feature-discovery/ks.yaml
   - ./descheduler/ks.yaml
   - ./authentik/ks.yaml
-
----
-# Override the cluster-default PSA baseline back to privileged.
-# Required because: cilium (privileged for eBPF + hostNetwork),
-# csi-driver-smb (privileged for mount), kube-proxy-replacement, etc.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kube-system
-  labels:
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/enforce-version: latest
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/audit-version: latest
-    pod-security.kubernetes.io/warn: privileged
-    pod-security.kubernetes.io/warn-version: latest
+patches:
+  # PSA override: privileged required for cilium (eBPF + hostNetwork),
+  # csi-driver-smb (mount), and other system-level workloads.
+  - target:
+      kind: Namespace
+      name: kube-system
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: kube-system
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
