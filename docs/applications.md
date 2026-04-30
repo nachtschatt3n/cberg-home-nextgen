@@ -66,7 +66,7 @@
 | teslamate | Tesla data logger and analytics | Internal | Home Automation |
 | mqttx-web | Web-based MQTT client | Internal | Home Automation |
 | matter-server | Matter and Thread protocol server | Internal (cluster) | — |
-| otbr | OpenThread Border Router (Matter/Thread) — **suspended**: Talos kernel lacks `CONFIG_IPV6_MROUTE`, re-enable after Talos v1.12 upgrade (see `docs/sops/talos-upgrade.md`) | Internal (cluster) | — |
+| otbr | OpenThread Border Router (Matter/Thread) — re-enabled 2026-04-30 with Talos v1.13.0 (kernel 6.18.24 has `CONFIG_IPV6_MROUTE=y`) | Internal (cluster) | — |
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
@@ -157,7 +157,9 @@
 | coredns | Cluster-internal DNS resolution | None | — |
 | csi-driver-smb | SMB/CIFS storage integration (NAS) | None | — |
 | descheduler | Pod descheduler for resource optimization | None | — |
-| intel-device-plugin | Intel GPU acceleration support | None | — |
+| intel-device-plugin | Intel device plugin operator (manages GPU + NPU sub-charts) | None | — |
+| intel-device-plugin-gpu | Intel GPU device plugin — exposes `gpu.intel.com/i915` to pods (Jellyfin, Plex, Frigate, Scrypted, MakeMKV) | None | — |
+| intel-device-plugin-npu | Intel NPU/VPU device plugin — exposes `npu.intel.com/accel` to pods (Meteor Lake VPU 8086:7d1d, added 2026-04-30 with Talos v1.13.0) | None | — |
 | metrics-server | Kubernetes resource usage metrics API | None | — |
 | node-feature-discovery | Hardware feature detection and labeling | None | — |
 | reloader | Automatic pod restart on ConfigMap/Secret changes | None | — |
