@@ -77,6 +77,21 @@ spec:
         - name: AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE
           value: "days=365"
       initContainers:
+        # Wait for the bundled authentik-postgresql StatefulSet to be reachable
+        # before starting the server. Without this, authentik tries to connect
+        # too early after a cold-start / Talos node reboot, hits a connect
+        # error, enters CrashLoopBackOff, and recovery takes 5+ minutes due to
+        # kubelet exponential backoff. See docs/sops/container-dependencies.md.
+        - name: wait-for-postgresql
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z authentik-postgresql 5432; do
+                echo "waiting for authentik-postgresql:5432..."
+                sleep 2
+              done
         - name: patch-session-settings
           image: ghcr.io/goauthentik/server:2026.2.0
           command:
@@ -193,6 +208,18 @@ spec:
       readinessProbe: null
       startupProbe: null
       initContainers:
+        # Wait for the bundled authentik-postgresql StatefulSet to be reachable
+        # before starting the worker. See docs/sops/container-dependencies.md.
+        - name: wait-for-postgresql
+          image: busybox:stable
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z authentik-postgresql 5432; do
+                echo "waiting for authentik-postgresql:5432..."
+                sleep 2
+              done
         - name: patch-session-settings
           image: ghcr.io/goauthentik/server:2026.2.0
           command:
