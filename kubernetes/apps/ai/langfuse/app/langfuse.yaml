@@ -25,6 +25,45 @@ spec:
       - ip: "127.0.0.1"
         hostnames:
         - "langfuse.localhost"
+      # initContainers wait for stateful deps to be reachable on cold-start /
+      # node-reboot. Without these, langfuse-web starts before
+      # postgresql/redis/clickhouse, hits a connect error, enters
+      # CrashLoopBackOff, and recovery takes 5+ minutes (kubelet exponential
+      # backoff). minio is intentionally NOT waited on: it runs as a sidecar
+      # inside this same pod, so an init container waiting for it would
+      # deadlock the pod startup.
+      # See docs/sops/container-dependencies.md.
+      initContainers:
+      - name: wait-for-postgresql
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-postgresql 5432; do
+              echo "waiting for langfuse-postgresql:5432..."
+              sleep 2
+            done
+      - name: wait-for-redis
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-redis 6379; do
+              echo "waiting for langfuse-redis:6379..."
+              sleep 2
+            done
+      - name: wait-for-clickhouse
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-clickhouse 9000; do
+              echo "waiting for langfuse-clickhouse:9000..."
+              sleep 2
+            done
       containers:
       - name: langfuse-web
         image: langfuse/langfuse:3.111.0
@@ -291,6 +330,54 @@ spec:
       labels:
         app: langfuse-worker
     spec:
+      # initContainers wait for stateful deps to be reachable on cold-start /
+      # node-reboot. The worker depends on postgresql, redis, clickhouse, and
+      # the MinIO S3 endpoint (which lives as a sidecar on langfuse-web pods,
+      # exposed via the langfuse-web Service on port 9000). Without these,
+      # langfuse-worker hits a connect error, enters CrashLoopBackOff, and
+      # recovery takes 5+ minutes (kubelet exponential backoff).
+      # See docs/sops/container-dependencies.md.
+      initContainers:
+      - name: wait-for-postgresql
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-postgresql 5432; do
+              echo "waiting for langfuse-postgresql:5432..."
+              sleep 2
+            done
+      - name: wait-for-redis
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-redis 6379; do
+              echo "waiting for langfuse-redis:6379..."
+              sleep 2
+            done
+      - name: wait-for-clickhouse
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-clickhouse 9000; do
+              echo "waiting for langfuse-clickhouse:9000..."
+              sleep 2
+            done
+      - name: wait-for-minio
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z langfuse-web 9000; do
+              echo "waiting for langfuse-web:9000 (MinIO sidecar)..."
+              sleep 2
+            done
       containers:
       - name: langfuse-worker
         image: docker.io/langfuse/langfuse-worker:3.111.0
