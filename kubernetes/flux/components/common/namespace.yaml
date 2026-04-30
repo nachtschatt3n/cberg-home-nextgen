@@ -5,3 +5,12 @@ metadata:
   name: not-used
   annotations:
     kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    # Talos v1.12+ enforces PodSecurity Admission baseline by default.
+    # Several apps in this cluster require privileged + hostPath
+    # (longhorn-manager, cilium, prometheus-node-exporter, frigate, etc).
+    # Restoring v1.11 effective posture (no enforcement). Tighten per-namespace
+    # later if desired — see https://kubernetes.io/docs/concepts/security/pod-security-admission/
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
