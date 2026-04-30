@@ -31,6 +31,10 @@ spec:
   # Post-render patch: the Sure chart hard-codes ingress metadata.labels
   # and doesn't expose a values pass-through, so we inject the Homepage
   # discovery label here (doc-check.py enforces both annotation + label).
+  # Same chart limitation applies to extraInitContainers — the chart only
+  # exposes a fixed db-migrate initContainer, so we inject wait-for-pg /
+  # wait-for-redis via strategic-merge patches on the rendered Deployments.
+  # Pattern: docs/sops/container-dependencies.md (busybox + nc -z loop).
   postRenderers:
     - kustomize:
         patches:
@@ -41,6 +45,70 @@ spec:
               - op: add
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
+          - target:
+              kind: Deployment
+              name: sure-web
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: sure-web
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-pg
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z sure-pg 5432; do
+                              echo "waiting for sure-pg:5432..."
+                              sleep 2
+                            done
+                      - name: wait-for-redis
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z sure-redis 6379; do
+                              echo "waiting for sure-redis:6379..."
+                              sleep 2
+                            done
+          - target:
+              kind: Deployment
+              name: sure-worker
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: sure-worker
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-for-pg
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z sure-pg 5432; do
+                              echo "waiting for sure-pg:5432..."
+                              sleep 2
+                            done
+                      - name: wait-for-redis
+                        image: busybox:stable
+                        command:
+                          - sh
+                          - -c
+                          - |
+                            until nc -z sure-redis 6379; do
+                              echo "waiting for sure-redis:6379..."
+                              sleep 2
+                            done
   values:
     image:
       repository: ghcr.io/we-promise/sure
