@@ -214,6 +214,33 @@ spec:
           #runAsGroup: 1000
           #fsGroup: 1000
 
+    # initContainers wait for stateful deps to be reachable on cold-start /
+    # node-reboot. Without these the paperless pod starts before mariadb /
+    # redis, hits a connect error, enters CrashLoopBackOff, and recovery
+    # takes 5+ minutes (kubelet exponential backoff) instead of seconds.
+    # See docs/sops/container-dependencies.md.
+    initContainers:
+      wait-for-mariadb:
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z paperless-ngx-mariadb 3306; do
+              echo "waiting for paperless-ngx-mariadb:3306..."
+              sleep 2
+            done
+      wait-for-redis:
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - |
+            until nc -z paperless-ngx-redis-master 6379; do
+              echo "waiting for paperless-ngx-redis-master:6379..."
+              sleep 2
+            done
+
     # additionalContainers:
     #   - name: sidecar
     #     image: nginx:alpine
