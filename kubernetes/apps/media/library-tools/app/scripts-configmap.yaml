@@ -1149,3 +1149,206 @@ data:
 
     if __name__ == "__main__":
         main()
+
+  # =========================================================================
+  # plex_fs_classifier.py — classify the gap between FS Movies/* and Plex
+  # =========================================================================
+  # Read-only. Walks Movies/ on disk, queries Plex section 1 with
+  # `?includeFiles=1`, and emits structured log events for each category:
+  #   - multi_part_collapse  (cd1/cd2 split files Plex collapsed to one item)
+  #   - skip_dir_leftover    (`_duplicates/`, `_archive/`, etc. seen by Plex)
+  #   - unmatched            (Plex has the item but couldn't match metadata)
+  #   - no_resolvable_path   (Plex item has no Part.file — orphaned metadata)
+  #   - loose_mkv_at_root    (Movies/<file>.mkv with no folder — flat layout)
+  #   - bundled_extra_subdir (Movies/<title>/<extras>/... non-canonical)
+  # Output: per-category counts only. NO titles emitted (public-repo rule).
+  # =========================================================================
+  plex_fs_classifier.py: |
+    """Classify the gap between Movies/ on disk and Plex's view of section 1.
+
+    Read-only on both filesystem and Plex API. No mutations.
+
+    Required env:
+      PLEX_URL, PLEX_TOKEN, PLEX_MOVIES_SECTION_ID  (default "1")
+      MEDIA_ROOT  (default /data/data — set by CronJob spec)
+
+    Output: structured log lines (one per category) and a summary line.
+    Logs only counts and category names; never names items.
+    """
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.request
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import SECTIONS, log, log_event
+
+    MEDIA_EXTS = {".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv"}
+    SKIP_DIR_PREFIX = "_"
+
+    def http_get_json(url, headers=None):
+        req = urllib.request.Request(url, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                if r.status != 200:
+                    return None
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            log_event("classifier-http-error", severity="warn", code=e.code)
+            return None
+        except Exception as e:
+            log_event("classifier-http-error", severity="warn", error=type(e).__name__)
+            return None
+
+    def fs_inventory(movies_root: Path):
+        """Walk Movies/ and bucket entries.
+
+        Returns (folders, loose_files, skip_dirs) where:
+          - folders: {Path -> [media file paths inside]}
+          - loose_files: [Path] — .mkv etc directly under Movies/ (flat leftover)
+          - skip_dirs: [Path] — `_duplicates/` etc.
+        """
+        folders, loose_files, skip_dirs = {}, [], []
+        if not movies_root.is_dir():
+            return folders, loose_files, skip_dirs
+        for entry in sorted(movies_root.iterdir()):
+            if entry.is_dir():
+                if entry.name.startswith(SKIP_DIR_PREFIX):
+                    skip_dirs.append(entry)
+                    continue
+                inner = []
+                for f in entry.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in MEDIA_EXTS:
+                        inner.append(f)
+                folders[entry] = inner
+            elif entry.is_file() and entry.suffix.lower() in MEDIA_EXTS:
+                loose_files.append(entry)
+        return folders, loose_files, skip_dirs
+
+    def plex_items_with_files(plex_url, token, sid):
+        """Return list of items with their resolved Part.file paths.
+
+        Each entry: {"ratingKey": str, "files": [str], "title_present": bool,
+                     "guid_present": bool}
+        """
+        url = (f"{plex_url}/library/sections/{sid}/all"
+               f"?includeFiles=1&X-Plex-Token={token}")
+        data = http_get_json(url, headers={"Accept": "application/json"})
+        if not data:
+            return []
+        out = []
+        for item in (data.get("MediaContainer", {}).get("Metadata") or []):
+            files = []
+            for media in (item.get("Media") or []):
+                for part in (media.get("Part") or []):
+                    f = part.get("file")
+                    if f:
+                        files.append(f)
+            out.append({
+                "ratingKey":     item.get("ratingKey", ""),
+                "files":         files,
+                "title_present": bool((item.get("title") or "").strip()),
+                "guid_present":  bool((item.get("guid")  or "").strip()),
+            })
+        return out
+
+    def plex_unmatched(plex_url, token, sid):
+        url = f"{plex_url}/library/sections/{sid}/unmatched?X-Plex-Token={token}"
+        data = http_get_json(url, headers={"Accept": "application/json"})
+        if not data:
+            return 0
+        return len(data.get("MediaContainer", {}).get("Metadata") or [])
+
+    def main():
+        plex_url   = os.environ.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
+        plex_token = os.environ.get("PLEX_TOKEN", "")
+        sid        = os.environ.get("PLEX_MOVIES_SECTION_ID", "1")
+        movies     = SECTIONS["movies"]
+
+        if not plex_token:
+            log_event("classifier-skipped", severity="warn", reason="missing-plex-token")
+            sys.exit(0)
+
+        folders, loose_files, skip_dirs = fs_inventory(movies)
+        plex_items = plex_items_with_files(plex_url, plex_token, sid)
+        unmatched_count = plex_unmatched(plex_url, plex_token, sid)
+
+        # Build path index from Plex side. Plex's Part.file is the absolute
+        # path inside Plex's mount (`/data/data/Movies/...`). Compare against
+        # our equivalent local Path. Since both use MEDIA_ROOT, Plex paths
+        # should already start with str(MEDIA_ROOT).
+        plex_paths = set()
+        no_resolvable_path = 0
+        multi_part_collapse = 0
+        for it in plex_items:
+            if not it["files"]:
+                no_resolvable_path += 1
+                continue
+            if len(it["files"]) > 1:
+                multi_part_collapse += 1
+            for f in it["files"]:
+                plex_paths.add(os.path.normpath(f))
+
+        # FS-side categories
+        loose_mkv_at_root = len(loose_files)
+        skip_dir_leftover = 0
+        # If a skip-dir actually appears in any plex_paths file path, count it.
+        for sd in skip_dirs:
+            sd_str = str(sd) + os.sep
+            if any(p.startswith(sd_str) for p in plex_paths):
+                skip_dir_leftover += 1
+
+        # Bundled-extra subdirs: any folder with media files at depth >1
+        # (i.e. nested under a sub-subdir) not matching Plex multi-part naming.
+        bundled_extra_subdir = 0
+        for folder, files in folders.items():
+            for f in files:
+                # depth from folder root: how many extra path parts
+                rel_parts = f.relative_to(folder).parts
+                if len(rel_parts) > 1:
+                    bundled_extra_subdir += 1
+                    break  # one count per folder
+
+        # FS items missing from Plex: folder media file path not in plex_paths
+        fs_files_total = sum(len(v) for v in folders.values()) + loose_mkv_at_root
+        fs_missing_in_plex = 0
+        for folder, files in folders.items():
+            for f in files:
+                if os.path.normpath(str(f)) not in plex_paths:
+                    fs_missing_in_plex += 1
+        for f in loose_files:
+            if os.path.normpath(str(f)) not in plex_paths:
+                fs_missing_in_plex += 1
+
+        # Plex items pointing at a file that no longer exists on disk (stale)
+        plex_stale = sum(
+            1 for p in plex_paths
+            if not Path(p).exists()
+        )
+
+        log_event("classifier-fs",
+                  folders=len(folders),
+                  loose_mkv_at_root=loose_mkv_at_root,
+                  skip_dirs=len(skip_dirs),
+                  fs_files_total=fs_files_total)
+        log_event("classifier-plex",
+                  items=len(plex_items),
+                  unmatched=unmatched_count,
+                  no_resolvable_path=no_resolvable_path,
+                  multi_part_collapse=multi_part_collapse,
+                  stale_paths=plex_stale)
+        log_event("classifier-gap",
+                  fs_missing_in_plex=fs_missing_in_plex,
+                  plex_stale_paths=plex_stale,
+                  skip_dir_leftover=skip_dir_leftover,
+                  bundled_extra_subdir=bundled_extra_subdir)
+
+        log(f"FS folders={len(folders)} loose={loose_mkv_at_root} skip_dirs={len(skip_dirs)} | "
+            f"Plex items={len(plex_items)} unmatched={unmatched_count} multi_part={multi_part_collapse} "
+            f"no_path={no_resolvable_path} | gap fs_missing={fs_missing_in_plex} stale={plex_stale} "
+            f"skip_leftover={skip_dir_leftover} bundled_extra={bundled_extra_subdir}")
+        sys.exit(0)
+
+    if __name__ == "__main__":
+        main()

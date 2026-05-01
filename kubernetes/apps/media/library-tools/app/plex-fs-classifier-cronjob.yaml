@@ -1,0 +1,70 @@
+---
+# Daily classifier of the gap between Movies/* on disk and Plex's view of
+# section 1. Read-only on both sides. Walks the filesystem, queries Plex
+# with `?includeFiles=1`, and emits structured log events bucketing the
+# gap into:
+#   - multi_part_collapse  (cd1/cd2 split files Plex collapsed to one item)
+#   - skip_dir_leftover    (`_duplicates/`, `_archive/` visible to Plex)
+#   - unmatched            (Plex has the item, but no metadata match)
+#   - no_resolvable_path   (Plex item with no Part.file)
+#   - loose_mkv_at_root    (Movies/<file>.mkv at flat layout — pre-migration)
+#   - bundled_extra_subdir (Movies/<title>/<extras>/... non-canonical)
+#
+# Output: log lines only (`kubectl logs` + visible in media-dashboard).
+# No on-disk writes. Plex section ID defaults to 1 (Movies).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-plex-fs-classifier
+  namespace: media
+spec:
+  schedule: "0 4 * * *"   # daily at 04:00 (just before audit at 04:15)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3   # keep a few for trend
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: classifier
+              image: python:3.11-slim
+              command: ["python", "/app/plex_fs_classifier.py"]
+              env:
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+                - name: PLEX_URL
+                  value: "http://plex-plex-media-server.media.svc.cluster.local:32400"
+                - name: PLEX_MOVIES_SECTION_ID
+                  value: "1"
+                - name: PLEX_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_TOKEN
+                      optional: true
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb

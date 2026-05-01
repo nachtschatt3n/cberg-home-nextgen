@@ -13,6 +13,7 @@ resources:
   - ./cleanup-nfos-cronjob.yaml
   - ./coverage-cronjob.yaml
   - ./per-item-refresh-cronjob.yaml
+  - ./plex-fs-classifier-cronjob.yaml
   - ./rescan-cronjob.yaml
   - ./dashboard-rbac.yaml
   - ./dashboard-configmap.yaml
