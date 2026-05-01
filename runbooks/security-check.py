@@ -552,6 +552,8 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -vE 'kubectl (edit|get|describe) secret|`kubectl edit secret' "
         # Shell command substitution — value captured at runtime, never hardcoded:
         "| grep -vE '[a-zA-Z_]+=\"\\$\\(' "
+        # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
+        "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
     )
     # Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
