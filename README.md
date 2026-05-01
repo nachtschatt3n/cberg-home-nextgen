@@ -8,8 +8,8 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 <div align="center">
 
-[![Talos](https://img.shields.io/badge/Talos-v1.11.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.34.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
+[![Talos](https://img.shields.io/badge/Talos-v1.13.0-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
 [![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.5.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
@@ -51,8 +51,8 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 ### Core Components
 
-- **Operating System**: [Talos Linux v1.11.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration
-- **Container Runtime**: [Containerd 2.1.4](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
+- **Operating System**: [Talos Linux v1.13.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.24, Clang/ThinLTO build)
+- **Container Runtime**: [Containerd 2.2.3](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
 - **Networking**: [Cilium v1.19.2](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn v1.11.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
@@ -458,10 +458,10 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 **Managed Tools:**
 - **Python 3.13** - For automation scripts and utilities
 - **uv** - Fast Python package installer
-- **kubectl 1.34.0** - Kubernetes CLI
+- **kubectl 1.36.x** - Kubernetes CLI
 - **flux 2.7.5** - GitOps toolkit CLI
-- **talosctl 1.11.0** - Talos Linux management
-- **talhelper 3.0.37** - Talos configuration helper
+- **talosctl 1.13.0** - Talos Linux management
+- **talhelper 3.1.9** - Talos configuration helper
 - **sops 3.9.4** - Secrets encryption
 - **helm 3.17.1** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization

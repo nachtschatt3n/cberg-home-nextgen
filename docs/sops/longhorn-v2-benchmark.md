@@ -1,8 +1,8 @@
 # SOP: Longhorn v2 Data Engine Benchmark + Rollout
 
-> Description: Procedure for enabling Longhorn v2 data engine on a small subset of test volumes, running fio benchmarks against v1 and v2, and deciding whether to migrate production volumes. The OS prerequisites (hugepages=1024, vfio_pci, uio_pci_generic kernel modules) are already in place from the 2026-04-30 Talos v1.13 upgrade.
-> Version: `2026.04.30`
-> Last Updated: `2026-04-30`
+> Description: Procedure for enabling Longhorn v2 data engine on a small subset of test volumes, running fio benchmarks against v1 and v2, and deciding whether to migrate production volumes. The OS prerequisites (hugepages=1024, vfio_pci, uio_pci_generic kernel modules) are already in place from the 2026-04-30 Talos v1.13 upgrade. **The Longhorn-side block-disk prereq (Step 0.5) is NOT — every node still has only the default `filesystem` disk, so v2 PVCs will fault with `ReplicaSchedulingFailure` until block disks are provisioned.**
+> Version: `2026.05.01`
+> Last Updated: `2026-05-01`
 > Owner: `cluster-ops`
 
 ---
@@ -32,6 +32,7 @@ Status as of 2026-04-30 (cluster on Longhorn v1.11.1):
 | Hugepages required | 1024 × 2 MiB (2 GiB per node) |
 | Hugepage state on cluster | 1024 on each of 3 nodes ✅ (verified post-Talos-v1.13 upgrade) |
 | Required modules | `vfio_pci`, `uio_pci_generic` ✅ (loaded via `machine.kernel.modules`) |
+| **Longhorn block disk per node** | ❌ **NOT YET** — only default filesystem disk at `/var/lib/longhorn/`. Without a `block`-type Longhorn disk per node, v2 replicas will not schedule. See Step 0.5 below. |
 | SPDK target | spdk_tgt (one per node, runs in instance-manager) |
 | CPU reserved per node for spdk_tgt | 1 (default `data-engine-cpu-mask: 0x1`) |
 | Test volume size | 1 GiB |
@@ -64,6 +65,48 @@ c = collections.Counter(v['status'].get('robustness', '?') for v in d['items'])
 print('Longhorn:', dict(c))"
 # All should be healthy. Don't proceed if any volumes are degraded/faulted/unknown.
 ```
+
+### Step 0.5 — Provision a `block`-type Longhorn disk per node (PREREQ)
+
+**Encountered on 2026-04-30**: enabling `v2-data-engine: true` and creating a v2 StorageClass is not enough. v2 SPDK replicas can only land on Longhorn `Disk` resources where `diskType: block`. The default disk on every node is `filesystem` (`/var/lib/longhorn/`), so a v2 volume comes up `faulted` with `ReplicaSchedulingFailure`.
+
+Three viable approaches:
+
+| Approach | Realism | Risk | Notes |
+|---|---|---|---|
+| **A. Dedicated NVMe partition** | High (production-like) | Repartitioning live root disk needs a maintenance window | Talos `machine.disks` config: carve e.g. 10 GiB from end of NVMe per node, declare as Longhorn block disk |
+| **B. File-backed loop device** | Low (file-on-FS-on-FS layers) | Low | Talos `extraMounts` exposing a sparse file per node; `losetup` to create `/dev/loopN`; declare loop dev as Longhorn block disk |
+| **C. Single-node, file-loop, replicas=1** | Lowest (eliminates network path) | Lowest | Only useful for raw single-node SPDK perf, not v1-vs-v2 comparison |
+
+For a benchmark whose results inform a production decision, use **A**. For a "does v2 even start" smoke test, use **B/C** but caveat the numbers heavily.
+
+After the block disk exists, register it with Longhorn (UI: Node → disk → Add Disk; or via `Node` CRD spec):
+
+```yaml
+# Patch via kubectl edit nodes.longhorn.io <node-name> -n storage
+spec:
+  disks:
+    block-disk-0:
+      path: /dev/disk/by-id/<stable-id>     # or /dev/loop0 for option B
+      diskType: block
+      allowScheduling: true
+      tags:
+        - v2-bench
+```
+
+Then verify all 3 nodes expose a block disk before continuing to Step 1:
+
+```bash
+mise exec -- kubectl -n storage get nodes.longhorn.io -o json \
+  | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for n in d['items']:
+    blk = [k for k,v in n['spec'].get('disks',{}).items() if v.get('diskType')=='block']
+    print(f\"  {n['metadata']['name']}: block disks = {blk or 'NONE'}\")"
+```
+
+If any node shows `NONE`, **stop** — the v2 StorageClass will provision a faulted volume.
 
 ### Step 1 — Enable v2 data engine in Longhorn settings
 

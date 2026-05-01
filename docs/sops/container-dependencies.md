@@ -1,8 +1,8 @@
 # SOP: Container Dependency Wait-For Pattern
 
 > Description: Standard pattern for ensuring an app pod waits for its stateful dependencies (Postgres, Redis, Mongo, S3, etc.) to be reachable before its primary container starts. Eliminates cold-start crashloops when dependencies and their consumers reschedule on the same Talos upgrade or node reboot.
-> Version: `2026.04.30`
-> Last Updated: `2026-04-30`
+> Version: `2026.05.01`
+> Last Updated: `2026-05-01`
 > Owner: `cluster-ops`
 
 ---
@@ -12,6 +12,12 @@
 When a Talos node reboots (e.g., during the v1.11.0 → v1.13.0 rolling upgrade on 2026-04-30) or the cluster cold-starts, all pods on that node are evicted and rescheduled in parallel. Apps that connect to a database/cache often start their main process before the database is reachable, hit a connect-timeout-FATAL, exit, and enter `CrashLoopBackOff`. The deployment then takes 5+ minutes to recover (kubelet backoff is exponential up to 5 min).
 
 The fix is a one-line `initContainer` per app that blocks the main container until the dependency's TCP port is open. This SOP documents the pattern + applies it to the high-priority apps.
+
+**Status as of 2026-05-01** — wait-for is wired in:
+- `office/affine`, `ai/paperclip` (seed implementations, bjw-s app-template)
+- `office/paperless-ngx`, `office/nextcloud`, `kube-system/authentik`, `office/penpot`, `ai/langfuse`, `office/sure` (added 2026-05-01)
+- `databases/superset` — chart already ships default `wait-for-postgres` init; no edit needed
+- `ai/openclaw`, `home-automation/n8n` — no external dep (SQLite-only); skipped
 
 - **Scope**: every app with one or more upstream stateful dependencies (postgres, redis, mongo, mariadb, mqtt, MinIO, S3 endpoints, etc.)
 - **Prerequisites**: app uses bjw-s `app-template` Helm chart (most do), OR a regular Deployment/StatefulSet manifest where `spec.template.spec.initContainers` can be set.

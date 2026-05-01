@@ -17,6 +17,9 @@ talosconfig
 *-temp.yaml
 # Ansible
 .venv*
+# Python
+__pycache__/
+*.py[cod]
 # Taskfile
 .task
 # Brew
