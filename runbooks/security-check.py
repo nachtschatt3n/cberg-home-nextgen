@@ -252,8 +252,10 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     unenc = run_lines(
         "grep -rl 'kind: Secret' kubernetes/ --include='*.yaml' | grep -v '\\.sops\\.yaml$'"
     )
-    # Filter known false-positives (SecretKeyRef refs, SA tokens, kustomization refs)
-    fp_patterns = ["helmrelease.yaml", "ks.yaml", "token-secret.yaml"]
+    # Filter known false-positives (SecretKeyRef refs, SA tokens, kustomization refs,
+    # _template/ scaffolding directories, and *.example.yaml placeholder files which are
+    # by design unencrypted and not deployed by any kustomization).
+    fp_patterns = ["helmrelease.yaml", "ks.yaml", "token-secret.yaml", "/_template/", ".example.yaml"]
     real_unenc = [p for p in unenc if not any(fp in p for fp in fp_patterns)]
     if real_unenc:
         for p in real_unenc:
