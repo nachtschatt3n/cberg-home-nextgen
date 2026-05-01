@@ -33,6 +33,12 @@ spec:
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
+        # Default 30% reserved was leaving nuc14-03 at 71.8% scheduled
+        # (over the 70% schedulable threshold) blocking new replica
+        # placement. Lower to 20% — frees ~100 GiB scheduling headroom
+        # per node while still keeping a safety margin. Existing disks
+        # retain their old reservation until patched manually.
+        storageReservedPercentageForDefaultDisk: 20
         backupstorePollInterval: 300
         taintToleration: ""
         systemManagedComponentsNodeSelector: ""
