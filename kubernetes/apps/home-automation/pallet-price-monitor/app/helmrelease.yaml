@@ -68,7 +68,6 @@ spec:
                   secretKeyRef:
                     name: pallet-price-monitor-secret
                     key: ANTHROPIC_API_KEY
-                    optional: true
               - name: SCRAPER_SHA
                 valueFrom:
                   fieldRef:
