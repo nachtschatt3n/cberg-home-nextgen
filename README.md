@@ -459,7 +459,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **Python 3.13** - For automation scripts and utilities
 - **uv** - Fast Python package installer
 - **kubectl 1.36.x** - Kubernetes CLI
-- **flux 2.7.5** - GitOps toolkit CLI
+- **flux 2.8.0** - GitOps toolkit CLI
 - **talosctl 1.13.0** - Talos Linux management
 - **talhelper 3.1.9** - Talos configuration helper
 - **sops 3.9.4** - Secrets encryption
@@ -494,8 +494,8 @@ mise install
 # Verify tools are available
 mise ls
 python --version   # Python 3.13.8
-kubectl version    # kubectl 1.34.0
-flux version       # flux 2.7.5
+kubectl version    # kubectl 1.36.x
+flux version       # flux 2.8.0
 
 # Access cluster (KUBECONFIG already set by mise)
 kubectl get nodes
