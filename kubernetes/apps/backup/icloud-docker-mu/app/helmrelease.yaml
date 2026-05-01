@@ -51,7 +51,10 @@ spec:
                 cpu: 100m
                 memory: 256Mi
               limits:
-                memory: 1Gi
+                # Bumped 1Gi → 2Gi after 3 OOMKills in 2h on 2026-05-01.
+                # Steady-state is ~136Mi but photo-sync (every 500s) and
+                # drive-sync (every 300s) cycles spike past 1Gi briefly.
+                memory: 2Gi
             probes:
               liveness:
                 enabled: false
