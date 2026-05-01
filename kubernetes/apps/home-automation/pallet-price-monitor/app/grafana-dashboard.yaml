@@ -1,0 +1,144 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pallet-price-monitor-dashboard
+  namespace: home-automation
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Pellets
+data:
+  pellet-prices-65520.json: |
+    {
+      "title": "Pellet Prices 65520",
+      "uid": "pellet-prices-65520",
+      "schemaVersion": 41,
+      "version": 1,
+      "refresh": "30m",
+      "time": { "from": "now-90d", "to": "now" },
+      "tags": ["pellets","etl"],
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Current verdict",
+          "id": 1,
+          "gridPos": { "x": 0, "y": 0, "w": 8, "h": 5 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT verdict AS \"Verdict\", composite_score AS \"Composite\" FROM signals ORDER BY computed_at DESC LIMIT 1",
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "BUY":  { "text": "BUY",  "color": "green"  } } },
+                { "type": "value", "options": { "WAIT": { "text": "WAIT", "color": "orange" } } },
+                { "type": "value", "options": { "HOLD": { "text": "HOLD", "color": "blue"   } } }
+              ]
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "PLZ 65520 — price over time (all retail sources)",
+          "id": 2,
+          "gridPos": { "x": 8, "y": 0, "w": 16, "h": 9 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT observed_at AS time, price_per_t, source FROM prices WHERE zip_code='65520' AND $__timeFilter(observed_at) ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Buyer sentiment + delivery days",
+          "id": 3,
+          "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT observed_at AS time, pct_good_time_to_buy, delivery_days_avg FROM sentiment_obs WHERE $__timeFilter(observed_at) ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Heating-degree-days (PLZ 65520) — realised + 14d forecast",
+          "id": 4,
+          "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT observed_at AS time, hdd_15c, forecast_horizon_days::text AS metric FROM weather WHERE zip_code='65520' AND $__timeFilter(observed_at) ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Heizöl substitute price (PLZ 65520)",
+          "id": 5,
+          "gridPos": { "x": 0, "y": 17, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT observed_at AS time, value AS \"€/100l\" FROM substitutes WHERE source='heizoel24' AND zip_code='65520' AND $__timeFilter(observed_at) ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Destatis EPI — pellets vs sawdust",
+          "id": 6,
+          "gridPos": { "x": 12, "y": 17, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT observed_at AS time, value, source FROM indicators WHERE metric IN ('epi_pellets_2021_100','epi_sawdust_2021_100') AND $__timeFilter(observed_at) ORDER BY 1",
+              "format": "time_series",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Recent news",
+          "id": 7,
+          "gridPos": { "x": 0, "y": 24, "w": 24, "h": 9 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT published_at, source, sentiment, title, url FROM news WHERE published_at IS NOT NULL ORDER BY published_at DESC LIMIT 30",
+              "format": "table",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Step-change events",
+          "id": 8,
+          "gridPos": { "x": 0, "y": 33, "w": 24, "h": 6 },
+          "targets": [
+            {
+              "datasource": { "type": "postgres", "uid": "pellets" },
+              "rawSql": "SELECT effective_at, kind, description, numeric_delta FROM events ORDER BY effective_at DESC LIMIT 10",
+              "format": "table",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

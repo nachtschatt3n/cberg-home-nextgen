@@ -16,6 +16,7 @@ resources:
  - ./n8n/ks.yaml
  - ./node-red/ks.yaml
  - ./otbr/ks.yaml  # re-enabled 2026-04-30 — Talos v1.13.0 kernel has CONFIG_IPV6_MROUTE=y
+ - ./pallet-price-monitor/ks.yaml
  - ./scrypted-nvr/ks.yaml
  - ./solarfocus-scraper/ks.yaml
  - ./teslamate/ks.yaml

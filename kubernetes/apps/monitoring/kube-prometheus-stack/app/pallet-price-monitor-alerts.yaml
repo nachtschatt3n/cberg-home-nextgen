@@ -1,0 +1,90 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: pallet-price-monitor-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: pallet-price-monitor.run.health
+    rules:
+    - alert: PalletPriceMonitorRunStale
+      annotations:
+        description: |
+          The pellet-price-monitor scraper has not completed a successful run
+          in over 15 hours. The CronJob is supposed to fire every 12 hours
+          (08:00 + 20:00 Europe/Berlin). Check the latest Job status and DB.
+        summary: Pellet-price-monitor has not run recently
+      expr: |
+        time() - max(pellet_last_run_timestamp_seconds) > 60 * 60 * 15
+      for: 15m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: warning
+    - alert: PalletPriceMonitorJobFailed
+      annotations:
+        description: |
+          The most recent pellet-price-monitor Job failed. Check kubectl logs
+          for the latest pod under the pallet-price-monitor CronJob.
+        summary: Pellet-price-monitor Job failed
+      expr: |
+        sum(kube_job_failed{namespace="home-automation", job_name=~"pallet-price-monitor-.*"}) > 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: critical
+    - alert: PalletBuySignalActive
+      annotations:
+        description: |
+          The pellet-price-monitor reports a BUY verdict at composite_score
+          {{ $value }}. Local PLZ 65520 price is at the buy threshold or
+          below — review the Grafana dashboard and consider placing the order.
+        summary: 🔔 Pellet BUY signal — order window open
+      expr: |
+        max(pellet_buy_signal_active) == 1
+      for: 1m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: warning
+
+  - interval: 30s
+    name: pallet-price-monitor.pods.health
+    rules:
+    - alert: PalletPriceMonitorPodCrashLooping
+      annotations:
+        description: |
+          A pellet-price-monitor pod has restarted {{ $value | printf "%.0f" }}
+          times in the last 15 minutes — investigate the latest container logs.
+        summary: Pellet-price-monitor pod is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="home-automation", pod=~"pallet-price-monitor-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: critical
+    - alert: PalletPriceMonitorPodNotReady
+      annotations:
+        description: |
+          A pellet-price-monitor pod has been not-ready for more than 5 min.
+          The Succeeded-phase exclusion ensures normal CronJob completion does
+          not fire this alert.
+        summary: Pellet-price-monitor pod is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="home-automation", pod=~"pallet-price-monitor-.*", condition="true"}
+          unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+        ) == 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: warning

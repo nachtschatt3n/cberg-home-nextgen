@@ -1,0 +1,116 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pallet-price-monitor
+  namespace: home-automation
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      scraper:
+        type: cronjob
+        cronjob:
+          schedule: "0 8,20 * * *"
+          timeZone: "Europe/Berlin"
+          concurrencyPolicy: Forbid
+          successfulJobsHistory: 3
+          failedJobsHistory: 5
+          backoffLimit: 1
+        pod:
+          imagePullSecrets:
+            - name: ghcr-pellet-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/pellet-price-monitor
+              tag: sha-eafb8c4
+              pullPolicy: IfNotPresent
+            env:
+              - { name: TZ, value: "Europe/Berlin" }
+              - { name: PG_HOST, value: "postgresql.databases.svc.cluster.local" }
+              - { name: PG_PORT, value: "5432" }
+              - { name: PG_DB, value: "pellets" }
+              - { name: PG_USER, value: "pellets" }
+              - { name: PRIMARY_ZIP, value: "65520" }
+              - { name: PRIMARY_AMOUNT_KG, value: "6000" }
+              - { name: METRICS_PORT, value: "8080" }
+              - { name: SOURCES_CONFIG, value: "/etc/pellet-monitor/sources.yaml" }
+              - { name: SIGNAL_CONFIG, value: "/etc/pellet-monitor/signal.yaml" }
+              - name: PG_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: pallet-price-monitor-secret
+                    key: PG_PASSWORD
+              - name: ANTHROPIC_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: pallet-price-monitor-secret
+                    key: ANTHROPIC_API_KEY
+                    optional: true
+              - name: SCRAPER_SHA
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.labels['app.kubernetes.io/version']
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 384Mi
+
+    service:
+      app:
+        controller: scraper
+        ports:
+          metrics:
+            port: 8080
+
+    serviceMonitor:
+      app:
+        serviceName: pallet-price-monitor
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            interval: 30s
+            scrapeTimeout: 15s
+        labels:
+          release: kube-prometheus-stack
+
+    persistence:
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+      config:
+        type: configMap
+        name: pallet-price-monitor-config
+        globalMounts:
+          - path: /etc/pellet-monitor

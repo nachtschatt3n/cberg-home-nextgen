@@ -52,6 +52,7 @@ spec:
           - { name: InfluxDB, orgId: 1 }
           - { name: Unpoller InfluxDB, orgId: 1 }
           - { name: TeslaMate, orgId: 1 }
+          - { name: Pellets, orgId: 1 }
           - { name: Elasticsearch, orgId: 1 }
         datasources:
           - name: Prometheus
@@ -98,6 +99,18 @@ spec:
               database: teslamate
               sslmode: disable
               postgresVersion: 1800
+          - name: Pellets
+            type: postgres
+            uid: pellets
+            access: proxy
+            url: postgresql.databases.svc.cluster.local:5432
+            user: pellets
+            secureJsonData:
+              password: $__env{PELLETS_DB_PASSWORD}
+            jsonData:
+              database: pellets
+              sslmode: disable
+              postgresVersion: 1600
           - name: Elasticsearch
             type: elasticsearch
             uid: elasticsearch

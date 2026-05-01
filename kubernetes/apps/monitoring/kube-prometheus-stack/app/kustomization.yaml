@@ -17,6 +17,7 @@ resources:
   - ./tube-archivist-alerts.yaml
   - ./library-tools-alerts.yaml
   - ./solarfocus-scraper-alerts.yaml
+  - ./pallet-price-monitor-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml
   - ./alertmanager-ingress.yaml

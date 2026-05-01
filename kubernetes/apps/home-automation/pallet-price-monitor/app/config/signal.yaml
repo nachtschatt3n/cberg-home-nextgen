@@ -1,0 +1,33 @@
+# Buy/wait signal weights and thresholds.
+#
+# Each component is rescaled to a 0-100 buy-pressure score in `signal.py`.
+# These weights govern how much each component contributes to its bucket
+# average; bucket weights govern how spot vs structural roll up to the
+# composite score.
+
+weights:
+  buckets:
+    spot: 0.6667         # 2/3, per the source-catalog methodology
+    structural: 0.3333
+
+  spot:
+    hp24_local_delta_1w: 1.5
+    hp24_local_below_national: 0.5
+    esyoil_consensus_delta: 1.2
+    dwd_hdd_14d: 1.0
+    heizoel_delta_1m: 0.6
+    hp24_pct_good_time_to_buy: 1.2
+    hp24_delivery_days_below_avg: 1.0
+
+  structural:
+    destatis_epi_pellets_delta_1m: 1.5
+    destatis_epi_sawdust_delta_3m: 1.5
+    eurostat_imports_delta_3m: 1.0
+    propellets_at_delta_1m: 0.8
+    borkenkaefer_severity: 0.8
+    toll_collect_recent_step: 0.5
+
+thresholds:
+  composite_buy: 70.0          # composite >= 70 → BUY
+  composite_wait_below: 40.0   # composite <= 40 → WAIT
+  explicit_floor_eur_per_t: 330.0   # local price <= 330 EUR/t → BUY regardless of composite
