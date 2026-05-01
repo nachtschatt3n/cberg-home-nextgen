@@ -32,7 +32,7 @@ spec:
           concurrencyPolicy: Forbid
           successfulJobsHistory: 3
           failedJobsHistory: 5
-          backoffLimit: 1
+          backoffLimit: 2
         pod:
           imagePullSecrets:
             - name: ghcr-pellet-pull
@@ -79,10 +79,10 @@ spec:
                 drop: ["ALL"]
             resources:
               requests:
-                cpu: 50m
-                memory: 128Mi
+                cpu: 100m
+                memory: 512Mi
               limits:
-                memory: 384Mi
+                memory: 1Gi
 
     service:
       app:
