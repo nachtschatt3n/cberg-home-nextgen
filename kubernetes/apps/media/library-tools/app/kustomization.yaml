@@ -12,6 +12,7 @@ resources:
   - ./cleanup-cronjob.yaml
   - ./cleanup-nfos-cronjob.yaml
   - ./coverage-cronjob.yaml
+  - ./per-item-refresh-cronjob.yaml
   - ./rescan-cronjob.yaml
   - ./dashboard-rbac.yaml
   - ./dashboard-configmap.yaml

@@ -1,0 +1,74 @@
+---
+# Per-item metadata refresh — nudges Plex/Jellyfin to re-fetch art + overview
+# for items that scanned without them server-side. Pairs with the hourly
+# coverage CronJob: coverage *measures* the gap, this *acts* on it.
+#
+#   Plex:     PUT /library/metadata/{ratingKey}/refresh?force=1
+#   Jellyfin: POST /Items/{Id}/Refresh?MetadataRefreshMode=FullRefresh
+#                                       &ImageRefreshMode=FullRefresh
+#
+# Read-only on disk; only API calls. Soft-success: per-item failures log
+# at warn but the Job exits 0 — alerting belongs in a Prometheus rule on
+# the coverage metrics, not on this Job's exit code.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-per-item-refresh
+  namespace: media
+spec:
+  schedule: "0 */6 * * *"   # every 6 hours
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: per-item-refresh
+              image: python:3.11-slim
+              command: ["python", "/app/per_item_refresh.py"]
+              env:
+                - name: PLEX_URL
+                  value: "http://plex-plex-media-server.media.svc.cluster.local:32400"
+                - name: JELLYFIN_URL
+                  value: "http://jellyfin.media.svc.cluster.local:8096"
+                - name: MAX_REFRESH_PER_RUN
+                  value: "200"
+                - name: PLEX_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_TOKEN
+                      optional: true
+                - name: PLEX_SECTION_IDS
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: PLEX_SECTION_IDS
+                      optional: true
+                - name: JELLYFIN_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: JELLYFIN_API_KEY
+                      optional: true
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts

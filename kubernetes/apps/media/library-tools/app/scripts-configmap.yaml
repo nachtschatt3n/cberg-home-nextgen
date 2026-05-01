@@ -965,3 +965,187 @@ data:
 
     if __name__ == "__main__":
         main()
+
+  # =========================================================================
+  # per_item_refresh.py — nudge Plex/Jellyfin to re-fetch metadata for items
+  # that are missing summary / poster / backdrop server-side.
+  # =========================================================================
+  # metadata_coverage.py reports % coverage; this script acts on the gap.
+  # It lists items missing art/overview and fires per-item refresh requests:
+  #   Plex:     PUT /library/metadata/{ratingKey}/refresh?force=1
+  #   Jellyfin: POST /Items/{Id}/Refresh?MetadataRefreshMode=FullRefresh
+  #                                      &ImageRefreshMode=FullRefresh
+  # No on-disk writes; only API calls. Output: structured log events + counts.
+  # =========================================================================
+  per_item_refresh.py: |
+    """Per-item metadata refresh for items missing art/overview server-side.
+
+    Required env (from media-manager-tokens secret, all optional — script
+    skips a server cleanly if its credentials are absent):
+      PLEX_URL, PLEX_TOKEN, PLEX_SECTION_IDS  (comma-separated)
+      JELLYFIN_URL, JELLYFIN_API_KEY
+
+    Tunables:
+      MAX_REFRESH_PER_RUN  (default 200) — cap per-server to avoid storms
+      DRY_RUN              ("1" to skip POSTs and only log what would fire)
+    """
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+    sys.path.insert(0, "/app")
+    from common import log, log_event
+
+    DEFAULT_CAP = 200
+
+    def _http(url, method="GET", headers=None, timeout=30):
+        req = urllib.request.Request(url, headers=headers or {}, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read()
+                return r.status, body
+        except urllib.error.HTTPError as e:
+            return e.code, b""
+        except Exception as e:
+            log_event("refresh-http-error", severity="warn",
+                      method=method, error=type(e).__name__)
+            return 0, b""
+
+    def get_json(url, headers=None):
+        status, body = _http(url, "GET", headers)
+        if status != 200 or not body:
+            return None
+        try:
+            return json.loads(body)
+        except Exception:
+            return None
+
+    # ---- Plex --------------------------------------------------------------
+    def plex_missing_in_section(plex_url, token, sid):
+        """Yield (ratingKey, missing_fields) for items missing art/summary."""
+        url = f"{plex_url}/library/sections/{sid}/all?X-Plex-Token={token}"
+        data = get_json(url, headers={"Accept": "application/json"})
+        if not data:
+            return
+        for item in (data.get("MediaContainer", {}).get("Metadata") or []):
+            rk = item.get("ratingKey")
+            if not rk:
+                continue
+            missing = []
+            if not (item.get("summary") or "").strip():
+                missing.append("summary")
+            if not (item.get("thumb") or "").strip():
+                missing.append("thumb")
+            if not (item.get("art") or "").strip():
+                missing.append("art")
+            if missing:
+                yield rk, missing
+
+    def plex_refresh(plex_url, token, rk):
+        url = f"{plex_url}/library/metadata/{rk}/refresh?force=1&X-Plex-Token={token}"
+        status, _ = _http(url, "PUT")
+        return status
+
+    # ---- Jellyfin ----------------------------------------------------------
+    def jellyfin_missing(jf_url, key):
+        """Yield (item_id, missing_fields) for items missing overview/art/backdrop."""
+        url = (f"{jf_url}/Items?Recursive=true"
+               f"&IncludeItemTypes=Movie,Series"
+               f"&Fields=Overview,ImageTags,BackdropImageTags"
+               f"&Limit=10000")
+        data = get_json(url, headers={"X-Emby-Token": key})
+        if not data:
+            return
+        for item in (data.get("Items") or []):
+            iid = item.get("Id")
+            if not iid:
+                continue
+            missing = []
+            if not (item.get("Overview") or "").strip():
+                missing.append("overview")
+            if not (item.get("ImageTags") or {}).get("Primary"):
+                missing.append("primary")
+            if not item.get("BackdropImageTags"):
+                missing.append("backdrop")
+            if missing:
+                yield iid, missing
+
+    def jellyfin_refresh(jf_url, key, iid):
+        url = (f"{jf_url}/Items/{iid}/Refresh"
+               f"?MetadataRefreshMode=FullRefresh"
+               f"&ImageRefreshMode=FullRefresh")
+        status, _ = _http(url, "POST", headers={"X-Emby-Token": key})
+        return status
+
+    # ---- main --------------------------------------------------------------
+    def main():
+        plex_url   = os.environ.get("PLEX_URL", "http://plex-plex-media-server.media.svc.cluster.local:32400")
+        plex_token = os.environ.get("PLEX_TOKEN", "")
+        plex_sids  = [s.strip() for s in os.environ.get("PLEX_SECTION_IDS", "").split(",") if s.strip()]
+        jf_url     = os.environ.get("JELLYFIN_URL", "http://jellyfin.media.svc.cluster.local:8096")
+        jf_key     = os.environ.get("JELLYFIN_API_KEY", "")
+        cap        = int(os.environ.get("MAX_REFRESH_PER_RUN", str(DEFAULT_CAP)))
+        dry_run    = os.environ.get("DRY_RUN", "0") == "1"
+
+        plex_total = plex_fired = plex_failed = 0
+        if plex_token and plex_sids:
+            for sid in plex_sids:
+                section_fired = 0
+                for rk, missing in plex_missing_in_section(plex_url, plex_token, sid):
+                    plex_total += 1
+                    if section_fired >= cap:
+                        continue
+                    if dry_run:
+                        plex_fired += 1
+                        section_fired += 1
+                        continue
+                    status = plex_refresh(plex_url, plex_token, rk)
+                    if 200 <= status < 300:
+                        plex_fired += 1
+                        section_fired += 1
+                    else:
+                        plex_failed += 1
+                        log_event("plex-refresh-fail", severity="warn",
+                                  section=sid, status=status)
+                    # gentle pacing — 50/s upper bound is generous; 20/s plenty.
+                    time.sleep(0.05)
+                log_event("plex-refresh-section-done",
+                          section=sid, fired=section_fired,
+                          missing=plex_total, dry_run=dry_run)
+        else:
+            log_event("plex-refresh-skipped", severity="warn",
+                      reason="missing-token-or-sections")
+
+        jf_total = jf_fired = jf_failed = 0
+        if jf_key:
+            for iid, missing in jellyfin_missing(jf_url, jf_key):
+                jf_total += 1
+                if jf_fired >= cap:
+                    continue
+                if dry_run:
+                    jf_fired += 1
+                    continue
+                status = jellyfin_refresh(jf_url, jf_key, iid)
+                if 200 <= status < 300:
+                    jf_fired += 1
+                else:
+                    jf_failed += 1
+                    log_event("jellyfin-refresh-fail", severity="warn", status=status)
+                time.sleep(0.05)
+            log_event("jellyfin-refresh-done",
+                      missing=jf_total, fired=jf_fired,
+                      failed=jf_failed, dry_run=dry_run)
+        else:
+            log_event("jellyfin-refresh-skipped", severity="warn",
+                      reason="missing-key")
+
+        log(f"Plex: fired refresh on {plex_fired}/{plex_total} (failed={plex_failed}); "
+            f"Jellyfin: fired {jf_fired}/{jf_total} (failed={jf_failed}); cap={cap} dry_run={dry_run}")
+        # Soft-success even if some refreshes failed — alerting belongs in
+        # the coverage CronJob's Prometheus rule, not in this Job's exit code.
+        sys.exit(0)
+
+    if __name__ == "__main__":
+        main()
