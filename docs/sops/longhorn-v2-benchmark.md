@@ -230,12 +230,48 @@ Expected v2 advantage: 2-5x random IOPS, 30-50% lower latency on small random I/
 
 ### Step 5 — Cleanup
 
+**Order matters**: v2-data-engine must be ENABLED to disable+evict the block disks. If you disable v2 first, the disk patch operations fail with `The disk is a block device, but the SPDK feature is not enabled`.
+
 ```bash
+# 1. delete bench workloads
 mise exec -- kubectl -n default delete job fio-bench-v1 fio-bench-v2
 mise exec -- kubectl -n default delete pvc fio-v1 fio-v2
 mise exec -- kubectl delete sc longhorn-v2-test
-# Optionally disable v2 again until ready for production:
-mise exec -- kubectl -n storage patch settings v2-data-engine --type='merge' -p '{"value":"false"}'
+
+# 2. WITH v2 still enabled: stop scheduling on the bench disks + request eviction
+for n in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  mise exec -- kubectl -n storage patch nodes.longhorn.io $n --type=merge -p '{
+    "spec": {
+      "disks": {
+        "v2-bench-loop50": {
+          "path": "/dev/loop50",
+          "diskType": "block",
+          "allowScheduling": false,
+          "evictionRequested": true,
+          "tags": ["v2-bench"]
+        }
+      }
+    }
+  }'
+done
+sleep 10
+
+# 3. remove the disk entries
+for n in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  mise exec -- kubectl -n storage patch nodes.longhorn.io $n --type=json \
+    -p '[{"op":"remove","path":"/spec/disks/v2-bench-loop50"}]'
+done
+
+# 4. NOW disable v2
+mise exec -- kubectl -n storage patch settings v2-data-engine --type=merge -p '{"value":"false"}'
+
+# 5. tear down loopback DaemonSet (releases /dev/loop50, file remains for cleanup)
+mise exec -- kubectl -n storage delete -f kubernetes/apps/storage/longhorn/bench/loopback-daemonset.yaml
+
+# 6. (optional) wipe sparse files on each node to reclaim disk
+for ip in 192.168.55.11 192.168.55.12 192.168.55.13; do
+  mise exec -- talosctl -n $ip --talosconfig=... # delete /var/lib/longhorn-v2-bench/disk.img
+done
 ```
 
 ---
@@ -269,6 +305,32 @@ If v2 IM startup destabilizes the cluster: `kubectl -n storage patch settings v2
 
 ---
 
+## Run notes — 2026-05-01
+
+**Path used**: file-loop (Option A from §3 Step 0.5). 10 GiB sparse file per node on `/var/lib/longhorn-v2-bench/disk.img`, bound to `/dev/loop50` via `losetup --direct-io=on`. DaemonSet manifest committed at `kubernetes/apps/storage/longhorn/bench/loopback-daemonset.yaml` (NOT auto-deployed; apply manually for benchmarks).
+
+**fio config**: `--direct=1 --ioengine=libaio --time_based --runtime=15`. Without `--direct=1` the first run gave nonsense numbers (8 GiB/s seq write) because buffered writes hit the kernel page cache instead of the actual storage path.
+
+**Results** (2-replica volumes both engines, 4 GiB PVCs):
+
+| Test | v1 (tgt+iSCSI) | v2 (SPDK aio on /dev/loop50) | Δ |
+|---|---|---|---|
+| Seq write 1M, q=1 | 74 IOPS / 74 MiB/s | 113 IOPS / 113 MiB/s | **+53% throughput** |
+| Seq read  1M, q=1 | 156 IOPS / 156 MiB/s | 276 IOPS / 277 MiB/s | **+78% throughput** |
+| Rand write 4K, q=16, 2 jobs | 13.5k IOPS / 53 MiB/s | 29.8k IOPS / 116 MiB/s | **+121% IOPS** |
+| Rand read  4K, q=16, 2 jobs | 24.7k IOPS / 96 MiB/s | 47.3k IOPS / 185 MiB/s | **+92% IOPS** |
+
+Latency on rand 4K q=16: write `2370 µs → 1075 µs` (**−55%**), read `645 µs → 337 µs` (**−48%**).
+
+**Caveats**:
+- File-loop adds an XFS layer between SPDK and the NVMe — actual production v2 numbers on raw partition or dedicated SSD will be higher than measured.
+- Longhorn 1.11.x v2 still missing: online replica rebuild, replica count adjustment, RWX. Not safe to migrate production volumes yet.
+
+**Recommendation**: results justify hardware investment — second M.2 NVMe per NUC (production-realistic numbers, no shared I/O with system disk) is the right next step.
+
+---
+
 ## Version History
 
-- `2026.04.30`: Initial SOP — written after the v1.13 upgrade put OS prereqs in place. Actual benchmark run deferred to a less-stressful maintenance window (cluster has gone through 4 restoration cycles today; data engines should sit quiet for 24h before adding new variables).
+- `2026.05.01`: First successful benchmark run via Option A (file-loop). Numbers + run notes added. Cleanup procedure rewritten with the strict ordering required (v2 must stay enabled until disks are removed).
+- `2026.04.30`: Initial SOP — written after the v1.13 upgrade put OS prereqs in place. Actual benchmark run deferred to a less-stressful maintenance window.

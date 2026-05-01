@@ -1,0 +1,117 @@
+---
+# Longhorn v2 benchmark — loopback block device per node.
+#
+# NOT auto-deployed by Flux. Apply manually with `kubectl apply -f` when
+# running the benchmark in docs/sops/longhorn-v2-benchmark.md.
+#
+# Creates /var/lib/longhorn-v2-bench/disk.img (10 GiB sparse) and binds
+# it to /dev/loop50 with --direct-io=on so SPDK can use it as an aio
+# BDEV. Talos uses loop0–11 for system squashfs layers; loop50 is well
+# clear of conflicts.
+#
+# After this DaemonSet is Ready on all 3 nodes, register the loop device
+# with Longhorn:
+#
+#   kubectl -n storage patch settings.longhorn.io v2-data-engine \
+#     --type=merge -p '{"value":"true"}'
+#
+#   for n in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+#     kubectl -n storage patch nodes.longhorn.io $n --type=merge -p '{
+#       "spec": {
+#         "disks": {
+#           "v2-bench-loop50": {
+#             "path": "/dev/loop50",
+#             "diskType": "block",
+#             "allowScheduling": true,
+#             "evictionRequested": false,
+#             "tags": ["v2-bench"],
+#             "storageReserved": 0
+#           }
+#         }
+#       }
+#     }'
+#   done
+#
+# Teardown: see docs/sops/longhorn-v2-benchmark.md "Cleanup" section.
+# v2-data-engine MUST be re-enabled briefly to evict + remove the disks
+# before disabling again.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: longhorn-v2-bench-loopback
+  namespace: storage
+  labels:
+    app: longhorn-v2-bench-loopback
+    bench: longhorn-v2
+spec:
+  selector:
+    matchLabels:
+      app: longhorn-v2-bench-loopback
+  template:
+    metadata:
+      labels:
+        app: longhorn-v2-bench-loopback
+        bench: longhorn-v2
+    spec:
+      hostPID: true
+      hostNetwork: false
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: loopback
+          image: alpine:3.19
+          command: [sh, -c]
+          args:
+            - |
+              set -e
+              apk add --no-cache util-linux
+              FILE=/host/var/lib/longhorn-v2-bench/disk.img
+              SIZE=10G
+              LOOP=/dev/loop50
+
+              mkdir -p $(dirname $FILE)
+              if [ ! -f $FILE ]; then
+                echo "[+] creating sparse $SIZE bench file at $FILE"
+                truncate -s $SIZE $FILE
+              else
+                echo "[=] reusing existing bench file"
+              fi
+
+              # Detach if /dev/loop50 was bound to something else (paranoia)
+              if losetup $LOOP 2>/dev/null | grep -qv $FILE; then
+                losetup -d $LOOP || true
+              fi
+
+              # Bind loop50 to the file (idempotent)
+              if ! losetup -j $FILE | grep -q "^$LOOP:"; then
+                echo "[+] binding $LOOP to $FILE with --direct-io"
+                losetup $LOOP --direct-io=on $FILE
+              else
+                echo "[=] $LOOP already bound to $FILE"
+              fi
+
+              losetup -a | grep $FILE
+              echo "[ready] $LOOP available as Longhorn v2 block disk"
+
+              # Sleep forever so the binding persists with this pod
+              while true; do sleep 3600; done
+          securityContext:
+            privileged: true
+            capabilities:
+              add: [SYS_ADMIN, MKNOD]
+          volumeMounts:
+            - name: host-dev
+              mountPath: /dev
+              mountPropagation: HostToContainer
+            - name: host-var
+              mountPath: /host/var
+              mountPropagation: HostToContainer
+      volumes:
+        - name: host-dev
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: host-var
+          hostPath:
+            path: /var
+            type: Directory
