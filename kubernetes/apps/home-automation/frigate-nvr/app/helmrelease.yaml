@@ -66,14 +66,18 @@ spec:
 
 
     # Resource requests and limits
+    # GPU stays for VAAPI video decoding; NPU added for OpenVINO object detection
+    # (detector device flipped GPU → NPU in ConfigMap on 2026-05-01).
     resources:
       requests:
         cpu: 1000m
         memory: 1Gi
         gpu.intel.com/i915: 1
+        npu.intel.com/accel: 1
       limits:
         memory: 8Gi
         gpu.intel.com/i915: 1
+        npu.intel.com/accel: 1
 
     # Set shared memory size for ffmpeg
     shmSize: "2Gi"
