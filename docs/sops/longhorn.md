@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.03.20`
-> Last Updated: `2026-03-20`
+> Version: `2026.05.01`
+> Last Updated: `2026-05-01`
 > Owner: `Platform`
 
 ---
@@ -29,6 +29,7 @@ Longhorn v1.11.1 provides distributed block storage with replication across all 
 | Backup target | UNAS-CBERG (192.168.31.230) |
 | Backup schedule | Daily CronJob at 3:00 AM |
 | Storage classes | `longhorn` (dynamic), `longhorn-static` (manual) |
+| Default disk reserve | `storageReservedPercentageForDefaultDisk: 20` (was 30; lowered 2026-05-01 in `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` to free scheduling headroom on nuc14-03 — see commit `a48ef1c2`). Changing the helm value only affects newly-discovered disks; existing disks need a per-node `kubectl -n storage patch nodes.longhorn.io <node> --type=merge -p '{"spec":{"disks":{"default-disk-...":{"storageReserved":<bytes>}}}}'`. |
 
 ---
 

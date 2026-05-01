@@ -55,7 +55,7 @@
 | home-assistant | Central home automation platform | Internal | Home Automation |
 | esphome | ESP32/ESP8266 device management | Internal | Home Automation |
 | node-red | Flow-based automation and integrations | Internal | Home Automation |
-| frigate-nvr | AI-powered network video recorder (Coral TPU) | Internal | Home Automation |
+| frigate-nvr | AI-powered network video recorder (Intel NPU / OpenVINO) | Internal | Home Automation |
 | scrypted-nvr | Additional video management platform | Internal | Home Automation |
 | solarfocus-scraper | Solarfocus pellet^top heater scraper (VNC + OCR → MQTT with HA auto-discovery) — source: [github.com/nachtschatt3n/solarfocus-scraper](https://github.com/nachtschatt3n/solarfocus-scraper) | External (Authentik forward-auth, status UI) | Home Automation |
 | zigbee2mqtt | Zigbee device integration via MQTT | Internal | Home Automation |
@@ -134,7 +134,7 @@
 | jellyfin | Open-source media server | Internal | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
-| library-tools | Audit + organize + sidecar + rescan + cleanup Jobs for the shared media library; ConfigMap-of-Python pattern. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
+| library-tools | Audit + organize + sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
 | media-dashboard | Internal status dashboard with live intake queue + recent jobs + trigger buttons (audit, rescan, TA bridge). Part of `library-tools`. | Internal | Media |
 
 ---
