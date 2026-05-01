@@ -861,7 +861,7 @@ The previously-working `admission-controller-patch.yaml` (a JSON6902 `op: add` i
 
 **Resolution applied this cluster:** removed the JSON6902 patch entirely and switched to per-namespace PSA labels via kustomize patches. See:
 - `kubernetes/flux/components/common/namespace.yaml` — base namespace template
-- `patches:` blocks in each `kubernetes/apps/<ns>/kustomization.yaml` — per-namespace PSA enforcement
+- `patches:` blocks in each `kubernetes/apps/{namespace}/kustomization.yaml` (e.g. `kubernetes/apps/databases/kustomization.yaml`) — per-namespace PSA enforcement
 
 #### 5. `talhelper` Go-template ate `$patch` and `$i`
 

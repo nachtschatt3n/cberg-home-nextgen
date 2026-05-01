@@ -284,6 +284,16 @@ done
 
 ---
 
+## 4) Blueprints
+
+N/A — benchmark uses ephemeral test resources only (no Authentik blueprints, no production-touching CRDs).
+
+## 5) Examples
+
+See §3 Operational Instructions Steps 0.5 → 5 for the canonical sequence. Real-world results live under "Run notes" below.
+
+---
+
 ## 7) Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -292,6 +302,35 @@ done
 | v2 instance-manager pod CrashLoopBackOff | spdk_tgt failed to start | `kubectl -n storage logs <im-pod>`; common cause: kernel modules missing or hugepages not reserved |
 | v2 PVC stuck in Pending | StorageClass `dataEngine: v2` parameter typo | Verify SC matches schema |
 | fio reports "permission denied" | NS PSA = restricted | Run in `default` NS (privileged) or label NS |
+
+---
+
+## 8) Diagnose Examples
+
+```bash
+# Confirm SPDK BDEV registered for the bench disk on each node
+mise exec -- kubectl -n storage logs -l longhorn.io/data-engine=v2 --tail=200 \
+  | grep -E "v2-bench|loop50|aio|lvstore"
+# Look for: "Created disk successfully", "successfully scanned disk v2-bench-loop50"
+
+# Confirm Longhorn Node CRD reports the disk Ready
+for n in k8s-nuc14-01 k8s-nuc14-02 k8s-nuc14-03; do
+  mise exec -- kubectl -n storage get nodes.longhorn.io $n -o jsonpath="{range .status.diskStatus.v2-bench-loop50.conditions[*]}{.type}={.status} {end}"
+  echo " — $n"
+done
+# Expect: Ready=True Schedulable=True
+```
+
+## 9) Health Check
+
+- All flux Kustomizations Ready before starting; no Longhorn volumes in `degraded` / `faulted` state.
+- Hugepages 1024 × 2 MiB on each node (verify via §3 Step 0).
+- Loopback DaemonSet pods 3/3 Ready before patching the Longhorn Node CRDs.
+
+## 10) Security Check
+
+- Bench DaemonSet runs `privileged: true` + `hostPath: /var` + `hostPath: /dev` — only acceptable for the duration of the benchmark window. Tear down (§3 Step 5) when done so it doesn't sit idle in the cluster as an attack surface.
+- The bench file (`/var/lib/longhorn-v2-bench/disk.img`) and its loop binding are not encrypted; don't put any meaningful data on the v2 SC during the benchmark.
 
 ---
 

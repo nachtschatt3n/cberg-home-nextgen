@@ -49,7 +49,7 @@ Ports 11435 and 11436 are no longer in use.
 | Paperclip | ai | OpenAI | Agent orchestration | `kubernetes/apps/ai/paperclip/app/secret.sops.yaml` (OPENAI_API_KEY) |
 | n8n | home-automation | OpenAI | AI Agent workflows (Google Calendar, etc.) | n8n SQLite DB: `openAiApi` credential |
 | n8n | home-automation | Anthropic | Available in workflows | n8n SQLite DB: `anthropicApi` credential |
-| opencode (dev template) | my-software-development | Anthropic, OpenAI, Gemini | Coding assistant | `kubernetes/apps/my-software-development/_template/app/secrets.sops.yaml` |
+| opencode (dev template) | my-software-development | Anthropic, OpenAI, Gemini | Coding assistant | `kubernetes/apps/my-software-development/_template/app/secrets.example.yaml` (scaffold; rename + sops-encrypt before deploying a real app) |
 
 ---
 
