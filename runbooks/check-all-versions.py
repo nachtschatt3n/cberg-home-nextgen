@@ -26,6 +26,72 @@ import urllib.request
 import sys
 from packaging import version
 
+# Module-level cache for bjw-s chart latest versions (keyed by chart name)
+_BJW_S_CHART_CACHE: Dict[str, Optional[str]] = {}
+
+
+def resolve_bjw_s_chart_latest(chart_name: str) -> Optional[str]:
+    """Resolve the latest published version of a bjw-s Helm chart (e.g. app-template).
+
+    Strategy:
+      1. Try `helm search repo bjw-s/<chart> -o json` if helm is on PATH and a
+         repo named `bjw-s` is registered locally.
+      2. Fall back to fetching https://bjw-s-labs.github.io/helm-charts/index.yaml
+         via curl and parsing it as YAML.
+    Results are cached per chart name to avoid repeated subprocess calls.
+    Returns None if the version could not be determined.
+    """
+    if not chart_name:
+        return None
+    if chart_name in _BJW_S_CHART_CACHE:
+        return _BJW_S_CHART_CACHE[chart_name]
+
+    latest: Optional[str] = None
+
+    # 1) helm search repo
+    try:
+        result = subprocess.run(
+            ['helm', 'search', 'repo', f'bjw-s/{chart_name}', '-o', 'json'],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            if isinstance(data, list):
+                for item in data:
+                    if item.get('name', '').endswith(f'/{chart_name}') or item.get('name') == chart_name:
+                        v = item.get('version')
+                        if v:
+                            latest = v
+                            break
+    except Exception:
+        pass
+
+    # 2) curl index.yaml fallback
+    if not latest:
+        try:
+            result = subprocess.run(
+                ['curl', '-fsSL', 'https://bjw-s-labs.github.io/helm-charts/index.yaml'],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0 and result.stdout:
+                idx = yaml.safe_load(result.stdout)
+                entries = (idx or {}).get('entries', {})
+                versions = entries.get(chart_name, [])
+                # index.yaml lists newest first by convention; otherwise sort by parsed semver desc.
+                ver_list = [v.get('version') for v in versions if isinstance(v, dict) and v.get('version')]
+                if ver_list:
+                    def _key(s: str):
+                        m = re.match(r'^v?(\d+)\.(\d+)\.(\d+)', s)
+                        return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+                    ver_list.sort(key=_key, reverse=True)
+                    latest = ver_list[0]
+        except Exception:
+            pass
+
+    _BJW_S_CHART_CACHE[chart_name] = latest
+    return latest
+
+
 # Color codes for terminal output
 class Colors:
     RESET = '\033[0m'
@@ -930,6 +996,20 @@ class VersionChecker:
             print(f"  {Colors.YELLOW}⚠ Failed to fetch latest Talos release: {e}{Colors.RESET}")
             return None
 
+    def _get_talos_version_from_talconfig(self) -> Optional[str]:
+        """Read the desired Talos version from kubernetes/bootstrap/talos/talconfig.yaml."""
+        try:
+            tc_path = self.repo_root / "kubernetes" / "bootstrap" / "talos" / "talconfig.yaml"
+            with open(tc_path, 'r') as f:
+                doc = yaml.safe_load(f)
+            if isinstance(doc, dict):
+                v = doc.get('talosVersion')
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+        except Exception:
+            pass
+        return None
+
     def check_talos_versions(self):
         """Check Talos versions on all cluster nodes."""
         print(f"\nChecking {Colors.CYAN}Talos Linux{Colors.RESET} (cluster nodes)...")
@@ -945,6 +1025,7 @@ class VersionChecker:
         # Determine cluster version (use lowest across nodes, or unknown)
         node_tags = [v for v in node_versions.values() if v]
         cluster_version: Optional[str] = None
+        cluster_version_source: Optional[str] = None  # e.g. "from talconfig"
         mixed = False
         if node_tags:
             unique = set(node_tags)
@@ -954,6 +1035,13 @@ class VersionChecker:
                 cluster_version = sorted(unique, key=lambda v: self.parse_version(v) or (0, 0, 0))[0]
             except Exception:
                 cluster_version = sorted(unique)[0]
+        else:
+            # talosctl unreachable — fall back to declared version in talconfig.yaml
+            tc_version = self._get_talos_version_from_talconfig()
+            if tc_version:
+                cluster_version = tc_version
+                cluster_version_source = "from talconfig"
+                print(f"  {Colors.YELLOW}talosctl unreachable; using talconfig.yaml: {tc_version}{Colors.RESET}")
 
         has_update = False
         update_type: Optional[str] = None
@@ -985,6 +1073,7 @@ class VersionChecker:
             "name": "Talos Linux",
             "host": "cluster nodes",
             "current_version": cluster_version,
+            "current_version_source": cluster_version_source,
             "latest_version": latest,
             "has_update": has_update,
             "update_type": update_type,
@@ -1083,6 +1172,10 @@ class VersionChecker:
             # Check chart version
             if hr['chart_name'] and hr['repository_name']:
                 latest_chart = self.get_latest_chart_version(hr['repository_name'], hr['chart_name'])
+                # Fallback for bjw-s charts (app-template, etc.) which live in an
+                # OCI HelmRepository not loaded into self.helm_repositories.
+                if (not latest_chart) and hr['repository_name'] == 'bjw-s':
+                    latest_chart = resolve_bjw_s_chart_latest(hr['chart_name'])
                 result['chart']['latest_version'] = latest_chart
                 
                 # Get repository URL for chart repo detection
@@ -1387,10 +1480,12 @@ class VersionChecker:
 
                 lines.append(f"### {ei['name']} (`{ei['host']}`)")
                 lines.append("")
+                ver_source = ei.get("current_version_source")
+                source_suffix = f" _(from talconfig)_" if ver_source == "from talconfig" else ""
                 if has_update and latest_version:
-                    lines.append(f"- **Version:** `{ver}` → `{latest_version}`")
+                    lines.append(f"- **Version:** `{ver}`{source_suffix} → `{latest_version}`")
                 else:
-                    lines.append(f"- **Version:** `{ver}`")
+                    lines.append(f"- **Version:** `{ver}`{source_suffix}")
                 lines.append(f"- **Status:** {status}")
 
                 # Show per-node versions for Talos
@@ -1420,13 +1515,29 @@ class VersionChecker:
         lines.append("")
         lines.append("| Deployment | Namespace | Chart | Image | App | Complexity |")
         lines.append("|------------|-----------|-------|-------|-----|------------|")
-        
+
+        # Floating tags don't track upstream — collect separately so they don't
+        # pollute the main table with meaningless "✅ up to date" entries.
+        floating_tag_set = {'latest', 'main', 'master', 'stable'}
+        floating_tag_rows: List[Dict[str, str]] = []
+
         # Sort results by namespace and name for the table
         sorted_results = sorted(self.results, key=lambda x: (x['namespace'], x['name']))
-        
+
         for result in sorted_results:
             name = result['name']
             namespace = result['namespace']
+
+            # Collect floating-tag images for this deployment (any image, not just main)
+            for img in result.get('images', []):
+                tag = img.get('current_tag') or ''
+                if tag in floating_tag_set:
+                    floating_tag_rows.append({
+                        'app': name,
+                        'namespace': namespace,
+                        'image': img.get('repository', '') or '-',
+                        'tag': tag,
+                    })
             
             # Chart version info
             chart = result['chart']
@@ -1505,11 +1616,25 @@ class VersionChecker:
             app_version_display = app_version[:30] + "..." if len(app_version) > 30 else app_version
             
             lines.append(f"| `{name}` | `{namespace}` | {chart_version_display} | {image_version_display} | {app_version_display} | {overall_complexity} |")
-        
+
         lines.append("")
+
+        # Floating-tag sub-table — images using rolling tags can't be meaningfully
+        # compared against "latest" so they live outside the main update view.
+        if floating_tag_rows:
+            lines.append("### Floating tags")
+            lines.append("")
+            lines.append("> Floating tags don't track upstream — pin a SHA or version for Renovate to update.")
+            lines.append("")
+            lines.append("| App | Image | Tag |")
+            lines.append("|-----|-------|-----|")
+            for row in sorted(floating_tag_rows, key=lambda r: (r['namespace'], r['app'], r['image'])):
+                lines.append(f"| `{row['app']}` | `{row['image']}` | `{row['tag']}` |")
+            lines.append("")
+
         lines.append("---")
         lines.append("")
-        
+
         # Group by namespace
         by_namespace = {}
         for result in self.results:
