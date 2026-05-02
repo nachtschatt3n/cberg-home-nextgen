@@ -3,7 +3,7 @@
 # Kubernetes Cluster Health Check Script
 # Executes all operational health checks from runbooks/health-check.md
 # Scope: operational correctness only — does not flag newer upstream versions
-# Usage: ./runbooks/health-check.sh [output-file]
+# Usage: ./runbooks/health-check.sh [--prev <prior-report>] [output-file]
 
 set -uo pipefail
 
@@ -13,6 +13,40 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# --- CLI arg parsing (positional output-file preserved; --prev is optional) ---
+PREV_FILE=""
+POSITIONAL_ARGS=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --prev)
+            PREV_FILE="${2:-}"
+            shift 2
+            ;;
+        --prev=*)
+            PREV_FILE="${1#--prev=}"
+            shift
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+# Restore positional args so existing "${1:-...}" semantics work below
+# (bash 3.2: cannot reference empty array directly under set -u, so guard length)
+if [ "${#POSITIONAL_ARGS[@]}" -gt 0 ]; then
+    set -- "${POSITIONAL_ARGS[@]}"
+else
+    set --
+fi
+
+# Resolve repository root (parent of runbooks/) for git operations
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Allowlist of known-recurring noise (consumed by _noise_tag below)
+NOISE_ALLOWLIST="$SCRIPT_DIR/noise_allowlist.yaml"
 
 # Output file
 OUTPUT_FILE="${1:-/tmp/health-check-$(date +%Y%m%d-%H%M%S).txt}"
@@ -24,6 +58,44 @@ echo "Kubernetes Cluster Health Check" | tee -a "$OUTPUT_FILE"
 echo "Date: $(date)" | tee -a "$OUTPUT_FILE"
 echo "Output: $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
 echo "========================================" | tee -a "$OUTPUT_FILE"
+echo "" | tee -a "$OUTPUT_FILE"
+
+# --- Section 0: Convergence (local git HEAD vs Flux source revision) ---
+echo "=== Section 0: Convergence ===" | tee -a "$OUTPUT_FILE"
+{
+    local_head=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
+    flux_rev=$(kubectl -n flux-system get gitrepository flux-system \
+        -o jsonpath='{.status.artifact.revision}' 2>/dev/null || echo "")
+    # Strip optional "sha1:" prefix
+    flux_rev="${flux_rev#sha1:}"
+    # Some flux versions use "<branch>@sha1:<hash>" — keep just the hash
+    flux_rev="${flux_rev##*:}"
+
+    local_short="${local_head:0:8}"
+    flux_short=""
+    if [ -n "$flux_rev" ] && [ "$flux_rev" != "unknown" ]; then
+        flux_short="${flux_rev:0:8}"
+    else
+        flux_short="unknown"
+    fi
+
+    if [ "$local_head" != "unknown" ] && [ -n "$flux_rev" ] && [ "$local_head" = "$flux_rev" ]; then
+        converged="yes"
+    else
+        converged="no"
+    fi
+
+    printf '  Local HEAD:    %s\n' "$local_short"
+    printf '  Flux source:   %s\n' "$flux_short"
+    printf '  CONVERGED:     %s\n' "$converged"
+
+    if [ "$converged" = "no" ] && [ "$local_head" != "unknown" ] && [ -n "$flux_rev" ]; then
+        ahead=$(git -C "$REPO_ROOT" rev-list --count "$flux_rev..$local_head" 2>/dev/null || echo "")
+        if [ -n "$ahead" ]; then
+            printf '  Commits ahead: %s\n' "$ahead"
+        fi
+    fi
+} | tee -a "$OUTPUT_FILE"
 echo "" | tee -a "$OUTPUT_FILE"
 
 # --- Dependency check ---
@@ -101,6 +173,76 @@ add_major_issue() {
 
 add_minor_issue() {
     MINOR_ISSUES_LIST+=("$1")
+}
+
+# _noise_tag: Tag finding lines that match the recurring-noise allowlist.
+# Usage:
+#   tag=$(_noise_tag "Active alert line text...")
+#   echo "  - finding${tag}"
+# Returns " [noise: <note>]" if a substring from noise_allowlist.yaml is
+# present in the input line; empty string otherwise. YAML is grep-scanned,
+# not parsed. Fails silently (empty output) if allowlist is missing.
+_noise_tag() {
+    local line="$1"
+    [ -z "$line" ] && return 0
+    [ -f "$NOISE_ALLOWLIST" ] || return 0
+
+    # Extract candidate substrings from the allowlist:
+    #   - quoted strings ("Soil sensor 3")
+    #   - YAML scalar values after known keys (alertname/namespace/workload/pod/prefix)
+    # Then test each candidate against the finding line. First match wins;
+    # we then look up the nearest "note:" in the allowlist for context.
+    local match=""
+    local note=""
+    local cand
+    # Quoted substrings: e.g. "Soil sensor 3"
+    while IFS= read -r cand; do
+        [ -z "$cand" ] && continue
+        if printf '%s' "$line" | grep -qF -- "$cand"; then
+            match="$cand"
+            break
+        fi
+    done < <(grep -oE '"[^"]+"' "$NOISE_ALLOWLIST" 2>/dev/null | sed 's/^"//;s/"$//')
+
+    # Key-based substrings if no quoted hit
+    if [ -z "$match" ]; then
+        while IFS= read -r cand; do
+            [ -z "$cand" ] && continue
+            if printf '%s' "$line" | grep -qF -- "$cand"; then
+                match="$cand"
+                break
+            fi
+        done < <(grep -E '^[[:space:]]*(- )?(alertname|namespace|workload|pod|prefix):' "$NOISE_ALLOWLIST" 2>/dev/null \
+                    | sed -E 's/^[[:space:]]*(- )?[a-z]+:[[:space:]]*//' \
+                    | sed -E 's/^"//;s/"$//')
+    fi
+
+    [ -z "$match" ] && return 0
+
+    # Best-effort note lookup. Find the line number of the match, then look
+    # for a "note:" line in the same YAML list entry — i.e. a "note:" that
+    # appears AFTER the match but BEFORE the next "- " bullet or top-level
+    # YAML key. If no note is found in-block, emit a generic [noise] tag
+    # (do NOT borrow a note from a different block — it would be misleading).
+    local match_ln
+    match_ln=$(grep -nF -- "$match" "$NOISE_ALLOWLIST" 2>/dev/null | head -1 | cut -d: -f1)
+    if [ -n "$match_ln" ]; then
+        note=$(awk -v start="$match_ln" '
+            NR > start {
+                # Stop at the next list-entry bullet or a new top-level key
+                if ($0 ~ /^[[:space:]]*-[[:space:]]/) exit;
+                if ($0 ~ /^[A-Za-z0-9_]+:/) exit;
+                if ($0 ~ /^[[:space:]]*note:/) {
+                    sub(/^[[:space:]]*note:[[:space:]]*/, "");
+                    print; exit;
+                }
+            }' "$NOISE_ALLOWLIST" 2>/dev/null)
+    fi
+    if [ -n "$note" ]; then
+        printf ' [noise: %s]' "$note"
+    else
+        printf ' [noise]'
+    fi
 }
 
 # Helper to safely get integer count
@@ -618,6 +760,13 @@ log_section "Section 7: Pods Health"
     kubectl get pods -A -o json | jq -r '.items[] | select(.status.containerStatuses[]? | select(.restartCount > 5)) | "\(.metadata.namespace)/\(.metadata.name): \(.status.containerStatuses[0].restartCount) restarts"' | head -20
     echo ""
 
+    # Stable totals line consumed by the --prev drift extractor.
+    TOTAL_RESTARTS=$(kubectl get pods -A -o json 2>/dev/null \
+        | jq '[.items[].status.containerStatuses[]?.restartCount // 0] | add // 0' 2>/dev/null \
+        || echo 0)
+    echo "Total restartCount (cluster-wide): ${TOTAL_RESTARTS:-0}"
+    echo ""
+
     CRASH_LOOP=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'CrashLoopBackOff'")
     PENDING=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'Pending'")
 
@@ -737,7 +886,13 @@ log_section "Section 9: Alertmanager Alerts"
 
         if [ "$FIRING_ALERTS" -gt 0 ]; then
             echo "Active Alerts:"
-            echo "$ALERT_CHECK" | jq -r '.data.alerts[] | select(.state == "firing" and .labels.alertname != "Watchdog" and .labels.alertname != "InfoInhibitor") | "  - \(.labels.alertname) (\(.labels.severity // "unknown")): \(.annotations.summary // .annotations.description // "No description")"' | head -20
+            # Tag each alert with [noise: ...] when it matches noise_allowlist.yaml
+            # (alertname + namespace are included in the line so substring match works).
+            echo "$ALERT_CHECK" | jq -r '.data.alerts[] | select(.state == "firing" and .labels.alertname != "Watchdog" and .labels.alertname != "InfoInhibitor") | "  - \(.labels.alertname) [ns=\(.labels.namespace // "?")] (\(.labels.severity // "unknown")): \(.annotations.summary // .annotations.description // "No description")"' | head -20 \
+                | while IFS= read -r _alert_line; do
+                    tag=$(_noise_tag "$_alert_line")
+                    printf '%s%s\n' "$_alert_line" "$tag"
+                done
 
             log_warning "Active alerts firing: $FIRING_ALERTS"
             add_major_issue "Prometheus alerts firing: $FIRING_ALERTS"
@@ -2421,7 +2576,12 @@ except Exception as e:
 
         echo "Devices offline >5 days:"
         if [ -n "$Z2M_OFFLINE32" ] && [ "$Z2M_OFFLINE32" -gt 0 ] 2>/dev/null; then
-            echo "$Z2M_STATS" | grep "^STALE:" | cut -d: -f2- | head -10
+            # Tag flaky-known devices via noise_allowlist.yaml
+            echo "$Z2M_STATS" | grep "^STALE:" | cut -d: -f2- | head -10 \
+                | while IFS= read -r _stale_line; do
+                    tag=$(_noise_tag "$_stale_line")
+                    printf '%s%s\n' "$_stale_line" "$tag"
+                done
             echo "Total offline >5 days: $Z2M_OFFLINE32"
         else
             echo "None"
@@ -2517,9 +2677,20 @@ log_section "Section 33: Battery Health Monitoring"
         done <<< "$BATTERY_LIST"
 
         # Display categorized results
+        # Helper: tag known-flaky zigbee devices from noise_allowlist.yaml
+        _print_battery_block() {
+            local block="$1"
+            # echo -e expands the literal \n separators we built earlier
+            echo -e "$block" | while IFS= read -r _bat_line; do
+                [ -z "$_bat_line" ] && continue
+                tag=$(_noise_tag "$_bat_line")
+                printf '%s%s\n' "$_bat_line" "$tag"
+            done
+        }
+
         echo "🔴 CRITICAL (<15%) - Replace Immediately:"
         if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            echo -e "$CRITICAL_BATTERIES"
+            _print_battery_block "$CRITICAL_BATTERIES"
         else
             echo "  None"
         fi
@@ -2527,7 +2698,7 @@ log_section "Section 33: Battery Health Monitoring"
 
         echo "🟡 WARNING (15-30%) - Replace Soon:"
         if [ "$WARNING_COUNT" -gt 0 ]; then
-            echo -e "$WARNING_BATTERIES"
+            _print_battery_block "$WARNING_BATTERIES"
         else
             echo "  None"
         fi
@@ -2535,7 +2706,7 @@ log_section "Section 33: Battery Health Monitoring"
 
         echo "🔵 MONITOR (30-50%) - Watch Closely:"
         if [ "$MONITOR_COUNT" -gt 0 ]; then
-            echo -e "$MONITOR_BATTERIES"
+            _print_battery_block "$MONITOR_BATTERIES"
         else
             echo "  None"
         fi
@@ -3459,6 +3630,116 @@ log_section "Health Check Summary"
     echo "  - Issues summary: $ISSUES_FILE"
     echo "========================================="
 } | tee -a "$OUTPUT_FILE" "$SUMMARY_FILE"
+
+# --- Drift vs prior run (only when --prev is set and file exists) ---
+if [ -n "$PREV_FILE" ] && [ -f "$PREV_FILE" ]; then
+    {
+        echo ""
+        echo "## Drift vs prior run"
+        echo "Prior report: $PREV_FILE"
+        echo ""
+
+        # Helper: print " <metric>: <prev> → <now> (Δ <signed>)" or "no change",
+        # or skip silently if either extraction failed.
+        _drift_line() {
+            local label="$1" prev="$2" now="$3"
+            if [ -z "$prev" ] || [ -z "$now" ]; then
+                return 0
+            fi
+            if [ "$prev" = "$now" ]; then
+                printf '  %s: no change (%s)\n' "$label" "$now"
+                return 0
+            fi
+            local delta
+            delta=$(awk -v a="$prev" -v b="$now" 'BEGIN {
+                d = b - a;
+                if (d > 0) printf "+%g", d; else printf "%g", d;
+            }' 2>/dev/null)
+            printf '  %s: %s → %s (Δ %s)\n' "$label" "$prev" "$now" "$delta"
+        }
+
+        # --- Per-node CPU% (from "Prom node CPU (5m): nuc14-01:5.6%, ...") ---
+        _extract_node_cpu() {
+            local file="$1" node="$2"
+            grep -E '^[[:space:]]*Prom node CPU' "$file" 2>/dev/null \
+                | head -1 \
+                | grep -oE "${node}:[0-9.]+%" \
+                | head -1 \
+                | sed -E "s/^${node}://;s/%$//"
+        }
+        for node in nuc14-01 nuc14-02 nuc14-03; do
+            prev=$(_extract_node_cpu "$PREV_FILE" "$node")
+            now=$(_extract_node_cpu "$OUTPUT_FILE" "$node")
+            _drift_line "${node} cpu%" "$prev" "$now"
+        done
+
+        # --- Per-node mem% (from "Prom node memory: nuc14-01:48.4%, ...") ---
+        _extract_node_mem() {
+            local file="$1" node="$2"
+            grep -E '^[[:space:]]*Prom node memory' "$file" 2>/dev/null \
+                | head -1 \
+                | grep -oE "${node}:[0-9.]+%" \
+                | head -1 \
+                | sed -E "s/^${node}://;s/%$//"
+        }
+        for node in nuc14-01 nuc14-02 nuc14-03; do
+            prev=$(_extract_node_mem "$PREV_FILE" "$node")
+            now=$(_extract_node_mem "$OUTPUT_FILE" "$node")
+            _drift_line "${node} mem%" "$prev" "$now"
+        done
+
+        # --- Longhorn used % (100 - free%) per node/disk ---
+        # Source line: "<node>/<disk>: <NN>% free (<X>Gi free of <Y>Gi)"
+        _extract_lh_used_lines() {
+            # Emit "<node>/<disk> <usedPct>" pairs.
+            local file="$1"
+            grep -E '^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+: [0-9]+% free ' "$file" 2>/dev/null \
+                | awk -F': ' '{
+                    key = $1;
+                    rest = $2;
+                    n = split(rest, a, "%");
+                    free = a[1] + 0;
+                    used = 100 - free;
+                    print key, used;
+                }'
+        }
+        # Build key→used maps via temp files (bash 3.2 — no associative arrays).
+        _LH_PREV=$(mktemp 2>/dev/null) || _LH_PREV=/tmp/_lh_prev.$$
+        _LH_NOW=$(mktemp 2>/dev/null) || _LH_NOW=/tmp/_lh_now.$$
+        _extract_lh_used_lines "$PREV_FILE"   > "$_LH_PREV" 2>/dev/null || true
+        _extract_lh_used_lines "$OUTPUT_FILE" > "$_LH_NOW"  2>/dev/null || true
+        # Iterate keys present in the new run; look up the prior value
+        if [ -s "$_LH_NOW" ]; then
+            while IFS=' ' read -r key now; do
+                prev=$(awk -v k="$key" '$1 == k { print $2; exit }' "$_LH_PREV" 2>/dev/null)
+                _drift_line "longhorn ${key} used%" "$prev" "$now"
+            done < "$_LH_NOW"
+        fi
+        rm -f "$_LH_PREV" "$_LH_NOW" 2>/dev/null || true
+
+        # --- Total restartCount (from "Total restartCount (cluster-wide): N") ---
+        _extract_restart_total() {
+            grep -E '^[[:space:]]*Total restartCount \(cluster-wide\):' "$1" 2>/dev/null \
+                | head -1 \
+                | sed -E 's/.*: *([0-9]+).*/\1/'
+        }
+        prev=$(_extract_restart_total "$PREV_FILE")
+        now=$(_extract_restart_total "$OUTPUT_FILE")
+        _drift_line "total restarts" "$prev" "$now"
+
+        # --- Alert count (from "Firing alerts (excluding Watchdog): N") ---
+        _extract_alert_count() {
+            grep -E '^[[:space:]]*Firing alerts \(excluding Watchdog\):' "$1" 2>/dev/null \
+                | head -1 \
+                | sed -E 's/.*: *([0-9]+).*/\1/'
+        }
+        prev=$(_extract_alert_count "$PREV_FILE")
+        now=$(_extract_alert_count "$OUTPUT_FILE")
+        _drift_line "firing alerts" "$prev" "$now"
+
+        echo ""
+    } >> "$OUTPUT_FILE" 2>&1
+fi
 
 echo ""
 echo -e "${GREEN}Health check complete!${NC}"

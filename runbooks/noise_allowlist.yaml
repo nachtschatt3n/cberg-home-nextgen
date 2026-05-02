@@ -1,0 +1,17 @@
+# Known-recurring noise the LLM should not re-classify each run.
+# Each entry: a substring matched against alert/finding lines.
+recurring_alerts:
+  - alertname: CPUThrottlingHigh
+    namespace: penpot
+    workload: valkey
+    note: idle valkey scrape; cosmetic
+  - alertname: KubePodNotReady
+    namespace: ai
+    pod: icloud-docker-mu
+    note: upstream 503 — known
+flaky_zigbee_devices:
+  - "Soil sensor 3"
+  - "Shelly Entry Window Blinds"
+unexpected_jobs:
+  - prefix: manual-
+    note: ad-hoc cronjobs invoked by hand
