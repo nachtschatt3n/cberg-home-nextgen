@@ -301,7 +301,7 @@ trap _all_cleanup EXIT
 
 # Verify cluster access
 log_section "Phase 1: Preparation"
-if kubectl cluster-info &>> "$OUTPUT_FILE"; then
+if kubectl cluster-info >> "$OUTPUT_FILE" 2>&1; then
     log_success "Cluster access verified"
 else
     log_critical "Cannot access cluster"
