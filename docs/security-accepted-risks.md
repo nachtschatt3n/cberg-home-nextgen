@@ -133,7 +133,7 @@ The `headlamp` ServiceAccount is bound to `cluster-admin` via `clusterrolebindin
 
 ---
 
-## AR-009 — Privileged Containers and hostNetwork Pods for Hardware Access
+## AR-009 — Privileged Containers (otbr, frigate, scrypted, jellyfin, makemkv) and hostNetwork Pods for Hardware Access
 
 **Severity at time of discovery:** Warning
 **Status:** Accepted — hardware device access required by design

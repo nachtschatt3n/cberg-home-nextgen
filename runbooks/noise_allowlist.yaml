@@ -15,3 +15,7 @@ flaky_zigbee_devices:
 unexpected_jobs:
   - prefix: manual-
     note: ad-hoc cronjobs invoked by hand
+known_es_error_spikes:
+  - namespace: backup
+    workload: icloud-docker-mu
+    note: HTTP 410/530 from Apple CDN for expired iCloud photo URLs — benign sync failures

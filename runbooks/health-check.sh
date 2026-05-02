@@ -1134,7 +1134,9 @@ log_section "Section 13: Hardware Health"
         for node in $NODE_IPS; do
             echo "=== Hardware errors on $node ==="
             # Filter to actual hardware faults only; exclude known software/service error messages
-        ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(hardware|ecc|mce|edac|uncorrected|corrected error|pcie.*error|disk error|bad sector|ata.*error|nvme.*error)' | grep -viE '(DiscoveryService|controller-runtime|rpc error|context deadline|connection refused|EOF|dialing)' | wc -l")
+        # 'edac' alone matches driver init (EDAC MC: Ver, igen6_edac load) — require 'edac.*error' for actual faults.
+        # 'ecc' alone matches PCI device IDs (e.g. 7ecc) — require 'ecc error'. 'bare hardware' is a boot string.
+        ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(bare hardware error|ecc error|mce|edac.*error|uncorrected|corrected error|pcie.*error|disk error|bad sector|ata.*error|nvme.*error)' | grep -viE '(DiscoveryService|controller-runtime|rpc error|context deadline|connection refused|EOF|dialing)' | wc -l")
             echo "Hardware errors: $ERRORS"
             if [ "$ERRORS" -gt 10 ]; then
                 add_minor_issue "High hardware errors on $node: $ERRORS"
