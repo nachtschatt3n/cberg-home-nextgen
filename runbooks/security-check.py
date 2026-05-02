@@ -940,6 +940,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
     ACCEPTED_PRIVILEGED = {
         "databases/memgraph",             # init-sysctl (kernel tunables)
         "home-automation/frigate",        # GPU/Coral for object detection
+        "home-automation/otbr",           # OpenThread Border Router — network interface manipulation (AR-009)
         "home-automation/scrypted",       # Hardware transcoding
         "media/jellyfin",                 # HW-accelerated transcoding
         "media/makemkv",                  # Optical drive access
