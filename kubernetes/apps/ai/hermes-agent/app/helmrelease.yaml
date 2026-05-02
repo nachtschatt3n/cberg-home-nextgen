@@ -71,7 +71,10 @@ spec:
                     name: hermes-agent-secret
                     key: TELEGRAM_BOT_TOKEN
               - name: TELEGRAM_ALLOWED_USERS
-                value: "671676995"
+                valueFrom:
+                  secretKeyRef:
+                    name: hermes-agent-secret
+                    key: TELEGRAM_ALLOWED_USERS
               - name: API_SERVER_HOST
                 value: "0.0.0.0"
               - name: API_SERVER_KEY
