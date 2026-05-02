@@ -5,6 +5,16 @@
 # Scope: operational correctness only — does not flag newer upstream versions
 # Usage: ./runbooks/health-check.sh [--prev <prior-report>] [output-file]
 
+# Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are set
+# regardless of how the script is invoked (cron, sub-agent, fresh shell). Idempotent.
+if [ -z "${_MISE_ACTIVATED:-}" ]; then
+    _REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    if [ -f "$_REPO_ROOT/.mise.toml" ] && command -v mise >/dev/null 2>&1; then
+        export _MISE_ACTIVATED=1
+        exec mise -C "$_REPO_ROOT" exec -- bash "$0" "$@"
+    fi
+fi
+
 set -uo pipefail
 
 # Colors for output

@@ -20,6 +20,23 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
+# set regardless of how the script is invoked (cron, sub-agent, fresh shell).
+def _activate_mise() -> None:
+    if os.environ.get("_MISE_ACTIVATED"):
+        return
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if not os.path.isfile(os.path.join(repo_root, ".mise.toml")):
+        return
+    mise = next((os.path.join(p, "mise") for p in os.environ.get("PATH", "").split(os.pathsep)
+                 if os.path.isfile(os.path.join(p, "mise"))), None)
+    if not mise:
+        return
+    os.environ["_MISE_ACTIVATED"] = "1"
+    os.execvp(mise, [mise, "-C", repo_root, "exec", "--", sys.executable, *sys.argv])
+
+_activate_mise()
+
 # ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
