@@ -285,6 +285,78 @@ Expected:
 - Port 9080/9443 owned by `ulp-go-app` (identity service — unrelated to login throttle)
 - `uos_auth_backend` upstream points at a unix socket served by `unifi-core` — this is the throttle enforcer
 
+### Diagnose Example 4: Discover the auth-block routing chain from scratch (after a firmware update)
+
+Use this when a controller firmware update has shipped and Diagnose Example 3 paths may have moved. The chain to follow is **listening port → nginx server block → location for `/api/...` → upstream → unix socket → process**.
+
+```bash
+# Step A — Which processes own the externally-reachable ports?
+#   This tells you which binary handles each port without guessing.
+ssh dmp-cberg "netstat -tlnp 2>/dev/null | grep -E 'LISTEN' | awk '{print \$4, \$7}' | sort -u"
+# Expect (paths may differ across firmware):
+#   0.0.0.0:443     nginx: master
+#   :::8443         java          ← UniFi network controller (NOT the auth throttle)
+#   :::9080/9443    ulp-go-app    ← identity service (NOT the auth throttle)
+#   127.0.0.1:8081  java          ← controller's internal API (proxied by nginx)
+
+# Step B — Where is nginx's active config and what does it include?
+#   Watch for ".disabled" suffixes — those files are NOT loaded.
+ssh dmp-cberg "ls /etc/nginx/ /etc/nginx/conf.d/ 2>/dev/null"
+ssh dmp-cberg "grep -E 'include' /etc/nginx/nginx.conf | grep -v '^\s*#'"
+# Expect: include lines pointing at /data/unifi-core/config/http/site-*.conf
+#         and /data/unifi-core/config/http/upstream-*.conf — that directory is
+#         the real source of routing truth.
+
+# Step C — Which server block + location handles /api/auth/login ?
+#   The login endpoint usually falls under a generic "/api/" location.
+ssh dmp-cberg "grep -rEn 'location /api' /usr/share/unifi-core/http/ /data/unifi-core/config/http/ 2>/dev/null"
+ssh dmp-cberg "sed -n '/location \\/api\\/ {/,/^}/p' /usr/share/unifi-core/http/shared-post-setup-server.conf"
+# Expect: a `proxy_pass http://uos_api_backend/api/;` line, plus an
+#         `include .../auth.conf;` line that wires authentication.
+
+# Step D — What auth subrequest fires per /api/* call?
+ssh dmp-cberg "grep -E 'auth_request' /usr/share/unifi-core/http/auth.conf"
+# Expect: `auth_request /internal/auth/public-api;`
+
+# Step E — Where does that internal auth subrequest go?
+ssh dmp-cberg "grep -A 2 'location /internal/auth/public-api' /usr/share/unifi-core/http/shared-post-setup-server.conf"
+# Expect: `proxy_pass http://uos_auth_backend/public-api;`
+
+# Step F — What backend is uos_auth_backend?
+ssh dmp-cberg "cat /data/unifi-core/config/http/upstream-uos.conf"
+# Expect: `server unix:/data/unifi-core/config/http/uos-auth.sock;`
+
+# Step G — Which process owns that socket? (this is the throttle enforcer)
+ssh dmp-cberg "ls -la /data/unifi-core/config/http/uos-*.sock 2>/dev/null"
+ssh dmp-cberg "ps aux | grep -E 'unifi-core' | grep -v grep"
+# Expect: a single `unifi-core` process owns those sockets — IT is the binary
+#         that decides whether a given IP gets a 200 or a 429 on /api/auth/login.
+
+# Step H — Confirm the throttle is NOT in nginx (no rate-limit zones anywhere)
+ssh dmp-cberg "grep -rEn 'limit_req|limit_conn' /etc/nginx/ /usr/share/unifi-core/http/ /data/unifi-core/config/http/ 2>/dev/null"
+# Expect: empty. If non-empty, an additional nginx-side throttle exists
+#         and tuning interval alone may not be sufficient.
+
+# Step I — Confirm the throttle is NOT in iptables (no hashlimit/recent rules)
+ssh dmp-cberg "iptables -L -n 2>/dev/null | grep -iE 'hashlimit|recent|hashlimit'"
+# Expect: empty. Existing 'limit:' lines only apply to logging suppression.
+
+# Step J — Look for any user-tunable setting before assuming it's hardcoded
+ssh dmp-cberg "find /etc/unifi-core /usr/lib/unifi-core /data/unifi-core/config -maxdepth 2 -type f \( -name '*.yaml' -o -name '*.props' -o -name '*.conf' -o -name '*.json' \) 2>/dev/null"
+ssh dmp-cberg "grep -rEi 'rate.?limit|throttle|login.?attempt|max.?login' /data/unifi-core/config/ /usr/lib/unifi-core/ 2>/dev/null | head -10"
+# Expect (current firmware): no matches. The threshold is baked into the
+# unifi-core binary. If matches appear on a future firmware, document the
+# new tunable in this SOP and §2 Overview.
+```
+
+Expected (overall):
+- The chain `nginx :443 → location /api/ → auth_request /internal/auth/public-api → uos_auth_backend → unix:.../uos-auth.sock → unifi-core process` confirms that `unifi-core` is the only enforcer
+- Steps H, I, J prove no other layer (nginx, iptables, settings file) participates in the throttle decision
+
+If unclear:
+- If Step C points at a different server block (e.g. `site-direct-connect.conf`), repeat Steps D–F using that file instead — Ubiquiti occasionally restructures the per-context server blocks across major firmware releases.
+- If Step G shows a process other than `unifi-core` owning the socket, that new process becomes the enforcer; update §2 Overview accordingly.
+
 If unclear:
 - `ps aux | grep unifi-core` should show a `unifi-core` process with the socket files in its open file table.
 
