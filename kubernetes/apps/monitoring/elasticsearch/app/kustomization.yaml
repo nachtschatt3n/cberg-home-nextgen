@@ -8,3 +8,16 @@ resources:
   - ./elasticsearch.yaml
   - ./otel-ilm-configmap.yaml
   - ./otel-ilm-job.yaml
+patches:
+  - target:
+      kind: Namespace
+      name: not-used
+    patch: |-
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: not-used
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
