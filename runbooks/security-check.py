@@ -52,6 +52,7 @@ def cprint(color: str, msg: str) -> None:
 CRITICAL = "🔴"
 WARNING  = "🟡"
 OK       = "🟢"
+ACCEPTED = "🛡️"
 
 # ---------------------------------------------------------------------------
 # Repo paths
@@ -60,6 +61,46 @@ OK       = "🟢"
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT  = SCRIPT_DIR.parent
 OUTPUT     = SCRIPT_DIR / "security-check-current.md"
+ACCEPTED_RISKS_DOC = REPO_ROOT / "docs" / "security-accepted-risks.md"
+
+
+# ---------------------------------------------------------------------------
+# Accepted risks loader
+# ---------------------------------------------------------------------------
+
+def load_accepted_risks() -> dict[str, str]:
+    """Parse `docs/security-accepted-risks.md` for entries of the form
+    `AR-\\d{3}: <description>` (also accepts `AR-\\d{3} — <description>` and
+    `AR-\\d{3} - <description>` since the doc uses an em dash header style).
+
+    Returns dict {AR-ID: description}. On missing/empty file, logs a warning
+    and returns an empty dict so the rest of the audit proceeds unchanged.
+    """
+    if not ACCEPTED_RISKS_DOC.exists():
+        cprint(C.YELLOW, f"  ⚠ accepted-risks doc not found: {ACCEPTED_RISKS_DOC}")
+        return {}
+    try:
+        text = ACCEPTED_RISKS_DOC.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        cprint(C.YELLOW, f"  ⚠ could not read accepted-risks doc: {e}")
+        return {}
+    if not text.strip():
+        cprint(C.YELLOW, f"  ⚠ accepted-risks doc is empty: {ACCEPTED_RISKS_DOC}")
+        return {}
+
+    pattern = re.compile(r"\b(AR-\d{3})\s*[:—\-]\s+(.+?)\s*$")
+    risks: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.lstrip("# ").rstrip()
+        m = pattern.match(line)
+        if m:
+            ar_id, desc = m.group(1), m.group(2).strip()
+            # First match wins (header line) — skip later in-body references.
+            risks.setdefault(ar_id, desc)
+    return risks
+
+
+_ACCEPTED_RISKS: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -167,6 +208,28 @@ class Findings:
         if c: parts.append(f"{c} critical")
         if w: parts.append(f"{w} warning")
         return ", ".join(parts) if parts else "clean"
+
+    def suppress_accepted(self, accepted_risks: dict[str, str]) -> None:
+        """Re-tag findings whose message contains an accepted-risk description
+        substring. Sets severity to ACCEPTED and prepends the AR-ID to the
+        message. Lenient: case-insensitive substring match on the description.
+        """
+        if not accepted_risks:
+            return
+        new_items: list[tuple[str, str]] = []
+        for sev, msg in self._items:
+            matched_id: str | None = None
+            haystack = msg.lower()
+            for ar_id, desc in accepted_risks.items():
+                needle = desc.lower().strip()
+                if needle and needle in haystack:
+                    matched_id = ar_id
+                    break
+            if matched_id:
+                new_items.append((ACCEPTED, f"[{matched_id}] {msg}"))
+            else:
+                new_items.append((sev, msg))
+        self._items = new_items
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +511,7 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
     else:
         cprint(C.GREEN, "  🟢 No known token format fingerprints found")
 
+    f.suppress_accepted(_ACCEPTED_RISKS)
     lines = [f.markdown()]
     return f.worst(), f, "\n".join(lines)
 
@@ -1146,6 +1210,7 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
                     checks.append(f"{OK} flux-operator has cluster-admin (expected for GitOps)")
                     cprint(C.GREEN, "  🟢 flux-operator has cluster-admin (expected for GitOps)")
 
+    f.suppress_accepted(_ACCEPTED_RISKS)
     lines.extend(f"- {c}\n" for c in checks)
     return f.worst(), f, "\n".join(lines)
 
@@ -1494,6 +1559,12 @@ def main() -> int:
 
     cprint(C.CYAN, f"Sensitive vars loaded — DOMAIN={len(_sensitive['DOMAIN'])}c, "
                    f"NAME={len(_sensitive['NAME'])}c, EMAIL={len(_sensitive['EMAIL'])}c")
+
+    global _ACCEPTED_RISKS
+    _ACCEPTED_RISKS = load_accepted_risks()
+    if _ACCEPTED_RISKS:
+        cprint(C.CYAN, f"Accepted risks loaded — {len(_ACCEPTED_RISKS)} entries: "
+                       f"{', '.join(sorted(_ACCEPTED_RISKS.keys()))}")
 
     results: list[tuple[str, Findings, str]] = []
 
