@@ -15,13 +15,16 @@ sources:
   # heizpellets24 — German national average from the SSR'd home-page widget.
   # heizpellets24_offers — per-PLZ offer list via Playwright (JS-rendered).
   # esyoil — PLZ-specific via static GET.
-  # baywa_pellets — DEAD. BayWa removed the public Pelletspreisrechner;
-  #   /waerme_strom/holzpellets/pelletspreisrechner now redirects to a
-  #   marketing landing page with no price data. Disabled permanently.
+  # baywa_pellets — restored via baywa-holzpellets.de (Shopware/Vue) using
+  #   Playwright — fills PLZ + amount, dismisses the Usercentrics cookie
+  #   banner, clicks "Preis abrufen", extracts vita-holz-plus + BesserHeizer.
+  # holzpellets_net — DE national avg + Hessen avg + multi-period historical
+  #   bands (1m / 3m / 1y / 3y) via the step=2 PLZ-encoded URL.
   heizpellets24:        { enabled: true,  cadence: every_run, authority: 5 }
   heizpellets24_offers: { enabled: true,  cadence: every_run, authority: 5 }
   esyoil:               { enabled: true,  cadence: every_run, authority: 4 }
-  baywa_pellets:        { enabled: false, cadence: every_run, authority: 4 }
+  baywa_pellets:        { enabled: true,  cadence: every_run, authority: 4 }
+  holzpellets_net:      { enabled: true,  cadence: daily,     authority: 4 }
 
   # --- v1: SENTIMENT / DELIVERY-DAYS ---------------------------------------
   # The Kaufbarometer widget is not actually present on heizpellets24.de's
@@ -46,7 +49,14 @@ sources:
   destatis_epi_pellets: { enabled: true,  cadence: monthly,   authority: 5 }
   destatis_epi_sawdust: { enabled: true,  cadence: monthly,   authority: 5 }
   eurostat_hs_440131:   { enabled: true,  cadence: monthly,   authority: 5 }
+  energienutzer_de:     { enabled: true,  cadence: weekly,    authority: 3 }
   propellets_at:        { enabled: false, cadence: monthly,   authority: 5 }
+
+  # --- v1: FORECAST (derived, not scraped) ---------------------------------
+  # Reads existing prices + weather, applies P_t = anchor * seasonal *
+  # weather * capacity per Kaessler's 2026 model. Emits one ForecastObs per
+  # 1m/3m/6m/12m horizon each run.
+  forecast_kaessler:    { enabled: true,  cadence: every_run, authority: 3 }
 
   # --- v1: WEATHER ---------------------------------------------------------
   dwd_hdd:          { enabled: true,  cadence: daily,     authority: 5 }
