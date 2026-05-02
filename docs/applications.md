@@ -10,7 +10,7 @@
 
 | Namespace | App Count |
 |-----------|-----------|
-| ai | 9 |
+| ai | 10 |
 | home-automation | 18 |
 | databases | 10 |
 | monitoring | 12 |
@@ -43,6 +43,7 @@
 | ai-sre | AI-powered SRE tooling | Internal | AI |
 | next-ai-draw-io | AI-assisted diagram editor (natural language → diagrams) | Internal | AI |
 | paperclip | AI agent orchestration — multi-agent company management | Internal | AI |
+| hermes-agent | Self-improving AI agent with Telegram gateway and skill learning | Internal | AI |
 
 **External Ollama:** Mac Mini M4 Pro at `192.168.30.111` (not deployed in cluster)
 
