@@ -1,0 +1,256 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: hermes-agent
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    cleanupOnFail: false
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      hermes-agent:
+        pod:
+          annotations:
+            secret.reloader.stakater.com/reload: hermes-agent-secret
+          securityContext:
+            fsGroup: 10000
+            fsGroupChangePolicy: OnRootMismatch
+
+        initContainers:
+          seed-config:
+            image:
+              repository: busybox
+              tag: latest
+            command:
+              - sh
+              - -c
+              - |
+                if [ ! -f /opt/data/config.yaml ]; then
+                  cp /seed/config.yaml /opt/data/config.yaml
+                  echo "Seeded /opt/data/config.yaml from ConfigMap"
+                else
+                  echo "/opt/data/config.yaml already exists, not overwriting"
+                fi
+            securityContext:
+              runAsUser: 10000
+              runAsGroup: 10000
+
+        containers:
+          gateway:
+            image:
+              repository: nousresearch/hermes-agent
+              tag: latest
+              pullPolicy: Always
+            args:
+              - gateway
+              - run
+            env:
+              - name: TELEGRAM_BOT_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hermes-agent-secret
+                    key: TELEGRAM_BOT_TOKEN
+              - name: API_SERVER_HOST
+                value: "0.0.0.0"
+              - name: API_SERVER_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: hermes-agent-secret
+                    key: API_SERVER_KEY
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 8642
+                  initialDelaySeconds: 90
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 8642
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 8642
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                cpu: "2"
+                memory: 2Gi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10000
+              runAsGroup: 10000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                  - ALL
+
+          dashboard:
+            image:
+              repository: nousresearch/hermes-agent
+              tag: latest
+              pullPolicy: Always
+            args:
+              - dashboard
+              - --host
+              - "0.0.0.0"
+              - --no-open
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 9119
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 9119
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 9119
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10000
+              runAsGroup: 10000
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop:
+                  - ALL
+
+    service:
+      main:
+        controller: hermes-agent
+        type: ClusterIP
+        ports:
+          dashboard:
+            protocol: TCP
+            port: 9119
+            targetPort: 9119
+          api:
+            protocol: TCP
+            port: 8642
+            targetPort: 8642
+
+    ingress:
+      dashboard:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Hermes Agent"
+          gethomepage.dev/group: "AI"
+          gethomepage.dev/icon: "hermes.png"
+          gethomepage.dev/description: "Self-improving AI agent — Telegram + gemma4:26b"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: hermes.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: dashboard
+        tls:
+          - hosts:
+              - hermes.${SECRET_DOMAIN}
+
+      api:
+        enabled: true
+        className: internal
+        hosts:
+          - host: hermes-api.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: api
+        tls:
+          - hosts:
+              - hermes-api.${SECRET_DOMAIN}
+
+    persistence:
+      data:
+        type: persistentVolumeClaim
+        existingClaim: hermes-agent-data
+        advancedMounts:
+          hermes-agent:
+            seed-config:
+              - path: /opt/data
+            gateway:
+              - path: /opt/data
+            dashboard:
+              - path: /opt/data
+
+      seed-config:
+        type: configMap
+        name: hermes-agent-config
+        advancedMounts:
+          hermes-agent:
+            seed-config:
+              - path: /seed
