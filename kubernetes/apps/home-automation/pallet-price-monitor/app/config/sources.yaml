@@ -35,15 +35,16 @@ sources:
 
   # --- v1: LEADING INDICATORS ----------------------------------------------
   # destatis_epi_*: GENESIS-Online retired the GAST/GAST guest credentials
-  # for data download (verified 2026-05-01); free user registration now
-  # required. Disabled until we wire up an account.
+  # for data download. Now uses a personal API token via the `username:`
+  # HTTP header — token loaded from DESTATIS_API_TOKEN in the SOPS-encrypted
+  # app secret.
   # eurostat_hs_440131: now points at the comext host with dataset
   # DS-045409 (the dissemination host returns 404 for trade datasets).
   # propellets_at — DEAD. The site embeds 23degrees.eu chart iframes that
   #   render data in JS-managed canvas; no public JSON API surfaces the
   #   underlying values. Disabled permanently.
-  destatis_epi_pellets: { enabled: false, cadence: monthly,   authority: 5 }
-  destatis_epi_sawdust: { enabled: false, cadence: monthly,   authority: 5 }
+  destatis_epi_pellets: { enabled: true,  cadence: monthly,   authority: 5 }
+  destatis_epi_sawdust: { enabled: true,  cadence: monthly,   authority: 5 }
   eurostat_hs_440131:   { enabled: true,  cadence: monthly,   authority: 5 }
   propellets_at:        { enabled: false, cadence: monthly,   authority: 5 }
 

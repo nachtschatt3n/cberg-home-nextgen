@@ -68,6 +68,11 @@ spec:
                   secretKeyRef:
                     name: pallet-price-monitor-secret
                     key: ANTHROPIC_API_KEY
+              - name: DESTATIS_API_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: pallet-price-monitor-secret
+                    key: DESTATIS_API_TOKEN
               - name: SCRAPER_SHA
                 valueFrom:
                   fieldRef:
