@@ -61,7 +61,13 @@ sources:
   nrw_borkenkaefer: { enabled: true,  cadence: weekly,    authority: 4 }
 
   # --- v1: STEP-CHANGE EVENTS ---------------------------------------------
-  toll_collect:     { enabled: true,  cadence: on_change, authority: 5 }
+  # toll_collect — DEAD. The mauttarif page restructured; the canonical URL
+  # `bezahlen/maut_tarife/p1745_mauttarife_07_2024.html` returns 200 but the
+  # per-km values are rendered inside a complex table that doesn't yield to
+  # regex extraction (~700 KB of HTML, zero numeric matches near 'pro km').
+  # A Playwright-based parser could probably extract them but for an
+  # `on_change` source the value/effort ratio is poor — disabled.
+  toll_collect:     { enabled: false, cadence: on_change, authority: 5 }
 
   # --- v2 follow-ups (flip enabled→true when modules land) -----------------
   # kfw_beg_em_458:     { enabled: false, cadence: quarterly, authority: 5 }

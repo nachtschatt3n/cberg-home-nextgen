@@ -40,6 +40,25 @@ spec:
         category: home-automation
         component: pallet-price-monitor
         severity: critical
+    - alert: PalletCriticalSourceStale
+      annotations:
+        description: |
+          Critical pellet-price-monitor source `{{ $labels.source }}` has not
+          successfully reported in over 30 hours. This is the alert class that
+          would have caught the DWD HDD regression where the parser silently
+          emitted 0 weather rows for several runs.
+        summary: Pellet-price-monitor source {{ $labels.source }} is stale
+      expr: |
+        time() - max by (source) (
+          pellet_source_last_success_timestamp_seconds{
+            source=~"dwd_hdd|heizpellets24|heizpellets24_offers|esyoil|heizoel24|eurostat_hs_440131"
+          }
+        ) > 60 * 60 * 30
+      for: 30m
+      labels:
+        category: home-automation
+        component: pallet-price-monitor
+        severity: warning
     - alert: PalletBuySignalActive
       annotations:
         description: |
