@@ -61,7 +61,10 @@ For any deployment, upgrade, or non-trivial config change:
    - For user-facing apps: confirm Homepage entry and ingress reachability.
    - Confirm logs in Elasticsearch index `logs-generic-default`.
 6. **Delegate post-change verification** (see next section).
-7. **Update docs** if the change affects `docs/applications.md`, `docs/infrastructure.md`, or warrants an SOP update.
+7. **Update docs and capture learnings as SOPs.** After any change, incident, or investigation:
+   - Check `docs/applications.md` and `docs/infrastructure.md` for drift.
+   - Scan `docs/sops/` — if no SOP covers the pattern, create one using `docs/sops/SOP-TEMPLATE.md`.
+   - **A new SOP is warranted when**: the root cause was not evident from the code or docs, fixing required more than one non-standard step, the issue is likely to recur (e.g. after firmware updates, upgrades), or the knowledge lives only in someone's head. Examples: locating a hardcoded rate-limiter inside a binary, multi-step SOPS workflows, service-specific recovery sequences.
 
 ## Subagent orchestration — when to delegate
 
@@ -107,3 +110,4 @@ Never run destructive operations (`kubectl delete pv`, `--force`, `talosctl rese
 - Never run direct cluster mutations as a substitute for a GitOps change.
 - Never create a new namespace, storage class, or top-level doc without checking the matching SOP first.
 - Always ask before destructive or shared-state actions (`delete`, `reset`, `force-push`, node reboot, secret rotation that invalidates active sessions).
+- After any non-trivial investigation or incident, always review `docs/sops/` and create or update a SOP if the learning is reusable. Use `docs/sops/SOP-TEMPLATE.md`. No SOP = the knowledge disappears after the session.
