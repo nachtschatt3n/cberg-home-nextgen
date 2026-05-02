@@ -135,6 +135,7 @@ spec:
               - --host
               - "0.0.0.0"
               - --no-open
+              - --insecure
             probes:
               liveness:
                 enabled: true
@@ -205,7 +206,7 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Hermes Agent"
           gethomepage.dev/group: "AI"
-          gethomepage.dev/icon: "hermes.png"
+          gethomepage.dev/icon: "mdi-robot-outline"
           gethomepage.dev/description: "Self-improving AI agent — Telegram + gemma4:26b"
         labels:
           gethomepage.dev/enabled: "true"
