@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.03.20`
-> Last Updated: `2026-03-20`
+> Version: `2026.05.03`
+> Last Updated: `2026-05-03`
 > Owner: `Platform`
 
 ---
@@ -495,6 +495,57 @@ curl http://localhost:13133/
 kubectl logs -n monitoring ${POD} --tail=50 | grep -i "error\|warn\|fail"
 ```
 
+### OtelDaemonCollectorDown — edot-collector CreateContainerConfigError (PSA label reset)
+
+**Symptom:** `OtelDaemonCollectorDown` alert fires; edot-collector DaemonSet pods stuck in
+`CreateContainerConfigError`; pod events show `unable to validate against any security policy`.
+
+**Root cause:** The `monitoring` namespace requires `pod-security.kubernetes.io/enforce: privileged`
+because edot-collector mounts `hostPath` volumes. Every Flux Kustomization scoped to the
+`monitoring` namespace that carries its own namespace patch can overwrite the PSA labels.
+Whichever Kustomization reconciles **last** wins — if it does not include the `privileged` patch,
+the label reverts to `baseline` and the DaemonSet breaks.
+
+**Fix:**
+
+```bash
+# 1. Verify current PSA label
+kubectl get namespace monitoring -o jsonpath='{.metadata.labels}' | python3 -m json.tool | grep pod-security
+
+# 2. Apply privileged label directly (unblocks the DaemonSet immediately)
+kubectl label namespace monitoring \
+  pod-security.kubernetes.io/enforce=privileged \
+  pod-security.kubernetes.io/audit=privileged \
+  pod-security.kubernetes.io/warn=privileged \
+  --overwrite
+
+# 3. Find which Kustomization is missing the privileged patch
+grep -rL 'pod-security.kubernetes.io/enforce: privileged' \
+  kubernetes/apps/monitoring/*/app/kustomization.yaml
+
+# 4. Add the privileged namespace patch to each missing kustomization.yaml:
+#    patches:
+#      - target:
+#          kind: Namespace
+#          name: not-used
+#        patch: |-
+#          apiVersion: v1
+#          kind: Namespace
+#          metadata:
+#            name: not-used
+#            labels:
+#              pod-security.kubernetes.io/enforce: privileged
+#              pod-security.kubernetes.io/audit: privileged
+#              pod-security.kubernetes.io/warn: privileged
+
+# 5. Commit, push, wait for Flux reconciliation, verify DaemonSet recovers
+kubectl rollout status daemonset/edot-collector -n monitoring
+```
+
+**Invariant:** Every `app/kustomization.yaml` under `kubernetes/apps/monitoring/` **must** include
+the `pod-security.kubernetes.io/enforce: privileged` namespace patch. Adding a new app to the
+`monitoring` namespace without this patch will reproduce the issue on the next Flux reconcile cycle.
+
 ---
 
 ## Diagnose Examples
@@ -527,6 +578,37 @@ Expected:
 
 If unclear:
 - Verify Elasticsearch cluster health and index status.
+
+### Diagnose Example 3: OtelDaemonCollectorDown — PSA Label Reset
+
+```bash
+# 1. Check DaemonSet and pod state
+kubectl get daemonset edot-collector -n monitoring
+kubectl get pods -n monitoring -l app.kubernetes.io/name=edot-collector
+
+# 2. Check pod event for PSA rejection
+kubectl describe pod -n monitoring \
+  $(kubectl get pod -n monitoring -l app.kubernetes.io/name=edot-collector -o name | head -1) \
+  | grep -A5 "Events:"
+# Look for: "unable to validate against any security policy"
+
+# 3. Confirm namespace PSA label is missing or wrong
+kubectl get namespace monitoring -o jsonpath='{.metadata.labels}' | python3 -m json.tool | grep pod-security
+# Expected: enforce: privileged. If missing or "baseline" → root cause confirmed.
+
+# 4. Find kustomization(s) missing the privileged patch (whichever reconciled last reset it)
+grep -rL 'pod-security.kubernetes.io/enforce: privileged' \
+  kubernetes/apps/monitoring/*/app/kustomization.yaml
+# Any file printed here is the culprit — add the privileged patch and commit.
+```
+
+Expected:
+- Pod events show PSA rejection; namespace label is `baseline` or absent.
+- `grep -rL` identifies which kustomization is missing the patch.
+
+If unclear:
+- Check Flux reconciliation timestamps: `flux get kustomizations -n flux-system | grep monitoring`
+  to see which Kustomization reconciled most recently — that one reset the label.
 
 ---
 
