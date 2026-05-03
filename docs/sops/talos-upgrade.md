@@ -1,11 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
-> Description: Upgrade Talos Linux from v1.11.0 → v1.12.6 and apply missing performance patches (intelgpu, udev, enhanced sysctls, kubelet reservations, RPS fix). Unblocks OTBR (Thread border router) via `CONFIG_IPV6_MROUTE=y` now present in v1.12.x kernels. Keeps `powersave` CPU governor for home-lab power profile.
-> Version: `2026.04.30`
-> Last Updated: `2026-04-30`
+> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.0 + Kubernetes v1.36.0 (kernel 6.18.24-talos, Clang/ThinLTO).**
+> Version: `2026.05.03`
+> Last Updated: `2026-05-03`
 > Owner: `homelab-ops`
 
-> **Reader's note (2026-04-30):** Sections 1–12 are the canonical reference for a single-minor Talos upgrade. The cluster has since been taken to Talos `v1.13.0` + Kubernetes `v1.36.0` via two stages — see **§13 Stage A → Stage B path (v1.11.0 → v1.13.0)** for the multi-minor traversal procedure and the lessons learned during that run.
+> **Cluster state (2026-05-03):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.0` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
 
 ---
 
@@ -25,20 +25,26 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 
 ## 2) Overview
 
-| Setting | Current | Target |
-|---------|---------|--------|
-| Talos version | v1.11.0 | **v1.12.6** |
-| Kubernetes version | v1.34.0 | **v1.35.x** (latest in v1.35 line) |
-| Kernel | 6.12.43 | **6.18.18** |
-| `CONFIG_IPV6_MROUTE` | not set | **=y** ← unblocks OTBR |
-| CPU governor | `powersave` | `powersave` (unchanged — home-lab power profile) |
-| `machine-intelgpu.yaml` | ❌ not wired | ✅ applied |
-| `machine-udev.yaml` | ❌ not wired | ✅ applied |
-| Kubelet reservations | none | `systemReserved` + `kubeReserved` |
-| RPS mask | `ffff` (16 CPUs) | `3ffff` (18 CPUs) |
-| Conntrack tuning | default | `nf_conntrack_max=1048576` |
-| BBR congestion control | off | on (`tcp_congestion_control=bbr`) |
-| Source of truth | `kubernetes/bootstrap/talos/talconfig.yaml` | same |
+**Current cluster state (2026-05-03):**
+
+| Setting | Value |
+|---------|-------|
+| Talos version | `v1.13.0` ✅ |
+| Kubernetes version | `v1.36.0` ✅ |
+| Kernel | `6.18.24-talos` (Clang/ThinLTO) ✅ |
+| `CONFIG_IPV6_MROUTE` | `=y` ✅ |
+| CPU governor | `powersave` |
+| `machine-intelgpu.yaml` | ✅ wired (i915.enable_guc=3, hugepages=1024) |
+| `machine-udev.yaml` | ✅ wired (drm renderD* permissions) |
+| Kubelet reservations | ✅ `systemReserved` + `kubeReserved` (500m CPU + 1Gi each) |
+| RPS mask | ✅ `3ffff` (18 logical CPUs, Core Ultra 5 125H) |
+| Conntrack tuning | ✅ `nf_conntrack_max=1048576` |
+| BBR congestion control | ✅ on (`tcp_congestion_control=bbr`) |
+| Longhorn v2 OS prereqs | ✅ `hugepages=1024`, `vfio_pci` + `uio_pci_generic` modules |
+| NPU (IVPU) | ✅ exposed at `/sys/class/accel/accel0` on all 3 nodes |
+| Source of truth | `kubernetes/bootstrap/talos/talconfig.yaml` |
+
+**For next upgrade:** bump `talosVersion` and `kubernetesVersion` in `talconfig.yaml`, regenerate schematic at factory.talos.dev (same extension set), run steps 1–9. For a two-minor jump, use §13's two-stage pattern.
 
 ---
 
@@ -979,5 +985,6 @@ In practice, if Stage B fails: stop at `v1.12.7`, file the issue, plan Stage B r
 
 ## Version History
 
+- `2026.05.03`: Updated to reflect completed state — cluster is on Talos v1.13.0 + K8s v1.36.0. Rewrote header description and §2 Overview table from "Current → Target" planning format to "current cluster state" reference. Reader's note updated to cluster-state note.
 - `2026.04.30`: Documented the actual Stage A → Stage B path (`v1.11.0 → v1.12.7 → v1.13.0`, K8s `v1.34 → v1.35.4 → v1.36.0`) executed in this cluster. Added 13 lessons learned: powercycle-stuck on node 03 (cross-link to `docs/troubleshooting/talos-powercycle-stuck.md`), KSPP filtering of `install.extraKernelArgs` in v1.12+, `grubUseUKICmdline` default flip, JSON6902 PSA patch breaking, `talhelper` `$patch`/`$i` escaping, `talosctl` client `n±1` compatibility window, drain rate-limiter workaround, Longhorn `Retain` PV cascade-delete on backup-restore, intel-device-plugin operator `--devices` flag format, NPU NFD rule requirement, OTBR `replicas: 0` hardcode, etcd churn from concurrent `apply-config`, hugepages cmdline loss recovery. Section 2–6 perf sweep reframed as "applied during Stage A 2026-04-30". Longhorn v2 OS prereqs (hugepages=1024, `vfio_pci`, `uio_pci_generic`) recorded as wired in during Stage A via `machine-intelgpu.yaml`.
 - `2026.04.12`: Initial SOP — Talos v1.11.0 → v1.12.6 upgrade path combined with performance tuning sweep. Unblocks OTBR via `CONFIG_IPV6_MROUTE=y`. Keeps `powersave` governor.
