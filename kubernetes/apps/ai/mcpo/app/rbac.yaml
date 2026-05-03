@@ -21,7 +21,6 @@ rules:
       - nodes
       - namespaces
       - configmaps
-      - secrets
       - serviceaccounts
       - events
     verbs: ["get", "list", "watch"]

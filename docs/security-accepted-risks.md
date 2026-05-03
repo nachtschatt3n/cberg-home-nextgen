@@ -209,3 +209,19 @@ The `flux-webhook` ingress (`flux-system/webhook-receiver`) is exposed on the ex
 - Risk surface: an attacker would need both the public webhook URL and the HMAC secret to forge a request, at which point they could only trigger an early reconcile of the already-committed `main` — not inject code.
 
 **Mitigation:** Rotate the HMAC secret if the repo or webhook configuration is compromised. Webhook secret stored encrypted in `kubernetes/apps/flux-system/webhooks/app/*.sops.yaml`.
+
+---
+
+## AR-013 — `monitoring` Namespace PSA Enforced by Multiple Independent Kustomizations
+
+**Severity at time of discovery:** Informational
+**Status:** Accepted — structural consequence of OTel DaemonSet hostPath requirement
+
+The `monitoring` namespace carries `pod-security.kubernetes.io/enforce: privileged` because the `edot-collector` DaemonSet mounts `hostPath` volumes for log and metric collection. This label is set redundantly by three independent Flux Kustomizations (`eck-operator`, `elasticsearch`, `kibana`) in addition to the top-level `monitoring/kustomization.yaml`.
+
+**Why accepted:**
+- The `privileged` PSA level is required by design — edot-collector's hostPath mounts are blocked by `baseline` PSA.
+- The redundancy was introduced deliberately in commit `6ee8fbc3` (2026-05-02) to prevent a Flux reconcile-ordering race condition: whichever Kustomization reconciles last wins the namespace label. Without the redundancy, any of the three ECK Kustomizations could silently revert the label to `baseline`, breaking the DaemonSet.
+- The `monitoring` namespace has no external exposure; all privileged pods are for internal observability only (see AR-009 for the hardware-access justified privileged pods).
+
+**Invariant to enforce:** Any new Kustomization added to the `monitoring` namespace must include the `pod-security.kubernetes.io/enforce: privileged` patch. See `docs/sops/monitoring.md` troubleshooting section for the full procedure if the label is reset.
