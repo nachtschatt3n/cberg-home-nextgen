@@ -176,22 +176,45 @@ The `flux-operator` ServiceAccount is bound to `cluster-admin`. This is surfaced
 **Severity at time of discovery:** Warning
 **Status:** Accepted — functional, internal-only, migration deferred
 
-Two application charts bundle MariaDB instances using `bitnamilegacy/mariadb:latest`, a frozen archive registry that will never receive security patches:
+Application charts bundle database/cache sub-charts using `bitnamilegacy/*` images — a frozen archive registry that will never receive security patches:
 
-| App | Namespace | Pod | MariaDB Version | Database | Tables |
-|-----|-----------|-----|-----------------|----------|--------|
-| Nextcloud | office | `nextcloud-mariadb-0` | 11.8.2 | nextcloud | 199 |
-| Paperless-NGX | office | `paperless-ngx-mariadb-0` | 11.8.2 | paperless | 72 |
-
-Both parent charts (Nextcloud 9.0.4, Paperless-NGX 0.24.1) default to the `bitnamilegacy/mariadb` image in their bundled MariaDB subchart values. The modern replacement is `bitnami/mariadb` (MariaDB 12.x).
+| App | Namespace | Pod | Image | Version | Database |
+|-----|-----------|-----|-------|---------|----------|
+| Nextcloud | office | `nextcloud-mariadb-0` | `bitnamilegacy/mariadb` | 11.8.2 | nextcloud (199 tables) |
+| Paperless-NGX | office | `paperless-ngx-mariadb-0` | `bitnamilegacy/mariadb` | 11.8.2 | paperless (72 tables) |
+| Superset | databases | `superset-postgresql-0` | `bitnamilegacy/postgresql` | bundled | superset metadata |
+| Superset | databases | `superset-redis-master-0` | `bitnamilegacy/redis` | bundled | superset task queue |
 
 **Why accepted:**
-- Both instances are internal-only with no external ingress exposure
-- The legacy image is frozen but stable — no new vulnerabilities are being introduced by code changes
-- Migration to `bitnami/mariadb` requires a MariaDB 11.8 → 12.x major version jump with dump/restore
-- The standalone MariaDB in `databases/` was already upgraded to chart 25.0.6 (MariaDB 12.0.2) in February 2026
+- All instances are internal-only with no external ingress exposure
+- Legacy images are frozen but stable — no new vulnerabilities introduced by code changes
+- MariaDB: migration requires 11.8 → 12.x major version jump with dump/restore (Nextcloud, Paperless-NGX)
+- Superset: bundled sub-charts are upstream chart defaults; overriding to `bitnami/*` requires chart values changes and data migration
+- The standalone MariaDB in `databases/` was upgraded to chart 25.0.6 (MariaDB 12.0.2) in February 2026
 
-**Future action:** Migrate both bundled instances to `bitnami/mariadb` during a planned maintenance window. This requires mysqldump of each database, switching the image override, and restoring data.
+**Future action:** Migrate all four bundled instances to `bitnami/*` equivalents during planned maintenance windows. MariaDB instances require mysqldump + restore; Superset instances require pg_dump + Redis flush + sub-chart image override.
+
+---
+
+## AR-015 — Superset Root Containers and Longhorn Bench DaemonSet (Undeployed)
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — internal-only exposure; bench manifest is not Flux-managed
+
+**Superset root containers:** Apache Superset (`databases/superset`) deploys four pod variants (`superset`, `superset-celerybeat`, `superset-worker`, `superset-init-db`) using `apache/superset:5.0.0`, which runs as root (uid=0) by default. This is the upstream chart default and matches the same pattern as AR-006 (Node-RED) and AR-009 (privileged containers for hardware access).
+
+**Why accepted:**
+- Superset is on `internal` ingress only — no external exposure.
+- Root is the upstream image default; overriding requires custom entrypoint or init-container chown, adding maintenance overhead disproportionate to the risk.
+- Internal network access is required to reach Superset; no anonymous or unauthenticated path exists.
+
+**Longhorn bench DaemonSet:** `kubernetes/apps/storage/longhorn/bench/loopback-daemonset.yaml` exists in the public repo and contains a privileged DaemonSet with `hostPID: true` and hostPath mounts to `/dev` and `/var`. The file header documents it as NOT auto-deployed; it is not referenced in any Kustomization and cannot be applied by Flux reconciliation.
+
+**Why accepted:**
+- The manifest is excluded from all Kustomization entrypoints — Flux cannot apply it.
+- It requires an explicit `kubectl apply -f` with cluster access to take effect.
+- The risk is limited to insider/contributor misuse, not external attack surface.
+- File is retained as an operational reference for Longhorn v2 SPDK benchmarking.
 
 ---
 

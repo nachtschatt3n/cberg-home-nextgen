@@ -153,7 +153,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | flux-system | Flux GitOps operator | 1 |
 | backup | External backup integrations | 1 |
 | my-software-development | Custom app development | ~3 |
-| my-software-production | Custom app production | ~2 |
+| my-software-production | Custom app production | ~3 |
 
 ---
 

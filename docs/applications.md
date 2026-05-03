@@ -13,7 +13,7 @@
 | ai | 10 |
 | home-automation | 19 |
 | databases | 10 |
-| monitoring | 12 |
+| monitoring | 11 |
 | office | 11 |
 | media | 4 |
 | download | 2 |
@@ -103,7 +103,6 @@
 | eck-operator | Elastic Cloud on Kubernetes operator | None | — |
 | elasticsearch | Elasticsearch cluster (via ECK) | Internal | Monitoring |
 | elasticsearch-bootstrap | Initial ES index/ILM configuration job | None | — |
-| elasticsearch-exporter | Prometheus exporter for ES metrics | None | — |
 | edot-collector | Log collection and forwarding to Elasticsearch (EDOT) | None | — |
 | otel-operator | OpenTelemetry Operator for collector management | None | — |
 | kibana | Kibana log analytics UI | Internal | Monitoring |

@@ -23,7 +23,9 @@ port 11434, using Metal Performance Shaders (MPS) for GPU acceleration.
 
 Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
 
-In-cluster AI services (Open WebUI, Langfuse, etc.) connect to this external endpoint.
+In-cluster AI services (Open WebUI, Langfuse, hermes-agent, etc.) connect to this external endpoint.
+
+**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b` as its LLM backend. It is on the `internal` ingress class only; the Telegram bot token provides external reachability via the Telegram API, not via cluster ingress.
 
 ---
 
