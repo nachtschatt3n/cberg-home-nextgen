@@ -96,6 +96,8 @@ manages all subsequent deployments including upgrades to these components.
 
 > **Note:** Flux distribution is pinned to v2.5.0 due to a CRD incompatibility between flux-operator v0.14.0 and Flux v2.6+. The `flux` CLI tool (mise) is v2.8.0 but the running cluster distribution is v2.5.0.
 
+> **Note — bjw-s app-template frozen at 3.7.3:** The `bjw-s/app-template` chart is intentionally held at v3.7.3 cluster-wide (~40 apps). Upgrading to 4.x requires a schema-breaking values migration (`controllers`, `containers`, `persistence` key paths all changed). This will be done as a dedicated multi-week migration project. Do not bump individual apps to 4.x ahead of the bulk migration — mixed versions create inconsistent maintenance overhead.
+
 ---
 
 ## Storage

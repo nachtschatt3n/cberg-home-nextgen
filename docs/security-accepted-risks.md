@@ -225,3 +225,22 @@ The `monitoring` namespace carries `pod-security.kubernetes.io/enforce: privileg
 - The `monitoring` namespace has no external exposure; all privileged pods are for internal observability only (see AR-009 for the hardware-access justified privileged pods).
 
 **Invariant to enforce:** Any new Kustomization added to the `monitoring` namespace must include the `pod-security.kubernetes.io/enforce: privileged` patch. See `docs/sops/monitoring.md` troubleshooting section for the full procedure if the label is reset.
+
+---
+
+## AR-014 — `ai-sre` Cluster-Wide Secret Read and SOPS Age Key Mount
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — internal-only, no external ingress
+
+The `ai-sre` ClusterRole grants `get/list/watch` on `secrets` across all namespaces, and the HelmRelease mounts the SOPS age private key at `/app/secrets/age-key.txt`. The MCP API endpoint runs with `REQUIRE_AUTH: false`.
+
+**Why accepted:**
+- Ingress is `enabled: false` — the MCP endpoint is reachable only cluster-internally at `ai-sre.ai.svc.cluster.local:8080`. No external or internal-ingress exposure.
+- The SRE agent requires cluster-wide diagnostic access by design, including Secret metadata. The SOPS age key enables the agent to decrypt secrets for diagnostic SOPS operations.
+- `REQUIRE_AUTH: false` is intentional for local in-cluster MCP use; the blast radius is limited to other pods in the cluster that can reach the ai namespace.
+- No NetworkPolicy currently restricts ingress to `ai-sre` — this is the open item if the risk posture tightens.
+
+**Mitigations in place:** No external exposure; cluster-internal access only. If the `ai` namespace is compromised, this is an escalation path to all cluster secrets.
+
+**Future remediation if needed:** Enable `REQUIRE_AUTH: true` using the MCP_AUTH_TOKEN already in the SOPS secret, and add a NetworkPolicy restricting ingress to known MCP client pods only.

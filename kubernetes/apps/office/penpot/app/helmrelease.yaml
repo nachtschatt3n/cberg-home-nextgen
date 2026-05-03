@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: penpot
-      version: 0.39.0
+      version: 0.40.0
       sourceRef:
         kind: HelmRepository
         name: penpot
@@ -187,6 +187,7 @@ spec:
       master:
         persistence:
           enabled: false  # Cache only - no persistence needed
+        resourcesPreset: "none"  # disable Bitnami preset so our resources block applies
         resources:
           requests:
             cpu: 100m
