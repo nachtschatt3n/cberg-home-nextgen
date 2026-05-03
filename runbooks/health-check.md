@@ -1406,17 +1406,21 @@ curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/logs-generic-default/_
   -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' | python3 -c "import sys,json; print('Logs last 5min:', json.load(sys.stdin)['count'])"
 
 # 6. Error pattern query using OTel fields (last 24h)
-# OTel stores severity in severity_text, log body in body, k8s attrs in resource.attributes.*
+# NOTE: EDOT in this cluster does NOT populate severity_text — it is N/A on all documents.
+# Use wildcard on body.text instead. The k8s-gateway DNS "NOERROR" lines are false positives
+# (grep for ERROR in NOERROR strings) — filter them out by excluding dns/k8s-gateway.
 curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{
   "size": 0,
   "query": {
     "bool": {
       "should": [
-        {"terms": {"severity_text": ["ERROR", "FATAL", "CRITICAL"]}},
-        {"match": {"body": "ERROR"}},
-        {"match": {"body": "FATAL"}}
+        {"wildcard": {"body.text": "*ERROR*"}},
+        {"wildcard": {"body.text": "*FATAL*"}}
       ],
       "minimum_should_match": 1,
+      "must_not": [
+        {"term": {"resource.attributes.k8s.container.name.keyword": "k8s-gateway"}}
+      ],
       "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
     }
   },
@@ -1444,16 +1448,16 @@ curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-de
   "query": {
     "bool": {
       "should": [
-        {"terms": {"severity_text": ["FATAL"]}},
-        {"match": {"body": "OOMKilled"}},
-        {"match": {"body": "out of memory"}}
+        {"wildcard": {"body.text": "*FATAL*"}},
+        {"wildcard": {"body.text": "*OOMKilled*"}},
+        {"wildcard": {"body.text": "*out of memory*"}}
       ],
       "minimum_should_match": 1,
       "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
     }
   },
   "sort": [{"@timestamp": {"order": "desc"}}],
-  "_source": ["@timestamp", "body", "resource.attributes.k8s.pod.name", "resource.attributes.k8s.namespace.name"]
+  "_source": ["@timestamp", "body.text", "resource.attributes.k8s.pod.name", "resource.attributes.k8s.namespace.name"]
 }' | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -1463,7 +1467,7 @@ for hit in data['hits']['hits']:
     ts  = src.get('@timestamp', 'N/A')
     ns  = src.get('resource.attributes.k8s.namespace.name', 'N/A')
     pod = src.get('resource.attributes.k8s.pod.name', 'N/A')
-    msg = str(src.get('body', 'N/A'))[:120]
+    msg = str(src.get('body', {}).get('text', src.get('body', 'N/A')))[:120]
     print(f'  {ts} [{ns}/{pod}]: {msg}')
 "
 
@@ -1472,15 +1476,17 @@ wait $PF_PID 2>/dev/null || true
 ```
 
 **OTel Field Reference** (replaces old Fluent-bit fields):
-| Old Fluent-bit field | OTel field |
-|---|---|
-| `log` | `body` |
-| `severity` / text match | `severity_text` (keyword: ERROR, WARN, FATAL…) |
-| `k8s_namespace_name` | `resource.attributes.k8s.namespace.name` |
-| `k8s_pod_name` | `resource.attributes.k8s.pod.name` |
-| `k8s_container_name` | `resource.attributes.k8s.container.name` |
-| `fluent-bit-YYYY.MM.DD` index | `logs-generic-default` data stream |
-| (metrics) | `metrics-generic.otel-default` data stream |
+| Old Fluent-bit field | OTel field | Notes |
+|---|---|---|
+| `log` | `body.text` | Use `wildcard` query on `body.text`, not `match` on `body` |
+| `severity` / text match | `severity_text` | **NOT populated by EDOT in this cluster** — always N/A. Use `body.text` wildcard instead. |
+| `k8s_namespace_name` | `resource.attributes.k8s.namespace.name` | |
+| `k8s_pod_name` | `resource.attributes.k8s.pod.name` | |
+| `k8s_container_name` | `resource.attributes.k8s.container.name` | |
+| `fluent-bit-YYYY.MM.DD` index | `logs-generic-default` data stream | |
+| (metrics) | `metrics-generic.otel-default` data stream | |
+
+> **k8s-gateway false positives:** DNS responses include the RCODE string `NOERROR`, which matches wildcard `*ERROR*`. Always exclude the `k8s-gateway` container from error queries (see query #6 above).
 
 **ILM Retention** (managed by `elasticsearch-otel-ilm-bootstrap` Job + `otel-ilm-configmap`):
 | Data stream | Policy | Retention |
