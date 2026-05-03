@@ -385,6 +385,81 @@ kubectl describe pod {pod-name} -n {namespace} | grep -A10 "Volumes:"
 kubectl logs -n storage -l app=longhorn-manager --tail=50 | grep -i error
 ```
 
+### Replica Rebuild Loop (cleanupReplicaInUnstableEnv)
+
+**Symptom:** A volume has more replicas than `numberOfReplicas` specifies, or a replica is repeatedly rebuilt, deleted, and rebuilt on the same node.
+
+**Root cause:** When a cluster node experiences a Kubernetes Ready condition transition (even a brief blip), Longhorn marks that node as "unstable" by comparing the `lastTransitionTime` of each node's Ready condition. Any replica on a node whose Ready transition is 30+ minutes newer than the oldest-transitioned node is considered suspect and deleted by `cleanupReplicaInUnstableEnv`. If auto-balance then places a new replica on a node that already has a healthy replica (because the "unstable" node is the only remaining option), a duplicate forms — which triggers another cleanup cycle.
+
+**Identify the loop:**
+
+```bash
+# List all replicas and their current state
+kubectl get replicas.longhorn.io -n storage | grep -E "stopped|error"
+
+# See which volumes have extra/duplicate replicas (more than spec)
+kubectl get replicas.longhorn.io -n storage -o json | python3 -c "
+import sys, json
+from collections import defaultdict
+data = json.load(sys.stdin)
+vol = defaultdict(list)
+for r in data['items']:
+    vol[r['spec']['volumeName']].append((r['metadata']['name'], r['spec']['nodeID'], r['status'].get('currentState','?')))
+for v, replicas in vol.items():
+    nodes = [r[1] for r in replicas if r[2] == 'running']
+    if len(nodes) != len(set(nodes)):
+        print(f'{v}: DUPLICATE NODE - {[(r[0], r[1], r[2]) for r in replicas]}')
+"
+
+# Check Longhorn manager logs for cleanup trigger
+kubectl logs -n storage -l app=longhorn-manager --tail=200 | grep -i "cleanupReplicaInUnstableEnv\|kube node ready transition"
+```
+
+**Fix — delete the duplicate replica:**
+
+```bash
+# Identify which replica is the duplicate (same node as another healthy replica)
+kubectl get replicas.longhorn.io -n storage -l longhornvolume={volume-name} \
+  -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,STATE:.status.currentState
+
+# Delete the stopped/duplicate replica (NOT the healthy running one)
+kubectl delete replica.longhorn.io {replica-name} -n storage
+
+# Longhorn will then rebuild one healthy replica per node (no duplicate = no cleanup loop)
+```
+
+**Confirm rebuild completion:**
+
+```bash
+# Wait for volume to return to healthy/robust state
+kubectl get volume {volume-name} -n storage -o jsonpath='{.status.robustness}'
+# Expected: "healthy"
+
+# Verify replica count matches spec (one per distinct node)
+kubectl get replicas.longhorn.io -n storage -l longhornvolume={volume-name} \
+  -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,STATE:.status.currentState
+# Expected: numberOfReplicas rows, each on a distinct node, all state=running
+```
+
+### Stale Stopped Replicas
+
+After a node failure or replacement, stopped replicas may accumulate on the old node without triggering an active rebuild loop.
+
+```bash
+# Find all stopped replicas
+kubectl get replicas.longhorn.io -n storage | grep stopped
+
+# Identify the volume and node for each stopped replica
+kubectl get replicas.longhorn.io -n storage -o custom-columns=\
+NAME:.metadata.name,VOLUME:.spec.volumeName,NODE:.spec.nodeID,STATE:.status.currentState \
+| grep stopped
+
+# Delete stopped replica — Longhorn will schedule a rebuild on a healthy node
+kubectl delete replica.longhorn.io {replica-name} -n storage
+```
+
+Only delete replicas whose volume still has `numberOfReplicas` healthy `running` replicas elsewhere — otherwise deleting a stopped replica reduces redundancy below spec and Longhorn will immediately begin a rebuild, which is fine if you have healthy replicas remaining.
+
 ---
 
 ## Maintenance
@@ -439,6 +514,32 @@ Expected:
 
 If unclear:
 - Validate Longhorn volume exists and is ready.
+
+### Diagnose Example 3: Replica Rebuild Loop After Node Readiness Blip
+
+**Incident (2026-04-30):** Volumes `memgraph-data` and `otbr-data` entered a rebuild loop after node `k8s-nuc14-02` had a brief Ready condition transition at 20:08:30Z.
+
+```bash
+# Step 1: Identify duplicate replicas
+kubectl get replicas.longhorn.io -n storage | grep -v running
+
+# Step 2: Confirm it's a duplicate (same volume, same node, two replicas)
+kubectl get replicas.longhorn.io -n storage -l longhornvolume=memgraph-data \
+  -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,STATE:.status.currentState
+
+# Step 3: Confirm loop in manager logs
+kubectl logs -n storage -l app=longhorn-manager --tail=200 \
+  | grep "kube node ready transition"
+# Output: "Deleting replica ... on node k8s-nuc14-02 since its kube node ready
+#          transition time 2026-04-30T20:08:30Z is over 30 minutes later than others"
+
+# Step 4: Delete the stopped duplicate (the one on nuc14-03 created by auto-balance)
+kubectl delete replica.longhorn.io pvc-2455ee11...-r-6ab39efe -n storage
+kubectl delete replica.longhorn.io pvc-e90ffdf6...-r-1bb03f00 -n storage
+
+# Step 5: Verify loop broken — all volumes reach robustness=healthy within ~30s
+kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,ROBUSTNESS:.status.robustness
+```
 
 ---
 

@@ -35,6 +35,19 @@ spec:
               - op: add
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
+          # Bitnami valkey subchart v3.0.31 ignores master.resources when a
+          # resourcesPreset is active, hardcoding 150m CPU. Patch the rendered
+          # StatefulSet directly to apply our intended limits.
+          - target:
+              kind: StatefulSet
+              name: penpot-valkey-primary
+            patch: |
+              - op: replace
+                path: /spec/template/spec/containers/0/resources/limits/cpu
+                value: "500m"
+              - op: replace
+                path: /spec/template/spec/containers/0/resources/limits/memory
+                value: "256Mi"
           # Inject wait-for initContainers into the backend Deployment.
           # The penpot chart does not expose an extraInitContainers / initContainers
           # values key on backend|frontend|exporter, so we patch the rendered
