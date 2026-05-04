@@ -221,8 +221,8 @@ spec:
         ratelimit_whitelist: [192.168.0.0]
         refuse_any: true
         upstream_dns:
-        - "[/kuma.mathiasuhl.com/]https://dns.cloudflare.com/dns-query"
-        - "[/mathiasuhl.com/]192.168.31.61"
+        - "[/kuma.${SECRET_DOMAIN}/]https://dns.cloudflare.com/dns-query"
+        - "[/${SECRET_DOMAIN}/]192.168.31.61"
         - "[/example.com/]192.168.55.101"
         - "https://dns.cloudflare.com/dns-query"
         - "tls://1dot1dot1dot1.cloudflare-dns.com"

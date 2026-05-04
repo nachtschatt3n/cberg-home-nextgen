@@ -268,3 +268,14 @@ The `ai-sre` ClusterRole grants `get/list/watch` on `secrets` across all namespa
 **Mitigations in place:** No external exposure; cluster-internal access only. If the `ai` namespace is compromised, this is an escalation path to all cluster secrets.
 
 **Future remediation if needed:** Enable `REQUIRE_AUTH: true` using the MCP_AUTH_TOKEN already in the SOPS secret, and add a NetworkPolicy restricting ingress to known MCP client pods only.
+
+---
+
+## AR-016 — Personal Domain in AdGuard Home Git History
+
+**Severity at time of discovery:** Info
+**Status:** Accepted — informational exposure only; forward references replaced with `${SECRET_DOMAIN}`
+
+The personal domain name was committed in plaintext in the AdGuard Home HelmRelease bootstrapConfig `upstream_dns` block (commit `8eab2f60`, 2026-02-XX). The domain appeared in two split-horizon DNS routing entries (`[/kuma.${SECRET_DOMAIN}/]` and `[/${SECRET_DOMAIN}/]`). These lines were replaced with `${SECRET_DOMAIN}` substitutions in commit `<current>` (2026-05-04) to stop future exposure.
+
+**Why accepted:** The exposure is informational — the personal domain is not a credential and does not enable any direct attack. Git history cannot be rewritten on a public repo with potential clones. The live HelmRelease now uses `${SECRET_DOMAIN}` substitution and no longer contains the literal domain.
