@@ -184,7 +184,9 @@ spec:
           destination: "s3://path/to/my/adguard-home-backup-bucket"
 
     # -- Whether to enable bootstrapping the AdguardHome config file using the content in bootstrapConfig
-    bootstrapEnabled: true
+    # Disabled: PVC is the authoritative config source. The bootstrapConfig password injection
+    # pattern is broken (literal ${ADMIN_PASSWORD} string, no envsubst in the init container).
+    bootstrapEnabled: false
 
     bootstrapConfig:
       # -- AdGuard Home config. See [this page](https://github.com/AdguardTeam/AdGuardHome/wiki/Configuration#configuration-file)
