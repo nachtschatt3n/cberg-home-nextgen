@@ -4,25 +4,20 @@ metadata:
   name: icloud-docker-mu-config
   namespace: backup
 data:
-  config.yaml: ENC[AES256_GCM,data:oMD/Uhqtcx34MY0ACOCo0E5NmGxjH7GlBCXFY9ooUCLoaqrXRqXk6jZ8z8+LHn+Pkd7MDzj593u/UaylxvcwhrzA0SBxja2xA3rmKbaAtGk04Wk0Ato9U6wSVzx6DNgoHzRBs1nkXdf3KMZxNOoQS2BKVrDgCof+JZbFfucHC/hS+VpC/cj0A8DLpo0ufObotTB7RSLqsBpusm9UBX++otL8IT8tHKoNCIInQ6T8NL+GBSZt9UOQaZR+mXOm2caLttMsbaxuBXctHsuuPBUVLbslzRrqLB4wr7lOO51KiKzWggbqKY2fzuFGSgECkQShmWWez/nJJd6dBLBILFpJkhONsXmqvKGQ4MSiQebiWQJrJks5gc5aAQRzZt8cuozketggqOC4ufPVWIKnCK3RCdQd0w9ZA2K0UhanUpQnNeIWT7TYbL04m5X8o8nhZGA5Oq4vCEkABpEg2QyiFAk8Q3BFrKwBGVT2awr7HZpe3570km5Q4sjE5Ag0gZmAOyk+xO4aB5I7zxCD3IptQ+UfFzvLR3j9GioX5kDvVTiZM/cyXokYfq8BU3Brqna9UnfbpOvOLyKll8uJ/YuOF69BFAvi3sxCmidAVgGPMIMoc0LVYH79oZlwXV/n8BgFmo4UBG7GY7Z4/9AriMb9WdHZh9cwvEN7O2lWbeJ7rZXTDE6YfYxLQ1M3p61pDxXEAP/7,iv:934xrUqF1asZCKG9fhA9a4pGUQAJPzEtM+AHu7IkD3U=,tag:qkOPQH1bTMl/1UyIM+To+A==,type:str]
+  config.yaml: ENC[AES256_GCM,data:35LduBEnpsMxcAXMuNtZPQ/9uhnlc1c1IK2azvLJTksXDWZkh1Tt7rm8uwV5ECvqHmpdR19wWKeAA0mPC/HNWCcsxFv5ZP2W+8k0dT018Ja15urmSEHGLmUv0EH/QcKzJ47ycUIvBc1omWnnq+2lmn04xxrJVc4MojCiI0OLRb5OaTj1j1y7nc+iATT0dvMstQC+v0nolfW4Utd/Th9wMFyv6VoA3cSsWSaloZlHvKiIoB+ZrkVuTpAgRjyXZK0MXztpCXpHeRXlc6nJk1x+nZW/QFkS/2WSA5q0mb3ydOS5dpPYOVciU1+IC1XKP2AMurDGZCCHoeDjqL6vuWh0eXZfxN5nDHD5yO019dj6qfAJTImDkrxM8j7xJuX/gmNSSWiD5lYSe6j1CCwMSpE6z4AmGg++kg33uLeUcub8m7AlHKn9NguAm39oLkbBELryOyndNJ/BIzqa6sRJqfvinQk3mRqQK097zDwmQLcQLZvnDoSrvlw5gH1jo81mYsGoyC7BhRtzNreNqaigsFMt2j/FfyJFFw/7XcYUAPDa6BsRt/D5cBebVUGrpIiYcs1ARC4LmiS1A7en+7y9bvUK6eApx9jqglLCO9/Xg9ckDu2qc7eEOX5dNNL8Ae7/T13cPhkWBRDg7YkanWB0nAv5QNNzysc/wN9f4SvuFXKOy3pDnExpOEUXHgZpSNqzlJ6I6A==,iv:F1NHQ6lAz1msL4cfHDRv6BUUBJqGCifQCvXByt7gvDI=,tag:dM48xEv1zSJ193qVNwv5mA==,type:str]
 sops:
-  kms: []
-  gcp_kms: []
-  azure_kv: []
-  hc_vault: []
   age:
     - recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
       enc: |
         -----BEGIN AGE ENCRYPTED FILE-----
-        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBTQ0xrNzlGSlBLbHArVWVa
-        d3JzV1RJQTl6QktJVjUxTXphV3g0UTBWUG1vCmE2Zmp2aG53akcrdyt0VHFVakdS
-        bmhnZ0FIblJUUTRtRldRZVVEakh5aDgKLS0tIHU1TGYrNjdlMEhJcCtzYTZ2cURP
-        cnY5Y1J2SGxCalNORFJZR1k5MTFxNG8KBGobb1m0QtBZFqG+eGq3w71I/gztT6rt
-        3+vZLDI7yo++WMGoPtaktvWzFQs9MbXcK7nAN9VmlaWui2BPKLoxJQ==
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBlYml3REVIUlg3ZDFUMjBD
+        Nm85c1V3cHg3RnNTSVJZUGdpZHBsVDUyYlQ0CjRxR2xUZkF5UVBKdUFKc3VPMEFW
+        b3R6RzdOVVJBb1hKOExZTm9TaW9lT00KLS0tIFVkYkRQOU9MZDl0ZU9hOWltOFpl
+        K2diZlYzZkcvdHhPU284a2E3aW1SREEKb9YIQ74/COvugan2xN+TVxdixbqqmqP8
+        juAGz9L1y/hkBn+sGdQXrNiWNqDwRsAeFqwZG8MJWkwGQz5V3Bhppg==
         -----END AGE ENCRYPTED FILE-----
-  lastmodified: "2025-11-15T16:49:54Z"
-  mac: ENC[AES256_GCM,data:14tHirAiHvR+zr4mXIp378fa6pbhWseBJgNUfNlWpwWmmEG1pdlfYQQxg7OFE3I+E+VpUPIeoJ45ZIDr4zcXDawxoO7jXpTuUyd8F57sYcoJyc3C+LJwjOysZvOzb6MToL/hvUqIaNXAl02YCQs2QEn7ViNODu1U6e8WgHG3KeM=,iv:8yyKzSW35lpZF4SQqhOVx1kUfj4SXQxI5KYZ0fx2tCY=,tag:VOXCdBGNr0teym5d2f4c6g==,type:str]
-  pgp: []
-  encrypted_regex: ^(data)$
+  lastmodified: "2026-05-04T21:23:16Z"
+  mac: ENC[AES256_GCM,data:lVPYhKLVrHA6/QTyYev39yr9mD9nhBwrHvtYZm/3BAlBiWkL1OVlsQ1atsduCe/aftzOM3bprHROkcrybk7GGiCtDCk75361uDpy+8Z3K9BhmTR1gEPOA2zYLMa4zmJWe/Ft5Fz/p2smyGtGXHh2yxgpqgCu7t5PHRSrPjaiMbU=,iv:bmcdxpdywMUqCuASdM3wdQpHNHzsp845y7B1UsHrlVE=,tag:ieK1KqMgIZv68NT7mwASRg==,type:str]
+  encrypted_regex: ^(data|stringData)$
   mac_only_encrypted: true
-  version: 3.9.4
+  version: 3.12.1
