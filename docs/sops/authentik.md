@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth integrations through GitOps blueprints.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `Platform`
 
 ---

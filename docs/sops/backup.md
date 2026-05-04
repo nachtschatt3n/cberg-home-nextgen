@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `Platform`
 
 ---

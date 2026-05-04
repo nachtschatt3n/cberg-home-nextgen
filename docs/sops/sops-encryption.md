@@ -3,8 +3,8 @@
 > Standard Operating Procedures for secret management with SOPS and age encryption.
 > Reference: `docs/security.md` for security overview and key details.
 > Description: Encrypting, editing, validating, and rotating secrets with SOPS + age.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `Platform`
 
 ---

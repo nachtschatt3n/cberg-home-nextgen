@@ -1,8 +1,8 @@
 # SOP: Headlamp Short-Lived Token Generation
 
 > Description: How to generate a short-lived cluster-admin token for Headlamp when manual kubectl or UI access is needed. Long-lived tokens are intentionally not stored in the repo.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `ops`
 
 ---

@@ -3,8 +3,8 @@
 > Standard Operating Procedures for integrating services with the Homepage dashboard.
 > Reference: `docs/integration.md` for Homepage overview and group list.
 > Description: Registering and validating service discovery entries in Homepage via ingress metadata.
-> Version: `2026.03.01`
-> Last Updated: `2026-03-01`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `Platform`
 
 ---
