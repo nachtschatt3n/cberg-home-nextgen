@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.04.19`
-> Last Updated: `2026-04-19`
+> Version: `2026.05.04`
+> Last Updated: `2026-05-04`
 > Owner: `Platform`
 
 ---
@@ -561,7 +561,35 @@ If 404, fall back to:
 
 Keep the value bare (no `si-` quotes or URL) — Homepage's resolver handles the prefix.
 
-### 9. Python WSGI apps behind TLS-terminating ingress
+### 9. bjw-s app-template — `resources` must be nested inside the container, not at chart top level
+
+In bjw-s `app-template`, placing `resources:` at the top level of `values:` (or under `controllers.<name>:`) is silently ignored — the pod runs with no resource limits. The correct location is inside `controllers.<name>.containers.<name>`:
+
+```yaml
+# ❌ WRONG — no-op, ignored by app-template
+values:
+  resources:
+    requests:
+      memory: 128Mi
+
+# ✅ CORRECT
+values:
+  controllers:
+    main:
+      containers:
+        main:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+```
+
+Symptom: pod runs without OOM limit → `Exit Code: 137 (OOMKilled)` if it grows unbounded. The HelmRelease shows `Ready: True` — there is no chart-level error for a misplaced `resources` block.
+
+### 10. Python WSGI apps behind TLS-terminating ingress
 
 Flask, Django, and other WSGI apps see the request as `http://` internally because nginx-ingress terminates TLS at the edge. Any URL the app generates from the request (OAuth `redirect_uri`, absolute asset URLs, `url_for(_external=True)`, cookie `secure` flags) will come out wrong unless the app trusts the ingress's `X-Forwarded-*` headers.
 
@@ -625,7 +653,8 @@ Our `internal` / `external` nginx ingress controllers already set `X-Forwarded-P
 | Helm chart with bundled Postgres needs custom PG driver | Image lacks `psycopg2` / other connector | Use chart's `bootstrapScript` value — install into the runtime venv path (e.g. Superset: `uv pip install --python /app/.venv/bin/python psycopg2-binary==X`) |
 | Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |
 | Celery-based app OOM-kills on fat nodes | Default concurrency = CPU count (18 on nuc14) → huge memory | Set explicit `--concurrency=N` in container `command` and bump memory limit |
-| OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust ingress's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #9 |
+| OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust ingress's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #10 |
+| Pod OOMKilled despite `resources:` in HelmRelease | `resources:` placed at wrong nesting level in app-template (no-op) | Move `resources:` inside `controllers.<name>.containers.<name>` — see Known Gotcha #9 |
 
 ---
 
@@ -758,3 +787,4 @@ Rollback success criteria:
 | `2026.04.18b` | `2026-04-18` | Add "Known Gotchas" section (Bitnami legacy images, Flux targetNamespace override, Helm configFromSecret pitfall, venv pip for modern Python images, Celery concurrency, Authentik copy-blueprints wildcard, PromRule Succeeded-phase exclusion, Homepage icon verification) |
 | `2026.04.18c` | `2026-04-18` | Add Known Gotcha #9: Python WSGI apps behind TLS-terminating ingress — enable framework ProxyFix (Flask/Django/FastAPI/Rails/n8n variants) so OAuth redirect_uri and self-referencing URLs use `https://` |
 | `2026.04.19` | `2026-04-19` | Consolidate prior 04.18/04.18b/04.18c versions into a single YYYY.MM.DD format (doc-check compliance) |
+| `2026.05.04` | `2026-05-04` | Add Known Gotcha #9: bjw-s app-template `resources` placement (top-level is a no-op → OOMKilled); update troubleshooting table; renumber WSGI gotcha to #10 |

@@ -3,7 +3,7 @@
 > Standard Operating Procedures for secret management with SOPS and age encryption.
 > Reference: `docs/security.md` for security overview and key details.
 > Description: Encrypting, editing, validating, and rotating secrets with SOPS + age.
-> Version: `2026.05.04`
+> Version: `2026.05.04b`
 > Last Updated: `2026-05-04`
 > Owner: `Platform`
 
@@ -60,7 +60,28 @@ Secret encryption policy source-of-truth:
 sops kubernetes/apps/{namespace}/{app}/app/secret.sops.yaml
 ```
 
-### Example 2: Create and Encrypt New Secret
+### Example 2: Encrypt a ConfigMap (non-Secret YAML)
+
+Encrypting Kubernetes Secrets works automatically because the `.sops.yaml` `encrypted_regex` targets only `data`/`stringData` fields. For ConfigMaps, SOPS has no special-field regex — it encrypts the entire file. Without explicit `--input-type`/`--output-type` flags SOPS may detect the file as binary and wrap the entire YAML payload as a single opaque `data` key, breaking Kustomize parsing.
+
+**Always pass `--input-type yaml --output-type yaml` when encrypting non-Secret YAML:**
+
+```bash
+# ❌ WRONG: SOPS may detect binary store and corrupt the ConfigMap structure
+sops -e -i kubernetes/apps/{namespace}/{app}/app/configmap.sops.yaml
+
+# ✅ CORRECT: explicit YAML store
+sops -e --input-type yaml --output-type yaml \
+     -i kubernetes/apps/{namespace}/{app}/app/configmap.sops.yaml
+```
+
+Verify the encrypted output still looks like valid YAML (not a single base64 blob under `data:`):
+```bash
+head -10 kubernetes/apps/{namespace}/{app}/app/configmap.sops.yaml
+# Expected: YAML structure with ENC[...] values inline, not a flat binary blob
+```
+
+### Example 3: Create and Encrypt New Secret
 
 ```bash
 cat > kubernetes/apps/{namespace}/{app}/app/secret.sops.yaml << 'EOF'
@@ -335,6 +356,7 @@ python3 runbooks/security-check.py
 | `failed to get the data key required to decrypt the SOPS file` | Age key file missing or wrong path | Check `SOPS_AGE_KEY_FILE` env var |
 | `failed to decrypt` | Wrong age key | Verify `SOPS_AGE_KEY_FILE` points to correct key |
 | Flux `decryption failed` | `sops-age` secret missing in `flux-system` | `kubectl get secret sops-age -n flux-system` |
+| ConfigMap encrypted but Kustomize fails to parse it | SOPS used binary store (no `--input-type yaml`) — entire file wrapped as opaque blob under `data:` | Re-encrypt: `sops -e --input-type yaml --output-type yaml -i <file>` |
 
 ---
 

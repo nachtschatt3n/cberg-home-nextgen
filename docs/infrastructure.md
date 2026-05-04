@@ -7,9 +7,9 @@
 
 ## Overview
 
-Home lab Kubernetes cluster running 75+ applications across 16 namespaces, managed via GitOps with
+Home lab Kubernetes cluster running ~83 applications across 16 namespaces, managed via GitOps with
 Flux on Talos Linux. Three-node hyper-converged architecture (all nodes serve as both control plane
-and worker).
+and worker). See `docs/applications.md` for the authoritative application count per namespace.
 
 | Attribute | Value |
 |-----------|-------|
@@ -138,22 +138,22 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 
 | Namespace | Purpose | App Count |
 |-----------|---------|-----------|
-| ai | AI/ML services | ~9 |
-| home-automation | Smart home integrations | ~16 |
-| databases | Database backends | ~8 |
-| monitoring | Observability stack | ~12 |
-| office | Productivity and document management | ~10 |
-| media | Media servers | ~3 |
-| download | Download managers | ~2 |
-| kube-system | Core cluster infrastructure | ~10 |
+| ai | AI/ML services | 10 |
+| home-automation | Smart home integrations | 19 |
+| databases | Database backends | 10 |
+| monitoring | Observability stack | 11 |
+| office | Productivity and document management | 11 |
+| media | Media servers | 4 |
+| download | Download managers | 2 |
+| kube-system | Core cluster infrastructure | 10 |
 | storage | Persistent storage (Longhorn) | 1 |
 | cert-manager | TLS certificate management | 1 |
-| network | Ingress controllers, DNS, networking | ~6 |
-| default | Dashboard (Homepage) + utilities | ~2 |
+| network | Ingress controllers, DNS, networking | 6 |
+| default | Dashboard (Homepage) + utilities | 2 |
 | flux-system | Flux GitOps operator | 1 |
 | backup | External backup integrations | 1 |
-| my-software-development | Custom app development | ~3 |
-| my-software-production | Custom app production | ~3 |
+| my-software-development | Custom app development | 3 |
+| my-software-production | Custom app production | 3 |
 
 ---
 
