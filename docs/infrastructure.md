@@ -7,7 +7,7 @@
 
 ## Overview
 
-Home lab Kubernetes cluster running ~83 applications across 16 namespaces, managed via GitOps with
+Home lab Kubernetes cluster running ~98 applications across 16 namespaces, managed via GitOps with
 Flux on Talos Linux. Three-node hyper-converged architecture (all nodes serve as both control plane
 and worker). See `docs/applications.md` for the authoritative application count per namespace.
 
@@ -143,9 +143,9 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | databases | Database backends | 10 |
 | monitoring | Observability stack | 11 |
 | office | Productivity and document management | 11 |
-| media | Media servers | 4 |
+| media | Media servers | 5 |
 | download | Download managers | 2 |
-| kube-system | Core cluster infrastructure | 10 |
+| kube-system | Core cluster infrastructure | 12 |
 | storage | Persistent storage (Longhorn) | 1 |
 | cert-manager | TLS certificate management | 1 |
 | network | Ingress controllers, DNS, networking | 6 |

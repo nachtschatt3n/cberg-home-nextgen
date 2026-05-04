@@ -15,9 +15,9 @@
 | databases | 10 |
 | monitoring | 11 |
 | office | 11 |
-| media | 4 |
+| media | 5 |
 | download | 2 |
-| kube-system | 10 |
+| kube-system | 12 |
 | storage | 1 |
 | cert-manager | 1 |
 | network | 6 |
@@ -26,7 +26,7 @@
 | backup | 1 |
 | my-software-development | 3 |
 | my-software-production | 3 |
-| **Total** | **~83** |
+| **Total** | **~98** |
 
 ---
 
