@@ -18,6 +18,7 @@ Six secrets were committed in plaintext to the public repository history. All ha
 | `1f9319c0` | Kopia backup | Encryption + server password | Service decommissioned |
 | `bb2bf972` | pgAdmin | Admin + master password | Rotated 2026-03-19, pod restarted 2026-03-20 |
 | `6b335828` | Rybbit | `BETTER_AUTH_SECRET` JWT key | Service decommissioned |
+| `6b335828` | Rybbit ClickHouse | Admin password (`kubernetes/apps/monitoring/rybbit/clickhouse/secret.yaml`) | Service decommissioned |
 | `4aa30e55` | Bytebot | PostgreSQL password + DB URL | Service decommissioned |
 | `0f86a14a` | Longhorn | Telegram bot token | Rotated 2026-04-05 via BotFather |
 | `00580874` | UniFi Controller (`cli-adm`) | Controller admin password | Rotation confirmed (current credential differs); file gitignored 2026-03-09 |
