@@ -1,7 +1,7 @@
 # Security Accepted Risks
 
 > Risks reviewed and explicitly accepted. Do not surface these in automated audits as actionable items.
-> Last reviewed: 2026-04-16
+> Last reviewed: 2026-05-04
 
 ---
 
@@ -20,6 +20,7 @@ Six secrets were committed in plaintext to the public repository history. All ha
 | `6b335828` | Rybbit | `BETTER_AUTH_SECRET` JWT key | Service decommissioned |
 | `4aa30e55` | Bytebot | PostgreSQL password + DB URL | Service decommissioned |
 | `0f86a14a` | Longhorn | Telegram bot token | Rotated 2026-04-05 via BotFather |
+| `00580874` | UniFi Controller (`cli-adm`) | Controller admin password | Rotation confirmed (current credential differs); file gitignored 2026-03-09 |
 
 History cannot be rewritten on a public repo with potential clones. Rotation is the remediation. Risk accepted.
 
@@ -133,7 +134,7 @@ The `headlamp` ServiceAccount is bound to `cluster-admin` via `clusterrolebindin
 
 ---
 
-## AR-009 — Privileged Containers (otbr, frigate, scrypted, jellyfin, makemkv) and hostNetwork Pods for Hardware Access
+## AR-009 — Privileged Containers (otbr, frigate, scrypted-nvr, jellyfin, makemkv) and hostNetwork Pods for Hardware Access
 
 **Severity at time of discovery:** Warning
 **Status:** Accepted — hardware device access required by design
@@ -144,7 +145,7 @@ The following containers run with elevated privileges or `hostNetwork: true`:
 |-----|-----------|----------------|---------------|
 | frigate-nvr | home-automation | Privileged | Direct access to capture cards (`/dev/video*`) and GPU for NVR hardware transcoding |
 | otbr | home-automation | Privileged | Network interface manipulation required for OpenThread Border Router (Thread radio) |
-| scrypted | home-automation | Privileged + uid=0 | Hardware transcoding, device passthrough, and SYS_ADMIN for camera NVR/proxy |
+| scrypted-nvr | home-automation | Privileged + uid=0 | Hardware transcoding, device passthrough, and SYS_ADMIN for camera NVR/proxy |
 | jellyfin | media | Privileged + SYS_ADMIN | iGPU hardware transcoding via Intel Quick Sync |
 | makemkv | media | Privileged | Raw device access for Blu-ray/DVD drive passthrough |
 | node-red | home-automation | uid=0 | PVC volume permission compatibility (see AR-006) |
