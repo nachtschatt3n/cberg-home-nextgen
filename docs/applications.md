@@ -102,7 +102,7 @@
 | headlamp | Kubernetes web UI | Internal | Monitoring |
 | eck-operator | Elastic Cloud on Kubernetes operator | None | — |
 | elasticsearch | Elasticsearch cluster (via ECK) | Internal | Monitoring |
-| elasticsearch-bootstrap | Initial ES index/ILM configuration job | None | — |
+| elasticsearch-bootstrap | Initial ES index/ILM configuration Job (within `elasticsearch/` dir, no standalone directory) | None | — |
 | edot-collector | Log collection and forwarding to Elasticsearch (EDOT) | None | — |
 | otel-operator | OpenTelemetry Operator for collector management | None | — |
 | kibana | Kibana log analytics UI | Internal | Monitoring |
