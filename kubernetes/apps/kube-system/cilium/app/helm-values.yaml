@@ -1,4 +1,8 @@
 ---
+# Ref: https://github.com/cilium/cilium/issues/37529
+# Cilium 1.17+ picks lowest MTU link (siderolink WireGuard=1280) as pod MTU floor,
+# breaking QUIC/UDP large-packet workloads. Override to physical interface MTU.
+MTU: 1500
 autoDirectNodeRoutes: true
 bpf:
   masquerade: true
