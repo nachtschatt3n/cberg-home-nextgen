@@ -32,6 +32,11 @@ data:
         matchExpressions: []
       alertmanagerSpec:
         logLevel: debug
+        # Remove automatic namespace= matcher injection so AlertmanagerConfigs
+        # in monitoring/storage namespaces route alerts from ALL namespaces.
+        # Without this, alerts from network/home-automation/ai/etc. hit receiver: "null".
+        alertmanagerConfigMatcherStrategy:
+          type: None
         storage:
           volumeClaimTemplate:
             spec:
