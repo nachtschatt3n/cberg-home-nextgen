@@ -17,6 +17,7 @@ Accepted risks — do NOT surface these as findings:
 - AR-002: Mosquitto `allow_anonymous true` — IoT VLAN (192.168.32.0/23) only, no external exposure.
 - AR-003: echo-server on external ingress without Authentik — intentional debug tool, no sensitive data.
 - AR-004: open-webui, n8n, iobroker, home-assistant on external ingress without Authentik — each has its own robust auth layer.
+- AR-018: KubeClientCertificateExpiration Prometheus alert — permanent false positive from histogram accumulation after kubelet cert auto-rotation. Verify real cert health via `talosctl -n <ip> read /var/lib/kubelet/pki/kubelet-client-current.pem | openssl x509 -noout -dates` (all expire Jan 5, 2027).
 
 Operating rules:
 - Execute the security runbook or script and classify findings as Critical/Warning/OK.

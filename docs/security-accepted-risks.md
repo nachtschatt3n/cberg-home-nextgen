@@ -297,3 +297,24 @@ These files are named `*.example.yaml`, not `*.sops.yaml`, so they are not cover
 **Why accepted:** All current values are placeholders (`<github-personal-access-token>`, `<base64-encoded-docker-config>`, etc.) — no credentials are exposed. The files are not referenced by any Flux Kustomization and cannot be applied to the cluster. Warning comments were added to both files (2026-05-05) directing developers to copy-then-rename to `.sops.yaml` before filling in real values.
 
 **Last reviewed:** 2026-05-05
+
+---
+
+## AR-018 — KubeClientCertificateExpiration False Positive (Prometheus Histogram Artifact)
+
+**Severity at time of discovery:** Info
+**Status:** Accepted — false positive, all actual client certificates are valid
+
+The `KubeClientCertificateExpiration` Prometheus alert fires against all three apiserver instances because the `apiserver_client_certificate_expiration_seconds` histogram permanently accumulates observations across the lifetime of the Prometheus pod. When the kubelet client certificate is auto-rotated by Kubernetes (which it is, automatically, before 80% of its 1-year validity), the final seconds of the old certificate's validity are recorded as histogram samples in the low-expiry buckets. These samples are never evicted. The alert expression checks if any bucket `le < 86400` has non-zero count, which is always true after the first rotation cycle.
+
+**Evidence (verified 2026-05-05):** All actual client certificates valid:
+- Kubelet client cert on all 3 nodes (`system:node:k8s-nuc14-0{1,2,3}`): expires Jan 5, 2027
+- Admin kubeconfig cert: expires Jan 5, 2027
+- Apiserver TLS cert: expires May 4, 2027
+- Prometheus histogram count: 600,453 accumulated observations on nuc14-03
+
+**Why accepted:** Well-known upstream kube-prometheus-stack false positive. Fixing it requires overriding the built-in PrometheusRule with a custom `increase()`-based expression. For this homelab, the alert is permanent noise — treat as accepted. To verify real cert health use `talosctl -n <ip> read /var/lib/kubelet/pki/kubelet-client-current.pem | openssl x509 -noout -dates`.
+
+**Security agent note:** Do not surface this as a finding. Verify actual cert expiry directly via talosctl when assessing certificate health.
+
+**Last reviewed:** 2026-05-05
