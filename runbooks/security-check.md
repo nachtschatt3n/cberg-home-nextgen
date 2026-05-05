@@ -667,15 +667,76 @@ for p in patterns:
 
 ## 11. UniFi Network Security Audit
 
-**Objective**: Check UniFi controller for IDS/IPS alerts, firewall anomalies, unknown devices, and admin login events.
+**Objective**: Check UniFi controller for IDS/IPS alerts, firewall anomalies, unknown devices, admin login events, and firmware CVE posture.
 
-**Note**: `unifictl` must be configured per CLAUDE.md prerequisites before running.
+### 11.0 unifictl invocation
 
-**Commands:**
+`mise exec -- unifictl` may fail if the tool isn't in the mise shim path. Use the direct binary instead:
 
 ```bash
+UNIFI=/Users/mu/.local/share/mise/installs/cargo-unifictl/5.4.0/bin/unifictl
+# Or discover:
+find /Users/mu/.local/share/mise/installs -name unifictl -type f | sort -V | tail -1
+```
+
+**Rate limit**: The controller enforces a login-attempt rate limit (HTTP 429). Do not loop or retry on auth failure — wait for the limit to clear. The limit was raised to 200/min on 2026-05-05 to allow sweep automation.
+
+### 11.1 Device firmware versions and CVE posture
+
+```bash
+UNIFI=/Users/mu/.local/share/mise/installs/cargo-unifictl/5.4.0/bin/unifictl
+
+echo "=== Device inventory and firmware versions ==="
+$UNIFI local device list 2>/dev/null
+# Output columns: name, model, type, ip, mac, version, state, adopted
+
+echo ""
+echo "=== CVE-2024-42025 check (UniFi Network App < 8.4.59) ==="
+$UNIFI local device list 2>/dev/null | python3 -c "
+import sys, re
+lines = sys.stdin.read()
+# UDM/UDMPRO devices: 'version' is UniFi OS version.
+# UniFi OS 4.x -> Network App 8.x; UniFi OS 5.x -> Network App 9.x
+# CVE-2024-42025 is patched in Network App >= 8.4.59 (i.e., UniFi OS >= 4.0.21 or any 5.x)
+udm = re.findall(r'(\S+)\s+(UDM\S*)\s+udm\s+\S+\s+\S+\s+(\S+)', lines)
+for name, model, ver in udm:
+    major = int(ver.split('.')[0])
+    minor_patch = ver.split('.',2)[1:3]
+    if major >= 5:
+        print(f'🟢 {name} ({model}): UniFi OS {ver} -> Network App 9.x -> NOT vulnerable to CVE-2024-42025')
+    elif major == 4:
+        patch = float('.'.join(minor_patch[:2])) if len(minor_patch) >= 2 else 0
+        if patch >= 0.21:
+            print(f'🟢 {name} ({model}): UniFi OS {ver} -> patched')
+        else:
+            print(f'🔴 {name} ({model}): UniFi OS {ver} -> POTENTIALLY VULNERABLE - upgrade to OS 4.0.21+ or 5.x')
+    else:
+        print(f'🔴 {name} ({model}): UniFi OS {ver} -> VULNERABLE - upgrade required')
+if not udm:
+    print('No UDM devices found')
+"
+```
+
+**Known environment (2026-05-05):**
+- `DMP-CBERG` (UDMPRO): UniFi OS **5.0.16.30692** → Network App 9.x → **Not vulnerable to CVE-2024-42025**
+
+### 11.2 Known false positives
+
+**VPN health warning** (`site-to-site: enabled true, active 0, inactive 1`):
+- `unifictl local health get` reports the `DreamRouterMostellerOK` SDWAN mesh tunnel as inactive when the remote end is not actively connected.
+- This is a **false positive** — the tunnel is configured intentionally (`USA-Peer` VLAN 192.168.60.0/24) and does not impair cluster operations. Do NOT escalate as a security finding.
+- Verify it is still the same tunnel: `$UNIFI local network list` → look for `purpose: site-vpn`, `vpn_type: sdwan-mesh-tunnel`. If a new/unknown site-VPN appears, investigate.
+
+**OpenVPN Server** (`remote-user: active 0`):
+- OpenVPN server is enabled (192.168.3.1/28) with 0 active remote users — expected when no one is currently connected. Not a finding.
+
+### 11.3 IDS/IPS, firewall, devices, and admin events
+
+```bash
+UNIFI=/Users/mu/.local/share/mise/installs/cargo-unifictl/5.4.0/bin/unifictl
+
 echo "=== IDS/IPS threat events ==="
-unifictl local events -o json 2>/dev/null | python3 -c "
+$UNIFI local event list -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
     events = json.load(sys.stdin)
@@ -695,7 +756,7 @@ else:
 
 echo ""
 echo "=== Firewall / security event keys ==="
-unifictl local events -o json 2>/dev/null | python3 -c "
+$UNIFI local event list -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
     events = json.load(sys.stdin)
@@ -717,11 +778,27 @@ if not security_events:
 
 echo ""
 echo "=== Unadopted / unknown devices (potential rogue hardware) ==="
-unifictl local devices --unadopted 2>/dev/null
+$UNIFI local device list -o json 2>/dev/null | python3 -c "
+import sys, json
+data = json.loads(sys.stdin.read())
+devs = data if isinstance(data, list) else data.get('data', [])
+unadopted = [d for d in devs if isinstance(d, dict) and not d.get('adopted', True)]
+print(f'Unadopted devices: {len(unadopted)}')
+for d in unadopted:
+    print(f'  {d.get(\"mac\",\"?\")} {d.get(\"model\",\"?\")} {d.get(\"ip\",\"?\")}')
+if not unadopted:
+    print('🟢 No unadopted devices')
+"
 
 echo ""
 echo "=== New wireless clients in last 24h ==="
-unifictl local clients -o json 2>/dev/null | python3 -c "
+$UNIFI local client list -o json 2>/dev/null | python3 -c "
+import sys, json, time
+try:
+    clients = json.load(sys.stdin)
+except Exception:
+    print('Could not parse clients JSON')
+    exit(0)
 import sys, json, time
 try:
     clients = json.load(sys.stdin)
@@ -742,7 +819,7 @@ if not new:
 
 echo ""
 echo "=== Blocked clients (confirm list is intentional) ==="
-unifictl local clients --blocked -o json 2>/dev/null | python3 -c "
+$UNIFI local client list --blocked -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
     blocked = json.load(sys.stdin)
@@ -758,11 +835,11 @@ if not blocked:
 
 echo ""
 echo "=== WAN status ==="
-unifictl local wan 2>/dev/null | head -20
+$UNIFI local wan get 2>/dev/null
 
 echo ""
 echo "=== Admin login events ==="
-unifictl local events -o json 2>/dev/null | python3 -c "
+$UNIFI local event list -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
     events = json.load(sys.stdin)
