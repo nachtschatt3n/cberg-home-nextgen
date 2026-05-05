@@ -1,0 +1,41 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: cloudflared-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: cloudflared.tunnel.health
+    interval: 30s
+    rules:
+    - alert: CloudflaredTunnelDown
+      annotations:
+        description: >-
+          Cloudflared has 0 active tunnel connections to Cloudflare edge.
+          External ingress is completely unreachable. Check pod logs:
+          kubectl logs -n network -l app.kubernetes.io/name=cloudflared --tail=50
+        summary: Cloudflare tunnel has no active connections
+      expr: cloudflared_tunnel_ha_connections == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: cloudflared
+        category: network
+    - alert: CloudflaredTunnelDegraded
+      annotations:
+        description: >-
+          Cloudflared has {{ $value }} active tunnel connections (expected 4).
+          External ingress may be degraded. Check pod logs:
+          kubectl logs -n network -l app.kubernetes.io/name=cloudflared --tail=50
+        summary: Cloudflare tunnel has fewer than 4 active connections
+      expr: cloudflared_tunnel_ha_connections < 4
+      for: 10m
+      labels:
+        severity: warning
+        component: cloudflared
+        category: network

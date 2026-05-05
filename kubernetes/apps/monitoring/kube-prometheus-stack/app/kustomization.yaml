@@ -28,3 +28,4 @@ resources:
   - ./superset-alerts.yaml
   - ./sure-alerts.yaml
   - ./rainbow-rescue-alerts.yaml
+  - ./cloudflared-alerts.yaml
