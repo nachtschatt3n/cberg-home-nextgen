@@ -280,3 +280,20 @@ The `ai-sre` ClusterRole grants `get/list/watch` on `secrets` across all namespa
 The personal domain name was committed in plaintext in the AdGuard Home HelmRelease bootstrapConfig `upstream_dns` block (commit `8eab2f60`, 2026-02-XX). The domain appeared in two split-horizon DNS routing entries (`[/kuma.${SECRET_DOMAIN}/]` and `[/${SECRET_DOMAIN}/]`). These lines were replaced with `${SECRET_DOMAIN}` substitutions in commit `<current>` (2026-05-04) to stop future exposure.
 
 **Why accepted:** The exposure is informational — the personal domain is not a credential and does not enable any direct attack. Git history cannot be rewritten on a public repo with potential clones. The live HelmRelease now uses `${SECRET_DOMAIN}` substitution and no longer contains the literal domain.
+
+---
+
+## AR-017 — Template Secret Files Without SOPS Path Coverage
+
+**Severity at time of discovery:** Info
+**Status:** Accepted — placeholder values only; warning comments added
+
+Two template files in the `my-software-development/_template/` directory contain `kind: Secret` scaffolding with placeholder values:
+- `kubernetes/apps/my-software-development/_template/app/secrets.example.yaml`
+- `kubernetes/apps/my-software-development/_template/app/ghcr-secret.example.yaml`
+
+These files are named `*.example.yaml`, not `*.sops.yaml`, so they are not covered by the SOPS `kubernetes/.*\.sops\.ya?ml` path rule. A developer could fill in real values and accidentally commit the `.example.yaml` file unencrypted.
+
+**Why accepted:** All current values are placeholders (`<github-personal-access-token>`, `<base64-encoded-docker-config>`, etc.) — no credentials are exposed. The files are not referenced by any Flux Kustomization and cannot be applied to the cluster. Warning comments were added to both files (2026-05-05) directing developers to copy-then-rename to `.sops.yaml` before filling in real values.
+
+**Last reviewed:** 2026-05-05
