@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.05.03`
-> Last Updated: `2026-05-03`
+> Version: `2026.05.05`
+> Last Updated: `2026-05-05`
 > Owner: `Platform`
 
 ---
@@ -248,6 +248,39 @@ Key dashboards to check during health checks:
 
 ## Alertmanager
 
+### AlertmanagerConfig Namespace Routing (Critical Design Constraint)
+
+**Problem:** Prometheus Operator's default `matcherStrategy` is `OnNamespace`. It automatically
+injects `namespace="<config-namespace>"` as a top-level matcher into every `AlertmanagerConfig`
+route. Without overriding this, alerts from all namespaces except the config's own namespace
+silently fall through to `receiver: null`.
+
+**Example of the failure:** `KubePodCrashLooping` fired for cloudflared (62 restarts over 4 days
+in the `network` namespace) and never reached Telegram because the `AlertmanagerConfig` in the
+`monitoring` namespace only routed `namespace="monitoring"` alerts.
+
+**Fix applied (2026-05-05):** `alertmanagerConfigMatcherStrategy: {type: None}` in the
+kube-prometheus-stack Helm values (`helmvalues.yaml`). This removes automatic namespace injection,
+making the `monitoring/telegram` AlertmanagerConfig route `severity=warning` alerts from ALL
+namespaces to Telegram.
+
+**Verify the fix is active:**
+```bash
+# Live config must have zero namespace= matchers at the top-level route
+kubectl exec -n monitoring alertmanager-kube-prometheus-stack-0 -c alertmanager \
+  -- cat /etc/alertmanager/config_out/alertmanager.env.yaml | grep -c 'namespace='
+# Expected: 0 (any positive number means the fix was lost during a Helm upgrade)
+
+# Alertmanager CRD must have the setting
+kubectl get alertmanager kube-prometheus-stack -n monitoring \
+  -o jsonpath='{.spec.alertmanagerConfigMatcherStrategy}'
+# Expected: {"type":"None"}
+```
+
+**If the fix is lost** (e.g., after a chart upgrade that resets the spec): re-apply via
+`helmvalues.yaml` → `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type: None`
+and reconcile.
+
 ### View Active Alerts
 
 ```bash
@@ -275,6 +308,8 @@ kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9
 | KubePersistentVolumeFillingUp | Volume nearing capacity | Expand PVC |
 | TargetDown | Scrape target unavailable | Check service/pod health |
 | Watchdog | Always firing — confirms Alertmanager works | Normal |
+| CloudflaredTunnelDown | 0 tunnel connections — QUIC/MTU regression | Check MTU=1500 in Cilium; see cilium/cilium#37529 |
+| CloudflaredTunnelDegraded | <4 tunnel connections | Check cloudflared pod logs and restart count |
 
 ---
 

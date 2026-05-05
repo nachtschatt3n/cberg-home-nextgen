@@ -788,9 +788,123 @@ if not admin_events:
 
 ---
 
+## 12. Cloudflare Tunnel Security Audit
+
+**Objective:** Verify the cloudflared tunnel is healthy, credentials are properly secured,
+exposed services are appropriately protected, and no unexpected routes exist.
+
+### 12.1 Tunnel Connectivity and Protocol
+
+```bash
+# Active connections — expect 4 (QUIC to Cloudflare Frankfurt edge nodes)
+kubectl get pods -n network -l app.kubernetes.io/name=cloudflared --no-headers
+kubectl logs -n network -l app.kubernetes.io/name=cloudflared --tail=20 \
+  | grep -E "Registered|protocol|ERR|WARN|failed"
+
+# Metrics — ha_connections should be 4, tunnel_register_success should be 4
+kubectl port-forward -n network deployment/cloudflared 8082:8080 &
+sleep 2
+curl -s http://localhost:8082/metrics | grep -E "cloudflared_tunnel_ha|cloudflared_tunnel_tunnel_reg|cloudflared_tunnel_server"
+kill %1
+```
+
+**Expected:** `cloudflared_tunnel_ha_connections 4`, 4 × `tunnel_register_success`, protocol=quic.
+
+**Severity:**
+- 🔴 Critical if `ha_connections == 0` (tunnel down, external ingress unreachable)
+- 🟡 Warning if `ha_connections < 4` (degraded, one or more edge connections lost)
+- 🟡 Warning if protocol != quic (QUIC regression — check Cilium MTU, see `docs/sops/monitoring.md` §Alertmanager)
+
+### 12.2 Tunnel Credential Security
+
+```bash
+# Credentials must be SOPS-encrypted — never plaintext
+grep -r "credentials\|AccountTag\|TunnelSecret\|TunnelID" \
+  kubernetes/apps/network/external/cloudflared/ | grep -v sops | grep -v ".example."
+# Expect: no output (all credential files are *.sops.yaml)
+
+# Verify the secret exists and is encrypted
+head -5 kubernetes/apps/network/external/cloudflared/app/secret.sops.yaml
+# Expect: sops: metadata block present (not plaintext JSON)
+```
+
+**Severity:**
+- 🔴 Critical if credentials file exists without SOPS encryption
+
+### 12.3 Exposed Services Inventory
+
+```bash
+# List all services routed through the tunnel via cloudflared configmap
+kubectl get configmap cloudflared-configmap -n network -o jsonpath='{.data.config\.yaml}' \
+  | grep -E "hostname:|service:" | sed 's/.*hostname:/hostname:/' | head -40
+```
+
+For each exposed hostname, verify it is either:
+a) Protected by Authentik forward-auth (check ingress annotations)
+b) Has its own robust authentication (open-webui, home-assistant, n8n, iobroker — see accepted risks AR-004)
+c) Intentionally public (echo-server — AR-003)
+
+```bash
+# Cross-reference: all external-facing ingresses
+kubectl get ingress -A -o json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for ing in data['items']:
+    ns = ing['metadata']['namespace']
+    name = ing['metadata']['name']
+    annotations = ing['metadata'].get('annotations', {})
+    hosts = [r.get('host','') for r in ing['spec'].get('rules', [])]
+    auth = annotations.get('nginx.ingress.kubernetes.io/auth-url', 'NONE')
+    is_external = 'external' in ing['metadata'].get('labels', {}).get('app.kubernetes.io/name', '') \
+        or 'external' in annotations.get('kubernetes.io/ingress.class', '') \
+        or 'external' in ing['spec'].get('ingressClassName', '')
+    if is_external or 'external' in name:
+        print(f'{ns}/{name}: hosts={hosts} auth={\"Authentik\" if \"authentik\" in auth else \"NONE\"}')"
+```
+
+**Severity:**
+- 🔴 Critical if a new external hostname has no auth and is not in accepted-risks
+- 🟡 Warning if an ingress uses external-nginx class but lacks Authentik and is not in AR list
+
+### 12.4 Cloudflare Configuration Version Drift
+
+```bash
+# Check cloudflared image version vs latest release
+kubectl get helmrelease cloudflared -n network -o jsonpath='{.spec.chart.spec.version}' 2>/dev/null \
+  || kubectl get deployment cloudflared -n network -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Check for Renovate PR open for cloudflared update
+gh pr list --label renovate --search "cloudflared" --json number,title,updatedAt | python3 -c "
+import sys,json; prs=json.load(sys.stdin)
+for p in prs: print(f'  PR #{p[\"number\"]}: {p[\"title\"]}')
+print('No open Renovate PRs for cloudflared' if not prs else '')"
+```
+
+**Severity:**
+- 🟡 Warning if cloudflared is more than 2 minor versions behind latest
+- 🟡 Warning if open Renovate PR for cloudflared has been pending > 14 days
+
+### 12.5 Post-Quantum Encryption Posture
+
+```bash
+# Verify TUNNEL_POST_QUANTUM=true is set (X25519MLKEM768 hybrid post-quantum KEM)
+kubectl get helmrelease cloudflared -n network -o yaml \
+  | grep -A2 "POST_QUANTUM\|TRANSPORT_PROTOCOL"
+# Expected: TUNNEL_POST_QUANTUM: "true", TUNNEL_TRANSPORT_PROTOCOL: quic
+```
+
+**Severity:**
+- 🟡 Warning if `TUNNEL_POST_QUANTUM` is not `true` (loses forward-secrecy against future quantum attacks)
+
+**Summary for section 12:**
+- 🔴 Critical if tunnel is down OR credentials unencrypted OR unexpected unauthenticated external service
+- 🟡 Warning if degraded connections, outdated version, non-QUIC protocol, or post-quantum disabled
+
+---
+
 ## Report Generation
 
-After completing all 11 sections, append the summary table to `runbooks/security-check-current.md`:
+After completing all 12 sections, append the summary table to `runbooks/security-check-current.md`:
 
 ```bash
 cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
@@ -812,6 +926,7 @@ cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
 | 9. Certificate Integrity | 🟢/🟡/🔴 | |
 | 10. Flux Security Posture | 🟢/🟡/🔴 | |
 | 11. UniFi Network Security | 🟢/🟡/🔴 | |
+| 12. Cloudflare Tunnel Security | 🟢/🟡/🔴 | |
 
 _Replace 🟢/🟡/🔴 placeholders with actual status and fill in finding counts._
 SUMMARY_EOF
