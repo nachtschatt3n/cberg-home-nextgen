@@ -17,11 +17,16 @@ spec:
     # Match all alerts from any namespace by not specifying namespace matchers
     matchers: []
     routes:
-      # Suppress Watchdog alerts (always firing, not useful for notifications)
+      # Suppress Watchdog and InfoInhibitor (synthetic kube-prometheus-stack alerts,
+      # not actionable — InfoInhibitor fires whenever any warning alert is active)
       - receiver: "null"
         matchers:
           - name: alertname
             value: Watchdog
+      - receiver: "null"
+        matchers:
+          - name: alertname
+            value: InfoInhibitor
       # Storage warning alerts - immediate first notification, then every 4 hours
       - receiver: telegram
         matchers:
