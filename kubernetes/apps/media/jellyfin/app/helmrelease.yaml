@@ -181,7 +181,7 @@ spec:
         memory: 4Gi
         gpu.intel.com/i915: 1
       limits:
-        memory: 8Gi
+        memory: 12Gi
         gpu.intel.com/i915: 1
 
     # Generous timeouts so SQLite contention during library scans
