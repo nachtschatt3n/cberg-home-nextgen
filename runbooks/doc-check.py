@@ -820,6 +820,20 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
         else:
             cprint(C.GREEN, f"  {OK} README has {category} section")
 
+    # Check README repo structure and tools sections are up to date
+    readme_checks = [
+        ("terraform/ in repo structure", ["terraform/cloudflare", "📁 terraform"]),
+        ("docs/sops/ in repo structure", ["📁 sops", "docs/sops"]),
+        ("terraform in tools list",      ["terraform"]),
+        ("Cloudflare zone management",   ["Cloudflare", "cloudflare.md", "terraform/cloudflare"]),
+    ]
+    for label, keywords in readme_checks:
+        if not any(kw in readme for kw in keywords):
+            f.add(WARNING, f"README missing: {label}")
+            cprint(C.YELLOW, f"  {WARNING} README missing: {label}")
+        else:
+            cprint(C.GREEN, f"  {OK} README has: {label}")
+
     # Check AGENTS.md (canonical) age key matches .sops.yaml
     # CLAUDE.md should be a symlink to AGENTS.md
     sops_yaml = read_file(REPO_ROOT / ".sops.yaml")
@@ -1068,6 +1082,7 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     "compliance-check.md",           # Manual checklist
                     "longhorn-name-migration.md",    # Reference procedure
                     "longhorn-name-migration-pending.md",  # Auto-generated list
+                    "media-manager.md",              # Sub-agent operator guide, no script
                 }
                 if runbook.name in MANUAL_RUNBOOKS:
                     cprint(C.GREEN, f"  {OK} {runbook.name}: manual procedure (no script expected)")

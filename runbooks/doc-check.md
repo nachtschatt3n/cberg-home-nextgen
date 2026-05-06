@@ -174,6 +174,13 @@ grep -c "| " docs/applications.md  # Row count
 - Each deployed app appears in the doc (or is explicitly excluded from user-facing docs)
 - App count in doc is close to cluster count (minor infra apps may be omitted intentionally)
 
+**Counting convention (prevents oscillation):**
+`docs/applications.md` counts **logical apps**, not git directories. Some entries share a
+directory (e.g. `intel-device-plugin-gpu`/`intel-device-plugin-npu` live under
+`intel-device-plugin/`; `elasticsearch-bootstrap` is a Job inside `elasticsearch/`;
+`media-dashboard` is part of `library-tools/`). Do not "correct" documented counts to
+match directory counts — the logical-app count is the authoritative convention.
+
 **Severity:**
 - 🔴 Critical if `docs/applications.md` is missing
 - 🟡 Warning per app deployed but not documented
@@ -277,16 +284,25 @@ SOPS_KEY=$(grep -o 'age1[a-z0-9]*' .sops.yaml | head -1)
 
 # Check namespace sections in README
 grep -E "### .*(Automation|AI|Databases|Monitoring|Office|Media)" README.md
+
+# Check repo structure and tools sections are current
+grep -c "terraform" README.md        # should be > 0
+grep -c "docs/sops" README.md        # should be > 0
+grep -c "cloudflare" README.md       # should be > 0
 ```
 
 **Expected results:**
 - README version badges match live cluster
 - Age key in CLAUDE.md matches `.sops.yaml`
 - README covers all major application categories
+- `terraform/` and `docs/sops/` appear in repo structure section
+- `terraform` listed in managed tools section
+- Cloudflare zone management section references `terraform/cloudflare` and SOP
 
 **Severity:**
 - 🟡 Warning if version badges are outdated (more than one minor version behind)
 - 🔴 Critical if age key in CLAUDE.md doesn't match `.sops.yaml`
+- 🟡 Warning if repo structure or tools sections are missing new top-level directories or tools
 
 ---
 
