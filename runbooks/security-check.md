@@ -1066,30 +1066,37 @@ kubectl get helmrelease cloudflared -n network -o yaml \
 
 ### 12.6 Cloudflare SaaS Security Audit (API)
 
-Queries the Cloudflare API to verify DNS hygiene and DNSSEC from the SaaS side.
+Queries the Cloudflare API to verify DNS hygiene, DNSSEC, and zone security settings.
 
-**Token scope note:** The `external-dns` token (`kubernetes/apps/network/external/external-dns/secret.sops.yaml`) has `DNS:Edit` scope — sufficient for §12.6a–b. Zone settings (SSL mode, security level, Bot Fight Mode) require a separate `Zone:Read` token; see §12.6c.
+**Token:** One token (`cf-security-audit-token`) covers all §12.6–12.9 checks.
+Token file: `kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml`
+Scopes: Zone → Zone Settings → Edit, Zone → Zone → Edit, Zone → DNS → Edit, Zone → Bot Management → Edit, Account → Cloudflare Tunnel → Read.
 
-**Setup:**
+Note: The `external-dns` token (`kubernetes/apps/network/external/external-dns/secret.sops.yaml`) is used by the cluster daemon only — the runbook uses the single audit token throughout.
+
+**Setup (run once — exports are used by §12.6a through §12.9):**
 
 ```bash
-CF_TOKEN=$(sops -d kubernetes/apps/network/external/external-dns/secret.sops.yaml \
+CF_AUDIT_TOKEN=$(sops -d kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml \
   | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
 
 SECRET_DOMAIN=$(sops -d kubernetes/flux/components/common/cluster-secrets.sops.yaml \
   | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['stringData']['SECRET_DOMAIN'])")
 
 ZONE_RESP=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=${SECRET_DOMAIN}" \
-  -H "Authorization: Bearer ${CF_TOKEN}")
+  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}")
 ZONE_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
-echo "Zone resolved: ${ZONE_ID:0:8}... (redacted)"
+ACCOUNT_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['account']['id'])")
+echo "Zone: ${ZONE_ID:0:8}... Account: ${ACCOUNT_ID:0:8}... (redacted)"
+
+export CF_AUDIT_TOKEN ZONE_ID ACCOUNT_ID SECRET_DOMAIN
 ```
 
 **§12.6a — DNSSEC status**
 
 ```bash
 curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dnssec" \
-  -H "Authorization: Bearer ${CF_TOKEN}" | python3 -c "
+  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 if not d.get('success'):
@@ -1106,7 +1113,7 @@ Unproxied A records expose the origin IP. All external A records should be Cloud
 
 ```bash
 curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?per_page=100&type=A,CNAME" \
-  -H "Authorization: Bearer ${CF_TOKEN}" | python3 -c "
+  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 if not d.get('success'):
@@ -1128,21 +1135,11 @@ else:
 "
 ```
 
-**§12.6c — Zone SSL/TLS and security settings (requires Zone:Read token)**
+**§12.6c — Zone SSL/TLS and security settings**
 
-Token stored at `kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml` (key: `api-token`).
-Scopes required: Zone → Zone → Read, Zone → Analytics → Read, Account → Cloudflare Tunnel → Read.
+Uses `CF_AUDIT_TOKEN`, `ZONE_ID`, and `ACCOUNT_ID` exported in the §12.6 setup block above.
 
 ```bash
-CF_AUDIT_TOKEN=$(sops -d kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
-
-# Resolve zone and account IDs from domain
-ZONE_RESP=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=${SECRET_DOMAIN}" \
-  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}")
-ZONE_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
-ACCOUNT_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['account']['id'])")
-
 # Check zone settings
 curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/settings" \
   -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" | python3 << 'PYEOF'
