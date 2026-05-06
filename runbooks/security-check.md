@@ -1130,33 +1130,159 @@ else:
 
 **§12.6c — Zone SSL/TLS and security settings (requires Zone:Read token)**
 
-The `DNS:Edit` token cannot read zone settings (returns error 9109). To enable these checks, create a read-only token:
-
-1. Cloudflare Dashboard → My Profile → API Tokens → Create Token
-2. Permissions: **Zone → Zone Settings → Read**, **Zone → Zone → Read**, **Account → Cloudflare Tunnel → Read**
-3. Restrict to your zone only
-4. Store as: `kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml` (key: `token`)
-
-Once the token exists:
+Token stored at `kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml` (key: `api-token`).
+Scopes required: Zone → Zone → Read, Zone → Analytics → Read, Account → Cloudflare Tunnel → Read.
 
 ```bash
 CF_AUDIT_TOKEN=$(sops -d kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml \
-  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['token'])")
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
 
-for setting in ssl min_tls_version always_use_https tls_1_3 security_level opportunistic_encryption; do
-  val=$(curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/settings/${setting}" \
-    -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('value','ERROR'))")
-  echo "${setting}: ${val}"
-done
-# Expected: ssl=full/strict, min_tls_version=1.2/1.3, always_use_https=on,
-#           tls_1_3=on, security_level=medium/high, opportunistic_encryption=on
+# Resolve zone and account IDs from domain
+ZONE_RESP=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=${SECRET_DOMAIN}" \
+  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}")
+ZONE_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+ACCOUNT_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['account']['id'])")
+
+# Check zone settings
+curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/settings" \
+  -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" | python3 << 'PYEOF'
+import sys, json
+settings = {s["id"]: s["value"] for s in json.load(sys.stdin)["result"]}
+checks = [
+    ("ssl",                      settings.get("ssl"),                      lambda v: v in ("full","strict"),       "🔴 Critical"),
+    ("min_tls_version",          settings.get("min_tls_version"),          lambda v: v in ("1.2","1.3"),           "🟡 Warning"),
+    ("tls_1_3",                  settings.get("tls_1_3"),                  lambda v: v in ("on","zrt"),            "🟡 Warning"),
+    ("always_use_https",         settings.get("always_use_https"),         lambda v: v == "on",                    "🟡 Warning"),
+    ("automatic_https_rewrites", settings.get("automatic_https_rewrites"), lambda v: v == "on",                    "🟡 Warning"),
+    ("security_level",           settings.get("security_level"),           lambda v: v not in ("off","essentially_off"), "🟡 Warning"),
+    ("opportunistic_encryption", settings.get("opportunistic_encryption"), lambda v: v == "on",                    "🟡 Warning"),
+]
+for name, val, ok_fn, sev in checks:
+    print(f"  {'✅' if ok_fn(val) else sev} {name}={val}")
+PYEOF
 ```
 
+**Expected:** ssl=full/strict, min_tls_version≥1.2, tls_1_3=on, always_use_https=on, security_level=medium/high.
+
 **Severity:**
-- 🔴 Critical: DNSSEC inactive, unproxied A records found, SSL=off/flexible
-- 🟡 Warning: unproxied CNAME records, TLS < 1.2, always_use_https=off, security_level=off
-- 🟢 OK: DNSSEC active, all A records proxied
+- 🔴 Critical: SSL=off/flexible
+- 🟡 Warning: TLS < 1.2, always_use_https=off, security_level=off
+
+---
+
+**§12.7 — WAF Rulesets, Security Insights, and Tunnel Inventory**
+
+```bash
+# (CF_AUDIT_TOKEN, ZONE_ID, ACCOUNT_ID must be set from §12.6c above)
+
+python3 << 'PYEOF'
+import urllib.request, json, urllib.error, os
+
+CF_TOKEN   = os.environ.get("CF_AUDIT_TOKEN","")
+ZONE_ID    = os.environ.get("ZONE_ID","")
+ACCOUNT_ID = os.environ.get("ACCOUNT_ID","")
+
+def cf_get(path):
+    req = urllib.request.Request(
+        f"https://api.cloudflare.com/client/v4{path}",
+        headers={"Authorization": f"Bearer {CF_TOKEN}"}
+    )
+    try:
+        return json.loads(urllib.request.urlopen(req).read())
+    except urllib.error.HTTPError as e:
+        return {"_error": e.code, "_body": e.read().decode()[:200]}
+
+# --- WAF Rulesets ---
+print("=== WAF Rulesets ===")
+r = cf_get(f"/zones/{ZONE_ID}/rulesets")
+if "_error" not in r:
+    for rs in r.get("result", []):
+        print(f"  ✅ [{rs.get('kind')}] {rs.get('phase')}: {rs.get('name')}")
+    # Check managed ruleset is deployed
+    phases = [rs["phase"] for rs in r.get("result",[])]
+    if "http_request_firewall_managed" not in phases:
+        print("  🔴 Critical: Cloudflare Managed Ruleset NOT deployed — WAF is off")
+    else:
+        print("  ✅ Managed WAF ruleset active")
+else:
+    print(f"  ⚠️  HTTP {r['_error']}")
+
+# --- Custom firewall rules ---
+print("\n=== WAF Custom Rules ===")
+r = cf_get(f"/zones/{ZONE_ID}/rulesets/phases/http_request_firewall_custom/entrypoint")
+if "_error" in r:
+    print("  (no custom rules configured)")
+else:
+    rules = r.get("result", {}).get("rules", [])
+    print(f"  Custom rules: {len(rules)}")
+    for rule in rules:
+        status = "✅" if rule.get("enabled", True) else "⏸ "
+        print(f"  {status} [{rule.get('action')}] {rule.get('description','(no desc)')}")
+
+# --- Rate Limiting ---
+print("\n=== Rate Limiting Rules ===")
+r = cf_get(f"/zones/{ZONE_ID}/rulesets/phases/http_ratelimit/entrypoint")
+if "_error" in r:
+    print("  🟡 Warning: No rate limiting rules configured")
+else:
+    rules = r.get("result", {}).get("rules", [])
+    print(f"  Rate limit rules: {len(rules)}")
+    for rule in rules:
+        print(f"  ✅ [{rule.get('action')}] {rule.get('description','(no desc)')}")
+
+# --- Security Insights ---
+print("\n=== Security Insights (open) ===")
+r = cf_get(f"/accounts/{ACCOUNT_ID}/security-center/insights?dismissed=false")
+if "_error" not in r:
+    issues = (r.get("result") or {}).get("issues", [])
+    # Deduplicate by issue_class
+    seen = set()
+    for i in issues:
+        ic = i.get("issue_class","?")
+        if ic in seen:
+            continue
+        seen.add(ic)
+        sev = i.get("severity","?")
+        resolve = i.get("resolve_text","").split(".")[0]
+        icon = "🔴" if sev == "High" else ("🟡" if sev == "Moderate" else "ℹ️ ")
+        print(f"  {icon} [{sev}] {ic}: {resolve}")
+else:
+    print(f"  ⚠️  HTTP {r['_error']}")
+
+# --- Tunnel Inventory ---
+print("\n=== Tunnel Inventory ===")
+r = cf_get(f"/accounts/{ACCOUNT_ID}/cfd_tunnel?is_deleted=false")
+if "_error" not in r:
+    tunnels = r.get("result", [])
+    expected_active = {"k8s-next-gen"}  # update if tunnel name changes
+    for t in tunnels:
+        name   = t.get("name","?")
+        status = t.get("status","?")
+        if status == "healthy" and name in expected_active:
+            print(f"  ✅ {name}: {status}")
+        elif status == "down":
+            print(f"  🟡 Warning: {name}: {status} (orphaned? consider deleting)")
+        else:
+            print(f"  ℹ️  {name}: {status} (verify if intentional)")
+else:
+    print(f"  ⚠️  HTTP {r['_error']}")
+
+PYEOF
+```
+
+**Note:** Run with `CF_AUDIT_TOKEN`, `ZONE_ID`, and `ACCOUNT_ID` exported in the environment.
+
+**Severity:**
+- 🔴 Critical: Managed WAF ruleset not active
+- 🟡 Warning: No rate limiting rules, orphaned tunnels (status=down), moderate security insights open
+- ℹ️  Informational: Low-severity insights (security.txt, AI labyrinth)
+
+**Expected baseline (2026-05-06):**
+- Rulesets: Normalization + Managed Free + DDoS L7 all active
+- Custom rules: none (acceptable for homelab)
+- Rate limiting: none (acceptable, Cloudflare DDoS covers volumetric attacks)
+- Active tunnel: `k8s-next-gen` (healthy)
+- Known orphaned: `k8s` (down — delete), `kuma` (healthy — verify)
 
 ---
 
@@ -1185,6 +1311,7 @@ cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
 | 10. Flux Security Posture | 🟢/🟡/🔴 | |
 | 11. UniFi Network Security | 🟢/🟡/🔴 | |
 | 12. Cloudflare Tunnel Security | 🟢/🟡/🔴 | |
+| 12.7 WAF / Insights / Tunnels | 🟢/🟡/🔴 | |
 
 _Replace 🟢/🟡/🔴 placeholders with actual status and fill in finding counts._
 SUMMARY_EOF
