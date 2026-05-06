@@ -1,5 +1,17 @@
 # Agent-Specific Guidelines
 
+## Scheduled Sweeps — Session-Only (No Cloud Schedules)
+
+Recurring health/security/version/doc/media sweeps **must run as session-local loops**, not as Anthropic cloud scheduled agents. Reasons:
+
+1. **Private cluster network**: All Kubernetes nodes are on VLAN 55 (192.168.55.0/24), unreachable from the internet. `kubectl`, `talosctl`, and Longhorn/Flux APIs are LAN-only.
+2. **Local SOPS age key**: The age key (`~/.config/sops/age/keys.txt`) used to decrypt all cluster secrets is stored on this machine only. Cloud agents cannot decrypt `.sops.yaml` files.
+3. **Local tool binaries**: `kubectl`, `talosctl`, `talhelper`, `unifictl`, `mise`, `flux` are installed locally via mise. Not available in Anthropic cloud sandboxes.
+4. **UniFi controller**: Reachable only at 192.168.30.1 (Trusted VLAN). No internet exposure.
+5. **Home Assistant / Zigbee2MQTT**: Internal services on private VLANs only.
+
+**How to schedule**: Use `/loop` → pick "This session only" when prompted. The loop fires via `CronCreate` (session-local cron, dies when the Claude session ends). Daily cadence at 8:17am local is the current setting (job `de44f77b`).
+
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
 - Lint Kubernetes manifests: `kubeconform -summary -fail-on error kubernetes/apps/`
