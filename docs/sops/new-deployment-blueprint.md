@@ -247,6 +247,8 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
    - For CIFS/SMB/NFS PVCs on a `Delete` reclaim class with `subdir: /` or any path containing user data beyond the PVC's scope: patch the PV to `Retain` first, then delete the PVC. Do not rely on the PVC's stated quota — it does not bound deletes.
    - Sub-agent dispatch (`health-check-agent`, `version-check-agent`, `security-agent`, `doc-agent`) must include the storage-safety rules in the brief if the task touches storage.
 6. Configure ingress and Homepage metadata for user-facing web apps (annotations + label).
+   - Use `className: internal` for LAN-only access; `className: external` for internet-facing apps.
+   - **External ingresses MUST include the `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"` annotation.** Without it, external-dns falls back to the internal LoadBalancer IP, which Cloudflare rejects (error 9003) for proxied records — the DNS record will never be created and the hostname will return NXDOMAIN.
 7. If the app has user login, declare the Authentik provider in the blueprint ConfigMap (`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`):
    - Forward-auth proxy providers for apps without their own auth.
    - OAuth2/OIDC providers for apps with their own user model.
@@ -631,6 +633,19 @@ WEBHOOK_URL: https://n8n.${SECRET_DOMAIN}/
 
 Our `internal` / `external` nginx ingress controllers already set `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For`, `X-Real-IP` — no ingress-side config needed.
 
+### 11. External ingress — missing `external-dns.alpha.kubernetes.io/target` annotation causes NXDOMAIN
+
+When switching an ingress from `className: internal` to `className: external`, external-dns must know to create a CNAME pointing to the Cloudflare tunnel rather than an A record pointing at the internal LoadBalancer IP. Without the target annotation, external-dns tries to register the LB IP (`192.168.55.x`) as a proxied Cloudflare A record, which Cloudflare rejects with error 9003 — "Target is not allowed for a proxied record." The DNS record is never created and the hostname returns NXDOMAIN.
+
+**Fix:** always add this annotation to every `className: external` ingress:
+
+```yaml
+annotations:
+  external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+```
+
+This makes external-dns create a proxied CNAME pointing to `external.${SECRET_DOMAIN}` (the cloudflared tunnel entry point), consistent with all other internet-facing services in the cluster.
+
 ---
 
 ## Troubleshooting
@@ -640,6 +655,7 @@ Our `internal` / `external` nginx ingress controllers already set `X-Forwarded-P
 | Push completed but app did not update | Webhook or source sync issue | Check `Receiver`, Flux events, and source-controller logs |
 | HelmRelease not ready | Invalid values/chart mismatch | `kubectl describe helmrelease {app} -n {namespace}` and fix values |
 | App running but missing from Homepage | Missing/misplaced metadata | Add Homepage annotations and label to ingress |
+| External hostname returns NXDOMAIN | Missing `external-dns.alpha.kubernetes.io/target` annotation | Add `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"` to ingress annotations — see Known Gotcha #11 |
 | PVC pending | Wrong storage class or missing static volume | Validate `longhorn`/`longhorn-static` workflow and PV binding |
 | Pods crash looping | Secret/config/runtime mismatch | Check pod events/logs and verify SOPS secrets |
 | Metrics missing | No ServiceMonitor or label mismatch | Validate ServiceMonitor selector and service labels |
@@ -788,3 +804,4 @@ Rollback success criteria:
 | `2026.04.18c` | `2026-04-18` | Add Known Gotcha #9: Python WSGI apps behind TLS-terminating ingress — enable framework ProxyFix (Flask/Django/FastAPI/Rails/n8n variants) so OAuth redirect_uri and self-referencing URLs use `https://` |
 | `2026.04.19` | `2026-04-19` | Consolidate prior 04.18/04.18b/04.18c versions into a single YYYY.MM.DD format (doc-check compliance) |
 | `2026.05.04` | `2026-05-04` | Add Known Gotcha #9: bjw-s app-template `resources` placement (top-level is a no-op → OOMKilled); update troubleshooting table; renumber WSGI gotcha to #10 |
+| `2026.05.06` | `2026-05-06` | Add Known Gotcha #11: external ingress requires `external-dns.alpha.kubernetes.io/target` annotation — without it Cloudflare rejects the A record (error 9003) and hostname returns NXDOMAIN |
