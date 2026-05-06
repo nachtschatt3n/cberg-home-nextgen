@@ -681,44 +681,125 @@ find /Users/mu/.local/share/mise/installs -name unifictl -type f | sort -V | tai
 
 **Rate limit**: The controller enforces a login-attempt rate limit (HTTP 429). Do not loop or retry on auth failure — wait for the limit to clear. The limit was raised to 200/min on 2026-05-05 to allow sweep automation.
 
-### 11.1 Device firmware versions and CVE posture
+### 11.1 Device firmware versions and CVE posture (dynamic NVD check)
+
+Version mapping: UniFi OS 4.x → Network App 8.x · OS 5.x → Network App 9.x · OS 6.x → Network App 10.x.
+The NVD query filters to CPEs `unifi_network_application` / `unifi_network_controller` — not all 40 results are relevant.
 
 ```bash
 UNIFI=/Users/mu/.local/share/mise/installs/cargo-unifictl/5.4.0/bin/unifictl
 
 echo "=== Device inventory and firmware versions ==="
 $UNIFI local device list 2>/dev/null
-# Output columns: name, model, type, ip, mac, version, state, adopted
 
 echo ""
-echo "=== CVE-2024-42025 check (UniFi Network App < 8.4.59) ==="
-$UNIFI local device list 2>/dev/null | python3 -c "
-import sys, re
-lines = sys.stdin.read()
-# UDM/UDMPRO devices: 'version' is UniFi OS version.
-# UniFi OS 4.x -> Network App 8.x; UniFi OS 5.x -> Network App 9.x
-# CVE-2024-42025 is patched in Network App >= 8.4.59 (i.e., UniFi OS >= 4.0.21 or any 5.x)
-udm = re.findall(r'(\S+)\s+(UDM\S*)\s+udm\s+\S+\s+\S+\s+(\S+)', lines)
-for name, model, ver in udm:
-    major = int(ver.split('.')[0])
-    minor_patch = ver.split('.',2)[1:3]
-    if major >= 5:
-        print(f'🟢 {name} ({model}): UniFi OS {ver} -> Network App 9.x -> NOT vulnerable to CVE-2024-42025')
-    elif major == 4:
-        patch = float('.'.join(minor_patch[:2])) if len(minor_patch) >= 2 else 0
-        if patch >= 0.21:
-            print(f'🟢 {name} ({model}): UniFi OS {ver} -> patched')
+echo "=== Dynamic CVE check via NVD API v2 ==="
+# Capture to temp file so the heredoc can own stdin
+$UNIFI local device list -o json 2>/dev/null > /tmp/_unifi_devices.json
+python3 << 'PYEOF'
+import json, urllib.request, urllib.error
+
+OS_TO_APP = {3: 7, 4: 8, 5: 9, 6: 10}
+
+try:
+    with open("/tmp/_unifi_devices.json") as f:
+        raw = json.load(f)
+    devices = raw.get("data", raw) if isinstance(raw, dict) else raw
+except Exception as e:
+    print(f"Could not parse device list JSON: {e}")
+    exit(1)
+
+udm_versions = []
+for d in devices:
+    dtype = str(d.get("type", "")).lower()
+    if "udm" in dtype or "unifiospro" in dtype:
+        udm_versions.append((d.get("name", "?"), d.get("model", "?"), d.get("version", "?")))
+
+if not udm_versions:
+    print("No UDM/UDMPRO devices found — skipping CVE check")
+    exit(0)
+
+for name, model, ver in udm_versions:
+    os_major = int(ver.split(".")[0]) if ver and ver[0].isdigit() else 0
+    app_major = OS_TO_APP.get(os_major, "?")
+    print(f"  {name} ({model}): UniFi OS {ver} → Network App ~{app_major}.x")
+
+print()
+
+try:
+    url = ("https://services.nvd.nist.gov/rest/json/cves/2.0"
+           "?keywordSearch=UniFi+Network+Application&resultsPerPage=40")
+    req = urllib.request.Request(url, headers={"User-Agent": "homelab-security-check/1.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read())
+except Exception as e:
+    print(f"⚠️  CVE check skipped — NVD unreachable: {e}")
+    exit(0)
+
+vulns = data.get("vulnerabilities", [])
+relevant = []
+seen_ids = set()
+for v in vulns:
+    cve = v.get("cve", {})
+    cve_id = cve.get("id", "")
+    if cve_id in seen_ids:
+        continue
+    for cfg in cve.get("configurations", []):
+        for node in cfg.get("nodes", []):
+            for cpe in node.get("cpeMatch", []):
+                uri = cpe.get("criteria", "")
+                if "unifi_network_application" in uri or "unifi_network_controller" in uri:
+                    metrics = cve.get("metrics", {})
+                    cvss_score, cvss_sev = None, "N/A"
+                    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                        if metrics.get(key):
+                            cvss_score = metrics[key][0]["cvssData"].get("baseScore")
+                            cvss_sev = metrics[key][0]["cvssData"].get("baseSeverity", "N/A")
+                            break
+                    desc = next(
+                        (d["value"] for d in cve.get("descriptions", []) if d["lang"] == "en"), ""
+                    )[:120]
+                    relevant.append({
+                        "id": cve_id, "score": cvss_score, "severity": cvss_sev,
+                        "vEndExcl": cpe.get("versionEndExcluding"),
+                        "vEndIncl": cpe.get("versionEndIncluding"),
+                        "desc": desc,
+                    })
+                    seen_ids.add(cve_id)
+                    break
+
+print(f"NVD: {len(vulns)} results, {len(relevant)} affect UniFi Network Application:")
+for r in relevant:
+    patch_ver = r["vEndExcl"] or r["vEndIncl"]
+    qualifier = "<" if r["vEndExcl"] else "<="
+    for name, model, ver in udm_versions:
+        os_major = int(ver.split(".")[0]) if ver and ver[0].isdigit() else 0
+        app_major = OS_TO_APP.get(os_major)
+        if app_major is None:
+            print(f"  ⚠️  {r['id']} (CVSS {r['score']}): cannot evaluate — OS {os_major}.x not in mapping")
+            continue
+        if patch_ver and patch_ver[0].isdigit():
+            patch_app_major = int(patch_ver.split(".")[0])
+            if app_major > patch_app_major:
+                status = "🟢"
+                verdict = f"safe (App {app_major}.x > affected {qualifier}{patch_ver})"
+            elif app_major < patch_app_major:
+                status = "🔴"
+                verdict = f"VULNERABLE (App {app_major}.x, affected {qualifier}{patch_ver})"
+            else:
+                status = "🟡"
+                verdict = f"same major — check minor version (App {app_major}.x, affected {qualifier}{patch_ver})"
         else:
-            print(f'🔴 {name} ({model}): UniFi OS {ver} -> POTENTIALLY VULNERABLE - upgrade to OS 4.0.21+ or 5.x')
-    else:
-        print(f'🔴 {name} ({model}): UniFi OS {ver} -> VULNERABLE - upgrade required')
-if not udm:
-    print('No UDM devices found')
-"
+            status = "🟡"
+            verdict = "no version range in NVD — manual review needed"
+        print(f"  {status} {r['id']} (CVSS {r['score']} {r['severity']}): {verdict}")
+        print(f"     {r['desc']}")
+PYEOF
+rm -f /tmp/_unifi_devices.json
 ```
 
 **Known environment (2026-05-05):**
-- `DMP-CBERG` (UDMPRO): UniFi OS **5.0.16.30692** → Network App 9.x → **Not vulnerable to CVE-2024-42025**
+- `DMP-CBERG` (UDMPRO): UniFi OS **5.0.16.30692** → Network App 9.x → all known CVEs affect versions below 9.x → 🟢
 
 ### 11.2 Known false positives
 
@@ -980,6 +1061,102 @@ kubectl get helmrelease cloudflared -n network -o yaml \
 **Summary for section 12:**
 - 🔴 Critical if tunnel is down OR credentials unencrypted OR unexpected unauthenticated external service
 - 🟡 Warning if degraded connections, outdated version, non-QUIC protocol, or post-quantum disabled
+
+---
+
+### 12.6 Cloudflare SaaS Security Audit (API)
+
+Queries the Cloudflare API to verify DNS hygiene and DNSSEC from the SaaS side.
+
+**Token scope note:** The `external-dns` token (`kubernetes/apps/network/external/external-dns/secret.sops.yaml`) has `DNS:Edit` scope — sufficient for §12.6a–b. Zone settings (SSL mode, security level, Bot Fight Mode) require a separate `Zone:Read` token; see §12.6c.
+
+**Setup:**
+
+```bash
+CF_TOKEN=$(sops -d kubernetes/apps/network/external/external-dns/secret.sops.yaml \
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
+
+SECRET_DOMAIN=$(sops -d kubernetes/flux/components/common/cluster-secrets.sops.yaml \
+  | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['stringData']['SECRET_DOMAIN'])")
+
+ZONE_RESP=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=${SECRET_DOMAIN}" \
+  -H "Authorization: Bearer ${CF_TOKEN}")
+ZONE_ID=$(echo "$ZONE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+echo "Zone resolved: ${ZONE_ID:0:8}... (redacted)"
+```
+
+**§12.6a — DNSSEC status**
+
+```bash
+curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dnssec" \
+  -H "Authorization: Bearer ${CF_TOKEN}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if not d.get('success'):
+    print('⚠️  DNSSEC query failed:', d.get('errors'))
+    sys.exit(1)
+status = d.get('result', {}).get('status', 'unknown')
+print('🟢 DNSSEC: active' if status == 'active' else f'🟡 DNSSEC: {status} (expected active)')
+"
+```
+
+**§12.6b — DNS record hygiene (unproxied A/CNAME records)**
+
+Unproxied A records expose the origin IP. All external A records should be Cloudflare-proxied unless intentionally bypassed (e.g., ACME validation TXT records, MX).
+
+```bash
+curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records?per_page=100&type=A,CNAME" \
+  -H "Authorization: Bearer ${CF_TOKEN}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if not d.get('success'):
+    print('⚠️  DNS records query failed:', d.get('errors'))
+    sys.exit(1)
+records = d.get('result', [])
+unproxied_a     = sum(1 for r in records if r['type'] == 'A'     and not r.get('proxied'))
+proxied_a       = sum(1 for r in records if r['type'] == 'A'     and     r.get('proxied'))
+proxied_cname   = sum(1 for r in records if r['type'] == 'CNAME' and     r.get('proxied'))
+unproxied_cname = sum(1 for r in records if r['type'] == 'CNAME' and not r.get('proxied'))
+print(f'DNS A/CNAME records: {len(records)} total')
+print(f'  A:     {proxied_a} proxied, {unproxied_a} unproxied')
+print(f'  CNAME: {proxied_cname} proxied, {unproxied_cname} unproxied')
+print('🔴 UNPROXIED A RECORDS — direct origin IP exposure' if unproxied_a else '🟢 All A records proxied')
+if unproxied_cname:
+    print(f'🟡 {unproxied_cname} unproxied CNAME record(s) — verify each is intentional (tunnel CNAME is OK unproxied)')
+else:
+    print('🟢 No unproxied CNAME records')
+"
+```
+
+**§12.6c — Zone SSL/TLS and security settings (requires Zone:Read token)**
+
+The `DNS:Edit` token cannot read zone settings (returns error 9109). To enable these checks, create a read-only token:
+
+1. Cloudflare Dashboard → My Profile → API Tokens → Create Token
+2. Permissions: **Zone → Zone Settings → Read**, **Zone → Zone → Read**, **Account → Cloudflare Tunnel → Read**
+3. Restrict to your zone only
+4. Store as: `kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml` (key: `token`)
+
+Once the token exists:
+
+```bash
+CF_AUDIT_TOKEN=$(sops -d kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml \
+  | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['token'])")
+
+for setting in ssl min_tls_version always_use_https tls_1_3 security_level opportunistic_encryption; do
+  val=$(curl -sf "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/settings/${setting}" \
+    -H "Authorization: Bearer ${CF_AUDIT_TOKEN}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('value','ERROR'))")
+  echo "${setting}: ${val}"
+done
+# Expected: ssl=full/strict, min_tls_version=1.2/1.3, always_use_https=on,
+#           tls_1_3=on, security_level=medium/high, opportunistic_encryption=on
+```
+
+**Severity:**
+- 🔴 Critical: DNSSEC inactive, unproxied A records found, SSL=off/flexible
+- 🟡 Warning: unproxied CNAME records, TLS < 1.2, always_use_https=off, security_level=off
+- 🟢 OK: DNSSEC active, all A records proxied
 
 ---
 
