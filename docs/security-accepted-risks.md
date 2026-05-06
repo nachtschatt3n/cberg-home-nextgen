@@ -119,8 +119,12 @@ The following services are on the external ingress class without Authentik forwa
 | andreamosteller (prod) | my-software-production | Intentionally public portfolio/website — no auth required |
 | langfuse | ai | Built-in user auth; SSO/email login required before any project/observability data access |
 | paperless-ngx | office | Built-in user auth; document library inaccessible without login |
+| nextcloud | office | Built-in user auth with MFA support, brute-force protection, and account lockout. Authentik forward-auth would conflict with CalDAV/CardDAV/WebDAV/desktop-sync clients that use Basic Auth or app passwords — those clients cannot complete an OAuth redirect flow. |
+| rainbow-rescue | my-software-production | Intentionally public PWA — offline-capable kids party hunt app with no user data or login surface. |
 
-**Why accepted:** All services with private data require authentication before access. `andreamosteller` is a public-facing website with no authentication by design. `langfuse` and `paperless-ngx` ship robust first-party auth and adding Authentik on top would double-prompt with no incremental security benefit (same rationale as AR-004).
+**Why accepted:** All services with private data require authentication before access. `andreamosteller` and `rainbow-rescue` are intentionally public-facing apps with no user data or authentication surface by design. `langfuse`, `paperless-ngx`, and `nextcloud` ship robust first-party auth and adding Authentik on top would double-prompt with no incremental security benefit (same rationale as AR-004). `nextcloud` additionally cannot use Authentik forward-auth because it would break protocol clients (CalDAV/CardDAV/WebDAV/desktop sync) that use Basic Auth or app passwords.
+
+**Last reviewed:** 2026-05-06
 
 ---
 
@@ -272,14 +276,20 @@ The `ai-sre` ClusterRole grants `get/list/watch` on `secrets` across all namespa
 
 ---
 
-## AR-016 — Personal Domain in AdGuard Home Git History
+## AR-016 — Personal Domain in Git History (AdGuard Home + Superset)
 
 **Severity at time of discovery:** Info
-**Status:** Accepted — informational exposure only; forward references replaced with `${SECRET_DOMAIN}`
+**Status:** Accepted — informational exposure only; all live manifests use `${SECRET_DOMAIN}`
 
-The personal domain name was committed in plaintext in the AdGuard Home HelmRelease bootstrapConfig `upstream_dns` block (commit `8eab2f60`, 2026-02-XX). The domain appeared in two split-horizon DNS routing entries (`[/kuma.${SECRET_DOMAIN}/]` and `[/${SECRET_DOMAIN}/]`). These lines were replaced with `${SECRET_DOMAIN}` substitutions in commit `<current>` (2026-05-04) to stop future exposure.
+The personal domain name was committed in plaintext in two separate HelmReleases, both subsequently remediated:
 
-**Why accepted:** The exposure is informational — the personal domain is not a credential and does not enable any direct attack. Git history cannot be rewritten on a public repo with potential clones. The live HelmRelease now uses `${SECRET_DOMAIN}` substitution and no longer contains the literal domain.
+1. **AdGuard Home** (`upstream_dns` block, commit `8eab2f60`, 2026-02-XX): two split-horizon DNS routing entries (`[/kuma.${SECRET_DOMAIN}/]` and `[/${SECRET_DOMAIN}/]`). Replaced with `${SECRET_DOMAIN}` substitutions in commit `<current>` (2026-05-04).
+
+2. **Superset** (OIDC metadata URL + admin email field, commits `5bd295dd` and `c3b9694d`, 2026-04-18): original deploy used the literal domain in the OIDC configuration. Fixed the same day in commit `c3b9694d`. Current file is clean.
+
+**Why accepted:** The exposure is informational — the personal domain is not a credential and does not enable any direct attack. Git history cannot be rewritten on a public repo with potential clones. All live manifests now use `${SECRET_DOMAIN}` substitution.
+
+**Last reviewed:** 2026-05-06
 
 ---
 
