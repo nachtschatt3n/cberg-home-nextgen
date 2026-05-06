@@ -259,6 +259,16 @@ external.${SECRET_DOMAIN} → ${TUNNEL_ID}.cfargotunnel.com
 - Web Application Firewall (WAF) protection
 - Automatic TLS/SSL via Cloudflare
 
+**Zone Settings Management:**
+
+Cloudflare zone settings (SSL mode, TLS version, HSTS, Bot Fight Mode, Block AI Bots) are managed as code via Terraform with state stored in a Kubernetes Secret in `flux-system`. See `docs/sops/cloudflare.md` for the full operational SOP.
+
+```bash
+cd terraform/cloudflare
+./tf plan    # preview changes
+./tf apply   # apply changes
+```
+
 ### VPN Access - UniFi WireGuard
 
 The UniFi Dream Machine Pro provides secure VPN access for remote administration and internal service access:
@@ -441,9 +451,12 @@ This Git repository contains the following directories:
 ├── 📁 bootstrap      # Talos and cluster bootstrap configuration
 ├── 📁 components     # Reusable Kustomize components
 └── 📁 flux           # Flux system configuration
+📁 terraform
+└── 📁 cloudflare     # Cloudflare zone settings managed via Terraform (kubernetes state backend)
 📁 runbooks           # Operational runbooks, their scripts, and generated outputs
 📁 tools              # Utility scripts and one-off automation helpers
 📁 docs
+├── 📁 sops           # Operational SOPs (Cloudflare, Authentik, storage, media, etc.)
 └── 📁 troubleshooting # Active investigations — deleted when resolved
 ```
 
@@ -466,6 +479,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **helm 3.17.1** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization
 - **age 1.2.1** - Encryption tool for SOPS
+- **terraform** - Cloudflare zone management (installed globally: `mise use -g terraform`)
 - **Additional utilities**: jq, yq, cloudflared, gum, kubeconform
 
 **Environment Variables:**
