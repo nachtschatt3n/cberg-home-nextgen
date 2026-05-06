@@ -20,5 +20,3 @@ spec:
   interval: 30m
   retryInterval: 1m
   timeout: 10m
-  dependsOn:
-    - name: edot-collector
