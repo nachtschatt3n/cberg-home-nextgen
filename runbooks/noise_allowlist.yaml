@@ -11,11 +11,17 @@ recurring_alerts:
     note: upstream 503 — known
 flaky_zigbee_devices:
   - "Soil sensor 3"
-  - "Shelly Entry Window Blinds"
+flaky_iot_devices:
+  - name: "Shelly Entry Window Blinds"
+    note: Shelly WiFi device intermittently unreachable — generates homeassistant.components.shelly fetch errors
 unexpected_jobs:
   - prefix: manual-
     note: ad-hoc cronjobs invoked by hand
+known_services_without_endpoints:
+  - namespace: home-automation
+    service: pallet-price-monitor
+    note: CronJob-based scraper (runs 08:00 and 20:00 Europe/Berlin); Prometheus metrics service has 0 endpoints between runs — expected
 known_es_error_spikes:
   - namespace: backup
     workload: icloud-docker-mu
-    note: HTTP 410/530 from Apple CDN for expired iCloud photo URLs — benign sync failures
+    note: HTTP 410/530/503 from Apple CDN for expired/unavailable iCloud file URLs — benign sync failures
