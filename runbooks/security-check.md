@@ -730,6 +730,10 @@ if not udm:
 **OpenVPN Server** (`remote-user: active 0`):
 - OpenVPN server is enabled (192.168.3.1/28) with 0 active remote users — expected when no one is currently connected. Not a finding.
 
+**USA-Peer VLAN client** (192.168.60.58, MAC `00:bf:af:96:62:30`, OUI: Hui Zhou Gaoshengda Technology):
+- This is the USA-side device for the `DreamRouterMostellerOK` SDWAN mesh peer tunnel. Confirmed 2026-05-06. Do NOT escalate as unknown/rogue device.
+- If a second or different unrecognised device appears on 192.168.60.0/24, investigate.
+
 ### 11.3 IDS/IPS, firewall, devices, and admin events
 
 ```bash
