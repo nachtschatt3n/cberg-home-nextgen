@@ -318,3 +318,22 @@ The `KubeClientCertificateExpiration` Prometheus alert fires against all three a
 **Security agent note:** Do not surface this as a finding. Verify actual cert expiry directly via talosctl when assessing certificate health.
 
 **Last reviewed:** 2026-05-05
+
+---
+
+## AR-019 — CVE-2024-42025 UniFi Network Application (Not Applicable)
+
+**Severity at time of discovery:** Info (version scanner false positive)
+**Status:** Accepted — not applicable to this installation
+
+CVE-2024-42025 (CVSS 7.8) is a command-injection privilege escalation in UniFi Network Application versions prior to 8.4.59. Automated version scanners flag this because the UniFi controller's Network Application version is not directly exposed via the `unifictl` API — the `version` field returns the UniFi OS version, which cannot be trivially compared to the Network Application versioning scheme.
+
+**Why not applicable:** The gateway `DMP-CBERG` (UDMPRO) runs UniFi OS **5.0.16.30692** (verified 2026-05-05 via `unifictl local device list`). UniFi OS 5.x ships with Network Application 9.x, which is well above the 8.4.59 patched version. The CVE is not present.
+
+**Mapping:**
+- UniFi OS 4.x → Network App 8.x (vulnerable if < 4.0.21 / Network App 8.4.59)
+- UniFi OS 5.x → Network App 9.x → **not vulnerable**
+
+**Version agent note:** Do not escalate CVE-2024-42025 as a finding. The automated check in `runbooks/security-check.md` §11.1 evaluates the OS version and confirms patched status automatically.
+
+**Last reviewed:** 2026-05-06
