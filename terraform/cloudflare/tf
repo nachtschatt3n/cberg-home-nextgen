@@ -5,7 +5,7 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 SOPS=$(command -v sops 2>/dev/null || echo "$HOME/.local/share/mise/shims/sops")
 
 export TF_VAR_cloudflare_api_token=$(
-  "$SOPS" -d "$REPO_ROOT/kubernetes/apps/network/external/cloudflared/cf-terraform-token.sops.yaml" \
+  "$SOPS" -d "$REPO_ROOT/kubernetes/apps/network/external/cloudflared/cf-security-audit-token.sops.yaml" \
   | python3 -c "import sys,yaml; print(yaml.safe_load(sys.stdin)['stringData']['api-token'])")
 
 # Resolve zone_id from domain name (provider v5 data source requires zone_id directly)
@@ -19,4 +19,8 @@ export TF_VAR_zone_id=$(
   | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
 
 export KUBECONFIG="$HOME/.kube/config"
-exec terraform "$@"
+TF=$(command -v terraform 2>/dev/null \
+  || command -v ~/.local/share/mise/shims/terraform 2>/dev/null \
+  || mise exec -- which terraform 2>/dev/null \
+  || { echo "terraform not found — install with: mise use -g terraform"; exit 1; })
+exec "$TF" "$@"
