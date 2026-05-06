@@ -1,4 +1,9 @@
-# ── Settings that need fixing ─────────────────────────────────────────────────
+# DNS records are intentionally NOT managed here.
+# external-dns (running in the cluster, managed via Flux) owns all CNAME/A records
+# and writes them directly to Cloudflare. Adding cloudflare_record resources here
+# would cause conflicts and duplicate records.
+
+# ── Settings to fix ───────────────────────────────────────────────────────────
 
 resource "cloudflare_zone_setting" "ssl" {
   zone_id    = var.zone_id
@@ -32,76 +37,8 @@ resource "cloudflare_zone_setting" "security_header" {
   }
 }
 
-# ── Settings already correct — documented to prevent drift ────────────────────
-
-resource "cloudflare_zone_setting" "tls_1_3" {
-  zone_id    = var.zone_id
-  setting_id = "tls_1_3"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "automatic_https_rewrites" {
-  zone_id    = var.zone_id
-  setting_id = "automatic_https_rewrites"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "opportunistic_encryption" {
-  zone_id    = var.zone_id
-  setting_id = "opportunistic_encryption"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "security_level" {
-  zone_id    = var.zone_id
-  setting_id = "security_level"
-  value      = "medium"
-}
-
-resource "cloudflare_zone_setting" "http2" {
-  zone_id    = var.zone_id
-  setting_id = "http2"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "http3" {
-  zone_id    = var.zone_id
-  setting_id = "http3"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "ipv6" {
-  zone_id    = var.zone_id
-  setting_id = "ipv6"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "brotli" {
-  zone_id    = var.zone_id
-  setting_id = "brotli"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "websockets" {
-  zone_id    = var.zone_id
-  setting_id = "websockets"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "browser_check" {
-  zone_id    = var.zone_id
-  setting_id = "browser_check"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "email_obfuscation" {
-  zone_id    = var.zone_id
-  setting_id = "email_obfuscation"
-  value      = "on"
-}
-
-resource "cloudflare_zone_setting" "zero_rtt" {
-  zone_id    = var.zone_id
-  setting_id = "0rtt"
-  value      = "off"
-}
+# ── Settings writable on free plan — documented to prevent drift ──────────────
+# (http2, http3, ipv6, brotli, websockets, browser_check, email_obfuscation,
+#  0rtt, tls_1_3, opportunistic_encryption, security_level all return 403 when
+#  patched via API on the free plan — correct values are already set in the
+#  dashboard and are verified by §12.6c of the security runbook.)

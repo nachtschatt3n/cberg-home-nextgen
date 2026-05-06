@@ -18,7 +18,8 @@ export TF_VAR_zone_id=$(
     -H "Authorization: Bearer $TF_VAR_cloudflare_api_token" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
 
-export KUBECONFIG="$HOME/.kube/config"
+export KUBECONFIG="$REPO_ROOT/kubeconfig"
+export KUBE_CONFIG_PATH="$REPO_ROOT/kubeconfig"
 TF=$(command -v terraform 2>/dev/null \
   || command -v ~/.local/share/mise/shims/terraform 2>/dev/null \
   || mise exec -- which terraform 2>/dev/null \
