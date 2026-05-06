@@ -347,3 +347,18 @@ CVE-2024-42025 (CVSS 7.8) is a command-injection privilege escalation in UniFi N
 **Version agent note:** Do not escalate CVE-2024-42025 as a finding. The automated check in `runbooks/security-check.md` §11.1 evaluates the OS version and confirms patched status automatically.
 
 **Last reviewed:** 2026-05-06
+
+---
+
+## AR-020 — Cloudflare Account MFA Not Enabled
+
+**Severity at time of discovery:** Warning (Cloudflare Security Center — Moderate)
+**Status:** Accepted
+
+The Cloudflare account does not have two-factor authentication (TOTP or hardware key) enabled. The Cloudflare Security Center flags this as a Moderate risk.
+
+**Why accepted:** This is a personal homelab account. The account password is stored in a password manager. All API access uses scoped tokens (not the global API key). Even if the account were compromised, Terraform-managed zone settings would be detected as drift on the next security sweep (§12.8). The blast radius is limited to a single personal zone.
+
+**Residual risk:** An account takeover could modify DNS records, disable Cloudflare proxying, or reconfigure tunnels. These changes would be detected within 4 hours by the session-local security loop.
+
+**Last reviewed:** 2026-05-06
