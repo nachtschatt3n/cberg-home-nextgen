@@ -1286,6 +1286,27 @@ PYEOF
 
 ---
 
+## §12.8 — Terraform Cloudflare Drift Detection
+
+Detects configuration drift between the Terraform-managed Cloudflare zone settings and the current live state.
+
+**Prerequisites:** `terraform` binary installed locally, Kubernetes backend accessible (`~/.kube/config`), SOPS age key at `~/.config/sops/age/keys.txt`.
+
+```bash
+cd terraform/cloudflare
+./tf plan -detailed-exitcode -out=/dev/null 2>&1
+# Exit 0 = no drift ✅   exit 2 = drift detected 🔴   exit 1 = error ⚠️
+```
+
+**Severity:**
+- 🔴 Critical: Exit code 2 — live zone settings differ from spec (e.g. SSL reverted to flexible)
+- 🟡 Warning: Exit code 1 — state backend unreachable or provider auth issue
+- 🟢 OK: Exit code 0 — all managed settings match
+
+**Note:** Run `./tf init` first if `.terraform/` directory is absent (e.g. on a new machine).
+
+---
+
 ## Report Generation
 
 After completing all 12 sections, append the summary table to `runbooks/security-check-current.md`:
@@ -1312,6 +1333,7 @@ cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
 | 11. UniFi Network Security | 🟢/🟡/🔴 | |
 | 12. Cloudflare Tunnel Security | 🟢/🟡/🔴 | |
 | 12.7 WAF / Insights / Tunnels | 🟢/🟡/🔴 | |
+| 12.8 Terraform Cloudflare Drift | 🟢/🟡/🔴 | |
 
 _Replace 🟢/🟡/🔴 placeholders with actual status and fill in finding counts._
 SUMMARY_EOF
