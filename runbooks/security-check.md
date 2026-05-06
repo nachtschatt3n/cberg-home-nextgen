@@ -1282,7 +1282,14 @@ PYEOF
 - Custom rules: none (acceptable for homelab)
 - Rate limiting: none (acceptable, Cloudflare DDoS covers volumetric attacks)
 - Active tunnel: `k8s-next-gen` (healthy)
-- Known orphaned: `k8s` (down — delete), `kuma` (healthy — verify)
+- `kuma` tunnel: healthy, runs on the uptime-kuma deployment (separate from this cluster)
+- `k8s` tunnel: deleted
+
+**security.txt note:** CF Security Insights flags `security.txt` as a low-severity finding. This is an accepted risk for a personal homelab — security.txt is intended for organisations receiving external vulnerability reports. To verify presence manually from an internet-connected machine:
+```bash
+curl -I https://[DOMAIN]/.well-known/security.txt
+# 200 = present, 404 = absent (accepted for homelab)
+```
 
 ---
 
@@ -1304,6 +1311,72 @@ cd terraform/cloudflare
 - 🟢 OK: Exit code 0 — all managed settings match
 
 **Note:** Run `./tf init` first if `.terraform/` directory is absent (e.g. on a new machine).
+
+---
+
+## §12.9 — Cloudflare Traffic & Threat Overview
+
+Reviews 7-day traffic volume and threat counts via GraphQL. Flags anomalies (sudden threat spikes, unusual bandwidth). WAF firewall event breakdowns require a paid plan and are not available on the free tier.
+
+**Prerequisites:** `CF_AUDIT_TOKEN` and `ZONE_ID` exported (from §12.6c above).
+
+```bash
+# CF_AUDIT_TOKEN and ZONE_ID must be set from §12.6c
+python3 - <<'PYEOF'
+import urllib.request, json, os, datetime
+
+token   = os.environ["CF_AUDIT_TOKEN"]
+zone_id = os.environ["ZONE_ID"]
+
+query = """
+{ viewer { zones(filter:{zoneTag:"%s"}) {
+  httpRequests1dGroups(limit:7, orderBy:[date_DESC],
+    filter:{date_geq:"%s"}) {
+      dimensions { date }
+      sum { requests threats cachedRequests bytes }
+  }
+} } }
+""" % (zone_id, (datetime.date.today() - datetime.timedelta(days=7)).isoformat())
+
+req = urllib.request.Request(
+    "https://api.cloudflare.com/client/v4/graphql",
+    data=json.dumps({"query": query}).encode(),
+    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    method="POST"
+)
+with urllib.request.urlopen(req) as r:
+    d = json.load(r)
+
+groups = d["data"]["viewer"]["zones"][0]["httpRequests1dGroups"]
+print(f"{'Date':<12} {'Requests':>10} {'Threats':>8} {'Threat%':>8} {'Cache%':>7} {'MB':>8}")
+total_req = total_thr = 0
+for g in groups:
+    s = g["sum"]
+    req = s.get("requests", 0)
+    thr = s.get("threats", 0)
+    cac = s.get("cachedRequests", 0)
+    byt = s.get("bytes", 0)
+    tpct = round(thr / req * 100, 1) if req else 0
+    cpct = round(cac / req * 100) if req else 0
+    flag = " 🔴" if tpct > 5 else (" 🟡" if thr > 50 else "")
+    print(f"{g['dimensions']['date']:<12} {req:>10} {thr:>8} {tpct:>7}%{flag:3} {cpct:>6}% {byt//1048576:>8}")
+    total_req += req; total_thr += thr
+
+print(f"\n7-day totals: {total_req} requests, {total_thr} threats "
+      f"({round(total_thr/total_req*100,1) if total_req else 0}% threat rate)")
+PYEOF
+```
+
+**Severity:**
+- 🔴 Critical: Daily threat rate > 5% of all requests (active attack)
+- 🟡 Warning: Daily threat count > 50, or sudden bandwidth spike (>10× baseline)
+- 🟢 OK: Threat rate < 1%, traffic consistent with homelab baseline (~1k–2k req/day)
+
+**Expected baseline (2026-05-06):**
+- ~900–2700 requests/day, 5–31 threats/day (~1–2% threat rate)
+- Cache hit rate ~0–1% (expected — homelab serves dynamic content, no static CDN caching configured)
+- Bandwidth: ~5–470 MB/day depending on media streaming activity
+- WAF firewall event breakdown requires paid plan — not available on free tier
 
 ---
 
@@ -1334,6 +1407,7 @@ cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
 | 12. Cloudflare Tunnel Security | 🟢/🟡/🔴 | |
 | 12.7 WAF / Insights / Tunnels | 🟢/🟡/🔴 | |
 | 12.8 Terraform Cloudflare Drift | 🟢/🟡/🔴 | |
+| 12.9 CF Traffic & Threat Overview | 🟢/🟡/🔴 | |
 
 _Replace 🟢/🟡/🔴 placeholders with actual status and fill in finding counts._
 SUMMARY_EOF
