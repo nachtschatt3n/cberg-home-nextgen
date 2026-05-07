@@ -22,7 +22,7 @@ spec:
         node-type: master
     spec:
       initContainers:
-        - name: init-wazuh-etc
+        - name: init-wazuh-dirs
           image: busybox:1.37.0
           resources:
             requests:
@@ -35,12 +35,22 @@ spec:
             - sh
             - -c
             - |
-              mkdir -p /var/ossec/etc/shared/default
-              touch /var/ossec/etc/shared/ar.conf
-              chown -R 1000:1000 /var/ossec/etc
+              # Create files/dirs Wazuh expects but doesn't auto-create when PVCs are mounted empty.
+              # wazuh user inside container is uid=999 gid=999.
+              mkdir -p /wazuh-etc/shared/default
+              touch /wazuh-etc/shared/ar.conf
+              chown -R 999:999 /wazuh-etc
+              chmod 750 /wazuh-etc /wazuh-etc/shared /wazuh-etc/shared/default
+              chmod 640 /wazuh-etc/shared/ar.conf
+
+              mkdir -p /wazuh-logs/archives /wazuh-logs/alerts /wazuh-logs/firewall /wazuh-logs/api
+              chown -R 999:999 /wazuh-logs
+              chmod -R 750 /wazuh-logs
           volumeMounts:
             - name: wazuh-manager-etc
-              mountPath: /var/ossec/etc
+              mountPath: /wazuh-etc
+            - name: wazuh-manager-logs
+              mountPath: /wazuh-logs
       containers:
         - name: wazuh-manager
           image: wazuh/wazuh-manager:4.14.5
