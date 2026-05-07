@@ -1,7 +1,7 @@
 # Security Accepted Risks
 
 > Risks reviewed and explicitly accepted. Do not surface these in automated audits as actionable items.
-> Last reviewed: 2026-05-04
+> Last reviewed: 2026-05-07
 
 ---
 
@@ -362,3 +362,35 @@ The Cloudflare account does not have two-factor authentication (TOTP or hardware
 **Residual risk:** An account takeover could modify DNS records, disable Cloudflare proxying, or reconfigure tunnels. These changes would be detected within 4 hours by the session-local security loop.
 
 **Last reviewed:** 2026-05-06
+
+---
+
+## AR-021 — Longhorn ClusterRole Wildcard on RBAC Resources
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — upstream chart default
+
+`ClusterRole/longhorn-role` grants `verbs: ["*"]` on `clusterrolebindings` and `clusterroles` resources. This allows the `longhorn-service-account` ServiceAccount to create or modify ClusterRoleBindings and ClusterRoles cluster-wide.
+
+**Why accepted:** This is the default RBAC configuration shipped by the upstream Longhorn v1.11.x Helm chart. It is required for Longhorn's support bundle generation and CSI dynamic provisioning workflows. There is no external exposure path — the Longhorn controller runs inside the cluster and is not network-accessible from outside. Compromise would require first breaching the `storage` namespace.
+
+**Security agent note:** Do not surface `ClusterRole/longhorn-role` wildcard RBAC as a finding. Verify against upstream Longhorn chart RBAC at next major Longhorn upgrade to confirm if the permission has been narrowed.
+
+**Last reviewed:** 2026-05-07
+
+---
+
+## AR-022 — Longhorn Support Bundle Permanent cluster-admin Binding
+
+**Severity at time of discovery:** Warning
+**Status:** Accepted — upstream chart default
+
+`ClusterRoleBinding/longhorn-support-bundle` permanently binds `ServiceAccount/longhorn-support-bundle` (namespace: `storage`) to the `cluster-admin` ClusterRole. No support-bundle pods are actively running; the binding is dormant.
+
+**Why accepted:** This is the default configuration shipped by the upstream Longhorn v1.11.x Helm chart. The `longhorn-support-bundle` SA is used on-demand when generating a support bundle for Longhorn diagnostics. The permanent binding is intentional upstream design so that support bundles can be triggered without manual RBAC changes. There is no external exposure path. Compromise would require first breaching the `storage` namespace.
+
+**Residual risk:** If the `storage` namespace were compromised, this SA could be used to escalate to full cluster-admin. Longhorn's own RBAC (AR-021) already carries similar risk.
+
+**Security agent note:** Do not surface `ClusterRoleBinding/longhorn-support-bundle` as a finding. Verify at next major Longhorn upgrade whether upstream has narrowed this binding.
+
+**Last reviewed:** 2026-05-07
