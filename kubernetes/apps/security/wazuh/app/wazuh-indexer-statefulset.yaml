@@ -1,5 +1,9 @@
 ---
-# Wazuh Indexer — 3-replica OpenSearch-based indexer for Wazuh events
+# Wazuh Indexer — single-node OpenSearch for homelab event volume.
+# Multi-node clustering is overkill at our event rate (3 agents + UniFi syslog)
+# and required ${HOSTNAME} substitution in opensearch.yml that the OpenSearch
+# YAML parser does NOT do natively, leaving node.name literal "${HOSTNAME}"
+# on every replica → cluster_manager_not_discovered_exception.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -9,7 +13,7 @@ spec:
   selector:
     matchLabels:
       app: wazuh-indexer
-  replicas: 3
+  replicas: 1
   serviceName: wazuh-indexer
   podManagementPolicy: Parallel
   updateStrategy:
@@ -137,21 +141,15 @@ metadata:
 data:
   opensearch.yml: |
     network.host: "0.0.0.0"
-    node.name: "${HOSTNAME}"
-
+    node.name: wazuh-indexer
     cluster.name: wazuh-indexer-cluster
-    cluster.initial_master_nodes:
-      - wazuh-indexer-0
-      - wazuh-indexer-1
-      - wazuh-indexer-2
-    discovery.seed_hosts:
-      - wazuh-indexer-0.wazuh-indexer
-      - wazuh-indexer-1.wazuh-indexer
-      - wazuh-indexer-2.wazuh-indexer
+    discovery.type: single-node
 
     plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
     plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
     plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
+    plugins.security.ssl.transport.enforce_hostname_verification: false
+    plugins.security.ssl.transport.resolve_hostname: false
     plugins.security.ssl.http.enabled: true
     plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/config/certs/indexer.pem
     plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/config/certs/indexer-key.pem
