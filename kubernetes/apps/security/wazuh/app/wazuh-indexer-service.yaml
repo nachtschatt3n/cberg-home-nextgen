@@ -1,0 +1,21 @@
+---
+# Headless service for StatefulSet DNS (indexer-0.wazuh-indexer, etc.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-indexer
+  namespace: security
+  labels:
+    app: wazuh-indexer
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: wazuh-indexer
+  ports:
+    - name: indexer-rest
+      port: 9200
+      targetPort: 9200
+    - name: indexer-nodes
+      port: 9300
+      targetPort: 9300

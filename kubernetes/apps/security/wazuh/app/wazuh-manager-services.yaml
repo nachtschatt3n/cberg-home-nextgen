@@ -1,0 +1,86 @@
+---
+# Headless service for manager clustering (wazuh-manager-master-0.wazuh-cluster)
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-cluster
+  namespace: security
+  labels:
+    app: wazuh-manager
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: wazuh-manager
+  ports:
+    - name: cluster
+      port: 1516
+      targetPort: 1516
+---
+# ClusterIP service for agent communications and API access
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-manager-master
+  namespace: security
+  labels:
+    app: wazuh-manager
+    node-type: master
+spec:
+  type: ClusterIP
+  selector:
+    app: wazuh-manager
+    node-type: master
+  ports:
+    - name: agent-events
+      port: 1514
+      targetPort: 1514
+    - name: agent-enroll
+      port: 1515
+      targetPort: 1515
+    - name: api
+      port: 55000
+      targetPort: 55000
+---
+# ClusterIP service for agent communications (worker)
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-manager-worker
+  namespace: security
+  labels:
+    app: wazuh-manager
+    node-type: worker
+spec:
+  type: ClusterIP
+  selector:
+    app: wazuh-manager
+    node-type: worker
+  ports:
+    - name: agent-events
+      port: 1514
+      targetPort: 1514
+---
+# LoadBalancer service for UniFi syslog CEF over UDP/514
+# IP 192.168.55.27 — reserved for Wazuh UniFi syslog receiver
+apiVersion: v1
+kind: Service
+metadata:
+  name: wazuh-syslog-unifi
+  namespace: security
+  labels:
+    app: wazuh-manager
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: "192.168.55.27"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 192.168.55.27
+  externalTrafficPolicy: Local
+  selector:
+    app: wazuh-manager
+    node-type: master
+  ports:
+    - name: syslog-udp
+      port: 514
+      targetPort: 514
+      protocol: UDP

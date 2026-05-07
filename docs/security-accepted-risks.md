@@ -394,3 +394,28 @@ The Cloudflare account does not have two-factor authentication (TOTP or hardware
 **Security agent note:** Do not surface `ClusterRoleBinding/longhorn-support-bundle` as a finding. Verify at next major Longhorn upgrade whether upstream has narrowed this binding.
 
 **Last reviewed:** 2026-05-07
+
+---
+
+## AR-023 — Wazuh Agent DaemonSet Runs Privileged with Host Root Mount
+
+**Severity:** High
+**Status:** Accepted — required for host-level security monitoring
+
+The `wazuh-agent` DaemonSet runs with `securityContext.privileged: true` and mounts the host filesystem at `/host` (read-only) and `/var/log` (read-only). This is the standard deployment pattern for a host-based intrusion detection and file integrity monitoring (FIM) agent.
+
+**Justification:**
+- Wazuh agents require privileged access to read kernel-level structures for rootcheck and FIM.
+- `/var/log` read-only mount is needed to collect system logs from host processes.
+- `/` host mount (read-only, `mountPropagation: HostToContainer`) is required for FIM baseline scanning of system files.
+- Without these mounts the agent cannot perform its core security function.
+
+**Mitigations:**
+- Both host mounts are `readOnly: true` — no write access to host filesystem.
+- DaemonSet is deployed to the `security` namespace with PSA `privileged` mode (scoped to that namespace).
+- Agent image is official `wazuh/wazuh-agent:4.11.2` from Wazuh's Docker Hub.
+- Agent connects only to internal cluster services (wazuh-manager-master on port 1514/1515).
+
+**Security agent note:** Do not surface `DaemonSet/wazuh-agent privileged container` or `hostPath /` as findings. The read-only constraint and narrow network access are the accepted mitigations. Review at next major Wazuh upgrade (5.x).
+
+**Last reviewed:** 2026-05-07

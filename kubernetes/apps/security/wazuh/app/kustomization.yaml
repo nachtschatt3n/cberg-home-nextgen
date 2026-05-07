@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: security
+resources:
+  - namespace.yaml
+  - wazuh-indexer-statefulset.yaml
+  - wazuh-indexer-service.yaml
+  - wazuh-manager-statefulset.yaml
+  - wazuh-manager-services.yaml
+  - wazuh-dashboard-deployment.yaml
+  - wazuh-dashboard-service.yaml
+  - wazuh-agents-daemonset.yaml
+  - wazuh-config-configmap.yaml
+  - unifi-decoder-configmap.yaml
+  - secret.sops.yaml
+  - certs-secret.sops.yaml
+  - ingress.yaml
+  - authentik-outpost-ingress.yaml

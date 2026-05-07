@@ -1,0 +1,107 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: wazuh-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: wazuh.pods.health
+      interval: 30s
+      rules:
+        - alert: WazuhIndexerPodNotReady
+          annotations:
+            description: >-
+              Wazuh Indexer pod {{ $labels.pod }} has been not ready for more than 5 minutes.
+              Event storage and search may be unavailable.
+            summary: Wazuh Indexer pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="security", pod=~"wazuh-indexer-.*", condition="true"}
+              unless on(namespace, pod)
+              kube_pod_owner{owner_kind="Job"}
+            ) == 0
+          for: 5m
+          labels:
+            category: security
+            component: wazuh-indexer
+            severity: critical
+        - alert: WazuhManagerPodNotReady
+          annotations:
+            description: >-
+              Wazuh Manager pod {{ $labels.pod }} has been not ready for more than 5 minutes.
+              Agent communications, event processing, and the REST API may be unavailable.
+            summary: Wazuh Manager pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="security", pod=~"wazuh-manager-.*", condition="true"}
+              unless on(namespace, pod)
+              kube_pod_owner{owner_kind="Job"}
+            ) == 0
+          for: 5m
+          labels:
+            category: security
+            component: wazuh-manager
+            severity: critical
+        - alert: WazuhDashboardDown
+          annotations:
+            description: >-
+              Wazuh Dashboard pod {{ $labels.pod }} has been not ready for more than 5 minutes.
+              The SIEM web UI is unavailable.
+            summary: Wazuh Dashboard pod {{ $labels.pod }} is not ready
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="security", pod=~"wazuh-dashboard-.*", condition="true"}
+              unless on(namespace, pod)
+              kube_pod_owner{owner_kind="Job"}
+            ) == 0
+          for: 5m
+          labels:
+            category: security
+            component: wazuh-dashboard
+            severity: critical
+        - alert: WazuhAgentDaemonSetNotReady
+          annotations:
+            description: >-
+              Wazuh Agent DaemonSet has {{ $value }} pods not ready (desired:
+              {{ with query "kube_daemonset_status_desired_number_scheduled{namespace=\"security\",daemonset=\"wazuh-agent\"}" }}{{ . | first | value }}{{ end }}).
+              Node-level log collection and FIM may be missing on some nodes.
+            summary: Wazuh Agent DaemonSet has pods not ready
+          expr: |
+            kube_daemonset_status_desired_number_scheduled{namespace="security", daemonset="wazuh-agent"}
+            -
+            kube_daemonset_status_number_ready{namespace="security", daemonset="wazuh-agent"} > 0
+          for: 5m
+          labels:
+            category: security
+            component: wazuh-agent
+            severity: critical
+        - alert: WazuhPodCrashLooping
+          annotations:
+            description: >-
+              Wazuh pod {{ $labels.pod }} has restarted {{ $value | printf "%.0f" }} times
+              in the last 15 minutes.
+            summary: Wazuh pod {{ $labels.pod }} is crash looping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="security", pod=~"wazuh-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            category: security
+            component: wazuh
+            severity: critical
+        - alert: WazuhPodRestarted
+          annotations:
+            description: >-
+              Wazuh pod {{ $labels.pod }} has restarted at least once in the last 15 minutes.
+            summary: Wazuh pod {{ $labels.pod }} restarted
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="security", pod=~"wazuh-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            category: security
+            component: wazuh
+            severity: warning

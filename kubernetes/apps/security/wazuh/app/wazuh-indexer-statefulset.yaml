@@ -1,0 +1,166 @@
+---
+# Wazuh Indexer — 3-replica OpenSearch-based indexer for Wazuh events
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: wazuh-indexer
+  namespace: security
+spec:
+  selector:
+    matchLabels:
+      app: wazuh-indexer
+  replicas: 3
+  serviceName: wazuh-indexer
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: wazuh-indexer
+    spec:
+      initContainers:
+        - name: volume-mount-hack
+          image: busybox:1.37.0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - sh
+            - -c
+            - chown -R 1000:1000 /var/lib/wazuh-indexer
+          volumeMounts:
+            - name: wazuh-indexer-data
+              mountPath: /var/lib/wazuh-indexer
+        - name: increase-vm-max-map
+          image: busybox:1.37.0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - sysctl
+            - -w
+            - vm.max_map_count=262144
+          securityContext:
+            privileged: true
+      containers:
+        - name: wazuh-indexer
+          image: wazuh/wazuh-indexer:4.11.2
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          env:
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms2g -Xmx2g"
+            - name: OPENSEARCH_PATH_CONF
+              value: /usr/share/wazuh-indexer/config
+          ports:
+            - name: indexer-rest
+              containerPort: 9200
+            - name: indexer-nodes
+              containerPort: 9300
+          volumeMounts:
+            - name: wazuh-indexer-data
+              mountPath: /var/lib/wazuh-indexer
+            - name: wazuh-indexer-config
+              mountPath: /usr/share/wazuh-indexer/config/opensearch.yml
+              subPath: opensearch.yml
+              readOnly: true
+            - name: wazuh-certs
+              mountPath: /usr/share/wazuh-indexer/certs/root-ca.pem
+              subPath: root-ca.pem
+              readOnly: true
+            - name: wazuh-certs
+              mountPath: /usr/share/wazuh-indexer/certs/node.pem
+              subPath: indexer.pem
+              readOnly: true
+            - name: wazuh-certs
+              mountPath: /usr/share/wazuh-indexer/certs/node-key.pem
+              subPath: indexer-key.pem
+              readOnly: true
+            - name: wazuh-certs
+              mountPath: /usr/share/wazuh-indexer/certs/admin.pem
+              subPath: admin.pem
+              readOnly: true
+            - name: wazuh-certs
+              mountPath: /usr/share/wazuh-indexer/certs/admin-key.pem
+              subPath: admin-key.pem
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 9200
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 6
+      volumes:
+        - name: wazuh-indexer-config
+          configMap:
+            name: wazuh-indexer-config
+        - name: wazuh-certs
+          secret:
+            secretName: wazuh-certs
+  volumeClaimTemplates:
+    - metadata:
+        name: wazuh-indexer-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 50Gi
+---
+# ConfigMap for OpenSearch configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wazuh-indexer-config
+  namespace: security
+data:
+  opensearch.yml: |
+    network.host: "0.0.0.0"
+    node.name: "${HOSTNAME}"
+
+    cluster.name: wazuh-indexer-cluster
+    cluster.initial_master_nodes:
+      - wazuh-indexer-0
+      - wazuh-indexer-1
+      - wazuh-indexer-2
+    discovery.seed_hosts:
+      - wazuh-indexer-0.wazuh-indexer
+      - wazuh-indexer-1.wazuh-indexer
+      - wazuh-indexer-2.wazuh-indexer
+
+    plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/certs/node.pem
+    plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/certs/node-key.pem
+    plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/certs/root-ca.pem
+    plugins.security.ssl.http.enabled: true
+    plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/certs/node.pem
+    plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/certs/node-key.pem
+    plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/certs/root-ca.pem
+    plugins.security.nodes_dn:
+      - CN=wazuh-indexer,O=cberg-home,C=DE
+    plugins.security.authcz.admin_dn:
+      - CN=admin,O=cberg-home,C=DE
+    plugins.security.allow_default_init_securityindex: true
+    plugins.security.restapi.roles_enabled:
+      - all_access
+      - security_rest_api_access

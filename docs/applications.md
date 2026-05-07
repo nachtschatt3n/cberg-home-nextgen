@@ -214,6 +214,18 @@
 
 ---
 
+## Security (`security`)
+
+| App | Purpose | Ingress | Homepage Group |
+|-----|---------|---------|---------------|
+| wazuh-indexer | 3-replica OpenSearch-based event store for Wazuh SIEM | None | — |
+| wazuh-manager-master | Wazuh Manager master node — agent enrollment, event processing, REST API | None | — |
+| wazuh-manager-worker | Wazuh Manager worker node — agent communications | None | — |
+| wazuh-dashboard | Wazuh SIEM web UI | Internal + Authentik | Security |
+| wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node for FIM and log collection | None | — |
+
+---
+
 ## Backup (`backup`)
 
 | App | Purpose | Ingress | Homepage Group |

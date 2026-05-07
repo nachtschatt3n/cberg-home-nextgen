@@ -29,3 +29,4 @@ resources:
   - ./sure-alerts.yaml
   - ./rainbow-rescue-alerts.yaml
   - ./cloudflared-alerts.yaml
+  - ./wazuh-alerts.yaml
