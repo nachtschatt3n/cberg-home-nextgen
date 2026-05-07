@@ -50,7 +50,7 @@ data:
           <enabled>yes</enabled>
           <manager_address>wazuh-manager-master.security.svc.cluster.local</manager_address>
           <port>1515</port>
-          <groups>kubernetes</groups>
+          <!-- No <groups> set — agents land in the default group. -->
         </enrollment>
       </client>
 
