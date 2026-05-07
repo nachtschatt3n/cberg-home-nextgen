@@ -50,9 +50,9 @@ spec:
             - name: SERVER_SSL_ENABLED
               value: "true"
             - name: SERVER_SSL_CERTIFICATE
-              value: /usr/share/wazuh-dashboard/certs/dashboard.pem
+              value: /etc/wazuh-dashboard/certs/dashboard.pem
             - name: SERVER_SSL_KEY
-              value: /usr/share/wazuh-dashboard/certs/dashboard-key.pem
+              value: /etc/wazuh-dashboard/certs/dashboard-key.pem
             - name: OPENSEARCH_SSL_VERIFICATIONMODE
               value: certificate
           ports:
@@ -60,15 +60,15 @@ spec:
               containerPort: 5601
           volumeMounts:
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-dashboard/certs/root-ca.pem
+              mountPath: /etc/wazuh-dashboard/certs/root-ca.pem
               subPath: root-ca.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-dashboard/certs/dashboard.pem
+              mountPath: /etc/wazuh-dashboard/certs/dashboard.pem
               subPath: dashboard.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-dashboard/certs/dashboard-key.pem
+              mountPath: /etc/wazuh-dashboard/certs/dashboard-key.pem
               subPath: dashboard-key.pem
               readOnly: true
           readinessProbe:
