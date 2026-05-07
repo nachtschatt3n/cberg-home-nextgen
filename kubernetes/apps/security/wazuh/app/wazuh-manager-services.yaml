@@ -42,25 +42,6 @@ spec:
       port: 55000
       targetPort: 55000
 ---
-# ClusterIP service for agent communications (worker)
-apiVersion: v1
-kind: Service
-metadata:
-  name: wazuh-manager-worker
-  namespace: security
-  labels:
-    app: wazuh-manager
-    node-type: worker
-spec:
-  type: ClusterIP
-  selector:
-    app: wazuh-manager
-    node-type: worker
-  ports:
-    - name: agent-events
-      port: 1514
-      targetPort: 1514
----
 # LoadBalancer service for UniFi syslog CEF over UDP/514
 # IP 192.168.55.27 — reserved for Wazuh UniFi syslog receiver
 apiVersion: v1

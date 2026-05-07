@@ -84,19 +84,19 @@ data:
         </ssl>
       </indexer>
 
-      <!-- Cluster configuration — master node -->
+      <!-- Cluster disabled — single-node manager for homelab. Re-enable if scaling agent connections. -->
       <cluster>
         <name>wazuh</name>
         <node_name>master-node</node_name>
         <node_type>master</node_type>
-        <key>CLUSTER_KEY_PLACEHOLDER</key>
+        <key>00000000000000000000000000000000</key>
         <port>1516</port>
         <bind_addr>0.0.0.0</bind_addr>
         <nodes>
           <node>wazuh-manager-master-0.wazuh-cluster</node>
         </nodes>
         <hidden>no</hidden>
-        <disabled>no</disabled>
+        <disabled>yes</disabled>
       </cluster>
 
       <!-- File integrity monitoring -->
@@ -150,67 +150,5 @@ data:
         <index-status>yes</index-status>
         <feed-update-interval>60m</feed-update-interval>
       </vulnerability-detection>
-
-    </ossec_config>
-
-  ossec-worker.conf: |
-    <ossec_config>
-      <global>
-        <jsonout_output>yes</jsonout_output>
-        <alerts_log>yes</alerts_log>
-        <logall>no</logall>
-        <logall_json>no</logall_json>
-        <email_notification>no</email_notification>
-        <agents_disconnection_time>10m</agents_disconnection_time>
-        <agents_disconnection_alert_time>0</agents_disconnection_alert_time>
-      </global>
-
-      <alerts>
-        <log_alert_level>3</log_alert_level>
-      </alerts>
-
-      <logging>
-        <log_format>plain</log_format>
-      </logging>
-
-      <!-- Agent communications listener -->
-      <remote>
-        <connection>secure</connection>
-        <port>1514</port>
-        <protocol>tcp</protocol>
-        <queue_size>131072</queue_size>
-      </remote>
-
-      <!-- OpenSearch / Wazuh Indexer integration -->
-      <indexer>
-        <enabled>yes</enabled>
-        <hosts>
-          <host>https://wazuh-indexer-0.wazuh-indexer:9200</host>
-          <host>https://wazuh-indexer-1.wazuh-indexer:9200</host>
-          <host>https://wazuh-indexer-2.wazuh-indexer:9200</host>
-        </hosts>
-        <ssl>
-          <certificate_authorities>
-            <ca>/etc/ssl/root-ca.pem</ca>
-          </certificate_authorities>
-          <certificate>/etc/ssl/filebeat.pem</certificate>
-          <key>/etc/ssl/filebeat-key.pem</key>
-        </ssl>
-      </indexer>
-
-      <!-- Cluster configuration — worker node -->
-      <cluster>
-        <name>wazuh</name>
-        <node_name>worker-node</node_name>
-        <node_type>worker</node_type>
-        <key>CLUSTER_KEY_PLACEHOLDER</key>
-        <port>1516</port>
-        <bind_addr>0.0.0.0</bind_addr>
-        <nodes>
-          <node>wazuh-manager-master-0.wazuh-cluster</node>
-        </nodes>
-        <hidden>no</hidden>
-        <disabled>no</disabled>
-      </cluster>
 
     </ossec_config>
