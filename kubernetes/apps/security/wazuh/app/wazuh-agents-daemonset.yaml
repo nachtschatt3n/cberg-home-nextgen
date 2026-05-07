@@ -38,21 +38,35 @@ spec:
           securityContext:
             privileged: true
           env:
-            - name: WAZUH_MANAGER
+            # The 4.14.5 image's 0-wazuh-init reads WAZUH_MANAGER_SERVER (not
+            # WAZUH_MANAGER) and only sed-substitutes CHANGE_* placeholders
+            # in the default ossec.conf — placeholders that no longer exist.
+            # We bypass that by mounting a complete agent.conf below; these
+            # vars stay set as belt-and-braces in case the image ever fixes
+            # the substitution path.
+            - name: WAZUH_MANAGER_SERVER
               value: "wazuh-manager-master.security.svc.cluster.local"
             - name: WAZUH_MANAGER_PORT
               value: "1514"
-            - name: WAZUH_AGENT_GROUP
-              value: "kubernetes"
             - name: WAZUH_REGISTRATION_SERVER
               value: "wazuh-manager-master.security.svc.cluster.local"
             - name: WAZUH_REGISTRATION_PORT
               value: "1515"
+            - name: WAZUH_AGENT_GROUP
+              value: "kubernetes"
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
           volumeMounts:
+            # mount_files in the image's 0-wazuh-init copies everything under
+            # /wazuh-config-mount/* into /var/ossec/* (preserving structure).
+            # Mounting agent.conf at .../etc/ossec.conf overwrites the empty
+            # default with our pre-populated config.
+            - name: agent-config
+              mountPath: /wazuh-config-mount/etc/ossec.conf
+              subPath: agent.conf
+              readOnly: true
             - name: var-log
               mountPath: /var/log
               readOnly: true
@@ -61,6 +75,12 @@ spec:
               readOnly: true
               mountPropagation: HostToContainer
       volumes:
+        - name: agent-config
+          configMap:
+            name: wazuh-config
+            items:
+              - key: agent.conf
+                path: agent.conf
         - name: var-log
           hostPath:
             path: /var/log

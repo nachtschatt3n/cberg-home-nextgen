@@ -27,6 +27,99 @@ data:
     chmod 750 /var/ossec/etc/shared /var/ossec/etc/shared/default
     chmod 640 /var/ossec/etc/shared/ar.conf
 
+  # Wazuh agent ossec.conf — fully-populated with manager addresses.
+  # The 4.14.5 wazuh/wazuh-agent image's 0-wazuh-init script sed-substitutes
+  # CHANGE_MANAGER_IP placeholders, but the default config in the image has
+  # empty <address></address> with no placeholder, so the substitution
+  # never fires and wazuh-agentd crashes with "Invalid server address: ''".
+  # We bypass the env-var path by mounting a complete agent.conf.
+  agent.conf: |
+    <ossec_config>
+      <client>
+        <server>
+          <address>wazuh-manager-master.security.svc.cluster.local</address>
+          <port>1514</port>
+          <protocol>tcp</protocol>
+        </server>
+        <config-profile>amzn, amzn2023</config-profile>
+        <notify_time>20</notify_time>
+        <time-reconnect>60</time-reconnect>
+        <auto_restart>yes</auto_restart>
+        <crypto_method>aes</crypto_method>
+        <enrollment>
+          <enabled>yes</enabled>
+          <manager_address>wazuh-manager-master.security.svc.cluster.local</manager_address>
+          <port>1515</port>
+          <groups>kubernetes</groups>
+        </enrollment>
+      </client>
+
+      <client_buffer>
+        <disabled>no</disabled>
+        <queue_size>5000</queue_size>
+        <events_per_second>500</events_per_second>
+      </client_buffer>
+
+      <rootcheck>
+        <disabled>no</disabled>
+        <check_files>yes</check_files>
+        <check_trojans>yes</check_trojans>
+        <check_dev>yes</check_dev>
+        <check_sys>yes</check_sys>
+        <check_pids>yes</check_pids>
+        <check_ports>yes</check_ports>
+        <check_if>yes</check_if>
+        <frequency>43200</frequency>
+        <skip_nfs>yes</skip_nfs>
+      </rootcheck>
+
+      <wodle name="syscollector">
+        <disabled>no</disabled>
+        <interval>1h</interval>
+        <scan_on_start>yes</scan_on_start>
+        <hardware>yes</hardware>
+        <os>yes</os>
+        <network>yes</network>
+        <packages>yes</packages>
+        <ports all="no">yes</ports>
+        <processes>yes</processes>
+      </wodle>
+
+      <syscheck>
+        <disabled>no</disabled>
+        <frequency>43200</frequency>
+        <scan_on_start>yes</scan_on_start>
+        <directories check_all="yes" realtime="yes">/etc,/usr/bin,/usr/sbin</directories>
+        <directories check_all="yes" realtime="yes">/bin,/sbin,/boot</directories>
+        <ignore>/etc/mtab</ignore>
+        <ignore>/etc/random-seed</ignore>
+        <ignore>/etc/adjtime</ignore>
+        <skip_nfs>yes</skip_nfs>
+        <skip_dev>yes</skip_dev>
+        <skip_proc>yes</skip_proc>
+        <skip_sys>yes</skip_sys>
+      </syscheck>
+
+      <localfile>
+        <log_format>journald</log_format>
+        <location>journald</location>
+      </localfile>
+
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/var/log/messages</location>
+      </localfile>
+
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/var/log/secure</location>
+      </localfile>
+
+      <active-response>
+        <disabled>no</disabled>
+      </active-response>
+    </ossec_config>
+
   master.conf: |
     <ossec_config>
       <global>
