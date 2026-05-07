@@ -21,6 +21,26 @@ spec:
         app: wazuh-manager
         node-type: master
     spec:
+      initContainers:
+        - name: init-wazuh-etc
+          image: busybox:1.37.0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /var/ossec/etc/shared/default
+              touch /var/ossec/etc/shared/ar.conf
+              chown -R 1000:1000 /var/ossec/etc
+          volumeMounts:
+            - name: wazuh-manager-etc
+              mountPath: /var/ossec/etc
       containers:
         - name: wazuh-manager
           image: wazuh/wazuh-manager:4.14.5
@@ -185,6 +205,26 @@ spec:
         app: wazuh-manager
         node-type: worker
     spec:
+      initContainers:
+        - name: init-wazuh-etc
+          image: busybox:1.37.0
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /var/ossec/etc/shared/default
+              touch /var/ossec/etc/shared/ar.conf
+              chown -R 1000:1000 /var/ossec/etc
+          volumeMounts:
+            - name: wazuh-manager-etc
+              mountPath: /var/ossec/etc
       containers:
         - name: wazuh-manager
           image: wazuh/wazuh-manager:4.14.5
