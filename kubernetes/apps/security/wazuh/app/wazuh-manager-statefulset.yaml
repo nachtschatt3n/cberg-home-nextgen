@@ -30,6 +30,13 @@ spec:
         - name: wazuh-config
           configMap:
             name: wazuh-config
+        - name: wazuh-entrypoint-scripts
+          configMap:
+            name: wazuh-config
+            defaultMode: 0755
+            items:
+              - key: 00-init-shared.sh
+                path: 00-init-shared.sh
         - name: unifi-decoders
           configMap:
             name: unifi-decoder
@@ -106,6 +113,13 @@ spec:
             - name: wazuh-config
               mountPath: /wazuh-config-mount/etc/ossec.conf
               subPath: master.conf
+              readOnly: true
+            # Entrypoint scripts run by the image's 2-manager init step,
+            # before `wazuh-control start`. We use this to create
+            # /var/ossec/etc/shared/ which the data_tmp tree doesn't supply.
+            - name: wazuh-entrypoint-scripts
+              mountPath: /entrypoint-scripts/00-init-shared.sh
+              subPath: 00-init-shared.sh
               readOnly: true
             # Indexer/Filebeat TLS material
             - name: wazuh-certs

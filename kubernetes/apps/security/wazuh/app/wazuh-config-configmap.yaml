@@ -10,6 +10,23 @@ metadata:
   name: wazuh-config
   namespace: security
 data:
+  # The wazuh-manager 4.14.5 image's `mount_permanent_data` step does NOT
+  # populate /var/ossec/etc/shared/ (the official data_tmp tree only has
+  # the top-level etc/ files). Without it, wazuh-analysisd fails on first
+  # start with "Could not open file 'etc/shared/ar.conf'".
+  #
+  # The image's 2-manager init runs every script in /entrypoint-scripts/
+  # before `wazuh-control start`. Mount this script there to create the
+  # missing dirs + an empty ar.conf right after data_tmp mount completes.
+  00-init-shared.sh: |
+    #!/bin/bash
+    set -e
+    mkdir -p /var/ossec/etc/shared/default
+    touch /var/ossec/etc/shared/ar.conf
+    chown -R wazuh:wazuh /var/ossec/etc/shared
+    chmod 750 /var/ossec/etc/shared /var/ossec/etc/shared/default
+    chmod 640 /var/ossec/etc/shared/ar.conf
+
   master.conf: |
     <ossec_config>
       <global>
