@@ -25,10 +25,6 @@ spec:
               cpu: 500m
               memory: 1Gi
           env:
-            - name: OPENSEARCH_HOSTS
-              value: "https://wazuh-indexer:9200"
-            - name: WAZUH_API_URL
-              value: "https://wazuh-manager-master:55000"
             - name: API_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -39,40 +35,26 @@ spec:
                 secretKeyRef:
                   name: wazuh-secret
                   key: API_PASSWORD
-            - name: DASHBOARD_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: wazuh-secret
-                  key: DASHBOARD_USERNAME
-            - name: DASHBOARD_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: wazuh-secret
-                  key: DASHBOARD_PASSWORD
-            - name: SERVER_SSL_ENABLED
-              value: "true"
-            - name: SERVER_SSL_CERTIFICATE
-              value: /etc/wazuh-dashboard/certs/dashboard.pem
-            - name: SERVER_SSL_KEY
-              value: /etc/wazuh-dashboard/certs/dashboard-key.pem
-            - name: OPENSEARCH_SSL_VERIFICATIONMODE
-              value: certificate
-            - name: OPENSEARCH_SSL_CERTIFICATEAUTHORITIES
-              value: "[/etc/wazuh-dashboard/certs/root-ca.pem]"
+            - name: WAZUH_API_URL
+              value: "https://wazuh-manager-master:55000"
           ports:
             - name: dashboard
               containerPort: 5601
           volumeMounts:
+            - name: wazuh-secret
+              mountPath: /usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+              subPath: opensearch_dashboards.yml
+              readOnly: true
             - name: wazuh-certs
-              mountPath: /etc/wazuh-dashboard/certs/root-ca.pem
+              mountPath: /usr/share/wazuh-dashboard/certs/root-ca.pem
               subPath: root-ca.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /etc/wazuh-dashboard/certs/dashboard.pem
+              mountPath: /usr/share/wazuh-dashboard/certs/dashboard.pem
               subPath: dashboard.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /etc/wazuh-dashboard/certs/dashboard-key.pem
+              mountPath: /usr/share/wazuh-dashboard/certs/dashboard-key.pem
               subPath: dashboard-key.pem
               readOnly: true
           readinessProbe:
@@ -88,6 +70,9 @@ spec:
             periodSeconds: 30
             failureThreshold: 6
       volumes:
+        - name: wazuh-secret
+          secret:
+            secretName: wazuh-secret
         - name: wazuh-certs
           secret:
             secretName: wazuh-certs
