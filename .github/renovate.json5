@@ -69,6 +69,22 @@
       }
     },
     {
+      // Wazuh manager/indexer/dashboard/agent must move in lockstep — mixed
+      // versions don't speak the same wire protocol and crash on startup.
+      "description": ["Wazuh Group — manager/indexer/dashboard/agent in lockstep"],
+      "groupName": "Wazuh",
+      "matchPackageNames": [
+        "wazuh/wazuh-manager",
+        "wazuh/wazuh-indexer",
+        "wazuh/wazuh-dashboard",
+        "wazuh/wazuh-agent"
+      ],
+      "matchDatasources": ["docker"],
+      "group": {
+        "commitMessageTopic": "{{{groupName}}} group"
+      }
+    },
+    {
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["major"],
       "commitMessagePrefix": "feat(container)!: ",

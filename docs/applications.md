@@ -218,11 +218,10 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| wazuh-indexer | 3-replica OpenSearch-based event store for Wazuh SIEM | None | — |
-| wazuh-manager-master | Wazuh Manager master node — agent enrollment, event processing, REST API | None | — |
-| wazuh-manager-worker | Wazuh Manager worker node — agent communications | None | — |
-| wazuh-dashboard | Wazuh SIEM web UI | Internal + Authentik | Security |
-| wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node for FIM and log collection | None | — |
+| wazuh-indexer | 3-replica OpenSearch-based event store for Wazuh SIEM (10Gi each, longhorn) | None | — |
+| wazuh-manager-master | Single-node Wazuh Manager — agent enrollment (1515), comms (1514), REST API (55000), UniFi syslog/CEF (UDP 514, LB IP 192.168.55.27). 10Gi single PVC with subPath layout. Cluster mode disabled. | None | — |
+| wazuh-dashboard | Wazuh SIEM web UI (4.14.5) | Internal + Authentik forward-auth | Security |
+| wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node for FIM and log collection (4.14.5, AR-023) | None | — |
 
 ---
 
