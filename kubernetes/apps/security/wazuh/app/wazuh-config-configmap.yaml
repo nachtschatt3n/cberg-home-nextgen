@@ -1,14 +1,16 @@
 ---
-# ossec.conf for master and worker nodes
-# Cluster key is read from environment (injected via initContainer in production).
-# Here we provide the base config; Wazuh container entrypoint merges /wazuh-config-mount/.
+# ossec.conf for the Wazuh manager (single-node, homelab)
+# Adapted from upstream wazuh-kubernetes v4.14.1 master.conf with:
+#   - cluster disabled (single-node, no scaling needed)
+#   - UniFi syslog listener on UDP/514
+#   - indexer hosts pointing at our internal wazuh-indexer service
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: wazuh-config
   namespace: security
 data:
-  ossec.conf: |
+  master.conf: |
     <ossec_config>
       <global>
         <jsonout_output>yes</jsonout_output>
@@ -17,10 +19,11 @@ data:
         <logall_json>no</logall_json>
         <email_notification>no</email_notification>
         <smtp_server>smtp.example.wazuh.com</smtp_server>
-        <email_from>wazuh@example.wazuh.com</email_from>
+        <email_from>ossecm@example.wazuh.com</email_from>
         <email_to>recipient@example.wazuh.com</email_to>
         <email_maxperhour>12</email_maxperhour>
         <email_log_source>alerts.log</email_log_source>
+        <queue_size>131072</queue_size>
         <agents_disconnection_time>10m</agents_disconnection_time>
         <agents_disconnection_alert_time>0</agents_disconnection_alert_time>
       </global>
@@ -34,7 +37,15 @@ data:
         <log_format>plain</log_format>
       </logging>
 
-      <!-- Syslog listener for UniFi CEF events -->
+      <!-- Agent communications listener (TCP/1514) -->
+      <remote>
+        <connection>secure</connection>
+        <port>1514</port>
+        <protocol>tcp</protocol>
+        <queue_size>131072</queue_size>
+      </remote>
+
+      <!-- UniFi CEF syslog listener (UDP/514) -->
       <remote>
         <connection>syslog</connection>
         <port>514</port>
@@ -43,17 +54,10 @@ data:
         <allowed-ips>192.168.55.0/24</allowed-ips>
       </remote>
 
-      <!-- Agent communications listener -->
-      <remote>
-        <connection>secure</connection>
-        <port>1514</port>
-        <protocol>tcp</protocol>
-        <queue_size>131072</queue_size>
-      </remote>
-
-      <!-- Rootcheck -->
+      <!-- Policy monitoring -->
       <rootcheck>
         <disabled>no</disabled>
+        <check_unixaudit>yes</check_unixaudit>
         <check_files>yes</check_files>
         <check_trojans>yes</check_trojans>
         <check_dev>yes</check_dev>
@@ -62,42 +66,43 @@ data:
         <check_ports>yes</check_ports>
         <check_if>yes</check_if>
         <frequency>43200</frequency>
-        <rootkit_files>etc/shared/rootkit_files.txt</rootkit_files>
-        <rootkit_trojans>etc/shared/rootkit_trojans.txt</rootkit_trojans>
+        <rootkit_files>/var/ossec/etc/rootcheck/rootkit_files.txt</rootkit_files>
+        <rootkit_trojans>/var/ossec/etc/rootcheck/rootkit_trojans.txt</rootkit_trojans>
         <skip_nfs>yes</skip_nfs>
       </rootcheck>
 
-      <!-- OpenSearch / Wazuh Indexer integration -->
+      <!-- System inventory -->
+      <wodle name="syscollector">
+        <disabled>no</disabled>
+        <interval>1h</interval>
+        <scan_on_start>yes</scan_on_start>
+        <hardware>yes</hardware>
+        <os>yes</os>
+        <network>yes</network>
+        <packages>yes</packages>
+        <ports all="yes">yes</ports>
+        <processes>yes</processes>
+      </wodle>
+
+      <vulnerability-detection>
+        <enabled>yes</enabled>
+        <index-status>yes</index-status>
+        <feed-update-interval>60m</feed-update-interval>
+      </vulnerability-detection>
+
       <indexer>
         <enabled>yes</enabled>
         <hosts>
-          <host>https://wazuh-indexer-0.wazuh-indexer:9200</host>
-          <host>https://wazuh-indexer-1.wazuh-indexer:9200</host>
-          <host>https://wazuh-indexer-2.wazuh-indexer:9200</host>
+          <host>https://wazuh-indexer:9200</host>
         </hosts>
         <ssl>
           <certificate_authorities>
             <ca>/etc/ssl/root-ca.pem</ca>
           </certificate_authorities>
           <certificate>/etc/ssl/filebeat.pem</certificate>
-          <key>/etc/ssl/filebeat-key.pem</key>
+          <key>/etc/ssl/filebeat.key</key>
         </ssl>
       </indexer>
-
-      <!-- Cluster disabled — single-node manager for homelab. Re-enable if scaling agent connections. -->
-      <cluster>
-        <name>wazuh</name>
-        <node_name>master-node</node_name>
-        <node_type>master</node_type>
-        <key>00000000000000000000000000000000</key>
-        <port>1516</port>
-        <bind_addr>0.0.0.0</bind_addr>
-        <nodes>
-          <node>wazuh-manager-master-0.wazuh-cluster</node>
-        </nodes>
-        <hidden>no</hidden>
-        <disabled>yes</disabled>
-      </cluster>
 
       <!-- File integrity monitoring -->
       <syscheck>
@@ -105,10 +110,16 @@ data:
         <frequency>43200</frequency>
         <scan_on_start>yes</scan_on_start>
         <alert_new_files>yes</alert_new_files>
+        <auto_ignore frequency="10" timeframe="3600">no</auto_ignore>
+
+        <directories check_all="yes">/etc,/usr/bin,/usr/sbin</directories>
+        <directories check_all="yes">/bin,/sbin,/boot</directories>
+
         <ignore>/etc/mtab</ignore>
         <ignore>/etc/hosts.deny</ignore>
         <ignore>/etc/mail/statistics</ignore>
         <ignore>/etc/random-seed</ignore>
+        <ignore>/etc/random.seed</ignore>
         <ignore>/etc/adjtime</ignore>
         <ignore>/etc/httpd/logs</ignore>
         <ignore>/etc/utmpx</ignore>
@@ -116,21 +127,57 @@ data:
         <ignore>/etc/cups/certs</ignore>
         <ignore>/etc/dumpdates</ignore>
         <ignore>/etc/svc/volatile</ignore>
+        <ignore>/sys/kernel/security</ignore>
+        <ignore>/sys/kernel/debug</ignore>
+
         <nodiff>/etc/ssl/private.key</nodiff>
+
         <skip_nfs>yes</skip_nfs>
-        <skip_dev>yes</skip_dev>
-        <skip_proc>yes</skip_proc>
-        <skip_sys>yes</skip_sys>
+        <remove_old_diff>yes</remove_old_diff>
+        <restart_audit>yes</restart_audit>
       </syscheck>
 
-      <!-- Active response -->
+      <!-- Active response whitelist -->
       <global>
         <white_list>127.0.0.1</white_list>
         <white_list>^localhost.localdomain$</white_list>
         <white_list>192.168.55.0/24</white_list>
       </global>
 
-      <!-- Localfiles / log collection from host -->
+      <command>
+        <name>disable-account</name>
+        <executable>disable-account.sh</executable>
+        <expect>user</expect>
+        <timeout_allowed>yes</timeout_allowed>
+      </command>
+
+      <command>
+        <name>restart-ossec</name>
+        <executable>restart-ossec.sh</executable>
+        <expect></expect>
+      </command>
+
+      <command>
+        <name>firewall-drop</name>
+        <executable>firewall-drop</executable>
+        <timeout_allowed>yes</timeout_allowed>
+      </command>
+
+      <command>
+        <name>host-deny</name>
+        <executable>host-deny.sh</executable>
+        <expect>srcip</expect>
+        <timeout_allowed>yes</timeout_allowed>
+      </command>
+
+      <command>
+        <name>route-null</name>
+        <executable>route-null.sh</executable>
+        <expect>srcip</expect>
+        <timeout_allowed>yes</timeout_allowed>
+      </command>
+
+      <!-- Localfiles / log collection -->
       <localfile>
         <log_format>command</log_format>
         <command>df -P</command>
@@ -144,11 +191,77 @@ data:
         <frequency>360</frequency>
       </localfile>
 
-      <!-- Vulnerability detection -->
-      <vulnerability-detection>
-        <enabled>yes</enabled>
-        <index-status>yes</index-status>
-        <feed-update-interval>60m</feed-update-interval>
-      </vulnerability-detection>
+      <localfile>
+        <log_format>full_command</log_format>
+        <command>last -n 20</command>
+        <frequency>360</frequency>
+      </localfile>
 
+      <ruleset>
+        <!-- Default ruleset -->
+        <decoder_dir>ruleset/decoders</decoder_dir>
+        <rule_dir>ruleset/rules</rule_dir>
+        <rule_exclude>0215-policy_rules.xml</rule_exclude>
+        <list>etc/lists/audit-keys</list>
+        <list>etc/lists/amazon/aws-sources</list>
+        <list>etc/lists/amazon/aws-eventnames</list>
+        <list>etc/lists/malicious-ioc/malicious-ip</list>
+        <list>etc/lists/malicious-ioc/malicious-domains</list>
+        <list>etc/lists/malicious-ioc/malware-hashes</list>
+
+        <!-- User-defined ruleset (UniFi decoders/rules mounted here) -->
+        <decoder_dir>etc/decoders</decoder_dir>
+        <rule_dir>etc/rules</rule_dir>
+      </ruleset>
+
+      <rule_test>
+        <enabled>yes</enabled>
+        <threads>1</threads>
+        <max_sessions>64</max_sessions>
+        <session_timeout>15m</session_timeout>
+      </rule_test>
+
+      <!-- Agent enrollment service (REQUIRED for wazuh-authd to start) -->
+      <auth>
+        <disabled>no</disabled>
+        <port>1515</port>
+        <use_source_ip>no</use_source_ip>
+        <force>
+          <enabled>yes</enabled>
+          <key_mismatch>yes</key_mismatch>
+          <disconnected_time enabled="yes">1h</disconnected_time>
+          <after_registration_time>1h</after_registration_time>
+        </force>
+        <purge>no</purge>
+        <use_password>no</use_password>
+        <ciphers>HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH</ciphers>
+        <ssl_verify_host>no</ssl_verify_host>
+        <ssl_manager_cert>/var/ossec/etc/sslmanager.cert</ssl_manager_cert>
+        <ssl_manager_key>/var/ossec/etc/sslmanager.key</ssl_manager_key>
+        <ssl_auto_negotiate>no</ssl_auto_negotiate>
+      </auth>
+
+      <!-- Cluster disabled — single-node manager for homelab.
+           Re-enable later by setting <disabled>no</disabled> and injecting a
+           valid 32-char hex key from a SOPS secret via WAZUH_CLUSTER_KEY env. -->
+      <cluster>
+        <name>wazuh</name>
+        <node_name>wazuh-manager-master</node_name>
+        <node_type>master</node_type>
+        <key>00000000000000000000000000000000</key>
+        <port>1516</port>
+        <bind_addr>0.0.0.0</bind_addr>
+        <nodes>
+          <node>wazuh-manager-master-0.wazuh-cluster</node>
+        </nodes>
+        <hidden>no</hidden>
+        <disabled>yes</disabled>
+      </cluster>
+    </ossec_config>
+
+    <ossec_config>
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/var/ossec/logs/active-responses.log</location>
+      </localfile>
     </ossec_config>

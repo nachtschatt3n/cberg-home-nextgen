@@ -1,5 +1,8 @@
 ---
-# Wazuh Manager Master — single replica, primary node for agent enrollment and clustering
+# Wazuh Manager — single-node, adapted from upstream wazuh-kubernetes v4.14.1.
+# Single PVC with subPath mounts: idiomatic K8s pattern that lets the image's
+# entrypoint create all needed subdirs on first start. fsGroup=999 matches the
+# wazuh user inside the 4.14.5 container (uid=999, gid=999).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -12,7 +15,7 @@ spec:
       node-type: master
   replicas: 1
   serviceName: wazuh-cluster
-  podManagementPolicy: OrderedReady
+  podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
   template:
@@ -21,36 +24,27 @@ spec:
         app: wazuh-manager
         node-type: master
     spec:
-      initContainers:
-        - name: init-wazuh-dirs
-          image: busybox:1.37.0
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-          command:
-            - sh
-            - -c
-            - |
-              # Create files/dirs Wazuh expects but doesn't auto-create when PVCs are mounted empty.
-              # wazuh user inside container is uid=999 gid=999.
-              mkdir -p /wazuh-etc/shared/default
-              touch /wazuh-etc/shared/ar.conf
-              chown -R 999:999 /wazuh-etc
-              chmod 750 /wazuh-etc /wazuh-etc/shared /wazuh-etc/shared/default
-              chmod 640 /wazuh-etc/shared/ar.conf
-
-              mkdir -p /wazuh-logs/archives /wazuh-logs/alerts /wazuh-logs/firewall /wazuh-logs/api
-              chown -R 999:999 /wazuh-logs
-              chmod -R 750 /wazuh-logs
-          volumeMounts:
-            - name: wazuh-manager-etc
-              mountPath: /wazuh-etc
-            - name: wazuh-manager-logs
-              mountPath: /wazuh-logs
+      securityContext:
+        fsGroup: 999
+      volumes:
+        - name: wazuh-config
+          configMap:
+            name: wazuh-config
+        - name: unifi-decoders
+          configMap:
+            name: unifi-decoder
+            items:
+              - key: unifi_decoders.xml
+                path: unifi_decoders.xml
+        - name: unifi-rules
+          configMap:
+            name: unifi-decoder
+            items:
+              - key: unifi_rules.xml
+                path: unifi_rules.xml
+        - name: wazuh-certs
+          secret:
+            secretName: wazuh-certs
       containers:
         - name: wazuh-manager
           image: wazuh/wazuh-manager:4.14.5
@@ -61,6 +55,9 @@ spec:
             limits:
               cpu: 1000m
               memory: 2Gi
+          securityContext:
+            capabilities:
+              add: ["SYS_CHROOT"]
           env:
             - name: INDEXER_URL
               value: "https://wazuh-indexer:9200"
@@ -81,7 +78,7 @@ spec:
             - name: SSL_CERTIFICATE
               value: /etc/ssl/filebeat.pem
             - name: SSL_KEY
-              value: /etc/ssl/filebeat-key.pem
+              value: /etc/ssl/filebeat.key
             - name: API_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -105,22 +102,12 @@ spec:
               containerPort: 514
               protocol: UDP
           volumeMounts:
-            - name: wazuh-manager-data
-              mountPath: /var/ossec/data
-            - name: wazuh-manager-logs
-              mountPath: /var/ossec/logs
-            - name: wazuh-manager-etc
-              mountPath: /var/ossec/etc
+            # Config (mounted as the source path the image reads from)
             - name: wazuh-config
               mountPath: /wazuh-config-mount/etc/ossec.conf
-              subPath: ossec.conf
+              subPath: master.conf
               readOnly: true
-            - name: unifi-decoders
-              mountPath: /var/ossec/etc/decoders/unifi
-              readOnly: true
-            - name: unifi-rules
-              mountPath: /var/ossec/etc/rules/unifi
-              readOnly: true
+            # Indexer/Filebeat TLS material
             - name: wazuh-certs
               mountPath: /etc/ssl/root-ca.pem
               subPath: root-ca.pem
@@ -130,43 +117,65 @@ spec:
               subPath: indexer.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /etc/ssl/filebeat-key.pem
+              mountPath: /etc/ssl/filebeat.key
               subPath: indexer-key.pem
               readOnly: true
+            # UniFi decoders/rules (extends the user-defined ruleset directory)
+            - name: unifi-decoders
+              mountPath: /var/ossec/etc/decoders/unifi
+              readOnly: true
+            - name: unifi-rules
+              mountPath: /var/ossec/etc/rules/unifi
+              readOnly: true
+            # Single PVC, mounted at all paths Wazuh persists, via subPath.
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/api/configuration
+              subPath: wazuh/var/ossec/api/configuration
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/etc
+              subPath: wazuh/var/ossec/etc
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/logs
+              subPath: wazuh/var/ossec/logs
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/queue
+              subPath: wazuh/var/ossec/queue
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/var/multigroups
+              subPath: wazuh/var/ossec/var/multigroups
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/integrations
+              subPath: wazuh/var/ossec/integrations
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/active-response/bin
+              subPath: wazuh/var/ossec/active-response/bin
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/agentless
+              subPath: wazuh/var/ossec/agentless
+            - name: wazuh-manager-master
+              mountPath: /var/ossec/wodles
+              subPath: wazuh/var/ossec/wodles
+            - name: wazuh-manager-master
+              mountPath: /etc/filebeat
+              subPath: filebeat/etc/filebeat
+            - name: wazuh-manager-master
+              mountPath: /var/lib/filebeat
+              subPath: filebeat/var/lib/filebeat
           readinessProbe:
             tcpSocket:
               port: 1515
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 15
-            failureThreshold: 6
+            failureThreshold: 10
           livenessProbe:
             tcpSocket:
               port: 1515
-            initialDelaySeconds: 60
+            initialDelaySeconds: 120
             periodSeconds: 30
             failureThreshold: 6
-      volumes:
-        - name: wazuh-config
-          configMap:
-            name: wazuh-config
-        - name: unifi-decoders
-          configMap:
-            name: unifi-decoder
-            items:
-              - key: unifi_decoders.xml
-                path: unifi_decoders.xml
-        - name: unifi-rules
-          configMap:
-            name: unifi-decoder
-            items:
-              - key: unifi_rules.xml
-                path: unifi_rules.xml
-        - name: wazuh-certs
-          secret:
-            secretName: wazuh-certs
   volumeClaimTemplates:
     - metadata:
-        name: wazuh-manager-data
+        name: wazuh-manager-master
       spec:
         accessModes:
           - ReadWriteOnce
@@ -174,21 +183,3 @@ spec:
         resources:
           requests:
             storage: 10Gi
-    - metadata:
-        name: wazuh-manager-logs
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: longhorn
-        resources:
-          requests:
-            storage: 5Gi
-    - metadata:
-        name: wazuh-manager-etc
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: longhorn
-        resources:
-          requests:
-            storage: 1Gi
