@@ -51,7 +51,7 @@
       "description": ["Flux Operator Group"],
       "groupName": "Flux Operator",
       "matchPackagePatterns": ["flux-operator", "flux-instance"],
-      "matchDatasources": ["docker"],
+      "matchDatasources": ["docker", "helm"],
       "group": {
         "commitMessageTopic": "{{{groupName}}} group"
       }
