@@ -53,7 +53,7 @@ spec:
             privileged: true
       containers:
         - name: wazuh-indexer
-          image: wazuh/wazuh-indexer:4.11.2
+          image: wazuh/wazuh-indexer:4.14.5
           resources:
             requests:
               cpu: 1000m
@@ -65,7 +65,7 @@ spec:
             - name: OPENSEARCH_JAVA_OPTS
               value: "-Xms2g -Xmx2g"
             - name: OPENSEARCH_PATH_CONF
-              value: /usr/share/wazuh-indexer/config
+              value: /etc/wazuh-indexer
           ports:
             - name: indexer-rest
               containerPort: 9200
@@ -75,27 +75,27 @@ spec:
             - name: wazuh-indexer-data
               mountPath: /var/lib/wazuh-indexer
             - name: wazuh-indexer-config
-              mountPath: /usr/share/wazuh-indexer/config/opensearch.yml
+              mountPath: /etc/wazuh-indexer/opensearch.yml
               subPath: opensearch.yml
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-indexer/certs/root-ca.pem
+              mountPath: /etc/wazuh-indexer/certs/root-ca.pem
               subPath: root-ca.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-indexer/certs/node.pem
+              mountPath: /etc/wazuh-indexer/certs/indexer.pem
               subPath: indexer.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-indexer/certs/node-key.pem
+              mountPath: /etc/wazuh-indexer/certs/indexer-key.pem
               subPath: indexer-key.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-indexer/certs/admin.pem
+              mountPath: /etc/wazuh-indexer/certs/admin.pem
               subPath: admin.pem
               readOnly: true
             - name: wazuh-certs
-              mountPath: /usr/share/wazuh-indexer/certs/admin-key.pem
+              mountPath: /etc/wazuh-indexer/certs/admin-key.pem
               subPath: admin-key.pem
               readOnly: true
           readinessProbe:
@@ -149,13 +149,13 @@ data:
       - wazuh-indexer-1.wazuh-indexer
       - wazuh-indexer-2.wazuh-indexer
 
-    plugins.security.ssl.transport.pemcert_filepath: /usr/share/wazuh-indexer/certs/node.pem
-    plugins.security.ssl.transport.pemkey_filepath: /usr/share/wazuh-indexer/certs/node-key.pem
-    plugins.security.ssl.transport.pemtrustedcas_filepath: /usr/share/wazuh-indexer/certs/root-ca.pem
+    plugins.security.ssl.transport.pemcert_filepath: /etc/wazuh-indexer/certs/indexer.pem
+    plugins.security.ssl.transport.pemkey_filepath: /etc/wazuh-indexer/certs/indexer-key.pem
+    plugins.security.ssl.transport.pemtrustedcas_filepath: /etc/wazuh-indexer/certs/root-ca.pem
     plugins.security.ssl.http.enabled: true
-    plugins.security.ssl.http.pemcert_filepath: /usr/share/wazuh-indexer/certs/node.pem
-    plugins.security.ssl.http.pemkey_filepath: /usr/share/wazuh-indexer/certs/node-key.pem
-    plugins.security.ssl.http.pemtrustedcas_filepath: /usr/share/wazuh-indexer/certs/root-ca.pem
+    plugins.security.ssl.http.pemcert_filepath: /etc/wazuh-indexer/certs/indexer.pem
+    plugins.security.ssl.http.pemkey_filepath: /etc/wazuh-indexer/certs/indexer-key.pem
+    plugins.security.ssl.http.pemtrustedcas_filepath: /etc/wazuh-indexer/certs/root-ca.pem
     plugins.security.nodes_dn:
       - CN=wazuh-indexer,O=cberg-home,C=DE
     plugins.security.authcz.admin_dn:

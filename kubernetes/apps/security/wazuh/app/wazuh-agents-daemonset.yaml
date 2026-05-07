@@ -27,7 +27,7 @@ spec:
         runAsUser: 0
       containers:
         - name: wazuh-agent
-          image: wazuh/wazuh-agent:4.11.2
+          image: wazuh/wazuh-agent:4.14.5
           resources:
             requests:
               cpu: 100m
