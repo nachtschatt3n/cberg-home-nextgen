@@ -1,0 +1,26 @@
+---
+# Global snapshot-cleanup — runs daily at 02:30 (after global-filesystem-trim
+# at 02:00, before daily-backup at 03:00). Applies to every volume in the
+# "default" group (which is all volumes by default), so each volume's
+# user-created snapshots get cleaned up regardless of whether the volume
+# has its own per-volume snapshot-cleanup RecurringJob.
+#
+# The auto-cleanup-recurring-job-backup-snapshot Longhorn setting (true)
+# already removes the working snapshot the daily-backup-all-volumes job
+# creates. This RecurringJob covers leftovers from manual / failed snapshots
+# (e.g. orphan snapshots from a failed backup, or debug snapshots).
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: global-snapshot-cleanup
+  namespace: storage
+spec:
+  name: global-snapshot-cleanup
+  task: snapshot-cleanup
+  cron: "30 2 * * *"
+  retain: 0
+  concurrency: 2
+  groups:
+    - default
+  labels:
+    job: global-snapshot-cleanup
