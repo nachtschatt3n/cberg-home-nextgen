@@ -24,10 +24,48 @@ data:
          CEF decoders (UniFi SIEM / Activity Logging export)
          ================================================================== -->
 
+    <!-- UDM Pro / Cloud Gateway / Console Activity Logging emits
+         CEF:0|Ubiquiti|UniFi OS|... not "UniFi Network". Capture both. -->
     <decoder name="unifi-cef">
       <prematch>CEF:0\|Ubiquiti\|UniFi</prematch>
-      <regex>^CEF:0\|Ubiquiti\|UniFi Network(?: Application)?\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$</regex>
+      <regex>^CEF:0\|Ubiquiti\|UniFi (?:Network(?: Application)?|OS)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$</regex>
       <order>unifi_device_version, unifi_event_id, unifi_event_name, unifi_severity, extra_data</order>
+    </decoder>
+
+    <!-- UNIFIhost / UNIFIdeviceName / UNIFIdeviceModel / UNIFIdeviceMac / UNIFIaccessMethod -->
+    <decoder name="unifi-cef-host">
+      <parent>unifi-cef</parent>
+      <prematch> UNIFIhost=</prematch>
+      <regex> UNIFIhost=(\S+)</regex>
+      <order>unifi_host</order>
+    </decoder>
+
+    <decoder name="unifi-cef-device-name">
+      <parent>unifi-cef</parent>
+      <prematch> UNIFIdeviceName=</prematch>
+      <regex> UNIFIdeviceName=(\S+)</regex>
+      <order>unifi_device_name</order>
+    </decoder>
+
+    <decoder name="unifi-cef-device-model">
+      <parent>unifi-cef</parent>
+      <prematch> UNIFIdeviceModel=</prematch>
+      <regex> UNIFIdeviceModel=(\S+)</regex>
+      <order>unifi_device_model</order>
+    </decoder>
+
+    <decoder name="unifi-cef-device-mac">
+      <parent>unifi-cef</parent>
+      <prematch> UNIFIdeviceMac=</prematch>
+      <regex> UNIFIdeviceMac=([0-9A-Fa-f:]{17})</regex>
+      <order>unifi_device_mac</order>
+    </decoder>
+
+    <decoder name="unifi-cef-access-method">
+      <parent>unifi-cef</parent>
+      <prematch> UNIFIaccessMethod=</prematch>
+      <pcre2> UNIFIaccessMethod=(.+?)(?:\s+\w+=|$)</pcre2>
+      <order>unifi_access_method</order>
     </decoder>
 
     <!-- Source IP: supports both IPv4 and IPv6 addresses -->
@@ -119,6 +157,19 @@ data:
         <if_sid>100100</if_sid>
         <field name="unifi_event_name">Admin Accessed UniFi Network</field>
         <description>UniFi: Admin accessed UniFi Network.</description>
+        <group>authentication_success,unifi,syslog,</group>
+        <mitre>
+          <id>T1078</id>
+        </mitre>
+      </rule>
+
+      <!-- UDM / Console UniFi OS admin login (different event family from
+           UniFi Network application). Catches the "Admin Accessed UniFi OS"
+           CEF events emitted by Cloud Gateways and Dream Machines. -->
+      <rule id="100120" level="3">
+        <if_sid>100100</if_sid>
+        <field name="unifi_event_name">Admin Accessed UniFi OS</field>
+        <description>UniFi OS: Admin accessed UniFi OS console.</description>
         <group>authentication_success,unifi,syslog,</group>
         <mitre>
           <id>T1078</id>
