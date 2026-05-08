@@ -25,10 +25,13 @@ data:
          ================================================================== -->
 
     <!-- UDM Pro / Cloud Gateway / Console Activity Logging emits
-         CEF:0|Ubiquiti|UniFi OS|... not "UniFi Network". Capture both. -->
+         CEF:0|Ubiquiti|UniFi OS|... not "UniFi Network". Capture both.
+         No ^ anchor: actual syslog format is "<device-name> CEF:0|..."
+         (e.g. "DMP-CBERG CEF:0|Ubiquiti|UniFi OS|..."), so we have to
+         scan-from-anywhere. -->
     <decoder name="unifi-cef">
       <prematch>CEF:0\|Ubiquiti\|UniFi</prematch>
-      <regex>^CEF:0\|Ubiquiti\|UniFi (?:Network(?: Application)?|OS)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$</regex>
+      <regex>CEF:0\|Ubiquiti\|UniFi (?:Network(?: Application)?|OS)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$</regex>
       <order>unifi_device_version, unifi_event_id, unifi_event_name, unifi_severity, extra_data</order>
     </decoder>
 
