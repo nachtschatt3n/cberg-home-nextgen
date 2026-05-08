@@ -195,5 +195,11 @@ spec:
           - ReadWriteOnce
         storageClassName: longhorn
         resources:
+          # NOTE: this template is immutable once the StatefulSet exists,
+          # which is why we can't bump it from 10Gi → 20Gi here. The live
+          # PVC was already patched in-cluster to 20Gi (Longhorn supports
+          # online resize), so the running pod sees 20Gi. If you ever
+          # delete the StatefulSet + PVC and recreate, set this to 20Gi
+          # before re-bootstrapping.
           requests:
-            storage: 20Gi
+            storage: 10Gi
