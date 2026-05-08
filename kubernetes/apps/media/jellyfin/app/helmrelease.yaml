@@ -203,7 +203,11 @@ spec:
     # checks that 8096 is accepting connections — that's the right
     # signal for "should this pod receive traffic" given liveness
     # already covers genuine hangs.
+    # NOTE: explicit `httpGet: null` is required — the upstream chart
+    # ships a default httpGet that merges with our tcpSocket otherwise,
+    # and Kubernetes rejects probes with >1 handler.
     readinessProbe:
+      httpGet: null
       tcpSocket:
         port: http
       initialDelaySeconds: 30
