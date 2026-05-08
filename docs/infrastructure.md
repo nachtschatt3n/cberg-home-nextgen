@@ -48,11 +48,23 @@ All three nodes connect to Basement-SW-24-PoE.
 | Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (gemma4:26b multimodal) |
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
+| Plex Media Server | 192.168.55.30 | Plex direct LB (port 32400) |
 | internal-ingress-nginx | 192.168.55.100 | Internal Ingress LB IP (cluster-private services) |
 | k8s-gateway | 192.168.55.101 | Split-DNS (`*.uhl.cool` → cluster) |
 | external-ingress-nginx | 192.168.55.102 | External Ingress LB IP (public via Cloudflared) |
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
+
+**Cilium LBIPAM pool** (`kubernetes/apps/kube-system/cilium/config/pool.yaml`): allocates LB IPs from `192.168.55.25–192.168.55.254`. The lower 24 addresses are intentionally reserved:
+
+| Range | Reserved for |
+|---|---|
+| `.1` | UniFi VLAN 55 (k8s-network) gateway |
+| `.2 – .10` | Manual / future static allocations |
+| `.11 / .12 / .13` | Talos node IPs |
+| `.14 – .24` | Reserved (bumped after the Plex `.1` collision: see commit `1bc08bcc`) |
+
+Existing services on `.1–.24` (allocated before the pool was narrowed) keep their pinned IPs via `lbipam.cilium.io/ips` annotations — only future auto-allocations are bounded.
 
 **Mac Mini M4 Pro:**
 - Single Ollama instance with Metal Performance Shaders (MPS) acceleration
