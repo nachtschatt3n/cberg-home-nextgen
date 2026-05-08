@@ -100,19 +100,62 @@ data:
         <skip_sys>yes</skip_sys>
       </syscheck>
 
+      <!-- Talos doesn't use journald nor /var/log/{messages,secure} —
+           leave these in for any non-Talos hosts that ever join, but they
+           harmlessly produce no events on Talos. -->
       <localfile>
         <log_format>journald</log_format>
         <location>journald</location>
       </localfile>
-
       <localfile>
         <log_format>syslog</log_format>
         <location>/var/log/messages</location>
       </localfile>
-
       <localfile>
         <log_format>syslog</log_format>
         <location>/var/log/secure</location>
+      </localfile>
+
+      <!-- Kubernetes container logs (CRI format) — every pod on this node.
+           Reads via /host/var/log/containers/*.log (host root mounted read-only
+           by the DaemonSet). 150+ symlinks pointing at /host/var/log/pods/*. -->
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/host/var/log/containers/*.log</location>
+      </localfile>
+
+      <!-- Talos / Kubernetes node-level logs.
+           kubelet emits structured JSON; etcd is JSON; kernel is syslog;
+           machined is mixed. We use json where it's reliably JSON, syslog
+           otherwise. -->
+      <localfile>
+        <log_format>json</log_format>
+        <location>/host/var/log/kubelet.log</location>
+      </localfile>
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/host/var/log/kernel.log</location>
+      </localfile>
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/host/var/log/machined.log</location>
+      </localfile>
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/host/var/log/containerd.log</location>
+      </localfile>
+      <localfile>
+        <log_format>syslog</log_format>
+        <location>/host/var/log/cri.log</location>
+      </localfile>
+
+      <!-- Kubernetes API audit log (if Talos enabled it).
+           Owned by uid=nobody with mode 700; the privileged agent (runAsUser:
+           0) traverses via the host mount. If the file doesn't exist Wazuh
+           skips it gracefully. -->
+      <localfile>
+        <log_format>json</log_format>
+        <location>/host/var/log/audit/kube/audit.log</location>
       </localfile>
 
       <active-response>
