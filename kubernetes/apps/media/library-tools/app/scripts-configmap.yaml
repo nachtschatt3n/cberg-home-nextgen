@@ -862,7 +862,7 @@ data:
 
     def plex_unmatched(plex_url, token, sid):
         """Item count Plex marks as 'unmatched' in this section."""
-        url = f"{plex_url}/library/sections/{sid}/unmatched?X-Plex-Token={token}"
+        url = f"{plex_url}/library/sections/{sid}/all?unmatched=1&X-Plex-Token={token}"
         data = http_get_json(url, headers={"Accept": "application/json"})
         if not data:
             return 0
@@ -1254,7 +1254,7 @@ data:
         return out
 
     def plex_unmatched(plex_url, token, sid):
-        url = f"{plex_url}/library/sections/{sid}/unmatched?X-Plex-Token={token}"
+        url = f"{plex_url}/library/sections/{sid}/all?unmatched=1&X-Plex-Token={token}"
         data = http_get_json(url, headers={"Accept": "application/json"})
         if not data:
             return 0
