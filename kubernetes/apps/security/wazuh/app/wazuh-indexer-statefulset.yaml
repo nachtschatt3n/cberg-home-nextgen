@@ -82,6 +82,17 @@ spec:
               mountPath: /usr/share/wazuh-indexer/config/opensearch.yml
               subPath: opensearch.yml
               readOnly: true
+            # SAML auth config — overlays the default config.yml +
+            # roles_mapping.yml. Applied to .opendistro_security index by
+            # securityadmin.sh after first start (run once manually).
+            - name: wazuh-saml-config
+              mountPath: /usr/share/wazuh-indexer/config/opensearch-security/config.yml
+              subPath: config.yml
+              readOnly: true
+            - name: wazuh-saml-config
+              mountPath: /usr/share/wazuh-indexer/config/opensearch-security/roles_mapping.yml
+              subPath: roles_mapping.yml
+              readOnly: true
             - name: wazuh-certs
               mountPath: /usr/share/wazuh-indexer/config/certs/root-ca.pem
               subPath: root-ca.pem
@@ -118,6 +129,9 @@ spec:
         - name: wazuh-indexer-config
           configMap:
             name: wazuh-indexer-config
+        - name: wazuh-saml-config
+          secret:
+            secretName: wazuh-saml-config
         - name: wazuh-certs
           secret:
             secretName: wazuh-certs
