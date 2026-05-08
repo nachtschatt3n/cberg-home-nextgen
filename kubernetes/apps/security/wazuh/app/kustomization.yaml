@@ -15,5 +15,6 @@ resources:
   - unifi-decoder-configmap.yaml
   - secret.sops.yaml
   - certs-secret.sops.yaml
+  - wazuh-saml-config.sops.yaml
   - ingress.yaml
   - authentik-outpost-ingress.yaml
