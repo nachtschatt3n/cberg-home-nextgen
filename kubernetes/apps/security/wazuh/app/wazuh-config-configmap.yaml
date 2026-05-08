@@ -118,10 +118,15 @@ data:
 
       <!-- Kubernetes container logs (CRI format) — every pod on this node.
            Reads via /host/var/log/containers/*.log (host root mounted read-only
-           by the DaemonSet). 150+ symlinks pointing at /host/var/log/pods/*. -->
+           by the DaemonSet). 150+ symlinks pointing at /host/var/log/pods/*.
+           Exclude wazuh-* containers to avoid a feedback loop: the manager's
+           own filebeat WARN lines look enough like a gitlab-shell-stderr
+           decoder match that rule 65618 was firing 350+ times per minute,
+           pegging the manager at its CPU limit. -->
       <localfile>
         <log_format>syslog</log_format>
         <location>/host/var/log/containers/*.log</location>
+        <exclude>/host/var/log/containers/wazuh-*</exclude>
       </localfile>
 
       <!-- Talos / Kubernetes node-level logs.
@@ -361,6 +366,12 @@ data:
         <decoder_dir>ruleset/decoders</decoder_dir>
         <rule_dir>ruleset/rules</rule_dir>
         <rule_exclude>0215-policy_rules.xml</rule_exclude>
+        <!-- We don't run Gitlab. Rule 65618 ((Gitlab) $(severity): $(message))
+             was firing on wazuh-manager's filebeat WARN lines (the gitlab-
+             shell-stderr decoder is too greedy on generic level/message
+             patterns). Excluding the whole gitlab rule file kills the
+             false-positive cleanly. Re-add if Gitlab is ever deployed. -->
+        <rule_exclude>0770-gitlab_rules.xml</rule_exclude>
         <list>etc/lists/audit-keys</list>
         <list>etc/lists/amazon/aws-sources</list>
         <list>etc/lists/amazon/aws-eventnames</list>
