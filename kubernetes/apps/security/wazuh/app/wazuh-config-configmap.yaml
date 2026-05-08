@@ -194,10 +194,11 @@ data:
         <processes>yes</processes>
       </wodle>
 
+      <!-- Vulnerability detection disabled — pulls multi-GB CVE feeds and writes
+           a 7-8 GB SQLite DB to /var/ossec/queue/vd. Re-enable only if you want
+           CVE-vs-syscollector matching and have bumped the PVC well past 20Gi. -->
       <vulnerability-detection>
-        <enabled>yes</enabled>
-        <index-status>yes</index-status>
-        <feed-update-interval>60m</feed-update-interval>
+        <enabled>no</enabled>
       </vulnerability-detection>
 
       <indexer>
