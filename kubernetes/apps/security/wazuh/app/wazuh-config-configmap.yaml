@@ -324,9 +324,16 @@ data:
         <list>etc/lists/malicious-ioc/malicious-domains</list>
         <list>etc/lists/malicious-ioc/malware-hashes</list>
 
-        <!-- User-defined ruleset (UniFi decoders/rules mounted here) -->
+        <!-- User-defined ruleset (UniFi decoders/rules mounted here).
+             NOTE: <decoder_dir> is non-recursive — subdirectories are
+             skipped silently. UniFi decoders are mounted at
+             etc/decoders/unifi/ (so the ConfigMap projection volume
+             can manage them as a unit), so we list that path
+             explicitly. -->
         <decoder_dir>etc/decoders</decoder_dir>
+        <decoder_dir>etc/decoders/unifi</decoder_dir>
         <rule_dir>etc/rules</rule_dir>
+        <rule_dir>etc/rules/unifi</rule_dir>
       </ruleset>
 
       <rule_test>
