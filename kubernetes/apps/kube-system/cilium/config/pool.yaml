@@ -6,15 +6,11 @@ metadata:
   name: pool
 spec:
   allowFirstLastIPs: "No"
-  # Reserve 192.168.55.0–.24 for the upstream / out-of-band:
-  #   .1            — UniFi gateway for VLAN 55 (k8s-network gw_ip)
-  #   .11/.12/.13   — Talos node IPs
-  #   .2–.10/.14–.24 — manual / reserved for future static-IP needs
-  # Cilium LBIPAM previously picked .1 for Plex (lowest free) which
-  # collided with the gateway and silently black-holed all traffic.
-  # Start the pool at .25 so the gateway and reserved range can't be
-  # auto-assigned. Existing services already on .1–.24 remain in
-  # place; only future allocations are bounded.
+  # REVERTED to /24 in commit (see below) after the .25-.254 narrowing
+  # in commit ac95aeb8 booted services that didn't have explicit
+  # `lbipam.cilium.io/ips` annotations off their auto-allocated low
+  # IPs (notably AdGuard at .5 → cluster DNS broken). To narrow this
+  # safely later, every service in the .1–.24 range must first get an
+  # explicit pin annotation.
   blocks:
-    - start: "192.168.55.25"
-      stop: "192.168.55.254"
+    - cidr: "192.168.55.0/24"
