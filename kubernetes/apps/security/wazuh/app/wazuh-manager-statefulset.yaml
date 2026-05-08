@@ -60,7 +60,11 @@ spec:
               cpu: 500m
               memory: 1Gi
             limits:
-              cpu: 1000m
+              # Bumped from 1000m → 2000m after enabling K8s container-log
+              # collection (~470 streams across 3 nodes). Manager was pegged
+              # at the 1000m limit (CPUThrottlingHigh fired). 2000m gives
+              # headroom for the steady-state event rate.
+              cpu: 2000m
               memory: 2Gi
           securityContext:
             capabilities:
