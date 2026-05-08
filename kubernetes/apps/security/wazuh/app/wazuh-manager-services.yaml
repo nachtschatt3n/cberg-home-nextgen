@@ -56,7 +56,10 @@ metadata:
 spec:
   type: LoadBalancer
   loadBalancerIP: 192.168.55.27
-  externalTrafficPolicy: Local
+  # externalTrafficPolicy: Cluster (default) — Local doesn't route UDP cleanly
+  # with Cilium L2 announce on Talos. Tradeoff: source IP gets SNAT'd to a
+  # node IP (192.168.55.11/12/13) instead of the real UniFi gateway IP. Both
+  # are inside <allowed-ips> 192.168.55.0/24 so packets are still accepted.
   selector:
     app: wazuh-manager
     node-type: master
