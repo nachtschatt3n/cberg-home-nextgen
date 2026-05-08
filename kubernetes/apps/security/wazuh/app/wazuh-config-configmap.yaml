@@ -125,8 +125,12 @@ data:
       <global>
         <jsonout_output>yes</jsonout_output>
         <alerts_log>yes</alerts_log>
-        <logall>no</logall>
-        <logall_json>no</logall_json>
+        <!-- logall=yes archives every received event (matched or not) at
+             /var/ossec/logs/archives/archives.{log,json}. Enabled while we're
+             still validating UniFi syslog flow + decoder rules. Flip back to
+             no once dashboard shows reliable rule.groups: unifi events. -->
+        <logall>yes</logall>
+        <logall_json>yes</logall_json>
         <email_notification>no</email_notification>
         <smtp_server>smtp.example.wazuh.com</smtp_server>
         <email_from>ossecm@example.wazuh.com</email_from>
