@@ -32,6 +32,14 @@ spec:
     service:
       type: LoadBalancer
       port: 32400
+      # Pin to .30 (was .1, which conflicts with the VLAN 55 gateway:
+      # UniFi configured k8s-network gw_ip=192.168.55.1, so the gateway
+      # wins ARP for that IP and traffic never reaches Cilium). Cilium
+      # LBIPAM picked .1 as the lowest free address, but .1 was never
+      # actually free — it's the upstream gateway. The pool should be
+      # narrowed to start at .25 to prevent future collisions.
+      annotations:
+        lbipam.cilium.io/ips: "192.168.55.30"
 
     ingress:
       enabled: false
