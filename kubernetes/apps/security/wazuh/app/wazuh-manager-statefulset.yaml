@@ -60,13 +60,13 @@ spec:
               cpu: 500m
               memory: 1Gi
             limits:
-              # Manager analysisd + remoted + filebeat together pin at the
-              # CPU limit when the agents stream container logs (~470 CRI
-              # files across 3 nodes). 1000m and 2000m both pegged in
-              # steady state. 4000m gives genuine headroom — node has 18
-              # cores, request stays at 500m so scheduling priority for
-              # other namespaces is unchanged.
-              cpu: 4000m
+              # 1000m is the right size after the gitlab-rules exclusion
+              # broke the feedback loop on wazuh-manager's own container
+              # log. Steady state with K8s container-log fan-in is now
+              # ~30m (3% of 1000m). We briefly bumped this to 4000m chasing
+              # what turned out to be a false-positive storm; reverted
+              # because the actual workload doesn't need it.
+              cpu: 1000m
               memory: 2Gi
           securityContext:
             capabilities:
