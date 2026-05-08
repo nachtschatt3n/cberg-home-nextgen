@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wazuh-app-config
+  namespace: security
+type: Opaque
+stringData:
+  wazuh.yml: ENC[AES256_GCM,data:mGKKunR9qDbRtX9RsZFz+zcMBsJ8qMkZB80f795MXbxNODoIgYwKKWW+DqKAdT2vAi9uw4joiJRH8g4u5bmGAYEAFT/k5xLnevJ+8ZMgSrKck0RB29+cSiIAErOTKIE8OoFAefObPRSJpkg/dHHYLrVInrh4PkEyGKabrDF84RQzQpNT095tjOA3ukRVcAUNu1aEW5PaPofl9qu8hXpnZJN1Tx0d5u1xyWiD64SmRJmKSDHR9cnktV1hoYzMJynM5uxYIVLO8+dLaJCpeWmJBq/W6bCZJIeI1Mx+WI7B37fgJ1vhLTMfiKxK9gPlyOyB2Nt9vg2fV++4nB9cpdMXGFVUY9XYS08Jm2ZRwsGqiUpkzEuxBpeOzTpcYGjaOTBltXknIiuh2M/aAtCc0gZKgM2i4UfSHaQ/TBG/IOSWZqLvQY5L8DFKK/uBtMHX7fAaLz93MBCTwybAdLVPNGScsV75i9gkLrQVu/ADQQU2ENNN/uZPM3ICPN3ocy00wBzL5hPP3E+zb/VV+Do2Caj1cPYQRcMoj0OAk4fbAXO2WgKbO1S+GheyiD5rGxxDtDntlSZ05yUGyNPExbmzLS42ic3+szs42IHmyn0tzbO4QzDwQObsgmYfJmnY3AlCkEmzEcNRdgR/XxgzCN6ORXWa5JGKAnjDQgcoR+BD1VvQUpEqgfNTDmnEoxLApEKxhK97DNmXospdYaehRwWGqNepEPis93xiyxz47GN4EKItnovLsD/fnjKOvZG/5wenIn1QCveAWW+u5ORO0aaEztfsIySrksSkndmH5TkX+xkGOUikrHk=,iv:oOA8ZqPw6uF+fN6B/P04U4z0MjPiOWVe4Ob9zqP6Skw=,tag:KLax3fm0IwXN5TDcXVU1Iw==,type:str]
+sops:
+  age:
+    - recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+      enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0K2hWNWVmZSsyNTBRWHoz
+        RG5yWTFIUTNGcG5DV1RRcFd5ZGJxSjU1YjNvCmhKVHJWc2ppYXpTNUVsS3lqZXBY
+        QXZkWFBIVXVtS1lDSlE1ZHpYY0RiVHMKLS0tIFRNNGN3bVdoVXFvWUJpYVN3MEpS
+        a1NEN2NZSTNpcUtsdFIvcUpnQjhRTXcKD962NkbtvmELf2ZOw/3Id18JwYH2OcQl
+        4FtbCwcQz7snKhLB75AjpuaRNU0n1LnnA7yw0EywdBT6XkNcZpLVyw==
+        -----END AGE ENCRYPTED FILE-----
+  lastmodified: "2026-05-08T05:54:02Z"
+  mac: ENC[AES256_GCM,data:gi2LCXlUcSReY1GAakeMy7QyMDTxx+znTtt3FS+JC3Qv2d2ipKFsv5MbTXbgCsgR/2fkRapFInPtNuFcBbXLRptyWbl/+qjRtFfEPV9RjvJY9swbHvJVIV1jjCS90vW2DVY/FEyPZQxgqhU5kNy5cAezvwlum4QVxf4ZjsZUpq0=,iv:IOKzT9pGhesa0RbPMayyXVxQa9XzzECUfTnfY52hFp8=,tag:xu50XV4YNVJtTuj3eEVktA==,type:str]
+  encrypted_regex: ^(data|stringData)$
+  mac_only_encrypted: true
+  version: 3.12.1

@@ -16,4 +16,5 @@ resources:
   - secret.sops.yaml
   - certs-secret.sops.yaml
   - wazuh-saml-config.sops.yaml
+  - wazuh-app-config.sops.yaml
   - ingress.yaml

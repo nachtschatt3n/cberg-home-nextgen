@@ -45,6 +45,15 @@ spec:
               mountPath: /usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
               subPath: opensearch_dashboards.yml
               readOnly: true
+            # Pre-registered Wazuh API connection (run_as: false). Without
+            # this the dashboard shows "[API connection] No API available"
+            # because the Wazuh app plugin can't reach the manager API
+            # under the SAML user identity (run_as: true would require
+            # mapping SAML users to manager API users).
+            - name: wazuh-app-config
+              mountPath: /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+              subPath: wazuh.yml
+              readOnly: true
             - name: wazuh-certs
               mountPath: /usr/share/wazuh-dashboard/certs/root-ca.pem
               subPath: root-ca.pem
@@ -73,6 +82,9 @@ spec:
         - name: wazuh-secret
           secret:
             secretName: wazuh-secret
+        - name: wazuh-app-config
+          secret:
+            secretName: wazuh-app-config
         - name: wazuh-certs
           secret:
             secretName: wazuh-certs
