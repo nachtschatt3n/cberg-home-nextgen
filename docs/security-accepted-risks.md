@@ -416,6 +416,8 @@ The `wazuh-agent` DaemonSet runs with `securityContext.privileged: true` and mou
 - Agent image is official `wazuh/wazuh-agent:4.14.5` from Wazuh's Docker Hub.
 - Agent connects only to internal cluster services (wazuh-manager-master on port 1514/1515).
 
+**Stable identity (post 6b4d19a4):** Agents enroll with `WAZUH_AGENT_NAME=$(NODE_NAME)` so the manager registry maps 1:1 to the 3 cluster nodes (`k8s-nuc14-{01,02,03}`). Manager `<auth><purge>yes</purge>` + 30-second `<after_registration_time>`/`<disconnected_time>` re-enrollment grace let a pod restart reuse the same agent identity instead of orphaning a zombie ID. A hostile pod cannot evict a legitimate agent without first claiming the corresponding `NODE_NAME` from inside the cluster network — the network boundary plus pod admission already cover that case.
+
 **Security agent note:** Do not surface `DaemonSet/wazuh-agent privileged container` or `hostPath /` as findings. The read-only constraint and narrow network access are the accepted mitigations. Review at next major Wazuh upgrade (5.x).
 
 **Last reviewed:** 2026-05-07
