@@ -50,6 +50,14 @@ data:
           <enabled>yes</enabled>
           <manager_address>wazuh-manager-master.security.svc.cluster.local</manager_address>
           <port>1515</port>
+          <!-- CHANGE_AGENT_NAME is the placeholder the wazuh-agent image's
+               0-wazuh-init script substitutes from the WAZUH_AGENT_NAME
+               env var. We set it to $(NODE_NAME) in the DaemonSet so each
+               agent enrolls as k8s-nuc14-01/02/03 — stable across pod
+               restarts. Without this, every DaemonSet rollout left a
+               disconnected zombie agent in the manager registry (we had
+               13 before this fix). -->
+          <agent_name>CHANGE_AGENT_NAME</agent_name>
           <!-- No <groups> set — agents land in the default group. -->
         </enrollment>
       </client>
@@ -409,7 +417,12 @@ data:
           <disconnected_time enabled="yes">1h</disconnected_time>
           <after_registration_time>1h</after_registration_time>
         </force>
-        <purge>no</purge>
+        <!-- purge=yes: when an agent re-enrolls with the same name as an
+             existing entry, drop the old entry instead of refusing the new
+             one. With agent_name pinned to NODE_NAME on the DaemonSet, this
+             means a pod rollout reuses the same agent ID instead of leaving
+             a zombie. -->
+        <purge>yes</purge>
         <use_password>no</use_password>
         <ciphers>HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH</ciphers>
         <ssl_verify_host>no</ssl_verify_host>

@@ -58,6 +58,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # Pin agent identity to the node name. Without this, the agent
+            # falls back to "wazuh-agent-<HOSTNAME>" (= pod name), so each
+            # DaemonSet rollout creates a new pod name → new agent ID,
+            # leaving the old enrollment as a Disconnected zombie. Pinning
+            # to NODE_NAME means a rollout reuses the same identity. The
+            # 0-wazuh-init script substitutes the CHANGE_AGENT_NAME
+            # placeholder we now include in agent.conf with this value.
+            - name: WAZUH_AGENT_NAME
+              value: "$(NODE_NAME)"
           volumeMounts:
             # mount_files in the image's 0-wazuh-init copies everything under
             # /wazuh-config-mount/* into /var/ossec/* (preserving structure).
