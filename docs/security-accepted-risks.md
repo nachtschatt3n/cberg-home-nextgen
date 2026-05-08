@@ -450,3 +450,41 @@ The OpenSearch Security `internal_users.yml` shipped with the wazuh/wazuh-indexe
 - Run `securityadmin.sh` to apply.
 
 **Last reviewed:** 2026-05-08
+
+---
+
+## AR-025 — Wazuh Aggregates Cluster-Wide Pod stdout/stderr
+
+**Severity:** Low
+**Status:** Accepted — internal-only sink, no external egress
+
+The Wazuh agent DaemonSet (AR-023) reads `/host/var/log/containers/*.log` on each cluster node, which means every pod's stdout/stderr line is mirrored into the Wazuh indexer. Some workloads inadvertently log sensitive data:
+
+- cert-manager Cloudflare error paths can echo bearer tokens
+- Renovate / GitHub webhook payloads include access tokens on retry-debug
+- Authentik blueprint debug mode logs full request bodies
+- Home Assistant tracebacks may include integration credentials
+- The Kubernetes API audit log (when enabled in Talos) carries Bearer tokens in `requestObject` for token-create events
+
+**Justification:**
+- The `wazuh-indexer` Service is `ClusterIP` only — no external exposure.
+- TLS-only transport (self-signed CA from the `wazuh-certs` SOPS secret).
+- Dashboard is gated by Authentik SAML SSO.
+- Wazuh-internal admin/kibanaserver creds documented under AR-024.
+- The aggregation is the *point* of running a SIEM — the alternative is no security visibility on cluster workloads.
+- Container-log retention is bound by ISM `wazuh-retention-14d` (14-day delete phase) — see `runbooks/wazuh-retention-policy.sh`.
+- The agent excludes `/host/var/log/containers/wazuh-*` to prevent feedback loops on the manager's own log output.
+
+**Mitigations in place:**
+- AR-023 covers the privileged DaemonSet itself (read-only host mount, internal-only network).
+- AR-024 covers the demo passwords on the indexer.
+- 14-day retention bounds the long-term aggregation footprint.
+
+**Future hardening (not blocking):**
+- Add a Wazuh log-collector pre-filter regex to drop lines matching `(?i)(authorization:|bearer |x-api-key|password=)` before forwarding to the manager. Small custom decoder; significantly reduces accidental-secret exposure.
+- Rotate AR-024 indexer creds. Current demo passwords mean any future accidental exposure of port 9200 = full read of all aggregated logs.
+- Enable Wazuh integration with secret-detection rules.
+
+**Security agent note:** Do not surface "Wazuh agent collects pod stdout" as a finding — this is the deliberate SIEM design, bounded by AR-023, AR-024, and the 14-day ISM retention. Re-evaluate if the indexer ever gains external exposure, or if the manager starts forwarding to an external destination.
+
+**Last reviewed:** 2026-05-08

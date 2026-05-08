@@ -221,7 +221,7 @@
 | wazuh-indexer | Single-node OpenSearch-based event store for Wazuh SIEM (10Gi, longhorn). ES7 compat enabled for Filebeat 7.10.2 | None | — |
 | wazuh-manager-master | Single-node Wazuh Manager — agent enrollment (1515), comms (1514), REST API (55000), UniFi syslog/CEF (UDP 514, LB IP 192.168.55.27). 10Gi (live: 20Gi) single PVC with subPath layout. Cluster mode disabled. Runbook: [wazuh-unifi-syslog.md](../runbooks/wazuh-unifi-syslog.md) | None | — |
 | wazuh-dashboard | Wazuh SIEM web UI (4.14.5). API connection pre-registered via mounted wazuh.yml (`run_as: false`) | Internal + Authentik SAML SSO | Security |
-| wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node for FIM and log collection (4.14.5, AR-023) | None | — |
+| wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node. Collects FIM (rootcheck on /etc /usr/bin /usr/sbin /bin /sbin /boot), Talos node logs (kubelet, kernel, machined, containerd, cri), and Kubernetes pod stdout via `/host/var/log/containers/*.log` (every CRI log on the node, except `wazuh-*` to avoid feedback loops). 4.14.5, AR-023 + AR-025. | None | — |
 
 ---
 
