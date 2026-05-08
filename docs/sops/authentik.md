@@ -93,6 +93,131 @@ Detailed implementation steps are in `Integrating a New Application` below.
 
 ---
 
+## SAML SSO Provider Pattern
+
+Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integrating a New Application" below). Apps that handle their own auth chain natively (e.g. OpenSearch Dashboards, Wazuh) should use a **SAML provider** instead — the dashboard renders its own login page with a "Sign in with SSO" button that redirects to Authentik.
+
+**Canonical example:** `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`, search for `id: wazuh-saml-provider`.
+
+### Blueprint shape
+
+```yaml
+- id: wazuh-saml-provider
+  model: authentik_providers_saml.samlprovider
+  state: present
+  identifiers:
+    name: wazuh-saml
+  attrs:
+    name: wazuh-saml
+    authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
+    invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
+    acs_url: "https://wazuh.uhl.cool/_opendistro/_security/saml/acs"
+    audience: "wazuh-saml"
+    issuer: "https://auth.uhl.cool"
+    sp_binding: "post"
+    sign_assertion: true
+    sign_response: false
+    name_id_mapping: !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/upn"]]
+    property_mappings:
+      - !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/username"]]
+      - !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/upn"]]
+      - !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/email"]]
+      - !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/name"]]
+      - !Find [authentik_providers_saml.samlpropertymapping, [managed, "goauthentik.io/providers/saml/groups"]]
+    signing_kp: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+
+- id: wazuh-application
+  model: authentik_core.application
+  state: present
+  identifiers:
+    slug: wazuh
+  attrs:
+    name: Wazuh
+    slug: wazuh
+    provider: !KeyOf wazuh-saml-provider
+    meta_launch_url: "https://wazuh.uhl.cool"
+    meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/wazuh.png"
+    meta_description: "XDR/SIEM platform"
+```
+
+### App-side configuration (OpenSearch / Wazuh dashboard example)
+
+1. **`opensearch_dashboards.yml`** (mounted from SOPS secret):
+   ```yaml
+   opensearch_security.auth.type: ["basicauth", "saml"]
+   opensearch_security.auth.multiple_auth_enabled: true
+   server.xsrf.allowlist:
+     - /_opendistro/_security/saml/acs
+     - /_opendistro/_security/saml/acs/idpinitiated
+     - /_opendistro/_security/saml/logout
+   ```
+   `multiple_auth_enabled: true` is required when `auth.type` is an array — otherwise the dashboard crashes with `Multiple Authentication Mode is disabled`.
+
+2. **OpenSearch Security `config.yml`** (mounted from SOPS secret):
+   ```yaml
+   saml_auth_domain:
+     http_enabled: true
+     order: 1
+     http_authenticator:
+       type: saml
+       challenge: true
+       config:
+         idp:
+           # Use the PK-based URL, NOT /application/saml/<slug>/metadata/.
+           # Authentik returns a 302 redirect on the slug path and the
+           # OpenSearch SAML library doesn't follow redirects.
+           metadata_url: "https://auth.uhl.cool/api/v3/providers/saml/<PK>/metadata/?download"
+           entity_id: "https://auth.uhl.cool"
+         sp:
+           entity_id: "wazuh-saml"
+         kibana_url: "https://wazuh.uhl.cool"
+         roles_key: "http://schemas.xmlsoap.org/claims/Group"
+         subject_key: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+         exchange_key: "<URL-safe base64 random ≥32 bytes — see gotcha below>"
+     authentication_backend:
+       type: noop
+   ```
+   After editing `config.yml` / `roles_mapping.yml`, run `securityadmin.sh -cd .../opensearch-security/` to push to the `.opendistro_security` index.
+
+3. **`roles_mapping.yml`** — map SAML users / Authentik backend roles to indexer roles:
+   ```yaml
+   all_access:
+     reserved: false
+     backend_roles:
+       - "authentik Admins"
+     users:
+       - "mu"
+   ```
+
+4. **Ingress** — drop the forward-auth annotations (`auth-url`, `auth-signin`, `auth-response-headers`). The dashboard handles auth itself once SAML is wired.
+
+### Gotchas
+
+- **`exchange_key` must be URL-safe base64** (RFC 4648 §5: `-` and `_`, no `+` or `/`). Generate with `openssl rand -base64 64 | tr -d '\n=' | tr '+/' '-_'`. Wrong alphabet → `Illegal base64 character 2f`. Wrong padding → `Last unit does not have enough valid bits`.
+- **Use the PK URL** for `idp.metadata_url`, not the application slug URL — Authentik 302-redirects the slug path and the SAML library does not follow redirects.
+- **Provider PK is stable** across blueprint reapplications, but if you delete + recreate the SAML provider, the PK changes and the metadata URL needs updating.
+
+### Migration: forward-auth → SAML
+
+When migrating an existing forward-auth app to SAML, the old `proxyprovider` and its `outpost` need to be torn down explicitly so Authentik cleans up the deployed proxy outpost pod:
+
+```yaml
+- id: app-forward-auth-provider-removed
+  model: authentik_providers_proxy.proxyprovider
+  state: absent
+  identifiers:
+    name: app-forward-auth
+- id: app-forward-auth-outpost-removed
+  model: authentik_outposts.outpost
+  state: absent
+  identifiers:
+    name: app-forward-auth
+```
+
+The `wazuh-blueprint.yaml` entry in the configmap shows this migration end-to-end.
+
+---
+
 ## Integrating a New Application
 
 ### Step 1: Create Blueprint File

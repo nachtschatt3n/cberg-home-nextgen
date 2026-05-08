@@ -218,9 +218,9 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| wazuh-indexer | 3-replica OpenSearch-based event store for Wazuh SIEM (10Gi each, longhorn) | None | — |
-| wazuh-manager-master | Single-node Wazuh Manager — agent enrollment (1515), comms (1514), REST API (55000), UniFi syslog/CEF (UDP 514, LB IP 192.168.55.27). 10Gi single PVC with subPath layout. Cluster mode disabled. | None | — |
-| wazuh-dashboard | Wazuh SIEM web UI (4.14.5) | Internal + Authentik forward-auth | Security |
+| wazuh-indexer | Single-node OpenSearch-based event store for Wazuh SIEM (10Gi, longhorn). ES7 compat enabled for Filebeat 7.10.2 | None | — |
+| wazuh-manager-master | Single-node Wazuh Manager — agent enrollment (1515), comms (1514), REST API (55000), UniFi syslog/CEF (UDP 514, LB IP 192.168.55.27). 10Gi (live: 20Gi) single PVC with subPath layout. Cluster mode disabled. Runbook: [wazuh-unifi-syslog.md](../runbooks/wazuh-unifi-syslog.md) | None | — |
+| wazuh-dashboard | Wazuh SIEM web UI (4.14.5). API connection pre-registered via mounted wazuh.yml (`run_as: false`) | Internal + Authentik SAML SSO | Security |
 | wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node for FIM and log collection (4.14.5, AR-023) | None | — |
 
 ---

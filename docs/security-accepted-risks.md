@@ -419,3 +419,34 @@ The `wazuh-agent` DaemonSet runs with `securityContext.privileged: true` and mou
 **Security agent note:** Do not surface `DaemonSet/wazuh-agent privileged container` or `hostPath /` as findings. The read-only constraint and narrow network access are the accepted mitigations. Review at next major Wazuh upgrade (5.x).
 
 **Last reviewed:** 2026-05-07
+
+---
+
+## AR-024 — Wazuh Indexer Internal Users Use Demo Passwords
+
+**Severity:** Low
+**Status:** Accepted — internal-only path, dashboard gated by SAML SSO
+
+The OpenSearch Security `internal_users.yml` shipped with the wazuh/wazuh-indexer:4.14.5 image contains demo bcrypt hashes for `admin` (password: `admin`) and `kibanaserver` (password: `kibanaserver`). Our SOPS secret (`kubernetes/apps/security/wazuh/app/secret.sops.yaml`) intentionally aligns `INDEXER_PASSWORD` and `DASHBOARD_PASSWORD` with these defaults so the manager and dashboard service paths work without recompiling internal_users.yml + running `securityadmin.sh`.
+
+**Justification:**
+- The `wazuh-indexer` Service is `ClusterIP` only — no LoadBalancer or Ingress exposure on port 9200.
+- All HTTP traffic to the indexer requires our self-signed TLS chain (`root-ca.pem`).
+- The user-facing dashboard at `https://wazuh.uhl.cool` is gated by Authentik SAML SSO (forward-auth annotations removed; the dashboard's OpenSearch Security config has `auth.type: ["basicauth", "saml"]` with the SAML auth_domain wired to Authentik).
+- The custom Wazuh API password (`wazuh-wui` user) IS strong (random 32-char) — the demo creds only protect indexer-internal accounts.
+- Rotating requires generating new bcrypt hashes, mounting a custom `internal_users.yml` overlay, then running `securityadmin.sh -cd .../opensearch-security/` against the live cluster. Doable but invasive.
+
+**Mitigations:**
+- Internal-only network exposure (any future public LoadBalancer on the indexer must rotate first).
+- TLS-only transport.
+- SAML enforces external user authentication regardless of indexer-internal creds.
+
+**Security agent note:** Do not surface `wazuh-indexer admin/admin password` or `kibanaserver/kibanaserver password` findings against the SOPS secret — the values match the image-shipped bcrypt hashes by design. Re-evaluate if the indexer ever gains external exposure or if `internal_users.yml` is overlaid.
+
+**Future hardening (not blocking):**
+- Generate strong replacement bcrypt hashes via `wazuh-passwords-tool.sh`.
+- Mount a custom `internal_users.yml` from a SOPS secret.
+- Update `INDEXER_PASSWORD` / `DASHBOARD_PASSWORD` in `secret.sops.yaml` + `opensearch_dashboards.yml` to match.
+- Run `securityadmin.sh` to apply.
+
+**Last reviewed:** 2026-05-08
