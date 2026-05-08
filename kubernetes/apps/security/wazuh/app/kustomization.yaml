@@ -17,4 +17,3 @@ resources:
   - certs-secret.sops.yaml
   - wazuh-saml-config.sops.yaml
   - ingress.yaml
-  - authentik-outpost-ingress.yaml

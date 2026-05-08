@@ -1,4 +1,8 @@
 ---
+# Authentik forward-auth annotations removed — auth is now handled by the
+# Wazuh dashboard itself via SAML SSO (Authentik as IdP). The dashboard
+# redirects unauthenticated users to /_opendistro/_security/saml/acs which
+# in turn redirects to Authentik's SAML SSO endpoint.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -13,12 +17,11 @@ metadata:
     gethomepage.dev/icon: "wazuh.png"
     gethomepage.dev/description: "XDR/SIEM platform"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-    nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-wazuh-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
-    nginx.ingress.kubernetes.io/auth-signin: "https://wazuh.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
-    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
-    nginx.ingress.kubernetes.io/auth-snippet: |
-      proxy_set_header X-Forwarded-Host $http_host;
     nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
+    # The SAML flow can produce large redirect URLs / cookies — bump nginx
+    # buffer sizes so large headers don't get rejected with 502.
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
 spec:
   ingressClassName: internal
   rules:
