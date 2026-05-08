@@ -125,12 +125,13 @@ data:
       <global>
         <jsonout_output>yes</jsonout_output>
         <alerts_log>yes</alerts_log>
-        <!-- logall=yes archives every received event (matched or not) at
-             /var/ossec/logs/archives/archives.{log,json}. Enabled while we're
-             still validating UniFi syslog flow + decoder rules. Flip back to
-             no once dashboard shows reliable rule.groups: unifi events. -->
-        <logall>yes</logall>
-        <logall_json>yes</logall_json>
+        <!-- logall=no — UniFi/agent flow validated 2026-05-08. Re-enable
+             temporarily by flipping both to yes if you need to debug
+             unmatched events at /var/ossec/logs/archives/archives.{log,json}.
+             The wazuh-archives-* indexer indices are also covered by the
+             wazuh-retention-14d ISM policy if logall is ever turned back on. -->
+        <logall>no</logall>
+        <logall_json>no</logall_json>
         <email_notification>no</email_notification>
         <smtp_server>smtp.example.wazuh.com</smtp_server>
         <email_from>ossecm@example.wazuh.com</email_from>

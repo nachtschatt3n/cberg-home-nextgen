@@ -20,7 +20,7 @@ persistent storage in the cluster.
 
 ## Overview
 
-Longhorn v1.11.1 provides distributed block storage with replication across all 3 cluster nodes.
+Longhorn v1.11.2 provides distributed block storage with replication across all 3 cluster nodes.
 
 | Setting | Value |
 |---------|-------|
@@ -285,19 +285,30 @@ kubectl delete volume {volume-name} -n storage
 
 ## Backup Procedures
 
-### Automated Backups
+### Recurring Jobs (Longhorn-native, not Kubernetes CronJobs)
 
-Daily CronJob backs up all volumes at 3:00 AM:
+Longhorn's own RecurringJob CRDs handle backup, snapshot-cleanup, and
+filesystem-trim. They live in `kubernetes/apps/storage/longhorn/recurringjobs/`
+and apply to every volume in Longhorn's `default` group (which is every
+volume by default — no explicit `recurring-job-selector` annotation needed).
+
+Daily schedule (UTC):
+
+| Time  | Job                       | Effect |
+|-------|---------------------------|--------|
+| 02:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
+| 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
+| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.31.230/backups`), `retain: 1` |
 
 ```bash
-# Check CronJob status
-kubectl get cronjob backup-of-all-volumes -n storage
+# Inspect the recurring job pipeline
+kubectl get recurringjobs.longhorn.io -n storage
 
-# View recent backup jobs
-kubectl get jobs -n storage --sort-by='.status.startTime' | tail -10
+# View recent backup CR state
+kubectl get backups.longhorn.io -n storage --sort-by='.status.snapshotCreatedAt' | tail -10
 
-# View backup job logs
-kubectl logs -n storage job/{job-name} --tail=100
+# Check the auto-cleanup setting that complements snapshot-cleanup
+kubectl get setting.longhorn.io -n storage auto-cleanup-recurring-job-backup-snapshot
 ```
 
 ### Manual Backup (via UI)
