@@ -60,11 +60,13 @@ spec:
               cpu: 500m
               memory: 1Gi
             limits:
-              # Bumped from 1000m → 2000m after enabling K8s container-log
-              # collection (~470 streams across 3 nodes). Manager was pegged
-              # at the 1000m limit (CPUThrottlingHigh fired). 2000m gives
-              # headroom for the steady-state event rate.
-              cpu: 2000m
+              # Manager analysisd + remoted + filebeat together pin at the
+              # CPU limit when the agents stream container logs (~470 CRI
+              # files across 3 nodes). 1000m and 2000m both pegged in
+              # steady state. 4000m gives genuine headroom — node has 18
+              # cores, request stays at 500m so scheduling priority for
+              # other namespaces is unchanged.
+              cpu: 4000m
               memory: 2Gi
           securityContext:
             capabilities:
