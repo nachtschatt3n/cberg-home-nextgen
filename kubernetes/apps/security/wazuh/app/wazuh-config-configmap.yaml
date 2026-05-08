@@ -414,8 +414,13 @@ data:
         <force>
           <enabled>yes</enabled>
           <key_mismatch>yes</key_mismatch>
-          <disconnected_time enabled="yes">1h</disconnected_time>
-          <after_registration_time>1h</after_registration_time>
+          <!-- Re-enrollment grace windows. With stable agent identities
+               pinned to NODE_NAME, the only re-enrollment we expect is
+               a pod restart of the same node's agent — should always
+               succeed. Lower both windows to 30s so a quick agent
+               restart doesn't get locked out for an hour. -->
+          <disconnected_time enabled="yes">30s</disconnected_time>
+          <after_registration_time>30s</after_registration_time>
         </force>
         <!-- purge=yes: when an agent re-enrolls with the same name as an
              existing entry, drop the old entry instead of refusing the new
