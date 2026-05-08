@@ -184,25 +184,32 @@ spec:
         memory: 12Gi
         gpu.intel.com/i915: 1
 
-    # Generous timeouts so SQLite contention during library scans
-    # does not kill the pod. /health blocks under DB load.
-    # 10 failures * 30s period = 300s grace before kubelet kills.
+    # Liveness uses /health so a genuinely hung Jellyfin gets restarted
+    # (10 failures * 30s = 5 min grace; SQLite contention or .NET GC
+    # pauses won't trip the kill).
     livenessProbe:
       httpGet:
         path: /health
         port: http
       initialDelaySeconds: 60
       periodSeconds: 30
-      timeoutSeconds: 10
+      timeoutSeconds: 15
       failureThreshold: 10
+    # Readiness uses tcpSocket: kubelet flapped the previous httpGet
+    # probe ~70 times in 42h with "context deadline exceeded" because
+    # /health intermittently takes >10s under DB lock contention or
+    # plugin sync activity. While unready the pod was kicked from
+    # Service endpoints, breaking external access. tcpSocket only
+    # checks that 8096 is accepting connections — that's the right
+    # signal for "should this pod receive traffic" given liveness
+    # already covers genuine hangs.
     readinessProbe:
-      httpGet:
-        path: /health
+      tcpSocket:
         port: http
       initialDelaySeconds: 30
       periodSeconds: 30
-      timeoutSeconds: 10
-      failureThreshold: 8
+      timeoutSeconds: 5
+      failureThreshold: 4
 
     # -- Additional volumes to mount in the Jellyfin pod.
     volumes: []
