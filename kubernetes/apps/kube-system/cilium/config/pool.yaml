@@ -6,13 +6,19 @@ metadata:
   name: pool
 spec:
   allowFirstLastIPs: "No"
-  # Exclude only .1 (UniFi VLAN 55 gateway). The original .25-.254
-  # narrowing in ac95aeb8 was too aggressive — it kicked unpinned
-  # services off their auto-allocated low IPs (notably AdGuard at .5,
-  # broke cluster DNS). Starting at .2 preserves every existing
-  # auto-allocation while keeping Cilium from grabbing the gateway IP.
-  # Node IPs .11/.12/.13 are routed (DHCP), not in this pool, so they
-  # don't collide.
+  # VLAN 55 (k8s-network) reservations cross-checked against UniFi config:
+  #   .1            UniFi gateway
+  #   .11/.12/.13   Talos node IPs (DHCP-assigned, but reserved here too as a
+  #                 belt-and-braces guard)
+  #   .200-.210     UniFi VLAN 55 DHCP pool (currently empty but reserved by
+  #                 the controller for future cluster-node DHCP leases)
+  # Every existing LB service is pinned via lbipam.cilium.io/ips so future
+  # pool changes won't migrate IPs. New auto-allocations come from the
+  # blocks below.
   blocks:
     - start: "192.168.55.2"
+      stop: "192.168.55.10"
+    - start: "192.168.55.14"
+      stop: "192.168.55.199"
+    - start: "192.168.55.211"
       stop: "192.168.55.254"

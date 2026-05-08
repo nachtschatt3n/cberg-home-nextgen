@@ -52,6 +52,7 @@ metadata:
   labels:
     app: wazuh-manager
   annotations:
+    lbipam.cilium.io/ips: "192.168.55.27"
     metallb.universe.tf/loadBalancerIPs: "192.168.55.27"
 spec:
   type: LoadBalancer

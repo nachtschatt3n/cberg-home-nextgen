@@ -74,7 +74,8 @@ spec:
         enabled: true
         type: LoadBalancer
         # -- Service annotations
-        annotations: {}
+        annotations:
+          lbipam.cilium.io/ips: "192.168.55.5"
         # -- Internal cluster service IP for DNS (when applicable)
         clusterIP: ""
         # -- Set traffic policy for external traffic. Set to "Local" to preserve client ip address in case of service type "LoadBalancer" or "NodePort"

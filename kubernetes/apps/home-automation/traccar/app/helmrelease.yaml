@@ -85,7 +85,8 @@ spec:
       osmand:
         controller: main
         type: LoadBalancer
-        loadBalancerIP: "192.168.55.26"
+        annotations:
+          lbipam.cilium.io/ips: "192.168.55.31"
         ports:
           osmand:
             port: 5055

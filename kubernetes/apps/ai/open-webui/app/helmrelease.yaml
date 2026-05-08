@@ -109,7 +109,8 @@ spec:
         memory: 2Gi
     service:
       type: LoadBalancer
-      annotations: {}
+      annotations:
+        lbipam.cilium.io/ips: "192.168.55.28"
       port: 80
       containerPort: 8080
       nodePort: ""

@@ -62,10 +62,10 @@ spec:
       main:
         controller: scrypted
         type: LoadBalancer
-        #loadBalancerIP: "192.168.55.16"
+        annotations:
+          lbipam.cilium.io/ips: "192.168.55.26"
         #externalTrafficPolicy: Cluster
-        #annotations:
-          #external-dns.alpha.kubernetes.io/hostname: scrypted.${SECRET_DOMAIN}
+        #external-dns.alpha.kubernetes.io/hostname: scrypted.${SECRET_DOMAIN}
         ports:
           web:
             protocol: TCP

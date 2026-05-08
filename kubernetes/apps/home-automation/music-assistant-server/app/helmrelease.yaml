@@ -112,7 +112,8 @@ spec:
       main:
         controller: music-assistant-server
         type: LoadBalancer
-        loadBalancerIP: "192.168.55.25"
+        annotations:
+          lbipam.cilium.io/ips: "192.168.55.29"
         ports:
           http:
             port: 80

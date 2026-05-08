@@ -55,16 +55,34 @@ All three nodes connect to Basement-SW-24-PoE.
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 
-**Cilium LBIPAM pool** (`kubernetes/apps/kube-system/cilium/config/pool.yaml`): allocates LB IPs from `192.168.55.25–192.168.55.254`. The lower 24 addresses are intentionally reserved:
+**Cilium LBIPAM pool** (`kubernetes/apps/kube-system/cilium/config/pool.yaml`) — multi-block, cross-checked against UniFi VLAN 55:
 
-| Range | Reserved for |
+| Range | Status | Reserved for |
+|---|---|---|
+| `.1` | excluded | UniFi VLAN 55 gateway |
+| `.2 – .10` | **pool** | available auto-allocations |
+| `.11 / .12 / .13` | excluded | Talos node IPs |
+| `.14 – .199` | **pool** | available auto-allocations |
+| `.200 – .210` | excluded | UniFi VLAN 55 DHCP pool |
+| `.211 – .254` | **pool** | available auto-allocations |
+
+Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so future pool changes can't migrate IPs:
+
+| Service | IP |
 |---|---|
-| `.1` | UniFi VLAN 55 (k8s-network) gateway |
-| `.2 – .10` | Manual / future static allocations |
-| `.11 / .12 / .13` | Talos node IPs |
-| `.14 – .24` | Reserved (bumped after the Plex `.1` collision: see commit `1bc08bcc`) |
-
-Existing services on `.1–.24` (allocated before the pool was narrowed) keep their pinned IPs via `lbipam.cilium.io/ips` annotations — only future auto-allocations are bounded.
+| `network/adguard-home-dns` | `.5` |
+| `home-automation/mosquitto-main` | `.15` |
+| `home-automation/home-assistant` | `.24` |
+| `home-automation/iobroker` | `.25` |
+| `home-automation/scrypted` | `.26` |
+| `security/wazuh-syslog-unifi` | `.27` |
+| `ai/open-webui` | `.28` |
+| `home-automation/music-assistant-server` | `.29` |
+| `media/plex-plex-media-server` | `.30` |
+| `home-automation/traccar-osmand` | `.31` |
+| `network/internal-ingress-nginx-controller` | `.100` |
+| `network/k8s-gateway` | `.101` |
+| `network/external-ingress-nginx-controller` | `.102` |
 
 **Mac Mini M4 Pro:**
 - Single Ollama instance with Metal Performance Shaders (MPS) acceleration
