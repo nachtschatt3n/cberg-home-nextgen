@@ -6,11 +6,13 @@ metadata:
   name: pool
 spec:
   allowFirstLastIPs: "No"
-  # REVERTED to /24 in commit (see below) after the .25-.254 narrowing
-  # in commit ac95aeb8 booted services that didn't have explicit
-  # `lbipam.cilium.io/ips` annotations off their auto-allocated low
-  # IPs (notably AdGuard at .5 → cluster DNS broken). To narrow this
-  # safely later, every service in the .1–.24 range must first get an
-  # explicit pin annotation.
+  # Exclude only .1 (UniFi VLAN 55 gateway). The original .25-.254
+  # narrowing in ac95aeb8 was too aggressive — it kicked unpinned
+  # services off their auto-allocated low IPs (notably AdGuard at .5,
+  # broke cluster DNS). Starting at .2 preserves every existing
+  # auto-allocation while keeping Cilium from grabbing the gateway IP.
+  # Node IPs .11/.12/.13 are routed (DHCP), not in this pool, so they
+  # don't collide.
   blocks:
-    - cidr: "192.168.55.0/24"
+    - start: "192.168.55.2"
+      stop: "192.168.55.254"
