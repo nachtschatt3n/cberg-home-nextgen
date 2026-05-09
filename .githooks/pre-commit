@@ -148,10 +148,10 @@ check_file() {
     local violations=""
 
     # Skip binary
-    file "$file" 2>/dev/null | grep -q text || return
+    file "$file" 2>/dev/null | grep -q text || return 0
 
     local content
-    content=$(git show ":$file" 2>/dev/null) || return
+    content=$(git show ":$file" 2>/dev/null) || return 0
 
     # Layer 1: literal match against any cluster-secret value
     if [ -s "$LITERALS" ]; then
