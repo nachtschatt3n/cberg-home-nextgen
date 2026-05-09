@@ -25,7 +25,7 @@ All CIFS mounts target one NAS at `192.168.31.230` (UNAS-CBERG, Servers VLAN 10)
 |---------|-------|
 | Namespace (CSI driver) | `storage` |
 | Namespace (BackupTarget) | `storage` (Longhorn) |
-| Source of truth | `kubernetes/apps/storage/csi-smb/` + `kubernetes/apps/*/cifs-*-storage-class.yaml` |
+| Source of truth | `kubernetes/apps/kube-system/csi-driver-smb/` + per-app `kubernetes/apps/*/<app>/app/storageclass.yaml` |
 | Critical dependency | NAS at `192.168.31.230`, kernel CIFS module on each Talos node |
 | Reclaim policy on every CIFS class | `Retain` (per `docs/sops/storage-safety.md`) |
 
@@ -47,9 +47,9 @@ The Backup profile is the only one with `soft`. That trade-off is intentional �
 Source of truth is the YAML for each StorageClass / PV / BackupTarget — there is no shared blueprint object. Each mount carries its options literally in `mountOptions` (StorageClass) or `cifsOptions=...` query string (BackupTarget URL).
 
 - Source of truth file(s):
-  - `kubernetes/apps/storage/longhorn/backup-target.yaml`
-  - `kubernetes/apps/storage/csi-smb/storageclasses/*.yaml`
-  - `kubernetes/apps/<app>/app/pvc.yaml` for static PVs
+  - `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` (`defaultSettings.backupTarget` value drives the BackupTarget URL)
+  - `kubernetes/apps/<ns>/<app>/app/storageclass.yaml` for per-app `cifs-*` StorageClass definitions
+  - `kubernetes/apps/<ns>/<app>/app/pvc.yaml` for static PVs
 - Related manifests: any `kind: PersistentVolume` with `spec.csi.driver: smb.csi.k8s.io`
 - Required IDs/constants: NAS host `192.168.31.230`, share names match table below
 
@@ -366,7 +366,7 @@ Application StorageClass / PV changes are GitOps-managed — `git revert <sha>` 
 - `docs/sops/storage-safety.md` — PVC delete blast-radius rules; the master safety SOP for any CIFS/SMB/NFS deletion
 - `docs/sops/longhorn.md` — Longhorn dynamic vs static class guidance
 - `docs/applications.md` — application inventory (which apps consume which CIFS share)
-- `kubernetes/apps/storage/csi-smb/` — csi-driver-smb HelmRelease
+- `kubernetes/apps/kube-system/csi-driver-smb/` — csi-driver-smb HelmRelease
 - `kubernetes/apps/storage/longhorn/` — Longhorn HelmRelease + BackupTarget
 
 ---

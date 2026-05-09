@@ -36,6 +36,11 @@ kubectl exec -n security wazuh-manager-master-0 -- \
 # UniFi-specific decoder rules surface as `rule.groups: unifi`
 ```
 
+The custom UniFi dashboard "UniFi - Security Events" is shipped via
+saved-object NDJSON under `kubernetes/apps/security/wazuh/app/dashboards/`.
+See `dashboards/README.md` for the import procedure after a Wazuh dashboard
+rebuild (kubectl cp doesn't work — image lacks `tar` — use base64 stream).
+
 You should see entries like:
 ```
 2026 May 07 21:00:01 192.168.30.1 unifi-gw: <134>2026-05-07T21:00:01+02:00 ...
