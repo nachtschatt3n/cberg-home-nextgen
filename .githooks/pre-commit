@@ -74,6 +74,12 @@ DICTIONARY_WORD = re.compile(r"^[a-z]{1,15}$")
 # Skip them so they don't false-positive every CIFS/network change.
 IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 IPV6 = re.compile(r"^[0-9a-fA-F:]+$")
+# OCI-style image/model tags (e.g. `gemma4:26b`, `nginx:1.25-alpine`).
+# These often live in cluster-secrets as shared config (the cluster's Ollama
+# model, default image versions) and are referenced from manifests by name —
+# not secrets, even though they're in a Secret object. Cap length to prevent
+# masking real `key:longvalue` patterns.
+OCI_TAG = re.compile(r"^[a-zA-Z][a-zA-Z0-9._-]*:[a-zA-Z0-9._-]+$")
 literals = set()
 data = json.load(sys.stdin)
 for s in data.get("items", []):
@@ -99,6 +105,8 @@ for s in data.get("items", []):
         if IPV4.match(decoded):
             continue
         if len(decoded) >= 6 and IPV6.match(decoded) and ":" in decoded:
+            continue
+        if len(decoded) <= 30 and OCI_TAG.match(decoded):
             continue
         literals.add(decoded)
 with open(out_path, "w") as f:

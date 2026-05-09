@@ -249,7 +249,12 @@ spec:
           cpu: 100m
           memory: 512Mi
         limits:
-          memory: 1Gi
+          # Sidekiq leaks slowly (~5-10 MiB/day). With 1 GiB limit the
+          # pod was OOMKilled after 9d of uptime (2026-05-09 06:52 UTC,
+          # working set hit 819 MiB then crossed limit during a job
+          # spike). Bumping to 1.5 GiB pushes the next OOM to ~3 weeks
+          # of uptime — acceptable cadence for a leak we don't own.
+          memory: 1536Mi
       extraVolumes:
         - name: uploads
           persistentVolumeClaim:
