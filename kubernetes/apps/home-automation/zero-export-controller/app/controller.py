@@ -218,7 +218,10 @@ async def fetch_inverters(ha: HAClient, names: list[str]) -> list[InverterState]
         power = states.get(f"sensor.{name}_power")
         reach = states.get(f"binary_sensor.{name}_reachable")
         power_w = power.numeric if power and power.numeric is not None else 0.0
-        reachable = bool(reach and reach.is_on and not reach.is_stale)
+        # binary_sensor.*_reachable only updates last_updated on transitions; a
+        # stable-on sensor will look "stale" but is in fact authoritative. HA
+        # surfaces lost contact as state="unavailable", which .is_on rejects.
+        reachable = bool(reach and reach.is_on)
         out.append(InverterState(name=name, power_w=power_w, reachable=reachable))
     return out
 
