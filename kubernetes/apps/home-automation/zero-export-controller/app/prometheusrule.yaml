@@ -61,22 +61,24 @@ spec:
               zec_inverter_limit_watts vs zec_inverter_power_watts.
 
         # --- ZECOverLegalCap -----------------------------------------------
-        # Sum of per-inverter ACTUAL output exceeds the legal cap (>850W) for
+        # Sum of per-inverter ACTUAL output exceeds the legal cap (>950W) for
         # >30s. This is a regulatory compliance alert: critical severity.
+        # Threshold is cap_w (900W) + 50W tolerance; tracks the controller's
+        # configured operating point with a small margin.
         - alert: ZECOverLegalCap
-          expr: sum(zec_inverter_power_watts) > 850
+          expr: sum(zec_inverter_power_watts) > 950
           for: 30s
           labels:
             severity: critical
             category: home-automation
             component: zero-export-controller
           annotations:
-            summary: Total inverter output exceeds 850W legal cap ({{ $value | printf "%.0f" }}W)
+            summary: Total inverter output exceeds 950W legal cap ({{ $value | printf "%.0f" }}W)
             description: |
               Sum of zec_inverter_power_watts across all inverters exceeds the
-              850W legal feed-in cap for >30s. This is a regulatory compliance
-              issue. Verify per-inverter limits are being honored and that the
-              controller's cap_w setting is correct.
+              950W threshold (cap_w 900W + 50W tolerance) for >30s. This is a
+              regulatory compliance issue. Verify per-inverter limits are
+              being honored and that the controller's cap_w setting is correct.
 
         # --- ZECLoopStalled ------------------------------------------------
         # Loop iteration counter has not advanced for >3min while the pod is
