@@ -54,7 +54,7 @@ spec:
                     name: trmnl-ha-secret
                     key: ACCESS_TOKEN
               - name: DRY_RUN
-                value: "true"
+                value: "false"
               - name: METRICS_PORT
                 value: "8080"
               - name: GRID_SENSOR

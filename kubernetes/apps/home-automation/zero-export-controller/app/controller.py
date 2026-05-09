@@ -247,28 +247,35 @@ async def loop_once(
 
     grid_ok = grid_state and grid_state.numeric is not None and not grid_state.is_stale
     pv_ok = pv_state and pv_state.numeric is not None and not pv_state.is_stale
+    if grid_state and grid_state.numeric is not None:
+        m_grid.set(grid_state.numeric)
+    if pv_state and pv_state.numeric is not None:
+        m_pv_total.set(pv_state.numeric)
 
-    if not tuning.enabled or not grid_ok or not pv_ok:
+    if not tuning.enabled:
+        # Kill switch off: hand control back to the user. Do NOT write any
+        # limits this tick — last RAM-resident limit stays. Note: the legal
+        # 800 W cap is then only as good as the inverter's persistent_limit
+        # config (set out-of-band in OpenDTU).
+        logging.info("kill switch off: skipping writes; last limits remain in effect")
+        return last_limits, tuning.loop_period_s
+    if not grid_ok or not pv_ok:
+        # Sensors stale or missing: fail to a safe state that respects the
+        # legal 800 W cap regardless of how many inverters are reachable.
         logging.warning(
-            "safe fallback: enabled=%s grid_ok=%s pv_ok=%s",
-            tuning.enabled, grid_ok, pv_ok,
+            "safe fallback: grid_ok=%s pv_ok=%s — distributing cap_w across reachable",
+            grid_ok, pv_ok,
         )
-        new_limits = {
-            inv.name: tuning.per_max_w for inv in inverters if inv.reachable
-        }
+        new_limits = distribute(tuning.cap_w, inverters, tuning.per_max_w)
+        m_desired.set(tuning.cap_w)
     else:
-        grid_w = grid_state.numeric
-        pv_total_w = pv_state.numeric
-        m_grid.set(grid_w)
-        m_pv_total.set(pv_total_w)
-
-        desired = compute_desired(grid_w, pv_total_w, tuning)
+        desired = compute_desired(grid_state.numeric, pv_state.numeric, tuning)
         m_desired.set(desired)
 
         new_limits = distribute(desired, inverters, tuning.per_max_w)
         logging.info(
             "grid=%.0fW pv=%.0fW target=%.0fW desired=%.0fW limits=%s",
-            grid_w, pv_total_w, tuning.target_w, desired,
+            grid_state.numeric, pv_state.numeric, tuning.target_w, desired,
             {k: round(v) for k, v in new_limits.items()},
         )
 
