@@ -600,6 +600,23 @@ data:
         <group>falco,homelab,</group>
       </rule>
 
+      <!-- Suppress Falco "Read sensitive file untrusted" when triggered by
+           PostgreSQL's pg_isready liveness/readiness probe. Every postgres-
+           backed app (sure-pg, langfuse-pg, traccar-postgres, affine-pg,
+           authentik-pg, etc.) runs pg_isready every few seconds; the
+           binary is wrapped by a perl shell helper that reads /etc/shadow
+           as part of its uid/gid lookup. Evidence: 11,001 of 11,033 (99.7%)
+           rule.id=100402 hits in a 50k-line alerts.json sample on
+           2026-05-10 came from `process=pg_isready`. Without this exclude,
+           pg_isready dominates the SIEM noise floor and drowns out real
+           "non-trusted program reads /etc/shadow" signals. -->
+      <rule id="100412" level="0">
+        <if_sid>100400</if_sid>
+        <field name="output" type="pcre2">process=pg_isready|command=pg_isready</field>
+        <description>Falco: ignore PostgreSQL pg_isready liveness probe reading /etc/shadow (false positive, ~99% of 100402 noise)</description>
+        <group>falco,homelab,</group>
+      </rule>
+
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
         <field name="priority" type="pcre2">^(Notice|Informational|Debug)$</field>
