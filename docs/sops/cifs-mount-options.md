@@ -48,8 +48,8 @@ Source of truth is the YAML for each StorageClass / PV / BackupTarget — there 
 
 - Source of truth file(s):
   - `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` (`defaultSettings.backupTarget` value drives the BackupTarget URL)
-  - `kubernetes/apps/<namespace>/<app-name>/app/storageclass.yaml` for per-app `cifs-*` StorageClass definitions (concrete examples: `kubernetes/apps/home-automation/scrypted-nvr/app/storageclass.yaml`, `kubernetes/apps/office/penpot/app/storageclass.yaml`)
-  - `kubernetes/apps/<namespace>/<app-name>/app/pvc.yaml` for static PVs (concrete example: `kubernetes/apps/office/nextcloud/app/pvc.yaml`)
+  - Per-app `cifs-*` StorageClass definitions live alongside each consuming app, e.g. `kubernetes/apps/home-automation/scrypted-nvr/app/storageclass.yaml`, `kubernetes/apps/office/penpot/app/storageclass.yaml`
+  - Static PVs live alongside their consuming app, e.g. `kubernetes/apps/office/nextcloud/app/pvc.yaml`
 - Related manifests: any `kind: PersistentVolume` with `spec.csi.driver: smb.csi.k8s.io`
 - Required IDs/constants: NAS host `192.168.31.230`, share names match table below
 
