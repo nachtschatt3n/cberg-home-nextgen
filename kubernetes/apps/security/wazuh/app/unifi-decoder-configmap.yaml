@@ -565,32 +565,32 @@ data:
       <rule id="100400" level="0">
         <decoded_as>json</decoded_as>
         <field name="source">syscall</field>
-        <field name="rule">\.+</field>
-        <field name="priority">\.+</field>
+        <field name="rule" type="pcre2">.+</field>
+        <field name="priority" type="pcre2">.+</field>
         <description>Falco syscall event (silent parent — children categorize by priority)</description>
         <group>falco,homelab,</group>
       </rule>
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
-        <field name="priority">^(Notice|Informational|Debug)$</field>
+        <field name="priority" type="pcre2">^(Notice|Informational|Debug)$</field>
         <description>Falco $(priority): $(rule)</description>
         <group>falco,homelab,</group>
       </rule>
       <rule id="100402" level="6">
         <if_sid>100400</if_sid>
-        <field name="priority">^Warning$</field>
+        <field name="priority" type="pcre2">^Warning$</field>
         <description>Falco Warning: $(rule)</description>
         <group>falco,homelab,</group>
       </rule>
       <rule id="100403" level="8">
         <if_sid>100400</if_sid>
-        <field name="priority">^Error$</field>
+        <field name="priority" type="pcre2">^Error$</field>
         <description>Falco Error: $(rule)</description>
         <group>falco,homelab,</group>
       </rule>
       <rule id="100404" level="12">
         <if_sid>100400</if_sid>
-        <field name="priority">^(Critical|Alert|Emergency)$</field>
+        <field name="priority" type="pcre2">^(Critical|Alert|Emergency)$</field>
         <description>Falco $(priority): $(rule)</description>
         <group>falco,homelab,attack,</group>
       </rule>
