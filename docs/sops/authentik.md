@@ -111,9 +111,9 @@ Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integ
     name: wazuh-saml
     authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"
     invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"
-    acs_url: "https://wazuh.uhl.cool/_opendistro/_security/saml/acs"
+    acs_url: "https://wazuh.${SECRET_DOMAIN}/_opendistro/_security/saml/acs"
     audience: "wazuh-saml"
-    issuer: "https://auth.uhl.cool"
+    issuer: "https://auth.${SECRET_DOMAIN}"
     sp_binding: "post"
     sign_assertion: true
     sign_response: false
@@ -135,7 +135,7 @@ Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integ
     name: Wazuh
     slug: wazuh
     provider: !KeyOf wazuh-saml-provider
-    meta_launch_url: "https://wazuh.uhl.cool"
+    meta_launch_url: "https://wazuh.${SECRET_DOMAIN}"
     meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/wazuh.png"
     meta_description: "XDR/SIEM platform"
 ```
@@ -166,11 +166,11 @@ Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integ
            # Use the PK-based URL, NOT /application/saml/<slug>/metadata/.
            # Authentik returns a 302 redirect on the slug path and the
            # OpenSearch SAML library doesn't follow redirects.
-           metadata_url: "https://auth.uhl.cool/api/v3/providers/saml/<PK>/metadata/?download"
-           entity_id: "https://auth.uhl.cool"
+           metadata_url: "https://auth.${SECRET_DOMAIN}/api/v3/providers/saml/<PK>/metadata/?download"
+           entity_id: "https://auth.${SECRET_DOMAIN}"
          sp:
            entity_id: "wazuh-saml"
-         kibana_url: "https://wazuh.uhl.cool"
+         kibana_url: "https://wazuh.${SECRET_DOMAIN}"
          roles_key: "http://schemas.xmlsoap.org/claims/Group"
          subject_key: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
          exchange_key: "<URL-safe base64 random ≥32 bytes — see gotcha below>"

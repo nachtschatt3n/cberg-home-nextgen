@@ -32,7 +32,7 @@ kubectl exec -n security wazuh-manager-master-0 -- \
   tail -f /var/ossec/logs/archives/archives.log | grep "192.168.30.1"
 
 # Or check via the dashboard:
-# https://wazuh.uhl.cool → Security Events → filter `agent.name: <unifi-gw-ip>`
+# https://wazuh.${SECRET_DOMAIN} → Security Events → filter `agent.name: <unifi-gw-ip>`
 # UniFi-specific decoder rules surface as `rule.groups: unifi`
 ```
 

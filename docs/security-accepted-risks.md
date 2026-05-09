@@ -434,7 +434,7 @@ The OpenSearch Security `internal_users.yml` shipped with the wazuh/wazuh-indexe
 **Justification:**
 - The `wazuh-indexer` Service is `ClusterIP` only — no LoadBalancer or Ingress exposure on port 9200.
 - All HTTP traffic to the indexer requires our self-signed TLS chain (`root-ca.pem`).
-- The user-facing dashboard at `https://wazuh.uhl.cool` is gated by Authentik SAML SSO (forward-auth annotations removed; the dashboard's OpenSearch Security config has `auth.type: ["basicauth", "saml"]` with the SAML auth_domain wired to Authentik).
+- The user-facing dashboard at `https://wazuh.${SECRET_DOMAIN}` is gated by Authentik SAML SSO (forward-auth annotations removed; the dashboard's OpenSearch Security config has `auth.type: ["basicauth", "saml"]` with the SAML auth_domain wired to Authentik).
 - The custom Wazuh API password (`wazuh-wui` user) IS strong (random 32-char) — the demo creds only protect indexer-internal accounts.
 - Rotating requires generating new bcrypt hashes, mounting a custom `internal_users.yml` overlay, then running `securityadmin.sh -cd .../opensearch-security/` against the live cluster. Doable but invasive.
 

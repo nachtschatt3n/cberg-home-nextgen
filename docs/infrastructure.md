@@ -50,7 +50,7 @@ All three nodes connect to Basement-SW-24-PoE.
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
 | Plex Media Server | 192.168.55.30 | Plex direct LB (port 32400) |
 | internal-ingress-nginx | 192.168.55.100 | Internal Ingress LB IP (cluster-private services) |
-| k8s-gateway | 192.168.55.101 | Split-DNS (`*.uhl.cool` → cluster) |
+| k8s-gateway | 192.168.55.101 | Split-DNS (`*.${SECRET_DOMAIN}` → cluster) |
 | external-ingress-nginx | 192.168.55.102 | External Ingress LB IP (public via Cloudflared) |
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
