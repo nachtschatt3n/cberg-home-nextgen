@@ -991,6 +991,47 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         for s in sample:
             lines.append(f"- `{s}`\n")
 
+    # ─── P2.3: per-source-IP correlation via Cloudflare-injected headers ────
+    # The external ingress logs cf_connecting_ip, cf_ray, cf_country
+    # (commit e6816990 + 1c9ac6a3 wired this through). Slice the same 24h
+    # window by real client IP and flag specific abuse patterns:
+    #   - >50 4xx responses from one IP (enumeration/brute force)
+    #   - bidirectional join with Cloudflare WAF events via cf_ray as key
+    #     (a future P3.x extension)
+    ip_body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"term": {"resource.attributes.k8s.namespace.name": "network"}},
+            {"range": {"http.response.status_code": {"gte": 400, "lt": 500}}},
+        ], "filter": {"range": {"@timestamp": {"gte": "now-24h"}}}}},
+        "aggs": {
+            "by_ip": {"terms": {"field": "cf_connecting_ip.keyword", "size": 20}},
+        },
+    }
+    ip_data = es.query(ip_body)
+    abusers: list[tuple[str, int]] = []
+    if ip_data:
+        for b in ip_data.get("aggregations", {}).get("by_ip", {}).get("buckets", []):
+            ip = b.get("key", "") or "(empty)"
+            count = b.get("doc_count", 0)
+            if count > 50 and ip not in ("", "(empty)"):
+                abusers.append((ip, count))
+
+    if abusers:
+        lines.append(f"\n**Per-source-IP abuse (24h, >50 4xx):** {len(abusers)} IPs\n")
+        for ip, n in abusers[:10]:
+            f.add(WARNING, f"Source IP `{redact(ip)}` triggered {n} 4xx responses (24h)")
+            cprint(C.YELLOW, f"  🟡 {redact(ip)}: {n} 4xx responses")
+            lines.append(f"- `{redact(ip)}`: {n} responses\n")
+    elif ip_data and ip_data.get("hits", {}).get("total", {}).get("value", 0) > 0:
+        cprint(C.GREEN, "  🟢 No per-source-IP abuse pattern (no IP >50 4xx in 24h)")
+    elif ip_data is not None:
+        # Query worked but no cf_connecting_ip-keyed events: log format may
+        # not have rolled out yet, or the field was indexed without keyword
+        # subfield. Will start populating as nginx logs accumulate post-rollout.
+        cprint(C.YELLOW, "  🟡 cf_connecting_ip not yet populated in ES "
+                       "(field will appear as fresh ingress logs index)")
+
     return f.worst(), f, "\n".join(lines)
 
 
