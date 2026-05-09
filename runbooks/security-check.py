@@ -316,11 +316,77 @@ class ElasticPortForward:
 
 
 # ---------------------------------------------------------------------------
+# Wazuh indexer port-forward (separate from ECK Elasticsearch — different
+# cluster, different creds, different index pattern). Used by section 13 to
+# pull SIEM findings (decoder-matched alerts from K8s agents + UniFi syslog).
+# ---------------------------------------------------------------------------
+
+class WazuhPortForward:
+    def __init__(self):
+        self._proc = None
+        self._password = None
+
+    def __enter__(self):
+        run("fuser -k 9201/tcp 2>/dev/null || true")
+        time.sleep(0.5)
+
+        self._proc = subprocess.Popen(
+            "kubectl port-forward -n security svc/wazuh-indexer 9201:9200",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for _ in range(20):
+            time.sleep(0.5)
+            try:
+                with socket.create_connection(("127.0.0.1", 9201), timeout=1):
+                    break
+            except OSError:
+                continue
+
+        raw = kubectl(
+            "get secret wazuh-secret -n security "
+            "-o jsonpath='{.data.INDEXER_PASSWORD}'",
+        )
+        try:
+            import base64
+            self._password = base64.b64decode(raw.strip("'")).decode()
+        except Exception:
+            self._password = None
+        return self
+
+    def __exit__(self, *_):
+        if self._proc:
+            self._proc.terminate()
+            self._proc.wait()
+        run("fuser -k 9201/tcp 2>/dev/null || true")
+
+    def query(self, body: dict, index: str = "wazuh-alerts-*", timeout: int = 15) -> dict | None:
+        if not self._password:
+            return None
+        import base64 as b64
+        auth = b64.b64encode(f"admin:{self._password}".encode()).decode()
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(
+            f"https://localhost:9201/{index}/_search",
+            data=data,
+            headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"},
+        )
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                return json.load(r)
+        except Exception:
+            return None
+
+
+# ---------------------------------------------------------------------------
 # Section implementations
 # ---------------------------------------------------------------------------
 
 def section_header(n: int, title: str) -> None:
-    cprint(C.BLUE, f"\n[{n}/12] {title}")
+    cprint(C.BLUE, f"\n[{n}/13] {title}")
 
 
 def s1_sops_coverage() -> tuple[str, Findings, str]:
@@ -1492,6 +1558,131 @@ def s11_unifi() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
+    """Surface SIEM-identified issues from the Wazuh indexer.
+
+    Looks at three slices over the last 24h:
+      1. High-severity alerts (rule.level >= 12) — auto-CRITICAL.
+      2. Medium-severity (rule.level 7-11) buckets keyed by rule.groups —
+         flag concerning categories (auth_failed, web_attack, intrusion,
+         privilege_escalation, rootcheck, syscheck) above small thresholds.
+      3. UniFi-specific event volume + K8s container alerts (level >= 5).
+
+    Threshold rationale: Wazuh's 0-15 scale puts level 12+ at "critical"
+    in upstream defaults; 7-11 is "notable but tunable"; 0-6 is routine.
+    Homelab-tuned: only escalate medium counts when they exceed a cluster
+    of >5 events (single-event noise gets filtered)."""
+    section_header(13, "Wazuh SIEM Findings")
+    f = Findings()
+    lines = []
+
+    # --- Slice 1: high-severity (level >= 12) --------------------------------
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"range": {"@timestamp": {"gte": "now-24h"}}},
+            {"range": {"rule.level": {"gte": 12}}},
+        ]}},
+        "aggs": {
+            "by_rule":  {"terms": {"field": "rule.description", "size": 10}},
+            "by_agent": {"terms": {"field": "agent.name",       "size": 10}},
+        },
+    }
+    data = wz.query(body)
+    if data is None:
+        f.add(WARNING, "Wazuh indexer unavailable — skipping SIEM check")
+        cprint(C.YELLOW, "  🟡 Wazuh indexer query failed (port-forward or auth)")
+        return f.worst(), f, f.markdown()
+
+    crit_total = data["hits"]["total"]["value"]
+    if crit_total > 0:
+        f.add(CRITICAL, f"{crit_total} high-severity Wazuh alerts (level≥12) in last 24h")
+        cprint(C.RED, f"  🔴 {crit_total} high-severity SIEM alerts (level≥12, 24h)")
+        lines.append(f"**High-severity alerts (level≥12, 24h):** {crit_total}\n\n")
+        lines.append("Top rules:\n")
+        for b in data["aggregations"]["by_rule"]["buckets"][:5]:
+            lines.append(f"- {b['key']}: {b['doc_count']}\n")
+        lines.append("\nTop agents:\n")
+        for b in data["aggregations"]["by_agent"]["buckets"][:5]:
+            lines.append(f"- {b['key']}: {b['doc_count']}\n")
+    else:
+        cprint(C.GREEN, "  🟢 No high-severity Wazuh alerts (level≥12, 24h)")
+        lines.append("High-severity alerts (level≥12, 24h): **0**\n")
+
+    # --- Slice 2: medium severity (level 7-11) by category -------------------
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"range": {"@timestamp": {"gte": "now-24h"}}},
+            {"range": {"rule.level": {"gte": 7, "lt": 12}}},
+        ]}},
+        "aggs": {"by_groups": {"terms": {"field": "rule.groups", "size": 20}}},
+    }
+    data = wz.query(body)
+    med_total = data["hits"]["total"]["value"] if data else 0
+    concerning = {
+        "authentication_failed", "authentication_failures",
+        "web_attack", "attack", "intrusion_detection",
+        "privilege_escalation", "rootcheck", "syscheck",
+        "ids", "ipsec",
+    }
+    flagged: list[tuple[str, int]] = []
+    if data:
+        for b in data.get("aggregations", {}).get("by_groups", {}).get("buckets", []):
+            if b["key"] in concerning and b["doc_count"] > 5:
+                flagged.append((b["key"], b["doc_count"]))
+    if flagged:
+        for cat, n in flagged:
+            f.add(WARNING, f"Wazuh: {n} `{cat}` events (level 7-11, 24h)")
+            cprint(C.YELLOW, f"  🟡 {n} {cat} events (medium, 24h)")
+    else:
+        cprint(C.GREEN, f"  🟢 No concerning medium-severity patterns ({med_total} medium total)")
+    lines.append(f"\nMedium-severity alerts (level 7-11, 24h): **{med_total}**\n")
+
+    # --- Slice 3a: UniFi events (any level — they're already filtered) -------
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"range": {"@timestamp": {"gte": "now-24h"}}},
+            {"match": {"decoder.name": "unifi"}},
+        ]}},
+        "aggs": {"by_rule": {"terms": {"field": "rule.description", "size": 10}}},
+    }
+    data = wz.query(body)
+    unifi_total = data["hits"]["total"]["value"] if data else 0
+    lines.append(f"\nUniFi events (24h): **{unifi_total}**\n")
+    if unifi_total > 0 and data:
+        lines.append("Top UniFi rules:\n")
+        for b in data["aggregations"]["by_rule"]["buckets"][:3]:
+            lines.append(f"- {b['key']}: {b['doc_count']}\n")
+    if unifi_total == 0:
+        cprint(C.YELLOW, "  🟡 0 UniFi events ingested (24h) — verify SIEM Server is forwarding")
+        f.add(WARNING, "Wazuh: 0 UniFi events in 24h — UniFi syslog flow may be broken")
+    else:
+        cprint(C.GREEN, f"  🟢 UniFi events flowing ({unifi_total} in 24h)")
+
+    # --- Slice 3b: K8s container alerts (level >= 5, location *containers*) --
+    body = {
+        "size": 0,
+        "query": {"bool": {"must": [
+            {"range": {"@timestamp": {"gte": "now-24h"}}},
+            {"wildcard": {"location": "*containers*"}},
+            {"range": {"rule.level": {"gte": 5}}},
+        ]}},
+        "aggs": {"by_rule": {"terms": {"field": "rule.description", "size": 10}}},
+    }
+    data = wz.query(body)
+    k8s_total = data["hits"]["total"]["value"] if data else 0
+    lines.append(f"\nK8s container alerts (level≥5, 24h): **{k8s_total}**\n")
+    if k8s_total > 100:
+        f.add(WARNING, f"Wazuh: high K8s container alert volume ({k8s_total}/24h, level≥5) — possible noisy app or rule mis-tune")
+        cprint(C.YELLOW, f"  🟡 K8s container alerts elevated ({k8s_total}/24h)")
+    else:
+        cprint(C.GREEN, f"  🟢 K8s container alert volume normal ({k8s_total}/24h)")
+
+    return f.worst(), f, "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Report writer
 # ---------------------------------------------------------------------------
@@ -1509,6 +1700,7 @@ SECTION_NAMES = [
     "Certificate Integrity",
     "Flux Security Posture",
     "UniFi Network Security",
+    "Wazuh SIEM Findings",
 ]
 
 
@@ -1605,6 +1797,11 @@ def main() -> int:
     results.append(s9_certificates())
     results.append(s10_flux_posture())
     results.append(s11_unifi())
+
+    # Section 13: Wazuh SIEM findings (separate indexer cluster)
+    cprint(C.CYAN, "\nStarting Wazuh indexer port-forward for section 13...")
+    with WazuhPortForward() as wz:
+        results.append(s13_wazuh_siem(wz))
 
     # Write report
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

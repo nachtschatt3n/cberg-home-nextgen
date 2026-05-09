@@ -1377,9 +1377,76 @@ PYEOF
 
 ---
 
+## 13. Wazuh SIEM Findings
+
+Pulls SIEM-identified issues from the Wazuh indexer (`security/wazuh-indexer:9200`,
+admin auth from `wazuh-secret`). Three slices over the last 24h:
+
+```bash
+# Port-forward + admin password (script handles this; manual equivalent below)
+mise exec -- kubectl port-forward -n security svc/wazuh-indexer 9201:9200 &
+ADMIN=$(mise exec -- kubectl get secret wazuh-secret -n security \
+  -o jsonpath='{.data.INDEXER_PASSWORD}' | base64 -d)
+
+# 1. High-severity (level >= 12) — auto-CRITICAL
+curl -sk -u "admin:$ADMIN" -H 'Content-Type: application/json' \
+  -X POST 'https://localhost:9201/wazuh-alerts-*/_search' -d '{
+    "size":0,
+    "query":{"bool":{"must":[
+      {"range":{"@timestamp":{"gte":"now-24h"}}},
+      {"range":{"rule.level":{"gte":12}}}
+    ]}},
+    "aggs":{"by_rule":{"terms":{"field":"rule.description","size":10}}}
+  }'
+
+# 2. Medium (level 7-11) bucketed by rule.groups — flag concerning categories
+#    above 5-event threshold: authentication_failed, web_attack, attack,
+#    intrusion_detection, privilege_escalation, rootcheck, syscheck, ids
+curl -sk -u "admin:$ADMIN" -H 'Content-Type: application/json' \
+  -X POST 'https://localhost:9201/wazuh-alerts-*/_search' -d '{
+    "size":0,
+    "query":{"bool":{"must":[
+      {"range":{"@timestamp":{"gte":"now-24h"}}},
+      {"range":{"rule.level":{"gte":7,"lt":12}}}
+    ]}},
+    "aggs":{"by_groups":{"terms":{"field":"rule.groups","size":20}}}
+  }'
+
+# 3a. UniFi event flow check (warns at 0/24h)
+curl -sk -u "admin:$ADMIN" -H 'Content-Type: application/json' \
+  -X POST 'https://localhost:9201/wazuh-alerts-*/_search' -d '{
+    "size":0,
+    "query":{"bool":{"must":[
+      {"range":{"@timestamp":{"gte":"now-24h"}}},
+      {"match":{"decoder.name":"unifi"}}
+    ]}}
+  }'
+
+# 3b. K8s container alerts (level >= 5) — warns at >100/24h (noisy app or rule mis-tune)
+curl -sk -u "admin:$ADMIN" -H 'Content-Type: application/json' \
+  -X POST 'https://localhost:9201/wazuh-alerts-*/_search' -d '{
+    "size":0,
+    "query":{"bool":{"must":[
+      {"range":{"@timestamp":{"gte":"now-24h"}}},
+      {"wildcard":{"location":"*containers*"}},
+      {"range":{"rule.level":{"gte":5}}}
+    ]}}
+  }'
+```
+
+**Severity model:**
+- Wazuh `rule.level` 0-15 (upstream default): 0-2 informational, 3-6 routine,
+  7-11 notable, 12-15 critical.
+- Section auto-CRITICAL on any level≥12 hit (24h window).
+- Section WARNs on individual `rule.groups` categories with >5 medium events
+  in the concerning set, on 0 UniFi events/24h, and on >100 K8s container
+  alerts/24h at level≥5.
+
+---
+
 ## Report Generation
 
-After completing all 12 sections, append the summary table to `runbooks/security-check-current.md`:
+After completing all 13 sections, append the summary table to `runbooks/security-check-current.md`:
 
 ```bash
 cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
@@ -1402,6 +1469,7 @@ cat >> runbooks/security-check-current.md << 'SUMMARY_EOF'
 | 10. Flux Security Posture | 🟢/🟡/🔴 | |
 | 11. UniFi Network Security | 🟢/🟡/🔴 | |
 | 12. Cloudflare Tunnel Security | 🟢/🟡/🔴 | |
+| 13. Wazuh SIEM Findings | 🟢/🟡/🔴 | |
 | 12.7 WAF / Insights / Tunnels | 🟢/🟡/🔴 | |
 | 12.8 Terraform Cloudflare Drift | 🟢/🟡/🔴 | |
 | 12.9 CF Traffic & Threat Overview | 🟢/🟡/🔴 | |
