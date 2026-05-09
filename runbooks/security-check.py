@@ -741,6 +741,119 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     if not found_vulns:
         cprint(C.GREEN, "  🟢 No CVEs found for checked components")
 
+    # ─── Trivy: scan running container images for CRITICAL/HIGH CVEs ────────
+    # OSV.dev above is Helm-ecosystem only and limited to the version-check
+    # tracked components. This block fills the gap by scanning every distinct
+    # image actually running in the cluster — covers app-level CVEs that
+    # Renovate would track only after a release, and Bitnami/distro CVEs
+    # that OSV doesn't carry.
+    #
+    # Cached 24h in $TMPDIR/cberg-trivy-cve-cache.json — Trivy DB pulls take
+    # ~30-60s and we don't need fresh-every-run. The previous Renovate +
+    # OSV blocks above run uncached for daily-fresh signal.
+    import shutil
+    if not shutil.which("trivy"):
+        cprint(C.YELLOW, "  🟡 trivy not on PATH — skipping running-image CVE scan")
+        return f.worst(), f, f.markdown()
+
+    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache.json"
+    cache_age_sec = 86400  # 24h
+
+    cached: dict | None = None
+    if trivy_cache.exists():
+        try:
+            age = time.time() - trivy_cache.stat().st_mtime
+            if age < cache_age_sec:
+                cached = json.loads(trivy_cache.read_text())
+                cprint(C.DIM if hasattr(C, "DIM") else C.CYAN,
+                       f"  · using cached Trivy results "
+                       f"({int(cache_age_sec - age)}s until refresh)")
+        except Exception:
+            cached = None
+
+    # Pull every distinct running image once
+    images_raw = kubectl(
+        "get pods -A -o jsonpath="
+        "'{range .items[*].spec.containers[*]}{.image}{\"\\n\"}{end}"
+        "{range .items[*].spec.initContainers[*]}{.image}{\"\\n\"}{end}'",
+    )
+    distinct_images = sorted({i.strip().strip("'") for i in images_raw.splitlines() if i.strip()})
+
+    findings_per_image: dict[str, dict] = {}
+    if cached is not None:
+        findings_per_image = cached.get("results", {})
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Skip well-known bases that AR docs accept or that don't add useful
+        # signal (Bitnami images tracked by Renovate; Wazuh internal images).
+        def _should_skip(img: str) -> bool:
+            return any(skip in img.lower() for skip in (
+                "bitnami/", "wazuh/wazuh-",
+            ))
+
+        scan_targets = [i for i in distinct_images if not _should_skip(i)]
+        cprint(C.CYAN, f"  Scanning {len(scan_targets)} distinct images "
+                       "with trivy (parallel, cached 24h)...")
+
+        def _scan_one(img: str) -> tuple[str, dict | None]:
+            rc, stdout, _stderr = run_cmd(
+                f"trivy image --severity CRITICAL,HIGH --exit-code 0 "
+                f"--quiet --format json --timeout 30s {img}",
+                timeout=45,
+            )
+            if rc != 0 or not stdout:
+                return img, None
+            try:
+                report = json.loads(stdout)
+            except Exception:
+                return img, None
+            crit = high = 0
+            sample_ids: list[str] = []
+            for tgt in report.get("Results", []) or []:
+                for v in tgt.get("Vulnerabilities", []) or []:
+                    sev = v.get("Severity", "")
+                    if sev == "CRITICAL":
+                        crit += 1
+                    elif sev == "HIGH":
+                        high += 1
+                    if (crit + high) <= 5 and v.get("VulnerabilityID"):
+                        sample_ids.append(v["VulnerabilityID"])
+            if crit or high:
+                return img, {"critical": crit, "high": high, "sample": sample_ids[:5]}
+            return img, None
+
+        # 6 parallel scans is enough to overlap registry latency without
+        # hammering the local Trivy DB lock.
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            futures = {ex.submit(_scan_one, img): img for img in scan_targets}
+            for fut in as_completed(futures):
+                img, result = fut.result()
+                if result:
+                    findings_per_image[img] = result
+        try:
+            trivy_cache.write_text(json.dumps({"results": findings_per_image}))
+        except Exception:
+            pass
+
+    # Surface findings: any image with >0 CRITICAL = CRITICAL audit finding;
+    # >5 HIGH on a single image = WARNING (noise floor for CVE accumulation).
+    if findings_per_image:
+        for img, r in sorted(findings_per_image.items()):
+            tag = img.split("@")[0]  # strip digest if present
+            sample = ", ".join(r["sample"][:3]) + ("…" if len(r["sample"]) > 3 else "")
+            if r["critical"] > 0:
+                f.add(CRITICAL, f"`{tag}`: {r['critical']} CRITICAL + {r['high']} HIGH CVEs — {sample}")
+                cprint(C.RED, f"  🔴 {tag}: {r['critical']}C/{r['high']}H — {sample}")
+            elif r["high"] > 5:
+                f.add(WARNING, f"`{tag}`: {r['high']} HIGH CVEs — {sample}")
+                cprint(C.YELLOW, f"  🟡 {tag}: {r['high']} HIGH — {sample}")
+        cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images "
+                       f"with CRITICAL or >5 HIGH CVEs")
+    else:
+        cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL CVEs in {len(distinct_images)} running images "
+                       "(no images had >5 HIGH either)")
+
     return f.worst(), f, f.markdown()
 
 
