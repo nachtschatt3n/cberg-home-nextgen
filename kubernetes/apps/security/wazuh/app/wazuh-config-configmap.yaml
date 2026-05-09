@@ -141,6 +141,22 @@ data:
              Excluding longhorn-manager logs at the agent eliminates ~330
              false-positive 'attack' events per day per node. -->
         <exclude>/host/var/log/containers/longhorn-manager-*</exclude>
+        <!-- Falco DaemonSet stdout would double up with the file_output we
+             tail below; exclude to dedupe. -->
+        <exclude>/host/var/log/containers/falco-*</exclude>
+      </localfile>
+
+      <!-- Falco syscall events (JSON). Falco DaemonSet writes JSON-formatted
+           syscall trace events to /var/run/falco/falco.log on each node.
+           The wazuh-agent DaemonSet host-mounts that path read-only. The
+           bundled Wazuh `falco-json` decoder (in core since 4.4) parses
+           these into structured fields (rule, priority, output_fields.*),
+           and the Socfortress falco_rules.xml ruleset surfaces them as
+           wazuh-alerts events.
+           Reference: https://wazuh.com/blog/cloud-native-security-with-wazuh-and-falco/ -->
+      <localfile>
+        <log_format>json</log_format>
+        <location>/var/run/falco/falco.log</location>
       </localfile>
 
       <!-- Talos / Kubernetes node-level logs.

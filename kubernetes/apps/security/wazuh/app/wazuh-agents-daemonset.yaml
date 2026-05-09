@@ -83,6 +83,11 @@ spec:
               mountPath: /host
               readOnly: true
               mountPropagation: HostToContainer
+            # Falco DaemonSet writes JSON syscall events here on each node;
+            # the agent tails /var/run/falco/falco.log via this mount.
+            - name: falco-host-output
+              mountPath: /var/run/falco
+              readOnly: true
       volumes:
         - name: agent-config
           configMap:
@@ -96,3 +101,7 @@ spec:
         - name: host-root
           hostPath:
             path: /
+        - name: falco-host-output
+          hostPath:
+            path: /var/run/falco
+            type: DirectoryOrCreate

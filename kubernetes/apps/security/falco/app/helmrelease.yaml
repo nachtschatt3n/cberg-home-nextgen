@@ -1,0 +1,101 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: falco
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: falco
+      version: 6.4.4
+      sourceRef:
+        kind: HelmRepository
+        name: falcosecurity
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    # ──────────────────────────────────────────────────────────────────────
+    # Falco DaemonSet — runtime syscall monitoring on every node.
+    # Outputs JSON to /var/run/falco/falco.log; the Wazuh agent DaemonSet
+    # tails that path (mounted via host /var/run) and forwards events to the
+    # Wazuh manager, where the bundled `falco-json` decoder + Socfortress
+    # ruleset surface them as wazuh-alerts events.
+    # Reference: https://wazuh.com/blog/cloud-native-security-with-wazuh-and-falco/
+    # ──────────────────────────────────────────────────────────────────────
+    driver:
+      kind: modern_ebpf  # Talos kernel >= 5.8 supports CO-RE eBPF; no kmod build needed
+    collectors:
+      enabled: true
+      docker:
+        enabled: false  # Talos uses containerd, not Docker socket
+      containerd:
+        enabled: true
+        socket: /run/containerd/containerd.sock
+      kubernetes:
+        enabled: true
+    falco:
+      json_output: true                # Wazuh `falco-json` decoder needs JSON
+      json_include_output_property: true
+      json_include_tags_property: true
+      log_level: warning               # info-level is too verbose for syscall events
+      priority: notice                 # surface notice and above
+      buffered_outputs: false
+      # Append-only file output that the Wazuh agent will tail.
+      file_output:
+        enabled: true
+        keep_alive: false
+        filename: /var/run/falco/falco.log
+      # Disable stdout output so the wazuh-agent doesn't double-collect via
+      # /host/var/log/containers/*.log AND via /var/run/falco/falco.log.
+      stdout_output:
+        enabled: false
+      syslog_output:
+        enabled: false
+      http_output:
+        enabled: false
+    # Mount the falco file_output dir on the host so the wazuh-agent
+    # (also a DaemonSet) can read it. /var/run/falco is created on the host.
+    extraVolumes:
+      - name: falco-host-output
+        hostPath:
+          path: /var/run/falco
+          type: DirectoryOrCreate
+    extraVolumeMounts:
+      - name: falco-host-output
+        mountPath: /var/run/falco
+        readOnly: false
+    # Resource budget per node: 100m CPU + 192Mi RAM × 3 nodes = 300m / 576Mi
+    # cluster-wide. Modest given the 18-core, 192GiB cluster.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 192Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    # Run on every node including the (hyper-converged) control planes.
+    tolerations:
+      - operator: Exists
+    # Falco needs CAP_SYS_ADMIN + privileged to attach BPF programs and
+    # read syscall trace ring buffers. Documented as accepted in
+    # docs/security-accepted-risks.md AR-026 (added in same PR).
+    podSecurityContext:
+      runAsNonRoot: false
+    securityContext:
+      privileged: true
+    # ServiceMonitor: keep off for now. Falco exposes Prometheus metrics
+    # but we don't have a corresponding alert ruleset yet.
+    serviceMonitor:
+      create: false
+    # Disable Falcosidekick; events go to file → Wazuh, not external webhooks.
+    falcosidekick:
+      enabled: false
