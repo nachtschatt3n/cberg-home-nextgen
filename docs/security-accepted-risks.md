@@ -490,3 +490,51 @@ The Wazuh agent DaemonSet (AR-023) reads `/host/var/log/containers/*.log` on eac
 **Security agent note:** Do not surface "Wazuh agent collects pod stdout" as a finding — this is the deliberate SIEM design, bounded by AR-023, AR-024, and the 14-day ISM retention. Re-evaluate if the indexer ever gains external exposure, or if the manager starts forwarding to an external destination.
 
 **Last reviewed:** 2026-05-08
+
+---
+
+## AR-026 — Falco DaemonSet Runs Privileged with Host BPF Access
+
+**App:** `security/falco` (DaemonSet, 3 replicas — one per cluster node)
+**Status:** Accepted
+
+The Falco DaemonSet runs as `privileged: true`, `runAsNonRoot: false`, and uses the
+`modern_ebpf` driver to attach BPF programs to syscall trace ring buffers on each
+Talos node. It also mounts the host's containerd socket (`/run/containerd/containerd.sock`)
+to enrich events with container context, and writes JSON output to
+`/var/run/falco/falco.log` on the host so the wazuh-agent can tail it.
+
+**Why this risk exists:**
+- Falco's whole job is syscall observation. CAP_SYS_ADMIN + privileged are the
+  documented requirements for the eBPF driver — there's no non-privileged mode
+  that produces equivalent telemetry.
+- The host write to `/var/run/falco` is needed because the wazuh-agent (which
+  is also a DaemonSet) can't share an in-cluster volume with falco — they're
+  different pods on the same node. Host-path is the cluster-internal IPC.
+
+**Why accepted:**
+- This is the same risk class as AR-023 (Wazuh agent privileged DaemonSet). Both
+  are observability tools that need kernel-level access.
+- Falco image is pinned at chart 8.0.3 / appVersion 0.43.1 and tracked by
+  Renovate. CVE scanning happens via `runbooks/security-check.py` section 4
+  (Trivy block) on every audit.
+- No external exposure: Falco's only outputs are file_output (host path,
+  read-only-mounted into wazuh-agent) and stdout (excluded from
+  `/host/var/log/containers/*.log` collection to prevent double-shipping).
+  HTTP/syslog/sidekick outputs are explicitly disabled in the HelmRelease.
+- Tuned false positives are documented in
+  `kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml` rules
+  100410 (wazuh-syscheckd) + 100411 (cilium-cni). Add new excludes there as
+  needed.
+
+**Future hardening (not blocking):**
+- Move from in-tree configmap to a dedicated `falco-rules-configmap.yaml` so
+  Falco rule edits stop sharing a file with UniFi rules (cosmetic).
+- Add a `runbooks/falco-rules.md` runbook for the 100400-series tuning workflow.
+
+**Security agent note:** Treat Falco's privileged DaemonSet as expected (same
+pattern as AR-023). Surface a finding only if the privileged spec changes
+(e.g., new capabilities added beyond CAP_SYS_ADMIN), or if Falco starts
+shipping events outside the cluster.
+
+**Last reviewed:** 2026-05-09

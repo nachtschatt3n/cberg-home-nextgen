@@ -572,16 +572,19 @@ data:
       </rule>
 
       <!-- Suppress Falco "Read sensitive file untrusted" when the reader is
-           Wazuh's own syscheckd doing FIM scans. Without this the rule
-           fires constantly on /etc/shadow / /etc/gshadow / /etc/passwd reads
-           that are by design (FIM hashes them on each scan cycle). Place
-           BEFORE the priority-mapped rules so the rule engine matches
-           the noise pattern first and demotes to level 0. ~tens to hundreds
-           of false-positive 100402 events per day per node before this. -->
+           any Wazuh internal module (wazuh-syscheckd, wazuh-modulesd,
+           wazuh-agentd, wazuh-execd, wazuh-logcollector). Wazuh's modules
+           routinely read /etc/shadow / /etc/gshadow / /etc/passwd as part
+           of FIM scans, syscollector inventory, and module reports. Place
+           BEFORE the priority-mapped rules so the rule engine matches the
+           noise pattern first and demotes to level 0. ~950+ false-positive
+           100402 events per hour cluster-wide before this (initially we
+           only matched wazuh-syscheckd; live data showed wazuh-modulesd
+           is the dominant source — broadened to the whole wazuh-* family). -->
       <rule id="100410" level="0">
         <if_sid>100400</if_sid>
-        <field name="output" type="pcre2">wazuh-syscheckd</field>
-        <description>Falco: ignore wazuh-syscheckd FIM-cycle reads (false positive)</description>
+        <field name="output" type="pcre2">process=wazuh-\w+|proc_exepath=/var/ossec/bin/wazuh-</field>
+        <description>Falco: ignore Wazuh-internal module reads (false positive — FIM/syscollector/agent doing their job)</description>
         <group>falco,homelab,</group>
       </rule>
 
