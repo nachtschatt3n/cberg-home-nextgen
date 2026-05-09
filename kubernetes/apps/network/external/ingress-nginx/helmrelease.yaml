@@ -64,7 +64,15 @@ spec:
           "status": $status, "vhost": "$host", "request_proto": "$server_protocol",
           "path": "$uri", "request_query": "$args", "request_length": $request_length,
           "duration": $request_time,"method": "$request_method", "http_referrer": "$http_referer",
-          "http_user_agent": "$http_user_agent"}
+          "http_user_agent": "$http_user_agent",
+          "cf_connecting_ip": "$http_cf_connecting_ip",
+          "cf_ray": "$http_cf_ray", "cf_country": "$http_cf_ipcountry"}
+        # Trust the Cloudflare-tunnel-injected real-client-IP header so
+        # nginx's $remote_addr / metrics reflect the public IP, not the
+        # tunnel's internal cluster IP. Cloudflare-injected headers are
+        # already validated upstream of us; cf-tunnel is the only path here.
+        enable-real-ip: "true"
+        forwarded-for-header: "CF-Connecting-IP"
         proxy-body-size: 0
         proxy-buffer-size: 16k
         ssl-protocols: TLSv1.3 TLSv1.2
