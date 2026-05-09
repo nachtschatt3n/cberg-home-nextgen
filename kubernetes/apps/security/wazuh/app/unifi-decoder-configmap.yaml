@@ -548,4 +548,50 @@ data:
         <description>Rootcheck: ignore Kubernetes-injected /dev/termination-log file (false positive)</description>
         <group>rootcheck,homelab,</group>
       </rule>
+
+      <!-- ─────────────────────────────────────────────────────────────────
+           Falco syscall events (P2.2). Falco DaemonSet writes JSON to
+           /var/run/falco/falco.log on each node (commit 74241572). The
+           wazuh-agent localfile (in agent.conf) tails it; events flow to
+           the manager and get JSON-decoded by Wazuh's built-in json
+           decoder. These rules surface them as wazuh-alerts.
+
+           Mapping Falco priority → Wazuh level (0-15 scale):
+             Notice/Informational → 3 (informational)
+             Warning              → 6 (low-medium)
+             Error                → 8 (medium)
+             Critical/Alert/Emerg → 12 (high — auto-CRITICAL in section 13)
+           ───────────────────────────────────────────────────────────── -->
+      <rule id="100400" level="0">
+        <decoded_as>json</decoded_as>
+        <field name="source">syscall</field>
+        <field name="rule">\.+</field>
+        <field name="priority">\.+</field>
+        <description>Falco syscall event (silent parent — children categorize by priority)</description>
+        <group>falco,homelab,</group>
+      </rule>
+      <rule id="100401" level="3">
+        <if_sid>100400</if_sid>
+        <field name="priority">^(Notice|Informational|Debug)$</field>
+        <description>Falco $(priority): $(rule)</description>
+        <group>falco,homelab,</group>
+      </rule>
+      <rule id="100402" level="6">
+        <if_sid>100400</if_sid>
+        <field name="priority">^Warning$</field>
+        <description>Falco Warning: $(rule)</description>
+        <group>falco,homelab,</group>
+      </rule>
+      <rule id="100403" level="8">
+        <if_sid>100400</if_sid>
+        <field name="priority">^Error$</field>
+        <description>Falco Error: $(rule)</description>
+        <group>falco,homelab,</group>
+      </rule>
+      <rule id="100404" level="12">
+        <if_sid>100400</if_sid>
+        <field name="priority">^(Critical|Alert|Emergency)$</field>
+        <description>Falco $(priority): $(rule)</description>
+        <group>falco,homelab,attack,</group>
+      </rule>
     </group>
