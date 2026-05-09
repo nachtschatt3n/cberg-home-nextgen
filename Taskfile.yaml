@@ -25,6 +25,17 @@ tasks:
 
   default: task --list
 
+  install-hooks:
+    desc: Activate the in-repo pre-commit hook (.githooks/pre-commit)
+    summary: |
+      Sets `git config core.hooksPath .githooks` so commits in this clone use the
+      tracked pre-commit hook. Run once after `git clone` (or after re-cloning).
+      The hook scans staged files for cluster-Secret value literals, unencrypted
+      *.sops.yaml files, and common credential patterns. See .githooks/pre-commit.
+    cmds:
+      - git config core.hooksPath .githooks
+      - test -x .githooks/pre-commit && echo "✅ pre-commit hook active"
+
   reconcile:
     desc: Force Flux to pull in changes from your Git repository
     cmd: flux --namespace flux-system reconcile kustomization flux-system --with-source
