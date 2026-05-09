@@ -1,0 +1,33 @@
+---
+# Explicit ServiceMonitor for zero-export-controller.
+#
+# Note: the bjw-s app-template chart also generates a ServiceMonitor (named
+# `zero-export-controller`) via helmrelease.yaml's `serviceMonitor:` block, but
+# the kube-prometheus-stack operator does not currently include chart-generated
+# SMs from this namespace in Prometheus' scrape config (cf. pallet-price-monitor
+# which exhibits the same symptom). All other working ServiceMonitors in the
+# cluster are explicit YAML — match that convention here.
+#
+# This SM uses a distinct name (-metrics suffix) to avoid colliding with the
+# chart-generated one. A subsequent change can disable the chart's serviceMonitor
+# block once we confirm scraping works via this resource.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: zero-export-controller-metrics
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - home-automation
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zero-export-controller
+      app.kubernetes.io/instance: zero-export-controller
+  endpoints:
+    - port: metrics
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 15s

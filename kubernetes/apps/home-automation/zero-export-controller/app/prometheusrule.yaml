@@ -1,0 +1,99 @@
+---
+# ZEC-specific functional alerts. Pod-health alerts (PodNotReady, CrashLooping,
+# Restarted) live separately in
+#   kubernetes/apps/monitoring/kube-prometheus-stack/app/zero-export-controller-alerts.yaml
+# per the cluster's centralized convention. This file holds the controller-
+# domain alerts that depend on metrics emitted by the controller itself.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: zero-export-controller
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: zero-export-controller
+      interval: 30s
+      rules:
+        # --- ZECPodDown ----------------------------------------------------
+        # Warn (not critical) if the deployment has zero available replicas
+        # for >3min during daylight hours. Outside daylight, the controller
+        # being down has no effect on inverter limits (no PV production).
+        # 06:00-22:00 Europe/Berlin covers both CET (UTC+1) and CEST (UTC+2)
+        # with a small buffer: hour() in [4, 21) UTC.
+        - alert: ZECPodDown
+          expr: |
+            (
+              kube_deployment_status_replicas_available{namespace="home-automation",deployment="zero-export-controller"} == 0
+            )
+            and on() (hour() >= 4 and hour() < 21)
+          for: 3m
+          labels:
+            severity: warning
+            category: home-automation
+            component: zero-export-controller
+          annotations:
+            summary: Zero-export controller is down during daylight
+            description: |
+              Deployment zero-export-controller has 0 available replicas for >3min
+              during daylight (06:00-22:00 Europe/Berlin). Inverter power limits
+              are not being updated; PV production may be exporting to grid or
+              clamped to last-known limits.
+
+        # --- ZECExportSustained --------------------------------------------
+        # Grid power < -100W (i.e. exporting more than 100W) for >2min while
+        # the controller is supposed to be holding zero export.
+        - alert: ZECExportSustained
+          expr: zec_grid_power_watts < -100
+          for: 2m
+          labels:
+            severity: warning
+            category: home-automation
+            component: zero-export-controller
+          annotations:
+            summary: Sustained grid export detected ({{ $value | printf "%.0f" }}W)
+            description: |
+              Grid power has been below -100W (exporting) for more than 2 minutes.
+              The zero-export controller is not bringing inverters down fast
+              enough, or an inverter is ignoring its setpoint. Investigate
+              zec_inverter_limit_watts vs zec_inverter_power_watts.
+
+        # --- ZECOverLegalCap -----------------------------------------------
+        # Sum of per-inverter ACTUAL output exceeds the legal cap (>850W) for
+        # >30s. This is a regulatory compliance alert: critical severity.
+        - alert: ZECOverLegalCap
+          expr: sum(zec_inverter_power_watts) > 850
+          for: 30s
+          labels:
+            severity: critical
+            category: home-automation
+            component: zero-export-controller
+          annotations:
+            summary: Total inverter output exceeds 850W legal cap ({{ $value | printf "%.0f" }}W)
+            description: |
+              Sum of zec_inverter_power_watts across all inverters exceeds the
+              850W legal feed-in cap for >30s. This is a regulatory compliance
+              issue. Verify per-inverter limits are being honored and that the
+              controller's cap_w setting is correct.
+
+        # --- ZECLoopStalled ------------------------------------------------
+        # Loop iteration counter has not advanced for >3min while the pod is
+        # up. Indicates the control loop is stuck (deadlock, blocked HTTP,
+        # exception in non-fatal path).
+        - alert: ZECLoopStalled
+          expr: |
+            rate(zec_loop_iterations_total[5m]) == 0
+            and on() kube_deployment_status_replicas_available{namespace="home-automation",deployment="zero-export-controller"} > 0
+          for: 3m
+          labels:
+            severity: warning
+            category: home-automation
+            component: zero-export-controller
+          annotations:
+            summary: Zero-export controller loop has stalled
+            description: |
+              zec_loop_iterations_total has not incremented in the last 5min
+              while the pod is reported as available. The control loop is
+              stuck. Check pod logs for blocked HTTP calls or exceptions.
