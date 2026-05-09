@@ -531,3 +531,21 @@ data:
         <group>pci_dss_10.2.4,pci_dss_11.4,nist_800_53_IA-2,nist_800_53_SI-4,hipaa_164.312(d),mitre_t1110</group>
       </rule>
     </group>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         Cluster-local rule overrides (not UniFi-specific, but lives in this
+         configmap because the manager already loads etc/rules/unifi/*.xml
+         via <rule_dir>etc/rules/unifi</rule_dir>).
+         ────────────────────────────────────────────────────────────────── -->
+    <group name="local,homelab,">
+      <!-- Suppress rule 510 (rootcheck "Host-based anomaly detection event")
+           when it fires on /dev/termination-log, which is a standard Kubernetes-
+           injected file present in every container by design. ~34 false
+           positives per 24h before this override. -->
+      <rule id="100300" level="0" overwrite="yes">
+        <if_sid>510</if_sid>
+        <match>termination-log</match>
+        <description>Rootcheck: ignore Kubernetes-injected /dev/termination-log file (false positive)</description>
+        <group>rootcheck,homelab,</group>
+      </rule>
+    </group>

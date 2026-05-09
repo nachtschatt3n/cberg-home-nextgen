@@ -135,6 +135,12 @@ data:
         <log_format>syslog</log_format>
         <location>/host/var/log/containers/*.log</location>
         <exclude>/host/var/log/containers/wazuh-*</exclude>
+        <!-- Longhorn manager emits routine inter-replica POSTs
+             (POST /v1/volumes/.../snapshotCRList every few seconds) that
+             trip rule 31533 "High amount of POST requests = likely bot".
+             Excluding longhorn-manager logs at the agent eliminates ~330
+             false-positive 'attack' events per day per node. -->
+        <exclude>/host/var/log/containers/longhorn-manager-*</exclude>
       </localfile>
 
       <!-- Talos / Kubernetes node-level logs.
