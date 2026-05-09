@@ -68,6 +68,12 @@ SKIP_KEY_NAMES = {"TIMEZONE", "TZ", "tz", "timezone", "ca.crt"}
 # and cause false positives. Real secrets have entropy markers (digits, case,
 # special chars). Trade-off: a weak all-lowercase password would slip through.
 DICTIONARY_WORD = re.compile(r"^[a-z]{1,15}$")
+# Pure IPv4/IPv6 literals — Secret values that are just an IP address are
+# config endpoints (NAS host, DB host, SMTP server, etc.), not credentials,
+# and routinely show up in StorageClass YAML, infra docs, network SOPs.
+# Skip them so they don't false-positive every CIFS/network change.
+IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+IPV6 = re.compile(r"^[0-9a-fA-F:]+$")
 literals = set()
 data = json.load(sys.stdin)
 for s in data.get("items", []):
@@ -89,6 +95,10 @@ for s in data.get("items", []):
         if "\n" in decoded:
             continue
         if DICTIONARY_WORD.match(decoded):
+            continue
+        if IPV4.match(decoded):
+            continue
+        if len(decoded) >= 6 and IPV6.match(decoded) and ":" in decoded:
             continue
         literals.add(decoded)
 with open(out_path, "w") as f:
