@@ -62,7 +62,31 @@ SKIP_TYPES = {
     "bootstrap.kubernetes.io/token",
     "helm.sh/release.v1",
 }
-SKIP_KEY_NAMES = {"TIMEZONE", "TZ", "tz", "timezone", "ca.crt"}
+# Whitelist Secret keys whose values are public identifiers, not credentials.
+# Decoded values from these keys are *never* added to the literals scan list,
+# because flagging them creates false positives the moment the same identifier
+# (a GitHub org name, an OCI image coordinate, a timezone string) shows up in
+# any committed manifest.
+#
+# Selection rule: a key qualifies only if its value is, by convention, public
+# coordinates that may legitimately appear verbatim in YAML manifests. Adding
+# a key here means "if a real secret is ever stored under this key it will
+# slip past Layer 1" — so we keep the list narrow and identifier-only.
+#
+# Current entries:
+#   TIMEZONE, TZ, tz, timezone — IANA tz strings (Europe/Berlin etc.)
+#   ca.crt                     — X.509 CA bundles (handled by BEGIN CERT skip too)
+#   username                   — basic-auth / GHCR / git pull username (e.g.
+#                                an org or repo-owner handle); the password
+#                                is the actual secret and is in a different
+#                                key (`password`, `token`, `.dockerconfigjson`)
+#   repository, repo           — git/OCI repository coordinates
+#   org, organization          — GitHub/GitLab org slugs
+#   image                      — fully qualified image references
+SKIP_KEY_NAMES = {
+    "TIMEZONE", "TZ", "tz", "timezone", "ca.crt",
+    "username", "repository", "repo", "org", "organization", "image",
+}
 # Pure-lowercase dictionary-like words (no digits, no special chars) — these
 # overlap with common technical terms (postgres, authentik, placeholder, etc.)
 # and cause false positives. Real secrets have entropy markers (digits, case,
