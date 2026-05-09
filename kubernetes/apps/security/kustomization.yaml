@@ -6,6 +6,7 @@ components:
   - ../../flux/components/common
 resources:
   - ./wazuh/ks.yaml
+  - ./falco/ks.yaml
 patches:
   # PSA override: privileged required for Wazuh agent DaemonSet (hostPath /var/log, /).
   - target:
