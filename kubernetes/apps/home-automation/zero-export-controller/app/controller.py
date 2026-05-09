@@ -45,6 +45,11 @@ m_desired = Gauge("zec_desired_total_watts", "Computed desired total inverter li
 m_limit = Gauge(
     "zec_inverter_limit_watts", "Effective per-inverter limit (W)", ["inverter"]
 )
+m_ceiling = Gauge(
+    "zec_inverter_ceiling_watts",
+    "Per-inverter water-fill ceiling for this tick (W); shrinks when sun-limited",
+    ["inverter"],
+)
 m_pv_per = Gauge(
     "zec_inverter_power_watts", "Per-inverter live AC power (W)", ["inverter"]
 )
@@ -145,17 +150,62 @@ class InverterState:
     reachable: bool
 
 
-def distribute(
-    desired: float, inverters: list[InverterState], per_max_w: float
-) -> dict[str, float]:
-    """Water-fill `desired` watts across reachable inverters, capped per inverter.
+SHADE_MARGIN_W = 30.0       # actual must trail current limit by more than this to be "sun-limited"
+SHADE_HEADROOM_W = 50.0     # headroom granted above actual production for shaded inverter ceiling
 
-    With per_max_w=600 and cap_w=800 the leftover loop is rarely exercised in
-    practice, but it keeps the algorithm correct for the single-reachable
-    burst case (one inverter at 600 W, others unreachable).
+
+def compute_ceilings(
+    inverters: list[InverterState],
+    per_max_w: float,
+    last_limits: dict[str, float],
+) -> dict[str, float]:
+    """Per-inverter water-fill ceiling for the next tick.
+
+    East/west panel mismatch is the dominant case: one side is sun-limited,
+    the other is limit-bound. A naive equal-share would set both inverters to
+    desired/2 and the shaded one would underproduce, draining the productive
+    one's allocation across loops. Production-aware ceilings cap the shaded
+    inverter near its actual output and free the headroom for the productive
+    inverter to consume up to its hardware limit.
+
+    Recovery is automatic: as soon as actual catches up to the (tight) limit,
+    the inverter looks limit-bound on the next tick and gets the full
+    per_max_w ceiling restored.
     """
+    out: dict[str, float] = {}
+    for inv in inverters:
+        if not inv.reachable:
+            out[inv.name] = 0.0
+            continue
+        prev_limit = last_limits.get(inv.name, per_max_w)
+        if inv.power_w + SHADE_MARGIN_W < prev_limit:
+            out[inv.name] = max(0.0, min(per_max_w, inv.power_w + SHADE_HEADROOM_W))
+        else:
+            out[inv.name] = per_max_w
+    return out
+
+
+def distribute(
+    desired: float,
+    inverters: list[InverterState],
+    per_max_w: float,
+    ceilings: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Water-fill `desired` watts across reachable inverters.
+
+    Each inverter's allocation is capped by `ceilings[name]` if provided,
+    otherwise by `per_max_w`. The water-fill loop redistributes any leftover
+    capacity from inverters that hit their cap to those that haven't.
+    """
+    if ceilings is None:
+        ceilings = {
+            inv.name: per_max_w if inv.reachable else 0.0 for inv in inverters
+        }
     limits = {inv.name: 0.0 for inv in inverters}
-    pool = [inv.name for inv in inverters if inv.reachable]
+    pool = [
+        inv.name for inv in inverters
+        if inv.reachable and ceilings.get(inv.name, 0.0) > 0.0
+    ]
     if not pool or desired <= 0:
         return limits
 
@@ -164,11 +214,11 @@ def distribute(
         share = remaining / len(pool)
         next_pool = []
         for name in pool:
-            headroom = per_max_w - limits[name]
-            grant = min(share, headroom)
+            headroom = ceilings[name] - limits[name]
+            grant = min(share, max(0.0, headroom))
             limits[name] += grant
             remaining -= grant
-            if per_max_w - limits[name] > 0.5:
+            if ceilings[name] - limits[name] > 0.5:
                 next_pool.append(name)
         if next_pool == pool:
             break
@@ -259,6 +309,10 @@ async def loop_once(
         # config (set out-of-band in OpenDTU).
         logging.info("kill switch off: skipping writes; last limits remain in effect")
         return last_limits, tuning.loop_period_s
+    ceilings = compute_ceilings(inverters, tuning.per_max_w, last_limits)
+    for name, c in ceilings.items():
+        m_ceiling.labels(inverter=name).set(c)
+
     if not grid_ok or not pv_ok:
         # Sensors stale or missing: fail to a safe state that respects the
         # legal 800 W cap regardless of how many inverters are reachable.
@@ -266,16 +320,17 @@ async def loop_once(
             "safe fallback: grid_ok=%s pv_ok=%s — distributing cap_w across reachable",
             grid_ok, pv_ok,
         )
-        new_limits = distribute(tuning.cap_w, inverters, tuning.per_max_w)
+        new_limits = distribute(tuning.cap_w, inverters, tuning.per_max_w, ceilings)
         m_desired.set(tuning.cap_w)
     else:
         desired = compute_desired(grid_state.numeric, pv_state.numeric, tuning)
         m_desired.set(desired)
 
-        new_limits = distribute(desired, inverters, tuning.per_max_w)
+        new_limits = distribute(desired, inverters, tuning.per_max_w, ceilings)
         logging.info(
-            "grid=%.0fW pv=%.0fW target=%.0fW desired=%.0fW limits=%s",
+            "grid=%.0fW pv=%.0fW target=%.0fW desired=%.0fW ceilings=%s limits=%s",
             grid_state.numeric, pv_state.numeric, tuning.target_w, desired,
+            {k: round(v) for k, v in ceilings.items()},
             {k: round(v) for k, v in new_limits.items()},
         )
 
