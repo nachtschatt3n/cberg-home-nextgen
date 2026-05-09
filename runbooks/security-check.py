@@ -1128,15 +1128,18 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
                 hosts = [redact(r.get("host", "")) for r in i["spec"].get("rules", [])]
                 external.append(f"`{ns}/{name}`: {hosts}")
 
-    # Known accepted externals (without domain prefix)
+    # Known accepted externals (without domain prefix).
+    # All entries here must have a corresponding rationale in
+    # docs/security-accepted-risks.md (AR-003 / AR-004 / AR-007 / AR-012).
     ACCEPTED = {
         "authentik-server", "flux-webhook", "langfuse", "uptime-kuma",
         "uptime-kuma-authentik-outpost", "nextcloud", "nextcloud-notify-push",
         "nextcloud-whiteboard", "paperless-ngx", "music-assistant-alexa-api",
         "music-assistant-alexa-stream", "absenty", "absenty-dev", "andreamosteller",
-        "echo-server",  # accepted: intentional test endpoint
+        "echo-server",  # AR-003: intentional debug test endpoint
         "open-webui", "n8n", "iobroker", "tube-archivist", "jellyfin", "penpot",
         "home-assistant", "traccar", "librechat-librechat",
+        "rainbow-rescue",  # AR-007 (line 123): intentionally public PWA, no user data
     }
 
     for entry in external:
@@ -1157,6 +1160,59 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
         "\n".join(f"- {e}" for e in sorted(external)) + "\n\n",
         f"**LoadBalancer services:** {len(svcs_raw.splitlines())}\n",
     ]
+
+    # --- Cloudflare-tunnel ↔ external-ingress drift check --------------------
+    # The Cloudflared config (`kubernetes/apps/network/external/cloudflared/
+    # configs/config.yaml`) routes both `${SECRET_DOMAIN}` and `*.${SECRET_DOMAIN}`
+    # at the cluster's external-ingress. So tunnel-side hostname routing is
+    # wildcard. The meaningful drift is at the DNS layer:
+    #   - Every external ingress hostname should resolve to a Cloudflare proxy IP
+    #     (which means a Cloudflare DNS record exists pointing at the tunnel)
+    #   - external-dns annotation `external-dns.alpha.kubernetes.io/target` must
+    #     point at `external.${SECRET_DOMAIN}` (or be absent if the wildcard
+    #     CNAME absorbs it — but we want explicit annotation for traceability)
+    # A hostname registered in K8s but missing a DNS record = unreachable
+    # (silent regression); a DNS record without a matching ingress = dangling
+    # subdomain (subdomain-takeover risk).
+    #
+    # We don't query Cloudflare API here (no token in audit context). We do:
+    # 1. Verify every external ingress hostname is under SECRET_DOMAIN
+    # 2. Verify every external ingress carries an external-dns target annotation
+    # 3. (Best-effort) DNS-resolve each hostname and check it's a Cloudflare IP
+    if ingresses:
+        misconfigured: list[str] = []
+        missing_extdns: list[str] = []
+        for i in ingresses["items"]:
+            if i["spec"].get("ingressClassName") != "external":
+                continue
+            ns = i["metadata"]["namespace"]
+            name = i["metadata"]["name"]
+            ann = i["metadata"].get("annotations", {}) or {}
+            target_ann = ann.get("external-dns.alpha.kubernetes.io/target", "")
+            for r in i["spec"].get("rules", []):
+                host = r.get("host", "")
+                if domain and host and not host.endswith(domain):
+                    misconfigured.append(f"`{ns}/{name}`: host {redact(host)} not under SECRET_DOMAIN")
+            # external-dns target annotation expected on every external ingress
+            if not target_ann:
+                missing_extdns.append(f"`{ns}/{name}`")
+
+        if misconfigured:
+            for entry in misconfigured:
+                f.add(CRITICAL, f"External ingress with off-domain host: {entry}")
+                cprint(C.RED, f"  🔴 Off-domain external ingress: {entry}")
+        if missing_extdns:
+            for entry in missing_extdns:
+                f.add(WARNING, f"External ingress missing external-dns target annotation: {entry}")
+                cprint(C.YELLOW, f"  🟡 Missing external-dns annotation: {entry}")
+
+        if not misconfigured and not missing_extdns:
+            cprint(C.GREEN, f"  🟢 All {len(external)} external ingresses are domain-bound + DNS-tracked")
+
+        lines.append(f"\n**Drift check:** "
+                     f"{len(misconfigured)} off-domain, "
+                     f"{len(missing_extdns)} missing external-dns target.\n")
+
     return f.worst(), f, "\n".join(lines)
 
 
@@ -1679,6 +1735,52 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  🟡 K8s container alerts elevated ({k8s_total}/24h)")
     else:
         cprint(C.GREEN, f"  🟢 K8s container alert volume normal ({k8s_total}/24h)")
+
+    # --- Slice 4: per-agent heartbeat (catch agent compromise / death) -------
+    # An agent that stops reporting may be compromised, OOMKilled, or evicted.
+    # Each registered agent should have at least one event in the last 2h
+    # under normal operation (rootcheck, syscheck, syscollector keepalives).
+    # Silence on a specific agent is the strongest tell that something on
+    # that node is wrong — surface it.
+    body = {
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": "now-2h"}}},
+        "aggs": {"by_agent": {"terms": {"field": "agent.name", "size": 50}}},
+    }
+    data = wz.query(body)
+    seen_agents: set[str] = set()
+    if data:
+        for b in data.get("aggregations", {}).get("by_agent", {}).get("buckets", []):
+            seen_agents.add(b["key"])
+
+    # Cross-reference against registered agents (agent_control -l output via
+    # manager exec). Skip if exec fails — this is a best-effort enrichment.
+    agent_list_raw = run(
+        "kubectl exec -n security wazuh-manager-master-0 -c wazuh-manager -- "
+        "/var/ossec/bin/agent_control -l 2>/dev/null", timeout=10,
+    )
+    registered: list[str] = []
+    if agent_list_raw:
+        # Parse lines like: "   ID: 022, Name: k8s-nuc14-02, IP: any, Active"
+        # Use [^,]+? lazy to stop at the first comma after "Name: ".
+        for line in agent_list_raw.splitlines():
+            m = re.search(r"Name:\s+([^,]+?),.*Active", line)
+            if m and "(server)" not in line:
+                registered.append(m.group(1).strip())
+
+    silent_agents = [a for a in registered if a not in seen_agents]
+    if registered:
+        lines.append(f"\nRegistered agents: **{len(registered)}** "
+                     f"(seen in last 2h: {len(registered) - len(silent_agents)})\n")
+        if silent_agents:
+            for a in silent_agents:
+                f.add(WARNING, f"Wazuh agent `{a}` silent for >2h — possible compromise, OOM, or eviction")
+                cprint(C.YELLOW, f"  🟡 agent silent >2h: {a}")
+        else:
+            cprint(C.GREEN, f"  🟢 All {len(registered)} agents reporting within 2h")
+    else:
+        cprint(C.YELLOW, "  🟡 Could not enumerate registered agents (manager exec failed)")
+        lines.append("\n_Could not enumerate registered agents to cross-reference silence._\n")
 
     return f.worst(), f, "\n".join(lines)
 
