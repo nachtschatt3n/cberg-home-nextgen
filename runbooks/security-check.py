@@ -44,6 +44,15 @@ import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Make the script's directory importable so we can load the
+# security_check_acceptances sibling module regardless of CWD.
+sys.path.insert(0, str(Path(__file__).parent))
+from security_check_acceptances import (
+    EXTERNAL_INGRESS_ACCEPTED,
+    GIT_HISTORY_CRED_PATTERNS,
+    GIT_HISTORY_SECRET_FILES,
+)
+
 # ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
@@ -604,74 +613,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
     f = Findings()
     domain = _sensitive.get("DOMAIN", "")
 
-    # Accepted risks: patterns in git history that have been reviewed and accepted
-    ACCEPTED_CRED_PATTERNS = [
-        'apiKey: "ollama"',            # Not a real secret — Ollama local API key placeholder
-        'api_key: "ollama"',           # Same, snake_case variant
-        "backupTargetCredentialSecret", # SecretRef name, not an actual secret value
-        "bot-token: 6597763731",       # Telegram bot token — rotated, old value in history
-        'os.environ.get(',             # Python env var read, never a value
-        "existingSecret",              # Helm chart secretKeyRef field (existingSecret, existingSecretApiKey)
-        "existingMaster",              # Helm chart existingMasterKeySecret field
-        "envFromSecret:",              # Grafana Helm field referencing a secret name, not value
-        "apiKey: ollamaKey",           # Python variable reference (ollamaKey is a var, not a value)
-        "database.password=$DATABASE_PASS",  # Shell var expansion, not the value
-        "=$(kubectl",                  # Shell pipeline reading from K8s (value retrieved at runtime, not in source)
-        'token_resp.json().get(',      # Python code extracting token from response
-        '"password:|api',              # grep regex search strings (not credential values)
-        'kubectl create token',        # kubectl command that generates a token at runtime
-        '--token="$TOKEN"',            # kubectl using shell $TOKEN var (value elsewhere)
-        '--token=$TOKEN',              # Same, unquoted form
-        "Mmih1SVbxAJMQY36",            # unpoller InfluxDB token — ROTATED in commit 74dec616
-        "wN_jWa6cq00Ma1hOi",           # unpoller InfluxDB token — ROTATED in commit 74dec616
-        "PC2kxlwtIRDd3teGNUKVm",       # unpoller InfluxDB token — ROTATED in commit d5be84ec
-        "password: clickhouse123",     # langfuse clickhouse — rotated via SOPS
-        "POSTGRES_PASSWORD: langfuse", # langfuse postgres — rotated via SOPS
-        "X-Proxy-Secret",              # Nginx ingress header name (not a secret value, but matches "Secret")
-        "KYmG4q@Vn366#_",              # OLD UniFi cli-adm password — ROTATED to new value
-        "Secret: adguard-home-tls",    # TLS cert secret NAME reference, not a value
-        "MC3lY6PQ2lkhP2z70Q1pw373",    # OLD Elasticsearch password — ES volume recreated since (2026-02)
-        "github_token: Optional",      # Python function param type annotation (check-all-versions.py)
-        "github_token=github_token",   # Python function call kwarg passing (not a value)
-        "Uw04r2oij23oju2efji4ro834jri", # OLD SMB service worker password — moved to SOPS (commit 2b9e9469)
-        "JTKQ8Qu69KNu1lWrs9tzMa75Vup", # OLD penpot DB password — moved to SOPS (commit 5668a907)
-        "TebAWN8h2M3xGHkIUTH60",       # OLD Grafana OIDC client_secret — ROTATED 2026-04-18
-        "0v0zon0PrpoHZt5yDdz5LXvJu",   # OLD pgadmin password — ROTATED 2026-04-17
-        "IJGEQTcvzxEnFeDeCFJ8uMem",    # rybbit/clickhouse historical password — app removed
-        "POSTGRES_PASSWORD: linkwarden123", # linkwarden historical password — moved to SOPS
-        "POSTGRES_PASSWORD: bytebotpgpass2024secure", # bytebot historical — app removed
-        "BETTER_AUTH_SECRET: ZtVI0L26IRoUi4S34Ki", # rybbit historical — app removed
-        "better-auth-secret: ZtVI0L26IRoUi4S34Ki", # rybbit historical — app removed
-        "rybbit-postgres-password",    # rybbit historical (secret-name placeholder ref) — app removed
-        "rybbit-clickhouse-password",  # rybbit historical (secret-name placeholder ref) — app removed
-        "GI6EWiGrGnOYg0kwLt75",        # k8s-mcp-server token — service replaced by ai-sre (commit 2703a173)
-        "VXcwNHIyb2lqMjNvanUy",        # base64 of SMB password — accepted (same as Uw04r2oij above)
-        "VXUwNHIyb2lqMjNvanUy",        # base64 typo variant of same — accepted
-        "OWgzZm84aDNnZm8zaWhq",        # kopia KOPIA_PASSWORD/SERVER_PASSWORD base64 — kopia removed
-        "credentialsSecret: aws-credentials-secret", # commented-out SecretRef, not a value
-        "eyJpc3MiOiJiYzBlMWJmNjI5Yzg0ZWUyODhlYjBhMWNmM2ViNjYw", # HA long-lived token from deleted script commit 2b0665fd — CONFIRMED REVOKED 2026-04-18 (verified via HA UI)
-        "serviceAccountSecret: influxdb-backup-key",   # commented-out SecretRef
-        "storageAccountSecret: influxdb-backup-azure", # commented-out SecretRef
-        'api_key: "{FRIGATE_GENAI_API_KEY}"',          # commented-out templated reference
-        'VNC_PASSWORD = env(',                         # solarfocus-scraper main.py: Python env-var READ (VNC_PASSWORD = env("VNC_PASSWORD", ""))
-        'password=VNC_PASSWORD',                       # solarfocus-scraper main.py: vnc_api.connect(..., password=VNC_PASSWORD) — variable reference, not a value
-    ]
-    ACCEPTED_SECRET_FILES = {
-        "templates/config/",           # Jinja2 templates, not actual secrets
-        "kubernetes/flux/meta/repositories/helm/external-secrets.yaml",  # HelmRepository, not a secret
-        "kubernetes/apps/download/icloud-docker/app-secrets/kustomization.yaml",  # Kustomization ref
-        "kubernetes/apps/download/icloud-docker/secrets-ks.yaml",  # Kustomization ref
-        # Historical secret-named files (reviewed 2026-04-17): all deleted from current tree
-        "kubernetes/apps/ai/bytebot/app/secret.sops.tmp.yaml",  # Bytebot not deployed; creds not reused
-        "kubernetes/apps/ai/langfuse/app/s3-credentials.yaml",  # Rotated in s3-credentials.sops.yaml
-        "kubernetes/apps/backup/kopia/app/secret.yaml",  # Kopia not deployed
-        "kubernetes/apps/databases/pgadmin/app/secret.sops.yaml.bak",  # Was sops-encrypted
-        "kubernetes/apps/databases/pgadmin/app/secret.yaml",  # Rotated 2026-04-17 in secret.sops.yaml
-        "kubernetes/apps/monitoring/headlamp/app/token-secret.yaml",  # ServiceAccountToken type, no value in file
-        "kubernetes/apps/monitoring/rybbit/app/secret.sops.tmp.yaml",  # Rybbit not deployed
-        "kubernetes/apps/monitoring/rybbit/clickhouse/secret.yaml",  # Rybbit not deployed
-        "kubernetes/flux/meta/repositories/git/github-k8s-self-ai-ops-secret-temp.yaml",  # Placeholder only
-    }
+    # Accepted exceptions live in `security_check_acceptances.py` so credential
+    # rotations and false-positive whitelists can be edited in a focused file
+    # without touching the 1700-line scanner.
+    ACCEPTED_CRED_PATTERNS = GIT_HISTORY_CRED_PATTERNS
+    ACCEPTED_SECRET_FILES = GIT_HISTORY_SECRET_FILES
 
     # Plaintext credential patterns
     # Scope: exclude files that are themselves scanners/reports/SOPs containing regex strings
@@ -1128,19 +1074,10 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
                 hosts = [redact(r.get("host", "")) for r in i["spec"].get("rules", [])]
                 external.append(f"`{ns}/{name}`: {hosts}")
 
-    # Known accepted externals (without domain prefix).
-    # All entries here must have a corresponding rationale in
-    # docs/security-accepted-risks.md (AR-003 / AR-004 / AR-007 / AR-012).
-    ACCEPTED = {
-        "authentik-server", "flux-webhook", "langfuse", "uptime-kuma",
-        "uptime-kuma-authentik-outpost", "nextcloud", "nextcloud-notify-push",
-        "nextcloud-whiteboard", "paperless-ngx", "music-assistant-alexa-api",
-        "music-assistant-alexa-stream", "absenty", "absenty-dev", "andreamosteller",
-        "echo-server",  # AR-003: intentional debug test endpoint
-        "open-webui", "n8n", "iobroker", "tube-archivist", "jellyfin", "penpot",
-        "home-assistant", "traccar", "librechat-librechat",
-        "rainbow-rescue",  # AR-007 (line 123): intentionally public PWA, no user data
-    }
+    # Known accepted externals — list lives in security_check_acceptances.py
+    # (one focused file for all whitelist edits; each entry there has the
+    # matching AR-ID inline).
+    ACCEPTED = EXTERNAL_INGRESS_ACCEPTED
 
     for entry in external:
         name_part = entry.split("/")[1].split("`")[0]
