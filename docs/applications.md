@@ -11,7 +11,7 @@
 | Namespace | App Count |
 |-----------|-----------|
 | ai | 10 |
-| home-automation | 19 |
+| home-automation | 20 |
 | databases | 10 |
 | monitoring | 11 |
 | office | 11 |
@@ -72,6 +72,7 @@
 | traccar | GPS/location tracking server | Internal | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
+| zero-export-controller | Balcony PV zero-export controller (Tibber Pulse + OpenDTU via HA REST → per-inverter `number.set_value`) — holds grid at −50 W, caps summed feed at 800 W (Bagatellgrenze), live-tunable via HA helpers, killed by `input_boolean.solar_zero_export_enabled`. Source: [github.com/nachtschatt3n/tibber-openDTU-home-assitant-solar-monitor](https://github.com/nachtschatt3n/tibber-openDTU-home-assitant-solar-monitor) | Internal (cluster, /metrics ServiceMonitor) | — |
 
 ---
 
