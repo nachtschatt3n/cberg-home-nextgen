@@ -115,6 +115,12 @@ spec:
                 href: http://192.168.32.201
                 description: Epson ES-580W
                 ping: 192.168.32.201
+        - "Home Automation":
+            - Balkonkraftwerk:
+                href: https://hass.${SECRET_DOMAIN}/dashboard-balkonkraftwerk
+                icon: sun-panel.png
+                description: Balcony PV zero-export dashboard
+                ping: hass.${SECRET_DOMAIN}
         - Monitoring:
             - Alertmanager:
                 href: https://alertmanager.${SECRET_DOMAIN}
