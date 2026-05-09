@@ -64,15 +64,17 @@ spec:
         enabled: false
     # Mount the falco file_output dir on the host so the wazuh-agent
     # (also a DaemonSet) can read it. /var/run/falco is created on the host.
-    extraVolumes:
-      - name: falco-host-output
-        hostPath:
-          path: /var/run/falco
-          type: DirectoryOrCreate
-    extraVolumeMounts:
-      - name: falco-host-output
-        mountPath: /var/run/falco
-        readOnly: false
+    # Chart 8.x uses `mounts.volumes` / `mounts.volumeMounts` (not extraVolumes).
+    mounts:
+      volumes:
+        - name: falco-host-output
+          hostPath:
+            path: /var/run/falco
+            type: DirectoryOrCreate
+      volumeMounts:
+        - name: falco-host-output
+          mountPath: /var/run/falco
+          readOnly: false
     # Resource budget per node: 100m CPU + 192Mi RAM × 3 nodes = 300m / 576Mi
     # cluster-wide. Modest given the 18-core, 192GiB cluster.
     resources:
