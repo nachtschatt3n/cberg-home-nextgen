@@ -114,23 +114,36 @@ data:
       </rule>
 
       <!--
-        IMPORTANT: do NOT use `<field name="status">` here. `status` is a
-        reserved Wazuh decoder slot (alongside srcip, dstip, srcuser,
-        protocol, hostname, url, etc. — fields the JSON_Decoder
-        auto-populates from JSON keys with the matching name). Using
-        <field name="status"> makes wazuh-analysisd refuse to load the
-        rule with: "Failure to read rule NNNN. Field 'status' is
-        static." (caught 2026-05-10 — first deploy crash-looped
-        wazuh-manager). The fix is to use the reserved <status>
-        match element directly, which Wazuh evaluates against the
-        same JSON_Decoder-populated value.
+        IMPORTANT — TWO FAILED APPROACHES, NOW USING <match>:
+
+        (1) `<field name="status">` crashes wazuh-analysisd with
+            "Field 'status' is static." (caught 2026-05-10 commit
+            9e4697ec, reverted in 361bb46c). `status` is a reserved
+            decoder slot name and `<field>` rejects reserved names.
+
+        (2) `<status>` reserved match element fires against the
+            corresponding reserved-slot value, but JSON_Decoder run
+            as a plugin_decoder does NOT populate reserved slots —
+            empirically tested 2026-05-10 with both string ("404")
+            and integer (404) JSON values, both produced 0 matches
+            on `<status>^4\d\d$</status>`. Wazuh's JSON_Decoder
+            stores extracted keys under `data.*` (or just as custom
+            fields, depending on version), not in reserved slots.
+
+        Working approach: pcre2 substring match against the original
+        JSON text via `<match type="pcre2">`. Crude but reliable —
+        the JSON shape is fixed by our nginx log_format and `"status":`
+        is unique enough to not false-match. Key correlation values
+        (cf_connecting_ip, vhost, path, etc.) ARE accessible via
+        `<field name="...">` because they aren't reserved names —
+        same_field correlation in 100503 still works that way.
       -->
 
       <!-- 4xx — typical of scanners, missing-auth probes, broken clients. -->
       <rule id="100501" level="3">
         <if_sid>100500</if_sid>
-        <status>^4\d\d$</status>
-        <description>Ingress-nginx 4xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
+        <match type="pcre2">"status":\s*"?4\d\d"?</match>
+        <description>Ingress-nginx 4xx response from $(cf_connecting_ip)</description>
         <group>web,ingress,attack,</group>
       </rule>
 
@@ -139,8 +152,8 @@ data:
            attack or denial-of-service attempt. -->
       <rule id="100502" level="6">
         <if_sid>100500</if_sid>
-        <status>^5\d\d$</status>
-        <description>Ingress-nginx 5xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
+        <match type="pcre2">"status":\s*"?5\d\d"?</match>
+        <description>Ingress-nginx 5xx response from $(cf_connecting_ip)</description>
         <group>web,ingress,attack,</group>
       </rule>
 
