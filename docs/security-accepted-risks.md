@@ -528,6 +528,14 @@ to enrich events with container context, and writes JSON output to
   plugin invocations on every pod create) and 100412 (postgres pg_isready
   liveness probes — perl-wrapped binary reads /etc/shadow during uid lookup,
   ~99.7% of rule 100402 hits). Add new excludes there as needed.
+- **When you add or edit a rule**, also bump the
+  `checksum/unifi-decoder` annotation on
+  `kubernetes/apps/security/wazuh/app/wazuh-manager-statefulset.yaml`
+  (`spec.template.metadata.annotations`). `wazuh-analysisd` reads
+  `local_rules.xml` only at process start, not on configmap mount changes,
+  so without the annotation bump the new rule is committed but inert.
+  Recipe is in the manifest comment; one-liner:
+  `sha256sum kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml | awk '{print substr($1,1,12)}'`
 
 **Future hardening (not blocking):**
 - Move from in-tree configmap to a dedicated `falco-rules-configmap.yaml` so
