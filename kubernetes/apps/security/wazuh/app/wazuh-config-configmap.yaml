@@ -409,25 +409,16 @@ data:
         <list>etc/lists/malicious-ioc/malicious-domains</list>
         <list>etc/lists/malicious-ioc/malware-hashes</list>
 
-        <!-- User-defined ruleset (UniFi + ingress-nginx decoders/rules
-             mounted here).
+        <!-- User-defined ruleset (UniFi decoders/rules mounted here).
              NOTE: <decoder_dir> is non-recursive — subdirectories are
-             skipped silently. Each custom decoder set is mounted in
-             its own subdirectory (so the ConfigMap projection volume
-             can manage them as a unit), so we list each path
-             explicitly. Adding a new custom decoder set means: create
-             a configmap, mount it under etc/decoders/<name>/ +
-             etc/rules/<name>/ in the StatefulSet, AND add the two
-             <decoder_dir>/<rule_dir> entries here. Without the
-             entries, analysisd silently skips the directory and the
-             rules are inert (failure mode caught 2026-05-10 when the
-             ingress-nginx decoder was committed but never loaded). -->
+             skipped silently. UniFi decoders are mounted at
+             etc/decoders/unifi/ (so the ConfigMap projection volume
+             can manage them as a unit), so we list that path
+             explicitly. -->
         <decoder_dir>etc/decoders</decoder_dir>
         <decoder_dir>etc/decoders/unifi</decoder_dir>
-        <decoder_dir>etc/decoders/ingress-nginx</decoder_dir>
         <rule_dir>etc/rules</rule_dir>
         <rule_dir>etc/rules/unifi</rule_dir>
-        <rule_dir>etc/rules/ingress-nginx</rule_dir>
       </ruleset>
 
       <rule_test>
