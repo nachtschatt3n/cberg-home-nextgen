@@ -88,7 +88,16 @@ data:
       so this still doesn't false-fire on other JSON-emitting apps.
     -->
     <decoder name="cri-ingress-nginx">
-      <prematch type="pcre2">\{"time":\s*"[^"]+","remote_addr":\s*"[^"]*","x_forwarded_for":</prematch>
+      <!--
+        Allow whitespace between every JSON token. nginx's
+        log_format-upstream emits `", "next_key":` (comma + SPACE), but
+        wazuh-logtest validation 2026-05-10 was performed against a
+        no-space sample (which Wazuh accepted) — production lines never
+        matched until 2026-05-11 sweep flagged 0 hits over 24h. Always
+        include `\s*` after every separator. JSON_Decoder still parses
+        the body correctly regardless of whitespace.
+      -->
+      <prematch type="pcre2">\{\s*"time":\s*"[^"]+"\s*,\s*"remote_addr":\s*"[^"]*"\s*,\s*"x_forwarded_for":</prematch>
       <plugin_decoder>JSON_Decoder</plugin_decoder>
     </decoder>
 

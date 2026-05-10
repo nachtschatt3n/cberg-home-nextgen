@@ -849,6 +849,15 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         except Exception:
             pass
 
+    # Drop any cached findings whose image:tag is no longer running in the
+    # cluster. Without this, fixed/replaced images linger as findings until
+    # the 24h cache expires (e.g. an ai-sre 2.1.0 entry persists after a
+    # rollout to 2.1.4 even though the vulnerable image has been pulled).
+    findings_per_image = {
+        img: r for img, r in findings_per_image.items()
+        if img in distinct_images
+    }
+
     # Surface findings: any image with >0 CRITICAL = CRITICAL audit finding;
     # >5 HIGH on a single image = WARNING (noise floor for CVE accumulation).
     if findings_per_image:
