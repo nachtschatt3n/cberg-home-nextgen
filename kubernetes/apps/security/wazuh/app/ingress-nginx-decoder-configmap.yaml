@@ -113,10 +113,23 @@ data:
         <group>web,ingress,</group>
       </rule>
 
+      <!--
+        IMPORTANT: do NOT use `<field name="status">` here. `status` is a
+        reserved Wazuh decoder slot (alongside srcip, dstip, srcuser,
+        protocol, hostname, url, etc. — fields the JSON_Decoder
+        auto-populates from JSON keys with the matching name). Using
+        <field name="status"> makes wazuh-analysisd refuse to load the
+        rule with: "Failure to read rule NNNN. Field 'status' is
+        static." (caught 2026-05-10 — first deploy crash-looped
+        wazuh-manager). The fix is to use the reserved <status>
+        match element directly, which Wazuh evaluates against the
+        same JSON_Decoder-populated value.
+      -->
+
       <!-- 4xx — typical of scanners, missing-auth probes, broken clients. -->
       <rule id="100501" level="3">
         <if_sid>100500</if_sid>
-        <field name="status" type="pcre2">^4\d\d$</field>
+        <status>^4\d\d$</status>
         <description>Ingress-nginx 4xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
         <group>web,ingress,attack,</group>
       </rule>
@@ -126,7 +139,7 @@ data:
            attack or denial-of-service attempt. -->
       <rule id="100502" level="6">
         <if_sid>100500</if_sid>
-        <field name="status" type="pcre2">^5\d\d$</field>
+        <status>^5\d\d$</status>
         <description>Ingress-nginx 5xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
         <group>web,ingress,attack,</group>
       </rule>

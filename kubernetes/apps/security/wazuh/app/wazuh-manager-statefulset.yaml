@@ -35,8 +35,9 @@ spec:
         # so a single configmap edit is a minimal-diff template change.
         # Recipe (run after any decoder configmap edit):
         #   sha256sum kubernetes/apps/security/wazuh/app/<configmap>.yaml | awk '{print substr($1,1,12)}'
+        checksum/wazuh-config: "bca4bee0eb19"
         checksum/unifi-decoder: "95acd9cec36d"
-        checksum/ingress-nginx-decoder: "c2928ea1f55b"
+        checksum/ingress-nginx-decoder: "5209a9e6d831"
     spec:
       securityContext:
         fsGroup: 999
