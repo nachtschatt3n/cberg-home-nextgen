@@ -23,6 +23,17 @@ spec:
       labels:
         app: wazuh-manager
         node-type: master
+      annotations:
+        # Restart trigger — wazuh-analysisd reads local_rules.xml only at
+        # process start, not on configmap mount changes. Bumping this hash
+        # whenever unifi-decoder-configmap.yaml changes forces a rolling
+        # restart of the manager pod via the StatefulSet template, which
+        # is the GitOps-safe way to pick up new Falco silencer rules
+        # (e.g. 100410, 100411, 100412 added in commits 645caf4b /
+        # e05e2b18 / 848acce9). When you edit the unifi-decoder configmap,
+        # also bump this value:
+        #   sha256sum kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml | awk '{print substr($1,1,12)}'
+        checksum/unifi-decoder: "95acd9cec36d"
     spec:
       securityContext:
         fsGroup: 999
