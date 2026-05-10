@@ -13,6 +13,7 @@ resources:
   - wazuh-agents-daemonset.yaml
   - wazuh-config-configmap.yaml
   - unifi-decoder-configmap.yaml
+  - ingress-nginx-decoder-configmap.yaml
   - secret.sops.yaml
   - certs-secret.sops.yaml
   - wazuh-saml-config.sops.yaml

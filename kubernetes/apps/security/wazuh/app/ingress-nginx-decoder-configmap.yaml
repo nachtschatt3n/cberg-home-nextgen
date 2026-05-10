@@ -1,0 +1,131 @@
+---
+# Wazuh decoder + rules for external ingress-nginx access logs.
+#
+# Why this exists:
+#   security-check.py section 6 (s6_attack_patterns / cf_connecting_ip
+#   correlation) wants to slice 4xx/5xx volume by source IP to detect
+#   scanners and brute-force attempts. The data is *already produced* —
+#   ingress-nginx writes structured JSON access logs containing
+#   cf_connecting_ip (real client IP, injected by Cloudflare and trusted
+#   via `forwarded-for-header: CF-Connecting-IP`), and the wazuh-agent
+#   DaemonSet already tails /host/var/log/containers/*.log on every node.
+#
+#   What was missing: wazuh-agent ships those lines under
+#   <log_format>syslog</log_format>, so the JSON body never gets
+#   parsed into structured fields. Querying `cf_connecting_ip:*` in
+#   wazuh-alerts-* returned 0 — not because no data was flowing, but
+#   because the field didn't exist as a structured field in the index.
+#
+# What this configmap adds:
+#   1. Decoder `cri-ingress-nginx` — matches the CRI envelope
+#      (`<RFC3339-ish-ts> stdout F {`) AND the ingress-nginx-specific
+#      JSON shape (`{"time":...,"remote_addr":...`), then runs Wazuh's
+#      built-in JSON_Decoder which finds the first `{` and parses every
+#      field (status, cf_connecting_ip, vhost, path, method, etc.) into
+#      structured form usable in indexer queries.
+#   2. Rules 100500-100503 — silent baseline + 4xx/5xx escalation +
+#      50-4xx-in-60s-from-same-IP scanner detection.
+#
+# Mounted into the manager at:
+#   /var/ossec/etc/decoders/ingress-nginx/ingress-nginx_decoders.xml
+#   /var/ossec/etc/rules/ingress-nginx/ingress-nginx_rules.xml
+#
+# When you edit this configmap, also bump
+# `checksum/ingress-nginx-decoder` on the wazuh-manager StatefulSet
+# template (recipe in that manifest), otherwise wazuh-analysisd won't
+# reload the ruleset and the changes are inert (same failure mode that
+# kept rule 100412 dormant 2026-05-09 → 2026-05-10).
+#
+# Validate after deploy with:
+#   kubectl -n security exec wazuh-manager-master-0 -- \
+#     /var/ossec/bin/wazuh-logtest << 'LOG'
+#   2026-05-10T10:00:00.123456Z stdout F {"time":"2026-05-10T10:00:00+00:00","remote_addr":"10.42.0.1","x_forwarded_for":"1.2.3.4","request_id":"abc","remote_user":"","bytes_sent":1234,"request_time":0.05,"status":404,"vhost":"example.test","request_proto":"HTTP/2.0","path":"/admin","request_query":"","request_length":42,"duration":0.05,"method":"GET","http_referrer":"","http_user_agent":"curl/8.0","cf_connecting_ip":"1.2.3.4","cf_ray":"abc-DUS","cf_country":"DE"}
+#   LOG
+# Expected: cri-ingress-nginx decoder hit, status=404, cf_connecting_ip=1.2.3.4,
+# vhost=example.test, rule 100501 (4xx, level 3) fires.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-decoder
+  namespace: security
+data:
+  ingress-nginx_decoders.xml: |
+    <!--
+      CRI-prefixed nginx access log shape (each line in
+      /var/log/containers/external-ingress-nginx-controller-*.log):
+
+        <RFC3339Nano-ts> stdout F {"time":"...","remote_addr":"...",...
+                                                 ^^^^^^^^^^^^^^
+                                                 fixed-order JSON
+
+      log-format-upstream is defined in
+      kubernetes/apps/network/external/ingress-nginx/helmrelease.yaml and
+      always emits these 19 fields in this order:
+
+        time, remote_addr, x_forwarded_for, request_id, remote_user,
+        bytes_sent, request_time, status, vhost, request_proto, path,
+        request_query, request_length, duration, method, http_referrer,
+        http_user_agent, cf_connecting_ip, cf_ray, cf_country
+
+      The prematch below pins on the first three keys (time + remote_addr
+      + x_forwarded_for) which are unique to this log format — no other
+      CRI-wrapped JSON in this cluster matches. JSON_Decoder then parses
+      the body from the first `{` to the matching `}`, producing one
+      indexer field per JSON key.
+    -->
+    <decoder name="cri-ingress-nginx">
+      <prematch type="pcre2">^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+stdout\s+[FP]\s+\{"time":\s*"[^"]+","remote_addr":\s*"[^"]*","x_forwarded_for":</prematch>
+      <plugin_decoder>JSON_Decoder</plugin_decoder>
+    </decoder>
+
+  ingress-nginx_rules.xml: |
+    <group name="web,ingress,homelab,">
+
+      <!--
+        Baseline match — silent (level 0). Required as the parent for
+        the child escalation rules below; without it, JSON_Decoder
+        extracts the fields but Wazuh discards the event because no rule
+        fired. Keeping it level 0 means 2xx/3xx traffic does not get
+        archived (would be ~hundreds of MB/day on the indexer); only the
+        error-class events surface via 100501/100502 children below.
+        Trade-off: legitimate attack traffic that returns 2xx (already-
+        valid creds, valid endpoints) is invisible to this pipeline.
+        That's acceptable because scanners/probers generate 4xx by
+        nature (unknown endpoints, malformed requests).
+      -->
+      <rule id="100500" level="0">
+        <decoded_as>cri-ingress-nginx</decoded_as>
+        <description>Ingress-nginx access log (decoded baseline)</description>
+        <group>web,ingress,</group>
+      </rule>
+
+      <!-- 4xx — typical of scanners, missing-auth probes, broken clients. -->
+      <rule id="100501" level="3">
+        <if_sid>100500</if_sid>
+        <field name="status" type="pcre2">^4\d\d$</field>
+        <description>Ingress-nginx 4xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
+        <group>web,ingress,attack,</group>
+      </rule>
+
+      <!-- 5xx — server errors. Higher signal: usually backend bugs but
+           sustained 5xx from one source IP can indicate a fuzzing
+           attack or denial-of-service attempt. -->
+      <rule id="100502" level="6">
+        <if_sid>100500</if_sid>
+        <field name="status" type="pcre2">^5\d\d$</field>
+        <description>Ingress-nginx 5xx: $(status) $(method) $(vhost)$(path) from $(cf_connecting_ip)</description>
+        <group>web,ingress,attack,</group>
+      </rule>
+
+      <!-- Same-source-IP 4xx burst — classic scanner/enumeration
+           shape. 50+ 4xx in 60s from one cf_connecting_ip is way above
+           any legitimate-user pattern at this homelab's traffic
+           volume. Level 10 = "log+alert" but not paged. -->
+      <rule id="100503" level="10" frequency="50" timeframe="60">
+        <if_matched_sid>100501</if_matched_sid>
+        <same_field>cf_connecting_ip</same_field>
+        <description>Ingress-nginx: 50+ 4xx in 60s from same cf_connecting_ip — likely scanner/enumeration</description>
+        <group>web,ingress,attack,recon,</group>
+      </rule>
+
+    </group>

@@ -24,16 +24,19 @@ spec:
         app: wazuh-manager
         node-type: master
       annotations:
-        # Restart trigger — wazuh-analysisd reads local_rules.xml only at
-        # process start, not on configmap mount changes. Bumping this hash
-        # whenever unifi-decoder-configmap.yaml changes forces a rolling
-        # restart of the manager pod via the StatefulSet template, which
-        # is the GitOps-safe way to pick up new Falco silencer rules
-        # (e.g. 100410, 100411, 100412 added in commits 645caf4b /
-        # e05e2b18 / 848acce9). When you edit the unifi-decoder configmap,
-        # also bump this value:
-        #   sha256sum kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml | awk '{print substr($1,1,12)}'
+        # Restart triggers — wazuh-analysisd reads decoders/rules only at
+        # process start, not on configmap mount changes. Bumping these
+        # hashes whenever the corresponding decoder configmap changes
+        # forces a rolling restart of the manager pod via the StatefulSet
+        # template, which is the GitOps-safe way to pick up new rules
+        # (e.g. 100410/100411/100412 Falco silences added in commits
+        # 645caf4b / e05e2b18 / 848acce9; ingress-nginx CRI/JSON decoder
+        # added with this commit). One annotation per decoder configmap
+        # so a single configmap edit is a minimal-diff template change.
+        # Recipe (run after any decoder configmap edit):
+        #   sha256sum kubernetes/apps/security/wazuh/app/<configmap>.yaml | awk '{print substr($1,1,12)}'
         checksum/unifi-decoder: "95acd9cec36d"
+        checksum/ingress-nginx-decoder: "05cf34d6654b"
     spec:
       securityContext:
         fsGroup: 999
@@ -60,6 +63,18 @@ spec:
             items:
               - key: unifi_rules.xml
                 path: unifi_rules.xml
+        - name: ingress-nginx-decoders
+          configMap:
+            name: ingress-nginx-decoder
+            items:
+              - key: ingress-nginx_decoders.xml
+                path: ingress-nginx_decoders.xml
+        - name: ingress-nginx-rules
+          configMap:
+            name: ingress-nginx-decoder
+            items:
+              - key: ingress-nginx_rules.xml
+                path: ingress-nginx_rules.xml
         - name: wazuh-certs
           secret:
             secretName: wazuh-certs
@@ -157,6 +172,16 @@ spec:
               readOnly: true
             - name: unifi-rules
               mountPath: /var/ossec/etc/rules/unifi
+              readOnly: true
+            # Ingress-nginx decoder/rules (CRI-wrapped JSON access logs from
+            # external ingress; produces structured cf_connecting_ip / status /
+            # vhost / path fields for security-check.py section 6 attacker
+            # correlation.)
+            - name: ingress-nginx-decoders
+              mountPath: /var/ossec/etc/decoders/ingress-nginx
+              readOnly: true
+            - name: ingress-nginx-rules
+              mountPath: /var/ossec/etc/rules/ingress-nginx
               readOnly: true
             # Single PVC, mounted at all paths Wazuh persists, via subPath.
             - name: wazuh-manager-master
