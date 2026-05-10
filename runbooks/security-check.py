@@ -446,9 +446,22 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
                     "requiredDuringSchedulingIgnoredDuringExecution",  # K8s podAffinity field name
                     "preferredDuringSchedulingIgnoredDuringExecution", # K8s podAffinity field name
                     "/paperclip/instances/default/data/backups",  # shell path in backup-cleanup.yaml
-                    "terminationGracePeriodSeconds",  # K8s pod spec field in JSON patch path
                     ]
-    real_b64  = [h for h in b64_hits if not any(p in h for p in safe_content)]
+    # Structural filter: JSONPatch operation paths (Flux postRenderers,
+    # kustomize patches) are slash-rooted POSIX-like strings with no '=' or
+    # '+'. Real base64 has padding ('=') or '+'. JSONPatch paths regularly
+    # cross the 40-char threshold (e.g. /spec/template/spec/containers/0/...)
+    # and were previously suppressed via per-app substring entries in
+    # safe_content (terminationGracePeriodSeconds, the paperclip path).
+    # Replace those bandaids with one regex that catches the whole class.
+    _jsonpatch_path = re.compile(
+        r'\bpath:\s*/[A-Za-z0-9~_-][A-Za-z0-9/~_.-]*\s*$'
+    )
+    real_b64 = [
+        h for h in b64_hits
+        if not any(p in h for p in safe_content)
+        and not _jsonpatch_path.search(h)
+    ]
     if real_b64:
         for hit in real_b64[:10]:
             short = redact(hit[:120])
