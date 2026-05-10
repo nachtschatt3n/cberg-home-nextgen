@@ -73,8 +73,22 @@ data:
       the body from the first `{` to the matching `}`, producing one
       indexer field per JSON key.
     -->
+    <!--
+      Note on the prematch shape: Wazuh's Phase 1 pre-decoder consumes a
+      RFC3339-shaped timestamp at the start of every line and stuffs it
+      into a generic `timestamp` field, leaving an altered remainder
+      for Phase 2 decoders. Sample run with the original CRI-anchored
+      prematch had Phase 1 eat "2026-05-10T10:00:00.123456Z std" into
+      the timestamp field, leaving "out F {…}" for decoders — so an
+      anchor on `^\d{4}-…stdout F` never fires. Pin the prematch on
+      the JSON shape that follows instead. The first three keys
+      (time, remote_addr, x_forwarded_for) are unique to the
+      ingress-nginx log-format-upstream defined in
+      kubernetes/apps/network/external/ingress-nginx/helmrelease.yaml,
+      so this still doesn't false-fire on other JSON-emitting apps.
+    -->
     <decoder name="cri-ingress-nginx">
-      <prematch type="pcre2">^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+stdout\s+[FP]\s+\{"time":\s*"[^"]+","remote_addr":\s*"[^"]*","x_forwarded_for":</prematch>
+      <prematch type="pcre2">\{"time":\s*"[^"]+","remote_addr":\s*"[^"]*","x_forwarded_for":</prematch>
       <plugin_decoder>JSON_Decoder</plugin_decoder>
     </decoder>
 
