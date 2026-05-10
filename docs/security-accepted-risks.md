@@ -524,8 +524,10 @@ to enrich events with container context, and writes JSON output to
   HTTP/syslog/sidekick outputs are explicitly disabled in the HelmRelease.
 - Tuned false positives are documented in
   `kubernetes/apps/security/wazuh/app/unifi-decoder-configmap.yaml` rules
-  100410 (wazuh-syscheckd) + 100411 (cilium-cni). Add new excludes there as
-  needed.
+  100410 (wazuh-* daemons doing FIM/syscheck cycles), 100411 (cilium-cni
+  plugin invocations on every pod create) and 100412 (postgres pg_isready
+  liveness probes — perl-wrapped binary reads /etc/shadow during uid lookup,
+  ~99.7% of rule 100402 hits). Add new excludes there as needed.
 
 **Future hardening (not blocking):**
 - Move from in-tree configmap to a dedicated `falco-rules-configmap.yaml` so

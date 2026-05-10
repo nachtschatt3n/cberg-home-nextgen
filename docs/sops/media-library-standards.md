@@ -229,10 +229,27 @@ downloads/tube-archivist/UC<channel-id>/
 ├── backdrop.jpg                           # fanart — written by tube-archivist-image-sync
 ├── banner.jpg                             # written by tube-archivist-image-sync
 ├── <channel>_YYYYMMDD_<title>.mp4
-└── <channel>_YYYYMMDD_<title>.nfo
+└── <channel>_YYYYMMDD_<title>.nfo        # <episodedetails> root (NOT <movie>) — see schema below
 ```
 
 Point a Jellyfin library at `/media/downloads/tube-archivist/` and these are picked up via the `Nfo` metadata reader + the embedded image extractor.
+
+**TA per-video NFO schema** (written by `tube-archivist-nfo-sync`, switched
+from `<movie>` to `<episodedetails>` in commit 5bb03b9d for Jellyfin TV
+library compatibility):
+
+```xml
+<episodedetails>
+  <title>...</title>
+  <showtitle>...</showtitle>            <!-- TA channel name -->
+  <season>YYYY</season>                 <!-- year as season -->
+  <episode>NNN</episode>                <!-- ordinal within year -->
+  <aired>YYYY-MM-DD</aired>
+  <plot>...</plot>
+  <runtime>...</runtime>
+  <thumb>...</thumb>
+</episodedetails>
+```
 
 ---
 

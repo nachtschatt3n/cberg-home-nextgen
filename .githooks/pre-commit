@@ -92,6 +92,16 @@ SKIP_KEY_NAMES = {
 # and cause false positives. Real secrets have entropy markers (digits, case,
 # special chars). Trade-off: a weak all-lowercase password would slip through.
 DICTIONARY_WORD = re.compile(r"^[a-z]{1,15}$")
+# DNS-1123-style Kubernetes resource names (lowercase + digits + hyphens,
+# must start with a letter, ≤30 chars). Examples we have actually hit as
+# false positives: `superset-postgresql` (Helm release name surfaced in a
+# Secret's value), `wazuh-wui` (the Wazuh dashboard's API user — username
+# is in a Secret but the password is the actual credential). These names
+# legitimately appear verbatim in manifests, docs, and AR-* records.
+# Same trade-off as DICTIONARY_WORD: a weak hyphenated lowercase password
+# (e.g. "correct-horse-battery") would also be filtered. Cap at 30 chars
+# so longer high-entropy hyphenated tokens still get scanned.
+K8S_NAME = re.compile(r"^[a-z][a-z0-9-]{0,29}$")
 # Pure IPv4/IPv6 literals — Secret values that are just an IP address are
 # config endpoints (NAS host, DB host, SMTP server, etc.), not credentials,
 # and routinely show up in StorageClass YAML, infra docs, network SOPs.
@@ -125,6 +135,8 @@ for s in data.get("items", []):
         if "\n" in decoded:
             continue
         if DICTIONARY_WORD.match(decoded):
+            continue
+        if K8S_NAME.match(decoded):
             continue
         if IPV4.match(decoded):
             continue
