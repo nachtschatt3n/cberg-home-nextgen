@@ -1,0 +1,34 @@
+---
+# Internal ingress only. The app has no auth of its own — it is designed
+# for trusted networks (LAN / Tailscale). Do NOT switch to ingressClassName:
+# external; that would put it on the open internet (Cloudflare tunnel).
+# See ~/code/gas-price-monitor/CLAUDE.md "Architecture decisions".
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gas-price-monitor
+  namespace: my-software-production
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Gas Price Monitor"
+    gethomepage.dev/description: "German fuel prices (Tankerkoenig)"
+    gethomepage.dev/group: "Software Development"
+    gethomepage.dev/icon: "mdi-gas-station"
+  labels:
+    gethomepage.dev/enabled: "true"
+spec:
+  ingressClassName: internal
+  tls:
+    - hosts:
+        - "gas-price-monitor.${SECRET_DOMAIN}"
+  rules:
+    - host: "gas-price-monitor.${SECRET_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gas-price-monitor
+                port:
+                  number: 80

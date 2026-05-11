@@ -8,6 +8,7 @@ components:
 resources:
   - ./absenty/ks.yaml
   - ./andreamosteller/ks.yaml
+  - ./gas-price-monitor/ks.yaml
   - ./rainbow-rescue/ks.yaml
 # PSA = baseline (cluster default). Inline Namespace resource was silently
 # ignored by kustomize. rainbow-rescue currently uses CHOWN/SETUID/SETGID/

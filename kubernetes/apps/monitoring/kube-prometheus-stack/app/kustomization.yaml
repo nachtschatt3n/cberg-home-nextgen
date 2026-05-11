@@ -19,6 +19,7 @@ resources:
   - ./solarfocus-scraper-alerts.yaml
   - ./zero-export-controller-alerts.yaml
   - ./pallet-price-monitor-alerts.yaml
+  - ./gas-price-monitor-alerts.yaml
   - ./prometheus-ingress.yaml
   - ./prometheus-outpost-ingress.yaml
   - ./alertmanager-ingress.yaml
