@@ -89,9 +89,18 @@ spec:
               limits:
                 cpu: 500m
                 memory: 256Mi
-        pod:
-          securityContext:
-            runAsNonRoot: true
+    # Image USER is non-numeric ("bun"). Kubelet refuses to enforce
+    # runAsNonRoot without a numeric UID, so pin runAsUser/runAsGroup/fsGroup
+    # explicitly. bun in oven/bun:*-alpine is uid=1000 gid=1000.
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+        seccompProfile:
+          type: RuntimeDefault
 
     service:
       app:
