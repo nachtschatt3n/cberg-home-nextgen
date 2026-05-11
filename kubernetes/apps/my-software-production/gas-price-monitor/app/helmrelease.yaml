@@ -39,12 +39,13 @@ spec:
               repository: ghcr.io/nachtschatt3n/gas-price-monitor
               tag: sha-6ebfcbc
               pullPolicy: IfNotPresent
-            # NOTE: TANKERKOENIG_API_KEY is intentionally NOT set in this first
-            # deploy. The app's parseEnv() tolerates a missing key (defaults to
-            # "") and server.ts only logs a warning. `/api/stations` will 500
-            # until the key is wired in; `/` (dashboard HTML) and `/api/config`
-            # (probes) work without it. Follow-up: author secret.sops.yaml +
-            # add the env entry below once the look-and-feel pass is signed off.
+            # TANKERKOENIG_API_KEY is sourced from the SOPS-encrypted Secret
+            # `gas-price-monitor` (see ./secret.sops.yaml). The reloader
+            # annotation on the controller picks up secret changes and
+            # restarts the pod. Currently set to the public Tankerkönig demo
+            # key (00000000-0000-0000-0000-000000000002) which returns fixed
+            # example payloads, not real station prices — rotate to a real
+            # key by editing the SOPS file in place.
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -54,6 +55,9 @@ spec:
                 value: /cache
               - name: DATA_DIR
                 value: /data
+            envFrom:
+              - secretRef:
+                  name: gas-price-monitor
             probes:
               liveness:
                 enabled: true
