@@ -251,7 +251,7 @@
 |-----|---------|---------|
 | absenty | Absence/time tracking app (production) | External |
 | andreamosteller | Portfolio site (production) | External |
-| gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). First-deploy is intentionally keyless (`/api/stations` 500s until the Tankerkönig key is wired in via SOPS). | Internal |
+| gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). Currently using the public Tankerkönig demo key (fixed example payloads, not real prices) wired via SOPS-encrypted Secret — rotate by editing `kubernetes/apps/my-software-production/gas-price-monitor/app/secret.sops.yaml` in place. | Internal |
 | rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal |
 
 ---
