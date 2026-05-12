@@ -616,6 +616,50 @@ mise upgrade
 mise prune
 ```
 
+### AI-driven operations
+
+Day-to-day cluster ops on this repo are mostly run by [Claude
+Code](https://docs.claude.com/claude-code) sub-agents defined in
+`.claude/agents/*.md`. Each agent is a focused operator with its own system
+prompt, an evidence-first / read-only-by-default workflow, and a clear
+auto-fix vs. report-to-user boundary. The standing sweep cycle invokes five
+of them in parallel — the same five referenced by `docs/sops/disaster-recovery.md`
+"Health Check" — so the cluster gets a multi-perspective audit on each tick:
+
+| Agent | What it owns | Auto-fixes | Surfaces to user |
+|---|---|---|---|
+| **health-check-agent** | Runs `runbooks/health-check.py`: pods, nodes, Longhorn, certs, Flux convergence, AlertManager firing set, node hardware errors, low batteries. Diffs vs the prior `health-check-current.md`. | Stale `flux reconcile` triggers, transient cleanup that's GitOps-safe. | Persistent app-layer warnings, hardware issues, anything destructive. |
+| **security-agent** | Runs `runbooks/security-check.py` (13 sections): SOPS coverage, git-history credential scan, Trivy CVE scan of every running image (parallel), attack-pattern detection, mTLS/cert expiry, RBAC + privileged pods, ingress drift vs Cloudflare tunnel, per-Wazuh-agent heartbeat. Strict redaction (IPs, MACs, emails → placeholders) for the public repo. | Cert-acceptance markdown updates, helmrelease tag bumps to versions already in `main`, hook regex tweaks. | New CRIT/HIGH CVEs, secret rotation candidates, RBAC drift, anything touching `kubectl exec`/`logs` against shared workloads. |
+| **version-check-agent** | Runs `runbooks/check-all-versions.py`: Renovate PR queue, Helm chart drift, image-tag staleness, KS/HR readiness off latest HEAD. Verifies the Trivy `Image created` date — not just tag presence — to catch the "PR merged but image not rebuilt" trap. | Safe-to-auto-merge Renovate patches (trusted repos, tests green). | Minor/major bumps, app-template MAJOR migrations, orphan stale images. |
+| **doc-agent** | Runs `runbooks/doc-check.py` and audits canonical docs (`docs/applications.md`, `docs/infrastructure.md`, `docs/sops/*.md`, this README) against recent commits + live cluster state. Flags stale version pins, missing app rows, broken internal links. | Typos, broken links, well-scoped one-line catalog updates. | SOP rewrites, accepted-risk text changes, agent-prompt edits. |
+| **media-manager** | Owns the Plex + Jellyfin + Tube Archivist curation loop per [`docs/sops/media-library-standards.md`](docs/sops/media-library-standards.md): JDownloader intake → nested-folder layout → ffprobe dedup → NFO + poster/fanart sidecars → library rescans (via cluster-ops-agent). Privacy-aware: never names titles in committed artifacts. | Intake reorganisation under the SOP, sidecar writes, rescan triggers. | Destructive folder ops, sidecar overwrites, mass dedups. |
+
+Two more agents back the five above:
+
+- **cluster-ops-agent** — top-level operator that runs the sweep cycle, executes
+  deployments, and triages findings from the five specialists. Owns
+  `kubectl rollout restart`, `flux reconcile`, and the SOP-aligned
+  `checksum/<configmap>` annotation pattern (see §4 of any wazuh-decoder
+  commit).
+- **unifi-agent** — UniFi network operations via the `unifictl` Rust CLI
+  (separate repo, anchored at `/Users/mu/code/unifictl`). Handles read-only
+  network diagnostics + the `unpoller` scrape target.
+
+**Scheduling cadence:** sweeps fire via session-local cron (`CronCreate`, not
+Anthropic cloud schedules — the cluster is on a private VLAN with local
+SOPS-age decryption and local mise binaries, neither reachable from a cloud
+sandbox; see CLAUDE.md "Scheduled Sweeps — Session-Only"). Daily 8:17 local
+is the default tick; on-demand sweeps run any time.
+
+**Evidence-first / least-privilege:** each agent's prompt enforces a
+read-only default. Destructive operations (`kubectl delete`, `git push
+--force`, `sops -e` on new files, anything touching shared/production state)
+require explicit user authorization in chat — they don't get pre-approved
+even when the agent is operating autonomously. The `permission denied`
+responses you'll see in transcripts are the sandbox enforcing this.
+
+Each agent's full prompt + hard rules: see `.claude/agents/*.md`.
+
 ---
 
 ## 📚 SOP Library
