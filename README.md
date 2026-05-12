@@ -34,13 +34,15 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 - **Operating System**: [Talos Linux v1.13.0](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.24, Clang/ThinLTO build)
 - **Container Runtime**: [Containerd 2.2.3](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
-- **Networking**: [Cilium v1.19.2](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
-- **Storage**: [Longhorn v1.11.1](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
+- **Networking**: [Cilium v1.19.3](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
+- **Storage**: [Longhorn v1.11.2](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
+- **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
+- **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation).
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
 - **GitOps**: [Flux v2.5.0](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
-- **Certificate Management**: [cert-manager v1.20.1](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
+- **Certificate Management**: [cert-manager v1.20.2](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
 ### GitOps Workflow
 
@@ -67,9 +69,9 @@ The cluster runs on enterprise-grade Intel NUC systems with high-speed networkin
 
 | Node | Model | CPU | Memory | Storage | Network | Role |
 |------|-------|-----|---------|---------|---------|------|
-| k8s-nuc14-01 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | 2.5GbE | Control Plane + Worker |
-| k8s-nuc14-02 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | 2.5GbE | Control Plane + Worker |
-| k8s-nuc14-03 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | 2.5GbE | Control Plane + Worker |
+| k8s-nuc14-01 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | GbE (uplink 10GbE) | Control Plane + Worker |
+| k8s-nuc14-02 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | GbE (uplink 10GbE) | Control Plane + Worker |
+| k8s-nuc14-03 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | GbE (uplink 10GbE) | Control Plane + Worker |
 
 **Additional Infrastructure:**
 - **NAS**: UNAS-CBERG at `192.168.31.230` provides bulk storage, backups, and SMB/NFS shares
@@ -432,9 +434,13 @@ This Git repository contains the following directories:
 ├── 📁 bootstrap      # Talos and cluster bootstrap configuration
 ├── 📁 components     # Reusable Kustomize components
 └── 📁 flux           # Flux system configuration
+📁 talos              # Talhelper-managed Talos machineconfig (talconfig.yaml + clusterconfig/)
 📁 terraform
 └── 📁 cloudflare     # Cloudflare zone settings managed via Terraform (kubernetes state backend)
-📁 runbooks           # Operational runbooks, their scripts, and generated outputs
+📁 runbooks           # Operational scripts + their generated outputs:
+                      #   health-check.py, security-check.py, check-all-versions.py,
+                      #   doc-check.py — run on schedule via Claude Code sub-agents,
+                      #   reports land in *-current.md files
 📁 tools              # Utility scripts and one-off automation helpers
 📁 docs
 ├── 📁 sops           # Operational SOPs (Cloudflare, Authentik, storage, media, etc.)
@@ -449,19 +455,17 @@ This Git repository contains the following directories:
 
 This repository uses [mise](https://mise.jdx.dev/) for unified development tool management. All required tools are defined in [`.mise.toml`](.mise.toml) and automatically installed and configured when you enter the project directory.
 
-**Managed Tools:**
-- **Python 3.13** - For automation scripts and utilities
-- **uv** - Fast Python package installer
-- **kubectl 1.36.x** - Kubernetes CLI
-- **flux 2.8.0** - GitOps toolkit CLI
-- **talosctl 1.13.0** - Talos Linux management
-- **talhelper 3.1.9** - Talos configuration helper
-- **sops 3.9.4** - Secrets encryption
-- **helm 3.17.1** - Kubernetes package manager
+**Managed Tools** (versions from [`.mise.toml`](.mise.toml)):
+- **Python 3.12** + **uv** - Automation scripts and fast package install
+- **kubectl 1.36.0** - Kubernetes CLI
+- **flux 2.8.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.5.0`)
+- **talosctl 1.13.0** + **talhelper 3.1.9** - Talos Linux management
+- **sops 3.13.0** + **age 1.3.1** - Secrets encryption
+- **helm 3.20.0** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization
-- **age 1.2.1** - Encryption tool for SOPS
+- **helmfile 0.171.0**, **task 3.46.4**, **cloudflared 2026.3.0**, **gum 0.17.0**
+- **Additional utilities**: jq 1.7.1, yq 4.50.1, kubeconform
 - **terraform** - Cloudflare zone management (installed globally: `mise use -g terraform`)
-- **Additional utilities**: jq, yq, cloudflared, gum, kubeconform
 
 **Environment Variables:**
 
