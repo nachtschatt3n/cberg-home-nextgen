@@ -323,104 +323,171 @@ Internet → Cloudflare DNS (${SECRET_DOMAIN})
 
 ---
 
+## 🛡️ Identity, SIEM & Runtime Security
+
+Beyond network-layer DNS and tunnel encryption, the cluster runs a dedicated
+SIEM + runtime-security stack and a central IdP.
+
+### Authentik — Cluster IdP
+
+[Authentik](kubernetes/apps/kube-system/authentik) is the identity provider for
+the cluster. It backs:
+
+- **Forward-auth** for internal apps via ingress-nginx annotations (Homepage,
+  most admin UIs).
+- **SAML SSO** for Wazuh Dashboard (`run_as: false`, blueprint-managed).
+- **OIDC** for selected apps that prefer direct OIDC over forward-auth.
+
+Authentik configuration is managed entirely as blueprints in
+`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` — never via the
+UI. Full workflow: [`docs/sops/authentik.md`](docs/sops/authentik.md).
+
+### Wazuh — SIEM
+
+Single-node deployment in `kubernetes/apps/security/wazuh`:
+
+- **wazuh-manager-master** (4.14.5) — agent enrollment (1515), comms (1514), REST API
+  (55000), UniFi CEF syslog listener (UDP 514 on LB IP `192.168.55.27`).
+  Custom decoder sets mounted at `etc/decoders/{unifi,ingress-nginx}` and the
+  matching `etc/rules/` dirs (each path listed explicitly in `ossec.conf`
+  — `<decoder_dir>` is non-recursive).
+- **wazuh-indexer** — single-node OpenSearch (ES7 compat) for event storage,
+  14d ILM retention.
+- **wazuh-dashboard** — fronted by Authentik SAML SSO.
+- **wazuh-agent** — DaemonSet, one privileged agent per node with stable
+  identity `k8s-nuc14-{01,02,03}` (no zombie agents on DaemonSet rollouts).
+  Collects FIM, Talos node logs, every CRI container log (with `wazuh-*` /
+  `longhorn-manager-*` / `falco-*` excludes), and Falco syscall events.
+
+Custom rule families:
+- `100400-100404` — Falco priority → Wazuh level mapping.
+- `100410-100412` — silences for known FP patterns (wazuh-* daemon FIM,
+  cilium-cni plugin invocation, postgres `pg_isready` reading `/etc/shadow`).
+- `100500-100503` — ingress-nginx CRI/JSON decoder (cf_connecting_ip per-source-IP correlation, 4xx/5xx escalation, scanner detection).
+
+### Falco — Runtime syscall monitoring
+
+[Falco](kubernetes/apps/security/falco) runs as a DaemonSet via the
+`modern_ebpf` driver (Talos kernel ≥ 5.8, no kmod build needed). JSON events
+are written to `/var/run/falco/falco.log` and tailed by the wazuh-agent
+DaemonSet — the manager-side rule chain `100400-100404` surfaces them as
+Wazuh alerts. Accepted-risk record: [`docs/security-accepted-risks.md`](docs/security-accepted-risks.md) AR-026.
+
+### Defense-in-depth checks
+
+- **Pre-commit hook** (`.githooks/pre-commit`) scans staged files against
+  decoded values of every in-cluster Secret (10-min cached), warns on
+  unencrypted `*.sops.yaml`, and detects common credential patterns. K8s
+  resource names are filtered to avoid false positives.
+- **Security audit script** (`runbooks/security-check.py`) runs 13 sections
+  end-to-end: SOPS coverage, image CVEs (Trivy in parallel), attack patterns,
+  external ingress drift vs Cloudflare tunnel, internal mTLS, per-Wazuh-agent
+  heartbeat, plus the Wazuh-side SIEM noise floor.
+
+---
+
+## 💾 Storage & Backup
+
+### Longhorn — Distributed block storage
+
+[Longhorn v1.11.2](kubernetes/apps/storage/longhorn) is the default
+`StorageClass` for application data. Choose between two classes per the
+[`docs/sops/longhorn.md`](docs/sops/longhorn.md) standard:
+
+- **`longhorn`** (dynamic provisioning) — application databases, anything that
+  grows over time, StatefulSet volumes. PV names are auto-generated UUIDs.
+- **`longhorn-static`** — small config volumes you want to preserve across
+  namespace deletes; requires manually pre-creating the Longhorn `Volume` CRD.
+
+### CIFS/SMB to the NAS
+
+The [csi-driver-smb](kubernetes/apps/kube-system/csi-driver-smb) connects
+cluster pods to bulk shares on UNAS-CBERG (`192.168.31.230`). Media libraries
+(Plex / Jellyfin), JDownloader intake, Frigate recordings, Tube Archivist
+output, iCloud sync, Nextcloud data, and Paperless consume/export buckets all
+land on per-class StorageClasses defined in `kubernetes/apps/storage/csi-driver-smb`.
+
+> ⚠️ **Storage safety:** PVC delete on a CIFS class with `subdir: /` + reclaim
+> `Delete` will wipe the entire share. Always run the pre-flight one-liner from
+> [`docs/sops/storage-safety.md`](docs/sops/storage-safety.md) before any
+> CIFS/SMB/NFS PVC delete. The catastrophic + severe class table is enumerated
+> there.
+
+### Backup
+
+Daily Longhorn snapshot + backup at 03:00 local via the
+`storage/backup-of-all-volumes` CronJob — pushes to the CIFS backup target on
+the NAS. Retention is enforced by Longhorn's recurring-job policy. Verify last
+run via `kubectl get cronjob -n storage backup-of-all-volumes`.
+
+---
+
 ## 📦 Applications
 
-The cluster hosts a variety of applications organized by functional category:
+~98 apps across 17 namespaces. Full inventory with per-app purpose, ingress
+posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md);
+this section is a category-level map.
 
-### 🏠 Home Automation
-- **Home Assistant** - Central home automation platform
-- **ESPHome** - ESP device management and configuration  
-- **Node-RED** - Flow-based automation and integration
-- **Matter Server** - Matter and Thread device connectivity
-- **Frigate NVR** - AI-powered network video recorder
-- **Scrypted NVR** - Additional video management platform
-- **Zigbee2MQTT** - Zigbee device integration via MQTT
-- **Mosquitto** - MQTT broker for IoT communications
-- **Music Assistant** - Multi-room audio management
-- **ioBroker** - IoT integration platform
-- **n8n** - Workflow automation tool
-- **Teslamate** - Tesla data logger
-- **MQTTX Web** - Web-based MQTT client
+### 🤖 AI (`ai` — 10)
+ai-sre · anythingllm · hermes-agent · langfuse · librechat · mcpo ·
+next-ai-draw-io · open-webui · openclaw · paperclip
 
-### 🌐 Network Services  
-- **AdGuard Home** - Network-wide ad blocking at `192.168.55.5`
-- **Ingress NGINX** - Internal and external reverse proxy
-- **Cloudflared** - Cloudflare Tunnel for external access
-- **External DNS** - Automatic DNS record management
-- **k8s-gateway** - Internal DNS resolution for cluster services
-- **Flux Webhook** - Webhook receiver for Flux GitOps automation
+> **External Ollama** on Mac Mini M4 Pro (`192.168.30.111:11434`, gemma 4 +
+> Metal). Provides OpenAI-compatible endpoints to the cluster.
 
-### 📊 Monitoring & Observability
-- **Grafana** - Data visualization and dashboards
-- **Prometheus Stack** - Metrics collection and alerting  
-- **Uptime Kuma** - Service monitoring and status pages
-- **ECK Stack** - Elasticsearch, Kibana, and Fluent-bit for log management
-- **Elasticsearch Exporter** - Prometheus exporter for Elasticsearch metrics
-- **Headlamp** - Kubernetes web UI
-- **Unpoller** - UniFi metrics exporter for Prometheus
+### 🏠 Home Automation (`home-automation` — 20)
+esphome · frigate-nvr · ha-ai-harness · home-assistant · iobroker ·
+matter-server · mosquitto · mqttx-web · music-assistant-server · n8n ·
+node-red · otbr · pallet-price-monitor · scrypted-nvr · solarfocus-scraper ·
+teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
 
-### 🎬 Media & Entertainment
-- **Plex** - Media server for streaming content
-- **Jellyfin** - Open-source media server alternative
-- **TubeArchivist** - YouTube content archival and management
-- **MakeMKV** - Blu-ray and DVD ripping utility
+### 🗄️ Databases (`databases` — 10)
+influxdb · mariadb · memgraph · nocodb · pgadmin · phpmyadmin · postgresql ·
+redis · redisinsight · superset
 
-### 📥 Download
-- **JDownloader** - Download manager
-- **TubeArchivist** - YouTube content archival and management
+### 📊 Monitoring & Observability (`monitoring` — 10)
+eck-operator · edot-collector · elasticsearch · grafana · headlamp · kibana ·
+kube-prometheus-stack · otel-operator · unpoller · uptime-kuma
 
-### 🗄️ Databases
-- **PostgreSQL** - Advanced relational database
-- **MariaDB** - Primary relational database
-- **Redis** - In-memory data structure store
-- **InfluxDB** - Time-series database for metrics
-- **Nocodb** - Open-source Airtable alternative
-- **phpMyAdmin** - MySQL/MariaDB administration interface
-- **pgAdmin** - PostgreSQL administration interface
-- **RedisInsight** - Redis GUI
+### 📄 Office & Productivity (`office` — 11)
+actual-budget · affine · nextcloud · nextcloud-mcp · omni-tools · paperless-ai ·
+paperless-gpt · paperless-ngx · penpot · sure · vaultwarden
 
-### 🤖 AI & Machine Learning
-- **Ollama** - Local LLM inference server running on Mac Mini M4 Pro (`192.168.30.111`)
-- **Open WebUI** - Chat interface for AI models
-- **Langfuse** - LLM observability and analytics
-- **OpenClaw** - AI agent platform
-- **MCPO** - Model Control Plane Orchestrator
-- **AI-SRE** - AI-powered Site Reliability Engineering tools
+### 🎬 Media (`media` — 4)
+jellyfin · library-tools · makemkv · plex
 
-### 📄 Office & Productivity
-- **Nextcloud** - Self-hosted cloud storage and collaboration
-- **Paperless-ngx** - Document management and OCR
-- **Actual Budget** - Personal finance management
-- **Omni-Tools** - Collection of productivity tools
-- **Paperless-AI/GPT** - AI enhancements for Paperless-ngx
-- **Penpot** - Design and prototyping platform
-- **Vaultwarden** - Bitwarden-compatible password manager
+Library curation (nested per-item folder layout, NFO/poster sidecar standards,
+intake-from-JDownloader, dedup, Tube Archivist → Plex bridging) is documented
+in [`docs/sops/media-library-standards.md`](docs/sops/media-library-standards.md).
 
-### 💾 Storage & Backup
-- **Longhorn** - Distributed storage with replication 
-- **iCloud Drive Sync** - Apple iCloud integration
+### 📥 Download (`download` — 2)
+jdownloader · tube-archivist
 
-### 🔧 System Services
-- **authentik** - Unified identity provider
-- **cert-manager** - Automated TLS certificate management
-- **Cilium** - eBPF-based networking and security
-- **CoreDNS** - Cluster DNS resolution  
-- **CSI Driver SMB** - SMB/CIFS storage integration
-- **descheduler** - Kubernetes pod descheduler
-- **intel-device-plugin** - GPU acceleration support
-- **metrics-server** - Resource usage metrics
-- **node-feature-discovery** - Hardware feature detection
-- **reloader** - Automatic pod restart on config changes
-- **spegel** - Distributed container image mirroring
+### 🛡️ Security (`security` — 2)
+wazuh · falco — see the dedicated SIEM section above.
 
-### 🛠️ Custom Applications
-- **Absenty** - Custom development and production deployments
+### 🌐 Network (`network` — 6)
+external: cloudflared · external-dns · ingress-nginx  
+internal: adguard-home · k8s-gateway · ingress-nginx
 
-### 🔍 Utilities
+### 🔧 Cluster system services (`kube-system` — 10)
+authentik · cilium · coredns · csi-driver-smb · descheduler ·
+intel-device-plugin · metrics-server · node-feature-discovery · reloader ·
+spegel
 
-The repository includes helpful tools for infrastructure management:
+### 💾 Storage & Backup (`storage`, `backup`, `cert-manager`)
+- storage: longhorn  
+- backup: icloud-docker-mu  
+- cert-manager: cert-manager
 
-- **[SNMP Temperature Scanner](tools/snmp-temp-scan.sh)** - Discovers temperature sensors across UniFi devices for integration with Uptime Kuma monitoring
+### 🛠️ Custom applications (`my-software-development`, `my-software-production`, `default`)
+- dev: absenty · andreamosteller · opencode-andreamosteller  
+- prod: absenty · andreamosteller · gas-price-monitor · rainbow-rescue  
+- default: echo-server · homepage (the homepage app dashboard)
+
+### 🔍 Utilities (`tools/`)
+- **[SNMP Temperature Scanner](tools/snmp-temp-scan.sh)** — discovers
+  temperature sensors across UniFi devices for Uptime Kuma monitoring.
 
 ---
 
