@@ -74,8 +74,22 @@ The verdict emoji is `✅ all green` / `⚠️ <N> medium / <M> high` /
 
 Columns: `Sec` | `Sev` | `ID` | `Item` | `Status` | `Action`
 
-Section emojis (use these exact values in the `Sec` column for sort
-order + consistency across cycles):
+**Sort order**: by `Sev` column (most urgent → least), then by `Sec`
+emoji order within the same severity. The `📆 Next` row is always
+LAST regardless of severity (it's the horizon row, not a finding).
+
+Severity order (top → bottom of the table):
+
+1. 🚨 critical — action required *now*
+2. ⚠️ new action needed
+3. 🟡 monitor
+4. ⏸️ deferred / waiting
+5. ✅ clean / steady-state
+6. — N/A (rare; usually only the final 📆 Next row)
+
+Section emojis (use these exact values in the `Sec` column for
+consistency across cycles; within a single severity, rows appear in
+this order):
 
 - 🩺 Health
 - 🛡️ Security
