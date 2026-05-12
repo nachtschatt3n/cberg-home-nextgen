@@ -545,38 +545,48 @@ TALOSCONFIG=$PWD/kubernetes/bootstrap/talos/clusterconfig/talosconfig
 VIRTUAL_ENV=$PWD/.venv                  # Python virtual environment
 ```
 
-### Getting Started
+### Building your own — start from the template, not this fork
+
+This repo is my personal homelab — site-specific IPs, secrets layout, custom
+decoders, and a hand-curated app set. **Don't fork it as a starting point.**
+
+If you want to build a similar Talos + Flux + Cilium + SOPS-age setup,
+start from the upstream template that this repo was bootstrapped from:
+
+➡️ **[onedr0p/cluster-template](https://github.com/onedr0p/cluster-template)**
+
+The template gives you a clean, parameterised bootstrap with sensible defaults
+and an active maintainer community. Once your cluster is up, browse this repo
+for application-level examples (Authentik blueprints, Wazuh + Falco wiring,
+Longhorn class patterns, ingress-nginx + Cloudflare Tunnel + external-dns,
+Homepage layout) and copy what's useful — but always treat anything here as
+*opinionated reference*, not as a turnkey distribution.
+
+### Working in this repo (for me / contributors)
 
 ```bash
-# Install mise (if not already installed)
-# macOS: brew install mise
-# Other: https://mise.jdx.dev/getting-started.html
+# One-time: install mise (https://mise.jdx.dev/getting-started.html)
+# macOS:    brew install mise
 
-# Trust and install all tools
+# Auto-install the tool set pinned in .mise.toml + auto-load env vars
+# (KUBECONFIG, SOPS_AGE_KEY_FILE, TALOSCONFIG) when entering the directory.
 mise trust
 mise install
 
-# Environment is auto-configured when entering directory
-# Verify tools are available
-mise ls
-python --version   # Python 3.13.8
-kubectl version    # kubectl 1.36.x
-flux version       # flux 2.8.0
-
-# Access cluster (KUBECONFIG already set by mise)
+# Sanity-check the cluster
 kubectl get nodes
+flux get kustomizations -A | awk 'NR==1 || $5 != "True"'   # any KS not Ready?
+flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'   # any HR not Ready?
 
-# Monitor Flux
-flux get kustomizations -A
-flux get helmreleases -A
+# Audit scripts (used by Claude Code sub-agents and on schedule):
+mise exec -- python3 runbooks/health-check.py
+mise exec -- python3 runbooks/security-check.py
+mise exec -- python3 runbooks/check-all-versions.py
+mise exec -- python3 runbooks/doc-check.py
 
-# Debug applications
-kubectl get pods -A
-kubectl logs -n <namespace> <pod-name>
-
-# Upgrade tools to latest versions
+# Tool maintenance
 mise upgrade
-mise prune  # Clean up old versions
+mise prune
 ```
 
 ---
