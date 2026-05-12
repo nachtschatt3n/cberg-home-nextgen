@@ -18,6 +18,17 @@ spec:
     metadata:
       labels:
         app: wazuh-agent
+      annotations:
+        # Restart trigger — agent.conf is subPath-mounted from wazuh-config
+        # ConfigMap. Kubelet does NOT propagate subPath ConfigMap updates
+        # to running pods (only direct ConfigMap volume mounts auto-update),
+        # so configmap edits are inert until the pod restarts. Bumping this
+        # hash whenever wazuh-config-configmap.yaml changes makes the
+        # StatefulSet template diff and forces a DaemonSet rolling update —
+        # GitOps-safe equivalent of `kubectl rollout restart daemonset`.
+        # Recipe (run after any wazuh-config-configmap edit):
+        #   sha256sum kubernetes/apps/security/wazuh/app/wazuh-config-configmap.yaml | awk '{print substr($1,1,12)}'
+        checksum/wazuh-config: "85c1150b41c4"
     spec:
       tolerations:
         - operator: Exists

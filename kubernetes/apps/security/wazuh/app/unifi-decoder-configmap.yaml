@@ -617,6 +617,31 @@ data:
         <group>falco,homelab,</group>
       </rule>
 
+      <!-- Suppress Falco "Drop and execute new binary in container" when
+           triggered by the paperclip ai-tools sidecar. paperclip is an
+           AI agent platform whose `tools` container is a uid=0 ubuntu
+           sidecar that runs apt-get + dpkg + update-alternatives during
+           bootstrap to install language/tool dependencies on the fly.
+           Each apt/dpkg invocation modifies binaries under /usr/bin/*
+           AFTER the container has started, which Falco's "drop+exec
+           new binary" rule (parent rule 100404, Critical) treats as
+           potential compromise. Volume on 2026-05-12 was 1,461/24h on
+           k8s-nuc14-03 (100% of the entire high-sev bucket); AR-009
+           documents the privileged tools sidecar as expected.
+
+           Match shape: pcre2 on the `output` string, anchoring on
+           k8smeta_pod_name=paperclip- AND container_image_repository=
+           docker.io/library/ubuntu. Specific enough that no
+           false-silence happens — paperclip is the only ubuntu-based
+           workload in the cluster, and the `paperclip-` pod-name
+           prefix doesn't collide with anything else. -->
+      <rule id="100413" level="0">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">k8smeta_pod_name=paperclip-.*container_image_repository=docker\.io/library/ubuntu</field>
+        <description>Falco: ignore paperclip ai-tools sidecar apt/dpkg postinst (AR-009, expected)</description>
+        <group>falco,homelab,suppress,</group>
+      </rule>
+
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
         <field name="priority" type="pcre2">^(Notice|Informational|Debug)$</field>

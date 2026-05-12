@@ -127,12 +127,29 @@ data:
       <!-- Kubernetes container logs (CRI format) — every pod on this node.
            Reads via /host/var/log/containers/*.log (host root mounted read-only
            by the DaemonSet). 150+ symlinks pointing at /host/var/log/pods/*.
+
+           log_format: multi-line-regex with `match="start"` and an
+           RFC3339-prefix anchor. Each line that starts with
+           `YYYY-MM-DDT...` is treated as the START of a new event;
+           continuation lines (rare in CRI — containerd's `F`/`P` marker
+           handles partial lines at the runtime layer) get appended to
+           the prior event. This was previously `<log_format>syslog</log_format>`
+           but production diagnostic on 2026-05-12 showed 0 forwarded
+           events from this glob despite 12k+ lines/file in
+           ingress-nginx logs — the syslog pre-decoder was silently
+           filtering CRI-prefixed lines that didn't match classic
+           `<priority>timestamp host proc:` grammar. multi-line-regex
+           bypasses the pre-decoder grammar check while keeping
+           one-event-per-line semantics for our use case (JSON access
+           logs, single-line app stdout).
+
            Exclude wazuh-* containers to avoid a feedback loop: the manager's
            own filebeat WARN lines look enough like a gitlab-shell-stderr
            decoder match that rule 65618 was firing 350+ times per minute,
            pegging the manager at its CPU limit. -->
       <localfile>
-        <log_format>syslog</log_format>
+        <log_format>multi-line-regex</log_format>
+        <multiline_regex match="start">^\d{4}-\d{2}-\d{2}T</multiline_regex>
         <location>/host/var/log/containers/*.log</location>
         <exclude>/host/var/log/containers/wazuh-*</exclude>
         <!-- Longhorn manager emits routine inter-replica POSTs
