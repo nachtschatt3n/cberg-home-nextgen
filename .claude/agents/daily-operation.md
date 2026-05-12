@@ -51,83 +51,112 @@ needs their decision, and what got auto-fixed.
 
 ## Output structure (mandatory)
 
-Produce a markdown document with these sections in order. Skip a
-section only if it's empty AND the absence is itself a finding (e.g.,
-no firing alerts = good; mention it).
+ONE markdown document. ONE table. The operator should be able to scan
+it in 30 seconds, decide on any flagged action in another 30, and
+move on. Every finding — new, auto-fixed, carry-over, infra-health,
+smart-home — is a row in the same table. Different sections live in
+the leftmost `Sec` column, not in different headings.
 
-### 1. Headline verdict — 1 sentence
+### Header (above the table)
 
-`✅ All green` / `⚠️ <N> medium / <M> high findings — see below` /
-`🚨 <N> critical findings — action required`
+Three pieces, one line each:
 
-### 2. Per-agent verdict table
+```
+# Daily Sweep — <YYYY-MM-DD HH:MM local>
 
-| Agent | Status | Auto-fixed | New REPORT items |
-|---|---|---|---|
-| Health | ✅/⚠️/🚨 | <count or none> | <count or none> |
-| Security | ... | ... | ... |
-| Version | ... | ... | ... |
-| Doc | ... | ... | ... |
-| Media | ... | ... | ... |
+**HEAD** `<sha7>` · **Verdict** <emoji> <one-phrase> · **<N> commits** since prior cycle
+```
 
-### 3. New findings (this cycle only)
+The verdict emoji is `✅ all green` / `⚠️ <N> medium / <M> high` /
+`🚨 <N> critical — action required`. Match it to the worst row.
 
-For each NEW finding (not a carry-over), one row:
+### The one table
 
-| ID | Severity | What | Source agent | Recommended action |
-|---|---|---|---|---|
+Columns: `Sec` | `Sev` | `ID` | `Item` | `Status` | `Action`
 
-Allocate temporary IDs like `N-01`, `N-02` for the new ones — these
-become part of the operator's open-finding list.
+Section emojis (use these exact values in the `Sec` column for sort
+order + consistency across cycles):
 
-### 4. Auto-fixed this cycle
+- 🩺 Health
+- 🛡️ Security
+- 🔢 Version
+- 📄 Doc
+- 🎬 Media
+- 🏠 Smart-home   (standing — at least one row even if all-clean)
+- 📌 Carry        (unchanged items from prior cycles)
+- 🔧 Infra        (pre-commit / decoder health / cache health — operator transparency)
+- 📆 Next         (final row — next sweep time + time-sensitive horizon)
 
-One-line bullets, each linking the commit SHA where it landed.
+Per-row rules:
 
-### 5. Carry-overs (status update, not re-discovery)
+- **One row per finding.** A "no new findings, all stable" sub-agent
+  still gets one row summarising the steady state (so the operator
+  can confirm the agent ran and saw nothing alarming).
+- **`Sev` column emoji**: `✅` clean · `⚠️` new action · `🟡` monitor ·
+  `⏸️` deferred · `🚨` critical · `—` N/A. Match the legend below
+  the table.
+- **`ID` column**: `—` for no-id rows, `auto` for auto-fixed items,
+  `N-01..N-NN` for new findings (allocated this cycle), or the existing
+  ID for carry-overs (`F-NN`, `#NNN`).
+- **`Item` column**: one sentence. Numbers are facts ("HA errors back
+  to baseline ~95/h"), names get redaction (`<movie>`, `<show>`,
+  `<channel>` per CLAUDE.md privacy rule).
+- **`Status` column**: short past-tense fact. Examples: `clean` /
+  `new` / `fixed <sha>` / `unchanged` / `improving (Δ-95%)` /
+  `worsening (Δ+340)` / `monitor` / `deferred`.
+- **`Action` column**: one phrase. `none` when there's nothing to do.
+  When there IS something, name it concretely ("merge if X in use",
+  "physical battery check soon", "Settings → Server → Library").
 
-For each known carry-over from prior cycles, one row:
+### Smart-home section (standing requirement)
 
-| ID | What | Status this cycle |
-|---|---|---|
-
-Status values: `unchanged`, `worsening (metric Δ)`, `improving (metric Δ)`,
-`resolved`.
-
-### 6. Decisions awaiting the operator
-
-Pull the HIGH-severity carry-overs and any new HIGH from §3.
-Order them with the lowest-blast-radius / quickest decision first.
-Each item gets: what, why now, ETA-if-actioned, recommended action.
-
-### 7. Smart-home check (Home Assistant impact)
-
-This is a STANDING section even if Home Assistant looks fine. Read
+Read
 [feedback memory](../../../.claude/projects/-Users-mu-code-cberg-home-nextgen/memory/feedback_ha_errors_investigate.md):
-HA errors are never "background noise." For every cycle:
+HA errors are never "background noise."
 
-- Group HA errors by integration (Tibber, Shelly, ResMed, Dirigera,
-  Tesla, Smartthings, icloud3, ...).
-- For each integration with elevated errors vs prior cycle baseline,
-  identify the impacted devices or automations and the operator-
-  visible consequence (e.g., "shade-battery sensors timing out —
-  blinds still operate; battery readings stale" vs "Tibber API
-  outage — solar-export controller running on stale price").
-- If everything's flat, say so in one sentence: "HA errors stable at
-  ~X/h, integration breakdown unchanged from baseline."
+If HA is flat, one row stating that ("baseline ~Xh/h, breakdown
+unchanged"). If any integration shows elevated errors vs prior cycle,
+ONE row per affected integration with the integration × impact × action
+condensed into the `Item` and `Action` columns. Don't span multiple
+rows for a single integration unless you have multiple distinct
+findings within it.
 
-### 8. Pre-commit + decoder health (operator transparency)
+### Final row (📆 Next)
 
-A 2–3 line check that the hidden infrastructure is working:
-- Pre-commit hook cluster-secret literal count + K8S_NAME filter active
-- Wazuh rule 100412 (pg_isready silence) holding
-- Trivy cache filter dropping stale image:tag entries
+Always present. Format:
 
-### 9. Next cycle prep
+```
+| 📆 Next | — | — | Next sweep <time> · <horizon-item-1> · <horizon-item-2> | — | — |
+```
 
-- "Next scheduled sweep: <time>"
-- Any time-sensitive items the operator should know before then (e.g.,
-  "PR #150 talos patch needs maintenance window 2026-05-26").
+Where horizon items are time-sensitive things the operator should know
+about before the next tick (e.g., "Stairwell shade 4d → ACTION", "Talos
+window 13d", "Renovate PR #151 needs CI rerun in 4h").
+
+### Legend (below the table, single line)
+
+```
+**Legend** ✅ clean · ⚠️ new action needed · 🟡 monitor · ⏸️ deferred · 📌 carry-over · 🚨 critical · — N/A
+```
+
+### Below-the-table notes
+
+If — and ONLY if — the table can't carry essential nuance for a
+specific row (e.g., a 4-line commit message excerpt, a Falco rule
+sample with regex), add a tiny anchored footnote section under the
+legend, max 3 lines per anchor, anchor like `[N-01]`.
+
+Default: NO below-table prose. The table is the report.
+
+### Length budget
+
+Aim for 15–25 rows total. Padding the table with `Sec: 🩺 Health`
+rows that say "all subsystem X is fine" is exactly what we're trying
+to avoid — collapse routine all-green into one row per agent.
+
+If you'd exceed 25 rows, drop the lowest-severity carry-overs from
+this cycle's table (they're still tracked in TODO; just not surfaced
+each day).
 
 ## Length budget
 
