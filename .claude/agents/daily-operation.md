@@ -49,6 +49,16 @@ needs their decision, and what got auto-fixed.
    their reports. Cross-reference with `git log` if a sub-agent says
    "fix shipped" — verify the commit landed.
 
+6. **Forbid the Monitor anti-pattern in sub-agent prompts.** Tell each
+   sub-agent to run the audit scripts SYNCHRONOUSLY in foreground
+   (`python3 runbooks/X-check.py`, blocking). Sub-agents that
+   background a script and arm a `Monitor` to wait for completion
+   will time out at "Still empty. Let me wait for monitor signal." —
+   `Monitor` events propagate to the PARENT session, not to the
+   sub-agent's own loop, so the agent's turn ends before the script
+   finishes. The audit scripts each complete in 30–120s; foreground
+   blocking is correct.
+
 ## Output structure (mandatory)
 
 ONE markdown document. ONE table. The operator should be able to scan

@@ -547,4 +547,47 @@ pattern as AR-023). Surface a finding only if the privileged spec changes
 (e.g., new capabilities added beyond CAP_SYS_ADMIN), or if Falco starts
 shipping events outside the cluster.
 
+---
+
+## AR-027 — `gas-price-monitor` External Ingress (Cloudflare Tunnel)
+
+**Status:** ACCEPTED — 2026-05-12
+
+**Description:** `my-software-production/gas-price-monitor` exposes a small
+HTTP service externally via the Cloudflare tunnel (ingressClassName=external)
+to surface the daily gas-price ETL output to the operator on mobile when
+away from the LAN. `runbooks/security-check.py` Section 9
+("external ingress allowlist") flags this as unexpected because the
+allowlist was last updated before this app deployed.
+
+**Why accepted:**
+- The endpoint is read-only (HTTP GET only); no auth-protected actions
+  exposed.
+- Cloudflare's Bot Fight Mode + AI bot block apply at the edge before any
+  request reaches the cluster.
+- The app stores no PII, no credentials, no personal location data —
+  output is public gas-station pricing aggregated by region.
+- Same surface-area class as AR-001 (general external ingress posture);
+  no incremental risk.
+- Alternative (forward-auth via Authentik) would add operational friction
+  for a non-sensitive read endpoint.
+
+**Mitigation in place:**
+- Cloudflare WAF rules (free tier) catch generic web-attack signatures.
+- The cri-ingress-nginx decoder (rules 100500-100503) provides per-
+  source-IP correlation should the endpoint start receiving suspicious
+  traffic patterns.
+- Section 6 attack-pattern detection will surface 4xx bursts from the
+  same `cf_connecting_ip`.
+
+**To clear this finding** (without removing the ingress): add
+`gas-price-monitor.${SECRET_DOMAIN}` to the EXTERNAL_INGRESS_ACCEPTED list
+in `runbooks/security_check_acceptances.py`. The list is loaded by Section 9.
+
+**Security agent note:** Treat any 5xx burst or geographic anomaly from
+this endpoint as a real finding — it's a small attack surface but it's
+internet-reachable.
+
+**Last reviewed:** 2026-05-12
+
 **Last reviewed:** 2026-05-09

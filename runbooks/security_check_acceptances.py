@@ -131,4 +131,5 @@ EXTERNAL_INGRESS_ACCEPTED: set[str] = {
     "traccar",                           # AR-007 — app-native auth
     "librechat-librechat",               # AR-007 — app-native auth
     "rainbow-rescue",                    # AR-007 line 123 — intentionally public PWA, no user data
+    "gas-price-monitor",                 # AR-027 — read-only public-data ETL output, no PII
 }
