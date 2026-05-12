@@ -181,8 +181,15 @@ def load_sensitive() -> bool:
         "| grep 'SECRET_DOMAIN:' | awk '{print $2}' | tr -d '\"'",
         timeout=15,
     )
-    git_name  = run("git config user.name")
-    git_email = run("git config user.email")
+    # NAME: prefer `git config user.name`, fall back to the most recent
+    # commit author. Local `git config user.name` is sometimes empty (e.g.,
+    # when only user.email is set), which used to produce NAME=0c and skip
+    # redaction entirely. The `git log -1 --format=%aN` fallback gives us
+    # the name that actually appears in committed artifacts — the right
+    # value to redact from any audit output that might be pasted into a
+    # public artifact.
+    git_name = run("git config user.name") or run("git log -1 --format=%aN")
+    git_email = run("git config user.email") or run("git log -1 --format=%aE")
 
     if not domain_raw:
         cprint(C.RED, "  ERROR: could not decrypt cluster-secrets.sops.yaml — is sops/age key available?")
@@ -457,10 +464,23 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     _jsonpatch_path = re.compile(
         r'\bpath:\s*/[A-Za-z0-9~_-][A-Za-z0-9/~_.-]*\s*$'
     )
+    # Repo-path references in YAML comments (inline documentation pointers
+    # like `kubernetes/apps/network/external/ingress-nginx/helmrelease.yaml`).
+    # These regularly appear inside ConfigMap `data:` blocks where the
+    # `grep -v '#'` precondition above doesn't help (XML/inline comments use
+    # `<!-- -->` or are continuation lines, not `#`-prefixed). Filter any
+    # line whose match contains a recognisable repo-root directory followed
+    # by a known file extension.
+    _repo_path = re.compile(
+        r'\b(?:kubernetes|docs|runbooks|tests|terraform|tools|talos|\.claude|\.github)/'
+        r'[A-Za-z0-9/_.-]+\.(?:yaml|yml|md|py|sh|txt|json|xml|toml)\b',
+        re.IGNORECASE,
+    )
     real_b64 = [
         h for h in b64_hits
         if not any(p in h for p in safe_content)
         and not _jsonpatch_path.search(h)
+        and not _repo_path.search(h)
     ]
     if real_b64:
         for hit in real_b64[:10]:
@@ -1688,41 +1708,58 @@ def s11_unifi() -> tuple[str, Findings, str]:
 
     # New clients (24h)
     clients_raw = run("unifictl local client list -o json 2>/dev/null", timeout=15)
-    try:
-        clients = json.loads(clients_raw)
-        if isinstance(clients, dict):
-            clients = clients.get("data", [])
-        threshold = time.time() - 86400
-        new = [c for c in clients if c.get("firstSeen", c.get("first_seen", 0)) > threshold]
-        blocked = [c for c in clients if c.get("blocked", False)]
-        cprint(C.GREEN if not new else C.YELLOW, f"  {'🟢' if not new else '🟡'} New clients (24h): {len(new)}")
-        lines.append(f"New clients (24h): **{len(new)}**, blocked: **{len(blocked)}**\n")
-        for c in new[:5]:
-            mac  = c.get("mac", "?")
-            name = c.get("name", c.get("hostname", c.get("oui", "?")))
-            net  = c.get("network", "?")
-            f.add(WARNING, f"New client: MAC={mac} name={name} network={net}")
-            lines.append(f"- New: MAC={mac} name={name} network={net}\n")
-    except Exception:
-        cprint(C.YELLOW, "  🟡 Could not parse client list")
+    if not clients_raw or not clients_raw.strip():
+        # Same ergonomics as the event-list parser below — empty output
+        # means controller unreachable / session expired, already
+        # surfaced by Section 12 WAN/health checks above.
+        pass
+    else:
+        try:
+            clients = json.loads(clients_raw)
+            if isinstance(clients, dict):
+                clients = clients.get("data", [])
+            threshold = time.time() - 86400
+            new = [c for c in clients if c.get("firstSeen", c.get("first_seen", 0)) > threshold]
+            blocked = [c for c in clients if c.get("blocked", False)]
+            cprint(C.GREEN if not new else C.YELLOW, f"  {'🟢' if not new else '🟡'} New clients (24h): {len(new)}")
+            lines.append(f"New clients (24h): **{len(new)}**, blocked: **{len(blocked)}**\n")
+            for c in new[:5]:
+                mac  = c.get("mac", "?")
+                name = c.get("name", c.get("hostname", c.get("oui", "?")))
+                net  = c.get("network", "?")
+                f.add(WARNING, f"New client: MAC={mac} name={name} network={net}")
+                lines.append(f"- New: MAC={mac} name={name} network={net}\n")
+        except Exception:
+            cprint(C.YELLOW, "  🟡 Could not parse client list")
 
     # Events / IDS
     events_raw = run("unifictl local event list -o json 2>/dev/null", timeout=15)
-    try:
-        events = json.loads(events_raw)
-        if isinstance(events, dict):
-            events = events.get("data", [])
-        threats = [e for e in events if any(k in str(e).upper()
-                   for k in ["IDS", "IPS", "THREAT", "INTRUSION", "MALWARE"])]
-        if threats:
-            for t in threats[:5]:
-                f.add(CRITICAL, f"IDS/IPS event: `{str(t)[:100]}`")
-                cprint(C.RED, f"  🔴 Threat event: {str(t)[:80]}")
-        else:
-            cprint(C.GREEN, "  🟢 No IDS/IPS events")
-        lines.append(f"IDS/IPS events: **{len(threats)}**\n")
-    except Exception:
-        cprint(C.YELLOW, "  🟡 Could not parse event list")
+    if not events_raw or not events_raw.strip():
+        # Empty output usually means unifictl session expired or the
+        # controller is briefly unreachable (e.g., during a UniFi
+        # Network application auth-API hang). Section 12 will already
+        # have surfaced the broader connectivity gap; don't double-emit
+        # a parse-failure warning here — the prior version flagged it
+        # as a sweep warning even when there was nothing to parse.
+        pass
+    else:
+        try:
+            events = json.loads(events_raw)
+            if isinstance(events, dict):
+                events = events.get("data", [])
+            threats = [e for e in events if any(k in str(e).upper()
+                       for k in ["IDS", "IPS", "THREAT", "INTRUSION", "MALWARE"])]
+            if threats:
+                for t in threats[:5]:
+                    f.add(CRITICAL, f"IDS/IPS event: `{str(t)[:100]}`")
+                    cprint(C.RED, f"  🔴 Threat event: {str(t)[:80]}")
+            else:
+                cprint(C.GREEN, "  🟢 No IDS/IPS events")
+            lines.append(f"IDS/IPS events: **{len(threats)}**\n")
+        except Exception:
+            # Output was non-empty but didn't parse as JSON — real
+            # ergonomics issue worth flagging.
+            cprint(C.YELLOW, "  🟡 Could not parse event list")
 
     return f.worst(), f, "\n".join(lines)
 
