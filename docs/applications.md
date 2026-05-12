@@ -251,7 +251,7 @@
 |-----|---------|---------|
 | absenty | Absence/time tracking app (production) | External |
 | andreamosteller | Portfolio site (production) | External |
-| gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). Currently using the public Tankerkönig demo key (fixed example payloads, not real prices) wired via SOPS-encrypted Secret — rotate by editing `kubernetes/apps/my-software-production/gas-price-monitor/app/secret.sops.yaml` in place. | Internal |
+| gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Geocoding via komoot Photon (requires `PHOTON_USER_AGENT` env at boot). Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). Currently using the public Tankerkönig demo key (fixed example payloads, not real prices) wired via SOPS-encrypted Secret — rotate by editing `kubernetes/apps/my-software-production/gas-price-monitor/app/secret.sops.yaml` in place. Public exposure approved by owner on 2026-05-12 (recorded override of source-repo Architecture Decision #3); no auth, no rate-limiting — accepted risks tracked in the source repo's `CLAUDE.md`. | External |
 | rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal |
 
 ---

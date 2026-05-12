@@ -1,14 +1,20 @@
 ---
-# Internal ingress only. The app has no auth of its own — it is designed
-# for trusted networks (LAN / Tailscale). Do NOT switch to ingressClassName:
-# external; that would put it on the open internet (Cloudflare tunnel).
-# See ~/code/gas-price-monitor/CLAUDE.md "Architecture decisions".
+# Public-internet ingress. The app has no auth of its own; owner explicitly
+# approved public exposure on 2026-05-12 — see the recorded override in the
+# source repo at ~/code/gas-price-monitor/CLAUDE.md (Architecture Decision #3,
+# updated in commit 9bad278). Known accepted risks tracked there:
+#   - Tankerkönig API key may be banned for abuse from public callers
+#   - Photon (komoot) may flag the User-Agent if traffic misbehaves
+#   - No rate-limiting on /api/stations, /api/geocode, /api/history
+# Mitigation if any bite: rotate TANKERKOENIG_API_KEY, change PHOTON_USER_AGENT,
+# or retreat to ingressClassName: internal.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: gas-price-monitor
   namespace: my-software-production
   annotations:
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: "Gas Price Monitor"
     gethomepage.dev/description: "German fuel prices (Tankerkoenig)"
@@ -17,7 +23,7 @@ metadata:
   labels:
     gethomepage.dev/enabled: "true"
 spec:
-  ingressClassName: internal
+  ingressClassName: external
   tls:
     - hosts:
         - "gas-price-monitor.${SECRET_DOMAIN}"

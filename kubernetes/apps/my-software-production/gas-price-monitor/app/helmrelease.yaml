@@ -37,7 +37,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/gas-price-monitor
-              tag: sha-6ebfcbc
+              tag: sha-9bad278
               pullPolicy: IfNotPresent
             # TANKERKOENIG_API_KEY is sourced from the SOPS-encrypted Secret
             # `gas-price-monitor` (see ./secret.sops.yaml). The reloader
@@ -46,6 +46,11 @@ spec:
             # key (00000000-0000-0000-0000-000000000002) which returns fixed
             # example payloads, not real station prices — rotate to a real
             # key by editing the SOPS file in place.
+            #
+            # PHOTON_USER_AGENT is REQUIRED at boot (server exits 1 if unset).
+            # It identifies this deployment to komoot's Photon geocoder so they
+            # can contact the owner if our traffic ever misbehaves. Plain env
+            # (not SOPS) — the value is a public contact string, not a secret.
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -55,6 +60,8 @@ spec:
                 value: /cache
               - name: DATA_DIR
                 value: /data
+              - name: PHOTON_USER_AGENT
+                value: "gas-price-monitor (mu@nachtschatt3n)"
             envFrom:
               - secretRef:
                   name: gas-price-monitor
