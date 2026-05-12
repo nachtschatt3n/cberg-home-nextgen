@@ -418,7 +418,34 @@ land on per-class StorageClasses defined in `kubernetes/apps/storage/csi-driver-
 Daily Longhorn snapshot + backup at 03:00 local via the
 `storage/backup-of-all-volumes` CronJob — pushes to the CIFS backup target on
 the NAS. Retention is enforced by Longhorn's recurring-job policy. Verify last
-run via `kubectl get cronjob -n storage backup-of-all-volumes`.
+run via `kubectl get cronjob -n storage backup-of-all-volumes`. Full
+operational workflow: [`docs/sops/backup.md`](docs/sops/backup.md).
+
+---
+
+## 🚑 Disaster Recovery
+
+Full procedures live in [`docs/sops/disaster-recovery.md`](docs/sops/disaster-recovery.md).
+The SOP tiers scenarios by recovery effort and lists, for each, the detection,
+blast radius, ordered recovery steps, and verification. Quick map:
+
+| Scenario | Tier | Notes |
+|---|---|---|
+| Single node loss (1-of-3) | T0 | etcd quorum survives; auto-heal once node returns |
+| Two/three node loss | T1 | Rebuild quorum or proceed to full rebuild |
+| Full cluster rebuild | T2 | Reprovision via Talos + `onedr0p/cluster-template` bootstrap; restore Longhorn PVs from CIFS backups |
+| **SOPS age key loss** | T3 | Catastrophic — every cluster secret must rotate. Back up `age.key` offline + offsite. |
+| Longhorn volume corruption | T0/T1 | Auto-rebuild on degraded; backup restore on faulted |
+| NAS (UNAS-CBERG) failure | T1/T2 | Media + intake + backup target lost; cluster live data survives on Longhorn replicas |
+| GitHub repo loss / compromise | T1 | Cluster keeps running on last reconciled commit; push to new origin to recover |
+| Cloudflare account compromise | T1 | Rotate API token + tunnel; AR-020 in `docs/security-accepted-risks.md` |
+| Authentik database loss | T1 | SSO outage only; restore PV or re-apply blueprints |
+| UniFi controller config loss | T0/T1 | Restore `.unf` auto-backup or rebuild from `CLAUDE.md` topology spec |
+
+The SOP also enumerates **critical prerequisites** that must be valid *before*
+you need them: SOPS age key offsite, Talos `talosconfig` in git, NAS offsite
+backup, UniFi `.unf` backup, Cloudflare 2FA recovery codes. Audit these
+quarterly.
 
 ---
 
