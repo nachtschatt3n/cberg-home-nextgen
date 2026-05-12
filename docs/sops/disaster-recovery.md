@@ -52,7 +52,20 @@ table-truncate). That's handled per-app via Longhorn snapshot + restore from
 
 ---
 
-## 3) Critical prerequisites — verify these are valid BEFORE you need them
+## 3) Blueprints
+
+**N/A** — disaster recovery is a procedural runbook, not a declarative
+configuration. Recovery steps reference declarative sources of truth that
+live in other manifests (Talos `kubernetes/bootstrap/talos/clusterconfig/`,
+Authentik blueprint configmap, Cloudflare Terraform), but the recovery
+*procedure* itself has no blueprint artifact to maintain.
+
+If a future scenario needs a declarative recovery aid (e.g., a saved Velero
+backup CR, a pre-rendered Talos image), add it here.
+
+---
+
+## Critical prerequisites — verify these are valid BEFORE you need them
 
 Most recovery procedures depend on these being current. Audit them quarterly.
 
@@ -280,7 +293,7 @@ kubectl annotate volume <name> -n storage \
    possible — saves manifest changes).
 2. Restore shares from offsite backup of the NAS itself (owner-managed).
 3. Point CIFS PVs back at the new NAS. If hostname/IP changed, search/replace
-   the StorageClass + PV manifests under `kubernetes/apps/storage/csi-driver-smb/`.
+   the StorageClass + PV manifests under `kubernetes/apps/kube-system/csi-driver-smb/`.
 
 **Verification:**
 - `kubectl get events -A --field-selector type=Warning` → no CIFS mount
