@@ -996,6 +996,125 @@ class VersionChecker:
                 versions[node] = None
         return versions
 
+    # PiKVM hosts to monitor. Each entry must accept passwordless SSH from
+    # this machine (the version-check is read-only — `pacman -Q kvmd`). Add
+    # additional hosts as more PiKVMs are deployed.
+    PIKVM_HOSTS: List[str] = ["192.168.30.154"]
+
+    def _get_pikvm_versions(self) -> Dict[str, Optional[str]]:
+        """SSH to each PiKVM and read the installed kvmd package version."""
+        versions: Dict[str, Optional[str]] = {}
+        for host in self.PIKVM_HOSTS:
+            try:
+                out = subprocess.run(
+                    [
+                        "ssh",
+                        "-o", "PasswordAuthentication=no",
+                        "-o", "BatchMode=yes",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "StrictHostKeyChecking=accept-new",
+                        f"root@{host}",
+                        "pacman -Q kvmd 2>/dev/null | awk '{print $2}'",
+                    ],
+                    capture_output=True, text=True, timeout=10,
+                )
+                v = (out.stdout or "").strip()
+                # Strip pacman's "-N" revision suffix: "4.168-1" → "4.168".
+                if v and "-" in v:
+                    v = v.split("-", 1)[0]
+                versions[host] = v or None
+            except Exception:
+                versions[host] = None
+        return versions
+
+    def _get_latest_pikvm_release(self) -> Optional[str]:
+        """Fetch the latest kvmd release tag from GitHub. Returns numeric form
+        ("4.168") with any leading "v" stripped. Returns None if unreachable."""
+        try:
+            req = urllib.request.Request(
+                "https://api.github.com/repos/pikvm/kvmd/releases/latest",
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "cberg-version-check"},
+            )
+            token = os.environ.get("GITHUB_TOKEN")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+                tag = (data.get("tag_name") or "").lstrip("v")
+                return tag or None
+        except Exception as e:
+            print(f"  {Colors.YELLOW}⚠ Failed to fetch latest kvmd release: {e}{Colors.RESET}")
+            return None
+
+    def check_pikvm_versions(self):
+        """Compare each PiKVM host's installed kvmd version against upstream.
+
+        Reports each host's current version, the upstream latest, and a
+        coloured drift indicator (green = current, yellow = behind a few
+        minor versions, red = behind ≥10 minor versions or major bump).
+        Surfaces unreachable hosts so the operator knows SSH/keys need
+        attention rather than silently passing."""
+        print(f"\nChecking {Colors.CYAN}PiKVM (kvmd){Colors.RESET}...")
+
+        current = self._get_pikvm_versions()
+        latest = self._get_latest_pikvm_release()
+
+        if latest:
+            print(f"  Upstream latest: {Colors.CYAN}{latest}{Colors.RESET}")
+        else:
+            print(f"  Upstream latest: {Colors.YELLOW}unknown{Colors.RESET}")
+
+        try:
+            latest_tuple = tuple(int(p) for p in latest.split(".")) if latest else None
+        except Exception:
+            latest_tuple = None
+
+        for host, ver in current.items():
+            if ver is None:
+                print(f"  {host}: {Colors.YELLOW}unreachable (passwordless SSH not configured?){Colors.RESET}")
+                self.external_infra_results.append({
+                    "name": "PiKVM (kvmd)",
+                    "host": host,
+                    "current_version": None,
+                    "latest_version": latest,
+                    "behind": None,
+                    "has_critical": False,
+                })
+                continue
+
+            color = Colors.GREEN
+            note = "up to date"
+            behind = False
+
+            if latest_tuple:
+                try:
+                    cur_tuple = tuple(int(p) for p in ver.split("."))
+                    if cur_tuple < latest_tuple:
+                        behind = True
+                        # Heuristic severity: major bump or >=10 minor versions = red.
+                        major_bump = cur_tuple[0] < latest_tuple[0]
+                        minor_gap = (latest_tuple[1] - cur_tuple[1]) if cur_tuple[0] == latest_tuple[0] and len(cur_tuple) > 1 and len(latest_tuple) > 1 else 0
+                        if major_bump or minor_gap >= 10:
+                            color = Colors.RED
+                        else:
+                            color = Colors.YELLOW
+                        note = f"behind by {minor_gap} minor versions" if minor_gap else "behind"
+                except Exception:
+                    color = Colors.YELLOW
+                    note = "version format unparseable"
+
+            arrow = f" → {latest}" if behind else ""
+            print(f"  {host}: {color}{ver}{arrow}{Colors.RESET} ({note})")
+
+            self.external_infra_results.append({
+                "name": "PiKVM (kvmd)",
+                "host": host,
+                "current_version": ver,
+                "latest_version": latest,
+                "behind": behind,
+                "has_critical": behind and color == Colors.RED,
+            })
+
     def _get_latest_talos_release(self) -> Optional[str]:
         """Fetch the latest stable Talos release tag from GitHub."""
         try:
@@ -1136,6 +1255,8 @@ class VersionChecker:
             "nvd_cves": nvd_cves,
             "has_critical": has_critical,
         })
+
+        self.check_pikvm_versions()
 
     def check_all(self):
         """Check all HelmReleases for updates."""
