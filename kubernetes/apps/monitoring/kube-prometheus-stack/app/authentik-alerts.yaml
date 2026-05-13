@@ -36,7 +36,7 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: Authentik pod {{ $labels.pod }} is crash looping
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="kube-system", pod=~"authentik-.*"}[15m]) > 0
+        rate(kube_pod_container_status_restarts_total{namespace="kube-system", pod=~"authentik-.*"}[15m]) * 900 > 2
       for: 5m
       labels:
         category: authentication
