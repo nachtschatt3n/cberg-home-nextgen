@@ -12,6 +12,14 @@ creation_rules:
     key_groups:
       - age:
           - "age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6"
+  - # Operator-tool credentials used by scripts in runbooks/ (e.g. PiKVM
+    # API password for check-all-versions.py). Not bound to a k8s Secret
+    # schema, so encrypt the whole file (no encrypted_regex).
+    path_regex: runbooks/.*\.sops\.ya?ml
+    mac_only_encrypted: true
+    key_groups:
+      - age:
+          - "age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6"
 stores:
   yaml:
     indent: 2

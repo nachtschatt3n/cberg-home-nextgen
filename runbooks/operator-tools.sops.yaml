@@ -1,0 +1,22 @@
+#ENC[AES256_GCM,data:GgaUMvIw29BBHUI4wQJy24tBWQ/3Rqi3s1K7jjJJIJ3uMxHMZKy4H9Om1RFXcWD8YCLkDg==,iv:K68S13H0ubzW7MZXwQEwi/w+3zCcksrYkjycOsX1Q/g=,tag:+hWlWZkEAQpSKxdWTxliNg==,type:comment]
+#ENC[AES256_GCM,data:q7PXOIPGvUQskYBsk9fxgMieC6192A4w9CDwVPsMaTVvgj1ggi3/xLu1u5IvgZeeiC8JfPpuHBK16MuSs//bIXhJh/LQusrLILLp87A=,iv:jrN3sj9ejw7JOgqDNnM28iFezIYwFVuMd60hvE/fqd8=,tag:V/QDafHSsqjnlRkOydC4yw==,type:comment]
+#ENC[AES256_GCM,data:/jpRZ9JpRpKYu7c0p4cHsWSF2dc1X7KBJFvb1cvadMMAw8LiStw5gknhomR4YfG/FS/ge5yzEwgR/+lW2AHQ/TinIwTGCHk=,iv:oZQBOuYePlyL+IpHdIV/7F0h0wKp+TdnGh6euzRcBrg=,tag:rEeZegLwTLLBQFMsBta28A==,type:comment]
+#ENC[AES256_GCM,data:vU7nksFtQUVGRo3/MDES04rJ95ldG7vV9RQ82tbzLCJP6NuierLJX8fa5XMc1Wcqo3f6KmrOPh2fwXp3AFsDUu51yacBxCa14+uy5+qFEQ==,iv:koliTWlu0oZ+OYBPf5QOAatoeINe6qw/HifxfO/PIA8=,tag:E6c0JgMCihxlHRxt0xdXkA==,type:comment]
+PIKVM_API_USER: ENC[AES256_GCM,data:P2huHEy5ITk=,iv:TdPbSsmnFjmLyZMJit5uUjFmW4zX/k9j6Y7H6H4PFmU=,tag:ovVWYPzVFxZy5CN/U6Xqrg==,type:str]
+PIKVM_API_PASS: ENC[AES256_GCM,data:wJwXfnKTaZD8b1QoMhBMDx+3WZxpGF07Rvt8k7AO5fg=,iv:EYVZK15cDa4//JfOvjzzXrriHFTsIKCLcW7AwG/Owxs=,tag:3aQ7Iz80Fhk6my9ZA8KlCw==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA5bzhKcGgzT2pBa3dIVldy
+        Q09qMjZGU3FnK09KVnp0SkgxclVKMENUdzM4CjBNSEI2YTg5dW5ZeU9qaEVjOExi
+        cVRIR204R2VQZWFOeHcwNW11bXJTTU0KLS0tIEsyTFViOXdSTHNKSjlPR01XTElX
+        SlpyWDFXWCs4b3luUENHN0RDMlJ3WE0KIDFxHY/4apQERxb35UejQPg5hiYpiGZF
+        3myG/oQx9FqPcCL5ZCo/9aXz/i1PWxDkdUNIy8SNAPX90bgQ+5IG4Q==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  lastmodified: "2026-05-13T16:35:48Z"
+  mac: ENC[AES256_GCM,data:oM0vztw7lc5QlTb04Cd9SOTVgjq+rrMJdsgnIQs65EEBE+wPStLqRruOOtVEbQzEfQMQ4cdTRUbroTDzvxhU3QqEYyPWJcN1KoT8M9MzLGUNnkIPmZTWlcNwFjMvG3lXZjZ9Qwb4INsXOneU3xeHmCVJkfXU5g9Svn7fJpjF5xM=,iv:FSFlO/9GNefGwfzGk7NSUT6iOrME+iXAMnQi+ixdAEA=,tag:BWZGAWLIP+yNqE4oOK0qxg==,type:str]
+  mac_only_encrypted: true
+  unencrypted_suffix: _unencrypted
+  version: 3.13.0

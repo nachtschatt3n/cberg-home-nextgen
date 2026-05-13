@@ -23,6 +23,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from urllib.parse import urlparse
 import urllib.request
+import ssl
+import base64
 import sys
 from packaging import version
 
@@ -996,33 +998,67 @@ class VersionChecker:
                 versions[node] = None
         return versions
 
-    # PiKVM hosts to monitor. Each entry must accept passwordless SSH from
-    # this machine (the version-check is read-only — `pacman -Q kvmd`). Add
-    # additional hosts as more PiKVMs are deployed.
+    # PiKVM hosts to monitor. Each must be reachable on HTTPS/443 from this
+    # machine. Credentials for the read-only `apicheck` kvmd user are in
+    # PIKVM_CREDS_FILE (SOPS-encrypted, same age key as the cluster). Add
+    # additional hosts as more PiKVMs are deployed; create the `apicheck`
+    # user on each via `kvmd-htpasswd add apicheck --read-stdin --quiet`.
     PIKVM_HOSTS: List[str] = ["192.168.30.154"]
+    PIKVM_CREDS_FILE: str = "runbooks/operator-tools.sops.yaml"
+
+    def _load_pikvm_creds(self) -> Optional[Tuple[str, str]]:
+        """Decrypt operator-tools.sops.yaml and return (user, password) or None."""
+        try:
+            out = subprocess.run(
+                ["sops", "-d", self.PIKVM_CREDS_FILE],
+                capture_output=True, text=True, timeout=15,
+            )
+            if out.returncode != 0:
+                return None
+            d = yaml.safe_load(out.stdout) or {}
+            u = d.get("PIKVM_API_USER")
+            p = d.get("PIKVM_API_PASS")
+            return (u, p) if u and p else None
+        except Exception:
+            return None
 
     def _get_pikvm_versions(self) -> Dict[str, Optional[str]]:
-        """SSH to each PiKVM and read the installed kvmd package version."""
+        """Query each PiKVM's /api/info?fields=system endpoint and return the
+        installed kvmd version per host. Uses HTTP Basic auth with the
+        SOPS-stored apicheck credentials.
+
+        TLS verification is disabled because PiKVM commonly serves a
+        self-signed cert OR a Let's Encrypt cert whose CN matches the
+        public hostname rather than the LAN IP. This is an explicit
+        trust-the-LAN choice; the auth header still gates access."""
         versions: Dict[str, Optional[str]] = {}
+        creds = self._load_pikvm_creds()
+        if not creds:
+            for host in self.PIKVM_HOSTS:
+                versions[host] = None
+            return versions
+        user, password = creds
+        auth_header = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         for host in self.PIKVM_HOSTS:
             try:
-                out = subprocess.run(
-                    [
-                        "ssh",
-                        "-o", "PasswordAuthentication=no",
-                        "-o", "BatchMode=yes",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "StrictHostKeyChecking=accept-new",
-                        f"root@{host}",
-                        "pacman -Q kvmd 2>/dev/null | awk '{print $2}'",
-                    ],
-                    capture_output=True, text=True, timeout=10,
+                req = urllib.request.Request(
+                    f"https://{host}/api/info?fields=system",
+                    headers={"Authorization": auth_header, "User-Agent": "cberg-version-check"},
                 )
-                v = (out.stdout or "").strip()
-                # Strip pacman's "-N" revision suffix: "4.168-1" → "4.168".
-                if v and "-" in v:
-                    v = v.split("-", 1)[0]
-                versions[host] = v or None
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    data = json.loads(resp.read().decode())
+                ver = (
+                    data.get("result", {})
+                        .get("system", {})
+                        .get("kvmd", {})
+                        .get("version")
+                )
+                versions[host] = ver
             except Exception:
                 versions[host] = None
         return versions

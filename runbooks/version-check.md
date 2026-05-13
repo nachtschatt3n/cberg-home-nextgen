@@ -31,7 +31,7 @@ The version checking system scans all HelmReleases in the repository and checks 
 7. **External Infrastructure**: Checks non-Kubernetes components:
    - **Talos Linux**: Current version per node (via `talosctl`) vs latest stable release from `siderolabs/talos` GitHub
    - **UniFi Network Application**: Version + NVD CVE scan
-   - **PiKVM (`kvmd`)**: Installed kvmd package version per host (via passwordless SSH `pacman -Q kvmd`) vs latest release from `pikvm/kvmd` GitHub. Hosts to monitor are listed in `VersionChecker.PIKVM_HOSTS` in `runbooks/check-all-versions.py` — add an entry when deploying additional PiKVM units. Severity colouring: green = current, yellow = behind by a few minor versions, red = ≥10 minor versions behind or a major bump. Requires the operator's SSH key in PiKVM's `root@` `~/.ssh/authorized_keys`; the script will not prompt for or accept passwords and falls back to "unreachable" if key auth isn't configured.
+   - **PiKVM (`kvmd`)**: Installed kvmd version per host via HTTPS to `/api/info?fields=system` (HTTP Basic auth with a dedicated low-privilege `apicheck` kvmd user) vs latest release from `pikvm/kvmd` GitHub. Hosts to monitor are listed in `VersionChecker.PIKVM_HOSTS` in `runbooks/check-all-versions.py` — add an entry when deploying additional PiKVM units. Credentials are SOPS-encrypted in `runbooks/operator-tools.sops.yaml` (whole-file encryption, age key matches the cluster). To rotate: SSH the PiKVM, `rw && echo NEW_PW | kvmd-htpasswd set apicheck --read-stdin --quiet && ro`, then update `PIKVM_API_PASS` in the operator-tools file and `sops -e -i` it. Severity colouring: green = current, yellow = behind by a few minor versions, red = ≥10 minor versions behind or a major bump. TLS verification is intentionally disabled (PiKVM commonly serves a self-signed cert or a public-hostname LE cert whose CN doesn't match the LAN IP); auth header still gates access.
 
 ## Tools
 
@@ -48,7 +48,7 @@ A comprehensive Python script that:
   - Registry APIs (Docker Hub, GHCR, Quay.io) for image tags
 - Generates a detailed markdown report with update indicators
 
-**Requirements:** Python 3.8+, `pyyaml`, `requests`, `packaging`, Helm CLI, `talosctl` (for Talos version check), `ssh` with passwordless key auth to each PiKVM host (for kvmd version check — gracefully marks the host "unreachable" when keys aren't set up).
+**Requirements:** Python 3.8+, `pyyaml`, `requests`, `packaging`, Helm CLI, `talosctl` (for Talos version check), `sops` with the age key available (for decrypting the PiKVM API password from `runbooks/operator-tools.sops.yaml` — gracefully marks each PiKVM host "unreachable" if the decrypt fails or the API returns non-200).
 
 **GitHub Authentication:**
 - **Preferred:** GitHub CLI (`gh`) - automatically authenticated, no rate limits
