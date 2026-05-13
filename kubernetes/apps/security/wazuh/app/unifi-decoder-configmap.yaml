@@ -642,6 +642,24 @@ data:
         <group>falco,homelab,suppress,</group>
       </rule>
 
+      <!-- Suppress Falco "Drop and execute new binary in container" when
+           triggered by the Nextcloud Collabora Online (richdocumentscode)
+           AppImage extraction. The richdocumentscode app ships a bundled
+           Collabora CODE AppImage that cannot mount FUSE in-pod, so it
+           extracts to /tmp/appimage_extracted_<rand>/ and executes its
+           binaries (cpio, coolwsd, coolforkit-ns, coolmount) from there
+           on every pod start and on first office-document open.
+           Triggered by parent rule 100404 (Critical, level 12). Volume
+           on 2026-05-13: 3 events on k8s-nuc14-02 after node-wide reboot
+           at 15:06; recurs on every Nextcloud pod restart. Image is the
+           official docker.io/nextcloud:33.0.0. -->
+      <rule id="100414" level="0">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">k8smeta_pod_name=nextcloud-.*proc_exepath=/tmp/appimage_extracted_</field>
+        <description>Falco: ignore Nextcloud Collabora CODE AppImage extraction (cpio/coolwsd/coolforkit-ns/coolmount, expected)</description>
+        <group>falco,homelab,suppress,</group>
+      </rule>
+
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
         <field name="priority" type="pcre2">^(Notice|Informational|Debug)$</field>
