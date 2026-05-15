@@ -2526,6 +2526,102 @@ log_section "Section 31: Home Assistant Integration Health"
     log_info "See Section 22 for detailed Home Assistant integration analysis"
 } >> "$OUTPUT_FILE" 2>&1
 
+log_section "Home Assistant Health (via hactl doctor)"
+{
+    # Wires the hactl `doctor` checks that don't overlap the bash sections
+    # above (config_entries = failed-setup integrations, zombie_devices =
+    # orphan/stalled/disabled/restored device-registry entries).
+    #
+    # Defensive by design: if hactl, mise, or HASS creds are missing, this
+    # section logs a single skip line and continues — it is informational
+    # enrichment, never a script-fatal dependency.
+
+    # 1. Locate hactl. The binary lives under the hactl repo's mise-managed
+    #    Python install (separate from this repo's mise env, which pins
+    #    Python 3.12). Try PATH first, then known install dir.
+    HACTL_BIN=""
+    if command -v hactl >/dev/null 2>&1; then
+        HACTL_BIN="hactl"
+    else
+        for cand in \
+            /Users/mu/.local/share/mise/installs/python/3.13.13/bin/hactl \
+            /Users/mu/.local/bin/hactl \
+            /opt/homebrew/bin/hactl; do
+            if [ -x "$cand" ]; then
+                HACTL_BIN="$cand"
+                break
+            fi
+        done
+    fi
+
+    # 2. Source HASS creds from the hactl repo's .env if not already in env.
+    #    Use ${VAR:-} expansion because `set -u` is active script-wide.
+    if [ -z "${HASS_URL:-}" ] || [ -z "${HASS_TOKEN:-}" ]; then
+        if [ -r /Users/mu/code/hactl/.env ]; then
+            set -a
+            # shellcheck disable=SC1091
+            . /Users/mu/code/hactl/.env
+            set +a
+        fi
+    fi
+
+    if [ -z "$HACTL_BIN" ] || [ -z "${HASS_URL:-}" ] || [ -z "${HASS_TOKEN:-}" ]; then
+        echo "hactl unavailable, skipping HA-side health check"
+    else
+        hactl_output=$("$HACTL_BIN" doctor --check config_entries --check zombie_devices 2>&1)
+        hactl_rc=$?
+
+        if [ "$hactl_rc" -ne 0 ]; then
+            echo "hactl doctor exited with rc=$hactl_rc — first 20 lines:"
+            printf '%s\n' "$hactl_output" | head -20
+            add_minor_issue "hactl doctor exited with rc=$hactl_rc"
+        else
+            # Echo Integrations + Zombie Devices section bodies inline so a
+            # human reading health-check-current.md sees actual findings,
+            # not just abstract counts. Slice from the first `---` block
+            # through the line before `=== Summary ===`.
+            echo "--- hactl doctor findings ---"
+            printf '%s\n' "$hactl_output" \
+                | awk '/^=== Summary ===/{exit} /^---/{p=1} p' \
+                || true
+            echo ""
+
+            # Parse summary block. Counts live as "  Critical:   N", etc.
+            crit_count=$(printf '%s\n' "$hactl_output" \
+                | awk '/^=== Summary ===/{f=1; next} f && /^[[:space:]]+Critical:/{print $2; exit}')
+            warn_count=$(printf '%s\n' "$hactl_output" \
+                | awk '/^=== Summary ===/{f=1; next} f && /^[[:space:]]+Warnings:/{print $2; exit}')
+            overall=$(printf '%s\n' "$hactl_output" \
+                | awk -F': *' '/Overall Health:/{print $2; exit}' | tr -d '[:space:]')
+
+            crit_count=${crit_count:-0}
+            warn_count=${warn_count:-0}
+            overall=${overall:-UNKNOWN}
+
+            echo "hactl summary: critical=$crit_count warnings=$warn_count overall=$overall"
+
+            if [ "$overall" = "CRITICAL" ]; then
+                log_critical "HA overall health: CRITICAL (hactl doctor)"
+                add_critical_issue "HA overall health: CRITICAL — run \`hactl doctor\` immediately"
+            fi
+
+            if [ "$crit_count" -gt 0 ] 2>/dev/null; then
+                log_critical "HA: $crit_count critical hactl finding(s)"
+                add_major_issue "HA: $crit_count critical hactl finding(s) — run \`hactl doctor\` for detail"
+            fi
+
+            if [ "$warn_count" -gt 0 ] 2>/dev/null; then
+                log_warning "HA: $warn_count warning hactl finding(s)"
+                add_minor_issue "HA: $warn_count warning hactl finding(s) — run \`hactl doctor\` for detail"
+            fi
+
+            if [ "$overall" = "OK" ] && [ "$crit_count" -eq 0 ] && [ "$warn_count" -eq 0 ]; then
+                log_success "hactl doctor: HA integrations + zombie devices clean"
+            fi
+        fi
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
 log_section "Section 32: Zigbee2MQTT Device Monitoring"
 {
     echo "Zigbee2MQTT status:"
