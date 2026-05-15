@@ -628,10 +628,14 @@ def s4_security_docs() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  {WARNING} Could not verify Flux sops-age secret (kubectl error)")
 
     # Check no .sops.yaml files exist outside kubernetes/ or talos/
+    allowed_non_k8s_sops = {
+        "runbooks/operator-tools.sops.yaml",
+    }
     stray_sops = [
         p for p in REPO_ROOT.rglob("*.sops.yaml")
         if p.name != ".sops.yaml"  # exclude the SOPS config file itself
         and not any(part in ("kubernetes", "talos") for part in p.relative_to(REPO_ROOT).parts)
+        and str(p.relative_to(REPO_ROOT)) not in allowed_non_k8s_sops
     ]
     if stray_sops:
         for p in stray_sops:

@@ -2673,10 +2673,10 @@ log_section "Section 33: Battery Health Monitoring"
                 # Remove any decimal points
                 battery_int=$(echo "$battery" | awk '{print int($1)}')
 
-                if [ "$battery_int" -lt 15 ]; then
+                if [ "$battery_int" -lt 10 ]; then
                     CRITICAL_BATTERIES="${CRITICAL_BATTERIES}  - ${friendly} (${battery}%)\n"
                     CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
-                elif [ "$battery_int" -lt 30 ]; then
+                elif [ "$battery_int" -lt 10 ]; then
                     WARNING_BATTERIES="${WARNING_BATTERIES}  - ${friendly} (${battery}%)\n"
                     WARNING_COUNT=$((WARNING_COUNT + 1))
                 elif [ "$battery_int" -lt 50 ]; then
@@ -2700,7 +2700,7 @@ log_section "Section 33: Battery Health Monitoring"
             done
         }
 
-        echo "🔴 CRITICAL (<15%) - Replace Immediately:"
+        echo "🔴 CRITICAL (<10%) - Replace Immediately:"
         if [ "$CRITICAL_COUNT" -gt 0 ]; then
             _print_battery_block "$CRITICAL_BATTERIES"
         else
@@ -2716,7 +2716,7 @@ log_section "Section 33: Battery Health Monitoring"
         fi
         echo ""
 
-        echo "🔵 MONITOR (30-50%) - Watch Closely:"
+        echo "🔵 MONITOR (10-50%) - Watch Closely:"
         if [ "$MONITOR_COUNT" -gt 0 ]; then
             _print_battery_block "$MONITOR_BATTERIES"
         else
@@ -2735,8 +2735,8 @@ log_section "Section 33: Battery Health Monitoring"
 
         # Add issues based on severity
         if [ "$CRITICAL_COUNT" -gt 0 ]; then
-            log_warning "CRITICAL: $CRITICAL_COUNT devices with batteries <15%"
-            add_major_issue "Critical battery levels (<15%): $CRITICAL_COUNT devices need immediate replacement"
+            log_warning "CRITICAL: $CRITICAL_COUNT devices with batteries <10%"
+            add_major_issue "Critical battery levels (<10%): $CRITICAL_COUNT devices need immediate replacement"
         fi
 
         if [ "$WARNING_COUNT" -gt 0 ]; then

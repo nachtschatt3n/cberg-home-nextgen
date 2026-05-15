@@ -25,3 +25,11 @@ known_es_error_spikes:
   - namespace: backup
     workload: icloud-docker-mu
     note: HTTP 410/530/503 from Apple CDN for expired/unavailable iCloud file URLs — benign sync failures
+
+# Home Assistant integrations whose error rate is dominated by upstream/cloud
+# backend issues outside operator control. The sweep should only flag these if
+# the per-cycle error count exceeds the listed threshold.
+known_ha_error_sources:
+  - integration: homeassistant.components.miele
+    threshold_per_cycle: 100
+    note: Miele cloud coordinator timeouts (`Timeout fetching miele data`) — backend latency exceeds default integration timeout. Self-recovers each cycle, paired with `Fetching miele data recovered`. Live data flows. No automation impact. Out of operator control.
