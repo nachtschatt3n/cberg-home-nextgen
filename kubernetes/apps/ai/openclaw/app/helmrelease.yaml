@@ -565,26 +565,54 @@ spec:
                   # bash to expand at runtime.
                   cat > /home/node/.openclaw/bin/codex <<'SHIM'
                 #!/usr/bin/env bash
-                # codex-cli sandbox shim — translate --sandbox <mode> to the
-                # --dangerously-bypass-approvals-and-sandbox flag because
-                # bubblewrap can't create user namespaces inside this pod.
-                # All bash variable references use the ${VAR} braced form so
-                # Flux's $$-escape (drone/envsubst) handles them uniformly.
+                # codex-cli sandbox shim. Strips any sandbox-mode arg the
+                # caller passed (covers all forms openclaw uses) and replaces
+                # them with --dangerously-bypass-approvals-and-sandbox.
+                # The pod is already an external sandbox; bwrap can't open
+                # a user namespace on the Talos-hardened kernel.
+                #
+                # Forms intercepted:
+                #   --sandbox <mode>       (fresh-run args)
+                #   -s <mode>              (same, short form)
+                #   -c sandbox_mode=...    (resumeArgs path)
+                #   -c sandbox_permissions=...  (alt key)
                 CODEX_JS="/home/node/.openclaw/lib/node_modules/@openai/codex/bin/codex.js"
                 args=()
                 skip_next=0
                 bypass_added=0
-                for a in "$${@}"; do
+                add_bypass() {
+                  if [ "$${bypass_added}" = "0" ]; then
+                    args+=("--dangerously-bypass-approvals-and-sandbox")
+                    bypass_added=1
+                  fi
+                }
+                while [ "$${#}" -gt 0 ]; do
+                  a="$${1}"
+                  shift
                   if [ "$${skip_next}" = "1" ]; then
                     skip_next=0
+                    add_bypass
                     continue
                   fi
                   case "$${a}" in
                     --sandbox|-s)
                       skip_next=1
-                      if [ "$${bypass_added}" = "0" ]; then
-                        args+=("--dangerously-bypass-approvals-and-sandbox")
-                        bypass_added=1
+                      ;;
+                    --sandbox=*|-s=*)
+                      add_bypass
+                      ;;
+                    -c)
+                      if [ "$${#}" -gt 0 ]; then
+                        case "$${1}" in
+                          sandbox_mode=*|sandbox_permissions=*)
+                            shift
+                            add_bypass
+                            ;;
+                          *)
+                            args+=(-c "$${1}")
+                            shift
+                            ;;
+                        esac
                       fi
                       ;;
                     *)
