@@ -572,7 +572,7 @@ spec:
                       ;;
                   esac
                 done
-                exec /home/node/.openclaw/bin/codex-real "${args[@]}"
+                exec /home/node/.openclaw/bin/codex-real "$${args[@]}"
                 SHIM
                   chmod +x /home/node/.openclaw/bin/codex
                   echo "Installed codex CLI shim (bypasses bubblewrap)"
