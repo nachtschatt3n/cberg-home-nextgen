@@ -561,7 +561,7 @@ spec:
                   rm -f /home/node/.openclaw/bin/codex
                   # Single-quoted heredoc → no bash expansion at write time.
                   # $${...} below is Flux escape: drone/envsubst collapses
-                  # $$ -> $ when rendering the manifest, leaving ${...} for
+                  # $$ -> $ when rendering the manifest, leaving $${...} for
                   # bash to expand at runtime.
                   cat > /home/node/.openclaw/bin/codex <<'SHIM'
                 #!/usr/bin/env bash
