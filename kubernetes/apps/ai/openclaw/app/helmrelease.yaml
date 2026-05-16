@@ -497,8 +497,8 @@ spec:
                   echo "MCP server defs written to ~/.openclaw/mcp-servers.json"
                 fi
 
-                # 3. Install skills onto PATH. ConfigMap mount is read-only —
-                #    copy into PVC bin dir and make executable.
+                # 3. Install skill CLIs onto PATH. ConfigMap mount is
+                #    read-only — copy into PVC bin dir and make executable.
                 if [ -d /etc/openclaw-skills ]; then
                   for src in /etc/openclaw-skills/*.py; do
                     [ -f "$src" ] || continue
@@ -511,7 +511,22 @@ spec:
                     cp /etc/openclaw-skills/arag-plan.md /home/node/.openclaw/arag-plan.md
                   fi
                   mkdir -p /home/node/.openclaw/browser-profiles
-                  echo "Installed read-only skills: $(ls /etc/openclaw-skills/*.py 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+                  echo "Installed read-only skill CLIs: $(ls /etc/openclaw-skills/*.py 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+                fi
+
+                # 4. Materialize workspace SKILL.md files so the OpenClaw
+                #    skill-workshop plugin discovers them on agent start.
+                #    Files in the ConfigMap named skill-<name>.md become
+                #    ~/clawd/skills/<name>/SKILL.md.
+                if [ -d /etc/openclaw-skills ]; then
+                  for src in /etc/openclaw-skills/skill-*.md; do
+                    [ -f "$src" ] || continue
+                    base=$(basename "$src" .md)
+                    name=$${base#skill-}
+                    mkdir -p "/home/node/clawd/skills/$name"
+                    cp "$src" "/home/node/clawd/skills/$name/SKILL.md"
+                  done
+                  echo "Seeded workspace skills: $(ls /home/node/clawd/skills/ 2>/dev/null | tr '\n' ' ')"
                 fi
 
                 echo "Starting OpenClaw Gateway..."

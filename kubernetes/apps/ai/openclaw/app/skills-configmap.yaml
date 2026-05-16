@@ -385,3 +385,133 @@ data:
     - Browser may only `navigate`, `fill` on whitelisted login fields,
       `click` on whitelisted selectors, `read_text`, `screenshot`.
     - Never submit ARAG forms other than login.
+
+  # ----- SKILL.md files seeded into ~/clawd/skills/<name>/SKILL.md -----
+  # Discovered by the OpenClaw skill-workshop plugin on agent start.
+
+  skill-nextcloud-mail.md: |
+    ---
+    name: nextcloud-mail
+    description: Read-only access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, or to summarize/search mail. Read-only — never send, delete, move, or flag.
+    user-invocable: true
+    ---
+
+    # Nextcloud Mail
+
+    Read-only client for the user's Nextcloud Mail (which fans out to GMX,
+    iCloud, and Gmail). Invoke the `mail` CLI from your shell tool.
+
+    ## Verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `mail accounts` | List all configured mail accounts (id, email, IMAP host). |
+    | `mail mailboxes <account_id>` | Folder tree + unread counts for an account. |
+    | `mail messages <mailbox_db_id> [limit]` | List recent messages (default 25). |
+    | `mail search <query> [account_id] [limit]` | Server-side search. |
+    | `mail body <message_id>` | Plaintext body of a message. |
+    | `mail html <message_id>` | HTML body of a message. |
+    | `mail thread <message_id>` | Full thread metadata. |
+    | `mail source <message_id>` | Raw RFC822. |
+
+    ## Loop for "what are my latest emails?"
+
+    1. `mail accounts` — get account IDs.
+    2. For each account, `mail mailboxes <id>` and pick the mailbox with
+       `specialRole=inbox`. Note its `databaseId`.
+    3. `mail messages <inbox_db_id> 5` to get the 5 newest messages.
+    4. Summarize subject + from + date + preview. If the user asks for
+       details, follow up with `mail body <message_id>`.
+
+    ## Read-only invariants
+    - `mail` refuses any of: `send`, `compose`, `delete`, `move`, `trash`,
+      `snooze`, `flag`, `tag`, `mark`, `draft`, `outbox`, `patch`.
+    - Don't attempt SMTP — there is no send path in this setup.
+
+  skill-paperless.md: |
+    ---
+    name: paperless
+    description: Read-only search and retrieval over the user's Paperless-ngx document archive (scanned bills, invoices, receipts, contracts, letters). Use when the user asks about a specific document, bill, or wants to find paperwork.
+    user-invocable: true
+    ---
+
+    # Paperless
+
+    Read-only Paperless-ngx client. Invoke the `paperless` CLI.
+
+    ## Verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `paperless search "<query>" [limit]` | Full-text search across documents (default 10). |
+    | `paperless get <id>` | Full metadata for a document. |
+    | `paperless download <id> [out_path]` | Download PDF to /tmp/paperless-<id>.pdf. |
+
+    Tags and correspondents come back as numeric IDs in `get` — that's
+    Paperless's native form; don't try to "resolve" them unless asked.
+
+    Read-only: no edit, tag, delete, or reupload operations.
+
+  skill-sure.md: |
+    ---
+    name: sure
+    description: Read-only access to the user's Sure (Maybe-Finance fork) instance — accounts, balances, transactions, budgets. Use when the user asks about money, bank balances, recent spending, a specific transaction, or to cross-reference a bill with a payment.
+    user-invocable: true
+    ---
+
+    # Sure
+
+    Read-only finance client. Invoke the `sure` CLI.
+
+    ## Verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `sure accounts` | List accounts with balances, currency, classification. |
+    | `sure account <account_id>` | Detailed info for one account. |
+    | `sure transactions <account_id> [from_iso] [to_iso] [limit]` | List transactions in a window (default 100). |
+
+    Date format is ISO `YYYY-MM-DD`.
+
+    Read-only: no transaction edits, no balance adjustments.
+
+  skill-home-assistant.md: |
+    ---
+    name: home-assistant
+    description: Read-only access to the user's Home Assistant — entity states, device/area inventory, history. Use when the user asks about the smart home, sensor readings, who's home, what's open, recent device activity. NEVER call services or toggle anything.
+    user-invocable: true
+    ---
+
+    # Home Assistant
+
+    Two complementary CLIs are on PATH:
+
+    | CLI | Use for |
+    | --- | --- |
+    | `ha` (Python wrapper) | Fast REST queries, also enforces a read-only verb filter. |
+    | `hactl` (kubectl-style) | Richer queries — devices, sensors, automations, dashboards. |
+
+    ## `ha` verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `ha state <entity_id>` | Current state + attributes for one entity. |
+    | `ha states [domain_filter]` | All states, optionally filtered (e.g. `ha states sensor`). |
+    | `ha history <entity_id> [hours]` | State changes over the last N hours (default 24). |
+
+    The `ha` skill refuses any verb that would mutate HA state
+    (`service`, `call`, `trigger`, `fire`, `set_state`, etc.).
+
+    ## `hactl` highlights
+
+    - `hactl get devices` — device inventory (manufacturer, area).
+    - `hactl get sensors [keyword]` — sensor lookup.
+    - `hactl get areas` — area list.
+    - `hactl get automations` — automations.
+    - `hactl get dashboards` — dashboards.
+
+    ## Strict read-only
+
+    Never call HA services, never toggle entities, never enable/disable
+    automations, never change state. Even though `hactl` *could* do
+    those things, this agent must not.
