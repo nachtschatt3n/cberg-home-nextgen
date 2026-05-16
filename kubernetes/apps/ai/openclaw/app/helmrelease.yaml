@@ -568,25 +568,27 @@ spec:
                 # codex-cli sandbox shim — translate --sandbox <mode> to the
                 # --dangerously-bypass-approvals-and-sandbox flag because
                 # bubblewrap can't create user namespaces inside this pod.
+                # All bash variable references use the ${VAR} braced form so
+                # Flux's $$-escape (drone/envsubst) handles them uniformly.
                 CODEX_JS="/home/node/.openclaw/lib/node_modules/@openai/codex/bin/codex.js"
                 args=()
                 skip_next=0
                 bypass_added=0
-                for a in "$$@"; do
-                  if [ "$$skip_next" = "1" ]; then
+                for a in "$${@}"; do
+                  if [ "$${skip_next}" = "1" ]; then
                     skip_next=0
                     continue
                   fi
-                  case "$$a" in
+                  case "$${a}" in
                     --sandbox|-s)
                       skip_next=1
-                      if [ "$$bypass_added" = "0" ]; then
+                      if [ "$${bypass_added}" = "0" ]; then
                         args+=("--dangerously-bypass-approvals-and-sandbox")
                         bypass_added=1
                       fi
                       ;;
                     *)
-                      args+=("$$a")
+                      args+=("$${a}")
                       ;;
                   esac
                 done
