@@ -443,15 +443,16 @@ spec:
                   }
 
                   // Talk voice (classic batch TTS). ElevenLabs picks up
-                  // ELEVENLABS_API_KEY from env; we just declare the
-                  // active provider and an empty provider config so the
-                  // gateway accepts /voice and TTS routing. modelId can
-                  // be overridden via OPENCLAW_TALK_MODEL env var.
+                  // ELEVENLABS_API_KEY from env. modelId / voiceId can be
+                  // overridden via OPENCLAW_TALK_MODEL / OPENCLAW_TALK_VOICE
+                  // env vars; runtime `/voice` slash command persists
+                  // user-set values into the same block.
                   cfg.talk = cfg.talk || {};
                   cfg.talk.provider = 'elevenlabs';
                   cfg.talk.providers = cfg.talk.providers || {};
                   cfg.talk.providers.elevenlabs = {
                     modelId: process.env.OPENCLAW_TALK_MODEL || 'eleven_flash_v2_5',
+                    voiceId: process.env.OPENCLAW_TALK_VOICE || 'EST9Ui6982FZPSi7gCHi',
                     ...(cfg.talk.providers.elevenlabs || {}),
                   };
 
