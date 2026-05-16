@@ -439,9 +439,9 @@ spec:
                 # against cluster-settings/cluster-secrets. Doubling the dollar
                 # ($${VAR}) escapes one pass, leaving ${VAR} for bash at runtime.
 
-                # 1. hactl reads HASS_URL/HASS_TOKEN; our secret uses HA_*.
-                export HASS_URL="$${HA_URL:-}"
-                export HASS_TOKEN="$${HA_TOKEN:-}"
+                # NOTE: HASS_URL/HASS_TOKEN for hactl are now mapped from the
+                # secret in the container env: block, so they're available to
+                # both this script and `kubectl exec` sessions.
 
                 # 2. Materialize himalaya config from env vars (read-only mail).
                 #    SMTP intentionally omitted — `himalaya message send` cannot succeed.
@@ -536,6 +536,19 @@ spec:
               # point @playwright/mcp at the same location at runtime.
               - name: PLAYWRIGHT_BROWSERS_PATH
                 value: "/home/node/.openclaw/playwright-browsers"
+              # hactl expects HASS_URL/HASS_TOKEN; the secret stores them under
+              # HA_URL/HA_TOKEN. Map them here so `kubectl exec` shells get
+              # them too (envFrom only exposes the original key names).
+              - name: HASS_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: openclaw-secret
+                    key: HA_URL
+              - name: HASS_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: openclaw-secret
+                    key: HA_TOKEN
               # GitHub token for mise and git operations
               - name: GITHUB_TOKEN
                 valueFrom:
