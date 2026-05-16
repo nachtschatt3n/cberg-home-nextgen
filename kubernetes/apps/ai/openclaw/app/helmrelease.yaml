@@ -442,6 +442,19 @@ spec:
                     delete cfg.models.providers.openai;
                   }
 
+                  // Talk voice (classic batch TTS). ElevenLabs picks up
+                  // ELEVENLABS_API_KEY from env; we just declare the
+                  // active provider and an empty provider config so the
+                  // gateway accepts /voice and TTS routing. modelId can
+                  // be overridden via OPENCLAW_TALK_MODEL env var.
+                  cfg.talk = cfg.talk || {};
+                  cfg.talk.provider = 'elevenlabs';
+                  cfg.talk.providers = cfg.talk.providers || {};
+                  cfg.talk.providers.elevenlabs = {
+                    modelId: process.env.OPENCLAW_TALK_MODEL || 'eleven_flash_v2_5',
+                    ...(cfg.talk.providers.elevenlabs || {}),
+                  };
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
