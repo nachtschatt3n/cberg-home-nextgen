@@ -83,9 +83,16 @@ SKIP_TYPES = {
 #   repository, repo           — git/OCI repository coordinates
 #   org, organization          — GitHub/GitLab org slugs
 #   image                      — fully qualified image references
+#   OPENAI_URI_BASE,           — LAN Ollama/OpenAI-compatible endpoint URL.
+#   OPENAI_BASE,                 Shared infra coordinate (e.g.
+#   OLLAMA_BASE,                 http://192.168.30.111:11434/v1) referenced
+#   OLLAMA_BASE_URL              verbatim in helmreleases and CLAUDE.md. The
+#                                companion API key lives in OPENAI_ACCESS_TOKEN
+#                                / OPENAI_API_KEY, which are scanned normally.
 SKIP_KEY_NAMES = {
     "TIMEZONE", "TZ", "tz", "timezone", "ca.crt",
     "username", "repository", "repo", "org", "organization", "image",
+    "OPENAI_URI_BASE", "OPENAI_BASE", "OLLAMA_BASE", "OLLAMA_BASE_URL",
 }
 # Pure-lowercase dictionary-like words (no digits, no special chars) — these
 # overlap with common technical terms (postgres, authentik, placeholder, etc.)
