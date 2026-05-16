@@ -509,6 +509,14 @@ spec:
             env:
               - name: PATH
                 value: "/home/node/.local/share/mise/shims:/home/node/.openclaw/bin:/home/node/.local/bin:/home/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              # Pip-installed CLIs (hactl, himalaya, obsidian-cli) live under
+              # ~/.openclaw/lib/python3.11. PYTHONPATH must be set in the
+              # container env so it's inherited by `kubectl exec` sessions,
+              # not just the startup script.
+              - name: PYTHONUSERBASE
+                value: "/home/node/.openclaw"
+              - name: PYTHONPATH
+                value: "/home/node/.openclaw/lib/python3.11/site-packages"
               # Node configuration
               - name: NODE_ENV
                 value: "production"
