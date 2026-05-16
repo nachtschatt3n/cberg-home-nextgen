@@ -214,10 +214,10 @@ data:
 
   mail.py: |
     #!/usr/bin/env python3
-    """Read-only Nextcloud Mail client. Talks to the NC Mail REST API,
+    """Mostly read-only Nextcloud Mail client. Talks to the NC Mail REST API,
     which fans out to all configured IMAP backends (GMX/iCloud/Gmail).
 
-    Usage:
+    Read verbs:
         mail accounts
         mail mailboxes <account_id>
         mail messages <mailbox_db_id> [limit]
@@ -226,6 +226,17 @@ data:
         mail html <message_id>          # HTML body
         mail thread <message_id>        # full thread metadata
         mail source <message_id>        # raw RFC822
+
+    Write verbs (whitelisted, drafts only):
+        mail draft <account_id>         # JSON body from stdin:
+                                        #   {"subject":"...", "body":"...",
+                                        #    "to":"a@b,c@d", "cc":"", "bcc":"",
+                                        #    "isHtml": true,
+                                        #    "draftId": <existing-id-or-null>}
+                                        # Saves to the Drafts mailbox via
+                                        # POST /api/accounts/{id}/draft.
+                                        # Does NOT send — outbox/send remain
+                                        # blocked.
     """
     import base64, json, os, sys, urllib.parse, urllib.request
 
@@ -241,11 +252,10 @@ data:
     }
     API = f"{BASE}/index.php/apps/mail/api"
 
-    # Refuse any verb that hints at mutation. Mail-app routes that would
-    # POST/PATCH/DELETE messages all live behind specific verbs; we never
-    # construct anything other than GET.
+    # Block every mutation verb except `draft` (whitelisted below).
+    # send/outbox stay blocked so this skill cannot dispatch mail.
     BLOCKED = {"compose", "send", "delete", "move", "trash", "snooze",
-               "flag", "tag", "mark", "draft", "outbox", "patch"}
+               "flag", "tag", "mark", "outbox", "patch"}
 
     def _get(path, params=None):
         url = f"{API}{path}"
@@ -254,6 +264,18 @@ data:
             if clean:
                 url += "?" + urllib.parse.urlencode(clean)
         req = urllib.request.Request(url, headers=HEADERS, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ct = r.headers.get("Content-Type", "")
+            body = r.read()
+            if "application/json" in ct:
+                return json.loads(body)
+            return body.decode("utf-8", errors="replace")
+
+    def _post(path, payload):
+        url = f"{API}{path}"
+        data = json.dumps(payload).encode()
+        headers = {**HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=30) as r:
             ct = r.headers.get("Content-Type", "")
             body = r.read()
@@ -323,17 +345,47 @@ data:
         else:
             print(json.dumps(result, indent=2))
 
+    def draft(account_id):
+        """Save (or update) a draft. JSON body read from stdin:
+            {"subject": "...", "body": "...", "to": "a@b,c@d",
+             "cc": "", "bcc": "", "isHtml": true, "draftId": null}
+        Lands in the IMAP Drafts mailbox via accounts#draft. Does NOT send."""
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.stderr.write("mail draft: expected JSON body on stdin\n")
+            sys.exit(2)
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"mail draft: invalid JSON on stdin: {e}\n")
+            sys.exit(2)
+        # Defensive defaults — NC Mail requires all three recipient fields
+        # to be present even if empty.
+        body_payload = {
+            "subject":   str(payload.get("subject", "")),
+            "body":      str(payload.get("body", "")),
+            "to":        str(payload.get("to", "")),
+            "cc":        str(payload.get("cc", "")),
+            "bcc":       str(payload.get("bcc", "")),
+            "isHtml":    bool(payload.get("isHtml", True)),
+        }
+        if payload.get("draftId") is not None:
+            body_payload["draftId"] = int(payload["draftId"])
+        result = _post(f"/accounts/{int(account_id)}/draft", body_payload)
+        print(json.dumps(result, indent=2))
+
     def main():
         if len(sys.argv) < 2:
             print(__doc__); sys.exit(2)
         verb = sys.argv[1].lower()
         if verb in BLOCKED:
-            sys.stderr.write(f"refused: '{verb}' would mutate mail — read-only skill\n")
+            sys.stderr.write(f"refused: '{verb}' would mutate mail beyond drafts — blocked\n")
             sys.exit(3)
         dispatch = {
             "accounts": accounts, "mailboxes": mailboxes, "messages": messages,
             "search": search, "body": body, "html": html, "thread": thread,
             "source": source,
+            "draft": draft,
         }
         if verb not in dispatch:
             print(__doc__); sys.exit(2)
@@ -392,16 +444,16 @@ data:
   skill-nextcloud-mail.md: |
     ---
     name: nextcloud-mail
-    description: Read-only access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, or to summarize/search mail. Read-only — never send, delete, move, or flag.
+    description: Access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, to summarize/search mail, or to draft a reply. Drafts are saved to the IMAP Drafts mailbox only — never sends. All other mutations (send, delete, move, flag) remain blocked.
     user-invocable: true
     ---
 
     # Nextcloud Mail
 
-    Read-only client for the user's Nextcloud Mail (which fans out to GMX,
-    iCloud, and Gmail). Invoke the `mail` CLI from your shell tool.
+    Mostly read-only client for the user's Nextcloud Mail (which fans out
+    to GMX, iCloud, and Gmail). Invoke the `mail` CLI from your shell tool.
 
-    ## Verbs
+    ## Read verbs
 
     | Command | Purpose |
     | --- | --- |
@@ -414,6 +466,38 @@ data:
     | `mail thread <message_id>` | Full thread metadata. |
     | `mail source <message_id>` | Raw RFC822. |
 
+    ## Write verb (drafts only)
+
+    `mail draft <account_id>` — save a draft to the account's IMAP Drafts
+    mailbox via `POST /api/accounts/{id}/draft`. **JSON body is read from
+    stdin** with the following shape:
+
+    ```json
+    {
+      "subject": "Re: ALTERNATE - Rechnung",
+      "body":    "Hi — bestätige den Eingang …",
+      "to":      "person@example.com",
+      "cc":      "",
+      "bcc":     "",
+      "isHtml":  true,
+      "draftId": null
+    }
+    ```
+
+    - `to` / `cc` / `bcc` are comma-separated. Empty strings are fine for
+      cc/bcc, but the keys must exist.
+    - Pass `draftId` if you want to **update** an existing draft (otherwise
+      omit or `null` for a new one).
+    - `isHtml=true` is the default and matches NC Mail's UI behaviour.
+    - Returns `{ "id": <new_or_updated_draftId> }` on success.
+
+    Typical agent invocation:
+
+    ```bash
+    echo '{"subject":"Re: Apple Invoice","body":"<p>Bestätigt.</p>","to":"no_reply@email.apple.com","cc":"","bcc":"","isHtml":true}' \
+      | mail draft 1
+    ```
+
     ## Loop for "what are my latest emails?"
 
     1. `mail accounts` — get account IDs.
@@ -423,10 +507,21 @@ data:
     4. Summarize subject + from + date + preview. If the user asks for
        details, follow up with `mail body <message_id>`.
 
-    ## Read-only invariants
-    - `mail` refuses any of: `send`, `compose`, `delete`, `move`, `trash`,
-      `snooze`, `flag`, `tag`, `mark`, `draft`, `outbox`, `patch`.
-    - Don't attempt SMTP — there is no send path in this setup.
+    ## Loop for "draft a reply to that email"
+
+    1. `mail thread <message_id>` to get the existing thread context and
+       identify the right `accountId` + recipients.
+    2. Compose subject (prefix `Re:` if missing) and body. Use HTML if you
+       need formatting; plain text wrapped in `<p>` paragraphs is fine.
+    3. Pipe the JSON into `mail draft <account_id>` and confirm the
+       returned id to the user. Mention that the draft is saved in the
+       IMAP Drafts folder — they can review and send it from their normal
+       mail client.
+
+    ## What stays blocked
+    - `send`, `outbox`, `compose` — no SMTP send via this skill.
+    - `delete`, `move`, `trash`, `snooze`, `flag`, `tag`, `mark`, `patch` —
+      all refused with exit 3.
 
   skill-paperless.md: |
     ---
