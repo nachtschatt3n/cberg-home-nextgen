@@ -152,8 +152,23 @@ spec:
                 cd "$HOME"
 
                 echo "Installing jq..."
-                curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" -o "$BIN_DIR/jq"
-                chmod +x "$BIN_DIR/jq"
+                # GitHub release downloads occasionally TLS-flake on the
+                # redirect leg; retry a few times before giving up.
+                jq_ok=0
+                for attempt in 1 2 3 4 5; do
+                  if curl -fsSL --retry 3 --retry-delay 5 --retry-connrefused \
+                       "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" \
+                       -o "$BIN_DIR/jq" 2>/dev/null; then
+                    chmod +x "$BIN_DIR/jq"
+                    jq_ok=1
+                    break
+                  fi
+                  echo "jq download attempt $attempt failed, sleeping..."
+                  sleep 5
+                done
+                if [ "$jq_ok" != "1" ]; then
+                  echo "WARN: jq install failed after retries (continuing)"
+                fi
 
                 echo "Installing ffmpeg static build..."
                 FFMPEG_TMP="$(mktemp -d)"
