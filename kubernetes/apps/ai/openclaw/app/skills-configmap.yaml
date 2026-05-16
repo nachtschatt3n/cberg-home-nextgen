@@ -13,6 +13,8 @@
 #   ha          — wraps `hactl` for Home Assistant state, history, areas
 #   mail        — Nextcloud Mail REST API: accounts / mailboxes / messages
 #                 / body / thread (fans out to GMX/iCloud/Gmail internally)
+#   say         — synthesize text via ElevenLabs and send back through
+#                 Telegram as a voice message (Opus/OGG) or audio (MP3)
 #   arag-plan   — prompt template for the Paperless ↔ Sure ↔ ARAG flow
 apiVersion: v1
 kind: ConfigMap
@@ -438,6 +440,140 @@ data:
       `click` on whitelisted selectors, `read_text`, `screenshot`.
     - Never submit ARAG forms other than login.
 
+  say.py: |
+    #!/usr/bin/env python3
+    """say — synthesize text via ElevenLabs and send through Telegram.
+
+    Usage:
+        say <chat_id> "<text>" [flags]
+        echo "<text>" | say <chat_id> [flags]
+
+    Flags:
+        --audio              Send as audio file (MP3) instead of a voice
+                             message (default is voice / Opus-OGG).
+        --voice-id=<id>      Override ElevenLabs voiceId.
+
+    Reads:
+        ELEVENLABS_API_KEY   (env)
+        bot token            from /home/node/.openclaw/openclaw.json
+                             at channels.telegram.botToken
+    """
+    import json, os, subprocess, sys, tempfile, urllib.request, uuid
+
+    OPENCLAW_CFG = "/home/node/.openclaw/openclaw.json"
+    EL_BASE = "https://api.elevenlabs.io"
+    EL_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+    EL_MODEL = os.environ.get("OPENCLAW_TALK_MODEL", "eleven_flash_v2_5")
+    EL_VOICE_DEFAULT = os.environ.get(
+        "OPENCLAW_TALK_VOICE", "EST9Ui6982FZPSi7gCHi"
+    )
+    TG_BASE = "https://api.telegram.org"
+
+    def _bot_token():
+        with open(OPENCLAW_CFG) as f:
+            cfg = json.load(f)
+        token = cfg.get("channels", {}).get("telegram", {}).get("botToken", "")
+        if not token:
+            sys.stderr.write("say: telegram botToken not found in openclaw.json\n")
+            sys.exit(2)
+        return token
+
+    def _synth_mp3(text, voice_id):
+        url = f"{EL_BASE}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+        body = json.dumps({"text": text, "model_id": EL_MODEL}).encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read()
+
+    def _mp3_to_ogg_opus(mp3_bytes):
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_in:
+            tmp_in.write(mp3_bytes)
+            in_path = tmp_in.name
+        out_path = in_path.replace(".mp3", ".ogg")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y",
+                 "-i", in_path,
+                 "-c:a", "libopus", "-b:a", "32k", "-ac", "1",
+                 out_path],
+                check=True,
+            )
+            with open(out_path, "rb") as f:
+                return f.read()
+        finally:
+            for p in (in_path, out_path):
+                try: os.unlink(p)
+                except FileNotFoundError: pass
+
+    def _telegram_send(method, chat_id, audio, filename, field):
+        boundary = "----openclaw" + uuid.uuid4().hex
+        parts = []
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
+        parts.append(f"{chat_id}\r\n".encode())
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'.encode()
+        )
+        parts.append(b"Content-Type: application/octet-stream\r\n\r\n")
+        parts.append(audio)
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        payload = b"".join(parts)
+        url = f"{TG_BASE}/bot{_bot_token()}/{method}"
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read())
+
+    def main():
+        if not EL_KEY:
+            sys.stderr.write("say: ELEVENLABS_API_KEY not set\n"); sys.exit(2)
+        if len(sys.argv) < 2:
+            print(__doc__); sys.exit(2)
+        chat_id = sys.argv[1]
+        text = None
+        voice_id = EL_VOICE_DEFAULT
+        as_audio = False
+        rest = sys.argv[2:]
+        positional = []
+        for a in rest:
+            if a == "--audio":
+                as_audio = True
+            elif a.startswith("--voice-id="):
+                voice_id = a.split("=", 1)[1]
+            else:
+                positional.append(a)
+        if positional:
+            text = " ".join(positional)
+        else:
+            text = sys.stdin.read()
+        text = text.strip()
+        if not text:
+            sys.stderr.write("say: empty text — nothing to synthesize\n"); sys.exit(2)
+        if len(text) > 4000:
+            sys.stderr.write(
+                f"say: refused — text length {len(text)} > 4000 chars "
+                "(ElevenLabs character budget guard)\n"
+            )
+            sys.exit(3)
+        mp3 = _synth_mp3(text, voice_id)
+        if as_audio:
+            result = _telegram_send("sendAudio", chat_id, mp3, "openclaw.mp3", "audio")
+        else:
+            ogg = _mp3_to_ogg_opus(mp3)
+            result = _telegram_send("sendVoice", chat_id, ogg, "openclaw.ogg", "voice")
+        print(json.dumps(result, indent=2))
+
+    if __name__ == "__main__":
+        main()
+
   # ----- SKILL.md files seeded into ~/clawd/skills/<name>/SKILL.md -----
   # Discovered by the OpenClaw skill-workshop plugin on agent start.
 
@@ -569,6 +705,62 @@ data:
     Date format is ISO `YYYY-MM-DD`.
 
     Read-only: no transaction edits, no balance adjustments.
+
+  skill-telegram-voice.md: |
+    ---
+    name: telegram-voice
+    description: Send a Telegram voice message (Opus/OGG) or audio file (MP3) synthesized via ElevenLabs. Use whenever the user asks you to "say it back", "voice this", "read it out loud", "send a voice note", or otherwise wants audio delivered through Telegram instead of just text.
+    user-invocable: false
+    ---
+
+    # Telegram Voice
+
+    Synthesize text via ElevenLabs and post it through the Telegram Bot API
+    as a voice message (or audio file). Invoke the `say` CLI.
+
+    ## Invocation
+
+    The chat_id is the Telegram user/chat id you received with the inbound
+    message — it shows up in your harness context (`chatId=...`). For DMs
+    that's the user's Telegram id.
+
+    ```bash
+    # Preferred: pipe the text via stdin (no shell-quoting pitfalls)
+    echo "your reply here" | say <chat_id>
+
+    # Or pass as a positional arg
+    say <chat_id> "your reply here"
+    ```
+
+    Flags:
+
+    | Flag | Effect |
+    | --- | --- |
+    | _(default)_ | `sendVoice` — Opus/OGG voice bubble with waveform. |
+    | `--audio` | `sendAudio` — MP3 file, displayed as track with title/duration. |
+    | `--voice-id=<id>` | Override ElevenLabs voiceId for this call. |
+
+    Returns Telegram's JSON envelope (`{ok: true, result: {...}}`) on
+    success — confirm to the user that the voice note was sent.
+
+    ## When to use it
+
+    - User explicitly asks for audio: "say that back", "voice this",
+      "send as voice", "read it aloud".
+    - User is on the move and prefers listening — only when they've
+      asked or you have strong signal (don't surprise them with voice).
+    - For long replies (> ~1 min audio) prefer `--audio` so it appears
+      as a file with duration metadata rather than a voice bubble.
+
+    ## Constraints
+
+    - ElevenLabs Starter tier ≈ 30k chars / month — track usage; don't
+      voice extremely long messages by default.
+    - Hard cap in the skill: refuses text over 4,000 chars (exit 3).
+    - Plain text only — no SSML.
+    - Always preserve the regular text reply too unless the user
+      specifically said "voice only". Default: send text reply first,
+      then `say` as a follow-up so they have both.
 
   skill-home-assistant.md: |
     ---
