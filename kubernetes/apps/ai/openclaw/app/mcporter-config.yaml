@@ -25,9 +25,9 @@ data:
     {
       "nextcloud": {
         "transport": "http",
-        "url": "${NEXTCLOUD_MCP_URL}",
+        "url": "__NEXTCLOUD_MCP_URL__",
         "headers": {
-          "Authorization": "${NEXTCLOUD_MCP_AUTH_HEADER}"
+          "Authorization": "__NEXTCLOUD_MCP_AUTH_HEADER__"
         },
         "description": "Nextcloud files, notes, calendar, contacts, deck, tables (read-oriented)."
       },

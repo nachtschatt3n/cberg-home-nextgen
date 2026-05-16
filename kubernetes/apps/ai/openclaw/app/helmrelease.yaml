@@ -430,39 +430,50 @@ spec:
 
                 echo "Wiring personal-knowledge integrations..."
 
+                # NOTE on $$: Flux kustomize-controller does `${VAR}` substitution
+                # against cluster-settings/cluster-secrets. Doubling the dollar
+                # ($${VAR}) escapes one pass, leaving ${VAR} for bash at runtime.
+
                 # 1. hactl reads HASS_URL/HASS_TOKEN; our secret uses HA_*.
-                export HASS_URL="${HA_URL:-}"
-                export HASS_TOKEN="${HA_TOKEN:-}"
+                export HASS_URL="$${HA_URL:-}"
+                export HASS_TOKEN="$${HA_TOKEN:-}"
 
                 # 2. Materialize himalaya config from env vars (read-only mail).
                 #    SMTP intentionally omitted — `himalaya message send` cannot succeed.
-                if [ -n "${MAIL_IMAP_HOST:-}" ] && [ "${MAIL_IMAP_HOST}" != "CHANGEME-horde-imap.example.tld" ]; then
+                #    Skip if MAIL_IMAP_HOST is unset OR still a CHANGEME placeholder.
+                case "$${MAIL_IMAP_HOST:-}" in
+                  ""|CHANGEME*) skip_mail=1 ;;
+                  *)            skip_mail=0 ;;
+                esac
+                if [ "$skip_mail" = "1" ]; then
+                  echo "MAIL_IMAP_HOST unset or placeholder — skipping himalaya config"
+                else
                   mkdir -p /home/node/.config/himalaya
                   {
                     printf '[accounts.work]\n'
                     printf 'default = true\n'
-                    printf 'email = "%s"\n' "${MAIL_IMAP_USER}"
+                    printf 'email = "%s"\n' "$${MAIL_IMAP_USER}"
                     printf 'backend = "imap"\n'
-                    printf 'imap.host = "%s"\n' "${MAIL_IMAP_HOST}"
-                    printf 'imap.port = %s\n' "${MAIL_IMAP_PORT:-993}"
+                    printf 'imap.host = "%s"\n' "$${MAIL_IMAP_HOST}"
+                    printf 'imap.port = %s\n' "$${MAIL_IMAP_PORT:-993}"
                     printf 'imap.encryption = "tls"\n'
-                    printf 'imap.login = "%s"\n' "${MAIL_IMAP_USER}"
-                    printf 'imap.passwd.raw = "%s"\n' "${MAIL_IMAP_PASSWORD}"
+                    printf 'imap.login = "%s"\n' "$${MAIL_IMAP_USER}"
+                    printf 'imap.passwd.raw = "%s"\n' "$${MAIL_IMAP_PASSWORD}"
                   } > /home/node/.config/himalaya/config.toml
                   chmod 600 /home/node/.config/himalaya/config.toml
-                  echo "himalaya configured against ${MAIL_IMAP_HOST}"
-                else
-                  echo "MAIL_IMAP_HOST not set — skipping himalaya config"
+                  echo "himalaya configured against $${MAIL_IMAP_HOST}"
                 fi
 
                 # 3. Materialize MCP server registrations from ConfigMap with
-                #    secret-sourced URLs substituted in (sed — envsubst isn't
-                #    in the runtime image).
+                #    secret-sourced URLs substituted in. The `$$` escapes
+                #    Flux's kustomize-controller variable substitution so the
+                #    placeholders survive into the runtime container, where
+                #    bash and sed expand them at startup.
                 if [ -f /etc/openclaw-mcp/mcp-servers.json ]; then
                   mkdir -p /home/node/.openclaw
                   sed \
-                    -e "s|\${NEXTCLOUD_MCP_URL}|${NEXTCLOUD_MCP_URL:-}|g" \
-                    -e "s|\${NEXTCLOUD_MCP_AUTH_HEADER}|${NEXTCLOUD_MCP_AUTH_HEADER:-}|g" \
+                    -e "s|__NEXTCLOUD_MCP_URL__|$${NEXTCLOUD_MCP_URL:-}|g" \
+                    -e "s|__NEXTCLOUD_MCP_AUTH_HEADER__|$${NEXTCLOUD_MCP_AUTH_HEADER:-}|g" \
                     /etc/openclaw-mcp/mcp-servers.json \
                     > /home/node/.openclaw/mcp-servers.json
                   echo "MCP server defs written to ~/.openclaw/mcp-servers.json"
