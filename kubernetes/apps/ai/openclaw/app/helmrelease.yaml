@@ -31,6 +31,7 @@ spec:
         pod:
           annotations:
             secret.reloader.stakater.com/reload: openclaw-secret
+            configmap.reloader.stakater.com/reload: openclaw-mcp-servers,openclaw-skills
           securityContext:
             fsGroup: 1000
             fsGroupChangePolicy: OnRootMismatch
@@ -223,11 +224,30 @@ spec:
                 install_npm opencode-ai
                 install_npm summarize
                 install_npm sag
+                install_npm @playwright/mcp
 
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 install_pip himalaya
                 install_pip openai-whisper
+                install_pip "git+https://github.com/nachtschatt3n/hactl.git@v1.1.1"
+
+                # Playwright browsers + apt deps for the @playwright/mcp server.
+                # Browsers land in the PVC so they survive pod restarts.
+                export PLAYWRIGHT_BROWSERS_PATH=/home/node/.openclaw/playwright-browsers
+                mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+                PLAYWRIGHT_BIN="/home/node/.openclaw/bin/playwright"
+                if [ -x "$PLAYWRIGHT_BIN" ]; then
+                  echo "Installing Playwright chromium + system deps..."
+                  if ! "$PLAYWRIGHT_BIN" install-deps chromium; then
+                    echo "WARN: playwright install-deps failed (continuing)"
+                  fi
+                  if ! "$PLAYWRIGHT_BIN" install chromium; then
+                    echo "WARN: playwright install chromium failed (continuing)"
+                  fi
+                else
+                  echo "WARN: playwright CLI not found at $PLAYWRIGHT_BIN — skipping browser install"
+                fi
 
                 echo "Creating symlink..."
                 ln -sf /home/node/.openclaw/bin/openclaw /home/node/.openclaw/openclaw
@@ -408,6 +428,63 @@ spec:
                   echo "Warning: kubeconfig not found at ~/code/cberg-home-nextgen/kubeconfig"
                 fi
 
+                echo "Wiring personal-knowledge integrations..."
+
+                # 1. hactl reads HASS_URL/HASS_TOKEN; our secret uses HA_*.
+                export HASS_URL="${HA_URL:-}"
+                export HASS_TOKEN="${HA_TOKEN:-}"
+
+                # 2. Materialize himalaya config from env vars (read-only mail).
+                #    SMTP intentionally omitted — `himalaya message send` cannot succeed.
+                if [ -n "${MAIL_IMAP_HOST:-}" ] && [ "${MAIL_IMAP_HOST}" != "CHANGEME-horde-imap.example.tld" ]; then
+                  mkdir -p /home/node/.config/himalaya
+                  {
+                    printf '[accounts.work]\n'
+                    printf 'default = true\n'
+                    printf 'email = "%s"\n' "${MAIL_IMAP_USER}"
+                    printf 'backend = "imap"\n'
+                    printf 'imap.host = "%s"\n' "${MAIL_IMAP_HOST}"
+                    printf 'imap.port = %s\n' "${MAIL_IMAP_PORT:-993}"
+                    printf 'imap.encryption = "tls"\n'
+                    printf 'imap.login = "%s"\n' "${MAIL_IMAP_USER}"
+                    printf 'imap.passwd.raw = "%s"\n' "${MAIL_IMAP_PASSWORD}"
+                  } > /home/node/.config/himalaya/config.toml
+                  chmod 600 /home/node/.config/himalaya/config.toml
+                  echo "himalaya configured against ${MAIL_IMAP_HOST}"
+                else
+                  echo "MAIL_IMAP_HOST not set — skipping himalaya config"
+                fi
+
+                # 3. Materialize MCP server registrations from ConfigMap with
+                #    secret-sourced URLs substituted in (sed — envsubst isn't
+                #    in the runtime image).
+                if [ -f /etc/openclaw-mcp/mcp-servers.json ]; then
+                  mkdir -p /home/node/.openclaw
+                  sed \
+                    -e "s|\${NEXTCLOUD_MCP_URL}|${NEXTCLOUD_MCP_URL:-}|g" \
+                    -e "s|\${NEXTCLOUD_MCP_AUTH_HEADER}|${NEXTCLOUD_MCP_AUTH_HEADER:-}|g" \
+                    /etc/openclaw-mcp/mcp-servers.json \
+                    > /home/node/.openclaw/mcp-servers.json
+                  echo "MCP server defs written to ~/.openclaw/mcp-servers.json"
+                fi
+
+                # 4. Install skills onto PATH. ConfigMap mount is read-only —
+                #    copy into PVC bin dir and make executable.
+                if [ -d /etc/openclaw-skills ]; then
+                  for src in /etc/openclaw-skills/*.py; do
+                    [ -f "$src" ] || continue
+                    name=$(basename "$src" .py)
+                    cp "$src" "/home/node/.openclaw/bin/$name"
+                    chmod +x "/home/node/.openclaw/bin/$name"
+                  done
+                  # Also expose the ARAG playbook prompt for the agent.
+                  if [ -f /etc/openclaw-skills/arag-plan.md ]; then
+                    cp /etc/openclaw-skills/arag-plan.md /home/node/.openclaw/arag-plan.md
+                  fi
+                  mkdir -p /home/node/.openclaw/browser-profiles
+                  echo "Installed read-only skills: $(ls /etc/openclaw-skills/*.py 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+                fi
+
                 echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
@@ -431,6 +508,10 @@ spec:
                 value: "ollama"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
+              # Playwright browsers were installed into the PVC during init —
+              # point @playwright/mcp at the same location at runtime.
+              - name: PLAYWRIGHT_BROWSERS_PATH
+                value: "/home/node/.openclaw/playwright-browsers"
               # GitHub token for mise and git operations
               - name: GITHUB_TOKEN
                 valueFrom:
@@ -552,3 +633,22 @@ spec:
           openclaw:
             app:
               - path: /tmp
+
+      mcp-servers:
+        type: configMap
+        name: openclaw-mcp-servers
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /etc/openclaw-mcp
+                readOnly: true
+
+      skills:
+        type: configMap
+        name: openclaw-skills
+        defaultMode: 0755
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /etc/openclaw-skills
+                readOnly: true

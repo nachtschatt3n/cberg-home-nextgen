@@ -1,0 +1,50 @@
+---
+# MCP server registrations consumed by OpenClaw via mcporter.
+#
+# Two outbound MCP servers are exposed to the agent:
+#
+#   nextcloud — remote HTTP MCP server already deployed at
+#               kubernetes/apps/office/nextcloud-mcp/. Read-only file and
+#               supported-Nextcloud-app surface for the agent.
+#
+#   browser   — stdio @playwright/mcp server spawned per session. Used for
+#               login-walled portals (ARAG medical-bill status, etc.). The
+#               browser user-data directory is persisted in the PVC so a
+#               logged-in session survives pod restarts.
+#
+# The runtime container reads $NEXTCLOUD_MCP_URL / $NEXTCLOUD_MCP_AUTH_HEADER
+# from the openclaw-secret at startup and substitutes them into the JSON
+# below before handing it to mcporter / openclaw.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-mcp-servers
+  namespace: ai
+data:
+  mcp-servers.json: |
+    {
+      "nextcloud": {
+        "transport": "http",
+        "url": "${NEXTCLOUD_MCP_URL}",
+        "headers": {
+          "Authorization": "${NEXTCLOUD_MCP_AUTH_HEADER}"
+        },
+        "description": "Nextcloud files, notes, calendar, contacts, deck, tables (read-oriented)."
+      },
+      "browser": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@playwright/mcp@latest",
+          "--headless",
+          "--browser=chromium",
+          "--user-data-dir=/home/node/.openclaw/browser-profiles/default",
+          "--isolated=false"
+        ],
+        "env": {
+          "PLAYWRIGHT_BROWSERS_PATH": "/home/node/.openclaw/playwright-browsers"
+        },
+        "description": "Headless Chromium for login-walled portals (ARAG, etc.). Read-only navigation + whitelisted clicks."
+      }
+    }
