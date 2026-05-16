@@ -542,37 +542,55 @@ spec:
                 # codex's own docs, `--dangerously-bypass-approvals-and-sandbox`
                 # is the documented escape hatch for exactly this case.
                 #
-                # We shim the `codex` binary: when invoked with
-                # `--sandbox <mode>`, the shim swaps those two args for the
-                # bypass flag and forwards everything else to the real CLI.
-                if [ -L /home/node/.openclaw/bin/codex ] && [ ! -e /home/node/.openclaw/bin/codex-real ]; then
-                  cp /home/node/.openclaw/bin/codex /home/node/.openclaw/bin/codex-real
+                # Shim the `codex` binary so any `--sandbox <mode>` is
+                # rewritten to `--dangerously-bypass-approvals-and-sandbox`
+                # before the real CLI runs.
+                #
+                # Implementation note: the original `codex` is a symlink to
+                # an ES-module script under node_modules/@openai/codex/.
+                # Writing a shim with `cat >` clobbered the symlink target,
+                # and copying it elsewhere broke its node_modules resolution
+                # (Error: Missing optional dependency @openai/codex-linux-x64).
+                # So instead: replace the symlink with a bash script that
+                # invokes `node /<original-path>/codex.js` — keeping the
+                # script in its original directory so npm-relative imports
+                # still resolve.
+                # Repair a previous botched shim install if present.
+                rm -f /home/node/.openclaw/bin/codex-real
+                if [ -L /home/node/.openclaw/bin/codex ] || ! grep -q "codex-cli sandbox shim" /home/node/.openclaw/bin/codex 2>/dev/null; then
+                  rm -f /home/node/.openclaw/bin/codex
+                  # Single-quoted heredoc → no bash expansion at write time.
+                  # $${...} below is Flux escape: drone/envsubst collapses
+                  # $$ -> $ when rendering the manifest, leaving ${...} for
+                  # bash to expand at runtime.
                   cat > /home/node/.openclaw/bin/codex <<'SHIM'
                 #!/usr/bin/env bash
-                # Codex CLI shim — swap --sandbox <mode> for --dangerously-bypass-...
-                # because bubblewrap can't create user namespaces inside this pod.
+                # codex-cli sandbox shim — translate --sandbox <mode> to the
+                # --dangerously-bypass-approvals-and-sandbox flag because
+                # bubblewrap can't create user namespaces inside this pod.
+                CODEX_JS="/home/node/.openclaw/lib/node_modules/@openai/codex/bin/codex.js"
                 args=()
                 skip_next=0
                 bypass_added=0
-                for a in "$@"; do
-                  if [ "$skip_next" = "1" ]; then
+                for a in "$$@"; do
+                  if [ "$$skip_next" = "1" ]; then
                     skip_next=0
                     continue
                   fi
-                  case "$a" in
+                  case "$$a" in
                     --sandbox|-s)
                       skip_next=1
-                      if [ "$bypass_added" = "0" ]; then
+                      if [ "$$bypass_added" = "0" ]; then
                         args+=("--dangerously-bypass-approvals-and-sandbox")
                         bypass_added=1
                       fi
                       ;;
                     *)
-                      args+=("$a")
+                      args+=("$$a")
                       ;;
                   esac
                 done
-                exec /home/node/.openclaw/bin/codex-real "$${args[@]}"
+                exec node "$${CODEX_JS}" "$${args[@]}"
                 SHIM
                   chmod +x /home/node/.openclaw/bin/codex
                   echo "Installed codex CLI shim (bypasses bubblewrap)"
