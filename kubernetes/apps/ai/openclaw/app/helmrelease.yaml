@@ -429,24 +429,18 @@ spec:
                     }],
                   };
 
-                  // OpenAI provider routed through the codex harness, which
-                  // reads ChatGPT-subscription OAuth tokens from
-                  // /home/node/.codex/auth.json (persisted in the PVC after
-                  // a one-time `codex login`).
-                  cfg.models.providers.openai = {
-                    baseUrl: 'https://api.openai.com/v1',
-                    api: 'openai-responses',
-                    agentRuntime: { id: 'codex' },
-                    models: [{
-                      id: 'gpt-5.5',
-                      name: 'GPT-5.5',
-                      reasoning: true,
-                      input: ['text'],
-                      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      contextWindow: 200000,
-                      maxTokens: 16384,
-                    }],
-                  };
+                  // The codex CLI backend is registered automatically by
+                  // the bundled openai plugin (see extensions/openai/
+                  // cli-backend.js — registers id "codex-cli"). Models
+                  // referenced as "codex-cli/<model>" are routed through
+                  // the local `codex` CLI without any explicit provider
+                  // entry here, so the OPENCLAW_DEFAULT_MODEL env var
+                  // (e.g. "codex-cli/gpt-5.5") is the only switch needed.
+                  // Clean up any leftover openai provider override from
+                  // earlier (wrong) attempts.
+                  if (cfg.models.providers.openai && cfg.models.providers.openai.agentRuntime && cfg.models.providers.openai.agentRuntime.id === 'codex') {
+                    delete cfg.models.providers.openai;
+                  }
 
                   delete cfg.model;
 
@@ -549,13 +543,13 @@ spec:
                 value: "gemma4:26b"
               - name: OLLAMA_API_KEY
                 value: "ollama"
-              # Route the embedded agent through the codex CLI, which reads
-              # ChatGPT-subscription OAuth tokens from /home/node/.codex/auth.json
-              # (persisted in the PVC after a one-time `codex login`). Codex
-              # harness wiring lives under models.providers.openai in the Node
-              # init script — agents.defaults.agentRuntime is legacy/ignored.
+              # Route the embedded agent through the codex CLI backend
+              # (registered id "codex-cli"; the openai plugin wires it via
+              # registerCliBackend). The codex CLI reads ChatGPT-subscription
+              # OAuth tokens from /home/node/.codex/auth.json (persisted in
+              # the PVC after a one-time `codex login`).
               - name: OPENCLAW_DEFAULT_MODEL
-                value: "openai/gpt-5.5"
+                value: "codex-cli/gpt-5.5"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
               # Playwright browsers were installed into the PVC during init —
