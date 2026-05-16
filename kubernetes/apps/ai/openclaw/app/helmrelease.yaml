@@ -443,33 +443,12 @@ spec:
                 # secret in the container env: block, so they're available to
                 # both this script and `kubectl exec` sessions.
 
-                # 2. Materialize himalaya config from env vars (read-only mail).
-                #    SMTP intentionally omitted — `himalaya message send` cannot succeed.
-                #    Skip if MAIL_IMAP_HOST is unset OR still a CHANGEME placeholder.
-                case "$${MAIL_IMAP_HOST:-}" in
-                  ""|CHANGEME*) skip_mail=1 ;;
-                  *)            skip_mail=0 ;;
-                esac
-                if [ "$skip_mail" = "1" ]; then
-                  echo "MAIL_IMAP_HOST unset or placeholder — skipping himalaya config"
-                else
-                  mkdir -p /home/node/.config/himalaya
-                  {
-                    printf '[accounts.work]\n'
-                    printf 'default = true\n'
-                    printf 'email = "%s"\n' "$${MAIL_IMAP_USER}"
-                    printf 'backend = "imap"\n'
-                    printf 'imap.host = "%s"\n' "$${MAIL_IMAP_HOST}"
-                    printf 'imap.port = %s\n' "$${MAIL_IMAP_PORT:-993}"
-                    printf 'imap.encryption = "tls"\n'
-                    printf 'imap.login = "%s"\n' "$${MAIL_IMAP_USER}"
-                    printf 'imap.passwd.raw = "%s"\n' "$${MAIL_IMAP_PASSWORD}"
-                  } > /home/node/.config/himalaya/config.toml
-                  chmod 600 /home/node/.config/himalaya/config.toml
-                  echo "himalaya configured against $${MAIL_IMAP_HOST}"
-                fi
+                # NOTE: mail goes through the Nextcloud Mail REST API
+                # (skill mail.py), which fans out to GMX/iCloud/Gmail. No
+                # himalaya wiring needed at runtime — the binary stays
+                # installed for ad-hoc use but no config is seeded.
 
-                # 3. Materialize MCP server registrations from ConfigMap with
+                # 2. Materialize MCP server registrations from ConfigMap with
                 #    secret-sourced URLs substituted in. The `$$` escapes
                 #    Flux's kustomize-controller variable substitution so the
                 #    placeholders survive into the runtime container, where
@@ -484,7 +463,7 @@ spec:
                   echo "MCP server defs written to ~/.openclaw/mcp-servers.json"
                 fi
 
-                # 4. Install skills onto PATH. ConfigMap mount is read-only —
+                # 3. Install skills onto PATH. ConfigMap mount is read-only —
                 #    copy into PVC bin dir and make executable.
                 if [ -d /etc/openclaw-skills ]; then
                   for src in /etc/openclaw-skills/*.py; do

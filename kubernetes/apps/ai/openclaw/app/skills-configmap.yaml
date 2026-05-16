@@ -11,6 +11,8 @@
 #   paperless   — search/get/download Paperless documents
 #   sure        — list accounts / read balances / read transactions
 #   ha          — wraps `hactl` for Home Assistant state, history, areas
+#   mail        — Nextcloud Mail REST API: accounts / mailboxes / messages
+#                 / body / thread (fans out to GMX/iCloud/Gmail internally)
 #   arag-plan   — prompt template for the Paperless ↔ Sure ↔ ARAG flow
 apiVersion: v1
 kind: ConfigMap
@@ -203,6 +205,136 @@ data:
             sys.exit(3)
         dispatch = {"state": state, "states": states, "history": history,
                     "areas": areas, "devices": devices}
+        if verb not in dispatch:
+            print(__doc__); sys.exit(2)
+        dispatch[verb](*sys.argv[2:])
+
+    if __name__ == "__main__":
+        main()
+
+  mail.py: |
+    #!/usr/bin/env python3
+    """Read-only Nextcloud Mail client. Talks to the NC Mail REST API,
+    which fans out to all configured IMAP backends (GMX/iCloud/Gmail).
+
+    Usage:
+        mail accounts
+        mail mailboxes <account_id>
+        mail messages <mailbox_db_id> [limit]
+        mail search <query> [account_id] [limit]
+        mail body <message_id>          # plaintext body
+        mail html <message_id>          # HTML body
+        mail thread <message_id>        # full thread metadata
+        mail source <message_id>        # raw RFC822
+    """
+    import base64, json, os, sys, urllib.parse, urllib.request
+
+    BASE = os.environ["NEXTCLOUD_URL"].rstrip("/")
+    USER = os.environ["NEXTCLOUD_USERNAME"]
+    PASS = os.environ["NEXTCLOUD_PASSWORD"]
+    AUTH = base64.b64encode(f"{USER}:{PASS}".encode()).decode()
+    HEADERS = {
+        "Authorization": f"Basic {AUTH}",
+        "Accept": "application/json",
+        "OCS-APIREQUEST": "true",
+        "User-Agent": "openclaw-mail/1.0",
+    }
+    API = f"{BASE}/index.php/apps/mail/api"
+
+    # Refuse any verb that hints at mutation. Mail-app routes that would
+    # POST/PATCH/DELETE messages all live behind specific verbs; we never
+    # construct anything other than GET.
+    BLOCKED = {"compose", "send", "delete", "move", "trash", "snooze",
+               "flag", "tag", "mark", "draft", "outbox", "patch"}
+
+    def _get(path, params=None):
+        url = f"{API}{path}"
+        if params:
+            clean = {k: v for k, v in params.items() if v is not None}
+            if clean:
+                url += "?" + urllib.parse.urlencode(clean)
+        req = urllib.request.Request(url, headers=HEADERS, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ct = r.headers.get("Content-Type", "")
+            body = r.read()
+            if "application/json" in ct:
+                return json.loads(body)
+            return body.decode("utf-8", errors="replace")
+
+    def accounts():
+        out = []
+        for a in _get("/accounts"):
+            out.append({"id": a["id"], "email": a["emailAddress"],
+                        "imap_host": a.get("imapHost"),
+                        "imap_port": a.get("imapPort")})
+        print(json.dumps(out, indent=2))
+
+    def mailboxes(account_id):
+        data = _get("/mailboxes", {"accountId": int(account_id)})
+        out = []
+        for m in data.get("mailboxes", []):
+            out.append({
+                "databaseId": m["databaseId"],
+                "name": m.get("displayName") or m.get("name"),
+                "specialRole": m.get("specialRole"),
+                "unread": m.get("unread"),
+            })
+        print(json.dumps({"account": data.get("email"), "mailboxes": out}, indent=2))
+
+    def messages(mailbox_db_id, limit=25):
+        data = _get("/messages", {"mailboxId": int(mailbox_db_id), "limit": int(limit)})
+        # Trim noisy fields
+        slim = []
+        for m in (data if isinstance(data, list) else data.get("messages", [])):
+            slim.append({
+                "id": m.get("databaseId") or m.get("id"),
+                "subject": m.get("subject"),
+                "from": [f.get("email") for f in (m.get("from") or [])],
+                "date": m.get("dateInt") or m.get("sentAt"),
+                "flags": m.get("flags"),
+                "preview": (m.get("preview") or "")[:120],
+            })
+        print(json.dumps(slim, indent=2))
+
+    def search(query, account_id=None, limit=25):
+        params = {"query": query, "limit": int(limit)}
+        if account_id:
+            params["accountId"] = int(account_id)
+        data = _get("/messages", params)
+        print(json.dumps(data, indent=2))
+
+    def body(message_id):
+        print(json.dumps(_get(f"/messages/{int(message_id)}/body"), indent=2))
+
+    def html(message_id):
+        result = _get(f"/messages/{int(message_id)}/html")
+        if isinstance(result, str):
+            print(result)
+        else:
+            print(json.dumps(result, indent=2))
+
+    def thread(message_id):
+        print(json.dumps(_get(f"/messages/{int(message_id)}/thread"), indent=2))
+
+    def source(message_id):
+        result = _get(f"/messages/{int(message_id)}/source")
+        if isinstance(result, str):
+            print(result)
+        else:
+            print(json.dumps(result, indent=2))
+
+    def main():
+        if len(sys.argv) < 2:
+            print(__doc__); sys.exit(2)
+        verb = sys.argv[1].lower()
+        if verb in BLOCKED:
+            sys.stderr.write(f"refused: '{verb}' would mutate mail — read-only skill\n")
+            sys.exit(3)
+        dispatch = {
+            "accounts": accounts, "mailboxes": mailboxes, "messages": messages,
+            "search": search, "body": body, "html": html, "thread": thread,
+            "source": source,
+        }
         if verb not in dispatch:
             print(__doc__); sys.exit(2)
         dispatch[verb](*sys.argv[2:])
