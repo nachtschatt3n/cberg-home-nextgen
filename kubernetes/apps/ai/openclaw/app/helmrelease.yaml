@@ -529,6 +529,30 @@ spec:
                   echo "Seeded workspace skills: $(ls /home/node/clawd/skills/ 2>/dev/null | tr '\n' ' ')"
                 fi
 
+                # 5. Codex CLI sandbox tuning. The codex-cli backend runs every
+                #    agent shell with --sandbox workspace-write, which by
+                #    default blocks outbound network AND drops most env vars.
+                #    Our skills (mail, paperless, sure, ha) need both:
+                #     - network: to call internal cluster APIs
+                #     - env vars: NEXTCLOUD_USERNAME/PASSWORD, *_TOKEN, etc.
+                #    Patch ~/.codex/config.toml idempotently (preserves any
+                #    existing keys like plugins.*, projects.*).
+                if [ -f /home/node/.codex/config.toml ]; then
+                  if ! grep -q '\[sandbox_workspace_write\]' /home/node/.codex/config.toml; then
+                    {
+                      printf '\n[sandbox_workspace_write]\n'
+                      printf 'network_access = true\n'
+                    } >> /home/node/.codex/config.toml
+                  fi
+                  if ! grep -q '\[shell_environment_policy\]' /home/node/.codex/config.toml; then
+                    {
+                      printf '\n[shell_environment_policy]\n'
+                      printf 'inherit = "all"\n'
+                    } >> /home/node/.codex/config.toml
+                  fi
+                  echo "codex config.toml tuned for network + env passthrough"
+                fi
+
                 echo "Starting OpenClaw Gateway..."
                 mkdir -p /home/node/clawd
                 cd /home/node/clawd
