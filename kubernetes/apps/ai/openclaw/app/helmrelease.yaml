@@ -529,14 +529,58 @@ spec:
                   echo "Seeded workspace skills: $(ls /home/node/clawd/skills/ 2>/dev/null | tr '\n' ' ')"
                 fi
 
-                # 5. Codex CLI sandbox tuning. The codex-cli backend runs every
-                #    agent shell with --sandbox workspace-write, which by
-                #    default blocks outbound network AND drops most env vars.
-                #    Our skills (mail, paperless, sure, ha) need both:
-                #     - network: to call internal cluster APIs
-                #     - env vars: NEXTCLOUD_USERNAME/PASSWORD, *_TOKEN, etc.
-                #    Patch ~/.codex/config.toml idempotently (preserves any
-                #    existing keys like plugins.*, projects.*).
+                # 5. Codex CLI sandbox tuning.
+                #
+                # The codex-cli backend hard-codes `--sandbox workspace-write`,
+                # which uses bubblewrap to set up an unprivileged user
+                # namespace. Talos-hardened kernels block that
+                # (bwrap: "No permissions to create a new namespace"), so
+                # every agent shell exits before running.
+                #
+                # The K8s pod is itself an external sandbox (non-root user,
+                # dropped caps, no privilege escalation, dedicated PVC). Per
+                # codex's own docs, `--dangerously-bypass-approvals-and-sandbox`
+                # is the documented escape hatch for exactly this case.
+                #
+                # We shim the `codex` binary: when invoked with
+                # `--sandbox <mode>`, the shim swaps those two args for the
+                # bypass flag and forwards everything else to the real CLI.
+                if [ -L /home/node/.openclaw/bin/codex ] && [ ! -e /home/node/.openclaw/bin/codex-real ]; then
+                  cp /home/node/.openclaw/bin/codex /home/node/.openclaw/bin/codex-real
+                  cat > /home/node/.openclaw/bin/codex <<'SHIM'
+                #!/usr/bin/env bash
+                # Codex CLI shim — swap --sandbox <mode> for --dangerously-bypass-...
+                # because bubblewrap can't create user namespaces inside this pod.
+                args=()
+                skip_next=0
+                bypass_added=0
+                for a in "$@"; do
+                  if [ "$skip_next" = "1" ]; then
+                    skip_next=0
+                    continue
+                  fi
+                  case "$a" in
+                    --sandbox|-s)
+                      skip_next=1
+                      if [ "$bypass_added" = "0" ]; then
+                        args+=("--dangerously-bypass-approvals-and-sandbox")
+                        bypass_added=1
+                      fi
+                      ;;
+                    *)
+                      args+=("$a")
+                      ;;
+                  esac
+                done
+                exec /home/node/.openclaw/bin/codex-real "${args[@]}"
+                SHIM
+                  chmod +x /home/node/.openclaw/bin/codex
+                  echo "Installed codex CLI shim (bypasses bubblewrap)"
+                fi
+
+                # Also leave the config.toml tuned for network + env
+                # passthrough so any direct `codex` invocations that don't
+                # go through the shim still behave sensibly.
                 if [ -f /home/node/.codex/config.toml ]; then
                   if ! grep -q '\[sandbox_workspace_write\]' /home/node/.codex/config.toml; then
                     {
@@ -550,7 +594,6 @@ spec:
                       printf 'inherit = "all"\n'
                     } >> /home/node/.codex/config.toml
                   fi
-                  echo "codex config.toml tuned for network + env passthrough"
                 fi
 
                 echo "Starting OpenClaw Gateway..."
