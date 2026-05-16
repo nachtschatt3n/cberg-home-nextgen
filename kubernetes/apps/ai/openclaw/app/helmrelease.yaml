@@ -388,7 +388,15 @@ spec:
                   cfg.agents.defaults = cfg.agents.defaults || {};
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
-                  cfg.agents.defaults.model.primary = displayModel;
+                  // OPENCLAW_DEFAULT_MODEL overrides the routed model; pair
+                  // with OPENCLAW_AGENT_RUNTIME=codex to route OpenAI models
+                  // through the codex CLI (which reads ~/.codex/auth.json).
+                  cfg.agents.defaults.model.primary = process.env.OPENCLAW_DEFAULT_MODEL || displayModel;
+                  if (process.env.OPENCLAW_AGENT_RUNTIME) {
+                    cfg.agents.defaults.agentRuntime = { id: process.env.OPENCLAW_AGENT_RUNTIME };
+                  } else {
+                    delete cfg.agents.defaults.agentRuntime;
+                  }
 
                   // Update models
                   cfg.models = cfg.models || {};
@@ -509,6 +517,13 @@ spec:
                 value: "gemma4:26b"
               - name: OLLAMA_API_KEY
                 value: "ollama"
+              # Route the embedded agent through the codex CLI, which reads
+              # ChatGPT-subscription OAuth tokens from /home/node/.codex/auth.json
+              # (persisted in the PVC after a one-time `codex login`).
+              - name: OPENCLAW_DEFAULT_MODEL
+                value: "openai/gpt-5.5"
+              - name: OPENCLAW_AGENT_RUNTIME
+                value: "codex"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
               # Playwright browsers were installed into the PVC during init —
