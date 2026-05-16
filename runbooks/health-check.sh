@@ -2568,6 +2568,25 @@ log_section "Home Assistant Health (via hactl doctor)"
     if [ -z "$HACTL_BIN" ] || [ -z "${HASS_URL:-}" ] || [ -z "${HASS_TOKEN:-}" ]; then
         echo "hactl unavailable, skipping HA-side health check"
     else
+        # First: apply haghs_ignore labels to known-flaky devices from
+        # noise_allowlist.yaml so the doctor's unavailable_entity count
+        # reflects suppressions. Idempotent — already-labeled devices are
+        # no-ops. Failures are non-fatal: doctor still runs.
+        allowlist_path="$(dirname "$0")/noise_allowlist.yaml"
+        if [ -r "$allowlist_path" ]; then
+            label_output=$("$HACTL_BIN" label apply --from-allowlist "$allowlist_path" --label haghs_ignore --yes 2>&1)
+            label_rc=$?
+            if [ "$label_rc" -eq 0 ]; then
+                applied=$(printf '%s\n' "$label_output" | grep -c '^[[:space:]]*+label haghs_ignore on device' || true)
+                noop=$(printf '%s\n' "$label_output" | awk '/^Result:/{for(i=1;i<=NF;i++) if($i=="no-op."){print $(i-1); exit}}')
+                noop=${noop:-0}
+                echo "label apply: ${applied} new, ${noop} already-labeled (no-op)"
+            else
+                echo "label apply: rc=$label_rc — skipping (doctor still runs)"
+                printf '%s\n' "$label_output" | head -5
+            fi
+        fi
+
         hactl_output=$("$HACTL_BIN" doctor --check config_entries --check zombie_devices 2>&1)
         hactl_rc=$?
 
