@@ -578,6 +578,16 @@ spec:
                       dmPolicy: prev.dmPolicy || 'pairing',
                       groupPolicy: prev.groupPolicy || 'allowlist',
                       streaming: prev.streaming || { mode: 'progress' },
+                      // Voice — stt-tts mode using ElevenLabs for both
+                      // transcription (Scribe) and synthesis. Same API
+                      // key the `say` / talk skills already use.
+                      voice: prev.voice || {
+                        enabled: true,
+                        mode: 'stt-tts',
+                        realtime: { provider: 'elevenlabs' },
+                        tts: { provider: 'elevenlabs' },
+                      },
+                      intents: prev.intents || { voiceStates: true },
                       // Required nested schemas — empty objects accept all
                       // sub-field defaults.
                       markdown:      prev.markdown      || {},
