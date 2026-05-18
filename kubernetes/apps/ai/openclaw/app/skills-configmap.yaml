@@ -879,6 +879,10 @@ data:
     - **What to call him:** Mathias
     - **Pronouns:** he/him
     - **Timezone:** Europe/Berlin (CEST/CET)
+    - **Home / default location:** Schulstrasse 105, 65520 Bad Camberg,
+      Germany. Use this as the implicit "near here" anchor for
+      location queries (`goplaces`, weather, etc.) unless he specifies
+      somewhere else.
     - **Telegram chat id (DM):** 671676995
     - **Email:**
       - `mathiasuhl@gmx.de` (primary, GMX)
