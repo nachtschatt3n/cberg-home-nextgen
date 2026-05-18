@@ -574,7 +574,9 @@ spec:
                   target="$2"
                   marker="$3"
                   [ -f "$src" ] || return 0
-                  if [ ! -f "$target" ] || grep -qF "$marker" "$target"; then
+                  # `--` stops grep arg parsing — markers like "- Creature:"
+                  # start with a dash and were being read as flags.
+                  if [ ! -f "$target" ] || grep -qF -- "$marker" "$target"; then
                     cp "$src" "$target"
                     chown 1000:1000 "$target"
                     echo "Seeded workspace file: $(basename "$target")"
