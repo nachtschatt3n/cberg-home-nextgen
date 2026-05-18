@@ -136,14 +136,21 @@ data:
 
   ha.py: |
     #!/usr/bin/env python3
-    """Read-only Home Assistant client. Wraps hactl where it's clean; falls
-    back to the HA REST API otherwise. Usage:
+    """Home Assistant client. Read verbs are unrestricted; write verbs are
+    gated by an explicit domain whitelist enforced in code.
+
+    Read:
         ha state <entity_id>
         ha states [domain_filter]
         ha history <entity_id> [hours]
         ha areas
         ha devices
-    Refuses anything that would call a service or mutate state.
+
+    Write (whitelisted domains only):
+        ha call <domain>.<service> [entity_id] [json_data_on_stdin]
+
+    The agent must confirm with the user BEFORE invoking `ha call`.
+    See the SKILL.md for the protocol.
     """
     import json, os, subprocess, sys, urllib.parse, urllib.request
 
@@ -151,7 +158,28 @@ data:
     TOKEN = os.environ["HA_TOKEN"]
     HEADERS = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 
-    BLOCKED = {"call", "service", "trigger", "fire", "set_state", "post", "put", "delete"}
+    # Whitelisted service-call domains for ha call. Inside these domains all
+    # services are accepted (turn_on, toggle, set_temperature, etc.); the
+    # blast radius is bounded by what HA itself exposes for that domain.
+    WRITE_DOMAINS = {
+        "light", "switch", "scene", "climate", "fan", "cover", "lock",
+        "media_player", "vacuum", "button", "valve",
+        "input_boolean", "input_number", "input_select", "input_text",
+        "script", "notify",
+    }
+    # Explicitly blocked even if the user asks — these touch HA itself or
+    # have effects beyond a single device.
+    BLOCKED_DOMAINS = {
+        "homeassistant",       # restart, reload_*, etc.
+        "system_log",          # log fiddling
+        "persistent_notification",  # spam
+        "shell_command",       # arbitrary shell exec
+        "logger",              # log-level changes
+        "automation",          # config edits (trigger via script if needed)
+        "group",
+    }
+    # Legacy guard for older verbs that meant "agent tried to mutate".
+    LEGACY_BLOCKED_VERBS = {"service", "trigger", "fire", "set_state", "post", "put", "delete"}
 
     def _rest_get(path, params=None):
         url = f"{BASE}{path}"
@@ -160,6 +188,15 @@ data:
         req = urllib.request.Request(url, headers=HEADERS, method="GET")
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
+
+    def _rest_post(path, payload):
+        url = f"{BASE}{path}"
+        data = json.dumps(payload).encode()
+        h = {**HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(url, data=data, headers=h, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read()
+            return json.loads(body) if body else []
 
     def _hactl(*args):
         proc = subprocess.run(["hactl", *args], capture_output=True, text=True, timeout=30)
@@ -184,7 +221,6 @@ data:
         print(json.dumps(_rest_get(path, {"filter_entity_id": entity_id}), indent=2))
 
     def areas():
-        # Prefer hactl if present
         try:
             print(_hactl("get", "area"))
         except FileNotFoundError:
@@ -198,15 +234,50 @@ data:
             sys.stderr.write("hactl not installed; HA REST has no public devices endpoint\n")
             sys.exit(1)
 
+    def call(domain_service, entity_id=None):
+        """Invoke an HA service. Usage:
+            ha call <domain>.<service> [entity_id]   # extra JSON via stdin
+        Examples:
+            ha call light.turn_on light.kitchen
+            echo '{"brightness": 180}' | ha call light.turn_on light.kitchen
+            ha call scene.turn_on scene.movie_night
+        """
+        if "." not in domain_service:
+            sys.stderr.write("ha call expects <domain>.<service>, e.g. light.turn_on\n")
+            sys.exit(2)
+        domain, service = domain_service.split(".", 1)
+        if domain in BLOCKED_DOMAINS:
+            sys.stderr.write(f"refused: domain '{domain}' is permanently blocked (touches HA core / has wide blast radius)\n")
+            sys.exit(3)
+        if domain not in WRITE_DOMAINS:
+            sys.stderr.write(
+                f"refused: domain '{domain}' is not in the write whitelist. "
+                f"Allowed: {sorted(WRITE_DOMAINS)}\n"
+            )
+            sys.exit(3)
+        payload = {}
+        if not sys.stdin.isatty():
+            raw = sys.stdin.read().strip()
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    sys.stderr.write(f"ha call: invalid JSON on stdin: {e}\n")
+                    sys.exit(2)
+        if entity_id:
+            payload.setdefault("entity_id", entity_id)
+        result = _rest_post(f"/api/services/{domain}/{service}", payload)
+        print(json.dumps({"called": f"{domain}.{service}", "payload": payload, "result": result}, indent=2))
+
     def main():
         if len(sys.argv) < 2:
             print(__doc__); sys.exit(2)
         verb = sys.argv[1].lower()
-        if verb in BLOCKED:
-            sys.stderr.write(f"refused: '{verb}' would mutate HA state — read-only skill\n")
+        if verb in LEGACY_BLOCKED_VERBS:
+            sys.stderr.write(f"refused: '{verb}' is a legacy mutation verb — use `ha call <domain>.<service>` instead\n")
             sys.exit(3)
         dispatch = {"state": state, "states": states, "history": history,
-                    "areas": areas, "devices": devices}
+                    "areas": areas, "devices": devices, "call": call}
         if verb not in dispatch:
             print(__doc__); sys.exit(2)
         dispatch[verb](*sys.argv[2:])
@@ -765,7 +836,7 @@ data:
   skill-home-assistant.md: |
     ---
     name: home-assistant
-    description: Read-only access to the user's Home Assistant — entity states, device/area inventory, history. Use when the user asks about the smart home, sensor readings, who's home, what's open, recent device activity. NEVER call services or toggle anything.
+    description: Read and (with confirmation) control the user's Home Assistant — entity states, device/area inventory, history, plus whitelisted service calls (turn lights on/off, set scenes, adjust climate, run scripts). Use when the user asks about smart home state or wants to control devices.
     user-invocable: true
     ---
 
@@ -775,33 +846,86 @@ data:
 
     | CLI | Use for |
     | --- | --- |
-    | `ha` (Python wrapper) | Fast REST queries, also enforces a read-only verb filter. |
-    | `hactl` (kubectl-style) | Richer queries — devices, sensors, automations, dashboards. |
+    | `ha` (Python wrapper) | Fast REST queries + whitelisted service calls. |
+    | `hactl` (kubectl-style) | Richer read queries — devices, sensors, automations, dashboards. |
 
-    ## `ha` verbs
+    ## Read verbs (`ha`)
 
     | Command | Purpose |
     | --- | --- |
     | `ha state <entity_id>` | Current state + attributes for one entity. |
-    | `ha states [domain_filter]` | All states, optionally filtered (e.g. `ha states sensor`). |
+    | `ha states [domain_filter]` | All states, optionally filtered (e.g. `ha states light`). |
     | `ha history <entity_id> [hours]` | State changes over the last N hours (default 24). |
+    | `ha areas` | Area inventory (via `hactl`). |
+    | `ha devices` | Device inventory (via `hactl`). |
 
-    The `ha` skill refuses any verb that would mutate HA state
-    (`service`, `call`, `trigger`, `fire`, `set_state`, etc.).
+    ## Write verb (`ha call`) — CONFIRM FIRST
 
-    ## `hactl` highlights
+    ```
+    ha call <domain>.<service> [entity_id]    # extra JSON via stdin
+    ```
 
-    - `hactl get devices` — device inventory (manufacturer, area).
+    **Whitelisted domains** (everything else is refused with exit 3):
+
+    `light`, `switch`, `scene`, `climate`, `fan`, `cover`, `lock`,
+    `media_player`, `vacuum`, `button`, `valve`, `input_boolean`,
+    `input_number`, `input_select`, `input_text`, `script`, `notify`.
+
+    **Permanently blocked** (touches HA core / wide blast radius):
+
+    `homeassistant.*`, `system_log.*`, `persistent_notification.*`,
+    `shell_command.*`, `logger.*`, `automation.*` (config edits;
+    trigger via `script` if you need to), `group.*`.
+
+    ### Protocol — always confirm before invoking `ha call`
+
+    1. Resolve the entity (use `ha states light` if you need to find it).
+    2. Show Mathias the proposed command in chat as plain text, e.g.
+       `ha call light.turn_on light.kitchen` or
+       `echo '{"brightness":200}' | ha call light.turn_on light.kitchen`.
+    3. Wait for an affirmative reply ("yes", "go", "do it", a 👍, etc.).
+       Don't infer consent from the original "turn on the lights" request
+       alone — the user must approve the specific command you're about to
+       run. (Idiomatic exception: if Mathias says "just do it" or
+       "yes go ahead and skip confirms for lights tonight", honour that
+       within the same session.)
+    4. Execute the command, then summarise the result. If HA returned an
+       array of changed states (it does for turn_on/off), show which
+       entities flipped and to what.
+    5. If anything looks wrong (entity not found, service unavailable,
+       state didn't change), surface it; don't silently retry.
+
+    ### Examples
+
+    - "Turn on the kitchen light" →
+      1. `ha states light` to find `light.kitchen_*`.
+      2. Propose `ha call light.turn_on light.kitchen_main`.
+      3. Wait for "yes".
+      4. Run; confirm new state.
+
+    - "Set the living room to movie mode" →
+      1. `ha states scene` to find `scene.movie_*`.
+      2. Propose `ha call scene.turn_on scene.movie_night`.
+      3. Wait for "yes".
+      4. Run.
+
+    - "Dim the bedroom to 20%" →
+      1. Propose `echo '{"brightness_pct":20}' | ha call light.turn_on light.bedroom`.
+      2. Wait for "yes".
+
+    ## `hactl` (read-only by convention)
+
+    Use for richer inventory queries that the HA REST API doesn't expose
+    nicely:
+
+    - `hactl get devices` — device list with manufacturer/area.
     - `hactl get sensors [keyword]` — sensor lookup.
-    - `hactl get areas` — area list.
-    - `hactl get automations` — automations.
-    - `hactl get dashboards` — dashboards.
+    - `hactl get automations` — list automations.
+    - `hactl get dashboards` — Lovelace dashboards.
 
-    ## Strict read-only
-
-    Never call HA services, never toggle entities, never enable/disable
-    automations, never change state. Even though `hactl` *could* do
-    those things, this agent must not.
+    `hactl` *can* mutate HA (it's a full admin CLI) but this skill uses
+    it only for read queries. Don't shell out to `hactl call` / similar
+    write verbs — go through `ha call` instead so the whitelist applies.
 
   # ----- Workspace persona files seeded into ~/clawd/ -----
   # Idempotently overwrites only the openclaw bootstrap placeholder.
