@@ -93,34 +93,37 @@ spec:
                   git openssh-client ca-certificates curl sudo \
                   libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
 
-                # tmux + ripgrep need to land in the PVC because they're
-                # used at runtime by openclaw skills. apt-installs in this
-                # init container don't propagate to the runtime container
-                # (different overlay), so extract the .debs into
+                # tmux + ripgrep need to land in the PVC because apt-installs
+                # in this init container don't propagate to the runtime
+                # container (different overlay). Extract the .debs into
                 # /home/node/.openclaw/runtime-extras/ and add that to
                 # PATH + LD_LIBRARY_PATH at runtime.
+                #
+                # NOTE: BIN_DIR isn't defined yet at this point in the
+                # script, so use the explicit path. Symlinks get created
+                # later, after BIN_DIR is established.
                 echo "Staging tmux + ripgrep into PVC runtime-extras..."
                 RUNTIME_EXTRAS=/home/node/.openclaw/runtime-extras
                 rm -rf "$RUNTIME_EXTRAS"
                 mkdir -p "$RUNTIME_EXTRAS"
                 DEB_TMP=$(mktemp -d)
-                cd "$DEB_TMP"
-                # Download tmux + ripgrep AND their critical runtime deps.
-                # node:22-bookworm has libc / libtinfo / libgcc already;
-                # libutempter0 and libevent-2.1-7 are tmux-specific.
-                apt-get download tmux ripgrep libutempter0 libevent-2.1-7 libevent-core-2.1-7 2>/dev/null || true
-                for deb in *.deb; do
-                  [ -f "$deb" ] || continue
-                  dpkg -x "$deb" "$RUNTIME_EXTRAS"
-                done
-                cd "$HOME"
+                pushd "$DEB_TMP" >/dev/null
+                # Tolerate partial-fail apt-get download; we'll extract whatever
+                # actually landed.
+                ( apt-get download tmux ripgrep libutempter0 libevent-2.1-7 libevent-core-2.1-7 || true ) >/dev/null 2>&1
+                # Use shopt-nullglob equivalent (set +e + explicit check) so
+                # an empty glob doesn't trip set -e.
+                deb_files=$(ls *.deb 2>/dev/null || true)
+                if [ -n "$deb_files" ]; then
+                  for deb in $deb_files; do
+                    dpkg -x "$deb" "$RUNTIME_EXTRAS" || echo "WARN: dpkg -x $deb failed"
+                  done
+                  echo "Staged $(echo "$deb_files" | wc -w) .debs into $RUNTIME_EXTRAS"
+                else
+                  echo "WARN: no .debs downloaded for tmux/ripgrep — skipping stage"
+                fi
+                popd >/dev/null
                 rm -rf "$DEB_TMP"
-                # Symlink the bins into the existing BIN_DIR so PATH picks them up
-                for bin in rg tmux; do
-                  if [ -x "$RUNTIME_EXTRAS/usr/bin/$bin" ]; then
-                    ln -sf "$RUNTIME_EXTRAS/usr/bin/$bin" "$BIN_DIR/$bin"
-                  fi
-                done
 
                 echo "Configuring passwordless sudo for node user..."
                 useradd -u 1000 -m -s /bin/bash node || true
@@ -133,6 +136,14 @@ spec:
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
                 rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
+                # Symlink the runtime-extras bins (tmux/rg) into BIN_DIR so
+                # PATH resolves them at runtime.
+                for bin in rg tmux; do
+                  if [ -x "/home/node/.openclaw/runtime-extras/usr/bin/$bin" ]; then
+                    ln -sf "/home/node/.openclaw/runtime-extras/usr/bin/$bin" "$BIN_DIR/$bin"
+                    echo "Linked $bin from runtime-extras"
+                  fi
+                done
 
                 echo "Installing kubectl..."
                 # Use a known stable version as fallback if latest check fails
