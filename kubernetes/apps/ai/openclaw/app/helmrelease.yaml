@@ -324,6 +324,10 @@ spec:
                 install_npm sag
                 install_npm playwright
                 install_npm @playwright/mcp
+                # Discord channel plugin: split out of openclaw core into
+                # @openclaw/discord. Provides the actual Discord Gateway
+                # WebSocket client that connects with the bot token.
+                install_npm @openclaw/discord
 
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
