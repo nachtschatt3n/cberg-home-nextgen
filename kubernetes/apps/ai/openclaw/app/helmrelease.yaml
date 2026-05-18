@@ -305,9 +305,9 @@ spec:
                 install_npm openclaw@latest
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
-                install_npm claude
+                install_npm @anthropic-ai/claude-code
                 install_npm @mariozechner/pi-coding-agent
-                install_npm clawdhub
+                install_npm clawhub
                 install_npm mcporter
                 # NOTE: There's a same-named npm package by Cesar Ferreira
                 # ("Quickly uninstall android apps") that has nothing to do
