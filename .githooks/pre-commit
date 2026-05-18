@@ -89,10 +89,18 @@ SKIP_TYPES = {
 #   OLLAMA_BASE_URL              verbatim in helmreleases and CLAUDE.md. The
 #                                companion API key lives in OPENAI_ACCESS_TOKEN
 #                                / OPENAI_API_KEY, which are scanned normally.
+#   TELEGRAM_ALLOWED_USERS      — comma-separated public Telegram user IDs
+#                                (numeric chat IDs are public — visible to
+#                                anyone the user has messaged). Bot token
+#                                is in TELEGRAM_BOT_TOKEN, scanned normally.
+#   SECRET_ICLOUD_USERNAME,     — usernames/emails for paired-credential
+#   *_USERNAME                    accounts. Passwords live in the matching
+#                                _PASSWORD / _TOKEN keys, scanned normally.
 SKIP_KEY_NAMES = {
     "TIMEZONE", "TZ", "tz", "timezone", "ca.crt",
     "username", "repository", "repo", "org", "organization", "image",
     "OPENAI_URI_BASE", "OPENAI_BASE", "OLLAMA_BASE", "OLLAMA_BASE_URL",
+    "TELEGRAM_ALLOWED_USERS", "SECRET_ICLOUD_USERNAME",
 }
 # Pure-lowercase dictionary-like words (no digits, no special chars) — these
 # overlap with common technical terms (postgres, authentik, placeholder, etc.)
