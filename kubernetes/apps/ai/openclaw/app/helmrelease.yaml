@@ -246,7 +246,9 @@ spec:
 
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
-                install_pip himalaya
+                # himalaya was installed for the early IMAP-direct mail
+                # bridge; superseded by the NC Mail REST `mail` skill.
+                # Dropping the install to shave ~30s off cold-start.
                 install_pip openai-whisper
                 install_pip "git+https://github.com/nachtschatt3n/hactl.git@v1.1.1"
 
@@ -543,7 +545,29 @@ spec:
                   echo "Seeded workspace skills: $(ls /home/node/clawd/skills/ 2>/dev/null | tr '\n' ' ')"
                 fi
 
-                # 5. Codex CLI sandbox tuning.
+                # 5. Seed workspace persona files. Only overwrites files
+                #    that still match the openclaw bootstrap placeholder
+                #    signature — once the user (or the agent itself) has
+                #    edited them, leave them alone.
+                seed_workspace_file() {
+                  src="$1"
+                  target="$2"
+                  marker="$3"
+                  [ -f "$src" ] || return 0
+                  if [ ! -f "$target" ] || grep -qF "$marker" "$target"; then
+                    cp "$src" "$target"
+                    chown 1000:1000 "$target"
+                    echo "Seeded workspace file: $(basename "$target")"
+                  fi
+                }
+                seed_workspace_file /etc/openclaw-skills/workspace-soul.md      /home/node/clawd/SOUL.md      "Describe who the assistant is, tone, and boundaries."
+                seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "- Creature:"
+                seed_workspace_file /etc/openclaw-skills/workspace-user.md      /home/node/clawd/USER.md      "- Preferred address:"
+                seed_workspace_file /etc/openclaw-skills/workspace-tools.md     /home/node/clawd/TOOLS.md     "### imsg"
+                seed_workspace_file /etc/openclaw-skills/workspace-agents.md    /home/node/clawd/AGENTS.md    "If you refer to the home lab"
+                seed_workspace_file /etc/openclaw-skills/workspace-heartbeat.md /home/node/clawd/HEARTBEAT.md "Optional: keep a tiny checklist"
+
+                # 6. Codex CLI sandbox tuning.
                 #
                 # The codex-cli backend hard-codes `--sandbox workspace-write`,
                 # which uses bubblewrap to set up an unprivileged user
