@@ -522,11 +522,34 @@ spec:
                   // Update models
                   cfg.models = cfg.models || {};
                   cfg.models.providers = cfg.models.providers || {};
-                  cfg.models.providers.ollama = {
-                    baseUrl: ollamaBase,
-                    apiKey: ollamaKey,
-                    api: 'openai-completions',
-                    models: [{
+                  // Register the local Ollama catalog. Models are picked at
+                  // runtime via `openclaw models set ollama/<id>` (or by the
+                  // agent itself on Mathias's request). Default stays
+                  // openai/gpt-5.5 via OPENCLAW_DEFAULT_MODEL.
+                  const ollamaModels = [
+                    {
+                      id: 'gemma4:26b',
+                      name: 'Gemma 4 (26B, quality)',
+                      reasoning: false,
+                      input: ['text'],
+                      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                      contextWindow: 32768,
+                      maxTokens: 4096,
+                    },
+                    {
+                      id: 'gemma4:e2b',
+                      name: 'Gemma 4 (e2B, fast small)',
+                      reasoning: false,
+                      input: ['text'],
+                      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                      contextWindow: 32768,
+                      maxTokens: 4096,
+                    },
+                  ];
+                  // If OLLAMA_MODEL points at a model not in the static list,
+                  // also include it so old config keeps working.
+                  if (modelName && !ollamaModels.some((m) => m.id === modelName)) {
+                    ollamaModels.push({
                       id: modelName,
                       name: modelName,
                       reasoning: false,
@@ -534,8 +557,22 @@ spec:
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                       contextWindow: 32768,
                       maxTokens: 4096,
-                    }],
+                    });
+                  }
+                  cfg.models.providers.ollama = {
+                    baseUrl: ollamaBase,
+                    apiKey: ollamaKey,
+                    api: 'openai-completions',
+                    models: ollamaModels,
                   };
+                  // Surface the ollama models in agents.defaults.models so
+                  // they show up as "configured" alongside openai/gpt-5.5
+                  // (openclaw models list / pickers honour this).
+                  cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                  for (const m of ollamaModels) {
+                    const ref = `ollama/$${m.id}`;
+                    cfg.agents.defaults.models[ref] = cfg.agents.defaults.models[ref] || {};
+                  }
 
                   // The codex CLI backend is registered automatically by
                   // the bundled openai plugin (see extensions/openai/

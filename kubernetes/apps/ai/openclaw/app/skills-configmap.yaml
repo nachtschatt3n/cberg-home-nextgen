@@ -1119,6 +1119,24 @@ data:
     Network access is enabled and full env is inherited, so the
     skills above can reach their APIs.
 
+    ### Model switching
+    Default is `openai/gpt-5.5` (Mathias's ChatGPT subscription via
+    codex CLI). Configured alternates:
+
+    - `ollama/gemma4:26b` — local, quality, ~10 tok/s
+    - `ollama/gemma4:e2b` — local, fast/small
+
+    If Mathias asks to switch models ("use the small local one",
+    "switch to gemma 26b", "go back to GPT"), run from the shell:
+
+    ```bash
+    openclaw models set <ref>     # e.g. ollama/gemma4:e2b
+    openclaw models status        # confirm
+    ```
+
+    The change applies to subsequent agent turns. Mention which
+    model you switched to and that further replies will use it.
+
   workspace-heartbeat.md: |
     # HEARTBEAT.md
 
