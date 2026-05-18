@@ -307,6 +307,11 @@ spec:
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
                 install_npm @mariozechner/pi-coding-agent
+                # Remove the leftover `clawdhub` symlink/bin from the prior
+                # typo-installed package so npm's EEXIST check passes when
+                # the real `clawhub` package wants to write its binary.
+                rm -f /home/node/.openclaw/bin/clawdhub
+                rm -rf /home/node/.openclaw/lib/node_modules/clawdhub
                 install_npm clawhub
                 install_npm mcporter
                 # NOTE: There's a same-named npm package by Cesar Ferreira
@@ -545,16 +550,40 @@ spec:
                     ...(cfg.talk.providers.elevenlabs || {}),
                   };
 
-                  // Discord channel wiring temporarily removed — the
-                  // schema rejected my keys with "must NOT have additional
-                  // properties". Re-add after introspecting the live
-                  // schema from a healthy pod. Bot token stays in env
-                  // (DISCORD_BOT_TOKEN) for the future re-add.
-                  // Drop any prior malformed discord block so the gateway
-                  // can start.
-                  if (cfg.channels && cfg.channels.discord) {
+                  // Discord channel — strict schema, key is `token` (not
+                  // `botToken`), and several nested schemas (markdown,
+                  // commands, retry, heartbeat, healthMonitor, ui) are
+                  // required and must be present even when empty.
+                  if (process.env.DISCORD_BOT_TOKEN) {
+                    cfg.channels = cfg.channels || {};
+                    const prev = (cfg.channels && cfg.channels.discord) || {};
+                    cfg.channels.discord = {
+                      enabled: prev.enabled !== false,
+                      token: prev.token || process.env.DISCORD_BOT_TOKEN,
+                      applicationId: prev.applicationId || '1506013623930060840',
+                      dmPolicy: prev.dmPolicy || 'pairing',
+                      groupPolicy: prev.groupPolicy || 'allowlist',
+                      streaming: prev.streaming || { mode: 'progress' },
+                      // Required nested schemas — empty objects accept all
+                      // sub-field defaults.
+                      markdown:      prev.markdown      || {},
+                      commands:      prev.commands      || {},
+                      retry:         prev.retry         || {},
+                      heartbeat:     prev.heartbeat     || {},
+                      healthMonitor: prev.healthMonitor || {},
+                      ui:            prev.ui            || {},
+                    };
+                  } else if (cfg.channels && cfg.channels.discord) {
                     delete cfg.channels.discord;
                   }
+
+                  // Enable the coding-agent skill — all binaries (claude,
+                  // codex, opencode, pi) are present; just needs config
+                  // opt-in.
+                  cfg.skills = cfg.skills || {};
+                  cfg.skills.entries = cfg.skills.entries || {};
+                  cfg.skills.entries['coding-agent'] = cfg.skills.entries['coding-agent'] || {};
+                  cfg.skills.entries['coding-agent'].enabled = true;
 
                   delete cfg.model;
 
