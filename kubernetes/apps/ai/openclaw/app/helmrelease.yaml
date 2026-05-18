@@ -590,13 +590,20 @@ spec:
                   cfg.skills.entries['coding-agent'].enabled = true;
 
                   // Enable the discord plugin (@openclaw/discord) — installed
-                  // separately above. Without this entry the plugin loader
-                  // skips it even though channels.discord is configured.
+                  // separately above. The loader only scans openclaw's own
+                  // dist/extensions by default; external @openclaw/* npm
+                  // packages need to be added to plugins.load.paths AND
+                  // toggled on via plugins.entries.<id>.enabled.
                   if (process.env.DISCORD_BOT_TOKEN) {
                     cfg.plugins = cfg.plugins || {};
                     cfg.plugins.entries = cfg.plugins.entries || {};
                     cfg.plugins.entries.discord = cfg.plugins.entries.discord || {};
                     cfg.plugins.entries.discord.enabled = true;
+                    cfg.plugins.load = cfg.plugins.load || {};
+                    const discordPath = '/home/node/.openclaw/lib/node_modules/@openclaw/discord';
+                    const paths = new Set(cfg.plugins.load.paths || []);
+                    paths.add(discordPath);
+                    cfg.plugins.load.paths = [...paths];
                   }
 
                   delete cfg.model;
