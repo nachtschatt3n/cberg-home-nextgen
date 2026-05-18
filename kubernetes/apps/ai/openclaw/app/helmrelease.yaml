@@ -595,9 +595,13 @@ spec:
                       // /admin or by editing openclaw.json (hot-reloaded).
                       guilds: prev.guilds || {
                         '1506017470270672926': {
+                          // Voice channel allowlist (channel-level enabled flag)
                           channels: {
                             '1506017471289626658': { enabled: true },
                           },
+                          // Command-owner allowlist: who can run /vc, /admin, etc.
+                          // resolveDiscordOwnerAllowFrom reads guilds.<id>.users.
+                          users: ['discord:201513928621162507'],
                         },
                       },
                       // Required nested schemas — empty objects accept all
