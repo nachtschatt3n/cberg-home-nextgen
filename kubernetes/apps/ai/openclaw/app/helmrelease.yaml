@@ -91,7 +91,8 @@ spec:
                   python3 python3-pip python3-venv python3-dev \
                   build-essential pkg-config \
                   git openssh-client ca-certificates curl sudo \
-                  libatlas-base-dev libopenblas-dev libssl-dev libffi-dev
+                  libatlas-base-dev libopenblas-dev libssl-dev libffi-dev \
+                  tmux ripgrep
 
                 echo "Configuring passwordless sudo for node user..."
                 useradd -u 1000 -m -s /bin/bash node || true
