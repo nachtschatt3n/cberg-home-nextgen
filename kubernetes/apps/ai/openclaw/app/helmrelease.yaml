@@ -545,19 +545,15 @@ spec:
                     ...(cfg.talk.providers.elevenlabs || {}),
                   };
 
-                  // Discord channel — seed from DISCORD_BOT_TOKEN env var on
-                  // first boot. Once written, openclaw owns the field (a
-                  // runtime `/discord` rotation would persist there). Same
-                  // dmPolicy/groupPolicy pattern as telegram: pairing for
-                  // DMs, allowlist for guild channels.
-                  if (process.env.DISCORD_BOT_TOKEN) {
-                    cfg.channels = cfg.channels || {};
-                    cfg.channels.discord = cfg.channels.discord || {};
-                    cfg.channels.discord.enabled = cfg.channels.discord.enabled !== false;
-                    cfg.channels.discord.botToken = cfg.channels.discord.botToken || process.env.DISCORD_BOT_TOKEN;
-                    cfg.channels.discord.dmPolicy = cfg.channels.discord.dmPolicy || 'pairing';
-                    cfg.channels.discord.groupPolicy = cfg.channels.discord.groupPolicy || 'allowlist';
-                    cfg.channels.discord.streaming = cfg.channels.discord.streaming || { mode: 'progress' };
+                  // Discord channel wiring temporarily removed — the
+                  // schema rejected my keys with "must NOT have additional
+                  // properties". Re-add after introspecting the live
+                  // schema from a healthy pod. Bot token stays in env
+                  // (DISCORD_BOT_TOKEN) for the future re-add.
+                  // Drop any prior malformed discord block so the gateway
+                  // can start.
+                  if (cfg.channels && cfg.channels.discord) {
+                    delete cfg.channels.discord;
                   }
 
                   delete cfg.model;
