@@ -229,6 +229,17 @@ spec:
                   fi
                 }
 
+                # Clean up any leftover backup-rename dirs from a prior
+                # interrupted npm install (ENOTEMPTY: directory not empty).
+                # Those orphan .openclaw-XXXX-style hidden dirs make npm
+                # refuse to update openclaw and other globals.
+                find /home/node/.openclaw/lib/node_modules -maxdepth 1 \
+                  -type d -name '.[a-z]*-*' -mmin +1 -exec rm -rf {} + 2>/dev/null || true
+                find /home/node/.openclaw/lib/node_modules/@openai -maxdepth 1 \
+                  -type d -name '.[a-z]*-*' -mmin +1 -exec rm -rf {} + 2>/dev/null || true
+                find /home/node/.openclaw/lib/node_modules/@playwright -maxdepth 1 \
+                  -type d -name '.[a-z]*-*' -mmin +1 -exec rm -rf {} + 2>/dev/null || true
+
                 install_npm openclaw@latest
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
@@ -271,8 +282,17 @@ spec:
 
                 echo "Creating symlink..."
                 ln -sf /home/node/.openclaw/bin/openclaw /home/node/.openclaw/openclaw
-                echo "OpenClaw installed at: /home/node/.openclaw/bin/openclaw"
-                /home/node/.openclaw/bin/openclaw --version
+                # Don't `set -e`-abort if the version check fails — the
+                # runtime container will surface a clearer error if the
+                # bin is actually missing, and a transient npm flake here
+                # shouldn't kill the whole init.
+                if [ -x /home/node/.openclaw/bin/openclaw ]; then
+                  echo "OpenClaw installed at: /home/node/.openclaw/bin/openclaw"
+                  /home/node/.openclaw/bin/openclaw --version || \
+                    echo "WARN: openclaw --version failed (continuing)"
+                else
+                  echo "WARN: /home/node/.openclaw/bin/openclaw missing — npm install probably failed; runtime will retry"
+                fi
                 echo "Seeding Ollama auth profile..."
                 AUTH_DIR="/home/node/.openclaw/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
