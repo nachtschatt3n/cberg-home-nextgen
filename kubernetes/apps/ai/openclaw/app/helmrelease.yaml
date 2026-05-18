@@ -584,22 +584,28 @@ spec:
                       // Voice — stt-tts mode using ElevenLabs for both
                       // transcription (Scribe) and synthesis. Same API
                       // key the `say` / talk skills already use.
-                      voice: prev.voice || {
+                      // Voice config — merge defaults under any prior
+                      // values so we can roll new keys (like bargeIn or
+                      // captureSilenceGraceMs) into an existing setup
+                      // without wiping user-set overrides.
+                      voice: {
                         enabled: true,
                         mode: 'stt-tts',
-                        // STT via ElevenLabs Scribe (realtime websocket).
+                        // Trim default ~1s silence-detection wait before
+                        // STT fires (snappier turn-taking).
+                        captureSilenceGraceMs: 400,
+                        ...(prev.voice || {}),
                         realtime: {
                           provider: 'elevenlabs',
                           bargeIn: true,           // user can interrupt the bot
                           minBargeInAudioEndMs: 200,
                           debounceMs: 250,
+                          ...((prev.voice || {}).realtime || {}),
                         },
-                        // TTS via ElevenLabs streaming (always on in this build).
-                        tts: { provider: 'elevenlabs' },
-                        // Trim default ~1s silence-detection wait before STT
-                        // fires. 400ms = snappier turn-taking; raise back to
-                        // 800-1000 if you find it cuts off mid-sentence.
-                        captureSilenceGraceMs: 400,
+                        tts: {
+                          provider: 'elevenlabs',
+                          ...((prev.voice || {}).tts || {}),
+                        },
                       },
                       intents: prev.intents || { voiceStates: true },
                       // Guild/voice-channel allowlist. groupPolicy=allowlist
