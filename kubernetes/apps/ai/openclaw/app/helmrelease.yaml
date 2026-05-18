@@ -588,6 +588,18 @@ spec:
                         tts: { provider: 'elevenlabs' },
                       },
                       intents: prev.intents || { voiceStates: true },
+                      // Guild/voice-channel allowlist. groupPolicy=allowlist
+                      // refuses voice in any channel that isn't explicitly
+                      // enabled here. cbergs-home-server / General is wired
+                      // by default; add more guilds/channels at runtime via
+                      // /admin or by editing openclaw.json (hot-reloaded).
+                      guilds: prev.guilds || {
+                        '1506017470270672926': {
+                          channels: {
+                            '1506017471289626658': { enabled: true },
+                          },
+                        },
+                      },
                       // Required nested schemas — empty objects accept all
                       // sub-field defaults.
                       markdown:      prev.markdown      || {},
