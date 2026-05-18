@@ -589,6 +589,16 @@ spec:
                   cfg.skills.entries['coding-agent'] = cfg.skills.entries['coding-agent'] || {};
                   cfg.skills.entries['coding-agent'].enabled = true;
 
+                  // Enable the discord plugin (@openclaw/discord) — installed
+                  // separately above. Without this entry the plugin loader
+                  // skips it even though channels.discord is configured.
+                  if (process.env.DISCORD_BOT_TOKEN) {
+                    cfg.plugins = cfg.plugins || {};
+                    cfg.plugins.entries = cfg.plugins.entries || {};
+                    cfg.plugins.entries.discord = cfg.plugins.entries.discord || {};
+                    cfg.plugins.entries.discord.enabled = true;
+                  }
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
