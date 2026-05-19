@@ -30,7 +30,12 @@ export SWEEP_TRIGGER="${SWEEP_TRIGGER:-cron}"
 echo "==> sweep-collector starting"
 echo "    cycle_id : ${SWEEP_CYCLE_ID}"
 echo "    trigger  : ${SWEEP_TRIGGER}"
-echo "    pg_dsn   : ${SWEEP_PG_DSN:+(set)}${SWEEP_PG_DSN:-(MISSING)}"
+# Never echo the DSN value itself — only confirm whether it's set.
+if [ -n "${SWEEP_PG_DSN:-}" ]; then
+    echo "    pg_dsn   : (set, ${#SWEEP_PG_DSN}c)"
+else
+    echo "    pg_dsn   : (MISSING — sweep will skip Postgres writes)"
+fi
 echo ""
 
 run_doc()      { echo "==> doc-check.py";          python3 runbooks/doc-check.py; }
