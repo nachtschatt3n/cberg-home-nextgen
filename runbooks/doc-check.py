@@ -79,7 +79,9 @@ OK       = "🟢"
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT  = SCRIPT_DIR.parent
-OUTPUT     = SCRIPT_DIR / "doc-check-current.md"
+# Snapshot path defaults to runbooks/X-current.md, overridable via env so
+# the in-cluster collector (read-only rootfs) can redirect to /tmp.
+OUTPUT     = Path(os.environ.get("SWEEP_SNAPSHOTS_DIR", str(SCRIPT_DIR))) / "doc-check-current.md"
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -90,7 +90,9 @@ ACCEPTED = "🛡️"
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT  = SCRIPT_DIR.parent
-OUTPUT     = SCRIPT_DIR / "security-check-current.md"
+# Snapshot path defaults to runbooks/X-current.md, overridable via env so
+# the in-cluster collector (read-only rootfs) can redirect to /tmp.
+OUTPUT     = Path(os.environ.get("SWEEP_SNAPSHOTS_DIR", str(SCRIPT_DIR))) / "security-check-current.md"
 ACCEPTED_RISKS_DOC = REPO_ROOT / "docs" / "security-accepted-risks.md"
 
 # Make `runbooks/lib/...` importable when invoked from any CWD.

@@ -2214,8 +2214,10 @@ def main(argv: list[str] | None = None):
     # Generate report
     report = checker.generate_markdown_report()
 
-    # Write to file
-    output_file = repo_root / "runbooks" / "version-check-current.md"
+    # Write to file. Snapshot dir is overridable via env so the in-cluster
+    # collector (read-only rootfs) can redirect to /tmp.
+    snapshots_dir = Path(os.environ.get("SWEEP_SNAPSHOTS_DIR", str(repo_root / "runbooks")))
+    output_file = snapshots_dir / "version-check-current.md"
     with open(output_file, 'w') as f:
         f.write(report)
 

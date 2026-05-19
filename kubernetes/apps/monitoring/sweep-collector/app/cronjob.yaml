@@ -58,6 +58,12 @@ spec:
                     secretKeyRef:
                       name: sweep-collector
                       key: SWEEP_PG_DSN
+                # Redirect *-current.md snapshots to a writable mount — the
+                # rootfs is read-only by design (allowPrivilegeEscalation: false,
+                # readOnlyRootFilesystem: true). The DB is the canonical store
+                # of findings; the markdown snapshots are debug-only here.
+                - name: SWEEP_SNAPSHOTS_DIR
+                  value: /tmp/snapshots
                 # When set, check-all-versions uses authenticated API
                 # (5000 req/h instead of 60). Optional — falls back gracefully.
                 - name: GITHUB_TOKEN
@@ -80,6 +86,7 @@ spec:
               volumeMounts:
                 # Writable /tmp for the audit scripts' transient files
                 # (health-check.sh writes to /tmp/health-check-*.txt).
+                # Also hosts /tmp/snapshots/ via SWEEP_SNAPSHOTS_DIR.
                 - name: tmp
                   mountPath: /tmp
           volumes:
