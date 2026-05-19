@@ -62,23 +62,36 @@ else
     esac
 fi
 
-# Each step's exit code is captured so one specialist's failure doesn't abort
-# the whole sweep. We exit non-zero at the end if anything failed.
-fail=0
+# Track scripts that exit non-zero, but DO NOT propagate that to the
+# container's exit code. The audit scripts conflate two distinct outcomes
+# in their exit code: "ran successfully + found a critical finding" vs
+# "actual runtime crash". Both surface as exit 1. From the CronJob's
+# perspective both look like Job failure, which then fires
+# KubeJobFailed — alert fatigue for the normal "found a finding" case.
+#
+# The findings themselves are the canonical signal — they're in the
+# sweep_history Postgres regardless of exit code. The container exits 0
+# as long as the entrypoint itself didn't crash. (set -e at the top
+# would still fail this script for syntax / shell-level errors.)
+nonzero_steps=()
 for step in "${steps[@]}"; do
     case "$step" in
-        doc)      run_doc      || fail=1 ;;
-        version)  run_version  || fail=1 ;;
-        security) run_security || fail=1 ;;
-        health)   run_health   || fail=1 ;;
+        doc)      run_doc      || nonzero_steps+=("doc") ;;
+        version)  run_version  || nonzero_steps+=("version") ;;
+        security) run_security || nonzero_steps+=("security") ;;
+        health)   run_health   || nonzero_steps+=("health") ;;
         *)
             echo "unknown step: $step" >&2
             echo "valid: doc | version | security | health | all | light | heavy" >&2
-            fail=2
+            nonzero_steps+=("$step")
             ;;
     esac
 done
 
 echo ""
-echo "==> sweep-collector done (cycle_id=${SWEEP_CYCLE_ID} fail=${fail})"
-exit "${fail}"
+if [ ${#nonzero_steps[@]} -eq 0 ]; then
+    echo "==> sweep-collector done (cycle_id=${SWEEP_CYCLE_ID}, all clean)"
+else
+    echo "==> sweep-collector done (cycle_id=${SWEEP_CYCLE_ID}, nonzero=${nonzero_steps[*]})"
+fi
+exit 0

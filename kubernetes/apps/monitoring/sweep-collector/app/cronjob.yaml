@@ -25,7 +25,10 @@ spec:
   startingDeadlineSeconds: 300
   jobTemplate:
     spec:
-      backoffLimit: 1
+      # Retries don't help here: scripts are deterministic, and a Pod that
+      # fails will fail the same way next time. Retry storms also magnify
+      # KubeJobFailed alert noise.
+      backoffLimit: 0
       ttlSecondsAfterFinished: 86400  # 24h — gives operator a window to read logs
       template:
         metadata:
