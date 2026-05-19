@@ -1,0 +1,105 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sweep-history-schema
+  namespace: databases
+data:
+  bootstrap.sh: |
+    #!/usr/bin/env bash
+    # Idempotent bootstrap of sweep-history DB on the shared postgresql instance.
+    # Runs as the postgres admin user. Safe to re-run on every Flux reconcile.
+    set -euo pipefail
+
+    : "${PGHOST:?PGHOST required}"
+    : "${PGUSER:?PGUSER required}"
+    : "${PGPASSWORD:?PGPASSWORD required}"
+    : "${SWEEP_WRITER_PASSWORD:?SWEEP_WRITER_PASSWORD required}"
+    : "${SWEEP_READER_PASSWORD:?SWEEP_READER_PASSWORD required}"
+
+    export PGCONNECT_TIMEOUT=10
+
+    psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
+    psql_sweep() { PGDATABASE=sweep_history psql -v ON_ERROR_STOP=1 "$@"; }
+
+    echo "==> Ensure roles exist (sweep_writer, sweep_reader)"
+    psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_writer'" | grep -q 1 \
+      || psql_admin -c "CREATE ROLE sweep_writer LOGIN"
+    psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_reader'" | grep -q 1 \
+      || psql_admin -c "CREATE ROLE sweep_reader LOGIN"
+    psql_admin -v writer_pw="${SWEEP_WRITER_PASSWORD}" \
+      -c "ALTER ROLE sweep_writer WITH PASSWORD :'writer_pw'"
+    psql_admin -v reader_pw="${SWEEP_READER_PASSWORD}" \
+      -c "ALTER ROLE sweep_reader WITH PASSWORD :'reader_pw'"
+
+    echo "==> Ensure database sweep_history exists (owner: sweep_writer)"
+    psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='sweep_history'" | grep -q 1 \
+      || psql_admin -c "CREATE DATABASE sweep_history OWNER sweep_writer"
+
+    echo "==> Apply schema migrations"
+    psql_sweep -f /sql/schema.sql
+
+    echo "==> Apply grants"
+    psql_sweep -c "GRANT CONNECT ON DATABASE sweep_history TO sweep_reader"
+    psql_sweep -c "GRANT USAGE ON SCHEMA public TO sweep_reader"
+    psql_sweep -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sweep_reader"
+    psql_sweep -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO sweep_reader"
+
+    echo "==> Done"
+
+  schema.sql: |
+    -- sweep-history schema v1
+    -- Idempotent — every statement uses IF NOT EXISTS or a guarded form.
+
+    CREATE TABLE IF NOT EXISTS sweep_cycles (
+      cycle_id    UUID PRIMARY KEY,
+      started_at  TIMESTAMPTZ NOT NULL,
+      finished_at TIMESTAMPTZ,
+      trigger     VARCHAR(16) NOT NULL,
+      git_head    VARCHAR(40),
+      verdict     VARCHAR(16),
+      notes       TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sweep_findings (
+      id              BIGSERIAL PRIMARY KEY,
+      finding_id      VARCHAR(32) NOT NULL,
+      fingerprint     VARCHAR(64) NOT NULL,
+      section         VARCHAR(32) NOT NULL,
+      severity        VARCHAR(16) NOT NULL,
+      title           TEXT        NOT NULL,
+      status          VARCHAR(32) NOT NULL,
+      action          TEXT,
+      evidence_path   TEXT,
+      first_seen      TIMESTAMPTZ NOT NULL,
+      last_seen       TIMESTAMPTZ NOT NULL,
+      resolved_at     TIMESTAMPTZ,
+      resolved_commit VARCHAR(40),
+      cycle_id        UUID        NOT NULL REFERENCES sweep_cycles(cycle_id),
+      metadata        JSONB
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_findings_open
+      ON sweep_findings(section, severity)
+      WHERE resolved_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_findings_fingerprint
+      ON sweep_findings(fingerprint);
+    CREATE INDEX IF NOT EXISTS idx_findings_first_seen
+      ON sweep_findings(first_seen);
+
+    CREATE TABLE IF NOT EXISTS slo_snapshots (
+      id                   BIGSERIAL PRIMARY KEY,
+      slo_name             VARCHAR(64) NOT NULL,
+      taken_at             TIMESTAMPTZ NOT NULL,
+      compliance_pct       NUMERIC(5,2),
+      target_pct           NUMERIC(5,2),
+      burn_rate_1h         NUMERIC,
+      burn_rate_6h         NUMERIC,
+      budget_remaining_pct NUMERIC(5,2),
+      window               VARCHAR(8),
+      source               VARCHAR(16),
+      raw_numerator        NUMERIC,
+      raw_denominator      NUMERIC
+    );
+    CREATE INDEX IF NOT EXISTS idx_slo_snapshots_name_time
+      ON slo_snapshots(slo_name, taken_at DESC);
