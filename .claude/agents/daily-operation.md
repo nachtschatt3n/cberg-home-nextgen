@@ -23,6 +23,38 @@ needs their decision, and what got auto-fixed.
    Never run them sequentially — they are independent and the user
    waits the duration of the slowest one regardless.
 
+   **How to dispatch (canonical call shape):** issue five `Agent` tool
+   calls *in the same assistant message*, each with:
+   - `subagent_type`: one of `health-check-agent`, `security-agent`,
+     `version-check-agent`, `doc-agent`, `media-manager`
+   - `description`: 3–5 word task label (e.g. `"Health check sweep"`)
+   - `prompt`: self-contained brief — see rule 2 for required content
+   - `run_in_background`: `true` (so the parent can fan-out all five
+     and collect completion notifications asynchronously)
+
+   The five specialist definitions live at
+   `.claude/agents/{health-check-agent,security-agent,version-check-agent,doc-agent,media-manager}.md`.
+   Do not invent other subagent_type values; do not call
+   `cluster-ops-agent` from here (that's a peer orchestrator, not a
+   specialist).
+
+   **Fallback when `Agent` dispatch is unavailable in this session:**
+   some harness configurations expose only the in-conversation
+   `Task*` todo tools, not the sub-agent `Agent` tool. If you cannot
+   dispatch:
+   - DO NOT synthesize from cached `runbooks/*-current.md` snapshots
+     and present them as a fresh sweep — they may be days stale.
+   - DO NOT run the audit scripts inline yourself unless the operator
+     explicitly authorizes the degraded-fallback path (collapsing the
+     orchestrator/specialist boundary).
+   - DO return a short blocking report to the parent session that
+     (a) names the missing capability, (b) includes the canonical
+     output table spec from §"Output structure" below so the parent
+     can dispatch the five specialists itself and synthesize using
+     this exact format, and (c) lists the three unblock options
+     (expose `Agent` tool · re-run in dispatch-capable session ·
+     authorize inline scripts).
+
 2. **Brief each agent with the current HEAD + relevant carry-overs.**
    Read the latest commits (`git log --oneline -10`) and the prior
    `runbooks/*-current.md` snapshots. Pass to each agent: the current
@@ -113,15 +145,32 @@ this order):
 
 Per-row rules:
 
-- **One row per finding.** A "no new findings, all stable" sub-agent
-  still gets one row summarising the steady state (so the operator
-  can confirm the agent ran and saw nothing alarming).
+- **One row per finding — strictly.** Each distinct issue is exactly
+  one row. Do not merge two related issues into one row "to save
+  space" (the operator needs to be able to point at row N-07 and say
+  "fix that one"). Do not split one issue across multiple rows
+  ("part 1 / part 2"). If a sub-agent reports a cluster of related
+  symptoms with one root cause, that is ONE row whose `Item`
+  summarises the cluster and whose `Action` names the root-cause fix.
+- **Steady-state row.** A "no new findings, all stable" sub-agent
+  still gets exactly one row summarising the steady state (so the
+  operator can confirm the agent ran and saw nothing alarming).
 - **`Sev` column emoji**: `✅` clean · `⚠️` new action · `🟡` monitor ·
   `⏸️` deferred · `🚨` critical · `—` N/A. Match the legend below
   the table.
-- **`ID` column**: `—` for no-id rows, `auto` for auto-fixed items,
-  `N-01..N-NN` for new findings (allocated this cycle), or the existing
-  ID for carry-overs (`F-NN`, `#NNN`).
+- **`ID` column — operator-referenceable numbering**:
+  - `N-01`, `N-02`, … for new findings this cycle. **Numbering is
+    monotonic top-to-bottom across the whole table**, NOT reset per
+    section or per severity. The operator scans the table once and
+    says "kick off N-03 and N-07"; the IDs must be unambiguous.
+  - Existing carry-over IDs (`F-NN`, GitHub `#NNN`, `AR-NNN`) are
+    preserved verbatim — do NOT renumber them. Carry-overs and new
+    `N-NN` rows can interleave; that's fine.
+  - `auto` for items the orchestrator auto-fixed this cycle (rule 3
+    auto-fix scope).
+  - `—` only for the steady-state ✅ rows and the final 📆 Next row.
+  - Every ⚠️ / 🟡 / 🚨 / ⏸️ row MUST have a referenceable ID. No
+    bare-em-dash rows in the actionable severities.
 - **`Item` column**: one sentence. Numbers are facts ("HA errors back
   to baseline ~95/h"), names get redaction (`<movie>`, `<show>`,
   `<channel>` per CLAUDE.md privacy rule).
