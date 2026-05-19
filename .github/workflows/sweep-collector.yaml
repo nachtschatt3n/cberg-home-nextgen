@@ -1,0 +1,73 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: sweep-collector image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "containers/sweep-collector/**"
+      - "runbooks/**"
+      - "requirements.txt"
+      - ".github/workflows/sweep-collector.yaml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish (default: short SHA)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/sweep-collector
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Lowercase repo owner
+        id: owner
+        run: echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=sha-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/sweep-collector/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/sweep-collector:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/sweep-collector:latest
+          # Cache between runs so subsequent rebuilds are fast.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
