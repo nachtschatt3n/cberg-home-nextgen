@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ finding_id }}{% endblock %}
+
+{% block content %}
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+  <div class="mb-4">
+    <a href="/findings" class="text-blue-600 hover:underline text-sm">← all findings</a>
+  </div>
+  <h1 class="text-2xl font-semibold mb-1">
+    <code class="font-mono">{{ finding_id }}</code>
+  </h1>
+  {% set latest = history[0] %}
+  <p class="text-sm text-gray-500 mb-4">
+    {{ sec_emoji(latest.section) }} {{ latest.section }} ·
+    <span class="px-2 py-0.5 rounded text-xs sev-{{ latest.severity }}">{{ s_emoji(latest.severity) }} {{ latest.severity }}</span>
+    · last seen <time datetime="{{ latest.last_seen.isoformat() }}">{{ latest.last_seen.strftime("%Y-%m-%d %H:%M UTC") }}</time>
+  </p>
+
+  <h2 class="text-base font-semibold mt-6 mb-2">History ({{ history|length }} occurrence{% if history|length != 1 %}s{% endif %})</h2>
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="text-left text-gray-500 border-b border-gray-200">
+        <th class="py-2 pr-3">Cycle</th>
+        <th class="py-2 pr-3">Sev</th>
+        <th class="py-2 pr-3">Status</th>
+        <th class="py-2 pr-3">First seen</th>
+        <th class="py-2 pr-3">Last seen</th>
+        <th class="py-2 pr-3">Title</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr class="border-b border-gray-100">
+        <td class="py-2 pr-3 font-mono text-xs">{{ h.cycle_id|string|truncate(8, True, "") }}</td>
+        <td class="py-2 pr-3">
+          <span class="px-2 py-0.5 rounded text-xs sev-{{ h.severity }}">{{ s_emoji(h.severity) }}</span>
+        </td>
+        <td class="py-2 pr-3 text-xs">{{ h.status }}</td>
+        <td class="py-2 pr-3 text-xs text-gray-500">{{ h.first_seen.strftime("%m-%d %H:%M") }}</td>
+        <td class="py-2 pr-3 text-xs text-gray-500">{{ h.last_seen.strftime("%m-%d %H:%M") }}</td>
+        <td class="py-2 pr-3">{{ h.title }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
