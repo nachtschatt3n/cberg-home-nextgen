@@ -32,7 +32,7 @@ spec:
         - name: dashboard
           # Pin to a specific commit SHA — `:latest` is non-deterministic
           # when builds race (per memory `project_image_rebuild_gap`).
-          image: ghcr.io/nachtschatt3n/sweep-dashboard:sha-b3f562f0
+          image: ghcr.io/nachtschatt3n/sweep-dashboard:sha-b3f562f
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
