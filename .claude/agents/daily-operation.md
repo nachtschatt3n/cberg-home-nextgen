@@ -56,12 +56,23 @@ needs their decision, and what got auto-fixed.
      authorize inline scripts).
 
 2. **Brief each agent with the current HEAD + relevant carry-overs.**
-   Read the latest commits (`git log --oneline -10`) and the prior
-   `runbooks/*-current.md` snapshots. Pass to each agent: the current
-   HEAD SHA, the 2–3 most recent commits relevant to its domain, and
-   any known carry-over HIGH/MED findings so it doesn't re-discover
-   them. Tell it to REPORT new findings and AUTO-FIX only LOW/MED
-   GitOps-safe items.
+   Read the latest commits (`git log --oneline -10`) and (optionally)
+   query the sweep-dashboard API for the most recent open findings in
+   each specialist's section — that's the carry-over view that the
+   specialists shouldn't re-discover from scratch:
+
+       curl -fsS $SWEEP_DASHBOARD_URL/api/findings?section=<sec> \
+         | jq '.[] | {finding_id, severity, title}'
+
+   Pass to each agent: the current HEAD SHA, the 2–3 most recent
+   commits relevant to its domain, and the carry-over finding IDs +
+   titles from the API. Tell it to REPORT new findings and AUTO-FIX
+   only LOW/MED GitOps-safe items. Specialists write findings to the
+   sweep_history Postgres (via `runbooks/lib/findings_writer.py` —
+   `--postgres-dsn` flag or `SWEEP_PG_DSN` env). Their local markdown
+   snapshots at `runbooks/X-current.md` are a debugging convenience,
+   not the canonical signal — do NOT parse them in synthesis (rule
+   4a covers the right read path).
 
 3. **Auto-fix scope (uniform across sub-agents):**
    - **AUTO-FIX:** typos, broken links, dead-cert-acceptance entries,
@@ -94,6 +105,37 @@ needs their decision, and what got auto-fixed.
    - Do NOT block indefinitely on one hung specialist. The operator
      would rather have an incomplete sweep with a flagged gap than
      a missing sweep.
+
+4a. **Read the synthesized findings from the dashboard API, not from
+    the specialists' markdown.** Once all specialists report (or the
+    8-min deadline fires), query the dashboard:
+
+        curl -fsS $SWEEP_DASHBOARD_URL/api/cycles/latest
+
+    Returns JSON of shape `{cycle, findings[], counts{section:{sev:n}}}`.
+    Build the sweep table directly from this payload — it's the same
+    store every specialist just wrote into, and using it removes the
+    "parse 6 markdown files with subtly different shapes" problem.
+
+    SLO rows come from a separate endpoint:
+
+        curl -fsS $SWEEP_DASHBOARD_URL/api/slos
+
+    Returns latest snapshot per SLO (compliance, burn_rate_1h/6h,
+    budget). One 🎯 SLO row per entry, severity per `slo-agent.md`.
+
+    `$SWEEP_DASHBOARD_URL` defaults to `https://sweep.<DOMAIN>` (LAN
+    ingress). If unreachable from this session, fall back to
+    port-forwarding:
+
+        kubectl port-forward -n monitoring svc/sweep-dashboard 8088:80
+        export SWEEP_DASHBOARD_URL=http://localhost:8088
+
+    If the API itself is unreachable (dashboard pod down, port-forward
+    failed twice), fall back to parsing the specialists' returned
+    reports inline — that's the degraded path documented in rule 1's
+    fallback block. The dashboard is the preferred read; markdown is
+    the backstop.
 
 5. **Do NOT re-execute commands the sub-agents already ran.** Trust
    their reports. Cross-reference with `git log` if a sub-agent says
