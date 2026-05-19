@@ -16,6 +16,13 @@ permissions:
   contents: read
   packages: write
 
+# Serialize builds so concurrent runs can't race each other when pushing
+# `:latest`. Slower builds completing later would otherwise overwrite a
+# newer image with stale content.
+concurrency:
+  group: sweep-collector-build
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build and push

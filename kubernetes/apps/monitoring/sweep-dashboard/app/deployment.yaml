@@ -30,8 +30,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: dashboard
-          image: ghcr.io/nachtschatt3n/sweep-dashboard:latest
-          imagePullPolicy: Always
+          # Pin to a specific commit SHA — `:latest` is non-deterministic
+          # when builds race (per memory `project_image_rebuild_gap`).
+          image: ghcr.io/nachtschatt3n/sweep-dashboard:sha-b3f562f0
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
               name: http
