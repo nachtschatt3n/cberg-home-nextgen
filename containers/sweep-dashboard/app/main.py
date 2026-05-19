@@ -57,9 +57,9 @@ def _section_emoji(section: str | None) -> str:
     }.get(section or "", "—")
 
 
-def _common(request: Request) -> dict[str, Any]:
+def _common() -> dict[str, Any]:
+    """Template-context globals injected into every render."""
     return {
-        "request": request,
         "v_emoji": _verdict_emoji,
         "s_emoji": _severity_emoji,
         "sec_emoji": _section_emoji,
@@ -80,8 +80,8 @@ def index(request: Request):
     for row in counts:
         grid.setdefault(row["section"], {})[row["severity"]] = row["n"]
     return templates.TemplateResponse(
-        "index.html",
-        {**_common(request), "cycle": cycle, "grid": grid},
+        request=request, name="index.html",
+        context={**_common(), "cycle": cycle, "grid": grid},
     )
 
 
@@ -89,8 +89,8 @@ def index(request: Request):
 def findings(request: Request, section: str | None = None, severity: str | None = None):
     rows = db.open_findings(section=section, severity=severity)
     return templates.TemplateResponse(
-        "findings.html",
-        {**_common(request), "rows": rows, "section": section, "severity": severity},
+        request=request, name="findings.html",
+        context={**_common(), "rows": rows, "section": section, "severity": severity},
     )
 
 
@@ -100,8 +100,8 @@ def finding_detail(request: Request, finding_id: str):
     if not history:
         raise HTTPException(404, f"finding {finding_id} not found")
     return templates.TemplateResponse(
-        "finding_detail.html",
-        {**_common(request), "finding_id": finding_id, "history": history},
+        request=request, name="finding_detail.html",
+        context={**_common(), "finding_id": finding_id, "history": history},
     )
 
 
@@ -109,7 +109,8 @@ def finding_detail(request: Request, finding_id: str):
 def cycles(request: Request):
     rows = db.recent_cycles()
     return templates.TemplateResponse(
-        "cycles.html", {**_common(request), "rows": rows},
+        request=request, name="cycles.html",
+        context={**_common(), "rows": rows},
     )
 
 
