@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://json.schemastore.org/yamllint
+# SLO catalog — declarative SLI/SLO definitions consumed by
+# runbooks/slo-check.py. Each entry is a recording-rule-shaped query plus
+# a target and window. The calculator computes compliance (long-window
+# average), burn rates (1h + 6h windows per the Google SRE multi-window
+# pattern), and budget remaining, and writes one row per SLO per run to
+# the sweep-history `slo_snapshots` table.
+#
+# Adding a new SLO:
+#   1. Confirm signal source in docs/sops/sli-catalog.md.
+#   2. Append an entry below with the correct `source` and query fields.
+#   3. Run `python3 runbooks/slo-check.py --once` to smoke-test.
+#   4. Add the entry to the canary list in the framework SOP (Track C / C4).
+
+version: 1
+
+defaults:
+  # Multi-window burn-rate windows. Calculator emits all three;
+  # alerting rules / dashboard pick the firing window.
+  burn_rate_windows:
+    - long: 1h
+      short: 5m
+      threshold: 14.4   # 2% budget consumed in 1h → page-worthy
+    - long: 6h
+      short: 30m
+      threshold: 6.0    # 5% budget consumed in 6h → page-worthy
+    - long: 3d
+      short: 6h
+      threshold: 1.0    # 10% over 3d → ticket
+
+slos:
+
+  # ─── PILOT 1 (canary) ────────────────────────────────────────────────
+  # Validates the calculator design: multi-state Prometheus signal,
+  # ratio-over-instantaneous (each scrape contributes one good/total pair),
+  # 7d window short enough to converge in days, target permissive enough
+  # to allow one degraded volume out of ~80 without breaching.
+  - name: longhorn-volume-health
+    description: |
+      Percentage of Longhorn volumes reported as `robustness=healthy`
+      (3-of-3 replicas attached). `degraded` (2-of-3) and `faulted` (≤1)
+      count as bad. Numerator and denominator are both instantaneous
+      counts; the time-average over the window is the compliance.
+    source: prom
+    kind: ratio
+    prom:
+      # Longhorn emits one series per (volume, state) tuple with value 1 if
+      # that state is active, 0 otherwise. State labels: healthy, degraded,
+      # faulted, unknown. So:
+      #   numerator   = count of volumes whose state="healthy" series == 1
+      #   denominator = count of distinct volumes (dedupe by `volume` label)
+      # `or on() vector(0)` floors the numerator at 0 when no volumes are
+      # currently healthy (count() of an empty vector returns empty, not 0,
+      # which would break the ratio downstream).
+      numerator:   '(count(longhorn_volume_robustness{state="healthy"} == 1) or on() vector(0))'
+      denominator: '(count(count by (volume) (longhorn_volume_robustness)) or on() vector(0))'
+    target: 0.99   # 99% — allows ~14m / 24h of degraded state
+    window: 7d
+    tags:
+      - storage
+      - canary
+      - pilot
