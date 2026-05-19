@@ -1,10 +1,16 @@
 ---
-# One-shot init Job. Name suffix v1 = schema v1. Bump to -v2/-v3 when the
-# schema changes — Flux will create a new Job. Old Job stays as audit trail.
+# One-shot init Job. Major suffix (v1, v2, …) tracks schema version. Minor
+# suffix (v1a, v1b, …) tracks bash-only bootstrap fixes that don't alter
+# the schema. Flux prune deletes the previous Job and creates the new one.
+#
+# History:
+#   v1  — initial scaffold
+#   v1a — psql -c didn't honour :'var' substitution; rewrote bootstrap.sh
+#         to shell-escape and inline passwords instead.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v1
+  name: sweep-history-init-v1a
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

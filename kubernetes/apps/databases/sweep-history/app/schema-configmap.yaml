@@ -22,15 +22,20 @@ data:
     psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
     psql_sweep() { PGDATABASE=sweep_history psql -v ON_ERROR_STOP=1 "$@"; }
 
+    # Double any embedded single quote so the password string is safe to
+    # interpolate directly into the SQL literal. psql client-side `:'var'`
+    # substitution doesn't fire reliably inside `-c "..."` invocations, so
+    # we shell-escape and inline instead.
+    writer_pw_sql=${SWEEP_WRITER_PASSWORD//\'/\'\'}
+    reader_pw_sql=${SWEEP_READER_PASSWORD//\'/\'\'}
+
     echo "==> Ensure roles exist (sweep_writer, sweep_reader)"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_writer'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_writer LOGIN"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_reader'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_reader LOGIN"
-    psql_admin -v writer_pw="${SWEEP_WRITER_PASSWORD}" \
-      -c "ALTER ROLE sweep_writer WITH PASSWORD :'writer_pw'"
-    psql_admin -v reader_pw="${SWEEP_READER_PASSWORD}" \
-      -c "ALTER ROLE sweep_reader WITH PASSWORD :'reader_pw'"
+    psql_admin -c "ALTER ROLE sweep_writer WITH PASSWORD '${writer_pw_sql}'"
+    psql_admin -c "ALTER ROLE sweep_reader WITH PASSWORD '${reader_pw_sql}'"
 
     echo "==> Ensure database sweep_history exists (owner: sweep_writer)"
     psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='sweep_history'" | grep -q 1 \
