@@ -1,0 +1,85 @@
+---
+# sweep-collector — runs the audit scripts on schedule and writes
+# findings into the sweep-history Postgres.
+#
+# Phase 1 scope (this manifest): args = ["light"] runs only doc-check
+# and check-all-versions. Both work without UniFi / HA / Wazuh
+# credentials. security-check and health-check are deferred until
+# their external dependencies (unifictl, hactl, Wazuh port-forward)
+# are wired into the container.
+#
+# To enable Phase 2: change `args` to ["all"] AND ensure the
+# additional credentials (UniFi cli, HA long-lived token) are present
+# in the sweep-collector Secret.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sweep-collector
+  namespace: monitoring
+spec:
+  # Every 30 minutes
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400  # 24h — gives operator a window to read logs
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sweep-collector
+            app.kubernetes.io/component: collector
+        spec:
+          restartPolicy: Never
+          serviceAccountName: sweep-collector
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sweep-collector
+              image: ghcr.io/nachtschatt3n/sweep-collector:latest
+              imagePullPolicy: Always
+              args: ["light"]
+              env:
+                - name: SWEEP_TRIGGER
+                  value: cron
+                - name: SWEEP_PG_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: sweep-collector
+                      key: SWEEP_PG_DSN
+                # When set, check-all-versions uses authenticated API
+                # (5000 req/h instead of 60). Optional — falls back gracefully.
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: sweep-collector
+                      key: GITHUB_TOKEN
+                      optional: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              volumeMounts:
+                # Writable /tmp for the audit scripts' transient files
+                # (health-check.sh writes to /tmp/health-check-*.txt).
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 256Mi

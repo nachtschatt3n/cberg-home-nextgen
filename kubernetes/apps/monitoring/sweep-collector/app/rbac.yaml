@@ -1,0 +1,82 @@
+---
+# Cluster-wide read access. The audit scripts call `kubectl get` /
+# `flux get` against many namespaces (every HelmRelease, Kustomization,
+# Pod, Event, Secret-metadata, ServiceMonitor, PrometheusRule, etc.).
+# Read-only — no create/update/delete/patch verbs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sweep-collector-read
+rules:
+  # Core API — most resources the audit scripts inspect
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - pods
+      - secrets   # metadata + decoded data: needed by security-check sections 1, 5, 6, 7
+      - serviceaccounts
+      - services
+    verbs: ["get", "list", "watch"]
+  # Workloads
+  - apiGroups: ["apps"]
+    resources: [daemonsets, deployments, replicasets, statefulsets]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: [cronjobs, jobs]
+    verbs: ["get", "list", "watch"]
+  # Networking / certs
+  - apiGroups: ["networking.k8s.io"]
+    resources: [ingresses, ingressclasses, networkpolicies]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cert-manager.io"]
+    resources: [certificates, certificaterequests, clusterissuers, issuers]
+    verbs: ["get", "list", "watch"]
+  # Flux
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: [kustomizations]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: [helmreleases]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: [gitrepositories, helmrepositories, ocirepositories, helmcharts, buckets]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["notification.toolkit.fluxcd.io"]
+    resources: [alerts, providers, receivers]
+    verbs: ["get", "list", "watch"]
+  # Longhorn
+  - apiGroups: ["longhorn.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # Monitoring (PrometheusRules, ServiceMonitors, PodMonitors)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # RBAC introspection (security-check section 7)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [clusterroles, clusterrolebindings, roles, rolebindings]
+    verbs: ["get", "list", "watch"]
+  # Pod Security Admission labels live on namespaces (already covered above)
+  # Storage classes for storage-safety pre-flight
+  - apiGroups: ["storage.k8s.io"]
+    resources: [storageclasses, csidrivers, csinodes, volumeattachments]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sweep-collector-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sweep-collector-read
+subjects:
+  - kind: ServiceAccount
+    name: sweep-collector
+    namespace: monitoring

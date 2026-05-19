@@ -38,27 +38,35 @@ run_version()  { echo "==> check-all-versions.py"; python3 runbooks/check-all-ve
 run_security() { echo "==> security-check.py";     python3 runbooks/security-check.py; }
 run_health()   { echo "==> health-check.py";       python3 runbooks/health-check.py; }
 
+# Resolve the requested step list. `all` and `light`/`heavy` expand into their
+# constituent steps; otherwise treat the args as a literal list.
+if [ "$#" -eq 0 ]; then
+    steps=(doc version security health)
+else
+    case "$1" in
+        all)   steps=(doc version security health); shift ;;
+        light) steps=(doc version); shift ;;
+        heavy) steps=(security health); shift ;;
+        *)     steps=("$@"); set -- ;;
+    esac
+fi
+
 # Each step's exit code is captured so one specialist's failure doesn't abort
 # the whole sweep. We exit non-zero at the end if anything failed.
 fail=0
-case "${1:-all}" in
-    doc)      run_doc      || fail=1 ;;
-    version)  run_version  || fail=1 ;;
-    security) run_security || fail=1 ;;
-    health)   run_health   || fail=1 ;;
-    all)
-        # Fast and cheap first (so DB has *something* even if heavy ones hang).
-        run_doc       || fail=1
-        run_version   || fail=1
-        run_security  || fail=1
-        run_health    || fail=1
-        ;;
-    *)
-        echo "unknown step: $1" >&2
-        echo "valid: all | doc | version | security | health" >&2
-        exit 2
-        ;;
-esac
+for step in "${steps[@]}"; do
+    case "$step" in
+        doc)      run_doc      || fail=1 ;;
+        version)  run_version  || fail=1 ;;
+        security) run_security || fail=1 ;;
+        health)   run_health   || fail=1 ;;
+        *)
+            echo "unknown step: $step" >&2
+            echo "valid: doc | version | security | health | all | light | heavy" >&2
+            fail=2
+            ;;
+    esac
+done
 
 echo ""
 echo "==> sweep-collector done (cycle_id=${SWEEP_CYCLE_ID} fail=${fail})"

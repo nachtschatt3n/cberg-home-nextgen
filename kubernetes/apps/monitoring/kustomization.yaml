@@ -15,6 +15,7 @@ resources:
   - ./kibana/ks.yaml
   - ./edot-collector/ks.yaml
   - ./otel-operator/ks.yaml
+  - ./sweep-collector/ks.yaml
 patches:
   # PSA override: privileged required for prometheus-node-exporter
   # DaemonSet (hostNetwork + hostPath /proc /sys).
