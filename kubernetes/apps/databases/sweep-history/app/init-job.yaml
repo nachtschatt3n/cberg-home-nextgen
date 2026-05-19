@@ -6,14 +6,18 @@
 # History:
 #   v1  — initial scaffold
 #   v1a — psql -c didn't honour :'var' substitution; tried shell-escape via
-#         ${VAR//\'/\'\'} but YAML/ConfigMap loading stripped the backslash
-#         and the password came through empty.
-#   v2  — runtime-assert no single quote in password, inline directly;
-#         renamed slo_snapshots.window → window_size (reserved word).
+#         ${VAR//\'/\'\'} but YAML/ConfigMap loading stripped the backslash.
+#   v2  — runtime-assert + inline password; renamed slo_snapshots.window →
+#         window_size (Postgres reserved word). Still saw empty passwords
+#         in-cluster: Flux postBuild.substituteFrom is eating every ${VAR}
+#         reference in the ConfigMap.
+#   v2a — escape all bash ${VAR} as $${VAR} so Flux outputs a literal `${VAR}`
+#         and bash expands at runtime. Schema identical to v2 — just a
+#         bootstrap.sh rewrite.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v2
+  name: sweep-history-init-v2a
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

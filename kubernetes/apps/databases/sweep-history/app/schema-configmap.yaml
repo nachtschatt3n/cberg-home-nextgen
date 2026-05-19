@@ -5,38 +5,43 @@ metadata:
   name: sweep-history-schema
   namespace: databases
 data:
+  # NOTE on $${VAR} double-dollar escapes: Flux postBuild.substituteFrom is
+  # applied to every Kustomization in this cluster (see
+  # kubernetes/flux/cluster/ks.yaml). It substitutes ${VAR}-style references
+  # before kubectl apply, which would otherwise strip the bash variables here
+  # to empty strings. `$${VAR}` survives as a literal `${VAR}` in the rendered
+  # ConfigMap and bash then expands it normally at runtime.
   bootstrap.sh: |
     #!/usr/bin/env bash
     # Idempotent bootstrap of sweep-history DB on the shared postgresql instance.
     # Runs as the postgres admin user. Safe to re-run on every Flux reconcile.
     set -euo pipefail
 
-    : "${PGHOST:?PGHOST required}"
-    : "${PGUSER:?PGUSER required}"
-    : "${PGPASSWORD:?PGPASSWORD required}"
-    : "${SWEEP_WRITER_PASSWORD:?SWEEP_WRITER_PASSWORD required}"
-    : "${SWEEP_READER_PASSWORD:?SWEEP_READER_PASSWORD required}"
+    : "$${PGHOST:?PGHOST required}"
+    : "$${PGUSER:?PGUSER required}"
+    : "$${PGPASSWORD:?PGPASSWORD required}"
+    : "$${SWEEP_WRITER_PASSWORD:?SWEEP_WRITER_PASSWORD required}"
+    : "$${SWEEP_READER_PASSWORD:?SWEEP_READER_PASSWORD required}"
 
     export PGCONNECT_TIMEOUT=10
 
     psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
     psql_sweep() { PGDATABASE=sweep_history psql -v ON_ERROR_STOP=1 "$@"; }
 
-    # Passwords are SOPS-managed and alphanumeric-only by convention
-    # (see runbooks/sweep-history-init for the generator). Refuse to run
-    # if a rotation has introduced a single quote — that would break the
-    # inline SQL literal below and the YAML/ConfigMap path can't carry the
-    # bash escape syntax reliably (we tried; it ate the backslash).
-    case "${SWEEP_WRITER_PASSWORD}" in *"'"*) echo "FATAL: writer password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
-    case "${SWEEP_READER_PASSWORD}" in *"'"*) echo "FATAL: reader password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
+    # Passwords are SOPS-managed and alphanumeric-only by convention. Refuse
+    # to run if a rotation has introduced a single quote — the SOPS+Flux path
+    # can't carry a SQL-safe shell-escape reliably, so inline interpolation
+    # is the simplest correct form (covered by this assert).
+    case "$${SWEEP_WRITER_PASSWORD}" in *"'"*) echo "FATAL: writer password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
+    case "$${SWEEP_READER_PASSWORD}" in *"'"*) echo "FATAL: reader password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
 
     echo "==> Ensure roles exist (sweep_writer, sweep_reader)"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_writer'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_writer LOGIN"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_reader'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_reader LOGIN"
-    psql_admin -c "ALTER ROLE sweep_writer WITH PASSWORD '${SWEEP_WRITER_PASSWORD}'"
-    psql_admin -c "ALTER ROLE sweep_reader WITH PASSWORD '${SWEEP_READER_PASSWORD}'"
+    psql_admin -c "ALTER ROLE sweep_writer WITH PASSWORD '$${SWEEP_WRITER_PASSWORD}'"
+    psql_admin -c "ALTER ROLE sweep_reader WITH PASSWORD '$${SWEEP_READER_PASSWORD}'"
 
     echo "==> Ensure database sweep_history exists (owner: sweep_writer)"
     psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='sweep_history'" | grep -q 1 \
