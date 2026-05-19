@@ -10,8 +10,10 @@ Scans all HelmReleases in the repository and checks for:
 Outputs:
 - runbooks/version-check-current.md: Current status of all deployments
 - runbooks/version-check.md: Documentation on how to use this tool
+- (optional) findings emitted to sweep-history Postgres via --postgres-dsn
 """
 
+import argparse
 import os
 import re
 import json
@@ -27,6 +29,12 @@ import ssl
 import base64
 import sys
 from packaging import version
+
+# Make `runbooks/lib/...` importable when invoked from any CWD.
+sys.path.insert(0, str(Path(__file__).parent))
+from lib.findings_writer import (  # noqa: E402
+    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+)
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
 # set regardless of how the script is invoked (cron, sub-agent, fresh shell).
@@ -2041,16 +2049,155 @@ class VersionChecker:
         return '\n'.join(lines)
 
 
-def main():
+def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_path: str) -> tuple[int, int]:
+    """Walk checker.results + external_infra_results and emit notable findings.
+
+    Returns (critical_count, warning_count). No-op when writer is disabled.
+    Patch-only bumps and clean items are NOT emitted — the cycle row alone
+    represents "specialist ran and saw nothing alarming."
+    """
+    if not writer.enabled:
+        return (0, 0)
+
+    crit, warn = 0, 0
+
+    # HelmRelease findings
+    for r in getattr(checker, 'results', []):
+        name = r.get('name', '<unknown>')
+        ns   = r.get('namespace', '')
+        chart = r.get('chart') or {}
+        ua = chart.get('update_assessment') or {}
+        cur, latest = chart.get('current_version'), chart.get('latest_version')
+
+        if ua.get('type') == 'major':
+            sev = 'warning'  # major bumps are warnings by default; breaking_changes can escalate
+            if chart.get('breaking_changes'):
+                sev = 'critical'
+                crit += 1
+            else:
+                warn += 1
+            writer.emit(
+                severity=sev,
+                title=f"{name}: chart {cur} → {latest} (major)",
+                action="review release notes + breaking-change list before merge",
+                evidence_path=evidence_path,
+                subsection="helmrelease_chart",
+                metadata={
+                    "namespace": ns, "kind": "chart", "type": "major",
+                    "breaking_changes": chart.get('breaking_changes') or [],
+                },
+            )
+        elif ua.get('type') == 'minor':
+            warn += 1
+            writer.emit(
+                severity='monitor',
+                title=f"{name}: chart {cur} → {latest} (minor)",
+                action="batch with other minor bumps",
+                evidence_path=evidence_path,
+                subsection="helmrelease_chart",
+                metadata={"namespace": ns, "kind": "chart", "type": "minor"},
+            )
+
+        for img in r.get('images') or []:
+            img_ua = img.get('update_assessment') or {}
+            if img_ua.get('type') == 'major':
+                sev = 'critical' if img.get('breaking_changes') else 'warning'
+                if sev == 'critical':
+                    crit += 1
+                else:
+                    warn += 1
+                writer.emit(
+                    severity=sev,
+                    title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (major)",
+                    action="review release notes",
+                    evidence_path=evidence_path,
+                    subsection="helmrelease_image",
+                    metadata={
+                        "namespace": ns, "kind": "image",
+                        "repository": img.get('repository'),
+                        "breaking_changes": img.get('breaking_changes') or [],
+                    },
+                )
+            elif img_ua.get('type') == 'minor':
+                writer.emit(
+                    severity='monitor',
+                    title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (minor)",
+                    action="batch with other minor bumps",
+                    evidence_path=evidence_path,
+                    subsection="helmrelease_image",
+                    metadata={
+                        "namespace": ns, "kind": "image",
+                        "repository": img.get('repository'),
+                    },
+                )
+
+    # External infrastructure probes
+    for x in getattr(checker, 'external_infra_results', []):
+        name = x.get('name', '<unknown>')
+        host = x.get('host', '<unknown>')
+        cur = x.get('current_version')
+        latest = x.get('latest_version')
+        if cur is None:
+            warn += 1
+            writer.emit(
+                severity='warning',
+                title=f"{name} ({host}): probe unreachable — current version unknown",
+                action="check connectivity / credentials",
+                evidence_path=evidence_path,
+                subsection="external_infra",
+                metadata={"host": host, "latest_version": latest},
+            )
+        elif x.get('has_critical'):
+            crit += 1
+            writer.emit(
+                severity='critical',
+                title=f"{name} ({host}): {cur} → {latest} (major version behind)",
+                action="schedule upgrade window",
+                evidence_path=evidence_path,
+                subsection="external_infra",
+                metadata={"host": host, "current_version": cur, "latest_version": latest},
+            )
+        elif x.get('behind'):
+            warn += 1
+            writer.emit(
+                severity='warning',
+                title=f"{name} ({host}): {cur} → {latest}",
+                action="review changelog, plan upgrade",
+                evidence_path=evidence_path,
+                subsection="external_infra",
+                metadata={"host": host, "current_version": cur, "latest_version": latest},
+            )
+
+    return (crit, warn)
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Version checker for Kubernetes deployments and external infra.",
+    )
+    parser.add_argument(
+        "--postgres-dsn",
+        default=os.environ.get("SWEEP_PG_DSN"),
+        help=(
+            "Postgres DSN for sweep-history. If unset and SWEEP_PG_DSN env "
+            "var is also unset, findings are written to markdown only."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None):
+    args = _parse_args(argv)
+
     # Get repository root
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
-    
+
     # Check for GitHub token
     github_token = os.environ.get('GITHUB_TOKEN')
-    
+
     checker = VersionChecker(str(repo_root), github_token=github_token)
-    
+
     if checker.use_gh_cli:
         print(f"{Colors.GREEN}Using GitHub CLI (gh) for authenticated API access{Colors.RESET}")
     elif github_token:
@@ -2058,17 +2205,33 @@ def main():
     else:
         print(f"{Colors.YELLOW}No GitHub CLI or token found - using unauthenticated API (60 req/hour limit){Colors.RESET}")
         print(f"{Colors.YELLOW}Install and authenticate 'gh' CLI or set GITHUB_TOKEN for higher rate limits{Colors.RESET}\n")
-    
+
+    if args.postgres_dsn:
+        print(f"{Colors.GREEN}Sweep-history Postgres: enabled (cycle={cycle_id_from_env('<new>')}){Colors.RESET}")
+
     checker.check_all()
-    
+
     # Generate report
     report = checker.generate_markdown_report()
-    
+
     # Write to file
     output_file = repo_root / "runbooks" / "version-check-current.md"
     with open(output_file, 'w') as f:
         f.write(report)
-    
+
+    # Emit findings to sweep-history (no-op without DSN)
+    evidence_path = str(output_file.relative_to(repo_root))
+    with FindingsWriter(
+        dsn=args.postgres_dsn,
+        section="version",
+        cycle_id=cycle_id_from_env(),
+        trigger=trigger_from_env(),
+        git_head=git_head(),
+    ) as writer:
+        crit, warn = _emit_findings(writer, checker, evidence_path)
+        verdict = "red" if crit > 0 else ("yellow" if warn > 0 else "green")
+        writer.close(verdict=verdict)
+
     print(f"\n{Colors.GREEN}=== Report Generated ==={Colors.RESET}")
     print(f"Saved to: {output_file}")
 

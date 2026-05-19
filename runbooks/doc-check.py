@@ -6,11 +6,15 @@ Runs 8 documentation checks and writes results to runbooks/doc-check-current.md.
 
 Usage:
     python3 runbooks/doc-check.py
+    python3 runbooks/doc-check.py --postgres-dsn "$READER_DSN"
+    SWEEP_PG_DSN=... SWEEP_CYCLE_ID=... python3 runbooks/doc-check.py
 
 Output:
     runbooks/doc-check-current.md
+    (optional) findings emitted to sweep-history Postgres
 """
 
+import argparse
 import fnmatch
 import json
 import os
@@ -19,6 +23,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Make `runbooks/lib/...` importable when the script is invoked from any CWD.
+sys.path.insert(0, str(Path(__file__).parent))
+from lib.findings_writer import (  # noqa: E402
+    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+)
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
 # set regardless of how the script is invoked (cron, sub-agent, fresh shell).
@@ -1240,7 +1250,56 @@ def write_report(timestamp: str, results: list[tuple[str, Findings, str]]) -> No
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+_SECTION_SLUGS = [
+    "s1_infrastructure_docs",
+    "s2_network_docs",
+    "s3_application_docs",
+    "s4_security_docs",
+    "s5_integration_docs",
+    "s6_readme_claude_currency",
+    "s7_coding_guidelines",
+    "s8_runbook_coverage",
+]
+
+
+def _emit_findings(writer: FindingsWriter, results: list) -> None:
+    """Persist each (section, Findings, body) tuple to sweep-history.
+
+    No-op when the writer is disabled (no DSN). Existing markdown
+    output is untouched either way.
+    """
+    if not writer.enabled:
+        return
+    for idx, (_status, findings, _body) in enumerate(results):
+        subsection = _SECTION_SLUGS[idx] if idx < len(_SECTION_SLUGS) else f"s{idx}"
+        section_title = SECTION_NAMES[idx] if idx < len(SECTION_NAMES) else subsection
+        for sev_emoji, msg in findings._items:
+            writer.emit(
+                severity=sev_emoji,
+                title=msg,
+                subsection=subsection,
+                evidence_path=str(OUTPUT.relative_to(REPO_ROOT)),
+                metadata={"section_title": section_title},
+            )
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Documentation health check for the homelab cluster.",
+    )
+    parser.add_argument(
+        "--postgres-dsn",
+        default=os.environ.get("SWEEP_PG_DSN"),
+        help=(
+            "Postgres DSN for sweep-history. If unset and SWEEP_PG_DSN env "
+            "var is also unset, findings are written to markdown only."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     os.chdir(REPO_ROOT)
 
     cprint(C.BOLD + C.BLUE, "=" * 60)
@@ -1248,6 +1307,8 @@ def main() -> int:
     cprint(C.BOLD + C.BLUE, "=" * 60)
     print(f"Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Output : {OUTPUT}")
+    if args.postgres_dsn:
+        print(f"Sweep  : enabled (cycle={cycle_id_from_env('<new>')})")
     print()
 
     # Sanity check: make sure we're in the right repo
@@ -1274,6 +1335,18 @@ def main() -> int:
     total_crit = sum(1 for s, _, _ in results if s == CRITICAL)
     total_warn = sum(1 for s, _, _ in results if s == WARNING)
     total_ok   = sum(1 for s, _, _ in results if s == OK)
+
+    # Emit findings to sweep-history (no-op without DSN)
+    verdict = "red" if total_crit > 0 else ("yellow" if total_warn > 0 else "green")
+    with FindingsWriter(
+        dsn=args.postgres_dsn,
+        section="doc",
+        cycle_id=cycle_id_from_env(),
+        trigger=trigger_from_env(),
+        git_head=git_head(),
+    ) as writer:
+        _emit_findings(writer, results)
+        writer.close(verdict=verdict)
 
     print()
     cprint(C.BOLD + C.BLUE, "=" * 60)

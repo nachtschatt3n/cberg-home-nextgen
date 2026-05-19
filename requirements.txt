@@ -2,3 +2,6 @@
 pyyaml>=6.0.0
 requests>=2.31.0
 packaging>=23.0
+
+# Sweep-history Postgres writer (runbooks/lib/findings_writer.py)
+psycopg[binary]>=3.1
