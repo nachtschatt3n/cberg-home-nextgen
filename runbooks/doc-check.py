@@ -1280,7 +1280,13 @@ def _emit_findings(writer: FindingsWriter, results: list) -> None:
                 severity=sev_emoji,
                 title=msg,
                 subsection=subsection,
-                evidence_path=str(OUTPUT.relative_to(REPO_ROOT)),
+                # OUTPUT may be outside REPO_ROOT when SWEEP_SNAPSHOTS_DIR is
+                # set (e.g. /tmp/snapshots in the in-cluster collector).
+                evidence_path=(
+                    str(OUTPUT.relative_to(REPO_ROOT))
+                    if str(OUTPUT).startswith(str(REPO_ROOT))
+                    else str(OUTPUT)
+                ),
                 metadata={"section_title": section_title},
             )
 
