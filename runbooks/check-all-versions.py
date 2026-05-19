@@ -2221,8 +2221,15 @@ def main(argv: list[str] | None = None):
     with open(output_file, 'w') as f:
         f.write(report)
 
-    # Emit findings to sweep-history (no-op without DSN)
-    evidence_path = str(output_file.relative_to(repo_root))
+    # Emit findings to sweep-history (no-op without DSN). evidence_path is
+    # the snapshot location, relative when under the repo, absolute when
+    # SWEEP_SNAPSHOTS_DIR moves it outside (e.g. /tmp/snapshots in-cluster).
+    output_str = str(output_file)
+    evidence_path = (
+        str(output_file.relative_to(repo_root))
+        if output_str.startswith(str(repo_root))
+        else output_str
+    )
     with FindingsWriter(
         dsn=args.postgres_dsn,
         section="version",

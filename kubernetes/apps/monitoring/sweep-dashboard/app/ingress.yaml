@@ -1,0 +1,47 @@
+---
+# LAN-only ingress (ingressClassName: internal). No Cloudflare tunnel, no
+# Authentik gating — sweep-dashboard is read-only via the sweep_reader role
+# and reachable only on the Trusted VLAN / tailnet. Authentik would add
+# friction without new protection for this audience-of-one surface.
+#
+# Pattern mirrors kubernetes/apps/databases/redisinsight/app/ingress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sweep-dashboard
+  namespace: monitoring
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Sweep"
+    gethomepage.dev/description: "Daily sweep findings + history"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "mdi-clipboard-list-outline"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=sweep-dashboard"
+    # Live counts on the Homepage card — pulled from the dashboard's JSON API.
+    gethomepage.dev/widget.type: "customapi"
+    gethomepage.dev/widget.url: "http://sweep-dashboard.monitoring.svc.cluster.local/api/cycles/latest"
+    gethomepage.dev/widget.mappings.0.label: "Verdict"
+    gethomepage.dev/widget.mappings.0.field.cycle: "verdict"
+    gethomepage.dev/widget.mappings.1.label: "Open findings"
+    gethomepage.dev/widget.mappings.1.field: "findings"
+    gethomepage.dev/widget.mappings.1.format: "text"
+  labels:
+    gethomepage.dev/enabled: "true"
+spec:
+  ingressClassName: internal
+  rules:
+    - host: sweep.${SECRET_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sweep-dashboard
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - sweep.${SECRET_DOMAIN}
+      secretName: sweep-dashboard-tls
