@@ -50,11 +50,19 @@ data:
     echo "==> Apply schema migrations"
     psql_sweep -f /sql/schema.sql
 
-    echo "==> Apply grants"
+    echo "==> Apply grants (writer = DML, reader = SELECT)"
+    # Reader
     psql_sweep -c "GRANT CONNECT ON DATABASE sweep_history TO sweep_reader"
     psql_sweep -c "GRANT USAGE ON SCHEMA public TO sweep_reader"
     psql_sweep -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO sweep_reader"
     psql_sweep -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO sweep_reader"
+    # Writer — needs DML + sequence USAGE for BIGSERIAL columns
+    psql_sweep -c "GRANT CONNECT ON DATABASE sweep_history TO sweep_writer"
+    psql_sweep -c "GRANT USAGE ON SCHEMA public TO sweep_writer"
+    psql_sweep -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO sweep_writer"
+    psql_sweep -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO sweep_writer"
+    psql_sweep -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO sweep_writer"
+    psql_sweep -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO sweep_writer"
 
     echo "==> Done"
 

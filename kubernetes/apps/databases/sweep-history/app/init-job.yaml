@@ -11,13 +11,14 @@
 #         window_size (Postgres reserved word). Still saw empty passwords
 #         in-cluster: Flux postBuild.substituteFrom is eating every ${VAR}
 #         reference in the ConfigMap.
-#   v2a — escape all bash ${VAR} as $${VAR} so Flux outputs a literal `${VAR}`
-#         and bash expands at runtime. Schema identical to v2 — just a
-#         bootstrap.sh rewrite.
+#   v2a — escape all bash ${VAR} as $${VAR} so Flux outputs a literal `${VAR}`.
+#   v2b — sweep_writer got DB ownership but not table-level DML (tables were
+#         created by `postgres`). Add explicit DML + sequence grants for
+#         sweep_writer + future-table defaults. Schema unchanged.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v2a
+  name: sweep-history-init-v2b
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history
