@@ -60,3 +60,56 @@ slos:
       - storage
       - canary
       - pilot
+
+  # ─── PILOT 2 (broker availability) ───────────────────────────────────
+  # Cleanest signal in the entire pilot set: `up` is binary, scraped
+  # every 30s, denominator is a constant. Tests the calculator on a
+  # different shape (boolean SLI vs ratio SLI) — same math, different
+  # numerator semantics.
+  - name: mosquitto-broker-up
+    description: |
+      Mosquitto MQTT broker scrape success. `up{job="mosquitto-metrics"}`
+      is 1 when the broker exposes its /metrics endpoint successfully on
+      this scrape, 0 otherwise. Denominator is the constant 1 so the
+      ratio is the boolean SLI itself.
+    source: prom
+    kind: ratio
+    prom:
+      # `sum()` strips labels so the binary op with `vector(1)` matches.
+      # Without it `up{...} / vector(1)` returns empty (label mismatch) and
+      # the subquery avg sees no samples for the up case, only the fallback
+      # zeros — producing artificial 0% compliance.
+      # `or on() vector(0)` floors at 0 if the exporter target disappears
+      # entirely (Pod evicted, ServiceMonitor removed).
+      numerator:   '(sum(up{job="mosquitto-metrics"}) or on() vector(0))'
+      denominator: 'vector(1)'
+    target: 0.995   # 99.5% — allows ~50min/7d of broker downtime
+    # 7d (not 30d) because the exporter was deployed ~7 days ago and the
+    # 30d window would artificially count pre-deploy nothingness as
+    # downtime. Bump back to 30d once enough history accumulates.
+    window: 7d
+    tags:
+      - broker
+      - pilot
+
+  # ─── PILOT 3 (network device availability) ──────────────────────────
+  # Multi-device SLI: numerator counts devices reporting uptime > 0,
+  # denominator counts known devices. Reused signal from the existing
+  # unifi-controller-rate-limit SOP (the implicit SLO target embedded in
+  # that runbook is now formalised here).
+  - name: unifi-device-availability
+    description: |
+      Percentage of UniFi devices reporting uptime > 0 in any scrape.
+      Numerator is the per-scrape count of online devices; denominator
+      is the total known device count. A single device being offline
+      drops compliance by 1/N for the duration.
+    source: prom
+    kind: ratio
+    prom:
+      numerator:   '(count(unpoller_device_uptime_seconds > 0) or on() vector(0))'
+      denominator: '(count(unpoller_device_uptime_seconds) or on() vector(0))'
+    target: 0.99   # 99% — allows ~7.2h/30d of any-device-offline
+    window: 30d
+    tags:
+      - network
+      - pilot
