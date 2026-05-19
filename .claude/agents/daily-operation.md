@@ -75,7 +75,25 @@ needs their decision, and what got auto-fixed.
      anything that requires `kubectl exec`/`logs` against shared
      workloads.
 
-4. **Wait for all five reports**, then synthesize.
+4. **Wait for all five reports — bounded by an 8-minute wall-clock
+   deadline.** The audit scripts typically complete in 30–120s; the
+   slowest specialist on a healthy run is security (Trivy CVE scan +
+   Wazuh queries) at ~4–5min. If any specialist hasn't returned by
+   480s after dispatch, proceed without it:
+
+   - Record `start_ts = now()` immediately after the five `Agent` calls
+     in rule 1.
+   - On each completion notification, compute `elapsed = now() - start_ts`.
+     If `elapsed > 480s` and ≥1 background task is still incomplete,
+     stop waiting.
+   - For each missing specialist, render a row in the table with
+     `Sec=<emoji> Sev=⚠️ ID=auto Item="<specialist> timed out after
+     8min — see prior snapshot from <date>" Status=timeout Action="rerun
+     <specialist> standalone"`. The orchestrator picks the prior
+     `runbooks/X-current.md` mtime as the snapshot date.
+   - Do NOT block indefinitely on one hung specialist. The operator
+     would rather have an incomplete sweep with a flagged gap than
+     a missing sweep.
 
 5. **Do NOT re-execute commands the sub-agents already ran.** Trust
    their reports. Cross-reference with `git log` if a sub-agent says
@@ -235,15 +253,37 @@ each day).
 
 Aim for 400–600 words total. If you're past 800, you're padding.
 
-## Privacy
+## Privacy / redaction (mandatory post-synthesis pass)
 
-This output may end up in commit messages or PRs. Apply the public-repo
-privacy rule from `CLAUDE.md`:
-- Redact specific IPs, MACs, email addresses, hostnames containing
-  `${SECRET_DOMAIN}`, media titles.
-- Use placeholders: `<IP>`, `<HOST>`, `<MAC>`, `<EMAIL>`, `<movie>`,
-  `<show>`, `<channel>`.
-- Counts are fine ("486 errors", "+27 from baseline"); names are not.
+This output may end up in commit messages or PRs. Each specialist
+already redacts its own output — but they redact independently, and a
+sloppy row from one will not be caught by another. Run a final
+deterministic pass over the assembled table BEFORE emitting it.
+
+**What to redact, with placeholders** (apply in this order — IPs first
+so they don't get partially eaten by other rules):
+
+| Pattern | Placeholder | Note |
+|---|---|---|
+| IPv4 in RFC1918 private ranges (`192\.168\.\d+\.\d+`, `10\.\d+\.\d+\.\d+`, `172\.(1[6-9]\|2\d\|3[01])\.\d+\.\d+`) | `<IP>` | Cluster, NAS, UniFi devices |
+| MAC address (`[0-9a-f]{2}(:[0-9a-f]{2}){5}`, case-insensitive) | `<MAC>` | UniFi devices, AP/STA hardware |
+| Email address (`[\w.+-]+@[\w-]+\.[\w.-]+`) | `<EMAIL>` | Authentik users, git config |
+| Hostname containing `${SECRET_DOMAIN}` | `<HOST>` | Source from `runbooks/security-check.py:load_sensitive()` |
+| Specific user names (Authentik / git names) | `<USER>` | Source from `runbooks/security-check.py:load_sensitive()` |
+| Media titles — movies, TV episodes, music, Tube Archivist channels | `<movie>` / `<show>` / `<track>` / `<channel>` | Per CLAUDE.md privacy rule |
+
+**Counts are fine.** "486 errors", "+27 from baseline", "7 devices
+rebooted" — names and identifiers are the privacy concern, not
+frequencies.
+
+**Helper:** `runbooks/lib/redact.py` implements the IPv4 / MAC / email
+patterns deterministically. The agent's per-row pass is prompt-driven
+(this section); a future scripted assembler can `from runbooks.lib.redact
+import redact` and apply the same regex pack programmatically.
+
+**Verification step before emit:** mentally re-scan the assembled table
+and confirm zero matches against any of the patterns above. If you
+find one, redact it before the table reaches the parent session.
 
 ## What you delegate, not own
 
