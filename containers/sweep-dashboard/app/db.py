@@ -138,3 +138,43 @@ def finding_history(finding_id: str) -> list[dict[str, Any]]:
         """,
         (finding_id,),
     )
+
+
+# ---------------------------------------------------------------------------
+# SLO queries
+# ---------------------------------------------------------------------------
+
+
+def latest_slo_snapshots() -> list[dict[str, Any]]:
+    """One row per slo_name — the most recent snapshot.
+
+    DISTINCT ON keeps each name's newest sample. Burn-rate badge logic
+    in the template uses these values; the underlying values may be
+    NULL when the long-window query had a NaN gap.
+    """
+    return fetch_all(
+        """
+        SELECT DISTINCT ON (slo_name)
+               slo_name, taken_at, compliance_pct, target_pct,
+               burn_rate_1h, burn_rate_6h, budget_remaining_pct,
+               window_size, source, raw_numerator, raw_denominator
+          FROM slo_snapshots
+         ORDER BY slo_name, taken_at DESC
+        """
+    )
+
+
+def slo_history(name: str, limit: int = 200) -> list[dict[str, Any]]:
+    """Recent snapshots for one SLO, newest first."""
+    return fetch_all(
+        """
+        SELECT id, slo_name, taken_at, compliance_pct, target_pct,
+               burn_rate_1h, burn_rate_6h, budget_remaining_pct,
+               window_size, source, raw_numerator, raw_denominator
+          FROM slo_snapshots
+         WHERE slo_name = %s
+         ORDER BY taken_at DESC
+         LIMIT %s
+        """,
+        (name, limit),
+    )

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+
+{% block content %}
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+  <div class="mb-4">
+    <a href="/slos" class="text-blue-600 hover:underline text-sm">← all SLOs</a>
+  </div>
+
+  {% set latest = history[0] %}
+  {% set badge = burn_badge(latest.burn_rate_1h|float if latest.burn_rate_1h is not none else none,
+                            latest.burn_rate_6h|float if latest.burn_rate_6h is not none else none) %}
+  <h1 class="text-2xl font-semibold mb-1 font-mono">{{ name }}</h1>
+  <p class="text-sm text-gray-500 mb-4">
+    <span class="px-2 py-0.5 rounded text-xs {{ badge.css }}">{{ badge.emoji }} {{ badge.label }}</span>
+    · source {{ latest.source }}
+    · window {{ latest.window_size }}
+    · target {{ "%.2f"|format(latest.target_pct|float) }}%
+    · last sampled <time>{{ latest.taken_at.strftime("%Y-%m-%d %H:%M UTC") }}</time>
+  </p>
+
+  {# Compliance sparkline. SVG inlined so no extra JS/asset is required.
+     Only points with non-null compliance contribute; gaps render as breaks. #}
+  {% set points = history | reverse | list %}
+  {% set vals = [] %}
+  {% for p in points %}{% if p.compliance_pct is not none %}{% set _ = vals.append(p.compliance_pct|float) %}{% endif %}{% endfor %}
+  <h2 class="text-base font-semibold mt-6 mb-2">Compliance over time ({{ vals|length }} sample{{ '' if vals|length == 1 else 's' }})</h2>
+  {% if vals %}
+    {% set vmin = vals|min %}
+    {% set vmax = vals|max %}
+    {% set range = (vmax - vmin) if (vmax - vmin) > 0 else 1.0 %}
+    {% set width = 600 %}
+    {% set height = 80 %}
+    <svg viewBox="0 0 {{ width }} {{ height }}" class="border border-gray-100 rounded w-full bg-gray-50">
+      {# target line — 50% from top is a rough visual baseline #}
+      <line x1="0" y1="{{ (height // 2) }}" x2="{{ width }}" y2="{{ (height // 2) }}" stroke="#e5e7eb" stroke-dasharray="2 4"/>
+      {% set step = (width / (vals|length - 1)) if vals|length > 1 else width %}
+      {% set pts = [] %}
+      {% for v in vals %}
+        {% set x = loop.index0 * step %}
+        {% set y = height - ((v - vmin) / range) * (height - 10) - 5 %}
+        {% set _ = pts.append("%.1f,%.1f"|format(x, y)) %}
+      {% endfor %}
+      <polyline points="{{ pts|join(' ') }}" fill="none" stroke="#2563eb" stroke-width="1.5"/>
+      {# endpoint dot #}
+      {% set last_x = (vals|length - 1) * step %}
+      {% set last_y = height - ((vals[-1] - vmin) / range) * (height - 10) - 5 %}
+      <circle cx="{{ "%.1f"|format(last_x) }}" cy="{{ "%.1f"|format(last_y) }}" r="3" fill="#2563eb"/>
+    </svg>
+    <p class="mt-2 text-xs text-gray-500">
+      min {{ "%.3f"|format(vmin) }}% · max {{ "%.3f"|format(vmax) }}% · most recent {{ "%.3f"|format(vals[-1]) }}%
+    </p>
+  {% else %}
+    <p class="text-gray-400 text-sm">No compliance samples with data yet — likely a windowed-query NaN gap. Burn rates and raw counts below.</p>
+  {% endif %}
+
+  <h2 class="text-base font-semibold mt-6 mb-2">Recent samples</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-gray-500 border-b border-gray-200">
+          <th class="py-2 pr-3">Time</th>
+          <th class="py-2 pr-3 text-right">Compliance</th>
+          <th class="py-2 pr-3 text-right">Budget left</th>
+          <th class="py-2 pr-3 text-right">Burn 1h</th>
+          <th class="py-2 pr-3 text-right">Burn 6h</th>
+          <th class="py-2 pr-3 text-right">Num</th>
+          <th class="py-2 pr-3 text-right">Den</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history %}
+        <tr class="border-b border-gray-100">
+          <td class="py-2 pr-3 text-xs text-gray-500">{{ h.taken_at.strftime("%m-%d %H:%M") }}</td>
+          <td class="py-2 pr-3 text-right">{% if h.compliance_pct is not none %}{{ "%.3f"|format(h.compliance_pct|float) }}%{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="py-2 pr-3 text-right">{% if h.budget_remaining_pct is not none %}{{ "%+.1f"|format(h.budget_remaining_pct|float) }}%{% else %}<span class="text-gray-400">—</span>{% endif %}</td>
+          <td class="py-2 pr-3 text-right">{% if h.burn_rate_1h is not none %}{{ "%.2f"|format(h.burn_rate_1h|float) }}{% else %}—{% endif %}</td>
+          <td class="py-2 pr-3 text-right">{% if h.burn_rate_6h is not none %}{{ "%.2f"|format(h.burn_rate_6h|float) }}{% else %}—{% endif %}</td>
+          <td class="py-2 pr-3 text-right text-gray-500">{% if h.raw_numerator is not none %}{{ h.raw_numerator|float|int }}{% else %}—{% endif %}</td>
+          <td class="py-2 pr-3 text-right text-gray-500">{% if h.raw_denominator is not none %}{{ h.raw_denominator|float|int }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

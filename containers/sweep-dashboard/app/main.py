@@ -57,12 +57,32 @@ def _section_emoji(section: str | None) -> str:
     }.get(section or "", "—")
 
 
+def _burn_badge(burn_rate_1h: float | None, burn_rate_6h: float | None) -> dict[str, str]:
+    """Map burn-rate thresholds to a colour-coded UI badge.
+
+    Threshold tiers match the burn_rate_windows defaults in
+    runbooks/slo-catalog.yaml:
+        burn >= 14.4 over 1h  → 🔴 fast burn (paging)
+        burn >=  6.0 over 6h  → 🟡 medium burn (warning)
+        otherwise              → 🟢 healthy
+        burn is None           → ⚪ no data
+    """
+    if burn_rate_1h is None and burn_rate_6h is None:
+        return {"emoji": "⚪", "label": "no data", "css": "sev-deferred"}
+    if burn_rate_1h is not None and burn_rate_1h >= 14.4:
+        return {"emoji": "🔴", "label": "fast burn", "css": "sev-critical"}
+    if burn_rate_6h is not None and burn_rate_6h >= 6.0:
+        return {"emoji": "🟡", "label": "medium burn", "css": "sev-warning"}
+    return {"emoji": "🟢", "label": "healthy", "css": "sev-clean"}
+
+
 def _common() -> dict[str, Any]:
     """Template-context globals injected into every render."""
     return {
         "v_emoji": _verdict_emoji,
         "s_emoji": _severity_emoji,
         "sec_emoji": _section_emoji,
+        "burn_badge": _burn_badge,
     }
 
 
@@ -114,6 +134,26 @@ def cycles(request: Request):
     )
 
 
+@app.get("/slos", response_class=HTMLResponse)
+def slos(request: Request):
+    rows = db.latest_slo_snapshots()
+    return templates.TemplateResponse(
+        request=request, name="slos.html",
+        context={**_common(), "rows": rows},
+    )
+
+
+@app.get("/slos/{name}", response_class=HTMLResponse)
+def slo_detail(request: Request, name: str):
+    history = db.slo_history(name)
+    if not history:
+        raise HTTPException(404, f"SLO {name} not found")
+    return templates.TemplateResponse(
+        request=request, name="slo_detail.html",
+        context={**_common(), "name": name, "history": history},
+    )
+
+
 # ---------------------------------------------------------------------------
 # JSON API — consumed by the daily-operation orchestrator and Homepage card
 # ---------------------------------------------------------------------------
@@ -134,6 +174,19 @@ def api_latest_cycle():
 @app.get("/api/findings", response_class=JSONResponse)
 def api_findings(section: str | None = None, severity: str | None = None):
     return db.open_findings(section=section, severity=severity)
+
+
+@app.get("/api/slos", response_class=JSONResponse)
+def api_slos():
+    return db.latest_slo_snapshots()
+
+
+@app.get("/api/slos/{name}", response_class=JSONResponse)
+def api_slo_detail(name: str, limit: int = 200):
+    history = db.slo_history(name, limit=limit)
+    if not history:
+        raise HTTPException(404, f"SLO {name} not found")
+    return history
 
 
 @app.get("/api/health", response_class=PlainTextResponse)
