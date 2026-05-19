@@ -27,6 +27,12 @@ if [ -z "${SWEEP_CYCLE_ID:-}" ]; then
 fi
 export SWEEP_TRIGGER="${SWEEP_TRIGGER:-cron}"
 
+# If the caller redirected snapshot output to a writable mount (read-only
+# rootfs case), make sure the target dir exists. No-op otherwise.
+if [ -n "${SWEEP_SNAPSHOTS_DIR:-}" ]; then
+    mkdir -p "${SWEEP_SNAPSHOTS_DIR}" 2>/dev/null || true
+fi
+
 echo "==> sweep-collector starting"
 echo "    cycle_id : ${SWEEP_CYCLE_ID}"
 echo "    trigger  : ${SWEEP_TRIGGER}"
