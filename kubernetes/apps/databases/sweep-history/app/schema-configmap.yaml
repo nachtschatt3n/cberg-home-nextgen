@@ -22,20 +22,21 @@ data:
     psql_admin() { PGDATABASE=postgres psql -v ON_ERROR_STOP=1 "$@"; }
     psql_sweep() { PGDATABASE=sweep_history psql -v ON_ERROR_STOP=1 "$@"; }
 
-    # Double any embedded single quote so the password string is safe to
-    # interpolate directly into the SQL literal. psql client-side `:'var'`
-    # substitution doesn't fire reliably inside `-c "..."` invocations, so
-    # we shell-escape and inline instead.
-    writer_pw_sql=${SWEEP_WRITER_PASSWORD//\'/\'\'}
-    reader_pw_sql=${SWEEP_READER_PASSWORD//\'/\'\'}
+    # Passwords are SOPS-managed and alphanumeric-only by convention
+    # (see runbooks/sweep-history-init for the generator). Refuse to run
+    # if a rotation has introduced a single quote — that would break the
+    # inline SQL literal below and the YAML/ConfigMap path can't carry the
+    # bash escape syntax reliably (we tried; it ate the backslash).
+    case "${SWEEP_WRITER_PASSWORD}" in *"'"*) echo "FATAL: writer password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
+    case "${SWEEP_READER_PASSWORD}" in *"'"*) echo "FATAL: reader password contains single quote — rotate to alphanumeric only" >&2; exit 1;; esac
 
     echo "==> Ensure roles exist (sweep_writer, sweep_reader)"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_writer'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_writer LOGIN"
     psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname='sweep_reader'" | grep -q 1 \
       || psql_admin -c "CREATE ROLE sweep_reader LOGIN"
-    psql_admin -c "ALTER ROLE sweep_writer WITH PASSWORD '${writer_pw_sql}'"
-    psql_admin -c "ALTER ROLE sweep_reader WITH PASSWORD '${reader_pw_sql}'"
+    psql_admin -c "ALTER ROLE sweep_writer WITH PASSWORD '${SWEEP_WRITER_PASSWORD}'"
+    psql_admin -c "ALTER ROLE sweep_reader WITH PASSWORD '${SWEEP_READER_PASSWORD}'"
 
     echo "==> Ensure database sweep_history exists (owner: sweep_writer)"
     psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='sweep_history'" | grep -q 1 \
@@ -101,7 +102,7 @@ data:
       burn_rate_1h         NUMERIC,
       burn_rate_6h         NUMERIC,
       budget_remaining_pct NUMERIC(5,2),
-      window               VARCHAR(8),
+      window_size          VARCHAR(8),   -- 7d|30d; `window` is a Postgres reserved word
       source               VARCHAR(16),
       raw_numerator        NUMERIC,
       raw_denominator      NUMERIC

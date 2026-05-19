@@ -5,12 +5,15 @@
 #
 # History:
 #   v1  — initial scaffold
-#   v1a — psql -c didn't honour :'var' substitution; rewrote bootstrap.sh
-#         to shell-escape and inline passwords instead.
+#   v1a — psql -c didn't honour :'var' substitution; tried shell-escape via
+#         ${VAR//\'/\'\'} but YAML/ConfigMap loading stripped the backslash
+#         and the password came through empty.
+#   v2  — runtime-assert no single quote in password, inline directly;
+#         renamed slo_snapshots.window → window_size (reserved word).
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v1a
+  name: sweep-history-init-v2
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history
