@@ -15,6 +15,9 @@
 #                 / body / thread (fans out to GMX/iCloud/Gmail internally)
 #   say         — synthesize text via ElevenLabs and send back through
 #                 Telegram as a voice message (Opus/OGG) or audio (MP3)
+#   pallet      — read-only access to the wood-pellet price monitor's
+#                 Postgres DB: latest verdict, signal history, per-source
+#                 prices, run logs.
 #   arag-plan   — prompt template for the Paperless ↔ Sure ↔ ARAG flow
 apiVersion: v1
 kind: ConfigMap
@@ -645,6 +648,152 @@ data:
     if __name__ == "__main__":
         main()
 
+  pallet.py: |
+    #!/usr/bin/env python3
+    """Read-only wood-pellet price-monitor client.
+
+    The pallet-price-monitor cronjob (home-automation namespace) scrapes
+    ~10 sources twice daily and writes to Postgres. This skill queries
+    that DB for the agent.
+
+    Usage:
+        pallet status                       # latest verdict + key prices
+        pallet history [days=14]            # signal trajectory
+        pallet signal <run_id>              # full inputs+rationale of one run
+        pallet prices [days=7] [source]     # raw price observations
+        pallet runs [limit=10]              # recent scrape runs
+        pallet sources                      # per-source freshness
+        pallet weather [days=14]            # heating-degree-day history
+
+    Read-only: every cursor is a SELECT; no INSERT/UPDATE/DELETE issued.
+    """
+    import json, os, sys
+    try:
+        import pg8000.dbapi as pg
+    except ImportError:
+        sys.stderr.write("pallet: pg8000 not installed; reinstall via `pip install --user pg8000`\n")
+        sys.exit(1)
+
+    CONN = dict(
+        host=os.environ["PELLET_PG_HOST"],
+        port=int(os.environ.get("PELLET_PG_PORT", "5432")),
+        database=os.environ["PELLET_PG_DB"],
+        user=os.environ["PELLET_PG_USER"],
+        password=os.environ["PELLET_PG_PASSWORD"],
+    )
+
+    def _q(sql, args=()):
+        with pg.connect(**CONN) as conn:
+            cur = conn.cursor()
+            cur.execute(sql, args)
+            cols = [d[0] for d in cur.description] if cur.description else []
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            return rows
+
+    def _emit(obj):
+        def default(o):
+            from datetime import datetime, date
+            from decimal import Decimal
+            if isinstance(o, (datetime, date)):
+                return o.isoformat()
+            if isinstance(o, Decimal):
+                return float(o)
+            return str(o)
+        print(json.dumps(obj, indent=2, default=default))
+
+    def status():
+        rows = _q("""
+            SELECT s.run_id, s.computed_at, s.verdict, s.composite_score,
+                   s.spot_score, s.structural_score,
+                   s.local_price_eur_per_t, s.national_avg_eur_per_t,
+                   s.delta_1w, s.delta_1m, s.delta_3m, s.rationale,
+                   r.status AS run_status
+            FROM signals s JOIN runs r ON r.id = s.run_id
+            ORDER BY s.run_id DESC LIMIT 1
+        """)
+        _emit(rows[0] if rows else {})
+
+    def history(days=14):
+        rows = _q("""
+            SELECT run_id, computed_at, verdict, composite_score,
+                   local_price_eur_per_t, national_avg_eur_per_t,
+                   delta_1w
+            FROM signals
+            WHERE computed_at > now() - (%s || ' days')::interval
+            ORDER BY computed_at DESC
+        """, (str(int(days)),))
+        _emit(rows)
+
+    def signal(run_id):
+        rows = _q("""
+            SELECT s.*, r.started_at, r.status AS run_status
+            FROM signals s JOIN runs r ON r.id = s.run_id
+            WHERE s.run_id = %s
+        """, (int(run_id),))
+        _emit(rows[0] if rows else {})
+
+    def prices(days=7, source=None):
+        if source:
+            rows = _q("""
+                SELECT observed_at, source_id, price_eur_per_t, plz, amount_kg, raw
+                FROM prices
+                WHERE observed_at > now() - (%s || ' days')::interval
+                  AND source_id = %s
+                ORDER BY observed_at DESC
+                LIMIT 200
+            """, (str(int(days)), source))
+        else:
+            rows = _q("""
+                SELECT observed_at, source_id, price_eur_per_t, plz, amount_kg
+                FROM prices
+                WHERE observed_at > now() - (%s || ' days')::interval
+                ORDER BY observed_at DESC
+                LIMIT 200
+            """, (str(int(days)),))
+        _emit(rows)
+
+    def runs(limit=10):
+        rows = _q("""
+            SELECT id, started_at, finished_at, status,
+                   array_length(sources_run, 1) AS source_count
+            FROM runs ORDER BY id DESC LIMIT %s
+        """, (int(limit),))
+        _emit(rows)
+
+    def sources():
+        rows = _q("""
+            SELECT DISTINCT ON (source_id)
+                   source_id, observed_at, price_eur_per_t
+            FROM prices
+            ORDER BY source_id, observed_at DESC
+        """)
+        _emit(rows)
+
+    def weather(days=14):
+        rows = _q("""
+            SELECT observed_at, station_id, hdd_value, raw
+            FROM weather
+            WHERE observed_at > now() - (%s || ' days')::interval
+            ORDER BY observed_at DESC LIMIT 200
+        """, (str(int(days)),))
+        _emit(rows)
+
+    def main():
+        if len(sys.argv) < 2:
+            print(__doc__); sys.exit(2)
+        verb = sys.argv[1].lower()
+        dispatch = {
+            "status": status, "history": history, "signal": signal,
+            "prices": prices, "runs": runs, "sources": sources,
+            "weather": weather,
+        }
+        if verb not in dispatch:
+            print(__doc__); sys.exit(2)
+        dispatch[verb](*sys.argv[2:])
+
+    if __name__ == "__main__":
+        main()
+
   # ----- SKILL.md files seeded into ~/clawd/skills/<name>/SKILL.md -----
   # Discovered by the OpenClaw skill-workshop plugin on agent start.
 
@@ -777,7 +926,62 @@ data:
 
     Read-only: no transaction edits, no balance adjustments.
 
-  skill-telegram-voice.md: |
+  skill-pallet.md: |
+    ---
+    name: pallet
+    description: Read-only access to the wood-pellet price-monitor database. Surfaces the latest BUY/HOLD verdict, composite score, local vs national price (€/t), per-source prices, signal history, and weather (heating-degree-days). Use whenever Mathias asks about pellet prices, "should I buy pellets now", or how the heating-fuel market is doing.
+    user-invocable: true
+    ---
+
+    # Pellet Price Monitor
+
+    A cronjob in `home-automation` scrapes ~10 sources twice a day
+    (08:00 and 20:00 Europe/Berlin) — heizpellets24, esyoil, holzkurier,
+    DWD weather degree-days, etc. — and writes to a Postgres `pellets`
+    DB. This skill is the agent's read-only window into that DB.
+
+    PLZ is `65520` (Bad Camberg), reference amount 6000 kg (~one
+    delivery). All prices in €/t.
+
+    ## Verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `pallet status` | Latest verdict + local/national price + delta + composite score. The default for "should I buy pellets now". |
+    | `pallet history [days=14]` | Recent verdict + price trajectory. |
+    | `pallet signal <run_id>` | Full inputs/rationale of one specific run. |
+    | `pallet prices [days=7] [source]` | Raw price observations, optionally filtered to one source. |
+    | `pallet runs [limit=10]` | List recent scrape runs (status, source count). |
+    | `pallet sources` | Latest price per source (freshness check). |
+    | `pallet weather [days=14]` | Heating-degree-day history. |
+
+    ## Verdicts
+
+    The monitor outputs `verdict ∈ {BUY, HOLD, SELL, WATCH}` with a
+    composite score 0–100 (higher = more pressure to buy). Recent
+    reads have been **HOLD** at composite ~43, meaning prices are
+    sideways and no strong signal either way.
+
+    ## Loop: "should I buy pellets?"
+
+    1. `pallet status` → read the verdict + composite + delta_1w.
+    2. If the local price is meaningfully below national avg (e.g.
+       >5€/t lower) and delta_1w is also negative, mention that as
+       supporting context.
+    3. If verdict is BUY, recommend going ahead. If HOLD, explain why
+       (composite, key inputs from `rationale`). If WATCH/SELL, advise
+       waiting.
+    4. Offer to look up `pallet signal <run_id>` for the deeper inputs
+       breakdown if Mathias wants the reasoning behind the verdict.
+
+    ## Read-only invariants
+
+    - Every cursor is a SELECT. No INSERT/UPDATE/DELETE statements are
+      issued by this skill — the cronjob is the only writer.
+    - Don't try to start an unscheduled scrape from here. If Mathias
+      wants fresh data, point him at `kubectl create job --from=
+      cronjob/pallet-price-monitor pallet-now -n home-automation` and
+      let him run it.
     ---
     name: telegram-voice
     description: Send a Telegram voice message (Opus/OGG) or audio file (MP3) synthesized via ElevenLabs. Use whenever the user asks you to "say it back", "voice this", "read it out loud", "send a voice note", or otherwise wants audio delivered through Telegram instead of just text.

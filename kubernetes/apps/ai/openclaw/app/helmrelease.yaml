@@ -336,6 +336,9 @@ spec:
                 # Dropping the install to shave ~30s off cold-start.
                 install_pip openai-whisper
                 install_pip "git+https://github.com/nachtschatt3n/hactl.git@v1.1.1"
+                # Pure-Python Postgres driver — for the pallet/pellet skill
+                # talking to the home-automation pellets DB.
+                install_pip pg8000
 
                 # Playwright browsers + apt deps for the @playwright/mcp server.
                 # Browsers land in the PVC so they survive pod restarts.
