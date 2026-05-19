@@ -47,7 +47,7 @@ spec:
               # Pin to a specific commit SHA — `:latest` is non-deterministic
               # when builds race (per memory `project_image_rebuild_gap`).
               # Bump via Renovate or a small manual PR when a new build lands.
-              image: ghcr.io/nachtschatt3n/sweep-collector:sha-9234273
+              image: ghcr.io/nachtschatt3n/sweep-collector:sha-3d7cf08
               imagePullPolicy: IfNotPresent
               args: ["light"]
               env:
