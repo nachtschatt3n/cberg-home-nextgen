@@ -1239,8 +1239,6 @@ data:
     - Touch user files outside the drafts scope.
 
   skill-pallet.md: |
-
-  skill-pallet.md: |
     ---
     name: pallet
     description: Read-only access to the wood-pellet price-monitor database. Surfaces the latest BUY/HOLD verdict, composite score, local vs national price (€/t), per-source prices, signal history, and weather (heating-degree-days). Use whenever Mathias asks about pellet prices, "should I buy pellets now", or how the heating-fuel market is doing.
