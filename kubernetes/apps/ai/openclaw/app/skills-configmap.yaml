@@ -9,10 +9,13 @@
 #
 # Surfaces:
 #   paperless   — search/get/download Paperless documents
-#   sure        — list accounts / read balances / read transactions
-#   ha          — wraps `hactl` for Home Assistant state, history, areas
+#   sure        — accounts/transactions read + whitelisted writes
+#                 (categorize / tag / note — confirm-first)
+#   ha          — read entity state + whitelisted service calls
+#                 (light/switch/scene/etc. — confirm-first)
 #   mail        — Nextcloud Mail REST API: accounts / mailboxes / messages
-#                 / body / thread (fans out to GMX/iCloud/Gmail internally)
+#                 / body / thread / save-draft (fans out to GMX/iCloud/Gmail)
+#   nc          — scoped read+write under Nextcloud /openclaw-drafts/
 #   say         — synthesize text via ElevenLabs and send back through
 #                 Telegram as a voice message (Opus/OGG) or audio (MP3)
 #   pallet      — read-only access to the wood-pellet price monitor's
@@ -85,18 +88,35 @@ data:
 
   sure.py: |
     #!/usr/bin/env python3
-    """Read-only Sure client. Usage:
+    """Sure client (mostly read, whitelisted writes).
+
+    Read:
         sure accounts
         sure account <account_id>
         sure transactions [account_id] [from_iso] [to_iso] [limit]
+        sure transaction <txn_id>      # one transaction (helpful before writes)
+        sure categories                # available categories
+        sure tags                      # available tags
 
-    Auth: Sure uses an X-Api-Key header (see sure-moneymoney/src/sure-api.mjs).
+    Write (whitelisted; agent must confirm with user first):
+        sure categorize <txn_id> <category_id>
+        sure tag <txn_id> <tag_id>[,<tag_id>...]   # comma-separated; replaces tags
+        sure note <txn_id>             # body from stdin; replaces notes
+
+    Auth: Sure uses X-Api-Key header. Writes go via
+    PATCH /api/v1/transactions/:id with a {"transaction": {...}} wrapper.
+    Block: amount, date, account_id, account changes, deletes.
     """
     import json, os, sys, urllib.parse, urllib.request
 
     BASE = os.environ["SURE_URL"].rstrip("/")
     TOKEN = os.environ["SURE_TOKEN"]
     HEADERS = {"X-Api-Key": TOKEN, "Accept": "application/json"}
+
+    # Fields the agent is allowed to touch via PATCH. Any other field in a
+    # caller payload is silently dropped. Matches the user-approved scope:
+    # categorise + tag + note. Amount/date/account moves are forbidden.
+    WRITE_FIELDS = {"category_id", "tag_ids", "notes"}
 
     def _get(path, params=None):
         url = f"{BASE}{path}"
@@ -105,6 +125,23 @@ data:
             if clean:
                 url += "?" + urllib.parse.urlencode(clean)
         req = urllib.request.Request(url, headers=HEADERS, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+
+    def _patch_txn(txn_id, fields):
+        clean = {k: v for k, v in fields.items() if k in WRITE_FIELDS}
+        if not clean:
+            sys.stderr.write(
+                f"refused: no whitelisted write fields in payload. "
+                f"Allowed: {sorted(WRITE_FIELDS)}\n"
+            )
+            sys.exit(3)
+        body = json.dumps({"transaction": clean}).encode()
+        h = {**HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(
+            f"{BASE}/api/v1/transactions/{txn_id}",
+            data=body, headers=h, method="PATCH",
+        )
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
 
@@ -118,21 +155,57 @@ data:
         params = {"account_id": account_id, "from": frm, "to": to, "limit": limit}
         print(json.dumps(_get("/api/v1/transactions", params), indent=2))
 
+    def transaction(txn_id):
+        print(json.dumps(_get(f"/api/v1/transactions/{txn_id}"), indent=2))
+
+    def categories():
+        print(json.dumps(_get("/api/v1/categories"), indent=2))
+
+    def tags():
+        print(json.dumps(_get("/api/v1/tags"), indent=2))
+
+    def categorize(txn_id, category_id):
+        result = _patch_txn(txn_id, {"category_id": category_id})
+        cat = (result.get("category") or {}).get("name")
+        print(json.dumps({"id": txn_id, "category": cat, "result": result}, indent=2))
+
+    def tag(txn_id, tag_csv):
+        tag_ids = [t.strip() for t in tag_csv.split(",") if t.strip()]
+        result = _patch_txn(txn_id, {"tag_ids": tag_ids})
+        applied = [t.get("name") for t in (result.get("tags") or [])]
+        print(json.dumps({"id": txn_id, "tags": applied, "result": result}, indent=2))
+
+    def note(txn_id):
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.stderr.write("sure note: expected note text on stdin\n")
+            sys.exit(2)
+        result = _patch_txn(txn_id, {"notes": raw.strip()})
+        print(json.dumps({"id": txn_id, "notes": result.get("notes")}, indent=2))
+
     def main():
         if len(sys.argv) < 2:
             print(__doc__); sys.exit(2)
         verb = sys.argv[1]
-        if verb == "accounts":
-            accounts()
-        elif verb == "account":
-            account(sys.argv[2])
-        elif verb == "transactions":
-            transactions(sys.argv[2] if len(sys.argv) > 2 else None,
-                         sys.argv[3] if len(sys.argv) > 3 else None,
-                         sys.argv[4] if len(sys.argv) > 4 else None,
-                         int(sys.argv[5]) if len(sys.argv) > 5 else 100)
-        else:
+        dispatch = {
+            "accounts": lambda: accounts(),
+            "account": lambda: account(sys.argv[2]),
+            "transactions": lambda: transactions(
+                sys.argv[2] if len(sys.argv) > 2 else None,
+                sys.argv[3] if len(sys.argv) > 3 else None,
+                sys.argv[4] if len(sys.argv) > 4 else None,
+                int(sys.argv[5]) if len(sys.argv) > 5 else 100,
+            ),
+            "transaction": lambda: transaction(sys.argv[2]),
+            "categories": lambda: categories(),
+            "tags": lambda: tags(),
+            "categorize": lambda: categorize(sys.argv[2], sys.argv[3]),
+            "tag": lambda: tag(sys.argv[2], sys.argv[3]),
+            "note": lambda: note(sys.argv[2]),
+        }
+        if verb not in dispatch:
             print(__doc__); sys.exit(2)
+        dispatch[verb]()
 
     if __name__ == "__main__":
         main()
@@ -648,6 +721,143 @@ data:
     if __name__ == "__main__":
         main()
 
+  nc.py: |
+    #!/usr/bin/env python3
+    """Nextcloud drafts folder — scope-locked read/write.
+
+    The agent can read, create, and update files under
+    /openclaw-drafts/ in the user's Nextcloud. All other paths are
+    refused in code — there's no way to escape the folder.
+
+    Usage:
+        nc list [subpath]              # list files/folders (default: root)
+        nc read <path>                 # read a file's content
+        nc write <path>                # write file (content from stdin)
+        nc mkdir <path>                # create a sub-folder
+        nc rename <old> <new>          # move/rename within the folder
+        nc delete <path>               # delete file/folder (CONFIRM FIRST)
+
+    All paths are relative to /openclaw-drafts/. Absolute paths and
+    `..` traversal are stripped.
+    """
+    import base64, os, sys, urllib.parse, urllib.request, xml.etree.ElementTree as ET
+
+    BASE = os.environ["NEXTCLOUD_URL"].rstrip("/")
+    USER = os.environ["NEXTCLOUD_USERNAME"]
+    PASS = os.environ["NEXTCLOUD_PASSWORD"]
+    AUTH = base64.b64encode(f"{USER}:{PASS}".encode()).decode()
+    ROOT = f"/remote.php/dav/files/{USER}/openclaw-drafts"
+
+    HEADERS = {
+        "Authorization": f"Basic {AUTH}",
+        "User-Agent": "openclaw-nc/1.0",
+    }
+
+    def _safe_path(rel):
+        rel = (rel or "").strip().lstrip("/")
+        parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+        if any(p.startswith("..") for p in parts):
+            sys.stderr.write("nc: path traversal blocked\n"); sys.exit(3)
+        return "/".join(parts)
+
+    def _url(rel):
+        rel = _safe_path(rel)
+        return f"{BASE}{ROOT}/{urllib.parse.quote(rel)}" if rel else f"{BASE}{ROOT}/"
+
+    def _req(method, rel, data=None, extra_headers=None, timeout=30):
+        h = dict(HEADERS)
+        if extra_headers: h.update(extra_headers)
+        req = urllib.request.Request(_url(rel), data=data, headers=h, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def list_(subpath=""):
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<d:propfind xmlns:d="DAV:"><d:prop>'
+            '<d:displayname/><d:getcontentlength/><d:getlastmodified/><d:resourcetype/>'
+            '</d:prop></d:propfind>'
+        )
+        status, raw = _req("PROPFIND", subpath, data=body.encode(),
+                           extra_headers={"Depth": "1", "Content-Type": "application/xml"})
+        if status not in (207, 200):
+            sys.stderr.write(f"nc list: HTTP {status}\n{raw.decode(errors='replace')[:300]}\n")
+            sys.exit(1)
+        ns = {"d": "DAV:"}
+        rows = []
+        # Strip the prefix matching our root so we emit relative paths.
+        root_prefix = ROOT
+        for resp in ET.fromstring(raw).findall("d:response", ns):
+            href = resp.find("d:href", ns).text or ""
+            href_decoded = urllib.parse.unquote(href)
+            rel = href_decoded.replace(root_prefix, "", 1).lstrip("/")
+            if rel == "":  # the folder itself
+                continue
+            prop = resp.find("d:propstat/d:prop", ns)
+            is_dir = prop.find("d:resourcetype/d:collection", ns) is not None
+            size = prop.findtext("d:getcontentlength", default="", namespaces=ns)
+            mtime = prop.findtext("d:getlastmodified", default="", namespaces=ns)
+            rows.append({"path": rel.rstrip("/"), "type": "dir" if is_dir else "file",
+                         "size": int(size) if size else None, "mtime": mtime})
+        import json; print(json.dumps(rows, indent=2))
+
+    def read(path):
+        status, raw = _req("GET", path)
+        if status != 200:
+            sys.stderr.write(f"nc read {path}: HTTP {status}\n"); sys.exit(1)
+        sys.stdout.buffer.write(raw)
+
+    def write(path):
+        body = sys.stdin.buffer.read()
+        status, raw = _req("PUT", path, data=body,
+                           extra_headers={"Content-Type": "application/octet-stream"})
+        if status not in (200, 201, 204):
+            sys.stderr.write(f"nc write {path}: HTTP {status}\n{raw.decode(errors='replace')[:300]}\n"); sys.exit(1)
+        print(f'{{"path":"{path}","bytes":{len(body)},"http":{status}}}')
+
+    def mkdir(path):
+        status, raw = _req("MKCOL", path)
+        if status not in (201, 405):  # 405 = already exists
+            sys.stderr.write(f"nc mkdir {path}: HTTP {status}\n"); sys.exit(1)
+        print(f'{{"path":"{path}","created":{status==201},"http":{status}}}')
+
+    def rename(old, new):
+        new_safe = _safe_path(new)
+        h = dict(HEADERS)
+        h["Destination"] = f"{BASE}{ROOT}/{urllib.parse.quote(new_safe)}"
+        status, raw = _req("MOVE", old, extra_headers=h)
+        if status not in (201, 204):
+            sys.stderr.write(f"nc rename {old} -> {new}: HTTP {status}\n"); sys.exit(1)
+        print(f'{{"from":"{old}","to":"{new}","http":{status}}}')
+
+    def delete(path):
+        status, raw = _req("DELETE", path)
+        if status not in (204, 404):
+            sys.stderr.write(f"nc delete {path}: HTTP {status}\n"); sys.exit(1)
+        print(f'{{"path":"{path}","deleted":{status==204},"http":{status}}}')
+
+    def main():
+        if len(sys.argv) < 2:
+            print(__doc__); sys.exit(2)
+        verb = sys.argv[1].lower()
+        dispatch = {
+            "list":   lambda: list_(sys.argv[2] if len(sys.argv) > 2 else ""),
+            "read":   lambda: read(sys.argv[2]),
+            "write":  lambda: write(sys.argv[2]),
+            "mkdir":  lambda: mkdir(sys.argv[2]),
+            "rename": lambda: rename(sys.argv[2], sys.argv[3]),
+            "delete": lambda: delete(sys.argv[2]),
+        }
+        if verb not in dispatch:
+            print(__doc__); sys.exit(2)
+        dispatch[verb]()
+
+    if __name__ == "__main__":
+        main()
+
   pallet.py: |
     #!/usr/bin/env python3
     """Read-only wood-pellet price-monitor client.
@@ -906,25 +1116,129 @@ data:
   skill-sure.md: |
     ---
     name: sure
-    description: Read-only access to the user's Sure (Maybe-Finance fork) instance — accounts, balances, transactions, budgets. Use when the user asks about money, bank balances, recent spending, a specific transaction, or to cross-reference a bill with a payment.
+    description: Access to the user's Sure (Maybe-Finance fork) — accounts, balances, transactions, plus whitelisted writes (set category, set tags, set notes on a transaction). Use when the user asks about money, balances, recent spending, to cross-reference a bill with a payment, or to clean up uncategorised transactions. Confirm before any write.
     user-invocable: true
     ---
 
     # Sure
 
-    Read-only finance client. Invoke the `sure` CLI.
+    Mostly-read finance client; can categorise + tag + annotate transactions
+    with explicit user confirmation.
+
+    ## Read verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `sure accounts` | List accounts (balance, currency, classification). |
+    | `sure account <account_id>` | Detail for one account. |
+    | `sure transactions [account_id] [from_iso] [to_iso] [limit]` | List transactions (default 100). |
+    | `sure transaction <txn_id>` | Detail for one transaction (use before any write). |
+    | `sure categories` | Available categories (id + name). |
+    | `sure tags` | Available tags (often empty). |
+
+    Date format is ISO `YYYY-MM-DD`.
+
+    ## Write verbs (CONFIRM FIRST)
+
+    | Command | Purpose |
+    | --- | --- |
+    | `sure categorize <txn_id> <category_id>` | Assign a category. |
+    | `sure tag <txn_id> <tag_id>[,<tag_id>...]` | Replace the transaction's tags. Empty string clears tags. |
+    | `sure note <txn_id>` | Replace `notes` (body from stdin). |
+
+    The skill PATCH-es `/api/v1/transactions/:id` with a strict
+    whitelist: only `category_id`, `tag_ids`, `notes` are accepted in
+    the payload. Anything else is silently dropped. Amount, date,
+    account_id, deletes — all impossible from here.
+
+    ### Protocol — always confirm before writing
+
+    1. `sure transaction <id>` to load the current state if you don't
+       already have it (date, amount, payee, current category, notes).
+    2. If categorising: `sure categories` once to discover ids; cache
+       in the session.
+    3. Show Mathias the proposed change in chat as plain text, e.g.
+       *"I'll categorise the 2026-05-22 Frankfurt International School
+       income (€5,997.17) under `Income` (6a501ef5-…). OK?"*
+    4. Wait for an affirmative ("yes", "go", "do it", 👍). Don't infer
+       consent from the original "categorise my transactions" intent
+       alone — each PATCH is a separate confirmation.
+    5. Run the command, print the returned category/tag/notes, and
+       summarise.
+    6. Batch hint: if Mathias asks "categorise these 10 transactions",
+       it's fine to confirm the whole batch once ("these 10 → these
+       categories, OK?") rather than 10 separate yeses. But still show
+       the planned mapping before executing.
+
+    ## What stays blocked
+    - Editing amount / date / account.
+    - Deleting transactions.
+    - Moving transactions between accounts.
+    - Creating new transactions (the MoneyMoney sync handles that).
+
+  skill-nc.md: |
+    ---
+    name: nc
+    description: Scoped read/write to a Nextcloud drafts folder (/openclaw-drafts/). Use when the user asks you to save a note, draft document, summary, meeting minutes, or scratch artifact for later review. The scope is enforced in code — you cannot escape this folder.
+    user-invocable: true
+    ---
+
+    # Nextcloud Drafts
+
+    A safe scratchpad in the user's Nextcloud, mounted at
+    `/openclaw-drafts/`. Use it whenever you want to persist text that
+    Mathias should review later in the Nextcloud Files UI.
 
     ## Verbs
 
     | Command | Purpose |
     | --- | --- |
-    | `sure accounts` | List accounts with balances, currency, classification. |
-    | `sure account <account_id>` | Detailed info for one account. |
-    | `sure transactions <account_id> [from_iso] [to_iso] [limit]` | List transactions in a window (default 100). |
+    | `nc list [subpath]` | List files in the drafts folder (or a subfolder). |
+    | `nc read <path>` | Read a file's content to stdout. |
+    | `nc write <path>` | Write/overwrite a file (content from stdin). |
+    | `nc mkdir <path>` | Create a sub-folder. |
+    | `nc rename <old> <new>` | Move/rename within the folder. |
+    | `nc delete <path>` | Delete a file/folder (CONFIRM FIRST). |
 
-    Date format is ISO `YYYY-MM-DD`.
+    All paths are relative to `/openclaw-drafts/`. Absolute paths and
+    `..` traversal are stripped by the skill. There's no way to write
+    to other Nextcloud folders from here.
 
-    Read-only: no transaction edits, no balance adjustments.
+    ## Conventions
+
+    - **Naming**: prefer `YYYY-MM-DD-<topic>.md` for date-anchored notes,
+      `<topic>.md` for evergreen ones, and a subfolder per topic if
+      things multiply (`meetings/`, `summaries/`, `recipes/`, etc.).
+    - **Format**: Markdown unless the user specifies otherwise. Add a
+      one-line `# Title` and source/timestamp footer so Mathias can
+      tell at a glance what it is.
+    - **Writes are auto-OK without explicit confirmation** for the
+      drafts folder — the whole point is a low-friction scratchpad.
+      `delete` is the exception; always confirm before deleting.
+    - **Don't dump huge payloads.** Summaries of long mail threads or
+      multi-source research belong here, not raw API dumps. If you
+      need to persist a raw blob, mention the size first.
+
+    ## Typical flows
+
+    - "Take notes on what we just discussed" →
+      `nc write meetings/2026-05-23-discord-debug.md` with markdown
+      bullet summary, then tell Mathias the file path.
+    - "Save this email as a doc" →
+      `mail body <id>` → summarise → `nc write 2026-05-23-apple-invoice.md`.
+    - "What was in my drafts from last week?" →
+      `nc list` to inventory, then `nc read <path>` on interesting ones.
+    - "Delete the old shopping list" → propose `nc delete shopping.md`,
+      wait for "yes", then run.
+
+    ## Blast radius
+    Bounded to `/openclaw-drafts/`. The agent cannot:
+    - Write to `Documents/`, `Photos/`, or any other Nextcloud folder.
+    - Share files publicly.
+    - Modify Nextcloud Mail / Calendar / Contacts.
+    - Touch user files outside the drafts scope.
+
+  skill-pallet.md: |
 
   skill-pallet.md: |
     ---
