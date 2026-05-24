@@ -86,6 +86,345 @@ data:
     if __name__ == "__main__":
         main()
 
+  cal.py: |
+    #!/usr/bin/env python3
+    """Nextcloud Calendar client (CalDAV).
+
+    This household uses ZERO Google services. Calendar lives in
+    Nextcloud only — do not reach for Google Calendar APIs, gcal,
+    or any "google_*" tool. Use THIS skill for every calendar
+    operation.
+
+    Read:
+        cal calendars                                  # list all calendars + slugs
+        cal events [calendar] [from_iso] [to_iso]     # events in a window (default
+                                                       # = family, next 14 days)
+        cal get <calendar> <uid>                       # one event
+
+    Write (confirm first):
+        cal create                                     # JSON body on stdin
+        cal update <calendar> <uid>                    # JSON body on stdin
+        cal delete <calendar> <uid>                    # CONFIRM FIRST
+
+    Calendar selector: pass either the friendly alias (`family`,
+    `personal`, `holidays`) or the exact display name. The DEFAULT
+    target for `create` is ALWAYS `family` — do not change without
+    Mathias explicitly asking ("on my personal calendar", "private",
+    etc.).
+
+    Create JSON shape:
+        {
+          "calendar":  "family",        // optional, default family
+          "title":     "Pickup Anna from school",
+          "start":     "2026-05-25T15:00:00Z",   // ISO 8601 UTC
+          "end":       "2026-05-25T15:30:00Z",
+          "description": "...",         // optional
+          "location":    "...",         // optional
+          "allDay":      false          // optional, default false
+        }
+
+    Auth: NEXTCLOUD_USERNAME + NEXTCLOUD_PASSWORD env vars (already
+    set by the runtime). Direct CalDAV — no MCP layer.
+    """
+    import datetime as _dt
+    import base64, json, os, re, sys, urllib.error, urllib.parse, urllib.request, uuid
+
+    USER = os.environ["NEXTCLOUD_USERNAME"]
+    PASS = os.environ["NEXTCLOUD_PASSWORD"]
+    BASE = os.environ["NEXTCLOUD_URL"].rstrip("/")
+    DAV  = f"{BASE}/remote.php/dav/calendars/{USER}"
+
+    AUTH = "Basic " + base64.b64encode(f"{USER}:{PASS}".encode()).decode()
+    H = {"Authorization": AUTH, "User-Agent": "openclaw-cal/1.0"}
+
+    # Friendly aliases → substring match on display name.
+    ALIASES = {
+        "family":   "Uhl Family",
+        "personal": "Personal",
+        "holidays": "Feiertage",
+        "feiertage": "Feiertage",
+    }
+    # Calendars that must NEVER be written to (read-only by policy).
+    READONLY = {"Feiertage"}
+
+    def _req(method, url, body=None, extra_headers=None):
+        headers = dict(H)
+        if extra_headers:
+            headers.update(extra_headers)
+        data = body.encode() if isinstance(body, str) else body
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.read(), dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), dict(e.headers or {})
+
+    def _list_calendars_raw():
+        propfind = (
+            '<?xml version="1.0"?>'
+            '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+            '<d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>'
+        )
+        st, body, _ = _req("PROPFIND", DAV + "/", propfind,
+                           {"Depth": "1", "Content-Type": "application/xml"})
+        if st >= 400:
+            sys.stderr.write(f"cal: PROPFIND failed HTTP {st}\n")
+            sys.exit(2)
+        xml = body.decode("utf-8", errors="replace")
+        cals = []
+        for resp in xml.split("<d:response>")[1:]:
+            href_m = re.search(r"<d:href>([^<]+)</d:href>", resp)
+            name_m = re.search(r"<d:displayname>([^<]*)</d:displayname>", resp)
+            type_m = re.search(r"<d:resourcetype>(.*?)</d:resourcetype>", resp, re.S)
+            if not (href_m and name_m and type_m): continue
+            if "calendar" not in type_m.group(1): continue
+            href = href_m.group(1)
+            # slug = last path segment, already URL-encoded by NC
+            slug = href.rstrip("/").rsplit("/", 1)[-1]
+            cals.append({"name": name_m.group(1), "slug": slug, "href": href})
+        return cals
+
+    def _resolve(selector):
+        """Map friendly alias / display name / slug → canonical slug + display name.
+        Defaults to family if selector is None/empty."""
+        if not selector:
+            selector = "family"
+        cals = _list_calendars_raw()
+        sel = selector.strip()
+        match_str = ALIASES.get(sel.lower(), sel)
+        # 1. exact slug
+        for c in cals:
+            if c["slug"] == sel: return c
+        # 2. exact display name
+        for c in cals:
+            if c["name"] == sel: return c
+        # 3. substring of display name (case-insensitive)
+        for c in cals:
+            if match_str.lower() in c["name"].lower(): return c
+        sys.stderr.write(
+            f"cal: no calendar matched {selector!r}. Available: "
+            + ", ".join(c["name"] for c in cals) + "\n"
+        )
+        sys.exit(3)
+
+    def _readonly_guard(cal):
+        for ro in READONLY:
+            if ro.lower() in cal["name"].lower():
+                sys.stderr.write(
+                    f"cal: {cal['name']!r} is read-only by policy — refusing write.\n"
+                )
+                sys.exit(4)
+
+    def _parse_iso(s):
+        # Accept "...Z", "...+00:00", or naive (treated as UTC).
+        s = s.strip()
+        if s.endswith("Z"): s = s[:-1] + "+00:00"
+        try:
+            dt = _dt.datetime.fromisoformat(s)
+        except ValueError:
+            sys.stderr.write(f"cal: bad datetime {s!r} (need ISO 8601)\n")
+            sys.exit(2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.timezone.utc)
+        return dt.astimezone(_dt.timezone.utc)
+
+    def _ics_dt(dt):
+        return dt.strftime("%Y%m%dT%H%M%SZ")
+
+    def _ics_date(dt):
+        return dt.strftime("%Y%m%d")
+
+    def _build_ics(payload, event_uid):
+        title = payload.get("title") or ""
+        desc  = (payload.get("description") or "").replace("\n", "\\n")
+        loc   = (payload.get("location") or "").replace("\n", "\\n")
+        all_day = bool(payload.get("allDay"))
+        start = _parse_iso(payload["start"])
+        end   = _parse_iso(payload["end"])
+        now   = _dt.datetime.now(_dt.timezone.utc)
+        lines = [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//openclaw//cal-skill//EN",
+            "BEGIN:VEVENT",
+            f"UID:{event_uid}",
+            f"DTSTAMP:{_ics_dt(now)}",
+        ]
+        if all_day:
+            lines += [
+                f"DTSTART;VALUE=DATE:{_ics_date(start)}",
+                f"DTEND;VALUE=DATE:{_ics_date(end)}",
+            ]
+        else:
+            lines += [
+                f"DTSTART:{_ics_dt(start)}",
+                f"DTEND:{_ics_dt(end)}",
+            ]
+        lines.append(f"SUMMARY:{title}")
+        if desc: lines.append(f"DESCRIPTION:{desc}")
+        if loc:  lines.append(f"LOCATION:{loc}")
+        lines += ["END:VEVENT", "END:VCALENDAR"]
+        return "\r\n".join(lines) + "\r\n"
+
+    def calendars():
+        cals = _list_calendars_raw()
+        out = []
+        for c in cals:
+            tag = []
+            if "uhl family" in c["name"].lower(): tag.append("PRIMARY")
+            for ro in READONLY:
+                if ro.lower() in c["name"].lower(): tag.append("read-only")
+            out.append({
+                "name": c["name"],
+                "slug": c["slug"],
+                "tags": tag,
+            })
+        print(json.dumps(out, indent=2))
+
+    def events(selector=None, frm=None, to=None):
+        cal = _resolve(selector)
+        now = _dt.datetime.now(_dt.timezone.utc)
+        s = _parse_iso(frm) if frm else now
+        e = _parse_iso(to) if to else (now + _dt.timedelta(days=14))
+        # CalDAV REPORT for time-range
+        report = (
+            '<?xml version="1.0"?>'
+            '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+            '<d:prop><d:getetag/><c:calendar-data/></d:prop>'
+            '<c:filter><c:comp-filter name="VCALENDAR">'
+            '<c:comp-filter name="VEVENT">'
+            f'<c:time-range start="{_ics_dt(s)}" end="{_ics_dt(e)}"/>'
+            '</c:comp-filter></c:comp-filter></c:filter></c:calendar-query>'
+        )
+        st, body, _ = _req("REPORT", f"{BASE}{cal['href']}", report,
+                           {"Depth": "1", "Content-Type": "application/xml"})
+        if st >= 400:
+            sys.stderr.write(f"cal events: REPORT failed HTTP {st}\n"); sys.exit(2)
+        xml = body.decode("utf-8", errors="replace")
+        out = []
+        for resp in xml.split("<d:response>")[1:]:
+            href_m = re.search(r"<d:href>([^<]+)</d:href>", resp)
+            ics_m  = re.search(r"<c:calendar-data[^>]*>(.*?)</c:calendar-data>", resp, re.S)
+            if not (href_m and ics_m): continue
+            ics = ics_m.group(1)
+            uid = (re.search(r"\bUID:([^\r\n]+)", ics) or [None, ""])[1].strip()
+            sm  = (re.search(r"\bSUMMARY:([^\r\n]+)", ics) or [None, ""])[1].strip()
+            ds  = (re.search(r"\bDTSTART[^:]*:([^\r\n]+)", ics) or [None, ""])[1].strip()
+            de  = (re.search(r"\bDTEND[^:]*:([^\r\n]+)", ics) or [None, ""])[1].strip()
+            out.append({
+                "calendar": cal["name"],
+                "uid":      uid,
+                "summary":  sm,
+                "start":    ds,
+                "end":      de,
+                "href":     href_m.group(1),
+            })
+        out.sort(key=lambda e: e.get("start", ""))
+        print(json.dumps({"calendar": cal["name"], "count": len(out), "events": out}, indent=2))
+
+    def get(selector, uid):
+        cal = _resolve(selector)
+        ics_url = f"{BASE}{cal['href']}{uid}.ics"
+        st, body, _ = _req("GET", ics_url)
+        if st >= 400:
+            sys.stderr.write(f"cal get: HTTP {st}\n"); sys.exit(2)
+        print(body.decode("utf-8", errors="replace"))
+
+    def create():
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.stderr.write("cal create: expected JSON body on stdin\n"); sys.exit(2)
+        payload = json.loads(raw)
+        for k in ("title", "start", "end"):
+            if not payload.get(k):
+                sys.stderr.write(f"cal create: missing required field {k!r}\n"); sys.exit(2)
+        cal = _resolve(payload.get("calendar"))
+        _readonly_guard(cal)
+        event_uid = f"openclaw-{uuid.uuid4()}@cberg.home"
+        ics = _build_ics(payload, event_uid)
+        ics_url = f"{BASE}{cal['href']}{event_uid}.ics"
+        st, body, _ = _req("PUT", ics_url, ics,
+                           {"Content-Type": "text/calendar; charset=utf-8"})
+        if st not in (201, 204):
+            sys.stderr.write(f"cal create: PUT failed HTTP {st}: {body[:300]!r}\n")
+            sys.exit(5)
+        print(json.dumps({
+            "success":  True,
+            "calendar": cal["name"],
+            "uid":      event_uid,
+            "title":    payload["title"],
+            "start":    payload["start"],
+            "end":      payload["end"],
+            "href":     ics_url,
+        }, indent=2))
+
+    def update(selector, uid):
+        cal = _resolve(selector)
+        _readonly_guard(cal)
+        ics_url = f"{BASE}{cal['href']}{uid}.ics"
+        st, body, _ = _req("GET", ics_url)
+        if st >= 400:
+            sys.stderr.write(f"cal update: source GET failed HTTP {st}\n"); sys.exit(2)
+        # Merge: parse stdin patch onto fields by regex-replacing in the ICS.
+        raw = sys.stdin.read()
+        if not raw.strip():
+            sys.stderr.write("cal update: expected JSON patch on stdin\n"); sys.exit(2)
+        patch = json.loads(raw)
+        ics = body.decode("utf-8", errors="replace")
+        def _sub(line_re, new_value):
+            nonlocal ics
+            if new_value is None: return
+            new_line = new_value.replace("\r", "").replace("\n", "\\n")
+            if re.search(line_re, ics):
+                ics = re.sub(line_re, new_line, ics, count=1)
+        if "title" in patch:       _sub(r"SUMMARY:[^\r\n]*",     f"SUMMARY:{patch['title']}")
+        if "description" in patch: _sub(r"DESCRIPTION:[^\r\n]*", f"DESCRIPTION:{patch['description']}")
+        if "location" in patch:    _sub(r"LOCATION:[^\r\n]*",    f"LOCATION:{patch['location']}")
+        if "start" in patch:       _sub(r"DTSTART[^:]*:[^\r\n]*", f"DTSTART:{_ics_dt(_parse_iso(patch['start']))}")
+        if "end" in patch:         _sub(r"DTEND[^:]*:[^\r\n]*",   f"DTEND:{_ics_dt(_parse_iso(patch['end']))}")
+        st, body, _ = _req("PUT", ics_url, ics,
+                           {"Content-Type": "text/calendar; charset=utf-8",
+                            "If-Match": "*"})
+        if st not in (201, 204):
+            sys.stderr.write(f"cal update: PUT failed HTTP {st}: {body[:300]!r}\n"); sys.exit(5)
+        print(json.dumps({"success": True, "calendar": cal["name"], "uid": uid, "updated": list(patch.keys())}, indent=2))
+
+    def delete(selector, uid):
+        cal = _resolve(selector)
+        _readonly_guard(cal)
+        ics_url = f"{BASE}{cal['href']}{uid}.ics"
+        st, _, _ = _req("DELETE", ics_url)
+        if st not in (200, 204, 404):
+            sys.stderr.write(f"cal delete: HTTP {st}\n"); sys.exit(5)
+        print(json.dumps({"success": True, "calendar": cal["name"], "uid": uid, "status": st}, indent=2))
+
+    def main():
+        if len(sys.argv) < 2:
+            print(__doc__); sys.exit(2)
+        verb = sys.argv[1].lower()
+        dispatch = {
+            "calendars": lambda: calendars(),
+            "list":      lambda: calendars(),  # alias
+            "events":    lambda: events(
+                sys.argv[2] if len(sys.argv) > 2 else None,
+                sys.argv[3] if len(sys.argv) > 3 else None,
+                sys.argv[4] if len(sys.argv) > 4 else None,
+            ),
+            "get":       lambda: get(sys.argv[2], sys.argv[3]),
+            "create":    lambda: create(),
+            "update":    lambda: update(sys.argv[2], sys.argv[3]),
+            "delete":    lambda: delete(sys.argv[2], sys.argv[3]),
+        }
+        if verb not in dispatch:
+            print(__doc__); sys.exit(2)
+        try:
+            dispatch[verb]()
+        except KeyError as e:
+            sys.stderr.write(f"cal: missing arg {e}\n"); sys.exit(2)
+
+    if __name__ == "__main__":
+        main()
+
   sure.py: |
     #!/usr/bin/env python3
     """Sure client (mostly read, whitelisted writes).
@@ -1443,6 +1782,85 @@ data:
     - Moving transactions between accounts.
     - Creating new transactions (the MoneyMoney sync handles that).
 
+  skill-calendar.md: |
+    ---
+    name: nextcloud-calendar
+    description: Read + write the household calendars in Nextcloud (family, personal, holidays). Use whenever Mathias mentions an appointment, meeting, school pickup, deadline, travel, anniversary, doctor's appointment, or anything date/time-bound. THIS HOUSEHOLD DOES NOT USE GOOGLE — never reach for Google Calendar APIs, gcal tools, or any "google_*" surface. The CLI is `cal`. Default target for new events is the FAMILY calendar.
+    user-invocable: true
+    ---
+
+    # Nextcloud Calendar
+
+    Mathias and Andrea share a calendar in Nextcloud. The primary
+    calendar — the one both of them check on their phones — is the
+    family calendar. Use the `cal` CLI for every calendar operation.
+
+    > **No Google services.** This household migrated off Google
+    > years ago. There is no Google Calendar, no Gmail, no gcal CLI,
+    > no `google_*` MCP tool. If you find yourself reaching for one,
+    > stop — use `cal` instead.
+
+    ## Available calendars (run `cal calendars` to confirm slugs)
+
+    | Friendly alias | Display name | Use for |
+    | --- | --- | --- |
+    | `family` | Uhl Family | **DEFAULT.** Anything Andrea also needs to see — kids, school, joint trips, deliveries, household, shared appointments. |
+    | `personal` | Personal | Only when Mathias explicitly says private/personal/work-only/just-me. |
+    | `holidays` | Feiertage in Hessen | Read-only reference (German public holidays). The skill refuses writes here. |
+
+    ## Read verbs
+
+    | Command | Purpose |
+    | --- | --- |
+    | `cal calendars` | List all calendars + slugs (also `cal list`). |
+    | `cal events [calendar] [from_iso] [to_iso]` | Events in a window. Default calendar = family. Default range = now → +14d. |
+    | `cal get <calendar> <uid>` | Raw ICS for one event. |
+
+    Date format is ISO 8601 in UTC (`2026-05-25T15:00:00Z`). Naive
+    datetimes are treated as UTC.
+
+    ## Write verbs (CONFIRM FIRST)
+
+    `cal create` — JSON body on stdin:
+
+    ```json
+    {
+      "calendar": "family",
+      "title":    "Pickup Anna from school",
+      "start":    "2026-05-25T15:00:00Z",
+      "end":      "2026-05-25T15:30:00Z",
+      "description": "regular pickup, after-school club ends 15:00",
+      "location":    "Schulstrasse 105"
+    }
+    ```
+
+    `calendar` is optional and defaults to `family`. The skill returns
+    `{success, calendar, uid, title, start, end, href}`.
+
+    `cal update <calendar> <uid>` — JSON patch on stdin (any of
+    `title / description / location / start / end`).
+
+    `cal delete <calendar> <uid>` — irreversible. Confirm in chat
+    before invoking.
+
+    ## Confirm-before-write protocol
+
+    1. If you don't already have the times, ask Mathias clearly:
+       *"When and how long?"* — ISO format or natural language that
+       you can normalise.
+    2. Show the proposed event back as plain text:
+       *"Create on **Uhl Family** calendar — 'Pickup Anna' Mon
+       2026-05-25 17:00–17:30. OK?"*
+    3. Wait for an explicit affirmative.
+    4. Run `cal create` and repeat the calendar name + start time in
+       the confirmation reply. The calendar name is important — it
+       tells Mathias whether the event will reach Andrea too.
+
+    ## What stays blocked
+    - Writing to Feiertage (read-only by skill code, not just convention).
+    - Reaching for any non-Nextcloud calendar surface (no Google, no
+      iCloud, no Outlook, no Calendar.app sync calls).
+
   skill-nc.md: |
     ---
     name: nc
@@ -1794,7 +2212,29 @@ data:
     - **Email:**
       - `mathiasuhl@gmx.de` (primary, GMX)
       - `mathiasuhl@me.com` (iCloud)
-      - `mathiasuhl@googlemail.com` (Gmail)
+      - `mathiasuhl@googlemail.com` (legacy contact address — see below)
+
+    ## Services this household uses (and doesn't)
+
+    **Uses:** Nextcloud (mail, files, calendar, contacts), Home
+    Assistant, Paperless-ngx, Sure (finance), GMX + iCloud mail,
+    Telegram, Discord, Plex, Jellyfin.
+
+    **Does NOT use:** Google services. No Google Calendar, no Gmail
+    for new mail (the `googlemail.com` address is a legacy contact
+    address aggregated into the Nextcloud Mail inbox — never compose
+    new mail there). No Google Drive, no Google Contacts, no Google
+    Photos. The household migrated off Google years ago.
+
+    Implications for tool selection — if you ever feel pulled toward
+    a Google-flavoured surface, switch to the Nextcloud equivalent:
+
+    | Need | Use this | NOT this |
+    | --- | --- | --- |
+    | Calendar events | `cal` | gcal / Google Calendar API / `google_*` MCP |
+    | Files | `nc` or the Nextcloud MCP | Google Drive |
+    | Mail | `mail` (Nextcloud Mail) | Gmail API |
+    | Contacts | Nextcloud Contacts | Google People API |
 
     ## Context
 
@@ -1832,7 +2272,9 @@ data:
 
     | Skill | What it does |
     | --- | --- |
-    | `nextcloud-mail` | Read mail across GMX/iCloud/Gmail; save drafts (`mail draft`). |
+    | `nextcloud-mail` | Read mail across GMX/iCloud/Gmail-inbox; save drafts (`mail draft`). |
+    | `nextcloud-calendar` | Read + write calendar events via `cal`. Defaults to family. No Google. |
+    | `nextcloud-drafts` (`nc`) | Scoped notes/scratchpads in `/openclaw-drafts/`. |
     | `paperless` | Search/get/download archived PDFs. |
     | `sure` | Read finance accounts/transactions (Sure / Maybe-Finance fork). |
     | `home-assistant` | Read HA state via `ha` (REST) or `hactl` (richer CLI). |
@@ -1843,6 +2285,10 @@ data:
     - **Questions about Mathias's own data** → use the matching skill,
       don't guess from training data. "What's my GMX inbox look like" →
       `mail`. "Did I pay the Apple invoice" → `paperless` + `sure`.
+    - **Calendar / appointments / scheduling** → `cal` only. Default
+      to the **family** calendar. This household uses Nextcloud
+      Calendar — there is no Google Calendar, no gcal, no
+      `google_*` MCP. If you reach for one, stop and use `cal`.
     - **Smart-home questions** → `ha` first, `hactl` for richer lookups.
     - **Voice replies** → only when explicitly asked ("voice this",
       "say it back", "send as voice note"). Default delivery is text.
@@ -1894,38 +2340,18 @@ data:
     via `sendVoice`. Use the chat_id from the inbound message. Caps
     at 4000 chars to protect the Starter-tier ElevenLabs quota.
 
-    ## MCP-provided capabilities
+    ### `cal`
+    Nextcloud Calendar via CalDAV. Primary surface for every event
+    operation — DO NOT use Google Calendar tools, gcal, `google_*`
+    MCP tools (this household has no Google services at all).
+    Default calendar for new events is **family** — anything Andrea
+    also needs to see lands there without prompting. Use `personal`
+    only when Mathias explicitly says private/work-only. Full doc:
+    `~/clawd/skills/nextcloud-calendar/SKILL.md`.
 
-    These come from the `nextcloud` MCP server (mcporter-loaded), not
-    a CLI on PATH. Invoke the tools by name through the agent runtime.
-
-    ### Calendar — Nextcloud `nextcloud-mcp` calendar tools
-
-    Tools: `nc_calendar_list_calendars`, `nc_calendar_create_event`,
-    `nc_calendar_list_events`, `nc_calendar_get_event`,
-    `nc_calendar_update_event`, `nc_calendar_delete_event`,
-    plus search-across-calendars and todo equivalents.
-
-    **The PRIMARY calendar is `Uhl Family (Google Calendar import)`.**
-    Default every new event there unless Mathias explicitly says
-    otherwise ("put it on my personal calendar", "private appointment",
-    "work-only", etc.). The family calendar is what Andrea and Mathias
-    both see in their own clients — kids, school, joint appointments,
-    deliveries, household, shared travel all belong there.
-
-    Calendars currently visible to the agent's identity (MathiasUhl):
-
-    | Display name | When to use |
-    | --- | --- |
-    | `Uhl Family (Google Calendar import)` | **Default for new events.** Anything Andrea also needs to see. |
-    | `Personal` | Only when Mathias explicitly asks for a private/personal-only entry. |
-    | `Feiertage in Hessen (Google Calendar import)` | Read-only reference for German public holidays. Never write here. |
-
-    Confirm-before-create protocol mirrors the other write surfaces:
-    show the proposed `{calendar, title, start, end, attendees?}` in
-    chat as plain text, wait for an explicit yes, then create. After
-    creation, repeat back the calendar name + start datetime so it's
-    obvious which calendar the event landed on.
+    ### `nc`
+    Scoped Nextcloud Files writes (drafts folder only,
+    `/openclaw-drafts/`). Notes, scratchpads, summaries.
 
     ## Built-in conventions
 
