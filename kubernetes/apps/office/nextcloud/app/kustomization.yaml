@@ -7,4 +7,20 @@ resources:
   - ./helmrelease.yaml
   - ./whiteboard-proxy.yaml
   - ./notify-push.yaml
+configMapGenerator:
+  # Custom Nextcloud app — gives the OpenClaw agent a route that saves
+  # IMAP drafts WITH attachments (upstream nextcloud/mail#458 has been
+  # open since 2017). Materialized into the NC pod's custom_apps/ on
+  # each boot via the install-openclaw-mail initContainer.
+  - name: nextcloud-openclaw-mail-app
+    files:
+      - openclaw-mail/info.xml
+      - openclaw-mail/routes.php
+      - openclaw-mail/Application.php
+      - openclaw-mail/DraftController.php
+generatorOptions:
+  # Fixed name so the HelmRelease can reference the ConfigMap directly.
+  # Auto-restart on change is handled by reloader.stakater.com/auto on
+  # the deployment.
+  disableNameSuffixHash: true
 

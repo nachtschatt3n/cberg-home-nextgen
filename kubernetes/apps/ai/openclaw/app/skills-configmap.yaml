@@ -396,7 +396,7 @@ data:
                                         # Does NOT send — outbox/send remain
                                         # blocked.
     """
-    import base64, json, mimetypes, os, sys, urllib.parse, urllib.request, uuid
+    import base64, json, mimetypes, os, sys, urllib.error, urllib.parse, urllib.request, uuid
 
     BASE = os.environ["NEXTCLOUD_URL"].rstrip("/")
     USER = os.environ["NEXTCLOUD_USERNAME"]
@@ -587,10 +587,12 @@ data:
         Without `attachments`: lands in the IMAP Drafts mailbox via
         accounts#draft (POST /accounts/{id}/draft).
 
-        With `attachments`: routes through POST /outbox with sendAt=null,
-        because accounts#draft does not support attachments. The message
-        STAYS in the NC Mail Outbox (visible in the web UI) for review
-        and must be sent manually — this skill never sends.
+        With `attachments`: routes through the custom openclaw_mail NC
+        app (POST /apps/openclaw_mail/api/draft) which builds the full
+        MIME message (text/html + attachments) and APPENDs it to the
+        account's IMAP Drafts mailbox with the \\Draft flag. Drafts
+        appear in any IMAP client, just like a manual NC Mail draft.
+        This path never sends.
         """
         raw = sys.stdin.read()
         if not raw.strip():
@@ -621,27 +623,30 @@ data:
             print(json.dumps(result, indent=2))
             return
 
-        # Outbox path — accountId required in body, recipients must be objects.
-        is_html = bool(payload.get("isHtml", True))
-        body_text = str(payload.get("body", ""))
-        body_html = body_text if is_html else f"<p>{body_text}</p>"
-        body_plain = body_text if not is_html else ""
-        outbox_payload = {
-            "accountId":     int(account_id),
-            "subject":       str(payload.get("subject", "")),
-            "bodyPlain":     body_plain,
-            "bodyHtml":      body_html,
-            "editorBody":    body_html if is_html else body_text,
-            "isHtml":        is_html,
-            "smimeSign":     False,
-            "smimeEncrypt":  False,
-            "to":            _split_recipients(payload.get("to")),
-            "cc":            _split_recipients(payload.get("cc")),
-            "bcc":           _split_recipients(payload.get("bcc")),
-            "attachments":   attachments,
+        # IMAP-Drafts-with-attachments path via custom openclaw_mail app.
+        # The app accepts the same recipient comma-strings and a bare-int
+        # attachments[] (the IDs returned by `mail attach`).
+        oc_url = f"{BASE}/index.php/apps/openclaw_mail/api/draft"
+        oc_payload = {
+            "accountId":  int(account_id),
+            "subject":    str(payload.get("subject", "")),
+            "body":       str(payload.get("body", "")),
+            "to":         str(payload.get("to", "")),
+            "cc":         str(payload.get("cc", "")),
+            "bcc":        str(payload.get("bcc", "")),
+            "isHtml":     bool(payload.get("isHtml", True)),
+            "attachments": [a["id"] for a in attachments],
         }
-        # sendAt intentionally omitted (== null) so the outbox does NOT auto-send.
-        result = _post("/outbox", outbox_payload)
+        data = json.dumps(oc_payload).encode()
+        headers = {**HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(oc_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                result = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            body_err = e.read().decode("utf-8", errors="replace")
+            sys.stderr.write(f"mail draft (attachments): HTTP {e.code}: {body_err}\n")
+            sys.exit(4)
         print(json.dumps(result, indent=2))
 
     def main():
@@ -1131,7 +1136,7 @@ data:
   skill-nextcloud-mail.md: |
     ---
     name: nextcloud-mail
-    description: Access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, to summarize/search mail, or to draft a reply (with or without photo/PDF attachments). Plain drafts go to the IMAP Drafts mailbox; drafts WITH attachments are parked in the NC Mail Outbox for review — never sends. All other mutations (send, delete, move, flag) remain blocked.
+    description: Access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, to summarize/search mail, or to draft a reply (with or without photo/PDF attachments). Drafts — with or without attachments — always land in the account's IMAP Drafts mailbox; never sends. All other mutations (send, delete, move, flag) remain blocked.
     user-invocable: true
     ---
 
@@ -1189,8 +1194,18 @@ data:
 
     ### Attachments
 
-    NC Mail's IMAP-Drafts endpoint cannot carry attachments. The skill
-    therefore splits the path:
+    Upstream NC Mail's `accounts#draft` route silently drops attachments
+    (open issue [nextcloud/mail#458][issue-458] since 2017). To work
+    around that, the cluster runs a tiny custom Nextcloud app —
+    `openclaw_mail` — that exposes `POST /apps/openclaw_mail/api/draft`.
+    The app reuses NC Mail's own `TransmissionService` + `MimeMessage`
+    pipeline to build a full MIME message with attachments, then APPENDs
+    it to the account's IMAP Drafts mailbox with the `\Draft` flag.
+
+    [issue-458]: https://github.com/nextcloud/mail/issues/458
+
+    From the agent's perspective the flow is the same as a plain draft,
+    just with an extra `attachments` key:
 
     1. **Upload** each file (local path OR http(s) URL):
 
@@ -1200,10 +1215,9 @@ data:
        #    "mimeType": "image/jpeg", "type": "local"}
        ```
 
-    2. **Compose** the draft with the returned attachment IDs. Adding an
-       `attachments` array switches the draft from IMAP Drafts to the
-       **NC Mail Outbox** (`POST /api/outbox`, `sendAt=null` so it never
-       auto-sends):
+    2. **Compose** the draft with the returned attachment IDs. Whether
+       the array is empty or not, the draft ends up in the same IMAP
+       Drafts folder — visible in any mail client, including GMX webmail:
 
        ```bash
        echo '{
@@ -1217,8 +1231,8 @@ data:
        ```
 
        Attachment IDs may be bare ints (`[42]`) or `{type,id}` objects
-       (`[{"type":"local","id":42}]`). Outbox drafts appear under
-       Settings → Outbox in the NC Mail web UI; the user must hit Send.
+       (`[{"type":"local","id":42}]`). On success the helper returns
+       `{success, uid, mailboxId, attachmentsAttached}`.
 
     ## Loop for "what are my latest emails?"
 
@@ -1239,12 +1253,9 @@ data:
        `mail attach <path_or_url>` for each file and collect the returned
        `id` values into the draft payload's `attachments` array.
     4. Pipe the JSON into `mail draft <account_id>` and confirm the
-       returned id to the user.
-       - No attachments → tell the user the draft is in **IMAP Drafts**
-         (visible in any mail client).
-       - With attachments → tell the user the draft is in **NC Mail
-         Outbox** (Settings → Outbox in the NC Mail web UI) and must be
-         sent from there.
+       returned id/uid to the user. The draft lives in the account's
+       **IMAP Drafts** mailbox in both cases — visible in any mail
+       client (NC Mail web UI, GMX webmail, Mail.app, K-9, etc.).
 
     ## What stays blocked
     - `send`, `outbox`, `compose` — no SMTP send via this skill.

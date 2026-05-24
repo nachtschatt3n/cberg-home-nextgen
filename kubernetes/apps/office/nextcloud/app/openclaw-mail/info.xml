@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>openclaw_mail</id>
+    <name>OpenClaw Mail Helper</name>
+    <summary>API endpoint that saves IMAP-Drafts-with-attachments for the OpenClaw agent.</summary>
+    <description><![CDATA[
+        Adds a single REST route: POST /apps/openclaw_mail/api/draft.
+
+        Reuses the Nextcloud Mail app's TransmissionService + MimeMessage
+        builder to assemble a full MIME message (text/html + attachments
+        from /apps/mail/api/attachments), then APPENDs it directly to
+        the account's IMAP Drafts mailbox.
+
+        Workaround for upstream nextcloud/mail#458 (open since 2017):
+        the canonical accounts#draft endpoint silently drops attachments,
+        and the outbox endpoint stores drafts in Nextcloud's local DB
+        rather than the IMAP Drafts folder.
+    ]]></description>
+    <version>0.1.0</version>
+    <licence>agpl</licence>
+    <author>cberg-home-nextgen</author>
+    <namespace>OpenclawMail</namespace>
+    <category>integration</category>
+    <bugs>https://github.com/nachtschatt3n/cberg-home-nextgen/issues</bugs>
+    <dependencies>
+        <php min-version="8.1" max-version="8.5"/>
+        <nextcloud min-version="30" max-version="34"/>
+    </dependencies>
+</info>

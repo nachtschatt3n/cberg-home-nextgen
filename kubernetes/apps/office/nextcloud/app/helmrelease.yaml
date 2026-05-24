@@ -230,6 +230,37 @@ spec:
                 echo "waiting for nextcloud-redis-master:6379..."
                 sleep 2
               done
+        # Install our small custom NC app that exposes
+        # POST /apps/openclaw_mail/api/draft (IMAP drafts with attachments
+        # — workaround for nextcloud/mail#458). Files come from the
+        # `nextcloud-openclaw-mail-app` ConfigMap; on each pod boot we
+        # wipe + re-materialize the standard NC app directory layout.
+        - name: install-openclaw-mail
+          image: busybox:stable
+          securityContext:
+            runAsUser: 33
+            runAsGroup: 33
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              DEST=/var/www/html/custom_apps/openclaw_mail
+              SRC=/openclaw-mail-src
+              rm -rf "$DEST"
+              mkdir -p "$DEST/appinfo" "$DEST/lib/AppInfo" "$DEST/lib/Controller"
+              cp "$SRC/info.xml"             "$DEST/appinfo/info.xml"
+              cp "$SRC/routes.php"           "$DEST/appinfo/routes.php"
+              cp "$SRC/Application.php"      "$DEST/lib/AppInfo/Application.php"
+              cp "$SRC/DraftController.php"  "$DEST/lib/Controller/DraftController.php"
+              echo "openclaw_mail installed under $DEST"
+              ls -la "$DEST" "$DEST/appinfo" "$DEST/lib/AppInfo" "$DEST/lib/Controller"
+          volumeMounts:
+            - name: nextcloud-main
+              mountPath: /var/www/html/custom_apps
+              subPath: custom_apps
+            - name: openclaw-mail-src
+              mountPath: /openclaw-mail-src
       extraVolumes:
         - name: whiteboard-jwt
           secret:
@@ -237,6 +268,9 @@ spec:
             items:
               - key: whiteboard-jwt-secret
                 path: whiteboard-jwt-secret
+        - name: openclaw-mail-src
+          configMap:
+            name: nextcloud-openclaw-mail-app
       extraSidecarContainers:
         - name: worker
           image: nextcloud:33.0.0
@@ -268,6 +302,27 @@ spec:
                   echo "whiteboard jwt_secret_key sync failed"
                 fi
               }
+
+              # Enable the custom openclaw_mail app once per boot.
+              # `occ app:enable` is idempotent ("already enabled" exits 0).
+              # On a cold start NC may not be fully bootstrapped yet, so
+              # retry until it succeeds or we hit 60s.
+              enable_openclaw_mail() {
+                if [ ! -d /var/www/html/custom_apps/openclaw_mail ]; then
+                  echo "openclaw_mail: source not yet materialized; skipping"
+                  return
+                fi
+                for i in $(seq 1 30); do
+                  if php /var/www/html/occ app:enable openclaw_mail >/dev/null 2>&1; then
+                    echo "openclaw_mail: enabled"
+                    return
+                  fi
+                  sleep 2
+                done
+                echo "openclaw_mail: gave up enabling after 60s"
+              }
+
+              enable_openclaw_mail
 
               next_sync=0
               while true; do
