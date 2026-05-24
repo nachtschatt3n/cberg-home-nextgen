@@ -377,17 +377,26 @@ data:
         mail source <message_id>        # raw RFC822
 
     Write verbs (whitelisted, drafts only):
+        mail attach <file-or-url>       # uploads to NC Mail local attachments
+                                        # store; prints {"id":<int>,
+                                        # "fileName":..., "mimeType":...}.
+                                        # Source: local path OR http(s) URL.
         mail draft <account_id>         # JSON body from stdin:
                                         #   {"subject":"...", "body":"...",
                                         #    "to":"a@b,c@d", "cc":"", "bcc":"",
                                         #    "isHtml": true,
-                                        #    "draftId": <existing-id-or-null>}
-                                        # Saves to the Drafts mailbox via
-                                        # POST /api/accounts/{id}/draft.
+                                        #    "draftId": <existing-id-or-null>,
+                                        #    "attachments": [<id>, <id>...] }
+                                        # No attachments: lands in IMAP Drafts
+                                        # via POST /api/accounts/{id}/draft.
+                                        # With attachments: routes through
+                                        # POST /api/outbox (sendAt=null so
+                                        # the message STAYS in the outbox
+                                        # for review — never auto-sends).
                                         # Does NOT send — outbox/send remain
                                         # blocked.
     """
-    import base64, json, os, sys, urllib.parse, urllib.request
+    import base64, json, mimetypes, os, sys, urllib.parse, urllib.request, uuid
 
     BASE = os.environ["NEXTCLOUD_URL"].rstrip("/")
     USER = os.environ["NEXTCLOUD_USERNAME"]
@@ -431,6 +440,24 @@ data:
             if "application/json" in ct:
                 return json.loads(body)
             return body.decode("utf-8", errors="replace")
+
+    def _post_multipart(path, field_name, filename, content, mimetype):
+        boundary = "----openclaw" + uuid.uuid4().hex
+        url = f"{API}{path}"
+        parts = []
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'.encode()
+        )
+        parts.append(f"Content-Type: {mimetype}\r\n\r\n".encode())
+        parts.append(content)
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        body = b"".join(parts)
+        headers = {**HEADERS, "Content-Type": f"multipart/form-data; boundary={boundary}"}
+        # Remove Accept: application/json — multipart endpoint returns JSON anyway
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
 
     def accounts():
         out = []
@@ -494,11 +521,77 @@ data:
         else:
             print(json.dumps(result, indent=2))
 
+    def attach(source):
+        """Upload a single file to NC Mail's local attachments store.
+        Source: filesystem path OR http(s):// URL.
+        Prints {"id": <int>, "fileName": ..., "mimeType": ..., "type": "local"}
+        which the caller can pass to `mail draft` as an `attachments: [<id>]` item."""
+        if source.startswith("http://") or source.startswith("https://"):
+            with urllib.request.urlopen(source, timeout=120) as r:
+                content = r.read()
+                mt = r.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+            fn = os.path.basename(urllib.parse.urlparse(source).path) or "download.bin"
+        else:
+            with open(source, "rb") as fh:
+                content = fh.read()
+            fn = os.path.basename(source)
+            mt = mimetypes.guess_type(fn)[0] or "application/octet-stream"
+        result = _post_multipart("/attachments", "attachment", fn, content, mt)
+        # NC Mail returns {id, fileName, mimeType}; ensure id is int for downstream
+        if isinstance(result, dict) and "id" in result:
+            result["id"] = int(result["id"])
+            result.setdefault("type", "local")
+        print(json.dumps(result, indent=2))
+
+    def _split_recipients(value):
+        """Accept either a comma-separated string ('a@b,c@d') or a list of
+        strings/objects. Return the [{label, email}, ...] shape outbox expects."""
+        if not value:
+            return []
+        if isinstance(value, str):
+            items = [p.strip() for p in value.split(",") if p.strip()]
+        elif isinstance(value, list):
+            items = value
+        else:
+            items = [value]
+        out = []
+        for it in items:
+            if isinstance(it, dict):
+                email = it.get("email") or it.get("address") or ""
+                if email:
+                    out.append({"label": it.get("label") or email, "email": email})
+            elif isinstance(it, str) and it.strip():
+                out.append({"label": it.strip(), "email": it.strip()})
+        return out
+
+    def _normalize_attachments(value):
+        """Accept [int, int] OR [{type, id}, ...] OR [{id}]. Return outbox shape."""
+        if not value:
+            return []
+        out = []
+        for it in value:
+            if isinstance(it, int):
+                out.append({"type": "local", "id": int(it)})
+            elif isinstance(it, str) and it.isdigit():
+                out.append({"type": "local", "id": int(it)})
+            elif isinstance(it, dict) and "id" in it:
+                out.append({"type": it.get("type", "local"), "id": int(it["id"])})
+        return out
+
     def draft(account_id):
         """Save (or update) a draft. JSON body read from stdin:
             {"subject": "...", "body": "...", "to": "a@b,c@d",
-             "cc": "", "bcc": "", "isHtml": true, "draftId": null}
-        Lands in the IMAP Drafts mailbox via accounts#draft. Does NOT send."""
+             "cc": "", "bcc": "", "isHtml": true, "draftId": null,
+             "attachments": [<int>, ...]}
+
+        Without `attachments`: lands in the IMAP Drafts mailbox via
+        accounts#draft (POST /accounts/{id}/draft).
+
+        With `attachments`: routes through POST /outbox with sendAt=null,
+        because accounts#draft does not support attachments. The message
+        STAYS in the NC Mail Outbox (visible in the web UI) for review
+        and must be sent manually — this skill never sends.
+        """
         raw = sys.stdin.read()
         if not raw.strip():
             sys.stderr.write("mail draft: expected JSON body on stdin\n")
@@ -508,19 +601,47 @@ data:
         except json.JSONDecodeError as e:
             sys.stderr.write(f"mail draft: invalid JSON on stdin: {e}\n")
             sys.exit(2)
-        # Defensive defaults — NC Mail requires all three recipient fields
-        # to be present even if empty.
-        body_payload = {
-            "subject":   str(payload.get("subject", "")),
-            "body":      str(payload.get("body", "")),
-            "to":        str(payload.get("to", "")),
-            "cc":        str(payload.get("cc", "")),
-            "bcc":       str(payload.get("bcc", "")),
-            "isHtml":    bool(payload.get("isHtml", True)),
+
+        attachments = _normalize_attachments(payload.get("attachments"))
+
+        if not attachments:
+            # IMAP-Drafts path. NC Mail requires all three recipient fields
+            # to be present even if empty.
+            body_payload = {
+                "subject":   str(payload.get("subject", "")),
+                "body":      str(payload.get("body", "")),
+                "to":        str(payload.get("to", "")),
+                "cc":        str(payload.get("cc", "")),
+                "bcc":       str(payload.get("bcc", "")),
+                "isHtml":    bool(payload.get("isHtml", True)),
+            }
+            if payload.get("draftId") is not None:
+                body_payload["draftId"] = int(payload["draftId"])
+            result = _post(f"/accounts/{int(account_id)}/draft", body_payload)
+            print(json.dumps(result, indent=2))
+            return
+
+        # Outbox path — accountId required in body, recipients must be objects.
+        is_html = bool(payload.get("isHtml", True))
+        body_text = str(payload.get("body", ""))
+        body_html = body_text if is_html else f"<p>{body_text}</p>"
+        body_plain = body_text if not is_html else ""
+        outbox_payload = {
+            "accountId":     int(account_id),
+            "subject":       str(payload.get("subject", "")),
+            "bodyPlain":     body_plain,
+            "bodyHtml":      body_html,
+            "editorBody":    body_html if is_html else body_text,
+            "isHtml":        is_html,
+            "smimeSign":     False,
+            "smimeEncrypt":  False,
+            "to":            _split_recipients(payload.get("to")),
+            "cc":            _split_recipients(payload.get("cc")),
+            "bcc":           _split_recipients(payload.get("bcc")),
+            "attachments":   attachments,
         }
-        if payload.get("draftId") is not None:
-            body_payload["draftId"] = int(payload["draftId"])
-        result = _post(f"/accounts/{int(account_id)}/draft", body_payload)
+        # sendAt intentionally omitted (== null) so the outbox does NOT auto-send.
+        result = _post("/outbox", outbox_payload)
         print(json.dumps(result, indent=2))
 
     def main():
@@ -534,7 +655,7 @@ data:
             "accounts": accounts, "mailboxes": mailboxes, "messages": messages,
             "search": search, "body": body, "html": html, "thread": thread,
             "source": source,
-            "draft": draft,
+            "draft": draft, "attach": attach,
         }
         if verb not in dispatch:
             print(__doc__); sys.exit(2)
@@ -1010,7 +1131,7 @@ data:
   skill-nextcloud-mail.md: |
     ---
     name: nextcloud-mail
-    description: Access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, to summarize/search mail, or to draft a reply. Drafts are saved to the IMAP Drafts mailbox only — never sends. All other mutations (send, delete, move, flag) remain blocked.
+    description: Access to the user's Nextcloud Mail across GMX, iCloud, and Gmail. Use whenever the user asks about emails, inbox status, recent messages, to summarize/search mail, or to draft a reply (with or without photo/PDF attachments). Plain drafts go to the IMAP Drafts mailbox; drafts WITH attachments are parked in the NC Mail Outbox for review — never sends. All other mutations (send, delete, move, flag) remain blocked.
     user-invocable: true
     ---
 
@@ -1032,11 +1153,13 @@ data:
     | `mail thread <message_id>` | Full thread metadata. |
     | `mail source <message_id>` | Raw RFC822. |
 
-    ## Write verb (drafts only)
+    ## Write verbs (drafts only)
 
-    `mail draft <account_id>` — save a draft to the account's IMAP Drafts
-    mailbox via `POST /api/accounts/{id}/draft`. **JSON body is read from
-    stdin** with the following shape:
+    ### Plain draft (no attachments)
+
+    `mail draft <account_id>` with no `attachments` key (or `[]`) saves the
+    draft to the account's **IMAP Drafts** mailbox via
+    `POST /api/accounts/{id}/draft`. **JSON body is read from stdin**:
 
     ```json
     {
@@ -1064,6 +1187,39 @@ data:
       | mail draft 1
     ```
 
+    ### Attachments
+
+    NC Mail's IMAP-Drafts endpoint cannot carry attachments. The skill
+    therefore splits the path:
+
+    1. **Upload** each file (local path OR http(s) URL):
+
+       ```bash
+       mail attach /tmp/rechnung-foto.jpg
+       # → {"id": 42, "fileName": "rechnung-foto.jpg",
+       #    "mimeType": "image/jpeg", "type": "local"}
+       ```
+
+    2. **Compose** the draft with the returned attachment IDs. Adding an
+       `attachments` array switches the draft from IMAP Drafts to the
+       **NC Mail Outbox** (`POST /api/outbox`, `sendAt=null` so it never
+       auto-sends):
+
+       ```bash
+       echo '{
+         "subject":"Foto zur Rechnung",
+         "body":"<p>Wie besprochen — Foto im Anhang.</p>",
+         "to":"person@example.com",
+         "cc":"","bcc":"",
+         "isHtml":true,
+         "attachments":[42]
+       }' | mail draft 1
+       ```
+
+       Attachment IDs may be bare ints (`[42]`) or `{type,id}` objects
+       (`[{"type":"local","id":42}]`). Outbox drafts appear under
+       Settings → Outbox in the NC Mail web UI; the user must hit Send.
+
     ## Loop for "what are my latest emails?"
 
     1. `mail accounts` — get account IDs.
@@ -1079,10 +1235,16 @@ data:
        identify the right `accountId` + recipients.
     2. Compose subject (prefix `Re:` if missing) and body. Use HTML if you
        need formatting; plain text wrapped in `<p>` paragraphs is fine.
-    3. Pipe the JSON into `mail draft <account_id>` and confirm the
-       returned id to the user. Mention that the draft is saved in the
-       IMAP Drafts folder — they can review and send it from their normal
-       mail client.
+    3. If the user mentioned attaching a photo/PDF, run
+       `mail attach <path_or_url>` for each file and collect the returned
+       `id` values into the draft payload's `attachments` array.
+    4. Pipe the JSON into `mail draft <account_id>` and confirm the
+       returned id to the user.
+       - No attachments → tell the user the draft is in **IMAP Drafts**
+         (visible in any mail client).
+       - With attachments → tell the user the draft is in **NC Mail
+         Outbox** (Settings → Outbox in the NC Mail web UI) and must be
+         sent from there.
 
     ## What stays blocked
     - `send`, `outbox`, `compose` — no SMTP send via this skill.
