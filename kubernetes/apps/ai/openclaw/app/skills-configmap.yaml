@@ -102,10 +102,18 @@ data:
         sure categorize <txn_id> <category_id>
         sure tag <txn_id> <tag_id>[,<tag_id>...]   # comma-separated; replaces tags
         sure note <txn_id>             # body from stdin; replaces notes
+        sure reclassify <txn_id> <income|expense>  # flips income↔expense by
+                                                    # keeping |amount| and
+                                                    # letting Sure apply the
+                                                    # right sign via `nature`.
 
     Auth: Sure uses X-Api-Key header. Writes go via
     PATCH /api/v1/transactions/:id with a {"transaction": {...}} wrapper.
-    Block: amount, date, account_id, account changes, deletes.
+    Block: arbitrary amount/date/account_id changes, deletes.
+    Note on reclassify: Sure derives `classification` from amount sign
+    (negative → income, positive → expense). To flip it via the API you
+    must send BOTH `nature` AND `amount` so calculate_signed_amount runs
+    on the server. This verb does exactly that, preserving |amount|.
     """
     import json, os, sys, urllib.parse, urllib.request
 
@@ -183,6 +191,65 @@ data:
         result = _patch_txn(txn_id, {"notes": raw.strip()})
         print(json.dumps({"id": txn_id, "notes": result.get("notes")}, indent=2))
 
+    def reclassify(txn_id, target):
+        """Flip income↔expense by preserving |amount| and sending `nature`.
+
+        Bypasses _patch_txn's WRITE_FIELDS allowlist on purpose — we send
+        `amount` here but only as the existing absolute value, never a
+        user-chosen number. That keeps the "no arbitrary amount edits"
+        invariant: this verb cannot change how much money the txn is for,
+        only which side of the ledger it sits on.
+        """
+        target = target.lower().strip()
+        if target not in ("income", "expense", "inflow", "outflow"):
+            sys.stderr.write(
+                f"sure reclassify: target must be income|expense (got {target!r})\n"
+            )
+            sys.exit(2)
+        # Normalize inflow/outflow → income/expense for the user-facing
+        # confirmation and the post-PATCH check; Sure accepts both.
+        canonical = {"inflow": "income", "outflow": "expense"}.get(target, target)
+
+        current = _get(f"/api/v1/transactions/{txn_id}")
+        if not isinstance(current, dict) or "amount_cents" not in current:
+            sys.stderr.write(f"sure reclassify: txn {txn_id} not found or malformed\n")
+            sys.exit(4)
+        if current.get("classification") == canonical:
+            print(json.dumps({
+                "id": txn_id,
+                "classification": canonical,
+                "noop": True,
+                "reason": "already classified that way",
+            }, indent=2))
+            return
+
+        magnitude = abs(int(current["amount_cents"])) / 100.0
+
+        body = json.dumps({
+            "transaction": {"nature": canonical, "amount": magnitude},
+        }).encode()
+        h = {**HEADERS, "Content-Type": "application/json"}
+        req = urllib.request.Request(
+            f"{BASE}/api/v1/transactions/{txn_id}",
+            data=body, headers=h, method="PATCH",
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read())
+
+        applied = result.get("classification")
+        ok = applied == canonical
+        print(json.dumps({
+            "id": txn_id,
+            "name": result.get("name"),
+            "amount": result.get("amount"),
+            "classification_before": current.get("classification"),
+            "classification_after": applied,
+            "success": ok,
+            "category": (result.get("category") or {}).get("name"),
+        }, indent=2))
+        if not ok:
+            sys.exit(5)
+
     def main():
         if len(sys.argv) < 2:
             print(__doc__); sys.exit(2)
@@ -202,6 +269,7 @@ data:
             "categorize": lambda: categorize(sys.argv[2], sys.argv[3]),
             "tag": lambda: tag(sys.argv[2], sys.argv[3]),
             "note": lambda: note(sys.argv[2]),
+            "reclassify": lambda: reclassify(sys.argv[2], sys.argv[3]),
         }
         if verb not in dispatch:
             print(__doc__); sys.exit(2)
@@ -1289,7 +1357,7 @@ data:
   skill-sure.md: |
     ---
     name: sure
-    description: Access to the user's Sure (Maybe-Finance fork) — accounts, balances, transactions, plus whitelisted writes (set category, set tags, set notes on a transaction). Use when the user asks about money, balances, recent spending, to cross-reference a bill with a payment, or to clean up uncategorised transactions. Confirm before any write.
+    description: Access to the user's Sure (Maybe-Finance fork) — accounts, balances, transactions, plus whitelisted writes (set category, tags, notes on a transaction; flip income↔expense classification when an import got the sign wrong). Use when the user asks about money, balances, recent spending, to cross-reference a bill with a payment, or to clean up uncategorised/mis-classified transactions. Confirm before any write.
     user-invocable: true
     ---
 
@@ -1318,11 +1386,35 @@ data:
     | `sure categorize <txn_id> <category_id>` | Assign a category. |
     | `sure tag <txn_id> <tag_id>[,<tag_id>...]` | Replace the transaction's tags. Empty string clears tags. |
     | `sure note <txn_id>` | Replace `notes` (body from stdin). |
+    | `sure reclassify <txn_id> <income\|expense>` | Flip income↔expense when the bank import got the sign wrong (see below). |
 
     The skill PATCH-es `/api/v1/transactions/:id` with a strict
     whitelist: only `category_id`, `tag_ids`, `notes` are accepted in
-    the payload. Anything else is silently dropped. Amount, date,
-    account_id, deletes — all impossible from here.
+    the payload. Amount, date, account_id, deletes — all impossible
+    from here. The one exception is `reclassify`, which sends
+    `nature` + the existing `|amount|` so Sure's server flips the
+    sign; the magnitude is preserved, never user-chosen.
+
+    ### Reclassify (income ↔ expense)
+
+    Sure has no editable `classification` field — it's derived from
+    the amount sign (`amount.negative? → income, positive → expense`).
+    Some bank imports occasionally come in with the wrong sign, e.g.
+    a healthcare reimbursement payout to ARAG showing as `income`.
+
+    When the user reports a wrong income/expense classification:
+
+    1. `sure transaction <id>` to confirm payee, amount, current
+       `classification`, current `category`.
+    2. Confirm in chat: *"The 2026-05-22 ARAG €256.45 row is marked
+       `income` but it's a payment out — flip to `expense`?"*
+    3. On a yes: `sure reclassify <id> expense`.
+    4. The skill returns `classification_before / classification_after`
+       and `success: true`. Magnitude is unchanged.
+
+    Don't reclassify *anything* without explicit confirmation — many
+    "income-looking" rows are genuine income (e.g. salaries, Kindergeld,
+    teaching income, refunds). Ask before flipping.
 
     ### Protocol — always confirm before writing
 
@@ -1344,7 +1436,9 @@ data:
        the planned mapping before executing.
 
     ## What stays blocked
-    - Editing amount / date / account.
+    - Editing the magnitude of `amount` (reclassify only sends the
+      existing absolute value back).
+    - Editing date or account.
     - Deleting transactions.
     - Moving transactions between accounts.
     - Creating new transactions (the MoneyMoney sync handles that).
