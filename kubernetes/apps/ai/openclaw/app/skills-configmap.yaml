@@ -1894,6 +1894,39 @@ data:
     via `sendVoice`. Use the chat_id from the inbound message. Caps
     at 4000 chars to protect the Starter-tier ElevenLabs quota.
 
+    ## MCP-provided capabilities
+
+    These come from the `nextcloud` MCP server (mcporter-loaded), not
+    a CLI on PATH. Invoke the tools by name through the agent runtime.
+
+    ### Calendar — Nextcloud `nextcloud-mcp` calendar tools
+
+    Tools: `nc_calendar_list_calendars`, `nc_calendar_create_event`,
+    `nc_calendar_list_events`, `nc_calendar_get_event`,
+    `nc_calendar_update_event`, `nc_calendar_delete_event`,
+    plus search-across-calendars and todo equivalents.
+
+    **The PRIMARY calendar is `Uhl Family (Google Calendar import)`.**
+    Default every new event there unless Mathias explicitly says
+    otherwise ("put it on my personal calendar", "private appointment",
+    "work-only", etc.). The family calendar is what Andrea and Mathias
+    both see in their own clients — kids, school, joint appointments,
+    deliveries, household, shared travel all belong there.
+
+    Calendars currently visible to the agent's identity (MathiasUhl):
+
+    | Display name | When to use |
+    | --- | --- |
+    | `Uhl Family (Google Calendar import)` | **Default for new events.** Anything Andrea also needs to see. |
+    | `Personal` | Only when Mathias explicitly asks for a private/personal-only entry. |
+    | `Feiertage in Hessen (Google Calendar import)` | Read-only reference for German public holidays. Never write here. |
+
+    Confirm-before-create protocol mirrors the other write surfaces:
+    show the proposed `{calendar, title, start, end, attendees?}` in
+    chat as plain text, wait for an explicit yes, then create. After
+    creation, repeat back the calendar name + start datetime so it's
+    obvious which calendar the event landed on.
+
     ## Built-in conventions
 
     ### codex CLI

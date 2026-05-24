@@ -101,6 +101,7 @@ SKIP_KEY_NAMES = {
     "username", "repository", "repo", "org", "organization", "image",
     "OPENAI_URI_BASE", "OPENAI_BASE", "OLLAMA_BASE", "OLLAMA_BASE_URL",
     "TELEGRAM_ALLOWED_USERS", "SECRET_ICLOUD_USERNAME",
+    "NEXTCLOUD_USERNAME",
 }
 # Pure-lowercase dictionary-like words (no digits, no special chars) — these
 # overlap with common technical terms (postgres, authentik, placeholder, etc.)
