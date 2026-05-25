@@ -128,6 +128,16 @@ data:
     """
     import datetime as _dt
     import base64, json, os, re, sys, urllib.error, urllib.parse, urllib.request, uuid
+    import xml.etree.ElementTree as ET
+
+    # CalDAV / WebDAV / Sabre XML namespaces — Sabre responds with prefixes
+    # like `cal:` and `d:` that may not match the prefixes we send. Always
+    # parse with full namespace URIs.
+    NS = {
+        "d":  "DAV:",
+        "c":  "urn:ietf:params:xml:ns:caldav",
+        "cs": "http://calendarserver.org/ns/",
+    }
 
     USER = os.environ["NEXTCLOUD_USERNAME"]
     PASS = os.environ["NEXTCLOUD_PASSWORD"]
@@ -170,18 +180,29 @@ data:
         if st >= 400:
             sys.stderr.write(f"cal: PROPFIND failed HTTP {st}\n")
             sys.exit(2)
-        xml = body.decode("utf-8", errors="replace")
+        root = ET.fromstring(body)
         cals = []
-        for resp in xml.split("<d:response>")[1:]:
-            href_m = re.search(r"<d:href>([^<]+)</d:href>", resp)
-            name_m = re.search(r"<d:displayname>([^<]*)</d:displayname>", resp)
-            type_m = re.search(r"<d:resourcetype>(.*?)</d:resourcetype>", resp, re.S)
-            if not (href_m and name_m and type_m): continue
-            if "calendar" not in type_m.group(1): continue
-            href = href_m.group(1)
-            # slug = last path segment, already URL-encoded by NC
+        for resp in root.findall("d:response", NS):
+            href_el = resp.find("d:href", NS)
+            if href_el is None: continue
+            # Walk every propstat — sometimes displayname is in one stat,
+            # resourcetype in another.
+            name = None
+            is_cal = False
+            for ps in resp.findall("d:propstat", NS):
+                prop = ps.find("d:prop", NS)
+                if prop is None: continue
+                dn = prop.find("d:displayname", NS)
+                if dn is not None and dn.text:
+                    name = dn.text
+                rt = prop.find("d:resourcetype", NS)
+                if rt is not None and rt.find("c:calendar", NS) is not None:
+                    is_cal = True
+            if not is_cal or not name:
+                continue
+            href = href_el.text
             slug = href.rstrip("/").rsplit("/", 1)[-1]
-            cals.append({"name": name_m.group(1), "slug": slug, "href": href})
+            cals.append({"name": name, "slug": slug, "href": href})
         return cals
 
     def _resolve(selector):
@@ -286,11 +307,15 @@ data:
         now = _dt.datetime.now(_dt.timezone.utc)
         s = _parse_iso(frm) if frm else now
         e = _parse_iso(to) if to else (now + _dt.timedelta(days=14))
-        # CalDAV REPORT for time-range
+        # CalDAV REPORT for time-range. We also ask Sabre to expand
+        # recurring events within the window via <c:expand>, so master
+        # RRULE events surface as concrete instances.
         report = (
             '<?xml version="1.0"?>'
             '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
-            '<d:prop><d:getetag/><c:calendar-data/></d:prop>'
+            '<d:prop><d:getetag/>'
+            f'<c:calendar-data><c:expand start="{_ics_dt(s)}" end="{_ics_dt(e)}"/></c:calendar-data>'
+            '</d:prop>'
             '<c:filter><c:comp-filter name="VCALENDAR">'
             '<c:comp-filter name="VEVENT">'
             f'<c:time-range start="{_ics_dt(s)}" end="{_ics_dt(e)}"/>'
@@ -300,25 +325,38 @@ data:
                            {"Depth": "1", "Content-Type": "application/xml"})
         if st >= 400:
             sys.stderr.write(f"cal events: REPORT failed HTTP {st}\n"); sys.exit(2)
-        xml = body.decode("utf-8", errors="replace")
+        root = ET.fromstring(body)
         out = []
-        for resp in xml.split("<d:response>")[1:]:
-            href_m = re.search(r"<d:href>([^<]+)</d:href>", resp)
-            ics_m  = re.search(r"<c:calendar-data[^>]*>(.*?)</c:calendar-data>", resp, re.S)
-            if not (href_m and ics_m): continue
-            ics = ics_m.group(1)
-            uid = (re.search(r"\bUID:([^\r\n]+)", ics) or [None, ""])[1].strip()
-            sm  = (re.search(r"\bSUMMARY:([^\r\n]+)", ics) or [None, ""])[1].strip()
-            ds  = (re.search(r"\bDTSTART[^:]*:([^\r\n]+)", ics) or [None, ""])[1].strip()
-            de  = (re.search(r"\bDTEND[^:]*:([^\r\n]+)", ics) or [None, ""])[1].strip()
-            out.append({
-                "calendar": cal["name"],
-                "uid":      uid,
-                "summary":  sm,
-                "start":    ds,
-                "end":      de,
-                "href":     href_m.group(1),
-            })
+        for resp in root.findall("d:response", NS):
+            href_el = resp.find("d:href", NS)
+            ics = None
+            for ps in resp.findall("d:propstat", NS):
+                prop = ps.find("d:prop", NS)
+                if prop is None: continue
+                cd = prop.find("c:calendar-data", NS)
+                if cd is not None and cd.text:
+                    ics = cd.text
+            if href_el is None or not ics:
+                continue
+            # An ICS resource can contain multiple VEVENT components (e.g.
+            # a recurrence master + overrides, or a multi-event file).
+            # Walk each VEVENT block and emit one row.
+            blocks = re.findall(r"BEGIN:VEVENT(.*?)END:VEVENT", ics, re.S)
+            for block in blocks:
+                uid = (re.search(r"\bUID:([^\r\n]+)", block) or [None, ""])[1].strip()
+                sm  = (re.search(r"\bSUMMARY:([^\r\n]+)", block) or [None, ""])[1].strip()
+                ds  = (re.search(r"\bDTSTART[^:]*:([^\r\n]+)", block) or [None, ""])[1].strip()
+                de  = (re.search(r"\bDTEND[^:]*:([^\r\n]+)", block) or [None, ""])[1].strip()
+                loc = (re.search(r"\bLOCATION:([^\r\n]+)", block) or [None, ""])[1].strip()
+                out.append({
+                    "calendar": cal["name"],
+                    "uid":      uid,
+                    "summary":  sm,
+                    "start":    ds,
+                    "end":      de,
+                    "location": loc,
+                    "href":     href_el.text,
+                })
         out.sort(key=lambda e: e.get("start", ""))
         print(json.dumps({"calendar": cal["name"], "count": len(out), "events": out}, indent=2))
 
