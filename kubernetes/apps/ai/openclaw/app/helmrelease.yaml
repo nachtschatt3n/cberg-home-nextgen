@@ -743,6 +743,14 @@ spec:
                     }
                   }
 
+                  // Turn off the in-process update check. runGatewayUpdateCheck
+                  // only returns early when BOTH update.checkOnStart === false
+                  // (this) AND OPENCLAW_NO_AUTO_UPDATE=1 (env var on the
+                  // container) are set. Either branch alone keeps the npm
+                  // registry probe alive.
+                  cfg.update = cfg.update || {};
+                  cfg.update.checkOnStart = false;
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
@@ -1013,6 +1021,16 @@ spec:
                 value: "openai/gpt-5.5"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
+              # Disable openclaw's recurring npm-registry update probe.
+              # We pin the image via Renovate; the in-process check has
+              # no upgrade path it can act on and just blocks the Node
+              # event loop ~2-3s every cycle (felt as latency on
+              # Telegram/Discord/dashboard). Pair-required: this env
+              # alone isn't enough — the init script also sets
+              # cfg.update.checkOnStart=false so both branches of
+              # runGatewayUpdateCheck short-circuit.
+              - name: OPENCLAW_NO_AUTO_UPDATE
+                value: "1"
               # Playwright browsers were installed into the PVC during init —
               # point @playwright/mcp at the same location at runtime.
               - name: PLAYWRIGHT_BROWSERS_PATH
