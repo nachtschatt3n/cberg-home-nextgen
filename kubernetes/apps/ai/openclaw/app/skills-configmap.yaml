@@ -1183,7 +1183,7 @@ data:
     EL_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
     EL_MODEL = os.environ.get("OPENCLAW_TALK_MODEL", "eleven_flash_v2_5")
     EL_VOICE_DEFAULT = os.environ.get(
-        "OPENCLAW_TALK_VOICE", "EST9Ui6982FZPSi7gCHi"
+        "OPENCLAW_TALK_VOICE", "vzQig4HUz4S19MKnT0jp"
     )
     TG_BASE = "https://api.telegram.org"
 
@@ -1198,7 +1198,15 @@ data:
 
     def _synth_mp3(text, voice_id):
         url = f"{EL_BASE}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
-        body = json.dumps({"text": text, "model_id": EL_MODEL}).encode()
+        # `use_speaker_boost=true` is the ElevenLabs "Enhance" toggle —
+        # crisper diction at a small latency cost. Other voice_settings
+        # fields fall back to the per-voice defaults configured in EL
+        # VoiceLab.
+        body = json.dumps({
+            "text": text,
+            "model_id": EL_MODEL,
+            "voice_settings": {"use_speaker_boost": True},
+        }).encode()
         req = urllib.request.Request(
             url, data=body,
             headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
@@ -2232,7 +2240,7 @@ data:
       reachable as `@cbergClawdBot` on Telegram.
     - Backing model: `codex-cli/gpt-5.5` via Mathias's ChatGPT
       subscription (no separate API billing).
-    - Speech: ElevenLabs voice `EST9Ui6982FZPSi7gCHi`, sent through
+    - Speech: ElevenLabs voice `vzQig4HUz4S19MKnT0jp`, sent through
       Telegram by the `say` skill.
 
   workspace-user.md: |
@@ -2373,7 +2381,7 @@ data:
     read-only by policy here, though it *can* mutate so be careful.
 
     ### `say`
-    Synthesises text via ElevenLabs (voice `EST9Ui6982FZPSi7gCHi`,
+    Synthesises text via ElevenLabs (voice `vzQig4HUz4S19MKnT0jp`,
     model `eleven_flash_v2_5`) and sends as a Telegram voice bubble
     via `sendVoice`. Use the chat_id from the inbound message. Caps
     at 4000 chars to protect the Starter-tier ElevenLabs quota.

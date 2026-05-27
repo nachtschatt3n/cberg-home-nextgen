@@ -600,10 +600,15 @@ spec:
                   cfg.talk.providers = cfg.talk.providers || {};
                   cfg.talk.providers.elevenlabs = {
                     modelId: process.env.OPENCLAW_TALK_MODEL || 'eleven_flash_v2_5',
-                    voiceId: process.env.OPENCLAW_TALK_VOICE || 'EST9Ui6982FZPSi7gCHi',
+                    voiceId: process.env.OPENCLAW_TALK_VOICE || 'vzQig4HUz4S19MKnT0jp',
                     // ElevenLabs optimize_streaming_latency: 0=quality, 4=fastest.
                     // 4 cuts ~500ms off time-to-first-audio at minor quality cost.
                     latencyTier: 4,
+                    // "Enhance" toggle from the ElevenLabs playground —
+                    // sharper diction, slightly more processing per chunk.
+                    voiceSettings: {
+                      useSpeakerBoost: true,
+                    },
                     ...(cfg.talk.providers.elevenlabs || {}),
                   };
 
