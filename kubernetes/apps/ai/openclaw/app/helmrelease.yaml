@@ -702,34 +702,6 @@ spec:
                     cfg.plugins.load.paths = [...paths];
                   }
 
-                  // Disable LLM provider plugins we don't use.
-                  // We talk to OpenAI (gpt-5.5 via codex runtime) and Ollama
-                  // (gemma4:26b + gemma4:e2b) only — the other ~43 provider
-                  // adapters fire HTTP auth checks during prewarm and have
-                  // been blocking the event loop for ~30s on every boot,
-                  // killing Discord WS + Telegram poll mid-handshake. See
-                  // 2026-05-24 incident in this session's notes.
-                  // Re-enable any of these by removing them from the list
-                  // (or by setting enabled:true in plugins.entries directly).
-                  cfg.plugins = cfg.plugins || {};
-                  cfg.plugins.entries = cfg.plugins.entries || {};
-                  const disabledProviders = [
-                    'alibaba', 'anthropic', 'arcee', 'byteplus', 'cerebras',
-                    'chutes', 'cloudflare-ai-gateway', 'copilot-proxy',
-                    'deepinfra', 'deepseek', 'fal', 'fireworks',
-                    'github-copilot', 'google', 'groq', 'huggingface',
-                    'kilocode', 'kimi-coding', 'litellm', 'lmstudio',
-                    'microsoft-foundry', 'minimax', 'mistral', 'moonshot',
-                    'nvidia', 'opencode', 'opencode-go', 'openrouter',
-                    'qianfan', 'qwen', 'sglang', 'stepfun', 'synthetic',
-                    'tencent', 'together', 'vercel-ai-gateway', 'venice',
-                    'vllm', 'volcengine', 'vydra', 'xai', 'xiaomi', 'zai',
-                  ];
-                  for (const id of disabledProviders) {
-                    cfg.plugins.entries[id] = cfg.plugins.entries[id] || {};
-                    cfg.plugins.entries[id].enabled = false;
-                  }
-
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
