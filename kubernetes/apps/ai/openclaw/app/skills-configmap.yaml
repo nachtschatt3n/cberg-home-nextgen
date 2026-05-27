@@ -474,11 +474,15 @@ data:
         sure transaction <txn_id>      # one transaction (helpful before writes)
         sure categories                # available categories
         sure tags                      # available tags
+        sure merchants [filter]        # available merchants (id + name);
+                                       # optional substring filter
 
     Write (whitelisted; agent must confirm with user first):
         sure categorize <txn_id> <category_id>
         sure tag <txn_id> <tag_id>[,<tag_id>...]   # comma-separated; replaces tags
         sure note <txn_id>             # body from stdin; replaces notes
+        sure merchant <txn_id> <merchant_id>       # set merchant
+        sure merchant <txn_id> none                # clear merchant
         sure reclassify <txn_id> <income|expense>  # flips income↔expense by
                                                     # keeping |amount| and
                                                     # letting Sure apply the
@@ -500,8 +504,9 @@ data:
 
     # Fields the agent is allowed to touch via PATCH. Any other field in a
     # caller payload is silently dropped. Matches the user-approved scope:
-    # categorise + tag + note. Amount/date/account moves are forbidden.
-    WRITE_FIELDS = {"category_id", "tag_ids", "notes"}
+    # categorise + tag + note + merchant. Amount/date/account moves
+    # remain forbidden (reclassify is its own verb with magnitude guard).
+    WRITE_FIELDS = {"category_id", "tag_ids", "notes", "merchant_id"}
 
     def _get(path, params=None):
         url = f"{BASE}{path}"
@@ -548,6 +553,37 @@ data:
 
     def tags():
         print(json.dumps(_get("/api/v1/tags"), indent=2))
+
+    def merchants(filter_text=None):
+        """List merchants. Optional substring filter (case-insensitive)
+        to keep agent context small — Sure can have hundreds of merchants."""
+        data = _get("/api/v1/merchants")
+        items = data if isinstance(data, list) else (data.get("merchants") or [])
+        if filter_text:
+            needle = filter_text.lower()
+            items = [m for m in items if needle in (m.get("name") or "").lower()]
+        slim = [{"id": m.get("id"), "name": m.get("name")} for m in items]
+        print(json.dumps(slim, indent=2))
+
+    def merchant(txn_id, merchant_id):
+        """Set or clear the merchant on a transaction. Pass a merchant id to
+        set, or `none`/`null`/`""` to clear (= unbind from any merchant).
+
+        Use case: bank import auto-matched the wrong merchant (typical for
+        payments routed through Stripe / Apple Pay / PayPal / SumUp, where
+        the processor name leaks into the bank text and Sure's matcher
+        binds to the processor instead of the actual seller). Clearing
+        the merchant or pointing it at the right one is a sub-edit; this
+        does NOT touch amount, date, account, or category."""
+        clear = merchant_id is None or str(merchant_id).strip().lower() in ("", "none", "null", "-")
+        payload = {"merchant_id": None if clear else str(merchant_id).strip()}
+        result = _patch_txn(txn_id, payload)
+        applied = (result.get("merchant") or {}).get("name") if not clear else None
+        print(json.dumps({
+            "id": txn_id,
+            "merchant": applied,
+            "cleared": clear,
+        }, indent=2))
 
     def categorize(txn_id, category_id):
         result = _patch_txn(txn_id, {"category_id": category_id})
@@ -643,9 +679,11 @@ data:
             "transaction": lambda: transaction(sys.argv[2]),
             "categories": lambda: categories(),
             "tags": lambda: tags(),
+            "merchants": lambda: merchants(sys.argv[2] if len(sys.argv) > 2 else None),
             "categorize": lambda: categorize(sys.argv[2], sys.argv[3]),
             "tag": lambda: tag(sys.argv[2], sys.argv[3]),
             "note": lambda: note(sys.argv[2]),
+            "merchant": lambda: merchant(sys.argv[2], sys.argv[3]),
             "reclassify": lambda: reclassify(sys.argv[2], sys.argv[3]),
         }
         if verb not in dispatch:
@@ -1742,7 +1780,7 @@ data:
   skill-sure.md: |
     ---
     name: sure
-    description: Access to the user's Sure (Maybe-Finance fork) — accounts, balances, transactions, plus whitelisted writes (set category, tags, notes on a transaction; flip income↔expense classification when an import got the sign wrong). Use when the user asks about money, balances, recent spending, to cross-reference a bill with a payment, or to clean up uncategorised/mis-classified transactions. Confirm before any write.
+    description: Access to the user's Sure (Maybe-Finance fork) — accounts, balances, transactions, plus whitelisted writes (set category, tags, notes, merchant on a transaction; flip income↔expense classification when an import got the sign wrong). Use when the user asks about money, balances, recent spending, to cross-reference a bill with a payment, or to clean up uncategorised/mis-classified transactions (including wrong merchant matches on Stripe / Apple Pay / PayPal payments). Confirm before any write.
     user-invocable: true
     ---
 
@@ -1761,6 +1799,7 @@ data:
     | `sure transaction <txn_id>` | Detail for one transaction (use before any write). |
     | `sure categories` | Available categories (id + name). |
     | `sure tags` | Available tags (often empty). |
+    | `sure merchants [filter]` | List merchants (id + name). Optional substring filter to keep agent context small. |
 
     Date format is ISO `YYYY-MM-DD`.
 
@@ -1771,6 +1810,7 @@ data:
     | `sure categorize <txn_id> <category_id>` | Assign a category. |
     | `sure tag <txn_id> <tag_id>[,<tag_id>...]` | Replace the transaction's tags. Empty string clears tags. |
     | `sure note <txn_id>` | Replace `notes` (body from stdin). |
+    | `sure merchant <txn_id> <merchant_id>` | Set or clear the merchant (pass `none` to clear). See merchant-fix section below. |
     | `sure reclassify <txn_id> <income\|expense>` | Flip income↔expense when the bank import got the sign wrong (see below). |
 
     The skill PATCH-es `/api/v1/transactions/:id` with a strict
@@ -1779,6 +1819,36 @@ data:
     from here. The one exception is `reclassify`, which sends
     `nature` + the existing `|amount|` so Sure's server flips the
     sign; the magnitude is preserved, never user-chosen.
+
+    ### Fix wrong merchant (Stripe / Apple Pay / PayPal cases)
+
+    Bank exports often route through a payment processor whose name
+    leaks into the transaction text, e.g. *"Spice POT/Frankfurt am
+    Main/DE / Stripe"* or *"Acme Corp / PAYPAL"*. Sure's auto-matcher
+    sometimes binds those rows to the processor (Stripe → "Apple"
+    via Apple Pay, etc.) instead of the actual merchant. Symptom: a
+    restaurant payment shows up under merchant "Apple", a hardware
+    store under "PayPal", and so on.
+
+    Fix protocol:
+
+    1. `sure transaction <id>` — confirm payee text, current category,
+       current merchant.
+    2. Identify the real merchant. Two paths:
+       - User-known name → `sure merchants "Spice"` to find/confirm an
+         existing merchant id. If a match exists, use it.
+       - No good match → clear the merchant: `sure merchant <id> none`.
+         This leaves the row with category but no merchant, which is
+         better than a wrong one (the matcher will not re-bind unless
+         a future MoneyMoney import re-creates a similar row).
+    3. Show the proposed change in chat as plain text:
+       *"The 2026-05-27 Spice POT €101.44 is wrongly merchant-matched
+       to Apple. Clear the merchant? (keeps category Food & Drink)"*
+    4. Wait for explicit yes, then run `sure merchant <id> <new>` or
+       `sure merchant <id> none`.
+
+    The skill never creates new merchant records — only sets an
+    existing merchant id or clears the field.
 
     ### Reclassify (income ↔ expense)
 
