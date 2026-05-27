@@ -6,5 +6,5 @@ resources:
   - ./secret.sops.yaml
   - ./pvc.yaml
   - ./mcporter-config.yaml
-  - ./skills-configmap.yaml
+  - ./skills-configmap.sops.yaml
   - ./helmrelease.yaml
