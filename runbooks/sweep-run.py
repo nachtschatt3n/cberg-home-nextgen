@@ -170,6 +170,56 @@ def _stop(pf: subprocess.Popen | None) -> None:
         pass
 
 
+def _auto_close_stale_findings(
+    dsn: str, cycle_id: str, sections: list[str]
+) -> list[tuple[str, str, str]]:
+    """Mark open findings as resolved when they didn't re-fire this cycle.
+
+    Scope: only sections in `sections` (those whose step script ran to a
+    sane rc). Returns the list of (finding_id, section, title) closed —
+    empty if nothing to close.
+
+    Safe to call repeatedly: the WHERE clause excludes already-resolved
+    rows and rows that the current cycle touched.
+    """
+    try:
+        import psycopg  # imported lazily so --no-write paths don't need it
+    except ImportError:
+        print("==> auto-close skipped: psycopg not available")
+        return []
+
+    git_head = ""
+    try:
+        git_head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, timeout=5
+        ).strip()[:40]
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE sweep_findings
+                       SET resolved_at = now(),
+                           status = 'resolved',
+                           resolved_commit = COALESCE(NULLIF(%s, ''), resolved_commit)
+                     WHERE resolved_at IS NULL
+                       AND section = ANY(%s)
+                       AND (cycle_id IS NULL OR cycle_id::text != %s)
+                     RETURNING finding_id, section, title
+                    """,
+                    (git_head, sections, cycle_id),
+                )
+                rows = cur.fetchall()
+            conn.commit()
+        return [(r[0], r[1], r[2]) for r in rows]
+    except Exception as e:  # noqa: BLE001
+        print(f"==> auto-close failed: {type(e).__name__}: {e}")
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -273,12 +323,30 @@ def main(argv: list[str] | None = None) -> int:
         print()
 
         nonzero: list[str] = []
+        completed: list[str] = []  # sections whose script ran to a sane rc
         for step in steps:
             cmd = list(STEP_SCRIPTS[step])
             print(f"────────── {step} ──────────")
             rc = subprocess.call(cmd, env=env)
             if rc != 0:
                 nonzero.append(f"{step}({rc})")
+            # rc 0/1/2 = "ran to completion" (1/2 typically mean "found findings");
+            # anything else, assume crash and skip its section in auto-close.
+            if rc in (0, 1, 2):
+                completed.append(step)
+
+        # Auto-close open findings in completed sections that did NOT
+        # re-fire this cycle. Section == step name. Skip if writes are
+        # disabled or no DSN.
+        if write_enabled and dsn and completed:
+            closed = _auto_close_stale_findings(dsn, cycle_id, completed)
+            if closed:
+                print()
+                print(f"==> auto-closed {len(closed)} finding(s) that didn't fire this cycle:")
+                for fid, sec, title in closed[:20]:
+                    print(f"      ✓ resolved {sec}/{fid}: {title[:80]}")
+                if len(closed) > 20:
+                    print(f"      … and {len(closed) - 20} more")
 
         print()
         if not nonzero:
