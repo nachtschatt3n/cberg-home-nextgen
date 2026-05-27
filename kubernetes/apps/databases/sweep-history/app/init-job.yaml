@@ -15,10 +15,16 @@
 #   v2b — sweep_writer got DB ownership but not table-level DML (tables were
 #         created by `postgres`). Add explicit DML + sequence grants for
 #         sweep_writer + future-table defaults. Schema unchanged.
+#   v3  — added 4 operator-curated policy tables (accepted_risks,
+#         slo_definitions, noise_suppressions, security_acceptances).
+#         No data migration in this Job — runbooks/migrate-policy-to-db.py
+#         is the one-shot. v2b's tables remain (idempotent CREATE IF NOT
+#         EXISTS). sweep_writer's DML grants from v2b carry over via
+#         ALTER DEFAULT PRIVILEGES.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v2b
+  name: sweep-history-init-v3
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

@@ -122,3 +122,68 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_slo_snapshots_name_time
       ON slo_snapshots(slo_name, taken_at DESC);
+
+    -- ─── schema v3: operator-curated policy tables ──────────────────
+    -- Replaces docs/security-accepted-risks.md, runbooks/slo-catalog.yaml,
+    -- runbooks/noise_allowlist.yaml, runbooks/security_check_acceptances.py.
+    -- Editing happens via runbooks/policy-cli.py (sweep_writer DSN).
+    -- All four tables use `enabled BOOLEAN` for soft-disable; loaders
+    -- treat enabled=false rows as if absent.
+
+    -- 1. accepted_risks — replaces docs/security-accepted-risks.md
+    CREATE TABLE IF NOT EXISTS accepted_risks (
+      ar_id            VARCHAR(16) PRIMARY KEY,   -- AR-001 … AR-NNN
+      severity         VARCHAR(16) NOT NULL,
+      description      TEXT        NOT NULL,     -- substring-match needle
+      justification    TEXT,
+      status           VARCHAR(16) NOT NULL DEFAULT 'accepted',
+      enabled          BOOLEAN     NOT NULL DEFAULT true,
+      accepted_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      metadata         JSONB
+    );
+    CREATE INDEX IF NOT EXISTS idx_ar_status
+      ON accepted_risks(status) WHERE enabled = true;
+
+    -- 2. slo_definitions — replaces runbooks/slo-catalog.yaml
+    CREATE TABLE IF NOT EXISTS slo_definitions (
+      name              VARCHAR(64) PRIMARY KEY,
+      description       TEXT,
+      source            VARCHAR(16) NOT NULL,    -- prom|es|hactl
+      kind              VARCHAR(16) NOT NULL,    -- ratio
+      target            NUMERIC(5,4) NOT NULL,   -- 0.0–1.0
+      window_size       VARCHAR(8)   NOT NULL,   -- 7d|30d
+      query_json        JSONB NOT NULL,          -- source-specific block
+      burn_rate_windows JSONB,                    -- null = inherit defaults
+      tags              TEXT[],
+      enabled           BOOLEAN NOT NULL DEFAULT true,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- 3. noise_suppressions — replaces runbooks/noise_allowlist.yaml
+    CREATE TABLE IF NOT EXISTS noise_suppressions (
+      id          BIGSERIAL PRIMARY KEY,
+      category    VARCHAR(40) NOT NULL,
+      match_key   VARCHAR(64),
+      match_value TEXT,
+      threshold   INTEGER,
+      note        TEXT,
+      enabled     BOOLEAN NOT NULL DEFAULT true,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_noise_category
+      ON noise_suppressions(category) WHERE enabled = true;
+
+    -- 4. security_acceptances — replaces runbooks/security_check_acceptances.py
+    CREATE TABLE IF NOT EXISTS security_acceptances (
+      id          BIGSERIAL PRIMARY KEY,
+      category    VARCHAR(40) NOT NULL,
+      pattern     TEXT NOT NULL,
+      note        TEXT,
+      ar_id       VARCHAR(16),                    -- optional ref to accepted_risks.ar_id
+      enabled     BOOLEAN NOT NULL DEFAULT true,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_secacc_category
+      ON security_acceptances(category) WHERE enabled = true;
