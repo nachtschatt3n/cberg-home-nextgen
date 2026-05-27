@@ -134,6 +134,56 @@ def cycles(request: Request):
     )
 
 
+# ---------------------------------------------------------------------------
+# Policy views (read-only — edits go through runbooks/policy-cli.py)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/policies", response_class=HTMLResponse)
+def policies_index(request: Request):
+    counts = db.policy_counts()
+    return templates.TemplateResponse(
+        request=request, name="policies/index.html",
+        context={**_common(), "counts": counts},
+    )
+
+
+@app.get("/policies/accepted-risks", response_class=HTMLResponse)
+def policies_accepted_risks(request: Request):
+    rows = db.accepted_risks()
+    return templates.TemplateResponse(
+        request=request, name="policies/accepted_risks.html",
+        context={**_common(), "rows": rows},
+    )
+
+
+@app.get("/policies/slos", response_class=HTMLResponse)
+def policies_slos(request: Request):
+    rows = db.slo_definitions()
+    return templates.TemplateResponse(
+        request=request, name="policies/slo_definitions.html",
+        context={**_common(), "rows": rows},
+    )
+
+
+@app.get("/policies/noise", response_class=HTMLResponse)
+def policies_noise(request: Request):
+    rows = db.noise_suppressions()
+    return templates.TemplateResponse(
+        request=request, name="policies/noise.html",
+        context={**_common(), "rows": rows},
+    )
+
+
+@app.get("/policies/security", response_class=HTMLResponse)
+def policies_security(request: Request):
+    rows = db.security_acceptances()
+    return templates.TemplateResponse(
+        request=request, name="policies/security.html",
+        context={**_common(), "rows": rows},
+    )
+
+
 @app.get("/slos", response_class=HTMLResponse)
 def slos(request: Request):
     rows = db.latest_slo_snapshots()
@@ -187,6 +237,31 @@ def api_slo_detail(name: str, limit: int = 200):
     if not history:
         raise HTTPException(404, f"SLO {name} not found")
     return history
+
+
+# ---------------------------------------------------------------------------
+# Policy JSON API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/policies/accepted-risks", response_class=JSONResponse)
+def api_policies_accepted_risks():
+    return db.accepted_risks()
+
+
+@app.get("/api/policies/slos", response_class=JSONResponse)
+def api_policies_slo_definitions():
+    return db.slo_definitions()
+
+
+@app.get("/api/policies/noise", response_class=JSONResponse)
+def api_policies_noise():
+    return db.noise_suppressions()
+
+
+@app.get("/api/policies/security", response_class=JSONResponse)
+def api_policies_security():
+    return db.security_acceptances()
 
 
 @app.get("/api/health", response_class=PlainTextResponse)

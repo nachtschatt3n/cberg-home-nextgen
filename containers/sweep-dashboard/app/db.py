@@ -178,3 +178,69 @@ def slo_history(name: str, limit: int = 200) -> list[dict[str, Any]]:
         """,
         (name, limit),
     )
+
+
+# ---------------------------------------------------------------------------
+# Policy queries (sweep_history v3 — Phase 2 dashboard surface)
+# ---------------------------------------------------------------------------
+
+
+def accepted_risks() -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        SELECT ar_id, severity, description, justification, status, enabled,
+               accepted_at, last_reviewed_at, metadata
+          FROM accepted_risks
+         ORDER BY ar_id
+        """
+    )
+
+
+def slo_definitions() -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        SELECT name, description, source, kind, target, window_size,
+               query_json, burn_rate_windows, tags, enabled,
+               created_at, updated_at
+          FROM slo_definitions
+         ORDER BY name
+        """
+    )
+
+
+def noise_suppressions() -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        SELECT id, category, match_key, match_value, threshold, note,
+               enabled, created_at
+          FROM noise_suppressions
+         ORDER BY category, id
+        """
+    )
+
+
+def security_acceptances() -> list[dict[str, Any]]:
+    return fetch_all(
+        """
+        SELECT id, category, pattern, note, ar_id, enabled, created_at
+          FROM security_acceptances
+         ORDER BY category, id
+        """
+    )
+
+
+def policy_counts() -> dict[str, dict[str, int]]:
+    """Per-table totals + enabled-only subtotals for the /policies landing page."""
+    out: dict[str, dict[str, int]] = {}
+    for table in ("accepted_risks", "slo_definitions",
+                  "noise_suppressions", "security_acceptances"):
+        row = fetch_one(
+            f"SELECT COUNT(*) AS total, "
+            f"SUM(CASE WHEN enabled THEN 1 ELSE 0 END) AS enabled "
+            f"FROM {table}"
+        )
+        out[table] = {
+            "total":   int(row["total"]) if row else 0,
+            "enabled": int(row["enabled"] or 0) if row else 0,
+        }
+    return out

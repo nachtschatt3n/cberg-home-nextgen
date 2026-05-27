@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Noise Suppressions{% endblock %}
+
+{% block content %}
+<section class="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+  <div class="mb-4">
+    <a href="/policies" class="text-blue-600 hover:underline text-sm">← all policies</a>
+  </div>
+  <h1 class="text-2xl font-semibold mb-4">🔇 Noise Suppressions</h1>
+  <p class="text-xs text-gray-500 mb-4">
+    Known-recurring noise that health-check.sh tags rather than re-flagging each cycle. Grouped by category.
+  </p>
+  {% if rows %}
+    {% set by_cat = {} %}
+    {% for r in rows %}{% set _ = by_cat.setdefault(r.category, []).append(r) %}{% endfor %}
+    {% for category, items in by_cat.items() %}
+    <div class="mb-6">
+      <h2 class="text-base font-semibold mb-2 text-gray-700"><code class="text-xs">{{ category }}</code> ({{ items|length }})</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-gray-500 border-b border-gray-200">
+            <th class="py-2 pr-3">Match Key</th>
+            <th class="py-2 pr-3">Match Value</th>
+            <th class="py-2 pr-3 text-right">Threshold</th>
+            <th class="py-2 pr-3">Note</th>
+            <th class="py-2 pr-3">Enabled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in items %}
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2 pr-3 text-xs text-gray-500">{{ r.match_key or "—" }}</td>
+            <td class="py-2 pr-3 font-mono text-xs">{{ r.match_value or "—" }}</td>
+            <td class="py-2 pr-3 text-right text-xs">{% if r.threshold %}{{ r.threshold }}{% else %}—{% endif %}</td>
+            <td class="py-2 pr-3 text-xs text-gray-500">{{ r.note or "—" }}</td>
+            <td class="py-2 pr-3 text-xs">{% if r.enabled %}✅{% else %}⏸️{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  {% else %}
+  <p class="text-gray-500 text-sm">No noise suppressions configured.</p>
+  {% endif %}
+</section>
+{% endblock %}
