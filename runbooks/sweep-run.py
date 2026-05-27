@@ -1,33 +1,41 @@
 #!/usr/bin/env python3
-"""sweep-run — fire a sweep from the operator's local session.
+"""sweep-run — single entry point for the daily sweep.
 
-Mirrors what the in-cluster sweep-collector CronJob does, but from
-your laptop with mise tooling instead of the container image. Useful
-when you just shipped something and want a fresh reading without
-waiting for the next 30-minute CronJob tick.
+This is the only path that runs the audit scripts. Use it either:
+  * scheduled — from a Claude CLI `/loop` job at the daily cadence
+    (per docs/sops/scheduled-sweeps in CLAUDE.md; session-local cron
+    via CronCreate). The daily-operation agent dispatches the six
+    specialists, each of whom invokes its `runbooks/X-check.py`; this
+    script handles the port-forward + DSN derivation those scripts need.
+  * ad-hoc — `python3 runbooks/sweep-run.py` from the operator's
+    session when you've just shipped something and want a fresh DB
+    reading without waiting for the next /loop tick.
 
-Findings land in the SAME `sweep_history` Postgres as the in-cluster
-collector — both writers share a SWEEP_CYCLE_ID per invocation so all
-specialists in one run group under a single sweep_cycles row.
+Findings land in the sweep_history Postgres on the cluster, keyed by
+a per-invocation SWEEP_CYCLE_ID so every specialist in the run groups
+under a single `sweep_cycles` row.
+
+Why local-only: the audit scripts need unifictl / hactl / talosctl and
+several other tools that live in the operator's mise toolchain but
+aren't (and shouldn't be) bundled into a container image. The cluster's
+role is reduced to storage + display — see kubernetes/apps/databases/
+sweep-history/ and kubernetes/apps/monitoring/sweep-dashboard/.
 
 Usage:
     # Implicit port-forwards + derived DSN from sweep-history secret
     python3 runbooks/sweep-run.py
 
-    # Pick a subset of audit scripts (mirrors the container entrypoint)
-    python3 runbooks/sweep-run.py light
+    # Pick a subset of audit scripts
+    python3 runbooks/sweep-run.py light       # doc + version
+    python3 runbooks/sweep-run.py heavy       # security + health
     python3 runbooks/sweep-run.py doc version
-    python3 runbooks/sweep-run.py all
+    python3 runbooks/sweep-run.py all         # default
 
     # Skip Postgres write (smoke test or markdown-only run)
     python3 runbooks/sweep-run.py --no-write
 
     # Use pre-existing DSN (e.g. when you already have the port-forward)
     SWEEP_PG_DSN=postgresql://... python3 runbooks/sweep-run.py
-
-Default scope is `all` (operator's machine has unifictl / hactl /
-talosctl — the in-cluster CronJob is restricted to `light` because
-those tools aren't bundled in the image yet).
 """
 from __future__ import annotations
 

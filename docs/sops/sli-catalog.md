@@ -66,14 +66,14 @@ Sorted by readiness. Source citations included so a follow-up can re-confirm wit
 | # | Integration | Why partial | Path to pilot-ready |
 |---|---|---|---|
 | 4 | **frigate** NVR | Prom metrics exist (`frigate_detections_total`, `frigate_detection_fps`) but no clear "good event" definition. Plus 684k errors / 7d in ES from a single signature — fix-first situation. | (a) Sample frigate `*_total` counters from a live Prom scrape; (b) isolate top error signature in Kibana; (c) decide whether SLO measures detection throughput, detection latency, or error rate. |
-| 5 | **home-assistant-core** | hactl is CLI-only. `Critical:` / `Warnings:` counts + `unavailable_entities` count are well-defined, but not queryable from Prom/ES until wrapped. | (a) Either expose hactl output as Prometheus metrics via a small in-cluster exporter, OR (b) have sweep-collector run hactl periodically and INSERT counts into sweep-history Postgres. (b) is cheaper; consumes the same architecture we just built. |
+| 5 | **home-assistant-core** | hactl is CLI-only. `Critical:` / `Warnings:` counts + `unavailable_entities` count are well-defined, but not queryable from Prom/ES until wrapped. | (a) Either expose hactl output as Prometheus metrics via a small in-cluster exporter, OR (b) add a new step inside `runbooks/sweep-run.py` (or a dedicated `hactl-check.py`) that polls hactl and inserts counts into `sweep_findings` via the existing `runbooks/lib/findings_writer.py` contract. (b) is cheaper — reuses the local-execution architecture instead of adding cluster-side surface. |
 | 6 | **shelly** | (From plan-mode inventory.) Connected MQTT clients is countable via mosquitto exporter (`mosquitto_clients_connected`) but the *expected* count is hardcoded (~34–38). Numerator clear, denominator is a constant. | Acceptable for v0 — define denominator as a literal `36` in the SLO catalog with a TODO to lift it from `noise_allowlist.yaml`. |
 
 ### Deferred (no signal yet, or intentionally out of scope)
 
 | # | Integration | Reason | Revisit when |
 |---|---|---|---|
-| 7 | **flux** GitOps | Kustomization/HelmRelease `Ready` conditions are real-time only, no Prom exporter deployed. | Either deploy flux's built-in Prometheus exporter (small Helm values change), or have sweep-collector emit reconcile counts on each run. |
+| 7 | **flux** GitOps | Kustomization/HelmRelease `Ready` conditions are real-time only, no Prom exporter deployed. | Either deploy flux's built-in Prometheus exporter (small Helm values change), or have `runbooks/sweep-run.py` query `flux get` and emit reconcile counts to `sweep_findings` on each invocation. |
 | 8 | **miele** cloud | Intentionally NOT an SLO target — measures vendor SaaS reliability, not anything you can act on. Documented as accepted-risk in `docs/troubleshooting/ha-upstream-integration-issues.md`. Allowlisted at 100 errors/cycle in `runbooks/noise_allowlist.yaml`. | Never. |
 
 ---
