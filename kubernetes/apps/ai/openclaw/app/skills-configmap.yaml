@@ -481,8 +481,9 @@ data:
         sure categorize <txn_id> <category_id>
         sure tag <txn_id> <tag_id>[,<tag_id>...]   # comma-separated; replaces tags
         sure note <txn_id>             # body from stdin; replaces notes
-        sure merchant <txn_id> <merchant_id>       # set merchant
-        sure merchant <txn_id> none                # clear merchant
+        sure merchant <txn_id> <merchant_id>       # change merchant (existing id)
+                                                    # cannot clear (use the
+                                                    # Sure web UI for that)
         sure reclassify <txn_id> <income|expense>  # flips income↔expense by
                                                     # keeping |amount| and
                                                     # letting Sure apply the
@@ -566,24 +567,48 @@ data:
         print(json.dumps(slim, indent=2))
 
     def merchant(txn_id, merchant_id):
-        """Set or clear the merchant on a transaction. Pass a merchant id to
-        set, or `none`/`null`/`""` to clear (= unbind from any merchant).
+        """Change a transaction's merchant binding to a different existing
+        merchant. Pass the target merchant id.
 
         Use case: bank import auto-matched the wrong merchant (typical for
         payments routed through Stripe / Apple Pay / PayPal / SumUp, where
         the processor name leaks into the bank text and Sure's matcher
-        binds to the processor instead of the actual seller). Clearing
-        the merchant or pointing it at the right one is a sub-edit; this
-        does NOT touch amount, date, account, or category."""
-        clear = merchant_id is None or str(merchant_id).strip().lower() in ("", "none", "null", "-")
-        payload = {"merchant_id": None if clear else str(merchant_id).strip()}
-        result = _patch_txn(txn_id, payload)
-        applied = (result.get("merchant") or {}).get("name") if not clear else None
+        binds to the processor instead of the actual seller).
+
+        Limitations (Sure API, not this skill):
+          - Cannot CLEAR the merchant. The Rails API does
+            `entryable_attributes.compact_blank` on the PATCH body, which
+            silently strips a nil/empty merchant_id. Only the Sure web UI
+            can clear it.
+          - Cannot CREATE a new merchant from the API. `POST /merchants`
+            returns 404; merchants come in only via bank imports.
+
+        If the target merchant doesn't exist in Sure yet and clearing is
+        the goal, tell the user to clear it in the Sure web UI and explain
+        why the skill can't.
+        """
+        sentinel = str(merchant_id).strip().lower() in ("", "none", "null", "-")
+        if sentinel:
+            sys.stderr.write(
+                "sure merchant: clearing the merchant is not supported by the "
+                "Sure API (compact_blank strips nil merchant_id). Use the "
+                "Sure web UI to clear, or pass an existing merchant id to "
+                "re-bind. See `sure merchants <filter>` to discover ids.\n"
+            )
+            sys.exit(2)
+        target = str(merchant_id).strip()
+        result = _patch_txn(txn_id, {"merchant_id": target})
+        applied = (result.get("merchant") or {}).get("name")
+        applied_id = (result.get("merchant") or {}).get("id")
+        ok = applied_id == target
         print(json.dumps({
             "id": txn_id,
             "merchant": applied,
-            "cleared": clear,
+            "merchant_id": applied_id,
+            "success": ok,
         }, indent=2))
+        if not ok:
+            sys.exit(5)
 
     def categorize(txn_id, category_id):
         result = _patch_txn(txn_id, {"category_id": category_id})
@@ -1810,7 +1835,7 @@ data:
     | `sure categorize <txn_id> <category_id>` | Assign a category. |
     | `sure tag <txn_id> <tag_id>[,<tag_id>...]` | Replace the transaction's tags. Empty string clears tags. |
     | `sure note <txn_id>` | Replace `notes` (body from stdin). |
-    | `sure merchant <txn_id> <merchant_id>` | Set or clear the merchant (pass `none` to clear). See merchant-fix section below. |
+    | `sure merchant <txn_id> <merchant_id>` | Change the merchant binding to a different existing merchant. **Cannot clear** (Sure API limitation — see below). |
     | `sure reclassify <txn_id> <income\|expense>` | Flip income↔expense when the bank import got the sign wrong (see below). |
 
     The skill PATCH-es `/api/v1/transactions/:id` with a strict
@@ -1834,21 +1859,25 @@ data:
 
     1. `sure transaction <id>` — confirm payee text, current category,
        current merchant.
-    2. Identify the real merchant. Two paths:
-       - User-known name → `sure merchants "Spice"` to find/confirm an
-         existing merchant id. If a match exists, use it.
-       - No good match → clear the merchant: `sure merchant <id> none`.
-         This leaves the row with category but no merchant, which is
-         better than a wrong one (the matcher will not re-bind unless
-         a future MoneyMoney import re-creates a similar row).
+    2. `sure merchants "<name>"` — search for the real merchant name.
+       - If an existing merchant matches (or a close-enough one exists),
+        use its id.
+       - If nothing matches → **STOP**. Tell Mathias the skill can only
+         re-bind to an existing merchant; clearing or creating a new
+         one has to be done in the Sure web UI. Don't pick a random
+         wrong merchant just to overwrite the existing wrong one.
     3. Show the proposed change in chat as plain text:
        *"The 2026-05-27 Spice POT €101.44 is wrongly merchant-matched
-       to Apple. Clear the merchant? (keeps category Food & Drink)"*
-    4. Wait for explicit yes, then run `sure merchant <id> <new>` or
-       `sure merchant <id> none`.
+       to Apple. Rebind to `<other>` (id ...). Category stays Food &
+       Drink. OK?"*
+    4. Wait for explicit yes, then run `sure merchant <id> <new_id>`.
 
-    The skill never creates new merchant records — only sets an
-    existing merchant id or clears the field.
+    Hard limits (Sure API, not this skill):
+    - Cannot clear the merchant — the API silently drops nil/empty
+      `merchant_id` via Rails `compact_blank`. Web UI works, API
+      doesn't.
+    - Cannot create new merchant records — `POST /merchants` returns
+      404. Merchants come in only via bank imports.
 
     ### Reclassify (income ↔ expense)
 
