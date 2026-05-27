@@ -2589,7 +2589,7 @@ log_section "Home Assistant Health (via hactl doctor)"
         # noise_allowlist.yaml so the doctor's unavailable_entity count
         # reflects suppressions. Idempotent — already-labeled devices are
         # no-ops. Failures are non-fatal: doctor still runs.
-        allowlist_path="$(dirname "$0")/noise_allowlist.yaml"
+        allowlist_path="$NOISE_ALLOWLIST"
         if [ -r "$allowlist_path" ]; then
             label_output=$("$HACTL_BIN" label apply --from-allowlist "$allowlist_path" --label haghs_ignore --yes 2>&1)
             label_rc=$?
