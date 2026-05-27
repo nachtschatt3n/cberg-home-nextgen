@@ -718,7 +718,7 @@ spec:
                     'chutes', 'cloudflare-ai-gateway', 'copilot-proxy',
                     'deepinfra', 'deepseek', 'fal', 'fireworks',
                     'github-copilot', 'google', 'groq', 'huggingface',
-                    'kilocode', 'kimi', 'litellm', 'lmstudio',
+                    'kilocode', 'kimi-coding', 'litellm', 'lmstudio',
                     'microsoft-foundry', 'minimax', 'mistral', 'moonshot',
                     'nvidia', 'opencode', 'opencode-go', 'openrouter',
                     'qianfan', 'qwen', 'sglang', 'stepfun', 'synthetic',
