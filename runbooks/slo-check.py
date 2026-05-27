@@ -106,7 +106,9 @@ def _evaluate_prom(slo: SloDef, prom: PromClient) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    catalog = load_catalog(args.catalog)
+    # Pass DSN explicitly so the loader uses the DB path. Falls back to the
+    # legacy YAML when DSN is unset AND the file is still present.
+    catalog = load_catalog(args.catalog, dsn=args.postgres_dsn)
 
     only = set(args.only)
     slos = [s for s in catalog.slos if (not only or s.name in only)]

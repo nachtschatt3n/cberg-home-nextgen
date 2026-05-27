@@ -1,11 +1,13 @@
-"""Read the SLO catalog YAML into typed dataclasses.
+"""Read the SLO catalog into typed dataclasses.
 
-The catalog file is `runbooks/slo-catalog.yaml` by default. Each `slos[i]`
-entry becomes one `SloDef`. Unknown top-level keys are tolerated so the
-schema can grow without breaking old loaders.
+Source of truth: the `slo_definitions` table in sweep-history Postgres
+(populated by Plan Phase 1.2's migration). Legacy YAML fallback at
+`runbooks/slo-catalog.yaml` is retained for the Phase 1↔2 cutover; that
+fallback (and the source YAML) are removed in Phase 2.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,8 +108,85 @@ def _normalise_brws(raw: list[dict[str, Any]] | None) -> tuple[BurnRateWindow, .
     return tuple(BurnRateWindow.from_dict(d) for d in raw)
 
 
-def load(path: Path | str) -> Catalog:
-    path = Path(path)
+def load(path: Path | str | None = None, *, dsn: str | None = None) -> Catalog:
+    """Load the SLO catalog.
+
+    Source-of-truth path:
+      1. If `dsn` (or `SWEEP_PG_DSN` env) is set → query `slo_definitions`
+         table in sweep_history. This is the canonical path after Plan
+         Phase 1.3 (operator-curated policy in DB).
+      2. Otherwise, if `path` is given (or default) AND the file exists →
+         legacy YAML fallback. Kept for backwards compatibility during
+         the cutover; this path is REMOVED in Plan Phase 2 when the
+         source file is deleted.
+
+    Burn-rate-window defaults: the YAML used a top-level `defaults` block;
+    DB rows store per-SLO `burn_rate_windows` (nullable JSON). When the
+    DB row's value is NULL, we fall back to a hard-coded default matching
+    what the YAML's defaults block carried.
+    """
+    dsn = dsn or os.environ.get("SWEEP_PG_DSN")
+    if dsn:
+        return _load_from_db(dsn)
+    # Legacy YAML path (Phase 1 ↔ Phase 2 bridge)
+    yaml_path = Path(path) if path else None
+    if yaml_path and yaml_path.is_file():
+        return _load_from_yaml(yaml_path)
+    raise RuntimeError(
+        "no SLO catalog source available — set SWEEP_PG_DSN or supply a path"
+    )
+
+
+# Default burn-rate windows mirror what runbooks/slo-catalog.yaml's
+# `defaults.burn_rate_windows` carried before Phase 1.3 migration. Used as
+# fallback when a slo_definitions.burn_rate_windows column is NULL.
+_DEFAULT_BRWS: tuple[BurnRateWindow, ...] = (
+    BurnRateWindow(long="1h", short="5m",  threshold=14.4),
+    BurnRateWindow(long="6h", short="30m", threshold=6.0),
+    BurnRateWindow(long="3d", short="6h",  threshold=1.0),
+)
+
+
+def _load_from_db(dsn: str) -> Catalog:
+    import psycopg
+    from psycopg.rows import dict_row
+    slos: list[SloDef] = []
+    with psycopg.connect(dsn, row_factory=dict_row) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT name, description, source, kind, target, window_size,
+                   query_json, burn_rate_windows, tags
+              FROM slo_definitions
+             WHERE enabled = true
+             ORDER BY name
+            """
+        )
+        for row in cur.fetchall():
+            brws_raw = row["burn_rate_windows"]
+            brws = _normalise_brws(brws_raw) if brws_raw else _DEFAULT_BRWS
+            source = row["source"]
+            q = row["query_json"] or {}
+            slos.append(SloDef(
+                name=row["name"],
+                description=(row["description"] or "").strip(),
+                source=source,
+                kind=row["kind"],
+                target=float(row["target"]),
+                window=row["window_size"],
+                prom=PromQuery.from_dict(q) if source == "prom" else None,
+                es=EsQuery.from_dict(q)   if source == "es"   else None,
+                hactl=HactlQuery.from_dict(q) if source == "hactl" else None,
+                burn_rate_windows=brws,
+                tags=tuple(row["tags"] or ()),
+            ))
+    return Catalog(version=3, defaults={"burn_rate_windows": [
+        {"long": b.long, "short": b.short, "threshold": b.threshold}
+        for b in _DEFAULT_BRWS
+    ]}, slos=tuple(slos))
+
+
+def _load_from_yaml(path: Path) -> Catalog:
+    """Legacy YAML loader. Deleted in Plan Phase 2 along with the source file."""
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top-level must be a mapping")

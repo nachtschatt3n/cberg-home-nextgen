@@ -55,8 +55,25 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Allowlist of known-recurring noise (consumed by _noise_tag below)
-NOISE_ALLOWLIST="$SCRIPT_DIR/noise_allowlist.yaml"
+# Allowlist of known-recurring noise (consumed by _noise_tag below).
+# Sourced from the noise_suppressions table of sweep_history Postgres since
+# Plan Phase 1.6. The dump_noise_yaml.py helper regenerates this tmp YAML
+# at script startup so the existing bash grep logic is unchanged.
+NOISE_ALLOWLIST="/tmp/noise_allowlist.yaml"
+if [ -n "${SWEEP_PG_DSN:-}" ]; then
+    if ! python3 "$SCRIPT_DIR/lib/dump_noise_yaml.py" "$NOISE_ALLOWLIST" 2>/dev/null; then
+        echo "  ⚠ noise allowlist dump failed; tagging will be skipped" >&2
+        # Legacy fallback: if the source YAML is still in repo (Phase 1↔2),
+        # use it directly so the bash logic still has something to grep.
+        [ -f "$SCRIPT_DIR/noise_allowlist.yaml" ] && \
+            NOISE_ALLOWLIST="$SCRIPT_DIR/noise_allowlist.yaml"
+    fi
+else
+    # No DSN → legacy YAML path. Removed in Plan Phase 2 when the source
+    # file is deleted from git.
+    [ -f "$SCRIPT_DIR/noise_allowlist.yaml" ] && \
+        NOISE_ALLOWLIST="$SCRIPT_DIR/noise_allowlist.yaml"
+fi
 
 # Output file
 OUTPUT_FILE="${1:-/tmp/health-check-$(date +%Y%m%d-%H%M%S).txt}"

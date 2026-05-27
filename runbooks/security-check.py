@@ -48,10 +48,14 @@ import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Make the script's directory importable so we can load the
-# security_check_acceptances sibling module regardless of CWD.
+# Acceptance lists used to live in runbooks/security_check_acceptances.py
+# (78 cred patterns + 13 secret-file paths + 26 ingress hostnames). Since
+# Plan Phase 1.5 they're stored in the `security_acceptances` table of
+# sweep_history Postgres and loaded lazily via PEP-562 module __getattr__.
+# Import path stays at the top of the file (no behavioural change for
+# downstream sites that read these names).
 sys.path.insert(0, str(Path(__file__).parent))
-from security_check_acceptances import (
+from lib.security_acceptances import (  # noqa: E402
     EXTERNAL_INGRESS_ACCEPTED,
     GIT_HISTORY_CRED_PATTERNS,
     GIT_HISTORY_SECRET_FILES,
@@ -107,13 +111,47 @@ from lib.findings_writer import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def load_accepted_risks() -> dict[str, str]:
-    """Parse `docs/security-accepted-risks.md` for entries of the form
-    `AR-\\d{3}: <description>` (also accepts `AR-\\d{3} — <description>` and
-    `AR-\\d{3} - <description>` since the doc uses an em dash header style).
+    """Return {AR-ID: description} for all enabled accepted_risks.
 
-    Returns dict {AR-ID: description}. On missing/empty file, logs a warning
-    and returns an empty dict so the rest of the audit proceeds unchanged.
+    Source of truth (since Plan Phase 1.4): the `accepted_risks` table in
+    sweep_history Postgres. The DSN comes from `SWEEP_PG_DSN` env (set by
+    `runbooks/sweep-run.py`, the daily-operation orchestrator, or
+    individual operator invocations).
+
+    Legacy YAML/Markdown fallback: if `SWEEP_PG_DSN` is unset AND
+    `docs/security-accepted-risks.md` still exists on disk, parse it
+    using the original regex. This bridges the Phase 1↔2 gap; the file
+    (and this fallback) are removed in Phase 2.
+
+    Empty result on every failure path — the audit proceeds without
+    accepted-risk filtering rather than blocking on policy loader errors.
     """
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if dsn:
+        return _load_accepted_risks_from_db(dsn)
+    return _load_accepted_risks_from_markdown()
+
+
+def _load_accepted_risks_from_db(dsn: str) -> dict[str, str]:
+    try:
+        import psycopg  # lazy: degrade if psycopg isn't available
+    except ImportError:
+        cprint(C.YELLOW, "  ⚠ psycopg not installed — skipping accepted-risk load")
+        return {}
+    try:
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT ar_id, description FROM accepted_risks "
+                "WHERE enabled = true AND status = 'accepted' "
+                "ORDER BY ar_id"
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+    except Exception as e:
+        cprint(C.YELLOW, f"  ⚠ could not load accepted_risks from DB: {e}")
+        return {}
+
+
+def _load_accepted_risks_from_markdown() -> dict[str, str]:
     if not ACCEPTED_RISKS_DOC.exists():
         cprint(C.YELLOW, f"  ⚠ accepted-risks doc not found: {ACCEPTED_RISKS_DOC}")
         return {}
@@ -125,7 +163,6 @@ def load_accepted_risks() -> dict[str, str]:
     if not text.strip():
         cprint(C.YELLOW, f"  ⚠ accepted-risks doc is empty: {ACCEPTED_RISKS_DOC}")
         return {}
-
     pattern = re.compile(r"\b(AR-\d{3})\s*[:—\-]\s+(.+?)\s*$")
     risks: dict[str, str] = {}
     for line in text.splitlines():
@@ -133,7 +170,6 @@ def load_accepted_risks() -> dict[str, str]:
         m = pattern.match(line)
         if m:
             ar_id, desc = m.group(1), m.group(2).strip()
-            # First match wins (header line) — skip later in-body references.
             risks.setdefault(ar_id, desc)
     return risks
 
