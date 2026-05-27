@@ -730,19 +730,6 @@ spec:
                     cfg.plugins.entries[id].enabled = false;
                   }
 
-                  // Drop stale plugin ids that no longer exist in upstream
-                  // openclaw. Spread-merge preserves any key the user/agent
-                  // ever added to openclaw.json, so renamed-or-removed ids
-                  // linger forever unless explicitly deleted here. Keep
-                  // this list pruned — only carry ids that produced a
-                  // "plugin not found" warning during a real boot.
-                  const stalePluginIds = ['kimi-coding'];
-                  for (const id of stalePluginIds) {
-                    if (cfg.plugins.entries[id]) {
-                      delete cfg.plugins.entries[id];
-                    }
-                  }
-
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
