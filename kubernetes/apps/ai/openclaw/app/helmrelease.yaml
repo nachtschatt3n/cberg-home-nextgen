@@ -751,22 +751,6 @@ spec:
                   cfg.update = cfg.update || {};
                   cfg.update.checkOnStart = false;
 
-                  // Reply delivery mode — keep heartbeats from swallowing
-                  // user DMs. When unset, codex-backed runtimes default to
-                  // "tool only" delivery (heartbeat_respond), which sets
-                  // sourceReplyDeliveryMode = "message_tool_only" on every
-                  // active operation. A user DM landing during an active
-                  // heartbeat inherits that mode and the agent's reply gets
-                  // suppressed silently. Forcing "automatic" makes the
-                  // heartbeat-runner take the plain-text branch
-                  // (`reply HEARTBEAT_OK`) and skips the message_tool_only
-                  // lockout — user replies deliver normally even mid-
-                  // heartbeat. See heartbeat-runner shouldUseHeartbeat
-                  // ResponseToolPrompt and the message_tool_only branch
-                  // in the runner for full chain.
-                  cfg.messages = cfg.messages || {};
-                  cfg.messages.visibleReplies = 'automatic';
-
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
