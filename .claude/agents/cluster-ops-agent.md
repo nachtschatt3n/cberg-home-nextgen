@@ -92,7 +92,7 @@ Never run destructive operations (`kubectl delete pv`, `--force`, `talosctl rese
 
 ## Memory, accepted risks, known broken versions
 
-- Load `MEMORY.md` context already in scope. Honor `docs/security-accepted-risks.md` (AR-001…AR-010) — do not re-flag accepted items.
+- Load `MEMORY.md` context already in scope. Honor accepted risks from the `accepted_risks` table in sweep_history Postgres — do not re-flag accepted items. Browse via `https://sweep.<DOMAIN>/policies/accepted-risks` or `runbooks/policy-cli.py risk list`.
 - Known broken: **headlamp 0.40.1** (chart bug, use 0.41.0+). Check `MEMORY.md` for current entries before recommending a version.
 
 ## Reporting style

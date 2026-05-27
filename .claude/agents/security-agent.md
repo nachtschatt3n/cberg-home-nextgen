@@ -25,7 +25,7 @@ Wazuh SIEM correlation (section 13) — runs alongside repo/cluster checks:
   or rule mis-tune.
 
 Accepted risks — do NOT surface these as findings:
-- Load `docs/security-accepted-risks.md` at the start of every audit.
+- Load accepted risks from the `accepted_risks` table in sweep_history Postgres at the start of every audit (security-check.py does this automatically via `SWEEP_PG_DSN`). Browse via the dashboard `/policies/accepted-risks` or query directly with `runbooks/policy-cli.py risk list`. The legacy `docs/security-accepted-risks.md` file was retired in the Phase 2 policy-in-DB migration (2026-05-27).
 - AR-001: Plaintext secrets in public git history — all rotated or services decommissioned; history cannot be rewritten on a public repo with clones.
 - AR-002: Mosquitto `allow_anonymous true` — IoT VLAN (192.168.32.0/23) only, no external exposure.
 - AR-003: echo-server on external ingress without Authentik — intentional debug tool, no sensitive data.

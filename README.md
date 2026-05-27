@@ -371,7 +371,7 @@ Custom rule families:
 `modern_ebpf` driver (Talos kernel ≥ 5.8, no kmod build needed). JSON events
 are written to `/var/run/falco/falco.log` and tailed by the wazuh-agent
 DaemonSet — the manager-side rule chain `100400-100404` surfaces them as
-Wazuh alerts. Accepted-risk record: [`docs/security-accepted-risks.md`](docs/security-accepted-risks.md) AR-026.
+Wazuh alerts. Accepted-risk record: `accepted_risks` table in sweep_history Postgres, AR-026 — browse at `https://sweep.<DOMAIN>/policies/accepted-risks#AR-026`.
 
 ### Defense-in-depth checks
 
@@ -438,7 +438,7 @@ blast radius, ordered recovery steps, and verification. Quick map:
 | Longhorn volume corruption | T0/T1 | Auto-rebuild on degraded; backup restore on faulted |
 | NAS (UNAS-CBERG) failure | T1/T2 | Media + intake + backup target lost; cluster live data survives on Longhorn replicas |
 | GitHub repo loss / compromise | T1 | Cluster keeps running on last reconciled commit; push to new origin to recover |
-| Cloudflare account compromise | T1 | Rotate API token + tunnel; AR-020 in `docs/security-accepted-risks.md` |
+| Cloudflare account compromise | T1 | Rotate API token + tunnel; AR-020 (`/policies/accepted-risks#AR-020` on the sweep dashboard) |
 | Authentik database loss | T1 | SSO outage only; restore PV or re-apply blueprints |
 | UniFi controller config loss | T0/T1 | Restore `.unf` auto-backup or rebuild from `CLAUDE.md` topology spec |
 

@@ -1,6 +1,6 @@
 # SOP: SLI Catalog (sweep-history Track C / Phase 0)
 
-> Description: Inventory of SLI candidates per integration, with explicit signal sources (Prometheus / Elasticsearch / hactl / kubectl / none) and pilot-ready ratings. Drives the SLO catalog (`runbooks/slo-catalog.yaml`) that ships in Track C / C1.
+> Description: Inventory of SLI candidates per integration, with explicit signal sources (Prometheus / Elasticsearch / hactl / kubectl / none) and pilot-ready ratings. Drives the `slo_definitions` table in sweep_history Postgres (the runtime SLO catalog).
 > Version: `2026.05.19`
 > Last Updated: `2026-05-19`
 > Owner: `homelab-operator`
@@ -31,7 +31,7 @@ Integrations missing all three are deferred until signal collection ships.
 
 ## 3) Blueprints
 
-N/A — this is the catalog, not a code blueprint. Implementing SLOs against this catalog happens in `runbooks/slo-catalog.yaml` (Track C / C1).
+N/A — this is the inventory, not a code blueprint. Adding an SLO that's listed here as pilot-ready: `runbooks/policy-cli.py slo add` writes a row to the `slo_definitions` table; the calculator picks it up on the next `slo-check.py` invocation.
 
 ---
 
@@ -67,14 +67,14 @@ Sorted by readiness. Source citations included so a follow-up can re-confirm wit
 |---|---|---|---|
 | 4 | **frigate** NVR | Prom metrics exist (`frigate_detections_total`, `frigate_detection_fps`) but no clear "good event" definition. Plus 684k errors / 7d in ES from a single signature — fix-first situation. | (a) Sample frigate `*_total` counters from a live Prom scrape; (b) isolate top error signature in Kibana; (c) decide whether SLO measures detection throughput, detection latency, or error rate. |
 | 5 | **home-assistant-core** | hactl is CLI-only. `Critical:` / `Warnings:` counts + `unavailable_entities` count are well-defined, but not queryable from Prom/ES until wrapped. | (a) Either expose hactl output as Prometheus metrics via a small in-cluster exporter, OR (b) add a new step inside `runbooks/sweep-run.py` (or a dedicated `hactl-check.py`) that polls hactl and inserts counts into `sweep_findings` via the existing `runbooks/lib/findings_writer.py` contract. (b) is cheaper — reuses the local-execution architecture instead of adding cluster-side surface. |
-| 6 | **shelly** | (From plan-mode inventory.) Connected MQTT clients is countable via mosquitto exporter (`mosquitto_clients_connected`) but the *expected* count is hardcoded (~34–38). Numerator clear, denominator is a constant. | Acceptable for v0 — define denominator as a literal `36` in the SLO catalog with a TODO to lift it from `noise_allowlist.yaml`. |
+| 6 | **shelly** | (From plan-mode inventory.) Connected MQTT clients is countable via mosquitto exporter (`mosquitto_clients_connected`) but the *expected* count is hardcoded (~34–38). Numerator clear, denominator is a constant. | Acceptable for v0 — define denominator as a literal `36` when adding the SLO via `policy-cli slo add`, with a TODO to derive it dynamically. |
 
 ### Deferred (no signal yet, or intentionally out of scope)
 
 | # | Integration | Reason | Revisit when |
 |---|---|---|---|
 | 7 | **flux** GitOps | Kustomization/HelmRelease `Ready` conditions are real-time only, no Prom exporter deployed. | Either deploy flux's built-in Prometheus exporter (small Helm values change), or have `runbooks/sweep-run.py` query `flux get` and emit reconcile counts to `sweep_findings` on each invocation. |
-| 8 | **miele** cloud | Intentionally NOT an SLO target — measures vendor SaaS reliability, not anything you can act on. Documented as accepted-risk in `docs/troubleshooting/ha-upstream-integration-issues.md`. Allowlisted at 100 errors/cycle in `runbooks/noise_allowlist.yaml`. | Never. |
+| 8 | **miele** cloud | Intentionally NOT an SLO target — measures vendor SaaS reliability, not anything you can act on. Documented as accepted-risk in `docs/troubleshooting/ha-upstream-integration-issues.md`. Allowlisted at 100 errors/cycle in the `noise_suppressions` table (category `known_ha_error_sources`). | Never. |
 
 ---
 
@@ -142,7 +142,7 @@ hactl doctor --json | jq '{overall, critical: .critical_count, warning: .warning
 
 Reverting this SOP is a no-op (it's documentation). To roll back an SLO that turned out to have a bad signal:
 
-1. Remove the entry from `runbooks/slo-catalog.yaml` in a single PR.
+1. Disable or delete the row in `slo_definitions` via `runbooks/policy-cli.py slo disable NAME` (preferred — keeps audit trail) or `delete NAME` (hard-remove).
 2. Move the catalog row in this SOP from `pilot-ready` to `partial` or `deferred` with the reason.
 3. Any historical `slo_snapshots` rows for that name are preserved — they're useful evidence of the failed pilot.
 
@@ -152,9 +152,9 @@ Reverting this SOP is a no-op (it's documentation). To roll back an SLO that tur
 
 - [SOP-TEMPLATE.md](SOP-TEMPLATE.md) — section structure this SOP follows
 - [sli-slo-framework.md](sli-slo-framework.md) — *(will exist after C4)* — the operator-facing SOP for adding new SLOs
-- [runbooks/slo-catalog.yaml](../../runbooks/slo-catalog.yaml) — *(will exist after C1)* — declarative SLO definitions
+- `slo_definitions` table in sweep_history Postgres — runtime SLO catalog; browse at `sweep.<DOMAIN>/policies/slos`
 - [runbooks/slo-check.py](../../runbooks/slo-check.py) — *(will exist after C1)* — multi-backend calculator
-- [runbooks/noise_allowlist.yaml](../../runbooks/noise_allowlist.yaml) — informal thresholds being formalised as SLOs
+- `noise_suppressions` table in sweep_history Postgres — informal thresholds being formalised as SLOs; browse at `sweep.<DOMAIN>/policies/noise`
 - [unifi-controller-rate-limit.md](unifi-controller-rate-limit.md) — implicit UniFi SLO target (30s polling → 99% device-up)
 - [docs/troubleshooting/ha-upstream-integration-issues.md](../troubleshooting/ha-upstream-integration-issues.md) — Miele accepted-risk posture
 

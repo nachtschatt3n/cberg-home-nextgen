@@ -326,7 +326,7 @@ breaks until you reboot or roll a pod that requires a re-pull.
 
 ### 4.8 Cloudflare account compromise
 
-See AR-020 in `docs/security-accepted-risks.md`. Risk is documented; recovery:
+See AR-020 in the `accepted_risks` table (`sweep.<DOMAIN>/policies/accepted-risks#AR-020`). Risk is documented; recovery:
 
 1. Reset Cloudflare account password + revoke all sessions (Cloudflare
    dashboard → My Profile → Sessions).
@@ -522,8 +522,10 @@ After §4.4 (key rotation), §4.7 (repo compromise), or §4.8 (Cloudflare):
 
 1. Re-run `runbooks/security-check.py` end-to-end. Confirm no critical
    findings.
-2. Audit `docs/security-accepted-risks.md` — any AR-* that referenced a
-   rotated credential needs a date-stamp update.
+2. Audit the `accepted_risks` table (`sweep.<DOMAIN>/policies/accepted-risks` or
+   `runbooks/policy-cli.py risk list`) — any AR-* that referenced a
+   rotated credential needs a `policy-cli risk review AR-NNN` to bump
+   `last_reviewed_at`.
 3. Trivy: re-scan running images for any introduced via emergency restore.
 
 ---
@@ -555,6 +557,7 @@ Treat it accordingly.
 - `docs/sops/cloudflare.md` — Cloudflare zone Terraform (referenced in §4.8).
 - `docs/sops/talos-upgrade.md` — node-level upgrade procedure (related to §4.1
   hardware swap).
-- `docs/security-accepted-risks.md` — risk register (AR-020 Cloudflare,
-  AR-023 Wazuh, AR-026 Falco).
+- `accepted_risks` table in sweep_history Postgres — risk register
+  (AR-020 Cloudflare, AR-023 Wazuh, AR-026 Falco); browse at
+  `sweep.<DOMAIN>/policies/accepted-risks`.
 - `CLAUDE.md` — network topology + VLAN map (referenced in §4.10).

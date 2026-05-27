@@ -141,6 +141,26 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
 - All secrets and sensitive data must be encrypted using SOPS before committing
 - Ensure no credentials, API keys, or configuration details are exposed in the repository
 
+## Operator-Curated Policy lives in sweep_history Postgres
+
+Since 2026-05-27, four categories of operator decisions live in the cluster
+DB, **not** in git:
+
+| Table | What | Edit |
+|---|---|---|
+| `accepted_risks` | AR-NNN risk register (was `docs/security-accepted-risks.md`) | `runbooks/policy-cli.py risk` |
+| `slo_definitions` | SLO targets (was `runbooks/slo-catalog.yaml`) | `runbooks/policy-cli.py slo` |
+| `noise_suppressions` | known-recurring noise (was `runbooks/noise_allowlist.yaml`) | `runbooks/policy-cli.py noise` |
+| `security_acceptances` | git-history + ingress allowlists (was `runbooks/security_check_acceptances.py`) | `runbooks/policy-cli.py sec` |
+
+Browse: `https://sweep.<DOMAIN>/policies/`. JSON API at
+`/api/policies/{accepted-risks,slos,noise,security}`.
+
+Audit scripts (security-check.py, slo-check.py, health-check.sh) load policy
+via the `SWEEP_PG_DSN` env var that `runbooks/sweep-run.py` sets up
+automatically (port-forwards postgresql, decodes the secret). No need to
+pass DSN manually unless you're running a script in isolation.
+
 ## Storage Safety — DESTRUCTIVE PVC OPERATIONS
 
 **Source of truth: `docs/sops/storage-safety.md`. Read it before any storage delete.**

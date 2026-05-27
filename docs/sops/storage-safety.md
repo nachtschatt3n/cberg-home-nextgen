@@ -290,7 +290,7 @@ Destructive storage operations are **not rollback-able** unless backups exist. R
 - For NAS-side restore: Longhorn snapshot ≠ NAS share snapshot. CIFS-mounted shares are restored from the NAS, not from Longhorn
 - If you are about to perform a destructive action without a confirmed restore path, **do not perform it**
 
-For the 2026-04-26 incident, rollback was attempted by restoring from kopia (where covered) and accepting loss for paths without backup coverage. Document recovery state in `docs/security-accepted-risks.md` if any data is unrecoverable.
+For the 2026-04-26 incident, rollback was attempted by restoring from kopia (where covered) and accepting loss for paths without backup coverage. Document recovery state via `runbooks/policy-cli.py risk add` (writes to the `accepted_risks` table in sweep_history) if any data is unrecoverable.
 
 ## See also
 
