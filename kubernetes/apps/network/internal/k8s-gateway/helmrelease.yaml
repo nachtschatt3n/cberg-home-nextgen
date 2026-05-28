@@ -24,7 +24,12 @@ spec:
   values:
     fullnameOverride: k8s-gateway
     domain: "${SECRET_DOMAIN}"
-    ttl: 1
+    # TTL 1 was pathologically low: the UniFi gateway's dnsmasq couldn't
+    # keep the positive A-record cached (expired every 1s) while latching
+    # the 60s NODATA negative SOA, so newly-added ingress hosts (e.g. the
+    # `sweep` subdomain) got stuck returning empty in a self-renewing loop.
+    # Match the SOA neg-TTL (60s) so positive answers actually stick.
+    ttl: 60
     service:
       type: LoadBalancer
       loadBalancerIP: "192.168.55.101"
