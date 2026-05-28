@@ -114,12 +114,17 @@ spec:
     customRules:
       apt-dpkg-noise.yaml: |-
         - rule: Drop and execute new binary in container
+          # APPEND (not replace) — keep Falco 0.44.0's built-in exclusions
+          # intact and only add ours. A prior `replace` discarded the base
+          # exclusions and made the rule fire on Longhorn's /data/longhorn
+          # engine binary (10k+ alerts/hr). Exclude package-setup ancestors
+          # (py3compile/dpkg/apt) AND the Longhorn engine-image launcher.
           condition: >
-            spawned_process
-            and container
-            and (proc.is_exe_upper_layer=true or proc.is_exe_lower_layer=false)
-            and thread.cap_effective contains CAP_SYS_ADMIN
-            and not (proc.aname[1] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
-                     proc.aname[2] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb))
+            and not (
+              proc.aname[1] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
+              proc.aname[2] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
+              proc.exe startswith /data/longhorn or
+              proc.exepath startswith /data/longhorn
+            )
           override:
-            condition: replace
+            condition: append
