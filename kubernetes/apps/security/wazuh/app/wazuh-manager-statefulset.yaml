@@ -35,7 +35,7 @@ spec:
         # so a single configmap edit is a minimal-diff template change.
         # Recipe (run after any decoder configmap edit):
         #   sha256sum kubernetes/apps/security/wazuh/app/<configmap>.yaml | awk '{print substr($1,1,12)}'
-        checksum/wazuh-config: "85c1150b41c4"
+        checksum/wazuh-config: "d6212dd4b98d"
         checksum/unifi-decoder: "95903711ca89"
         checksum/ingress-nginx-decoder: "cc95eb2394c2"
     spec:
@@ -76,6 +76,12 @@ spec:
             items:
               - key: ingress-nginx_rules.xml
                 path: ingress-nginx_rules.xml
+        - name: local-rules
+          configMap:
+            name: wazuh-local-rules
+            items:
+              - key: local_rules.xml
+                path: local_rules.xml
         - name: wazuh-certs
           secret:
             secretName: wazuh-certs
@@ -183,6 +189,10 @@ spec:
               readOnly: true
             - name: ingress-nginx-rules
               mountPath: /var/ossec/etc/rules/ingress-nginx
+              readOnly: true
+            # Local rule overrides (RFC1918 srcip suppression for rule 31533).
+            - name: local-rules
+              mountPath: /var/ossec/etc/rules/local
               readOnly: true
             # Single PVC, mounted at all paths Wazuh persists, via subPath.
             - name: wazuh-manager-master

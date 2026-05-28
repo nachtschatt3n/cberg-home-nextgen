@@ -1100,6 +1100,7 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     "longhorn-name-migration-pending.md",  # Auto-generated list
                     "media-manager.md",              # Sub-agent operator guide, no script
                     "wazuh-unifi-syslog.md",         # One-time UniFi controller setup procedure
+                    "icloud-cookie-rotation.md",     # Interactive 2FA — kubectl exec procedure
                 }
                 if runbook.name in MANUAL_RUNBOOKS:
                     cprint(C.GREEN, f"  {OK} {runbook.name}: manual procedure (no script expected)")

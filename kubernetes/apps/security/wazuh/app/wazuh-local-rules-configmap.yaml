@@ -1,0 +1,36 @@
+---
+# Local rule overrides for Wazuh manager — drop intracluster Longhorn POST
+# noise that fires upstream rule 31533 "High amount of POST requests = likely
+# bot". The agent-side <exclude> on /host/var/log/containers/longhorn-manager-*
+# is in place but doesn't suppress these for reasons we haven't isolated; this
+# manager-side override is the belt-and-braces fix.
+#
+# Mounted at /var/ossec/etc/rules/local/local_rules.xml; the master.conf's
+# <rule_dir>etc/rules/local</rule_dir> entry pulls it into the active ruleset.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wazuh-local-rules
+data:
+  local_rules.xml: |
+    <group name="local,attack,homelab">
+      <!-- Drop rule 31533 (high POST volume) when the source IP is RFC1918
+           private. Longhorn manager pods emit ~165 internal POSTs/day from
+           10.0.0.0/8 + 172.16.0.0/12 + 192.168.0.0/16 ranges. These are
+           legitimate intra-cluster volume management calls, not bots. -->
+      <rule id="100501" level="0">
+        <if_sid>31533</if_sid>
+        <srcip>10.0.0.0/8</srcip>
+        <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>
+      </rule>
+      <rule id="100502" level="0">
+        <if_sid>31533</if_sid>
+        <srcip>172.16.0.0/12</srcip>
+        <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>
+      </rule>
+      <rule id="100503" level="0">
+        <if_sid>31533</if_sid>
+        <srcip>192.168.0.0/16</srcip>
+        <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>
+      </rule>
+    </group>

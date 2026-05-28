@@ -453,6 +453,7 @@ data:
         <rule_dir>etc/rules</rule_dir>
         <rule_dir>etc/rules/unifi</rule_dir>
         <rule_dir>etc/rules/ingress-nginx</rule_dir>
+        <rule_dir>etc/rules/local</rule_dir>
       </ruleset>
 
       <rule_test>

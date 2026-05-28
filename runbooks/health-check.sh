@@ -3890,9 +3890,18 @@ echo -e "${GREEN}Health check complete!${NC}"
 echo "Full report: $OUTPUT_FILE"
 echo "Summary: $SUMMARY_FILE"
 echo "Issues: $ISSUES_FILE"
+
+# Auto-write the snapshot so doc-check's `health-check-current.md` freshness
+# check stays green without operator intervention. Same pattern the Python
+# *-check.py scripts use (OUTPUT path in each script).
+SNAPSHOT_DIR="${SWEEP_SNAPSHOTS_DIR:-$SCRIPT_DIR}"
+if [ -w "$SNAPSHOT_DIR" ] && [ -s "$SUMMARY_FILE" ]; then
+    cp "$SUMMARY_FILE" "$SNAPSHOT_DIR/health-check-current.md" 2>/dev/null && \
+        echo "Snapshot: $SNAPSHOT_DIR/health-check-current.md"
+fi
+
 echo ""
 echo "Next steps:"
 echo "  - Review full output: cat $OUTPUT_FILE"
 echo "  - Check summary: cat $SUMMARY_FILE"
 echo "  - Review issues: cat $ISSUES_FILE"
-echo "  - Save snapshot: cp $SUMMARY_FILE runbooks/health-check-current.md"
