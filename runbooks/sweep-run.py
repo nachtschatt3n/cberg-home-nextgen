@@ -170,6 +170,55 @@ def _stop(pf: subprocess.Popen | None) -> None:
         pass
 
 
+def _apply_ar_suppression(dsn: str) -> int:
+    """Re-tag open findings whose title substring-matches an accepted-risk
+    description. Sets severity='accepted' and prepends [AR-NNN] to the
+    title. Idempotent — already-tagged rows are left alone.
+
+    Cross-section: an AR description like "chart 3.7.3 → 5.0.0 (major)"
+    suppresses matching version findings AND any other section's finding
+    that happens to share the substring. Description authoring is the
+    knob to control scope.
+
+    Returns count of rows re-tagged this pass.
+    """
+    try:
+        import psycopg
+    except ImportError:
+        return 0
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT ar_id, description FROM accepted_risks "
+                    "WHERE status='accepted' AND enabled=true"
+                )
+                ars = cur.fetchall()
+                tagged = 0
+                for ar_id, desc in ars:
+                    needle = (desc or "").strip()
+                    if not needle:
+                        continue
+                    cur.execute(
+                        """
+                        UPDATE sweep_findings
+                           SET severity = 'accepted',
+                               title = %s || title
+                         WHERE resolved_at IS NULL
+                           AND severity IN ('critical', 'warning')
+                           AND position(%s in lower(title)) > 0
+                           AND position(%s in title) = 0
+                        """,
+                        (f"[{ar_id}] ", needle.lower(), f"[{ar_id}]"),
+                    )
+                    tagged += cur.rowcount
+            conn.commit()
+        return tagged
+    except Exception as e:  # noqa: BLE001
+        print(f"==> AR-suppression failed: {type(e).__name__}: {e}")
+        return 0
+
+
 def _auto_close_stale_findings(
     dsn: str, cycle_id: str, sections: list[str]
 ) -> list[tuple[str, str, str]]:
@@ -334,6 +383,15 @@ def main(argv: list[str] | None = None) -> int:
             # anything else, assume crash and skip its section in auto-close.
             if rc in (0, 1, 2):
                 completed.append(step)
+
+        # Apply AR suppression: tag any open finding whose title matches
+        # an enabled accepted-risk description as severity=accepted. Runs
+        # first so subsequent auto-close decisions see the post-tag state.
+        if write_enabled and dsn:
+            tagged = _apply_ar_suppression(dsn)
+            if tagged:
+                print()
+                print(f"==> AR-suppressed {tagged} finding(s) (matched accepted_risks descriptions)")
 
         # Auto-close open findings in completed sections that did NOT
         # re-fire this cycle. Section == step name. Skip if writes are

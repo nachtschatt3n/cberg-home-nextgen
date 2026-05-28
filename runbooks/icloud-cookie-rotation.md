@@ -13,14 +13,15 @@ When `icloud-docker-mu` logs `cookie pcs key is corrupt (INCORRECT_PCS_KEY)` or 
 NS=backup
 POD=$(kubectl -n $NS get pod -l app.kubernetes.io/name=icloud-docker-mu -o name | head -1)
 kubectl -n $NS exec $POD -- ls -la /config/session_data
-# expect: mathiasuhlmecom + mathiasuhlmecom.session
+# expect: 2 files — <appleid-slug> + <appleid-slug>.session
+# (slug = the operator's Apple ID with @ and . stripped)
 ```
 
 ## Rotate
 
 ```bash
 # 1) Delete stale session files (in-place; PVC survives the restart)
-kubectl -n $NS exec $POD -- sh -c 'rm -f /config/session_data/mathiasuhlmecom*'
+kubectl -n $NS exec $POD -- sh -c 'rm -f /config/session_data/*'
 
 # 2) Restart the deployment so the next start prompts for 2FA
 kubectl -n $NS rollout restart deploy/icloud-docker-mu

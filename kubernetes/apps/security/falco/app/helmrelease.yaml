@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: falco
-      version: 8.0.3
+      version: 9.0.0
       sourceRef:
         kind: HelmRepository
         name: falcosecurity
@@ -101,3 +101,34 @@ spec:
     # Disable Falcosidekick; events go to file → Wazuh, not external webhooks.
     falcosidekick:
       enabled: false
+    # Local rule overrides. The default Falco rule
+    # `Executing binary not part of base image` fires on legitimate
+    # py3compile / dpkg postinst invocations during package setup —
+    # observed ~1900 events/day from openclaw container alone (rule 100404
+    # in Wazuh). Suppress when the ancestor chain is dpkg/py3compile.
+    customRules:
+      apt-dpkg-noise.yaml: |-
+        - rule: Drop and execute new binary in container
+          desc: An attacker emplaced an executable not part of the base image and executed it.
+          condition: >
+            spawned_process
+            and container
+            and (proc.is_exe_upper_layer=true or proc.is_exe_lower_layer=false)
+            and thread.cap_effective contains CAP_SYS_ADMIN
+            and not (proc.aname[1] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
+                     proc.aname[2] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb))
+          output: >
+            Executing binary not part of base image
+            (proc_exe=%proc.exe proc_sname=%proc.sname gparent=%proc.aname[2]
+            proc_exe_ino_ctime=%proc.exe_ino.ctime
+            proc_exe_ino_mtime=%proc.exe_ino.mtime
+            proc_exe_ino_ctime_duration_proc_start=%proc.exe_ino.ctime_duration_proc_start
+            proc_cwd=%proc.cwd container_start_ts=%container.start_ts evt_type=%evt.type
+            user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid process=%proc.name
+            proc_exepath=%proc.exepath parent=%proc.pname command=%proc.cmdline terminal=%proc.tty
+            exe_flags=%evt.arg.flags %container.info)
+          priority: CRITICAL
+          tags: [maturity_stable, container, process, mitre_persistence, T1546]
+          override:
+            condition: replace
+            output: replace
