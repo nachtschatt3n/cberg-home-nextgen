@@ -16,6 +16,10 @@ metadata:
     gethomepage.dev/group: "Security"
     gethomepage.dev/icon: "wazuh.png"
     gethomepage.dev/description: "XDR/SIEM platform"
+    # wazuh-dashboard pods carry `app=wazuh-dashboard` (not the
+    # `app.kubernetes.io/name` convention homepage defaults to). Without
+    # this explicit selector homepage emits "no pods found" every poll.
+    gethomepage.dev/pod-selector: "app=wazuh-dashboard"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
     nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
     # The SAML flow can produce large redirect URLs / cookies — bump nginx

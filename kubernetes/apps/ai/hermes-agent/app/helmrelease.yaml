@@ -213,6 +213,10 @@ spec:
           gethomepage.dev/group: "AI"
           gethomepage.dev/icon: "mdi-robot-outline"
           gethomepage.dev/description: "Self-improving AI agent — Telegram + gemma4:26b"
+          # Pod label is `app.kubernetes.io/name=hermes-agent`, not
+          # `hermes-agent-dashboard` (homepage's default guess from
+          # ingress name). Set explicitly so status probes resolve.
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=hermes-agent"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
