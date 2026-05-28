@@ -14,6 +14,11 @@ spec:
         kind: HelmRepository
         name: falcosecurity
         namespace: flux-system
+  # DaemonSet upgrades require sequential pod replacement on each node.
+  # Default 5m timeout is too tight (privileged BPF init can take 30-60s
+  # per node × 3 nodes); bump to 15m so the v8.0.3→v9.0.0 upgrade can
+  # actually complete instead of rolling back at the deadline.
+  timeout: 15m
   install:
     remediation:
       retries: 3
