@@ -24,7 +24,16 @@ spec:
   values:
     controllers:
       otbr:
-        replicas: 1
+        # Scaled to 0 pending SMLIGHT RMA: the SLZB-06P7 Thread coordinator's
+        # Ethernet/LAN port is dead, forcing it onto WiFi. The Thread RCP
+        # spinel-over-TCP handshake can't tolerate the WiFi latency/jitter
+        # (48-378ms, spikes >1.7s) and otbr-agent crashloops
+        # (spinel_driver.cpp:83 Failure). A coordinator reboot didn't help —
+        # it's a hardware port fault. Running the pod just produced a
+        # permanent CrashLoopBackOff + KubeDeploymentReplicasMismatch alert
+        # + Wazuh mDNS noise with zero functional Thread/Matter service.
+        # Restore to 1 once the coordinator is on a wired link.
+        replicas: 0
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
