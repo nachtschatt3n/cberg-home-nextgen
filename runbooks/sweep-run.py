@@ -209,7 +209,7 @@ def _apply_ar_suppression(dsn: str) -> int:
                            SET severity = 'accepted',
                                title = %s || title
                          WHERE resolved_at IS NULL
-                           AND severity IN ('critical', 'warning')
+                           AND severity IN ('critical', 'warning', 'monitor')
                            AND position(%s in lower(title)) > 0
                            AND position(%s in title) = 0
                         """,
