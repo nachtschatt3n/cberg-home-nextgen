@@ -107,7 +107,7 @@ spec:
             - name: patched-settings
               mountPath: /authentik-settings
         - name: copy-blueprints
-          image: busybox:1.37
+          image: busybox:1.38
           command:
             - sh
             - -c
@@ -235,7 +235,7 @@ spec:
             - name: patched-settings
               mountPath: /authentik-settings
         - name: copy-blueprints
-          image: busybox:1.37
+          image: busybox:1.38
           command:
             - sh
             - -c

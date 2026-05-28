@@ -25,7 +25,7 @@ spec:
     spec:
       initContainers:
         - name: volume-mount-hack
-          image: busybox:1.37.0
+          image: busybox:1.38.0
           resources:
             requests:
               cpu: 10m
@@ -41,7 +41,7 @@ spec:
             - name: wazuh-indexer-data
               mountPath: /var/lib/wazuh-indexer
         - name: increase-vm-max-map
-          image: busybox:1.37.0
+          image: busybox:1.38.0
           resources:
             requests:
               cpu: 10m
