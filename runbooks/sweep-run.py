@@ -83,8 +83,12 @@ STEP_SCRIPTS = {
 }
 
 STEP_GROUPS = {
-    "all":   ["doc", "version", "security", "health", "slo"],
-    "light": ["doc", "version"],
+    # `doc` runs LAST so it sees freshly-written *-current.md snapshots
+    # from health/security/version/slo. Otherwise doc-check fires a stale
+    # "health-check-current.md is 12 days old" finding for one cycle until
+    # the next sweep catches the just-refreshed timestamp.
+    "all":   ["version", "security", "health", "slo", "doc"],
+    "light": ["version", "doc"],
     "heavy": ["security", "health"],
 }
 
