@@ -311,6 +311,28 @@ kubectl get backups.longhorn.io -n storage --sort-by='.status.snapshotCreatedAt'
 kubectl get setting.longhorn.io -n storage auto-cleanup-recurring-job-backup-snapshot
 ```
 
+> **`filesystem-trim` only reclaims space the *application* has freed.**
+> A `LonghornVolumeUsage{Warning,Critical,Emergency}` alert (thresholds
+> 80/90/99% of `actualSize / capacity`) on a high-churn volume usually
+> means the app isn't deleting its own data — trim then has nothing to
+> release and the volume legitimately fills with live data. Diagnose
+> with `df -h` inside the pod vs Longhorn's `actualSize`:
+>
+> - **`df` high AND actualSize high** → real data; fix the app's
+>   retention (don't just trim). 2026-05-29 incident: the ES OTel
+>   datastreams (`metrics-generic.otel-default`, `logs-generic-default`)
+>   carried `index.lifecycle.prefer_ilm: true` under the Elastic built-in
+>   `logs`/`metrics` ILM policies (no delete phase), so their DSL
+>   `data_retention` was silently ignored and indices grew unbounded back
+>   ~48 days. Fix: `prefer_ilm: false` so Data Stream Lifecycle governs
+>   deletion (see `kubernetes/apps/monitoring/elasticsearch/app/otel-ilm-job.yaml`).
+> - **`df` low BUT actualSize high** → data already deleted, blocks not
+>   yet reclaimed. The 02:00 `global-filesystem-trim` fixes this nightly;
+>   for an immediate reclaim, trigger it via the Longhorn API:
+>   `POST /v1/volumes/<pv-name>?action=trimFilesystem` (port-forward
+>   `svc/longhorn-frontend:80`). In-pod `fstrim` fails — the workload
+>   container lacks `CAP_SYS_ADMIN`.
+
 ### Manual Backup (via UI)
 
 1. Open Longhorn UI: `kubectl port-forward -n storage svc/longhorn-frontend 8080:80`

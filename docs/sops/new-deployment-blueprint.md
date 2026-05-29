@@ -120,6 +120,8 @@ spec:
 
 Three-file pattern when using `longhorn-static` (see `kubernetes/apps/databases/pgadmin/app/` or `kubernetes/apps/databases/superset/app/` for working references).
 
+**High-churn data (logs / metrics / time-series) — enforce app-side retention.** Longhorn's nightly `global-filesystem-trim` (02:00, covers every volume in the `default` group automatically) only reclaims blocks the *application* has freed. If the app never deletes its own old data, the volume fills with live data and trips `LonghornVolumeUsage*` alerts — trim can't help. So for any app that continuously writes (Elasticsearch/OTel datastreams, Prometheus, Loki, time-series DBs): verify its retention/ILM/DSL actually deletes old data. Watch for the Elasticsearch gotcha where `index.lifecycle.prefer_ilm: true` makes a no-delete ILM policy win over DSL `data_retention` (see the `filesystem-trim` note in `docs/sops/longhorn.md`).
+
 **Important — Longhorn Volume CR is NOT managed by Flux**: Flux app Kustomizations use `targetNamespace: {app-namespace}` which silently overrides the `namespace: storage` field in the `longhorn.io/v1beta2/Volume` manifest. This produces a duplicate/broken Volume in the app namespace that Longhorn does not manage. Therefore:
 
 - Keep `longhorn-volume.yaml` in the app folder as version-controlled source.
