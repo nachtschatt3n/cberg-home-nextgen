@@ -18,17 +18,21 @@ data:
            private. Longhorn manager pods emit ~165 internal POSTs/day from
            10.0.0.0/8 + 172.16.0.0/12 + 192.168.0.0/16 ranges. These are
            legitimate intra-cluster volume management calls, not bots. -->
-      <rule id="100501" level="0">
+      <!-- IDs 100600+ — the 100500-100503 range is already used by the
+           ingress-nginx decoder rules, so the earlier 100501-100503 here
+           silently collided and never suppressed anything (31533 kept
+           firing at level 10 for internal Longhorn POSTs). -->
+      <rule id="100600" level="0">
         <if_sid>31533</if_sid>
         <srcip>10.0.0.0/8</srcip>
         <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>
       </rule>
-      <rule id="100502" level="0">
+      <rule id="100601" level="0">
         <if_sid>31533</if_sid>
         <srcip>172.16.0.0/12</srcip>
         <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>
       </rule>
-      <rule id="100503" level="0">
+      <rule id="100602" level="0">
         <if_sid>31533</if_sid>
         <srcip>192.168.0.0/16</srcip>
         <description>Local: drop 31533 from RFC1918 srcip (intra-cluster traffic)</description>

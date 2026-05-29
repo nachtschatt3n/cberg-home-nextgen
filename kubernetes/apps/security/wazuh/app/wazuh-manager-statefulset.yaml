@@ -38,6 +38,7 @@ spec:
         checksum/wazuh-config: "d6212dd4b98d"
         checksum/unifi-decoder: "95903711ca89"
         checksum/ingress-nginx-decoder: "cc95eb2394c2"
+        checksum/wazuh-local-rules: "f05c324174a7"
     spec:
       securityContext:
         fsGroup: 999
