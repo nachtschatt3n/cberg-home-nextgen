@@ -1,7 +1,7 @@
 ---
 # Bootstraps ILM retention policies for OTel native data streams.
 # Runs once after Elasticsearch is ready; safe to re-run (PUT is idempotent).
-# Retention: logs=7d, metrics=7d, traces=7d
+# Retention: logs=14d, metrics=14d, traces=14d (DSL-governed, prefer_ilm=false)
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -61,11 +61,17 @@ spec:
               # Elastic-managed templates (metrics-otel@template, logs@template — priority 100-500)
               # beat any low-priority catch-all template we define. Per-index settings are applied
               # regardless of which template created the index.
-              echo "Setting auto_expand_replicas=0-1 on ALL existing indices..."
+              # auto_expand_replicas for single-node GREEN, AND prefer_ilm=false so
+              # Data Stream Lifecycle (DSL) governs retention instead of the Elastic
+              # built-in `logs`/`metrics` ILM policies (which have no delete phase).
+              # Without prefer_ilm=false the DSL data_retention set below is ignored
+              # and backing indices grow unbounded (observed: 48-day-old .ds-logs-*
+              # indices, 62GB total).
+              echo "Setting auto_expand_replicas=0-1 + prefer_ilm=false on ALL existing indices..."
               curl -sSf $CACERT $AUTH \
                 -H 'Content-Type: application/json' \
                 -X PUT "$${ES_URL}/_all/_settings" \
-                -d '{"index":{"auto_expand_replicas":"0-1"}}'
+                -d '{"index":{"auto_expand_replicas":"0-1","lifecycle":{"prefer_ilm":false}}}'
               echo ""
 
               # Also keep the legacy catch-all template (priority 1) as a safety net for
@@ -97,11 +103,11 @@ spec:
                 status=$(curl -s -o /dev/null -w '%{http_code}' $CACERT $AUTH \
                   "$${ES_URL}/_data_stream/$${stream}")
                 if [ "$${status}" = "200" ]; then
-                  echo "Setting DSL retention: $${stream}=7d ..."
+                  echo "Setting DSL retention: $${stream}=14d ..."
                   curl -sSf $CACERT $AUTH \
                     -H 'Content-Type: application/json' \
                     -X PUT "$${ES_URL}/_data_stream/$${stream}/_lifecycle" \
-                    -d '{"data_retention":"7d"}'
+                    -d '{"data_retention":"14d"}'
                   echo ""
                 else
                   echo "Skipping DSL for $${stream} (not yet created, status=$${status})"
@@ -118,12 +124,14 @@ spec:
               # extension point — empty by default. Putting our setting there makes it
               # win the template composition (last-wins) without touching upstream
               # Elastic templates that may change on version upgrades.
-              echo "Overriding @custom component templates with auto_expand_replicas=0-1..."
+              # Also pin prefer_ilm=false here so rolled-over backing indices keep
+              # deferring to DSL retention (last-wins composition extension point).
+              echo "Overriding @custom component templates with auto_expand_replicas=0-1 + prefer_ilm=false..."
               for kind in metrics logs traces metrics-otel logs-otel traces-otel; do
                 curl -sSf $CACERT $AUTH \
                   -H 'Content-Type: application/json' \
                   -X PUT "$${ES_URL}/_component_template/$${kind}@custom" \
-                  -d '{"template":{"settings":{"index":{"auto_expand_replicas":"0-1"}}}}'
+                  -d '{"template":{"settings":{"index":{"auto_expand_replicas":"0-1","lifecycle":{"prefer_ilm":false}}}}}'
                 echo ""
               done
 
