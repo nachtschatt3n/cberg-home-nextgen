@@ -324,7 +324,7 @@ class ElasticPortForward:
 
     def __enter__(self):
         # Kill any existing port-forward on 9200
-        run("fuser -k 9200/tcp 2>/dev/null || true")
+        run("lsof -ti tcp:9200 2>/dev/null | xargs kill 2>/dev/null || true")
         time.sleep(0.5)
 
         self._proc = subprocess.Popen(
@@ -355,7 +355,7 @@ class ElasticPortForward:
         if self._proc:
             self._proc.terminate()
             self._proc.wait()
-        run("fuser -k 9200/tcp 2>/dev/null || true")
+        run("lsof -ti tcp:9200 2>/dev/null | xargs kill 2>/dev/null || true")
 
     def query(self, body: dict, timeout: int = 15) -> dict | None:
         if not self._password:
@@ -372,11 +372,19 @@ class ElasticPortForward:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        try:
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                return json.load(r)
-        except Exception:
-            return None
+        # Retry a few times: a port-forward can need a moment to fully proxy
+        # after the socket opens, and the operator's Mac is often running
+        # several concurrent forwards during a sweep. A single attempt was
+        # intermittently reporting the backend "unavailable" when it was
+        # actually healthy.
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                    return json.load(r)
+            except Exception:
+                if attempt < 2:
+                    time.sleep(2)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +399,7 @@ class WazuhPortForward:
         self._password = None
 
     def __enter__(self):
-        run("fuser -k 9201/tcp 2>/dev/null || true")
+        run("lsof -ti tcp:9201 2>/dev/null | xargs kill 2>/dev/null || true")
         time.sleep(0.5)
 
         self._proc = subprocess.Popen(
@@ -421,7 +429,7 @@ class WazuhPortForward:
         if self._proc:
             self._proc.terminate()
             self._proc.wait()
-        run("fuser -k 9201/tcp 2>/dev/null || true")
+        run("lsof -ti tcp:9201 2>/dev/null | xargs kill 2>/dev/null || true")
 
     def query(self, body: dict, index: str = "wazuh-alerts-*", timeout: int = 15) -> dict | None:
         if not self._password:
@@ -438,11 +446,19 @@ class WazuhPortForward:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        try:
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                return json.load(r)
-        except Exception:
-            return None
+        # Retry a few times: a port-forward can need a moment to fully proxy
+        # after the socket opens, and the operator's Mac is often running
+        # several concurrent forwards during a sweep. A single attempt was
+        # intermittently reporting the backend "unavailable" when it was
+        # actually healthy.
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                    return json.load(r)
+            except Exception:
+                if attempt < 2:
+                    time.sleep(2)
+        return None
 
 
 # ---------------------------------------------------------------------------
