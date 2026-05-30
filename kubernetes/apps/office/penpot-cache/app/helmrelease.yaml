@@ -1,0 +1,43 @@
+---
+# Standalone Valkey (cache only) for Penpot.
+# Decoupled from the penpot chart along with the DB. No persistence and
+# no auth — matches the previous bundled valkey (redis://host:6379/0).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: penpot-cache
+  namespace: office
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: valkey
+      version: 3.0.31
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+      interval: 15m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: penpot-cache
+    architecture: standalone
+    auth:
+      enabled: false
+    primary:
+      persistence:
+        enabled: false  # cache only
+      resourcesPreset: "none"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi

@@ -1,0 +1,54 @@
+---
+# Standalone PostgreSQL for Penpot.
+# Decoupled from the penpot chart: penpot 1.1.0 dropped the bundled
+# postgresql/valkey subcharts and now requires an external DB. Same
+# bitnami chart version (15.5.38) the bundled subchart used, so the
+# pg_dump from the old bundled instance restores cleanly.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: penpot-db
+  namespace: office
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: postgresql
+      version: 15.5.38
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+      interval: 15m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    fullnameOverride: penpot-db
+    architecture: standalone
+    auth:
+      username: penpot
+      database: penpot
+      existingSecret: penpot-secret
+      secretKeys:
+        # penpot-secret only carries one password; use it for both the
+        # postgres superuser (needed to CREATE EXTENSION "uuid-ossp" on
+        # restore) and the penpot user.
+        adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
+        userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
+    primary:
+      persistence:
+        enabled: true
+        storageClass: longhorn
+        size: 10Gi
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
