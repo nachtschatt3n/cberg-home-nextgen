@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: penpot
-      version: 0.43.0
+      version: 1.1.0
       sourceRef:
         kind: HelmRepository
         name: penpot
@@ -25,6 +25,14 @@ spec:
       retries: 3
   uninstall:
     keepHistory: false
+  # 1.1.0 dropped the bundled postgresql/valkey subcharts — DB + cache now
+  # live as standalone HelmReleases (penpot-db, penpot-cache) that penpot
+  # connects to via config.postgresql.host / config.redis.host.
+  dependsOn:
+    - name: penpot-db
+      namespace: office
+    - name: penpot-cache
+      namespace: office
   postRenderers:
     - kustomize:
         patches:
@@ -35,23 +43,9 @@ spec:
               - op: add
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
-          # Bitnami valkey subchart v3.0.31 ignores master.resources when a
-          # resourcesPreset is active, hardcoding 150m CPU. Patch the rendered
-          # StatefulSet directly to apply our intended limits.
-          - target:
-              kind: StatefulSet
-              name: penpot-valkey-primary
-            patch: |
-              - op: replace
-                path: /spec/template/spec/containers/0/resources/limits/cpu
-                value: "500m"
-              - op: replace
-                path: /spec/template/spec/containers/0/resources/limits/memory
-                value: "256Mi"
-          # Inject wait-for initContainers into the backend Deployment.
-          # The penpot chart does not expose an extraInitContainers / initContainers
-          # values key on backend|frontend|exporter, so we patch the rendered
-          # Deployment via Flux's Kustomize post-renderer.
+          # Inject wait-for initContainers into the backend Deployment so it
+          # blocks until the standalone DB + cache are reachable. The penpot
+          # chart exposes no initContainers values key.
           # Pattern: docs/sops/container-dependencies.md (busybox + nc -z loop).
           - target:
               kind: Deployment
@@ -71,56 +65,47 @@ spec:
                           - sh
                           - -c
                           - |
-                            until nc -z penpot-postgresql 5432; do
-                              echo "waiting for penpot-postgresql:5432..."
+                            until nc -z penpot-db 5432; do
+                              echo "waiting for penpot-db:5432..."
                               sleep 2
                             done
-                      - name: wait-for-valkey
+                      - name: wait-for-redis
                         image: busybox:stable
                         command:
                           - sh
                           - -c
                           - |
-                            until nc -z penpot-valkey-primary 6379; do
-                              echo "waiting for penpot-valkey-primary:6379..."
+                            until nc -z penpot-cache-primary 6379; do
+                              echo "waiting for penpot-cache-primary:6379..."
                               sleep 2
                             done
   values:
-    # Global configuration
-    global:
+    # Application configuration (1.1.0 moved publicUri/flags/secretKey and
+    # the DB/redis connection details all under `config`).
+    config:
       publicUri: "https://penpot.${SECRET_DOMAIN}"
-
-      # Feature flags
       flags: "disable-registration enable-login-with-password disable-email-verification"
-
-      # Secret key for session encryption
-      secretKey:
-        valueFrom:
-          secretKeyRef:
-            name: penpot-secret
-            key: PENPOT_SECRET_KEY
-
-      # PostgreSQL configuration
-      postgresqlEnabled: true
+      # Session/token secret — reuse the existing PENPOT_SECRET_KEY so logins
+      # carry over (renamed to apiSecretKey in 1.1.0).
+      existingSecret: penpot-secret
+      secretKeys:
+        apiSecretKey: PENPOT_SECRET_KEY
       postgresql:
-        host: ""  # Use dependency
+        host: penpot-db
         port: 5432
         username: penpot
         database: penpot
-
-      # Valkey (Redis alternative) configuration
-      valkeyEnabled: true
-      valkey:
-        host: ""  # Use dependency
-        port: 6379
-        database: 0
-
-    # Application configuration
-    config:
-      postgresql:
         existingSecret: penpot-secret
         secretKeys:
           passwordKey: PENPOT_POSTGRESQL_PASSWORD
+      redis:
+        host: penpot-cache-primary
+        port: 6379
+        database: "0"
+      objectsStorage:
+        storageBackend: "fs"
+        filesystem:
+          directory: "/opt/data/assets"
 
     # Backend service configuration
     backend:
@@ -164,53 +149,13 @@ spec:
           cpu: 500m
           memory: 512Mi
 
-    # Persistence for assets
+    # Persistence for assets — the existing CIFS RWX claim with the design
+    # file blobs (hash-prefixed dirs under /opt/data/assets).
     persistence:
       assets:
         enabled: true
         existingClaim: penpot-assets
         size: 20Gi
-
-    # PostgreSQL subchart configuration
-    postgresql:
-      enabled: true
-      auth:
-        username: penpot
-        existingSecret: penpot-secret
-        secretKeys:
-          adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
-          userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
-        database: penpot
-      primary:
-        persistence:
-          enabled: true
-          existingClaim: penpot-postgresql
-          size: 10Gi
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          limits:
-            cpu: 1000m
-            memory: 1Gi
-
-    # Valkey subchart configuration
-    valkey:
-      enabled: true
-      master:
-        persistence:
-          enabled: false  # Cache only - no persistence needed
-        resourcesPreset: "none"  # disable Bitnami preset so our resources block applies
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 500m
-            memory: 256Mi
-      replica:
-        enabled: false
-        replicaCount: 0
 
     # Ingress configuration
     ingress:
