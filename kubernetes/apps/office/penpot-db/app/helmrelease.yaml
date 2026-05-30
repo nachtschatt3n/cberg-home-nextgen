@@ -29,6 +29,11 @@ spec:
       retries: 3
   values:
     fullnameOverride: penpot-db
+    # Bitnami deleted old tags from docker.io/bitnami/*; use the bitnamilegacy
+    # mirror (same convention as nextcloud/superset/paperless in this repo).
+    image:
+      registry: docker.io
+      repository: bitnamilegacy/postgresql
     architecture: standalone
     auth:
       username: penpot
