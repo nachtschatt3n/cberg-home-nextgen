@@ -11,16 +11,3 @@ spec:
     requests:
       storage: 50Gi
   storageClassName: cifs-penpot-assets
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: penpot-postgresql
-  namespace: office
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: longhorn
