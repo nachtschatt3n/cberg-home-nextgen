@@ -2209,6 +2209,41 @@ log_section "Section 23a: Office Services Health"
         log_warning "Nextcloud is not running"
         add_major_issue "Nextcloud pod not running - cloud storage and collaboration unavailable"
         OFFICE_ISSUES=$((OFFICE_ISSUES + 1))
+    else
+        # Google Calendar sync (google_synchronization app) — the imported
+        # Google calendar goes silently stale when a user's OAuth token stops
+        # refreshing (token revoked/expired). A healthy sync bumps
+        # token_expires_at to ~now+1h on each run, so a token that hasn't
+        # refreshed in >2 days means the sync is dead. (2026-03→05: it broke
+        # for 81 days unnoticed — this check exists so it can't happen again.)
+        NC_POD=$(kubectl get pod -n office -l app.kubernetes.io/name=nextcloud \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$NC_POD" ]; then
+            GSYNC_STALE=""
+            NOW_TS=$(date +%s)
+            for u in $(kubectl exec -n office "$NC_POD" -c nextcloud -- \
+                    su -s /bin/sh www-data -c 'php occ user:list 2>/dev/null' 2>/dev/null \
+                    | sed -n 's/^[[:space:]]*-[[:space:]]*\([^:]*\):.*/\1/p'); do
+                EXP=$(kubectl exec -n office "$NC_POD" -c nextcloud -- \
+                    su -s /bin/sh www-data -c "php occ user:setting $u google_synchronization token_expires_at 2>/dev/null" \
+                    2>/dev/null | tr -d '[:space:]')
+                case "$EXP" in
+                    ''|*[!0-9]*) : ;;  # no google sync for this user, or non-numeric
+                    *)
+                        AGE_DAYS=$(( (NOW_TS - EXP) / 86400 ))
+                        echo "  google_synchronization $u: token age ${AGE_DAYS}d"
+                        if [ "$AGE_DAYS" -gt 2 ]; then
+                            GSYNC_STALE="$GSYNC_STALE ${u}(${AGE_DAYS}d)"
+                        fi
+                        ;;
+                esac
+            done
+            if [ -n "$GSYNC_STALE" ]; then
+                log_warning "Nextcloud Google Calendar sync stale:$GSYNC_STALE"
+                add_major_issue "Nextcloud google_synchronization OAuth token not refreshing — Google Calendar import is stale for:$GSYNC_STALE. Reconnect via Nextcloud Settings → Google synchronization."
+                OFFICE_ISSUES=$((OFFICE_ISSUES + 1))
+            fi
+        fi
     fi
     echo ""
 
