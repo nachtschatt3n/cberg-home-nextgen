@@ -118,13 +118,16 @@ spec:
           # intact and only add ours. A prior `replace` discarded the base
           # exclusions and made the rule fire on Longhorn's /data/longhorn
           # engine binary (10k+ alerts/hr).
-          # Exclude package-manager activity: matching individual process
-          # names (py3compile/dpkg/...) missed dpkg-trigger + *.postinst
-          # hook scripts that paperclip's runtime apt installs spawn. The
-          # reliable common thread is the session leader (proc.sname=dpkg/apt),
-          # so exclude on that. Also exclude the Longhorn engine launcher.
+          # Exclude package-manager activity. paperclip is a build container
+          # that runs apt/dpkg at runtime. Earlier passes covered dpkg as an
+          # ANCESTOR (proc.aname) and the session leader (proc.sname), but
+          # missed the case where the package-manager binary IS the executed
+          # process (proc.name=dpkg, proc.exe=/usr/bin/dpkg, gparent=bash) —
+          # that left ~9 level-12 events/day. proc.name covers it. Also keep
+          # the Longhorn engine-launcher exclusion.
           condition: >
             and not (
+              proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
               proc.sname in (dpkg, apt, apt-get, dpkg-trigger, frontend) or
               proc.aname[1] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb, dpkg-trigger) or
               proc.aname[2] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb, dpkg-trigger) or
