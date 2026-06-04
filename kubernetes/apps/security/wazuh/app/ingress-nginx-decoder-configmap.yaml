@@ -166,6 +166,24 @@ data:
         <group>web,ingress,attack,</group>
       </rule>
 
+      <!-- Suppress the Tube Archivist channel-search 500. TA v0.5.10 returns
+           HTTP 500 from /api/channel/search/ whenever yt-dlp can't resolve the
+           searched @handle (typo / deleted / region-blocked / not a real
+           handle): an upstream bug where a False return isn't guarded and
+           ChannelSerializer chokes on it ('bool' has no attribute channel_id,
+           channel/views.py:283). It's benign WebUI search usage, not a backend
+           outage, but ~160/24h inflate the level>=5 alert volume (sweep finding
+           "high K8s container alert volume"). Scoped tightly to TA's search
+           path + vhost prefix so every other 5xx stays fully visible. vhost is
+           matched by prefix to keep the secret domain out of this public repo. -->
+      <rule id="100520" level="0">
+        <if_sid>100502</if_sid>
+        <field name="vhost">^tube-archivist</field>
+        <field name="path">^/api/channel/search/</field>
+        <description>Suppress TA channel-search 500 — upstream yt-dlp/bool bug on unresolved channel handle, not an outage</description>
+        <group>web,ingress,homelab,</group>
+      </rule>
+
       <!-- Same-source-IP 4xx burst — classic scanner/enumeration
            shape. 50+ 4xx in 60s from one cf_connecting_ip is way above
            any legitimate-user pattern at this homelab's traffic
