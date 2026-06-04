@@ -36,9 +36,9 @@ spec:
         # Recipe (run after any decoder configmap edit):
         #   sha256sum kubernetes/apps/security/wazuh/app/<configmap>.yaml | awk '{print substr($1,1,12)}'
         checksum/wazuh-config: "d6212dd4b98d"
-        checksum/unifi-decoder: "95903711ca89"
+        checksum/unifi-decoder: "4557a5534913"
         checksum/ingress-nginx-decoder: "cc95eb2394c2"
-        checksum/wazuh-local-rules: "7a459bf35e8e"
+        checksum/wazuh-local-rules: "a3c7ca6e7f98"
     spec:
       securityContext:
         fsGroup: 999

@@ -29,25 +29,10 @@ data:
         <if_sid>31533</if_sid>
         <description>Suppress 31533 — internal Longhorn volume-mgmt POST noise, not bots</description>
       </rule>
-
-      <!-- Suppress rule 100110 (UniFi Config Change, level 8) when it
-           over-matches plain "Admin Accessed UniFi OS" logins. 100110 fires on
-           any event carrying a uni_changeagent (decoded from UNIFIadmin=),
-           which is present in BOTH access logins and real config changes — so
-           read-only logins by the monitoring account get mislabelled as config
-           changes (~28/24h of medium-severity noise).
-           Discriminator: access logins decode uni_accessway (from
-           UNIFIaccessMethod=) but have NO uni_changedsection; real config
-           changes are the inverse. Key the suppression on uni_accessway being
-           present — that uniquely identifies an access event. A genuine config
-           change has no accessMethod, so it still alerts at 100110 (mitre_t1562
-           preserved); human GUI logins surface separately via rule 100114.
-           NOTE: an earlier attempt used <match>accessed the UniFi OS</match> on
-           the full log — it never fired (Wazuh <match> didn't match the decoded
-           CEF msg field). A decoded <field> check is the reliable mechanism. -->
-      <rule id="100610" level="0">
-        <if_sid>100110</if_sid>
-        <field name="uni_accessway">\w+</field>
-        <description>Suppress 100110 — read-only UniFi OS access-login (has accessMethod, no config section), not a config change</description>
-      </rule>
+      <!-- NOTE: the UniFi 100110 access-login suppression (rule 100610) lives in
+           unifi_rules.xml, NOT here. A child rule's <if_sid> only resolves
+           against rules already loaded; local_rules.xml loads BEFORE
+           unifi_rules.xml, so an if_sid=100110 here is dropped ("Signature ID
+           100110 was not found"). 100600 works only because 31533 is a built-in
+           rule loaded early. -->
     </group>

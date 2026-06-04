@@ -327,6 +327,26 @@ data:
         <description>UniFi Config Change by $(uni_changeagent) in $(uni_changedsection)</description>
         <group>pci_dss_10.5.5,pci_dss_11.5,nist_800_53_CM-3,nist_800_53_CM-6,nist_800_53_AU-12,hipaa_164.312(b),mitre_t1562</group>
       </rule>
+
+      <!-- Suppress 100110 over-match on plain "Admin Accessed UniFi OS" logins.
+           100110 fires on uni_changeagent (decoded from UNIFIadmin=), present in
+           BOTH access logins and real config changes — so read-only logins by
+           the monitoring account get mislabelled as config changes (~28/24h of
+           medium-severity noise). Access logins uniquely decode uni_accessway
+           (from UNIFIaccessMethod=) and have NO uni_changedsection; real changes
+           are the inverse. Keying on uni_accessway uniquely identifies an access
+           event → drop to level 0. A genuine config change has no accessMethod
+           so it still alerts at 100110 (mitre_t1562 preserved); human GUI logins
+           surface separately via rule 100114.
+           MUST live here, immediately after 100110: a child <if_sid> only
+           resolves against already-loaded rules, and local_rules.xml loads
+           before this file (an earlier 100610 placed there was silently
+           dropped: "Signature ID 100110 was not found"). -->
+      <rule id="100610" level="0">
+        <if_sid>100110</if_sid>
+        <field name="uni_accessway">\w+</field>
+        <description>Suppress 100110 — read-only UniFi OS access-login (has accessMethod, no config section), not a config change</description>
+      </rule>
     
       <!-- threat detection -->
       <rule id="100111" level="10">
