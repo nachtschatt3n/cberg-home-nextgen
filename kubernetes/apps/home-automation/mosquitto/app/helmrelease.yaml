@@ -42,11 +42,38 @@ spec:
             image:
               repository: public.ecr.aws/docker/library/eclipse-mosquitto
               tag: 2.0.22
+            # Replace the default TCP probes with `exec` probes using
+            # `mosquitto_sub`. The default tcp-socket :1883 probe opens a TCP
+            # connection without sending CONNECT, which mosquitto logs as
+            # "New connection from <kubelet> ... Client <unknown> closed its
+            # connection." once every probe tick. With liveness+readiness on
+            # period=10s that's ~12 spam lines/min that masked real client
+            # churn during the 2026-06-04 incident. mosquitto_sub does a
+            # proper MQTT CONNECT + SUBSCRIBE on $SYS/broker/version,
+            # appears as a normal client in the log, and validates the
+            # broker is actually serving MQTT (not just listening on the
+            # port).
             probes:
               liveness:
                 enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["mosquitto_sub", "-h", "127.0.0.1", "-W", "2", "-C", "1", "-t", "$SYS/broker/version"]
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
               readiness:
                 enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["mosquitto_sub", "-h", "127.0.0.1", "-W", "2", "-C", "1", "-t", "$SYS/broker/version"]
+                  initialDelaySeconds: 5
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true

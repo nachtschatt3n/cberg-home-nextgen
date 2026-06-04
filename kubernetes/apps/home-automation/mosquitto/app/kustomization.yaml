@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ./secrets.sops.yaml
   - ./helmrelease.yaml
+  - ./servicemonitor.yaml
 configMapGenerator:
   - name: mosquitto-configmap
     files:

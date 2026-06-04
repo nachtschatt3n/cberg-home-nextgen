@@ -1,0 +1,82 @@
+---
+# Alerts for the home-automation Mosquitto broker.
+#
+# Metrics come from the sapcc/mosquitto-exporter sidecar in the mosquitto
+# pod, scraped via the mosquitto-metrics ServiceMonitor. The exporter does
+# not prefix metrics with `mosquitto_`; series names are `broker_*` (e.g.
+# broker_clients_connected, broker_publish_messages_dropped,
+# broker_messages_received).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: mosquitto-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: mosquitto.broker.health
+    rules:
+    - alert: MosquittoExporterDown
+      annotations:
+        description: |
+          Prometheus has not scraped the mosquitto-exporter sidecar in pod {{ $labels.pod }} for 5 minutes.
+          Broker health/connection metrics are blind. Check the mosquitto pod and the mosquitto-metrics ServiceMonitor.
+        summary: Mosquitto exporter is down ({{ $labels.pod }})
+      expr: |
+        up{job=~".*mosquitto.*"} == 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: mosquitto
+        severity: warning
+
+    - alert: MosquittoNoClientsConnected
+      annotations:
+        description: |
+          The mosquitto broker reports zero connected clients for 5 minutes. Normally there are 40+ clients
+          (Home Assistant, Zigbee2MQTT, Frigate, Scrypted, TeslaMate, solarfocus-scraper, …). Either the broker
+          is restarted/wedged, or all consumers are disconnected — both surface major home-automation outages.
+        summary: Mosquitto has no connected clients
+      expr: |
+        broker_clients_connected == 0
+      for: 5m
+      labels:
+        category: home-automation
+        component: mosquitto
+        severity: critical
+
+    - alert: MosquittoPublishDropsSustained
+      annotations:
+        description: |
+          The mosquitto broker has been dropping published messages at >1 msg/min for 15 minutes
+          (rate(broker_publish_messages_dropped[5m]) * 60). Likely cause: a consumer with QoS>0 whose
+          inflight buffer is full, or persistence-store backpressure. Inspect connected clients and the
+          broker's persistence settings.
+        summary: Mosquitto is dropping published messages
+      expr: |
+        rate(broker_publish_messages_dropped[5m]) * 60 > 1
+      for: 15m
+      labels:
+        category: home-automation
+        component: mosquitto
+        severity: warning
+
+    - alert: MosquittoTrafficStalled
+      annotations:
+        description: |
+          The mosquitto broker has received zero messages for 10 minutes despite having clients connected.
+          With Zigbee2MQTT, Home Assistant and Frigate normally publishing hundreds of msgs/min, this means
+          traffic has stalled even though clients appear alive — likely a broker hang or stuck connection state.
+        summary: Mosquitto traffic stalled (clients connected, no messages received)
+      expr: |
+        rate(broker_messages_received[5m]) == 0
+        and on() broker_clients_connected > 0
+      for: 10m
+      labels:
+        category: home-automation
+        component: mosquitto
+        severity: warning
