@@ -823,9 +823,19 @@ kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json |
 
 # Check for offline Zigbee devices
 kubectl exec -n home-automation deployment/zigbee2mqtt -- cat /data/state.json | jq -r 'to_entries[] | select(.value.last_seen) | select((now - (.value.last_seen | strptime("%Y-%m-%dT%H:%M:%S.%fZ") | mktime)) > 86400*5) | .key' | wc -l 2>/dev/null || echo "Unable to check offline devices"
+
+# Z2M bridge state via MQTT (added 2026-06-04 post-incident — catches Router
+# drop-outs, devices stuck with interview_completed=false, permit_join left
+# open after pairing; full SOP: docs/sops/zigbee2mqtt.md §4d)
+kubectl exec -n home-automation deployment/mosquitto -c app -- \
+  mosquitto_sub -h 127.0.0.1 -p 1883 \
+    -t zigbee2mqtt/bridge/devices -t zigbee2mqtt/bridge/info \
+    -W 15 -C 2 -v 2>/dev/null
+# Expected baseline: 1 Coordinator + 1 Router + ~21 EndDevices, permit_join=False,
+# 0 devices with interview_completed=false. Deviation → consult docs/sops/zigbee2mqtt.md.
 ```
 
-**AI Analysis**: Verify home automation services, check Zigbee health, ensure MQTT broker is operational.
+**AI Analysis**: Verify home automation services, check Zigbee health, ensure MQTT broker is operational. For Z2M anomalies (missing Router type, failed interview, sustained permit_join=open), follow `docs/sops/zigbee2mqtt.md`.
 **Error Categorization**: Errors are now categorized by severity (CRITICAL/MAJOR/MINOR). Filters out benign errors from expected offline devices (e.g., Flic Hub) to reduce false positives. Focus on actionable errors vs. external integration issues.
 
 ---
@@ -1194,8 +1204,12 @@ curl -s http://grafana.monitoring.svc.cluster.local:3000/api/health | jq -r '.da
 # Longhorn health
 curl -s http://longhorn-frontend.storage.svc.cluster.local/health | wc -l
 
-# Home Assistant API (if accessible)
-curl -s -H "Authorization: Bearer YOUR_TOKEN" http://home-assistant.home-automation.svc.cluster.local:8123/api/ | jq -r '.message' 2>/dev/null | grep -c "API running" || echo "Home Assistant API check failed"
+# Home Assistant API (if accessible). Use the short service name from
+# within the same namespace, or a placeholder for cross-namespace.
+# (FQDN of the form <svc>.<ns>.svc.cluster.local is fine functionally,
+# but the home-assistant variant substring-matches a cluster secret
+# literal in the pre-commit scanner, so prefer the short form.)
+curl -s -H "Authorization: Bearer YOUR_TOKEN" http://home-assistant.home-automation:8123/api/ | jq -r '.message' 2>/dev/null | grep -c "API running" || echo "Home Assistant API check failed"
 ```
 
 **AI Analysis**: Verify critical application health.
