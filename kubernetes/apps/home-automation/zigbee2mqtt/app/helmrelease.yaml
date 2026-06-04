@@ -34,7 +34,13 @@ spec:
               - name: ZIGBEE2MQTT_DATA
                 value: "/data"
               - name: ZIGBEE2MQTT_CONFIG_MQTT_SERVER
-                value: "mqtt://mosquitto-main.home-automation.svc.cluster.local:1883"
+                # In-cluster consumer: use the ClusterIP service, not the
+                # LoadBalancer. mosquitto-main (192.168.55.15) is reserved
+                # for LAN clients (HA on host network, Frigate, Scrypted);
+                # zigbee2mqtt runs in-cluster and should hit the broker
+                # without the LB hop. Matches the pattern used by
+                # teslamate and solarfocus-scraper.
+                value: "mqtt://mosquitto-internal.home-automation.svc.cluster.local:1883"
               - name: ZIGBEE2MQTT_CONFIG_SERIAL_PORT
                 value: "tcp://192.168.32.20:6638"
               - name: ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER
