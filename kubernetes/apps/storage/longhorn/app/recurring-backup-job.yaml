@@ -9,8 +9,11 @@ spec:
   task: backup
   # Run at 3:00 AM daily (UTC)
   cron: "0 3 * * *"
-  # Keep only the latest daily backup
-  retain: 1
+  # Keep a week of daily backups (was 1). Motivated by the 2026-06-04 Z2M
+  # database injection incident: with retain=1, a corruption that went
+  # unnoticed for 24h would leave only the corrupted state as recovery.
+  # 7 daily backups give a usable rollback window without unbounded growth.
+  retain: 7
   # Default concurrency (2 volumes at a time)
   concurrency: 2
   # Apply to all volumes with this label
