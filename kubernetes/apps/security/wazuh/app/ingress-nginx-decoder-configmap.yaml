@@ -176,10 +176,14 @@ data:
            "high K8s container alert volume"). Scoped tightly to TA's search
            path + vhost prefix so every other 5xx stays fully visible. vhost is
            matched by prefix to keep the secret domain out of this public repo. -->
+      <!-- NOTE: this decoder populates NO named fields (field-decoding crashes
+           analysisd — see the 100500 comment), so matching must be pcre2 over
+           the raw JSON like 100501/100502. The nginx log_format fixes field
+           order (vhost before path), so a single ordered pcre2 is reliable.
+           vhost matched by prefix only — keeps the secret domain out of repo. -->
       <rule id="100520" level="0">
         <if_sid>100502</if_sid>
-        <field name="vhost">^tube-archivist</field>
-        <field name="path">^/api/channel/search/</field>
+        <match type="pcre2">"vhost":\s*"tube-archivist.*"path":\s*"/api/channel/search/</match>
         <description>Suppress TA channel-search 500 — upstream yt-dlp/bool bug on unresolved channel handle, not an outage</description>
         <group>web,ingress,homelab,</group>
       </rule>
