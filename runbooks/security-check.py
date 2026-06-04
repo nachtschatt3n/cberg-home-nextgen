@@ -314,35 +314,65 @@ class Findings:
 
 
 # ---------------------------------------------------------------------------
-# Elasticsearch port-forward context manager
+# Elasticsearch / Wazuh-indexer access — inside-pod exec, NOT port-forward
+#
+# We query both indexers by `kubectl exec`-ing into their pod and curling
+# localhost:9200 directly, instead of port-forwarding to the operator's Mac.
+# The port-forward approach intermittently dropped mid-sweep (concurrent
+# forwards + macOS networking) and reported the backend "unavailable" when it
+# was actually healthy (finding F-28d48cd7). Inside-pod exec has no local
+# socket to flake. The class names + query() signatures are unchanged so
+# callers don't care.
 # ---------------------------------------------------------------------------
 
+def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
+                 index: str, body: dict, timeout: int) -> dict | None:
+    """Run an _search against the indexer from inside its own pod.
+
+    JSON body is piped to curl via stdin (`-d @-`) so there's no shell
+    quoting of the query. Returns parsed JSON, or None on any failure.
+    """
+    if not userpass or not pod:
+        return None
+    data = json.dumps(body)
+    cmd = [
+        "kubectl", "exec", "-i", "-n", ns, pod, "-c", container, "--",
+        "curl", "-sk", "-u", userpass, "-H", "Content-Type: application/json",
+        f"https://localhost:9200/{index}/_search", "-d", "@-",
+    ]
+    for attempt in range(3):
+        try:
+            p = subprocess.run(cmd, input=data, capture_output=True,
+                               text=True, timeout=timeout + 25)
+            if p.returncode == 0 and p.stdout.strip():
+                return json.loads(p.stdout)
+        except Exception:
+            pass
+        if attempt < 2:
+            time.sleep(2)
+    return None
+
+
 class ElasticPortForward:
+    """Despite the legacy name, queries Elasticsearch via inside-pod exec
+    (see module note above). Used as a context manager so callers are
+    unchanged from the old port-forward implementation."""
+
     def __init__(self):
-        self._proc = None
         self._password = None
+        self._pod = None
+        self._ns = "monitoring"
+        self._container = "elasticsearch"
 
     def __enter__(self):
-        # Kill any existing port-forward on 9200
-        run("lsof -ti tcp:9200 2>/dev/null | xargs kill 2>/dev/null || true")
-        time.sleep(0.5)
-
-        self._proc = subprocess.Popen(
-            "kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        # Wait for port to open
-        for _ in range(20):
-            time.sleep(0.5)
-            try:
-                with socket.create_connection(("127.0.0.1", 9200), timeout=1):
-                    break
-            except OSError:
-                continue
-
-        raw = kubectl(
-            "get secret elasticsearch-es-elastic-user -n monitoring "
-            "-o jsonpath='{.data.elastic}'",
+        self._pod = run(
+            "kubectl get pod -n monitoring "
+            "-l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch "
+            "-o jsonpath='{.items[0].metadata.name}'"
+        ).strip().strip("'")
+        raw = run(
+            "kubectl get secret elasticsearch-es-elastic-user -n monitoring "
+            "-o jsonpath='{.data.elastic}'"
         )
         try:
             import base64
@@ -352,71 +382,42 @@ class ElasticPortForward:
         return self
 
     def __exit__(self, *_):
-        if self._proc:
-            self._proc.terminate()
-            self._proc.wait()
-        run("lsof -ti tcp:9200 2>/dev/null | xargs kill 2>/dev/null || true")
+        pass
 
     def query(self, body: dict, timeout: int = 15) -> dict | None:
-        if not self._password:
-            return None
-        import base64 as b64
-        auth = b64.b64encode(f"elastic:{self._password}".encode()).decode()
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            "https://localhost:9200/logs-generic-default/_search",
-            data=data,
-            headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"},
+        return _exec_search(
+            self._ns, self._pod, self._container,
+            f"elastic:{self._password}" if self._password else None,
+            "logs-generic-default", body, timeout,
         )
-        import ssl
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        # Retry a few times: a port-forward can need a moment to fully proxy
-        # after the socket opens, and the operator's Mac is often running
-        # several concurrent forwards during a sweep. A single attempt was
-        # intermittently reporting the backend "unavailable" when it was
-        # actually healthy.
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                    return json.load(r)
-            except Exception:
-                if attempt < 2:
-                    time.sleep(2)
-        return None
 
 
 # ---------------------------------------------------------------------------
-# Wazuh indexer port-forward (separate from ECK Elasticsearch — different
-# cluster, different creds, different index pattern). Used by section 13 to
-# pull SIEM findings (decoder-matched alerts from K8s agents + UniFi syslog).
+# Wazuh indexer (separate from ECK Elasticsearch — different cluster, creds,
+# index pattern). Used by section 13 to pull SIEM findings. Also inside-pod
+# exec, same rationale as Elasticsearch above.
 # ---------------------------------------------------------------------------
 
 class WazuhPortForward:
+    """Despite the legacy name, queries the Wazuh indexer via inside-pod
+    exec (see module note above)."""
+
     def __init__(self):
-        self._proc = None
         self._password = None
+        self._pod = "wazuh-indexer-0"
+        self._ns = "security"
+        self._container = "wazuh-indexer"
 
     def __enter__(self):
-        run("lsof -ti tcp:9201 2>/dev/null | xargs kill 2>/dev/null || true")
-        time.sleep(0.5)
-
-        self._proc = subprocess.Popen(
-            "kubectl port-forward -n security svc/wazuh-indexer 9201:9200",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        for _ in range(20):
-            time.sleep(0.5)
-            try:
-                with socket.create_connection(("127.0.0.1", 9201), timeout=1):
-                    break
-            except OSError:
-                continue
-
-        raw = kubectl(
-            "get secret wazuh-secret -n security "
-            "-o jsonpath='{.data.INDEXER_PASSWORD}'",
+        pod = run(
+            "kubectl get pod -n security -l app=wazuh-indexer "
+            "-o jsonpath='{.items[0].metadata.name}'"
+        ).strip().strip("'")
+        if pod:
+            self._pod = pod
+        raw = run(
+            "kubectl get secret wazuh-secret -n security "
+            "-o jsonpath='{.data.INDEXER_PASSWORD}'"
         )
         try:
             import base64
@@ -426,39 +427,14 @@ class WazuhPortForward:
         return self
 
     def __exit__(self, *_):
-        if self._proc:
-            self._proc.terminate()
-            self._proc.wait()
-        run("lsof -ti tcp:9201 2>/dev/null | xargs kill 2>/dev/null || true")
+        pass
 
     def query(self, body: dict, index: str = "wazuh-alerts-*", timeout: int = 15) -> dict | None:
-        if not self._password:
-            return None
-        import base64 as b64
-        auth = b64.b64encode(f"admin:{self._password}".encode()).decode()
-        data = json.dumps(body).encode()
-        req = urllib.request.Request(
-            f"https://localhost:9201/{index}/_search",
-            data=data,
-            headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"},
+        return _exec_search(
+            self._ns, self._pod, self._container,
+            f"admin:{self._password}" if self._password else None,
+            index, body, timeout,
         )
-        import ssl
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        # Retry a few times: a port-forward can need a moment to fully proxy
-        # after the socket opens, and the operator's Mac is often running
-        # several concurrent forwards during a sweep. A single attempt was
-        # intermittently reporting the backend "unavailable" when it was
-        # actually healthy.
-        for attempt in range(3):
-            try:
-                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-                    return json.load(r)
-            except Exception:
-                if attempt < 2:
-                    time.sleep(2)
-        return None
 
 
 # ---------------------------------------------------------------------------
