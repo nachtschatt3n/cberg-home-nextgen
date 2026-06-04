@@ -200,6 +200,9 @@ Application inventory and service-level context:
 Infrastructure and topology reference:
 - `docs/infrastructure.md`
 
+Zigbee2MQTT operations (permit_join API, device removal pre-flight, DB-injection recovery for CC2652-class router interview failures, backup/restore):
+- `docs/sops/zigbee2mqtt.md`
+
 Media library curation (Plex / Jellyfin / Tube Archivist layout, naming, sidecar standards, intake-from-jdownloader workflow, audit thresholds):
 - `docs/sops/media-library-standards.md`
 - Sub-agent: `.claude/agents/media-manager.md`

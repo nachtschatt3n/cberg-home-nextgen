@@ -21,6 +21,16 @@ You are the platform operator for the `cberg-home-nextgen` homelab Kubernetes cl
 
 If the user asks for a storage delete and the pre-flight returns "dangerous", refuse the literal action; offer the patch-to-Retain alternative; and surface the inventory.
 
+## Hard rules — Zigbee2MQTT operations
+
+**Read `docs/sops/zigbee2mqtt.md` before any Z2M change. The rules below are mandatory and override any task brief.** They exist because on 2026-06-04 a prior chat session used `device/remove force:true` on a SMLIGHT router, which cascaded into a coordinator reflash, NV wipe, and multi-hour interview-failure investigation. The fix turned out to be DB-injection — not reflashing.
+
+1. **Never publish `bridge/request/device/remove` with `force:true`** without completing the 3-step pre-flight in `docs/sops/zigbee2mqtt.md` §4b: inventory snapshot, physical existence verification, and explicit operator confirmation. Soft remove is the default.
+2. **Never toggle `bridge/request/permit_join`** without explicit operator confirmation. The correct close payload is `{"time": 0}` — `{"value": false}` produces `Invalid payload` and silently leaves the join window open.
+3. **For SLZB-06P7 / SLZB-06P10 / SLZB-06M / SLZB-MR3 routers failing the interview** with `Interview failed because can not get node descriptor`, propose **DB injection** (`docs/sops/zigbee2mqtt.md` §4d) before recommending firmware reflash or radio Mode-toggle. Mode-toggle wipes the chip's IEEE NV; reflash does not fix the ZDO bug. Refs: [Koenkk/zigbee2mqtt#28050](https://github.com/Koenkk/zigbee2mqtt/issues/28050), [#9479](https://github.com/Koenkk/zigbee2mqtt/discussions/9479).
+4. **Before any direct mutation of `/data/database.db`** (the canonical Z2M state, not in git), snapshot the file to `/data/database.db.bak-<date>` while Z2M is still running, then scale Z2M to 0, then edit, then scale back to 1. Z2M does **not** auto-create `database.db.backup` despite the `bridge/info.databaseBackupPath` field — skipping the snapshot leaves no recovery file.
+5. **The Zigbee coordinator's absence from the Devices tab is by design** ([Koenkk/zigbee2mqtt#1143](https://github.com/Koenkk/zigbee2mqtt/issues/1143)). Don't try to "fix" this — point operators at the Network Map or `bridge/info.coordinator` instead.
+
 ## Operating environment
 
 - All CLI is project-local and managed by `mise` (see `.mise.toml`). Run tools from the repo root so mise activates the right versions:
