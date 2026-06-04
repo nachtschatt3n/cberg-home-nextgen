@@ -125,6 +125,15 @@ spec:
           # process (proc.name=dpkg, proc.exe=/usr/bin/dpkg, gparent=bash) —
           # that left ~9 level-12 events/day. proc.name covers it. Also keep
           # the Longhorn engine-launcher exclusion.
+          #
+          # install-openclaw: an initContainer (apps/ai/openclaw) whose sole
+          # job is `python3 -m pip install` of ~52 CLIs (obsidian-cli, hactl,
+          # …) on every pod start. Each pip'd binary executes from a writable
+          # overlay layer → ~52 level-12 events PER pod start (observed 104/24h
+          # over 2 restarts). proc.name=python3 running pip isn't a package
+          # manager so the clauses above miss it. The container only ever
+          # installs — there's no long-running workload to protect — so scope
+          # the exclusion to the whole init container by name.
           condition: >
             and not (
               proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
@@ -133,7 +142,8 @@ spec:
               proc.aname[2] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb, dpkg-trigger) or
               proc.aname[3] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
               proc.exe startswith /data/longhorn or
-              proc.exepath startswith /data/longhorn
+              proc.exepath startswith /data/longhorn or
+              container.name = install-openclaw
             )
           override:
             condition: append

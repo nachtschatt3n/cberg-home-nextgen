@@ -29,4 +29,18 @@ data:
         <if_sid>31533</if_sid>
         <description>Suppress 31533 — internal Longhorn volume-mgmt POST noise, not bots</description>
       </rule>
+
+      <!-- Suppress rule 100110 (UniFi Config Change, level 8) when it
+           over-matches plain "Admin Accessed UniFi OS" logins. 100110 fires
+           on any event carrying a uni_changeagent, so read-only logins by the
+           in-cluster monitoring account ("cli", source 192.168.55.x cluster
+           nodes) get flagged as config changes with an EMPTY changedsection
+           (~28/24h of medium-severity noise). A real config change carries a
+           populated section and won't match "accessed the UniFi OS", so this
+           keeps genuine change-detection (mitre_t1562) intact. -->
+      <rule id="100610" level="0">
+        <if_sid>100110</if_sid>
+        <match>accessed the UniFi OS</match>
+        <description>Suppress 100110 — read-only UniFi OS login by monitoring account, not a config change</description>
+      </rule>
     </group>
