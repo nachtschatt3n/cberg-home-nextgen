@@ -1125,12 +1125,18 @@ def s6a_error_rate_spikes(es: ElasticPortForward) -> tuple[str, Findings, str]:
     body = {
         "size": 0,
         "query": {"bool": {
+            # Bracketed level tokens — `*[ERROR]*` not `*ERROR*` — so we don't
+            # false-match coredns "NOERROR" DNS responses etc. body.text is a
+            # non-analyzed keyword field, so substring wildcards are the only
+            # option, but a *leading* wildcard over 7d full-scanned and timed
+            # out (124s → reported ES "unavailable", finding F-28d48cd7). A 24h
+            # window keeps it ~2s and is plenty for a 1h-vs-baseline spike check.
             "should": [
-                {"wildcard": {"body.text": "*ERROR*"}},
-                {"wildcard": {"body.text": "*FATAL*"}},
+                {"wildcard": {"body.text": "*[ERROR]*"}},
+                {"wildcard": {"body.text": "*[FATAL]*"}},
             ],
             "minimum_should_match": 1,
-            "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}],
+            "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}],
         }},
         "aggs": {
             "by_namespace": {
@@ -1148,8 +1154,8 @@ def s6a_error_rate_spikes(es: ElasticPortForward) -> tuple[str, Findings, str]:
         cprint(C.YELLOW, "  🟡 Elasticsearch query failed")
         return f.worst(), f, f.markdown()
 
-    total_7d = data["hits"]["total"]["value"]
-    hourly_avg = total_7d / 168 if total_7d > 0 else 0  # 7 days = 168 hours
+    total_24h = data["hits"]["total"]["value"]
+    hourly_avg = total_24h / 24 if total_24h > 0 else 0  # 24-hour baseline
     buckets = data.get("aggregations", {}).get("by_namespace", {}).get("buckets", [])
 
     spiking = []
@@ -1157,20 +1163,20 @@ def s6a_error_rate_spikes(es: ElasticPortForward) -> tuple[str, Findings, str]:
         ns = b["key"]
         ns_total = b["doc_count"]
         ns_last_1h = b["last_1h"]["doc_count"]
-        ns_hourly_avg = ns_total / 168
+        ns_hourly_avg = ns_total / 24
         if ns_hourly_avg > 0 and ns_last_1h > 3 * ns_hourly_avg and ns_last_1h > 10:
             spiking.append((ns, ns_last_1h, ns_hourly_avg))
 
     if spiking:
-        lines.append(f"**Error rate spikes detected** (last 1h vs 7d hourly avg):\n")
+        lines.append(f"**Error rate spikes detected** (last 1h vs 24h hourly avg):\n")
         for ns, last_1h, avg in spiking:
             ratio = last_1h / avg if avg > 0 else 0
             f.add(WARNING, f"Error spike in `{ns}`: {last_1h} errors/1h vs {avg:.1f}/h avg ({ratio:.1f}x)")
             cprint(C.YELLOW, f"  🟡 Spike: {ns} — {last_1h} errors/h (avg {avg:.1f}/h, {ratio:.1f}x)")
             lines.append(f"- `{ns}`: {last_1h} errors/1h vs {avg:.1f}/h avg ({ratio:.1f}x)\n")
     else:
-        cprint(C.GREEN, f"  🟢 No error rate spikes (total 7d errors: {total_7d}, avg {hourly_avg:.0f}/h)")
-        lines.append(f"No spikes. Total 7d errors: {total_7d}, avg {hourly_avg:.0f}/h\n")
+        cprint(C.GREEN, f"  🟢 No error rate spikes (total 24h errors: {total_24h}, avg {hourly_avg:.0f}/h)")
+        lines.append(f"No spikes. Total 24h errors: {total_24h}, avg {hourly_avg:.0f}/h\n")
 
     lines.append(f.markdown())
     return f.worst(), f, "\n".join(lines)
