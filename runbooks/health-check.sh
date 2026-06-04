@@ -1830,38 +1830,53 @@ PYEOF
     # Descriptor bug — see docs/sops/zigbee2mqtt.md §4d), and permit_join
     # left open after pairing. Queries the broker directly so the check
     # works even when the Z2M pod logs look benign.
+    #
+    # NB: subscribe to each retained topic SEPARATELY (each with -C 1)
+    # rather than a combined -t a -t b -C 2. The latter approach is racy
+    # because z2m republishes bridge/info frequently (every device interaction);
+    # under load the subscriber can satisfy -C 2 with two bridge/info messages
+    # before the larger bridge/devices payload arrives, producing a false
+    # "coordinator missing" critical (real cause of the F-bfb57b26 false
+    # positive observed 2026-06-04 after the version 2.11.0 bump).
     echo "Zigbee2MQTT bridge state (via MQTT):"
-    # -W 15: the broker holds ~800+ retained messages and enumeration
-    # takes ~10s on a warm broker. -C 2 stops as soon as both topics arrive.
-    Z2M_BRIDGE_STATE=$(kubectl exec -n home-automation deployment/mosquitto -c app -- \
-        mosquitto_sub -h 127.0.0.1 -p 1883 \
-            -t zigbee2mqtt/bridge/devices -t zigbee2mqtt/bridge/info \
-            -W 15 -C 2 -v 2>/dev/null \
-        | python3 - <<'PYEOF'
-import json, re, sys
-raw = sys.stdin.read()
-out = {"by_type": {}, "failed_interview": [], "unknown": [], "permit_join": None, "count": 0}
-for c in re.split(r'\n(?=zigbee2mqtt/bridge/)', raw):
-    topic, _, payload = c.partition(' ')
-    payload = payload.strip()
-    if not payload:
-        continue
+    Z2M_BRIDGE_DEVICES_RAW=$(kubectl exec -n home-automation deployment/mosquitto -c app -- \
+        mosquitto_sub -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/devices -C 1 -W 12 2>/dev/null)
+    Z2M_BRIDGE_INFO_RAW=$(kubectl exec -n home-automation deployment/mosquitto -c app -- \
+        mosquitto_sub -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/info -C 1 -W 10 2>/dev/null)
+
+    Z2M_BRIDGE_STATE=$(python3 - "$Z2M_BRIDGE_DEVICES_RAW" "$Z2M_BRIDGE_INFO_RAW" <<'PYEOF'
+import json, sys
+devices_raw = sys.argv[1] if len(sys.argv) > 1 else ""
+info_raw    = sys.argv[2] if len(sys.argv) > 2 else ""
+got_devices = bool(devices_raw.strip())
+got_info    = bool(info_raw.strip())
+out = {"got_devices": got_devices, "got_info": got_info,
+       "by_type": {}, "failed_interview": [], "unknown": [],
+       "permit_join": None, "count": None}
+if got_devices:
     try:
-        d = json.loads(payload)
-    except Exception:
-        continue
-    if topic == 'zigbee2mqtt/bridge/info':
-        out['permit_join'] = d.get('permit_join')
-    elif topic == 'zigbee2mqtt/bridge/devices':
-        out['count'] = len(d)
-        for x in d:
+        devs = json.loads(devices_raw)
+        out['count'] = len(devs)
+        for x in devs:
             t = x.get('type', '?')
             out['by_type'][t] = out['by_type'].get(t, 0) + 1
             if x.get('interview_completed') is False:
                 out['failed_interview'].append(x.get('ieee_address', '?'))
             if x.get('type') == 'Unknown':
                 out['unknown'].append(x.get('ieee_address', '?'))
-print(f"COUNT={out['count']}")
+    except Exception as e:
+        out['got_devices'] = False
+        print(f"PARSE_ERROR:devices:{e}")
+if got_info:
+    try:
+        d = json.loads(info_raw)
+        out['permit_join'] = d.get('permit_join')
+    except Exception as e:
+        out['got_info'] = False
+        print(f"PARSE_ERROR:info:{e}")
+print(f"GOT_DEVICES={out['got_devices']}")
+print(f"GOT_INFO={out['got_info']}")
+print(f"COUNT={out['count'] if out['count'] is not None else ''}")
 print(f"PERMIT_JOIN={out['permit_join']}")
 for t, n in sorted(out['by_type'].items()):
     print(f"TYPE:{t}:{n}")
@@ -1871,13 +1886,18 @@ for ieee in out['unknown']:
     print(f"UNKNOWN:{ieee}")
 PYEOF
         )
+
+    Z2M_GOT_DEVICES=$(echo "$Z2M_BRIDGE_STATE" | awk -F= '/^GOT_DEVICES=/{print $2}')
+    Z2M_GOT_INFO=$(echo "$Z2M_BRIDGE_STATE" | awk -F= '/^GOT_INFO=/{print $2}')
     Z2M_BRIDGE_COUNT=$(echo "$Z2M_BRIDGE_STATE" | awk -F= '/^COUNT=/{print $2}')
     Z2M_PERMIT_JOIN=$(echo "$Z2M_BRIDGE_STATE" | awk -F= '/^PERMIT_JOIN=/{print $2}')
     Z2M_FAILED_COUNT=$(echo "$Z2M_BRIDGE_STATE" | grep -c "^FAILED:" || true)
     Z2M_ROUTER_COUNT=$(echo "$Z2M_BRIDGE_STATE" | awk -F: '/^TYPE:Router:/{print $3}')
     Z2M_COORD_COUNT=$(echo "$Z2M_BRIDGE_STATE" | awk -F: '/^TYPE:Coordinator:/{print $3}')
 
-    echo "  Total entries: ${Z2M_BRIDGE_COUNT:-?}"
+    echo "  bridge/devices received: ${Z2M_GOT_DEVICES:-False}"
+    echo "  bridge/info received:    ${Z2M_GOT_INFO:-False}"
+    echo "  Total entries: ${Z2M_BRIDGE_COUNT:-N/A}"
     echo "  By type:"
     echo "$Z2M_BRIDGE_STATE" | grep "^TYPE:" | sed 's/^TYPE:/    /'
     echo "  permit_join: ${Z2M_PERMIT_JOIN:-unknown}"
@@ -1886,28 +1906,35 @@ PYEOF
         echo "$Z2M_BRIDGE_STATE" | grep "^FAILED:" | sed 's/^FAILED:/    /'
     fi
 
-    # Critical: no coordinator visible — mesh is broken
-    if [ -z "$Z2M_BRIDGE_COUNT" ]; then
-        log_warning "Z2M bridge state unreachable (could not query MQTT broker)"
-    elif [ "${Z2M_COORD_COUNT:-0}" = "0" ]; then
-        log_critical "Z2M has 0 coordinators in bridge/devices — Zigbee mesh broken"
-        add_critical_issue "Z2M coordinator missing from bridge/devices"
+    # If we couldn't get bridge/devices at all, downgrade to warning (NOT critical).
+    # Most common cause: warm broker is busy enumerating ~800 retained
+    # messages and the larger bridge/devices payload didn't arrive in time.
+    # Re-running the sweep usually clears it.
+    if [ "${Z2M_GOT_DEVICES}" != "True" ]; then
+        log_warning "Z2M bridge/devices not received in time — broker busy or z2m offline; skipping coordinator/router/interview checks this sweep"
+    else
+        # Critical: bridge/devices arrived AND coordinator is absent → mesh broken
+        if [ "${Z2M_COORD_COUNT:-0}" = "0" ]; then
+            log_critical "Z2M has 0 coordinators in bridge/devices — Zigbee mesh broken"
+            add_critical_issue "Z2M coordinator missing from bridge/devices"
+        fi
+        # Major: router count dropped below baseline (SLZB-06P7 ground-floor router)
+        Z2M_ROUTER_BASELINE=1
+        if [ -n "$Z2M_ROUTER_COUNT" ] && [ "$Z2M_ROUTER_COUNT" -lt "$Z2M_ROUTER_BASELINE" ]; then
+            log_warning "Z2M router count below baseline: $Z2M_ROUTER_COUNT (expected ≥ $Z2M_ROUTER_BASELINE) — see docs/sops/zigbee2mqtt.md §4d for recovery"
+            add_major_issue "Z2M routers: $Z2M_ROUTER_COUNT (baseline $Z2M_ROUTER_BASELINE)"
+        fi
+        # Major: any device stuck with interview_completed=false. Baseline 0
+        # since the SLZB-06P7 was DB-injected on 2026-06-04.
+        Z2M_FAILED_BASELINE=0
+        if [ "$Z2M_FAILED_COUNT" -gt "$Z2M_FAILED_BASELINE" ]; then
+            log_warning "Z2M devices with failed interview: $Z2M_FAILED_COUNT (baseline $Z2M_FAILED_BASELINE) — see docs/sops/zigbee2mqtt.md §4d"
+            add_major_issue "Z2M failed-interview devices: $Z2M_FAILED_COUNT"
+        fi
     fi
-    # Major: router count dropped below baseline (SLZB-06P7 ground-floor router)
-    Z2M_ROUTER_BASELINE=1
-    if [ -n "$Z2M_ROUTER_COUNT" ] && [ "$Z2M_ROUTER_COUNT" -lt "$Z2M_ROUTER_BASELINE" ]; then
-        log_warning "Z2M router count below baseline: $Z2M_ROUTER_COUNT (expected ≥ $Z2M_ROUTER_BASELINE) — see docs/sops/zigbee2mqtt.md §4d for recovery"
-        add_major_issue "Z2M routers: $Z2M_ROUTER_COUNT (baseline $Z2M_ROUTER_BASELINE)"
-    fi
-    # Major: any device stuck with interview_completed=false. Baseline 0
-    # since the SLZB-06P7 was DB-injected on 2026-06-04.
-    Z2M_FAILED_BASELINE=0
-    if [ "$Z2M_FAILED_COUNT" -gt "$Z2M_FAILED_BASELINE" ]; then
-        log_warning "Z2M devices with failed interview: $Z2M_FAILED_COUNT (baseline $Z2M_FAILED_BASELINE) — see docs/sops/zigbee2mqtt.md §4d"
-        add_major_issue "Z2M failed-interview devices: $Z2M_FAILED_COUNT"
-    fi
-    # Minor: permit_join left open at sweep time = pairing window not closed
-    if [ "${Z2M_PERMIT_JOIN}" = "True" ]; then
+    # Minor: permit_join left open at sweep time = pairing window not closed.
+    # Only meaningful if bridge/info actually arrived.
+    if [ "${Z2M_GOT_INFO}" = "True" ] && [ "${Z2M_PERMIT_JOIN}" = "True" ]; then
         log_warning "Z2M permit_join is OPEN at sweep time — pairing window left open?"
         add_minor_issue "Z2M permit_join open during daily sweep"
     fi
