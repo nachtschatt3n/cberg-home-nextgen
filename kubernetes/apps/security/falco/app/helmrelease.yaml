@@ -147,3 +147,29 @@ spec:
             )
           override:
             condition: append
+      # Allowlist legitimate K8s-API-contact and socket-stdio workloads so the
+      # two noisiest default "Notice" rules stop flooding the SIEM low tier
+      # (~2470/24h "Redirect STDOUT/STDIN" + ~150/24h "Contact K8S API", all
+      # benign). Both rules gate on a user_known_* macro that defaults to
+      # (never_true); replace each with an image-scoped allowlist. Sources
+      # confirmed via 24h Wazuh triage:
+      #   - Redirect STDOUT/STDIN: Longhorn gRPC instance-managers (longhornio/*)
+      #     + Authentik proxy/server (socket-connected stdio is normal for both)
+      #   - Contact K8S API: the ai-sre agent + standalone kubectl pods
+      #     (their whole purpose is querying the cluster) + longhorn-manager
+      # Image-scoped (not namespace-wide) so a rogue pod in the same namespace
+      # still trips the rule.
+      k8s-api-noise.yaml: |-
+        - macro: user_known_contact_k8s_api_server_activities
+          condition: >
+            (container.image.repository = ghcr.io/nachtschatt3n/ai-sre or
+             container.image.repository = docker.io/bitnamilegacy/kubectl or
+             container.image.repository startswith docker.io/longhornio/)
+          override:
+            condition: replace
+        - macro: user_known_stand_streams_redirect_activities
+          condition: >
+            (container.image.repository startswith docker.io/longhornio/ or
+             container.image.repository in (ghcr.io/goauthentik/proxy, ghcr.io/goauthentik/server))
+          override:
+            condition: replace
