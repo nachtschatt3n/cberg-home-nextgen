@@ -66,9 +66,13 @@ spec:
             resources:
               requests:
                 cpu: 200m
-                memory: 1Gi
-              limits:
                 memory: 1.5Gi
+              limits:
+                # 1.5Gi OOMKilled (exit 137) on 2026-06-05 during a 180-item
+                # playlist download + ES metadata bulk-index — idle sits ~730Mi
+                # but download/indexing bursts blow past 1.5Gi. 3Gi gives ample
+                # headroom (192GiB cluster, cost is cheap).
+                memory: 3Gi
             probes:
               liveness:
                 enabled: true
