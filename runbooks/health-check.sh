@@ -1710,6 +1710,15 @@ log_section "Section 22: Home Automation Health"
     # Total errors (excluding known false positives)
     HA_ERRORS=$(echo "$HA_LOGS" | grep -E "(ERROR|error|Failed|failed)" | filter_ha_false_positives | wc -l || true)
 
+    # Recent-window (last 1h) major-error count. Distinguishes an ONGOING error
+    # storm from one that's already fixed but whose pre-fix ERROR lines still
+    # linger in the --since=24h window above. Without this, a resolved storm
+    # (e.g. a Shelly that was power-cycled out of setup_retry) keeps the major
+    # finding open for up to 24h while its old log lines age out. Same filtering
+    # as MAJOR_HA_ERRORS so the two are directly comparable.
+    HA_LOGS_RECENT=$(kubectl logs -n home-automation deployment/home-assistant --since=1h 2>&1 || echo "")
+    MAJOR_HA_ERRORS_RECENT=$(echo "$HA_LOGS_RECENT" | grep -E "ERROR" | grep -v "Failed to connect" | filter_ha_false_positives | wc -l || true)
+
     echo "Home Assistant error severity:"
     echo "  - Critical: $CRITICAL_HA_ERRORS"
     echo "  - Major: $MAJOR_HA_ERRORS"
@@ -1957,8 +1966,18 @@ PYEOF
         log_critical "Home Assistant critical errors: $CRITICAL_HA_ERRORS"
         add_critical_issue "Home Assistant critical errors: $CRITICAL_HA_ERRORS"
     elif [ "$MAJOR_HA_ERRORS" -gt 50 ]; then
-        log_warning "High Home Assistant major error count: $MAJOR_HA_ERRORS"
-        add_major_issue "High Home Assistant error count: $MAJOR_HA_ERRORS"
+        # Recency gate: only hold a MAJOR while the storm is still active
+        # (>=5 ERRORs in the last 1h). If recent activity has subsided, the
+        # device/integration is fixed and the high 24h count is just pre-fix
+        # log lines aging out — downgrade to a transient minor that clears on
+        # its own, instead of a stale major that lingers up to 24h.
+        if [ "${MAJOR_HA_ERRORS_RECENT:-0}" -ge 5 ]; then
+            log_warning "High Home Assistant major error count: $MAJOR_HA_ERRORS ($MAJOR_HA_ERRORS_RECENT in last 1h, ongoing)"
+            add_major_issue "High Home Assistant error count: $MAJOR_HA_ERRORS"
+        else
+            log_warning "Home Assistant 24h error count high ($MAJOR_HA_ERRORS) but subsided — only ${MAJOR_HA_ERRORS_RECENT:-0} in last 1h"
+            add_minor_issue "Home Assistant errors subsided: $MAJOR_HA_ERRORS in 24h, ${MAJOR_HA_ERRORS_RECENT:-0} in last 1h (aging out)"
+        fi
     elif [ "$MAJOR_HA_ERRORS" -gt 10 ]; then
         log_warning "Home Assistant errors: $MAJOR_HA_ERRORS (mostly external integrations)"
         add_minor_issue "Home Assistant integration errors: $MAJOR_HA_ERRORS"
