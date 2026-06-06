@@ -37,7 +37,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/gas-price-monitor
-              tag: sha-9c8b6b7
+              tag: sha-bd934d1
               pullPolicy: IfNotPresent
             # TANKERKOENIG_API_KEY is sourced from the SOPS-encrypted Secret
             # `gas-price-monitor` (see ./secret.sops.yaml). The reloader
