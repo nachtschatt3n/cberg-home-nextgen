@@ -146,12 +146,17 @@ class DraftController extends Controller {
         // MimeMessage is constructed directly (matches sendMessage in
         // OCA\Mail\Service\MailTransmission) rather than DI — keeps us
         // independent of any registered overrides.
+        //
+        // NC Mail >=5.9.0 reordered build() args 3 and 4: now
+        // (plain, html, isPgpEncrypted: bool, attachments: array).
+        // Older releases (the 5.7.2 we originally targeted) had them
+        // the other way around. We pin to the 5.9+ shape.
         $mimeMessage = new MimeMessage(new DataUriParser());
         $mimePart = $mimeMessage->build(
             $bodyPlain,
             $bodyHtml,
-            $attachmentParts,
             false, // not PGP encrypted
+            $attachmentParts,
         );
 
         $mail = new Horde_Mime_Mail();
