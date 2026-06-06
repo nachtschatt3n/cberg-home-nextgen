@@ -1005,6 +1005,11 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
         else:
             cprint(C.GREEN, f"  {OK} {sop_path.name}: compliant ({ver_m.group(1)})")
             sop_status.append(f"- {OK} `{rel}`: v{ver_m.group(1)}, all sections present")
+            # Emit compliant SOPs as `clean` findings so the operator can see
+            # what the compliance check passed, not only what it flagged.
+            # `clean` doesn't count toward section status (worst()/summary_cell
+            # only look at CRITICAL/WARNING), so the section stays green.
+            f.add(OK, f"SOP `{rel}` — compliant (v{ver_m.group(1)}, all sections present)")
 
     lines.append("\n**SOP compliance:**\n" + "\n".join(sop_status) + "\n")
 

@@ -2053,8 +2053,10 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
     """Walk checker.results + external_infra_results and emit notable findings.
 
     Returns (critical_count, warning_count). No-op when writer is disabled.
-    Patch-only bumps and clean items are NOT emitted — the cycle row alone
-    represents "specialist ran and saw nothing alarming."
+    Clean/up-to-date items are NOT emitted. Patch bumps ARE emitted at the
+    low `monitor` severity (operator wants the safe-to-patch list visible in
+    the sweep, not just buried in the markdown report) — they don't count
+    toward the critical/warning totals.
     """
     if not writer.enabled:
         return (0, 0)
@@ -2097,6 +2099,15 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                 subsection="helmrelease_chart",
                 metadata={"namespace": ns, "kind": "chart", "type": "minor"},
             )
+        elif ua.get('type') == 'patch':
+            writer.emit(
+                severity='monitor',
+                title=f"{name}: chart {cur} → {latest} (patch)",
+                action="batch with other patch bumps",
+                evidence_path=evidence_path,
+                subsection="helmrelease_chart",
+                metadata={"namespace": ns, "kind": "chart", "type": "patch"},
+            )
 
         for img in r.get('images') or []:
             img_ua = img.get('update_assessment') or {}
@@ -2123,6 +2134,18 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     severity='monitor',
                     title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (minor)",
                     action="batch with other minor bumps",
+                    evidence_path=evidence_path,
+                    subsection="helmrelease_image",
+                    metadata={
+                        "namespace": ns, "kind": "image",
+                        "repository": img.get('repository'),
+                    },
+                )
+            elif img_ua.get('type') == 'patch':
+                writer.emit(
+                    severity='monitor',
+                    title=f"{name}: image {img.get('repository')} {img.get('current_tag')} → {img.get('latest_tag')} (patch)",
+                    action="batch with other patch bumps",
                     evidence_path=evidence_path,
                     subsection="helmrelease_image",
                     metadata={
