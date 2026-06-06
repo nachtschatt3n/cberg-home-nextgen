@@ -134,6 +134,13 @@ spec:
           # manager so the clauses above miss it. The container only ever
           # installs — there's no long-running workload to protect — so scope
           # the exclusion to the whole init container by name.
+          #
+          # mount-cgroup / apply-sysctl-overwrites: cilium-agent's own
+          # privileged init containers (cilium-mount mounts the cgroup2 fs,
+          # cilium-sysctlfix applies sysctls). They execute a binary from a
+          # writable layer on every cilium agent start → ~6 level-12 events per
+          # cluster-wide cilium roll (upgrades / node reboots). Known-good CNI
+          # bootstrap; scope-exclude by container name.
           condition: >
             and not (
               proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
@@ -143,7 +150,7 @@ spec:
               proc.aname[3] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
               proc.exe startswith /data/longhorn or
               proc.exepath startswith /data/longhorn or
-              container.name = install-openclaw
+              container.name in (install-openclaw, mount-cgroup, apply-sysctl-overwrites)
             )
           override:
             condition: append
