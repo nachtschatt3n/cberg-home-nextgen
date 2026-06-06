@@ -22,10 +22,10 @@ metadata:
     gethomepage.dev/widget.type: "customapi"
     gethomepage.dev/widget.url: "http://sweep-dashboard.monitoring.svc.cluster.local/api/cycles/latest"
     gethomepage.dev/widget.mappings.0.label: "Verdict"
-    gethomepage.dev/widget.mappings.0.field.cycle: "verdict"
+    gethomepage.dev/widget.mappings.0.field: "cycle.verdict"
     gethomepage.dev/widget.mappings.1.label: "Open findings"
     gethomepage.dev/widget.mappings.1.field: "findings"
-    gethomepage.dev/widget.mappings.1.format: "text"
+    gethomepage.dev/widget.mappings.1.format: "size"
   labels:
     gethomepage.dev/enabled: "true"
 spec:
