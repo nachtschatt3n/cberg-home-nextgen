@@ -719,6 +719,22 @@ spec:
                     cfg.plugins.load.paths = [...paths];
                   }
 
+                  // Reply delivery mode — keep heartbeats from swallowing
+                  // user DMs. When unset, codex-backed runtimes default to
+                  // tool-only delivery (heartbeat_respond), which sets
+                  // sourceReplyDeliveryMode = "message_tool_only" on every
+                  // active operation. A user DM landing during an active
+                  // heartbeat inherits that mode and the reply gets
+                  // suppressed (Delivery suppressed by sourceReplyDeliveryMode:
+                  // message_tool_only). Forcing "automatic" makes the
+                  // heartbeat-runner take the plain-text branch
+                  // (`reply HEARTBEAT_OK`) and skips the lockout — user
+                  // replies deliver normally even mid-heartbeat.
+                  // Reverted on 2026-05-27, re-applied on 2026-06-06 after
+                  // observing the same suppression on the post-OOM recovery.
+                  cfg.messages = cfg.messages || {};
+                  cfg.messages.visibleReplies = 'automatic';
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
@@ -1052,11 +1068,21 @@ spec:
 
             resources:
               requests:
+                # Bump request to ~1.2Gi to reflect actual steady-state
+                # usage (we sit at 1.1-1.3 GiB; the 512Mi request let the
+                # scheduler over-commit the node, making us the first
+                # eviction target under pressure).
                 cpu: 100m
-                memory: 512Mi
+                memory: 1200Mi
               limits:
+                # Bumped 2Gi -> 4Gi on 2026-06-06 after an OOMKill (exit
+                # 137) wedged the Telegram dispatcher mid-reply. We crawl
+                # toward 2GiB over ~40h (heartbeat dream-narrative jobs
+                # accumulate; not a hard leak). 4GiB gives us a couple
+                # of weeks before the next risk. Investigate the actual
+                # growth source if this still bites.
                 cpu: 2
-                memory: 2Gi
+                memory: 4Gi
 
             securityContext:
               runAsNonRoot: true
