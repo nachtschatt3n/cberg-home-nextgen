@@ -88,7 +88,7 @@ spec:
           app:
             image:
               repository: memgraph/lab
-              tag: "3.10.1"
+              tag: "3.10.2"
               pullPolicy: IfNotPresent
             env:
               QUICK_CONNECT_MG_HOST: memgraph.databases.svc.cluster.local
