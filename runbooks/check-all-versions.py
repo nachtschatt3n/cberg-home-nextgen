@@ -551,7 +551,19 @@ class VersionChecker:
         
         current_major, current_minor, current_patch = current_parsed
         latest_major, latest_minor, latest_patch = latest_parsed
-        
+
+        # Guard: only classify as an update if `latest` is actually greater
+        # OVERALL. The component-wise elif chain below would otherwise
+        # mis-classify a downgrade as a "patch" — e.g. 0.9.4 → 0.3.7: minor
+        # 3<9 fails but patch 7>4 matches → false "patch". This bit the
+        # open-webui image, whose 0.9.x GHCR tags are missed by tag pagination
+        # (hundreds of cuda/dev/dated variants), so the detected "latest"
+        # (0.3.7) is OLDER than the running tag. Treat <= current as up-to-date.
+        if latest_parsed <= current_parsed:
+            result['type'] = 'unknown'
+            result['description'] = 'Up to date or downgrade detected (latest <= current)'
+            return result
+
         if latest_major > current_major:
             result['type'] = 'major'
             result['complexity'] = 'high'
