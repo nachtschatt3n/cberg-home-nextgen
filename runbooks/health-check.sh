@@ -2533,6 +2533,67 @@ log_section "Section 24a: Network Infrastructure Services"
     fi
     echo ""
 
+    # openclaw codex OAuth — the agent's "openai-codex" provider depends on
+    # tokens written by `codex login` into ~/.codex/auth.json. ChatGPT-mode
+    # tokens (`auth_mode: chatgpt`) rotate organically for a while via the
+    # refresh_token, but the refresh chain has a finite lifetime — when it
+    # stops rolling we get "Missing API key for provider openai-codex" on
+    # every dispatch (FailoverError, lastErrorReason="auth"). Symptom matches
+    # the 2026-05-27 and 2026-06-06 incidents (10-day cycle).
+    #
+    # Two signals:
+    #   1. last_refresh stale → proactive nudge to re-run device-auth
+    #   2. Daily Morning Briefing cron lastErrorReason == "auth" → already broken
+    echo "openclaw codex OAuth:"
+    OC_POD=$(kubectl get pod -n ai -l app.kubernetes.io/instance=openclaw \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "$OC_POD" ]; then
+        echo "openclaw pod not found — skipping codex OAuth check"
+    else
+        # Signal 1: last_refresh age (warning at 7d, fail at 14d)
+        CODEX_REFRESH=$(kubectl exec -n ai "$OC_POD" -c app -- \
+            cat /home/node/.codex/auth.json 2>/dev/null \
+            | jq -r '.last_refresh // empty' 2>/dev/null)
+        if [ -n "$CODEX_REFRESH" ]; then
+            # ISO8601 → epoch (BSD date and GNU date both accept -d with this format)
+            REFRESH_TS=$(date -d "$CODEX_REFRESH" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "${CODEX_REFRESH%%.*}Z" +%s 2>/dev/null || echo "")
+            if [ -n "$REFRESH_TS" ]; then
+                AGE_DAYS=$(( ($(date +%s) - REFRESH_TS) / 86400 ))
+                echo "  codex auth last_refresh: $CODEX_REFRESH (age ${AGE_DAYS}d)"
+                if [ "$AGE_DAYS" -ge 14 ]; then
+                    log_warning "codex auth last_refresh is ${AGE_DAYS}d old — refresh chain likely dead"
+                    add_major_issue "openclaw codex OAuth tokens not refreshed in ${AGE_DAYS} days — provider auth will fail. Run: kubectl -n ai exec -it $OC_POD -c app -- codex login --device-auth, then delete the pod."
+                    INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+                elif [ "$AGE_DAYS" -ge 7 ]; then
+                    log_warning "codex auth last_refresh is ${AGE_DAYS}d old — proactive re-auth recommended"
+                fi
+            fi
+        else
+            echo "  codex auth.json missing or unreadable"
+        fi
+
+        # Signal 2: Morning Briefing cron's lastErrorReason — catches the case
+        # where the refresh chain has already died and the agent is wedging
+        # on every openai-codex dispatch (FailoverError).
+        # `openclaw cron get` has no -o/--format flag; output is JSON with a
+        # "Config warnings:" preamble. sed strips everything before the first
+        # `{` line so jq sees clean JSON.
+        CRON_JSON=$(kubectl exec -n ai "$OC_POD" -c app -- \
+            bash -lc 'openclaw cron get c1b12530-aa91-4711-83bd-cba2b0e7f36f 2>/dev/null' 2>/dev/null \
+            | sed -n '/^{/,$p')
+        CRON_STATUS=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastRunStatus // empty' 2>/dev/null)
+        CRON_ERR_REASON=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastErrorReason // empty' 2>/dev/null)
+        echo "  Morning Briefing cron lastRunStatus=$CRON_STATUS lastErrorReason=$CRON_ERR_REASON"
+        if [ "$CRON_ERR_REASON" = "auth" ] && [ "$CRON_STATUS" = "error" ]; then
+            log_critical "openclaw openai-codex provider failing with FailoverError on every dispatch"
+            add_critical_issue "openclaw agent dispatch broken (lastErrorReason=auth) — refresh codex OAuth. Run: kubectl -n ai exec -it $OC_POD -c app -- codex login --device-auth, then delete the pod."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif [ "$CRON_STATUS" = "ok" ]; then
+            log_success "openclaw Morning Briefing cron last run: ok (codex auth healthy)"
+        fi
+    fi
+    echo ""
+
     # k8s-gateway — internal DNS for *.internal.${SECRET_DOMAIN} (cluster-local DNS)
     echo "k8s-gateway:"
     kubectl get pods -n network -l app.kubernetes.io/name=k8s-gateway 2>/dev/null || echo "k8s-gateway not found"
