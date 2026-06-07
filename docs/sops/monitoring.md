@@ -394,6 +394,24 @@ kubectl port-forward -n monitoring svc/uptime-kuma 3001:3001 &
 
 Add new monitors in the UI for new services. Configure notification channels for alerts.
 
+### ⚠️ After editing/removing a monitor — restart uptime-kuma to flush stale Prometheus series
+
+Kuma's Prometheus exporter caches each monitor's **label-set in memory** (including
+`monitor_hostname`). When you **edit** a monitor's host (or remove/disable it), the
+exporter keeps emitting the **old** label-set with its last status (e.g. `monitor_status=0`
+for the old IP) until the pod restarts. There is **no active/paused label** to filter on,
+so the health-check's `monitor_status{monitor_type!="group"} == 0` query keeps flagging the
+ghost series as DOWN — producing false "Kuma: X down (old-ip)" findings that never clear.
+
+Fix: restart the pod so the exporter re-registers only current configs.
+```bash
+kubectl -n monitoring rollout restart deploy/uptime-kuma
+# wait ~45s for re-scrape, then confirm no stale DOWN series:
+# (port-forward prometheus) curl -s 'http://localhost:9090/api/v1/query?query=monitor_status{monitor_type!="group"}==0'
+```
+Observed 2026-06-07 after the VLAN-55 reorg: UNAS/DreamMachine monitors were re-pointed
+`.31.230`→`.55.240` / `.31.1`→`.30.1`, but the old DOWN series persisted until this restart.
+
 ---
 
 ## Headlamp (Kubernetes UI)
