@@ -40,7 +40,7 @@ spec:
           app:
             image:
               repository: emqx/mqttx-web
-              tag: v1.13.3
+              tag: v1.13.0  # v1.13.3 is a GitHub release only; not published to Docker Hub (latest image tag is v1.13.0)
             resources:
               requests:
                 cpu: 10m
