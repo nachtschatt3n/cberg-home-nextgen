@@ -230,8 +230,7 @@ spec:
         refuse_any: true
         upstream_dns:
         - "[/kuma.${SECRET_DOMAIN}/]https://dns.cloudflare.com/dns-query"
-        - "[/${SECRET_DOMAIN}/]192.168.31.61"
-        - "[/example.com/]192.168.55.101"
+        - "[/${SECRET_DOMAIN}/]192.168.55.101"
         - "https://dns.cloudflare.com/dns-query"
         - "tls://1dot1dot1dot1.cloudflare-dns.com"
         - "https://dns10.quad9.net/dns-query"
