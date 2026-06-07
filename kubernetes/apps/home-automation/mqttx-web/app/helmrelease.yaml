@@ -40,7 +40,7 @@ spec:
           app:
             image:
               repository: emqx/mqttx-web
-              tag: v1.13.0
+              tag: v1.13.3
             resources:
               requests:
                 cpu: 10m
