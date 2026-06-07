@@ -263,7 +263,7 @@ Minimum mandatory rules:
 |---------|--------------|--------|-------------|------------|---------|
 | 1 | Trusted | 192.168.30.0/24 | 2a00:6020:ad52:4300::/64 | 14/101 leases | Network infrastructure, trusted admin devices |
 | 2 | USA-Peer | 192.168.60.0/24 | - | 1/249 leases | VPN/peering connections |
-| 10 | Servers | 192.168.31.0/24 | 2a00:6020:ad52:4301::/64 | 10/249 leases | Legacy server infrastructure — being retired into VLAN 55 (NAS already moved 2026-06-07; heater/zigbee hub pending) |
+| ~~10~~ | ~~Servers~~ | ~~192.168.31.0/24~~ | — | — | **RETIRED 2026-06-07** — folded into VLAN 55. NAS + SolarFocus heater moved to VLAN 55 (.240/.241); old K3s pi-cluster, AdGuard@NAS, old PiKVM, CC2652 zigbee hub decommissioned. Kept here for history. |
 | 20 | Trusted-Devices | 192.168.50.0/24 | 2a00:6020:ad52:4302::/64 | 7/101 leases | Trusted client devices |
 | 30 | IoT | 192.168.32.0/23 | 2a00:6020:ad52:4303::/64 | 102/499 leases | IoT devices, smart home |
 | 40 | Clients-Guests-Untrusted | 192.168.34.0/24 | - | 1/191 leases | Guest and untrusted devices |

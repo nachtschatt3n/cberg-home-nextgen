@@ -51,7 +51,7 @@ NUC-01  NUC-02  NUC-03   (k8s nodes, 2.5 GbE)
 |---------|------|--------|-------------|------------|---------|
 | 1 ¹ | Trusted | 192.168.30.0/24 | 2a00:6020:ad52:4300::/64 | 14/101 leases | Network infra, trusted admin devices |
 | 2 | USA-Peer | 192.168.60.0/24 | — | 1/249 leases | VPN/peering connections |
-| 10 | Servers | 192.168.31.0/24 | 2a00:6020:ad52:4301::/64 | 10/249 leases | NAS, server infrastructure |
+| ~~10~~ | ~~Servers~~ | ~~192.168.31.0/24~~ | — | — | **RETIRED 2026-06-07** — folded into VLAN 55 (NAS + heater moved; legacy devices decommissioned) |
 | 20 | Trusted-Devices | 192.168.50.0/24 | 2a00:6020:ad52:4302::/64 | 7/101 leases | Trusted client devices |
 | 30 | IoT | 192.168.32.0/23 | 2a00:6020:ad52:4303::/64 | 102/499 leases | IoT devices, smart home |
 | 40 | Clients-Guests-Untrusted | 192.168.34.0/24 | — | 1/191 leases | Guest and untrusted devices |
