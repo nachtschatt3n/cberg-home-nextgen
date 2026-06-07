@@ -187,6 +187,11 @@ spec:
     # -- Whether to enable bootstrapping the AdguardHome config file using the content in bootstrapConfig
     # Disabled: PVC is the authoritative config source. The bootstrapConfig password injection
     # pattern is broken (literal ${ADMIN_PASSWORD} string, no envsubst in the init container).
+    # NOTE: the inline bootstrapConfig below is STALE (schema_version 12, dead .31.61
+    # upstream) and inert while bootstrapEnabled=false. The authoritative DR snapshot of
+    # the live config is the encrypted Secret in ./config-backup.sops.yaml (schema 34).
+    # To restore: sops -d config-backup.sops.yaml, base64 -d the AdGuardHome.yaml data
+    # key, write it to the PVC at /opt/adguardhome/conf/AdGuardHome.yaml, restart the pod.
     bootstrapEnabled: false
 
     bootstrapConfig:
