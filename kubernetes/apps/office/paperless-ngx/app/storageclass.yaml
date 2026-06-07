@@ -9,6 +9,9 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
   - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
@@ -40,6 +43,9 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
   - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
@@ -71,6 +77,9 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
   - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
@@ -102,6 +111,9 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
   - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
