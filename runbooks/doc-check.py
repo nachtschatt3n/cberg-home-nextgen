@@ -301,7 +301,7 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  {WARNING} Could not check live node names")
 
     # Check key IPs
-    for label, ip in [("Mac Mini/Ollama", "192.168.30.111"), ("NAS", "192.168.31.230")]:
+    for label, ip in [("Mac Mini/Ollama", "192.168.30.111"), ("NAS", "192.168.55.240")]:
         if ip not in content:
             f.add(WARNING, f"{label} IP `{ip}` not found in docs/infrastructure.md")
             cprint(C.YELLOW, f"  {WARNING} {label} IP {ip} not in doc")
@@ -1107,6 +1107,7 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     "wazuh-unifi-syslog.md",         # One-time UniFi controller setup procedure
                     "icloud-cookie-rotation.md",     # Interactive 2FA — kubectl exec procedure
                     "sure-data-audit.md",            # Agent-driven weekly audit, no script
+                    "pikvm-update.md",               # SSH-on-device procedure, not GitOps/cluster
                 }
                 if runbook.name in MANUAL_RUNBOOKS:
                     cprint(C.GREEN, f"  {OK} {runbook.name}: manual procedure (no script expected)")

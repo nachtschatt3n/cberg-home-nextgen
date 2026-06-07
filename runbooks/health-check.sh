@@ -1572,8 +1572,8 @@ log_section "Section 19: Network Connectivity"
     # Use curl (HTTP) as primary check — more reliable than ping across all platforms
     # (macOS/Linux/WSL all support curl; ping -W semantics differ between platforms)
     echo ""
-    echo "NAS connectivity (192.168.31.230):"
-    curl -s --connect-timeout 2 http://192.168.31.230/ -o /dev/null 2>/dev/null && echo "NAS reachable" || { nc -z -w 2 192.168.31.230 22 2>/dev/null && echo "NAS reachable (SSH)"; } || echo "NAS unreachable - check storage integration"
+    echo "NAS connectivity (192.168.55.240, SMB 445):"
+    nc -z -w 2 192.168.55.240 445 2>/dev/null && echo "NAS reachable (SMB)" || { nc -z -w 2 192.168.55.240 22 2>/dev/null && echo "NAS reachable (SSH)"; } || echo "NAS unreachable - check storage integration"
 
     NETWORK_ISSUES=0
     if [ "$EXTDNS_PODS_READY" != "$EXTDNS_PODS_DESIRED" ]; then
@@ -1591,8 +1591,8 @@ log_section "Section 19: Network Connectivity"
         add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
     fi
-    if ! { curl -s --connect-timeout 2 http://192.168.31.230/ -o /dev/null 2>/dev/null || nc -z -w 2 192.168.31.230 22 2>/dev/null; }; then
-        log_warning "NAS (192.168.31.230) not reachable from cluster"
+    if ! { nc -z -w 2 192.168.55.240 445 2>/dev/null || nc -z -w 2 192.168.55.240 22 2>/dev/null; }; then
+        log_warning "NAS (192.168.55.240) not reachable from cluster"
         add_major_issue "NAS not reachable - storage backup integration may be broken"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
     fi
