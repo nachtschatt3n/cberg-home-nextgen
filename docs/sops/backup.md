@@ -298,7 +298,7 @@ kubectl logs -n storage -l app=longhorn-manager --tail=50 | grep -i backup
 
 Common causes:
 - Backup target not configured (check Longhorn → Settings → Backup Target)
-- NAS unreachable (verify `ping 192.168.31.230`)
+- NAS unreachable (verify `ping 192.168.55.240`)
 - Volume in degraded state (check `kubectl get volumes -n storage`)
 
 ```bash
@@ -306,7 +306,7 @@ Common causes:
 kubectl get setting backup-target -n storage -o jsonpath='{.value}'
 
 # Test NAS connectivity from cluster pod
-kubectl run test-pod --rm -it --image=alpine -- ping 192.168.31.230
+kubectl run test-pod --rm -it --image=alpine -- ping 192.168.55.240
 ```
 
 ### Longhorn UI Backup Tab Empty

@@ -337,7 +337,7 @@ All LAN clients use 192.168.55.5 as primary DNS (pushed via UniFi DHCP).
 
 **Deployment:** `kubernetes/apps/kube-system/csi-driver-smb/`
 
-Provides SMB/CIFS volume mounts from UNAS-CBERG NAS (192.168.31.230) to Kubernetes pods.
+Provides SMB/CIFS volume mounts from UNAS-CBERG NAS (192.168.55.240) to Kubernetes pods.
 
 Used by:
 - Applications needing large file storage (Jellyfin media library, etc.)

@@ -26,7 +26,7 @@ Longhorn v1.11.2 provides distributed block storage with replication across all 
 |---------|-------|
 | Namespace | `storage` |
 | Default replicas | 2 |
-| Backup target | UNAS-CBERG (192.168.31.230) |
+| Backup target | UNAS-CBERG (192.168.55.240) |
 | Backup schedule | Daily CronJob at 3:00 AM |
 | Storage classes | `longhorn` (dynamic), `longhorn-static` (manual) |
 | Default disk reserve | `storageReservedPercentageForDefaultDisk: 20` (was 30; lowered 2026-05-01 in `kubernetes/apps/storage/longhorn/app/helmrelease.yaml` to free scheduling headroom on nuc14-03 — see commit `a48ef1c2`). Changing the helm value only affects newly-discovered disks; existing disks need a per-node `kubectl -n storage patch nodes.longhorn.io <node> --type=merge -p '{"spec":{"disks":{"default-disk-...":{"storageReserved":<bytes>}}}}'`. |
@@ -298,7 +298,7 @@ Daily schedule (UTC):
 |-------|---------------------------|--------|
 | 02:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
 | 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
-| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.31.230/backups`), `retain: 1` |
+| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 1` |
 
 ```bash
 # Inspect the recurring job pipeline

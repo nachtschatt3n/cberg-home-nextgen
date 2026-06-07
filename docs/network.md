@@ -40,7 +40,7 @@ NUC-01  NUC-02  NUC-03   (k8s nodes, 2.5 GbE)
 - Guest Room USW SW-8 (192.168.30.165, GbE)
 
 **Additional:**
-- UNAS-CBERG (192.168.31.230) — 10 GbE SFP+, Servers VLAN
+- UNAS-CBERG (192.168.55.240) — 10 GbE SFP+, k8s-network VLAN 55 (moved off Servers VLAN 10 2026-06-07 for L2-switched storage)
 - Mac Mini M4 Pro (192.168.30.111) — Ollama AI inference host
 
 ---
@@ -99,7 +99,7 @@ Nodes connect on VLAN 55 (k8s-network, 192.168.55.0/24).
 | Internal Ingress | 192.168.55.x | 80 / 443 | Internal-only services |
 
 **Inter-VLAN Access:**
-- Kubernetes → Servers VLAN (10): NAS at 192.168.31.230
+- NAS (192.168.55.240) is on VLAN 55 itself → node↔NAS storage is L2-switched, not routed (avoids the UDM-Pro ~1 Gbit inter-VLAN routing cap)
 - Kubernetes → IoT VLAN (30): Home automation integrations
 - Kubernetes → Trusted VLAN (1): Network management (UniFi at 192.168.30.1)
 - Gateway routing and firewall rules control all cross-VLAN access
@@ -163,7 +163,7 @@ Internet → Cloudflare DNS
 ### Basic Connectivity
 ```bash
 ping 192.168.30.1       # Gateway
-ping 192.168.31.230     # NAS
+ping 192.168.55.240     # NAS
 ping 192.168.55.5       # AdGuard Home
 ping 192.168.30.111     # Mac Mini (Ollama)
 

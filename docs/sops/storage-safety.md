@@ -92,24 +92,24 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
-| `cifs-jellyfin-media` | `//192.168.31.230/media` | `/` | Delete ⚠ |
-| `cifs-plex-media` | `//192.168.31.230/media` | `/` | Delete ⚠ |
+| `cifs-jellyfin-media` | `//192.168.55.240/media` | `/` | Delete ⚠ |
+| `cifs-plex-media` | `//192.168.55.240/media` | `/` | Delete ⚠ |
 
 **Subdir = entire app share + `reclaimPolicy: Delete` — wipes the whole app share:**
 
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
-| `cifs-frigate-media` | `//192.168.31.230/frigate` | `/media` | Delete |
-| `cifs-scrypted-media` | `//192.168.31.230/scrypted` | `/media` | Delete |
-| `cifs-icloud-docker-mu` | `//192.168.31.230/backups` | `icloud-backup/mu` | Delete |
-| `cifs-jdownloader-media` | `//192.168.31.230/media/downloads` | `/jdownloader` | Delete |
-| `cifs-makemkv-media` | `//192.168.31.230/media` | `/Transcode` | Delete |
-| `cifs-tube-archivist-media` | `//192.168.31.230/media/downloads` | `/tube-archivist` | Delete |
-| `cifs-nextcloud-data` | `//192.168.31.230/nextcloud` | `data` | Delete |
-| `cifs-paperless-consume` | `//192.168.31.230/paperless_ngx` | `consume` | Delete |
-| `cifs-paperless-export` | `//192.168.31.230/paperless_ngx` | `export` | Delete |
-| `cifs-paperless-log` | `//192.168.31.230/paperless_ngx` | `log` | Delete |
-| `cifs-paperless-media` | `//192.168.31.230/paperless_ngx` | `media` | Delete |
+| `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Delete |
+| `cifs-scrypted-media` | `//192.168.55.240/scrypted` | `/media` | Delete |
+| `cifs-icloud-docker-mu` | `//192.168.55.240/backups` | `icloud-backup/mu` | Delete |
+| `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Delete |
+| `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Delete |
+| `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Delete |
+| `cifs-nextcloud-data` | `//192.168.55.240/nextcloud` | `data` | Delete |
+| `cifs-paperless-consume` | `//192.168.55.240/paperless_ngx` | `consume` | Delete |
+| `cifs-paperless-export` | `//192.168.55.240/paperless_ngx` | `export` | Delete |
+| `cifs-paperless-log` | `//192.168.55.240/paperless_ngx` | `log` | Delete |
+| `cifs-paperless-media` | `//192.168.55.240/paperless_ngx` | `media` | Delete |
 
 **Safer (`reclaimPolicy: Retain`) — PVC delete leaves data on share:**
 
@@ -172,7 +172,7 @@ $ PV=$(kubectl -n download get pvc extract-sort-nas -o jsonpath='{.spec.volumeNa
 $ kubectl get pv $PV -o jsonpath='{.spec.csi.volumeAttributes}' | jq
 {
   "subdir": "/",
-  "source": "//192.168.31.230/media",
+  "source": "//192.168.55.240/media",
   ...
 }
 $ kubectl get pv $PV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'
@@ -267,7 +267,7 @@ Likely the SMB connection lost state mid-operation, or the underlying share was 
 |---|---|
 | 1. Trigger | `kubectl delete pvc extract-sort-nas` in `download` namespace, after a one-shot `extract-sort` Job completed |
 | 2. PV | `pvc-806b0642-f818-40c4-aaba-658394a847b4` |
-| 3. StorageClass | `cifs-jellyfin-media` — `source=//192.168.31.230/media`, `subdir=/`, `reclaim=Delete` |
+| 3. StorageClass | `cifs-jellyfin-media` — `source=//192.168.55.240/media`, `subdir=/`, `reclaim=Delete` |
 | 4. CSI action | Mounted the share root, ran `os.RemoveAll`. Smoking gun in `csi-smb-controller` logs: `controllerserver.go:251] removing subdirectory at /tmp/pvc-806b0642-…` |
 | 5. Duration | ~17 minutes (21:15–21:32 UTC) |
 | 6. Loss | ~4.7 TB across audiobooks, books, kopia backups, music, transcode, downloads, most of `data/Movies`, `data/TV Shows`, `data/Music` |

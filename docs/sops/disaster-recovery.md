@@ -289,8 +289,8 @@ kubectl annotate volume <name> -n storage \
    ```
 
 **Recovery — option B: total NAS replacement**
-1. Provision new NAS (same hostname/IP `UNAS-CBERG` @ `192.168.31.230` if
-   possible — saves manifest changes).
+1. Provision new NAS (same hostname/IP `UNAS-CBERG` @ `192.168.55.240` on
+   k8s-network VLAN 55 if possible — saves manifest changes).
 2. Restore shares from offsite backup of the NAS itself (owner-managed).
 3. Point CIFS PVs back at the new NAS. If hostname/IP changed, search/replace
    the StorageClass + PV manifests under `kubernetes/apps/kube-system/csi-driver-smb/`.

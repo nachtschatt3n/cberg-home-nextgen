@@ -1,15 +1,19 @@
 # SOP: CIFS / SMB Mount Options
 
 > Description: Reference for every CIFS/SMB mount in the cluster — the NAS share it points at, the mount options used, the trade-off it expresses, and the use case profile it belongs to. Use this when adding a new CIFS-backed PVC or troubleshooting backup/IO issues.
-> Version: `2026.05.09`
-> Last Updated: `2026-05-09`
+> Version: `2026.06.07`
+> Last Updated: `2026-06-07`
 > Owner: `infra`
+
+> **2026-06-07 — two rules every new share MUST follow:**
+> 1. **NAS is on k8s-network VLAN 55 now** (`192.168.55.240`, was `192.168.31.230` on Servers VLAN 10). Storage is L2-switched, not routed — keeps NAS↔node at ~2.5 GbE line rate (routed inter-VLAN was capped at ~1 Gbit/s by the UDM-Pro). Always reference the NAS via the `${NAS_HOSTNAME}` substitution var, never a literal IP.
+> 2. **Every CIFS StorageClass `mountOptions` MUST include `nosharesock`, `multichannel`, `max_channels=4`.** `nosharesock` gives each mount its own TCP socket — without it, all of a node's mounts share ONE socket and a single stall wedges them all (this caused the 2026-06-07 nextcloud 502). `multichannel` adds per-mount channel parallelism (NAS advertises 2 server interfaces; verified negotiating `Extra Channels: 3`). Both are baked into all existing `cifs-*` SCs.
 
 ---
 
 ## 1) Description
 
-Documents the complete inventory of CIFS/SMB mount points the cluster maintains against the NAS at `192.168.31.230`, the kernel-level mount options each one uses, and the trade-offs that drove those choices. Operators consult this when adding a new CIFS-backed PVC, tuning a workload's IO profile, or diagnosing backup/mount failures.
+Documents the complete inventory of CIFS/SMB mount points the cluster maintains against the NAS at `192.168.55.240`, the kernel-level mount options each one uses, and the trade-offs that drove those choices. Operators consult this when adding a new CIFS-backed PVC, tuning a workload's IO profile, or diagnosing backup/mount failures.
 
 - Scope: Longhorn `BackupTarget` + every `csi-driver-smb` StorageClass and PV
 - Prerequisites: kubectl + cluster access (or read access to the GitOps repo)
@@ -19,14 +23,14 @@ Documents the complete inventory of CIFS/SMB mount points the cluster maintains 
 
 ## 2) Overview
 
-All CIFS mounts target one NAS at `192.168.31.230` (UNAS-CBERG, Servers VLAN 10). Two consumers mount CIFS shares:
+All CIFS mounts target one NAS at `192.168.55.240` (UNAS-CBERG, **k8s-network VLAN 55** — same L2 segment as the nodes, so storage is switched not routed). Two consumers mount CIFS shares:
 
 | Setting | Value |
 |---------|-------|
 | Namespace (CSI driver) | `storage` |
 | Namespace (BackupTarget) | `storage` (Longhorn) |
 | Source of truth | `kubernetes/apps/kube-system/csi-driver-smb/` + per-app `kubernetes/apps/*/<app>/app/storageclass.yaml` |
-| Critical dependency | NAS at `192.168.31.230`, kernel CIFS module on each Talos node |
+| Critical dependency | NAS at `192.168.55.240`, kernel CIFS module on each Talos node |
 | Reclaim policy on every CIFS class | `Retain` (per `docs/sops/storage-safety.md`) |
 
 Three operational profiles emerged from the inventory below, plus a distinct backup profile:
@@ -51,7 +55,7 @@ Source of truth is the YAML for each StorageClass / PV / BackupTarget — there 
   - Per-app `cifs-*` StorageClass definitions live alongside each consuming app, e.g. `kubernetes/apps/home-automation/scrypted-nvr/app/storageclass.yaml`, `kubernetes/apps/office/penpot/app/storageclass.yaml`
   - Static PVs live alongside their consuming app, e.g. `kubernetes/apps/office/nextcloud/app/pvc.yaml`
 - Related manifests: any `kind: PersistentVolume` with `spec.csi.driver: smb.csi.k8s.io`
-- Required IDs/constants: NAS host `192.168.31.230`, share names match table below
+- Required IDs/constants: NAS host `192.168.55.240`, share names match table below
 
 ```yaml
 # Minimal blueprint pattern — Profile A StorageClass
@@ -62,11 +66,14 @@ metadata:
 provisioner: smb.csi.k8s.io
 reclaimPolicy: Retain   # NEVER Delete on shared CIFS
 parameters:
-  source: //192.168.31.230/<share>
+  source: //192.168.55.240/<share>
   subdir: /<non-root-path>   # NEVER `/`
   csi.storage.k8s.io/node-stage-secret-name: cifs-<app>-creds
   csi.storage.k8s.io/node-stage-secret-namespace: storage
 mountOptions:
+  - nosharesock        # MANDATORY: own TCP socket per mount (anti head-of-line-stall)
+  - multichannel       # MANDATORY: per-mount channel parallelism
+  - max_channels=4     # MANDATORY
   - vers=3.1.1
   - dir_mode=0777
   - file_mode=0777
@@ -93,7 +100,10 @@ mountOptions:
    - Set `reclaimPolicy: Retain` (never `Delete` — see `docs/sops/storage-safety.md`)
    - Pin a non-root `subdir` (never `/` — that turns a PVC delete into a share wipe)
    - Reference a SOPS-encrypted credential secret
+   - Use `source: //${NAS_HOSTNAME}/<share>` (the substitution var, never a literal IP — it resolves to the NAS on VLAN 55)
+   - **Include `nosharesock`, `multichannel`, `max_channels=4` in `mountOptions`** (mandatory on every CIFS class — see the 2026-06-07 note at the top)
 4. Add an entry to the inventory table in this SOP in the same PR.
+   - **Note:** StorageClass `parameters`/`mountOptions` are immutable. Changing them on an existing class requires deleting+recreating the SC AND recreating its PVs (scale workload to 0 → storage-safety preflight → delete PVC+PV → Flux reconcile → scale up). Run such batch loops under `bash`, not zsh (zsh doesn't word-split unquoted vars).
 5. Standard GitOps commit/push:
 
 ```bash
@@ -146,6 +156,7 @@ The URL is the cluster's only backup config. A bad change breaks daily backups f
 Mount options shared by Profile A:
 
 ```
+nosharesock, multichannel, max_channels=4,
 vers=3.1.1, dir_mode=0777, file_mode=0777, uid=1000, gid=1000,
 noperm, noatime, rsize=1048576, wsize=1048576,
 cache=loose, actimeo=30, serverino
@@ -162,6 +173,7 @@ cache=loose, actimeo=30, serverino
 Mount options:
 
 ```
+nosharesock, multichannel, max_channels=4,
 vers=3.0, dir_mode=0777, file_mode=0777, uid=1000, gid=1000,
 noperm, cache=none, actimeo=0, noserverino
 ```
@@ -178,7 +190,7 @@ noperm, cache=none, actimeo=0, noserverino
 ### Example D: Profile D (Longhorn BackupTarget)
 
 ```
-cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60
+cifs://192.168.55.240/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60,nosharesock
 ```
 
 | Option | Effect |
@@ -189,6 +201,9 @@ cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,
 | `actimeo=10` | Attribute cache valid for 10 seconds. |
 | `closetimeo=10` | Wait up to 10s for pending writes on close. |
 | `echo_interval=60` | Send SMB keepalive every 60s. |
+| `nosharesock` | Backup gets its own TCP socket so its heavy/stalling IO can't wedge the live CSI mounts on the same node (added 2026-06-07). |
+
+> The BackupTarget URL in `defaultSettings` only *seeds* on first install — to change it on a running cluster you must also patch the live `BackupTarget` CRD: `kubectl -n storage patch backuptarget default --type=merge -p '{"spec":{"backupTargetURL":"..."}}'`.
 
 ### Backup vs application mounts — why the difference
 
@@ -354,7 +369,7 @@ Live BackupTarget changes:
 ```bash
 # Restore the URL captured in this SOP (Example D) if a tuning change broke backups.
 mise exec -- kubectl patch backuptarget default -n storage --type=merge -p \
-  '{"spec":{"backupTargetURL":"cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60"}}'
+  '{"spec":{"backupTargetURL":"cifs://192.168.55.240/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60"}}'
 ```
 
 Application StorageClass / PV changes are GitOps-managed — `git revert <sha>` and let Flux reconcile.

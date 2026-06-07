@@ -44,7 +44,7 @@ All three nodes connect to Basement-SW-24-PoE.
 
 | Device | IP | Role |
 |--------|----|------|
-| UNAS-CBERG (NAS) | 192.168.31.230 | Bulk storage, SMB/NFS shares, backups |
+| UNAS-CBERG (NAS) | 192.168.55.240 | Bulk storage, SMB/NFS shares, backups |
 | Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (gemma4:26b multimodal) |
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
@@ -90,7 +90,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 - Native Ollama API at `http://192.168.30.111:11434/api`
 
 **NAS (UNAS-CBERG):**
-- 10 GbE SFP+ connection on Servers VLAN (192.168.31.0/24)
+- 10 GbE SFP+ connection on **k8s-network VLAN 55** (`192.168.55.240`) — moved off Servers VLAN 10 on 2026-06-07 so node↔NAS storage is L2-switched (line rate) instead of routed through the UDM-Pro (which capped a routed flow at ~1 Gbit/s)
 - Provides SMB/NFS shares for Kubernetes workloads via CSI Driver SMB
 - Hosts Longhorn backup target
 

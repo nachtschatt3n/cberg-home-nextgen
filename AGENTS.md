@@ -255,7 +255,7 @@ Minimum mandatory rules:
     - K8s-nuc14-03
 
 **Storage:**
-- **UNAS-CBERG** (192.168.31.230) - 10 GbE SFP+ connection, Servers VLAN
+- **UNAS-CBERG** (192.168.55.240) - 10 GbE SFP+ connection, **k8s-network VLAN 55** (moved off Servers VLAN 10 on 2026-06-07 so NAS↔node storage is L2-switched, not routed through the gateway — fixed the ~1 Gbit inter-VLAN cap, now 2.5 GbE line rate. See `docs/sops/cifs-mount-options.md`.)
 
 ### VLAN and Network Segmentation
 
@@ -263,11 +263,11 @@ Minimum mandatory rules:
 |---------|--------------|--------|-------------|------------|---------|
 | 1 | Trusted | 192.168.30.0/24 | 2a00:6020:ad52:4300::/64 | 14/101 leases | Network infrastructure, trusted admin devices |
 | 2 | USA-Peer | 192.168.60.0/24 | - | 1/249 leases | VPN/peering connections |
-| 10 | Servers | 192.168.31.0/24 | 2a00:6020:ad52:4301::/64 | 10/249 leases | NAS, server infrastructure |
+| 10 | Servers | 192.168.31.0/24 | 2a00:6020:ad52:4301::/64 | 10/249 leases | Legacy server infrastructure — being retired into VLAN 55 (NAS already moved 2026-06-07; heater/zigbee hub pending) |
 | 20 | Trusted-Devices | 192.168.50.0/24 | 2a00:6020:ad52:4302::/64 | 7/101 leases | Trusted client devices |
 | 30 | IoT | 192.168.32.0/23 | 2a00:6020:ad52:4303::/64 | 102/499 leases | IoT devices, smart home |
 | 40 | Clients-Guests-Untrusted | 192.168.34.0/24 | - | 1/191 leases | Guest and untrusted devices |
-| 55 | k8s-network | 192.168.55.0/24 | 2a00:6020:ad52:4304::/64 | 0/11 leases | Kubernetes cluster nodes |
+| 55 | k8s-network | 192.168.55.0/24 | 2a00:6020:ad52:4304::/64 | 0/11 leases | Kubernetes cluster nodes + storage servers (NAS @ .240). Cilium LB pool .2-.10/.14-.199/.211-.239; nodes .11-.13; DHCP .200-.210; **physical servers reserved .240-.254** |
 
 ### WiFi Networks
 
@@ -307,10 +307,11 @@ Minimum mandatory rules:
 - Dedicated network segment isolated from other VLANs
 
 **Inter-VLAN Access:**
-- Kubernetes services can access:
-  - Servers VLAN (10) - for NAS storage at 192.168.31.230
+- NAS storage (192.168.55.240) is **on VLAN 55 itself** — node↔NAS traffic is L2-switched (no gateway hop). Do NOT put bulk storage behind inter-VLAN routing: the UDM-Pro caps a routed flow at ~1 Gbit/s (CPU routing, offload off), which is why the NAS was moved onto VLAN 55.
+- Kubernetes services still routed cross-VLAN to:
   - IoT VLAN (30) - for home automation integrations
   - Trusted VLAN (1) - for network management
+  - Servers VLAN (10) - remaining legacy devices until retired
 - Gateway routing and firewall rules control cross-VLAN access
 
 ### Network Security Posture
@@ -338,7 +339,7 @@ ping 192.168.30.1
 ping 192.168.55.{node-ip}
 
 # Check NAS connectivity
-ping 192.168.31.230
+ping 192.168.55.240
 
 # Verify cross-VLAN routing
 traceroute {destination-ip}
