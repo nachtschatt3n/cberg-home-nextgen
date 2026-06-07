@@ -12,6 +12,10 @@ spec:
   #                 belt-and-braces guard)
   #   .200-.210     UniFi VLAN 55 DHCP pool (currently empty but reserved by
   #                 the controller for future cluster-node DHCP leases)
+  #   .240-.254     RESERVED for physical servers being folded into VLAN 55
+  #                 (NAS, SolarFocus heater, Zigbee hub, …) as the old Servers
+  #                 VLAN 10 is retired. Carved OUT of the pool so Cilium L2 never
+  #                 ARP-announces a LB IP that collides with a static server.
   # Every existing LB service is pinned via lbipam.cilium.io/ips so future
   # pool changes won't migrate IPs. New auto-allocations come from the
   # blocks below.
@@ -21,4 +25,4 @@ spec:
     - start: "192.168.55.14"
       stop: "192.168.55.199"
     - start: "192.168.55.211"
-      stop: "192.168.55.254"
+      stop: "192.168.55.239"
