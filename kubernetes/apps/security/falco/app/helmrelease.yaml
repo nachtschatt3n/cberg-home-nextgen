@@ -141,6 +141,14 @@ spec:
           # writable layer on every cilium agent start → ~6 level-12 events per
           # cluster-wide cilium roll (upgrades / node reboots). Known-good CNI
           # bootstrap; scope-exclude by container name.
+          #
+          # nextcloud Collabora Office: the built-in Nextcloud Office (Collabora
+          # / richdocumentscode) ships as an AppImage that self-extracts to
+          # /tmp/appimage_extracted_* and runs coolwsd/coolforkit(-ns)/coolmount
+          # from there on every document edit → ~9 level-12 events/day (verified
+          # 2026-06-07: 9/37). Legitimate office workload. Scope TIGHTLY to those
+          # binaries / the AppImage path inside the nextcloud container only — a
+          # different dropped binary in that pod still fires.
           condition: >
             and not (
               proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
@@ -150,7 +158,8 @@ spec:
               proc.aname[3] in (py3compile, dpkg, apt, dpkg-reconfigure, dpkg-deb) or
               proc.exe startswith /data/longhorn or
               proc.exepath startswith /data/longhorn or
-              container.name in (install-openclaw, mount-cgroup, apply-sysctl-overwrites)
+              container.name in (install-openclaw, mount-cgroup, apply-sysctl-overwrites) or
+              (container.name = nextcloud and (proc.exepath startswith /tmp/appimage_extracted or proc.name in (coolwsd, coolforkit, coolforkit-ns, coolmount)))
             )
           override:
             condition: append
