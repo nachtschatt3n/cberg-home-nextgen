@@ -28,7 +28,7 @@ spec:
         # cluster overcommit while still keeping non-zero headroom for Longhorn.
         guaranteedInstanceManagerCpu: 8
         defaultLonghornStaticStorageClass: longhorn-static
-        backupTarget: "cifs://192.168.31.230/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60,nosharesock"
+        backupTarget: "cifs://192.168.55.240/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60,nosharesock"
         backupTargetCredentialSecret: "longhorn-backup-credentials"
         allowRecurringJobWhileVolumeDetached: true
         storageOverProvisioningPercentage: 100
