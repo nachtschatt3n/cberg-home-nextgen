@@ -541,7 +541,13 @@ spec:
       initialDelaySeconds: 120
       periodSeconds: 30
       timeoutSeconds: 60
-      failureThreshold: 3
+      # 3 → 10: status.php returns 503 when the CIFS data mount (NAS) briefly
+      # drops. The old 3×30s=90s threshold killed nextcloud on a transient NAS
+      # blip (2026-06-07 05:12 "Host is down" → exit 137 → restart → 502 that
+      # external monitoring caught). Restarting can't fix a NAS-side blip, so
+      # ride it out: ~5 min (10×30s) lets the mount recover without a restart.
+      # readiness (below) still pulls it from rotation during the blip.
+      failureThreshold: 10
       successThreshold: 1
     readinessProbe:
       enabled: true
