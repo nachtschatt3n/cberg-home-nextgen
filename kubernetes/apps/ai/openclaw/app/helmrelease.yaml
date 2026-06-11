@@ -735,6 +735,47 @@ spec:
                   cfg.messages = cfg.messages || {};
                   cfg.messages.visibleReplies = 'automatic';
 
+                  // Disable LLM provider plugins we don't use. Re-ratified on
+                  // 2026-06-11: this block was committed 2026-05-26 (perf),
+                  // reverted 2026-05-27 in git — but the live config retained
+                  // the disables via spread-merge and they ran trouble-free
+                  // for two weeks (the actual 5/27 incident was an
+                  // openclaw@latest host/plugin version skew, not this).
+                  // Without this block a fresh PVC would re-enable all 46
+                  // providers and bring back the 45s boot with a ~30s
+                  // event-loop stall (kills Discord WS + Telegram poll
+                  // mid-handshake). List mirrors the live config exactly;
+                  // note 'kimi' is the registered id (directory is
+                  // kimi-coding).
+                  const disabledProviders = [
+                    'alibaba', 'anthropic', 'arcee', 'byteplus', 'cerebras',
+                    'chutes', 'cloudflare-ai-gateway', 'copilot-proxy',
+                    'deepinfra', 'deepseek', 'fal', 'fireworks',
+                    'github-copilot', 'google', 'groq', 'huggingface',
+                    'kilocode', 'kimi', 'litellm', 'lmstudio',
+                    'microsoft-foundry', 'minimax', 'mistral', 'moonshot',
+                    'nvidia', 'opencode', 'opencode-go', 'openrouter',
+                    'qianfan', 'qwen', 'sglang', 'stepfun', 'synthetic',
+                    'tencent', 'together', 'venice', 'vercel-ai-gateway',
+                    'vllm', 'volcengine', 'vydra', 'xai', 'xiaomi', 'zai',
+                  ];
+                  cfg.plugins = cfg.plugins || {};
+                  cfg.plugins.entries = cfg.plugins.entries || {};
+                  for (const id of disabledProviders) {
+                    cfg.plugins.entries[id] = cfg.plugins.entries[id] || {};
+                    cfg.plugins.entries[id].enabled = false;
+                  }
+
+                  // Turn off the in-process npm update check (also re-ratified
+                  // 2026-06-11 — live-only since the 5/27 revert). Image
+                  // versions are pinned via the init script; the in-process
+                  // probe has no upgrade path it can act on and just blocks
+                  // the event loop ~2-3s per cycle. Pair-required with the
+                  // OPENCLAW_NO_AUTO_UPDATE env var on the runtime container:
+                  // runGatewayUpdateCheck only short-circuits when BOTH are off.
+                  cfg.update = cfg.update || {};
+                  cfg.update.checkOnStart = false;
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
@@ -1005,6 +1046,12 @@ spec:
                 value: "openai/gpt-5.5"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
+              # Half 2 of the update-check disable (half 1 is
+              # cfg.update.checkOnStart=false in the init script). Both must
+              # be off for runGatewayUpdateCheck to short-circuit before its
+              # npm-registry probe. Re-ratified 2026-06-11.
+              - name: OPENCLAW_NO_AUTO_UPDATE
+                value: "1"
               # Playwright browsers were installed into the PVC during init —
               # point @playwright/mcp at the same location at runtime.
               - name: PLAYWRIGHT_BROWSERS_PATH
