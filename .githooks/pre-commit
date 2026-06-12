@@ -130,6 +130,15 @@ IPV6 = re.compile(r"^[0-9a-fA-F:]+$")
 # not secrets, even though they're in a Secret object. Cap length to prevent
 # masking real `key:longvalue` patterns.
 OCI_TAG = re.compile(r"^[a-zA-Z][a-zA-Z0-9._-]*:[a-zA-Z0-9._-]+$")
+# Kubernetes in-cluster service DNS, optionally with a port — e.g.
+# `postgresql.databases.svc.cluster.local` or `prometheus-pushgateway.monitoring.svc:9091`.
+# Like the IPv4/IPv6 skip above, these are config endpoints (DB host, broker,
+# pushgateway), not credentials, and legitimately appear verbatim in manifests
+# (PG_HOST, *_URL env values). A Secret value that is *only* a service FQDN
+# (e.g. openclaw-secret/PELLET_PG_HOST) was false-positiving every manifest
+# that references the same service. Anchored on the mandatory `.svc` label so
+# no real high-entropy secret can match.
+SVC_DNS = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*\.svc(\.cluster\.local)?(:\d{1,5})?$")
 literals = set()
 data = json.load(sys.stdin)
 for s in data.get("items", []):
@@ -159,6 +168,8 @@ for s in data.get("items", []):
         if len(decoded) >= 6 and IPV6.match(decoded) and ":" in decoded:
             continue
         if len(decoded) <= 30 and OCI_TAG.match(decoded):
+            continue
+        if SVC_DNS.match(decoded):
             continue
         literals.add(decoded)
 with open(out_path, "w") as f:
