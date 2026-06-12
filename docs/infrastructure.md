@@ -118,7 +118,7 @@ manages all subsequent deployments including upgrades to these components.
 | Component | Details |
 |-----------|---------|
 | OS | Talos Linux v1.13.4 (immutable, minimal, Kubernetes-focused; kernel 6.18.34, Clang/ThinLTO) |
-| Container Runtime | Containerd 2.2.3 + Spegel (distributed image caching) |
+| Container Runtime | Containerd 2.2.4 + Spegel (distributed image caching) |
 | CNI | Cilium v1.19.3 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
@@ -204,7 +204,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
 | talosctl | v1.13.4 | CLI (client) — matches cluster OS |
-| talhelper | 3.1.9 | Talos config helper |
+| talhelper | 3.1.11 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |
 
