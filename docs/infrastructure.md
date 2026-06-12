@@ -14,7 +14,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Attribute | Value |
 |-----------|-------|
 | Kubernetes | v1.36.0 |
-| Talos Linux | v1.13.0 |
+| Talos Linux | v1.13.4 |
 | Flux | v2.5.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.19.3 |
@@ -117,7 +117,7 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.13.0 (immutable, minimal, Kubernetes-focused; kernel 6.18.24, Clang/ThinLTO) |
+| OS | Talos Linux v1.13.4 (immutable, minimal, Kubernetes-focused; kernel 6.18.34, Clang/ThinLTO) |
 | Container Runtime | Containerd 2.2.3 + Spegel (distributed image caching) |
 | CNI | Cilium v1.19.3 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
@@ -196,14 +196,14 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
-| Talos Linux | v1.13.0 | Cluster OS |
+| Talos Linux | v1.13.4 | Cluster OS |
 | Flux | v2.5.0 (pinned; see note above) | GitOps operator |
 | Cilium | v1.19.3 | CNI / network |
 | Longhorn | v1.11.2 | Distributed storage |
 | cert-manager | v1.20.2 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
-| talosctl | v1.13.0 | CLI (client) — matches cluster OS |
+| talosctl | v1.13.4 | CLI (client) — matches cluster OS |
 | talhelper | 3.1.9 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |
