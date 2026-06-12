@@ -90,24 +90,11 @@ spec:
               limits:
                 memory: 1Gi
 
-    service:
-      app:
-        controller: scraper
-        ports:
-          metrics:
-            port: 8080
-
-    serviceMonitor:
-      app:
-        serviceName: pallet-price-monitor
-        endpoints:
-          - port: metrics
-            scheme: http
-            path: /metrics
-            interval: 30s
-            scrapeTimeout: 15s
-        labels:
-          release: kube-prometheus-stack
+    # No Service/ServiceMonitor: this is a twice-daily CronJob, so a permanent
+    # per-pod scrape target left a stale `down` endpoint between runs (spurious
+    # Prometheus TargetDown). Metrics are pushed to the in-cluster Pushgateway
+    # at end-of-run instead (PUSHGATEWAY_URL env above), which Prometheus
+    # scrapes as an always-up target. See monitoring/prometheus-pushgateway.
 
     persistence:
       tmp:
