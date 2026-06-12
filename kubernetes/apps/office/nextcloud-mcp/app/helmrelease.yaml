@@ -31,7 +31,7 @@ spec:
           main:
             image:
               repository: ghcr.io/cbcoutinho/nextcloud-mcp-server
-              tag: 0.114.0
+              tag: 0.115.0
             envFrom:
               - secretRef:
                   name: nextcloud-mcp-config

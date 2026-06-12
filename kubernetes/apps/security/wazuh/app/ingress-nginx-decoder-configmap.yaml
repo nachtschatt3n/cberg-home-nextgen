@@ -156,13 +156,34 @@ data:
         <group>web,ingress,attack,</group>
       </rule>
 
-      <!-- 5xx — server errors. Higher signal: usually backend bugs but
-           sustained 5xx from one source IP can indicate a fuzzing
-           attack or denial-of-service attempt. -->
-      <rule id="100502" level="6">
+      <!-- 5xx — server errors. A SINGLE 5xx is routine churn in a GitOps
+           cluster (~98 apps): every Flux/Renovate pod roll, node drain, or
+           backend restart emits a brief 502/503 burst at the ingress while
+           endpoints flip. Scoring each one level 6 inflated the sweep's
+           "high K8s container alert volume (level>=5)" finding — e.g. a
+           single Talos rolling upgrade produced 211 5xx in 24h (HA 160,
+           Authentik 30, Nextcloud 18), all expected maintenance churn.
+           So the base 5xx is level 3 (logged + searchable, below the
+           level>=5 "notable" threshold). REAL signal — a backend that is
+           actually down, or a DoS — is sustained 5xx, caught by the
+           frequency rule 100504 below (mirrors the 4xx pattern in 100503). -->
+      <rule id="100502" level="3">
         <if_sid>100500</if_sid>
         <match type="pcre2">"status":\s*"?5\d\d"?</match>
         <description>Ingress-nginx 5xx response from $(cf_connecting_ip)</description>
+        <group>web,ingress,</group>
+      </rule>
+
+      <!-- Sustained 5xx burst — a backend genuinely down (outage) or under
+           a DoS, as opposed to a single deploy/restart blip. 12+ ingress 5xx
+           in 120s is well above routine rollout churn at this homelab's
+           traffic volume. Level 7 = surfaces in the sweep's level>=5 count
+           and SIEM, where a real outage belongs. Planned maintenance windows
+           (e.g. Talos node rolls) will legitimately trip this — correlate
+           with change activity before treating as an incident. -->
+      <rule id="100504" level="7" frequency="12" timeframe="120">
+        <if_matched_sid>100502</if_matched_sid>
+        <description>Ingress-nginx: 12+ 5xx in 120s — sustained backend outage or DoS</description>
         <group>web,ingress,attack,</group>
       </rule>
 
