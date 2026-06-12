@@ -5,7 +5,11 @@ metadata:
   name: echo-server-pdb
   namespace: default
 spec:
-  minAvailable: 1
+  # maxUnavailable (not minAvailable): with a single replica, minAvailable:1
+  # means ALLOWED DISRUPTIONS 0 — it deadlocked the Talos v1.13.4 node drain
+  # on 2026-06-12 until the 10m timeout. A 1-replica echo/test app must remain
+  # evictable during node maintenance.
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: echo-server
