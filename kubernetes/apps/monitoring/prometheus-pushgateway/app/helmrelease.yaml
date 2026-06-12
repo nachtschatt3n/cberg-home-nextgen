@@ -1,0 +1,45 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-pushgateway
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: prometheus-pushgateway
+      version: 3.1.2
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    # Predictable service DNS for batch-job pushers:
+    #   http://prometheus-pushgateway.monitoring.svc.cluster.local:9091
+    # Permanent, always-up scrape target — replaces the racy per-pod
+    # Service+ServiceMonitor on short-lived CronJobs (e.g. pallet-price-monitor),
+    # which left a stale `down` endpoint between runs (spurious TargetDown).
+    fullnameOverride: prometheus-pushgateway
+    replicaCount: 1
+    # In-memory only: pushers re-send their full snapshot every run (pallet
+    # twice daily), and the staleness alerts degrade gracefully on the rare
+    # pod restart (absent series → expr yields empty → no false alert).
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi

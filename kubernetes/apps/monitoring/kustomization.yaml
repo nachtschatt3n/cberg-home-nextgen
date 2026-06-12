@@ -15,6 +15,7 @@ resources:
   - ./kibana/ks.yaml
   - ./edot-collector/ks.yaml
   - ./otel-operator/ks.yaml
+  - ./prometheus-pushgateway/ks.yaml
   - ./sweep-dashboard/ks.yaml
 patches:
   # PSA override: privileged required for prometheus-node-exporter
