@@ -45,7 +45,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/pellet-price-monitor
-              tag: v0.2.0
+              tag: sha-53e9efa
               pullPolicy: IfNotPresent
             env:
               - { name: TZ, value: "Europe/Berlin" }
@@ -56,6 +56,7 @@ spec:
               - { name: PRIMARY_ZIP, value: "65520" }
               - { name: PRIMARY_AMOUNT_KG, value: "6000" }
               - { name: METRICS_PORT, value: "8080" }
+              - { name: PUSHGATEWAY_URL, value: "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091" }
               - { name: SOURCES_CONFIG, value: "/etc/pellet-monitor/sources.yaml" }
               - { name: SIGNAL_CONFIG, value: "/etc/pellet-monitor/signal.yaml" }
               - name: PG_PASSWORD
