@@ -34,6 +34,14 @@ spec:
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
   values:
+    # The chart creates a PDB (minAvailable: 1) by default. With a single
+    # replica that means ALLOWED DISRUPTIONS 0 — it deadlocked the Talos
+    # v1.13.4 node drain on 2026-06-12 (influxdb pod could not be evicted,
+    # which kept its volume engine on the node and locked Longhorn's
+    # instance-manager PDBs too). A 1-replica StatefulSet gains nothing
+    # from a PDB; disable it so node maintenance can drain.
+    pdb:
+      create: false
     ## influxdb image version
     ## ref: https://hub.docker.com/r/library/influxdb/tags/
     image:
