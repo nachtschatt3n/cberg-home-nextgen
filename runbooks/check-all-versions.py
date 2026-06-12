@@ -1304,7 +1304,10 @@ class VersionChecker:
         if mixed:
             print(f"  {Colors.YELLOW}⚠ Mixed Talos versions across nodes{Colors.RESET}")
         if has_update:
-            print(f"  {Colors.YELLOW}⚠ Update available: {cluster_version} → {latest} ({update_type}){Colors.RESET}")
+            # Name the component explicitly — an unlabeled "v1.13.0 → v1.13.4" was
+            # misattributed to mqttx-web (also on v1.13.0) on 2026-06-09, causing a
+            # bogus image bump + ErrImagePull. Never print a bare version pair.
+            print(f"  {Colors.YELLOW}⚠ Talos update available: {cluster_version} → {latest} ({update_type}){Colors.RESET}")
         elif cluster_version and latest and not has_update:
             print(f"  {Colors.GREEN}✓ Running latest stable Talos{Colors.RESET}")
 
