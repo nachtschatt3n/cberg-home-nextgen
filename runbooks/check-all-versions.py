@@ -1149,6 +1149,29 @@ class VersionChecker:
             print(f"  {Colors.YELLOW}⚠ Failed to fetch latest kvmd release: {e}{Colors.RESET}")
             return None
 
+    def _get_pikvm_repo_version(self, host: str) -> Optional[str]:
+        """Return the kvmd version installable from the host's own pacman repo
+        ("4.171" — pkgrel suffix stripped), or None if the SSH query fails.
+
+        PiKVM publishes GitHub releases days-to-weeks before its Arch pacman
+        repo serves them (observed: installed 4.171, GitHub 4.175, repo still
+        4.171). Only a repo version newer than the installed one is actionable
+        via runbooks/pikvm-update.md — GitHub-only versions must not produce
+        findings. Uses the same passwordless root SSH as the update runbook."""
+        try:
+            out = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                 "-o", "StrictHostKeyChecking=no", f"root@{host}",
+                 "pacman -Sy >/dev/null 2>&1; pacman -Si kvmd 2>/dev/null | awk '/^Version/{print $3}'"],
+                capture_output=True, text=True, timeout=40,
+            )
+            ver = (out.stdout or "").strip()
+            if not ver:
+                return None
+            return ver.split("-", 1)[0]  # "4.171-1" -> "4.171"
+        except Exception:
+            return None
+
     def check_pikvm_versions(self):
         """Compare each PiKVM host's installed kvmd version against upstream.
 
@@ -1160,17 +1183,18 @@ class VersionChecker:
         print(f"\nChecking {Colors.CYAN}PiKVM (kvmd){Colors.RESET}...")
 
         current = self._get_pikvm_versions()
-        latest = self._get_latest_pikvm_release()
+        github_latest = self._get_latest_pikvm_release()
 
-        if latest:
-            print(f"  Upstream latest: {Colors.CYAN}{latest}{Colors.RESET}")
+        if github_latest:
+            print(f"  GitHub latest: {Colors.CYAN}{github_latest}{Colors.RESET} (informational — pacman repo decides actionability)")
         else:
-            print(f"  Upstream latest: {Colors.YELLOW}unknown{Colors.RESET}")
+            print(f"  GitHub latest: {Colors.YELLOW}unknown{Colors.RESET}")
 
-        try:
-            latest_tuple = tuple(int(p) for p in latest.split(".")) if latest else None
-        except Exception:
-            latest_tuple = None
+        def _vt(v):
+            try:
+                return tuple(int(p) for p in v.split(".")) if v else None
+            except Exception:
+                return None
 
         for host, ver in current.items():
             if ver is None:
@@ -1179,41 +1203,57 @@ class VersionChecker:
                     "name": "PiKVM (kvmd)",
                     "host": host,
                     "current_version": None,
-                    "latest_version": latest,
+                    "latest_version": github_latest,
                     "behind": None,
                     "has_critical": False,
                 })
                 continue
 
+            # Actionability is decided by the host's own pacman repo — PiKVM
+            # publishes GitHub releases days-to-weeks before the repo serves
+            # them, so GitHub-only versions are not installable and must not
+            # produce findings (runbooks/pikvm-update.md pre-flight).
+            repo_ver = self._get_pikvm_repo_version(host)
+            target = repo_ver or ver  # repo unreachable -> treat as current (not actionable)
+            if repo_ver:
+                print(f"  {host} pacman repo: {Colors.CYAN}{repo_ver}{Colors.RESET}")
+            else:
+                print(f"  {host} pacman repo: {Colors.YELLOW}unreachable — actionability unknown, treating installed as current{Colors.RESET}")
+            gh_t, tgt_t = _vt(github_latest), _vt(target)
+            if gh_t and tgt_t and gh_t > tgt_t:
+                print(f"  {host}: GitHub {github_latest} ahead of pacman repo — not installable yet, no finding")
+
             color = Colors.GREEN
-            note = "up to date"
+            note = "up to date with pacman repo"
             behind = False
 
-            if latest_tuple:
+            target_tuple = _vt(target)
+            if target_tuple:
                 try:
-                    cur_tuple = tuple(int(p) for p in ver.split("."))
-                    if cur_tuple < latest_tuple:
+                    cur_tuple = _vt(ver)
+                    if cur_tuple and cur_tuple < target_tuple:
                         behind = True
                         # Heuristic severity: major bump or >=10 minor versions = red.
-                        major_bump = cur_tuple[0] < latest_tuple[0]
-                        minor_gap = (latest_tuple[1] - cur_tuple[1]) if cur_tuple[0] == latest_tuple[0] and len(cur_tuple) > 1 and len(latest_tuple) > 1 else 0
+                        major_bump = cur_tuple[0] < target_tuple[0]
+                        minor_gap = (target_tuple[1] - cur_tuple[1]) if cur_tuple[0] == target_tuple[0] and len(cur_tuple) > 1 and len(target_tuple) > 1 else 0
                         if major_bump or minor_gap >= 10:
                             color = Colors.RED
                         else:
                             color = Colors.YELLOW
-                        note = f"behind by {minor_gap} minor versions" if minor_gap else "behind"
+                        note = f"repo has newer: behind by {minor_gap} minor versions — run runbooks/pikvm-update.md" if minor_gap else "behind pacman repo"
                 except Exception:
                     color = Colors.YELLOW
                     note = "version format unparseable"
 
-            arrow = f" → {latest}" if behind else ""
+            arrow = f" → {target}" if behind else ""
             print(f"  {host}: {color}{ver}{arrow}{Colors.RESET} ({note})")
 
             self.external_infra_results.append({
                 "name": "PiKVM (kvmd)",
                 "host": host,
                 "current_version": ver,
-                "latest_version": latest,
+                "latest_version": target,
+                "github_latest": github_latest,
                 "behind": behind,
                 "has_critical": behind and color == Colors.RED,
             })
@@ -1318,6 +1358,10 @@ class VersionChecker:
             "current_version_source": cluster_version_source,
             "latest_version": latest,
             "has_update": has_update,
+            # `behind` is what _emit_findings keys on — without it a Talos
+            # update never produced a tracked finding (only an stdout line),
+            # which is how v1.13.0→v1.13.4 went unattributed for days.
+            "behind": has_update,
             "update_type": update_type,
             "mixed_versions": mixed,
             "node_versions": node_versions,
