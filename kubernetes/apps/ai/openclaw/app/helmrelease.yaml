@@ -961,7 +961,13 @@ spec:
                 seed_workspace_file /etc/openclaw-skills/workspace-soul.md      /home/node/clawd/SOUL.md      "Describe who the assistant is, tone, and boundaries."
                 seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "- Creature:"
                 seed_workspace_file /etc/openclaw-skills/workspace-user.md      /home/node/clawd/USER.md      "- Preferred address:"
-                seed_workspace_file /etc/openclaw-skills/workspace-tools.md     /home/node/clawd/TOOLS.md     "### imsg"
+                # Marker MUST be a stable string that exists in the current
+                # workspace-tools.md, or the file freezes and edits never
+                # propagate. The old "### imsg" section was removed long ago,
+                # which silently froze TOOLS.md (skills landed on PATH but the
+                # agent never saw the guidance for pdf/contacts/browser/etc.).
+                # Use a structural header that always exists.
+                seed_workspace_file /etc/openclaw-skills/workspace-tools.md     /home/node/clawd/TOOLS.md     "## Custom skills on PATH"
                 seed_workspace_file /etc/openclaw-skills/workspace-agents.md    /home/node/clawd/AGENTS.md    "If you refer to the home lab"
                 seed_workspace_file /etc/openclaw-skills/workspace-heartbeat.md /home/node/clawd/HEARTBEAT.md "Optional: keep a tiny checklist"
 
