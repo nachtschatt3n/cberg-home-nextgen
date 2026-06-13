@@ -425,6 +425,23 @@ spec:
                   else
                     echo "WARN: no new libs after install-deps — chromium may fail to launch at runtime"
                   fi
+                  # NSS PKCS#11 modules (libsoftokn3/libfreebl3/libnssckbi/...)
+                  # are dlopen()ed by chromium for TLS/cert handling. They fall
+                  # THROUGH the before/after diff above because the poppler
+                  # apt-get install earlier already pulled libnss3 + these
+                  # modules, so they predate the "before" snapshot — leaving
+                  # chromium to FATAL with `libsoftokn3.so: cannot open shared
+                  # object file` / `NSS error code: -5925` on any https page
+                  # (a data: page launches fine; real TLS does not). Stage them
+                  # explicitly, including the .chk integrity files softoken
+                  # loads beside each .so.
+                  for m in libsoftokn3 libfreebl3 libfreeblpriv3 libnssckbi libnssdbm3; do
+                    for ext in so chk; do
+                      f="/usr/lib/x86_64-linux-gnu/$m.$ext"
+                      [ -f "$f" ] && cp -a "$f" "$PW_RE_LIB/" 2>/dev/null || true
+                    done
+                  done
+                  echo "Staged NSS PKCS#11 modules for chromium TLS"
                   rm -f /tmp/pwlibs.before /tmp/pwlibs.after
                 else
                   echo "WARN: playwright CLI not found at $PLAYWRIGHT_BIN — skipping browser install"
