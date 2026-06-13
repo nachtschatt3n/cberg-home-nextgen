@@ -407,9 +407,28 @@ unifictl local device list --watch 5
 # Export device inventory to CSV
 unifictl local device list -o csv > /tmp/devices.csv
 
-# Rogue AP detection
+# Rogue AP detection (returns ALL neighbour APs — hundreds; only an
+# evil-twin broadcasting one of OUR SSIDs is a real finding)
 unifictl local stat rogueap
+
+# IPS/IDS threat-management alarms (the main UniFi threat signal; 5.5.0+)
+unifictl local stat alarm                    # active alarms
+unifictl local stat alarm --archived         # include archived
+
+# Controller admin-access audit trail — who logged in, source IP, platform (5.5.0+)
+unifictl local log admin-activity --limit 20
+
+# System logs (modern UniFi-OS endpoints, fixed in 5.5.0+)
+unifictl local log critical
+unifictl local log device-alert
+unifictl local event list
 ```
+
+> UniFi is **not** ingested into Wazuh (no `unifi` decoder), so UniFi threat
+> monitoring is done natively via unifictl in the sweep's security-check
+> (`stat alarm` IPS/IDS · `stat rogueap` evil-twin · `log admin-activity`
+> audit). Requires unifictl ≥ 5.5.0 (`.mise.toml` pin); the legacy
+> `event list`/`log` endpoints 404 on this firmware before that release.
 
 **Client Connectivity:**
 ```bash

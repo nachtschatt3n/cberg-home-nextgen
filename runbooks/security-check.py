@@ -1795,34 +1795,65 @@ def s11_unifi() -> tuple[str, Findings, str]:
         except Exception:
             cprint(C.YELLOW, "  🟡 Could not parse client list")
 
-    # Events / IDS
-    events_raw = run("unifictl local event list -o json 2>/dev/null", timeout=15)
-    if not events_raw or not events_raw.strip():
-        # Empty output usually means unifictl session expired or the
-        # controller is briefly unreachable (e.g., during a UniFi
-        # Network application auth-API hang). Section 12 will already
-        # have surfaced the broader connectivity gap; don't double-emit
-        # a parse-failure warning here — the prior version flagged it
-        # as a sweep warning even when there was nothing to parse.
-        pass
-    else:
+    # --- Threat surface (native unifictl 5.5.0+; replaces the dead syslog path) ---
+    # UniFi is not ingested into Wazuh (no `unifi` decoder exists), so monitor
+    # the controller's own security feeds directly. The legacy `event list`
+    # endpoint 404s on this firmware; the modern feeds are:
+    #   stat alarm          -> IPS/IDS threat-management alarms (the main signal)
+    #   stat rogueap        -> rogue APs; only an evil-twin (a rogue broadcasting
+    #                          one of OUR SSIDs) is a finding — neighbour WiFi
+    #                          (hundreds of cars/houses) is expected noise
+    #   log admin-activity  -> controller admin-access audit trail (visibility)
+    def _unifi_json(cmd: str):
+        raw = run_unifictl(f"unifictl local {cmd} -o json 2>/dev/null", timeout=15)
+        if not raw.strip():
+            return None
         try:
-            events = json.loads(events_raw)
-            if isinstance(events, dict):
-                events = events.get("data", [])
-            threats = [e for e in events if any(k in str(e).upper()
-                       for k in ["IDS", "IPS", "THREAT", "INTRUSION", "MALWARE"])]
-            if threats:
-                for t in threats[:5]:
-                    f.add(CRITICAL, f"IDS/IPS event: `{str(t)[:100]}`")
-                    cprint(C.RED, f"  🔴 Threat event: {str(t)[:80]}")
-            else:
-                cprint(C.GREEN, "  🟢 No IDS/IPS events")
-            lines.append(f"IDS/IPS events: **{len(threats)}**\n")
+            doc = json.loads(raw)
+            return doc.get("data", doc) if isinstance(doc, dict) else doc
         except Exception:
-            # Output was non-empty but didn't parse as JSON — real
-            # ergonomics issue worth flagging.
-            cprint(C.YELLOW, "  🟡 Could not parse event list")
+            return None
+
+    # IPS/IDS alarms — active threat-management events
+    alarms = _unifi_json("stat alarm")
+    if alarms is None:
+        cprint(C.YELLOW, "  🟡 Could not read UniFi IPS/IDS alarms (stat alarm)")
+        lines.append("IPS/IDS alarms: query failed\n")
+    elif alarms:
+        for a in alarms[:5]:
+            msg = str(a.get("msg") or a.get("key") or a)[:120]
+            f.add(CRITICAL, f"UniFi IPS/IDS alarm: `{msg}`")
+            cprint(C.RED, f"  🔴 IPS/IDS alarm: {msg[:80]}")
+        lines.append(f"IPS/IDS alarms (active): **{len(alarms)}**\n")
+    else:
+        cprint(C.GREEN, "  🟢 No active IPS/IDS alarms")
+        lines.append("IPS/IDS alarms (active): **0**\n")
+
+    # Evil-twin rogue APs — a rogue broadcasting one of our own SSIDs
+    rogues = _unifi_json("stat rogueap")
+    if rogues is not None:
+        our_ssids = {str(w).lower() for w in
+                     [r.get("name") for r in (_unifi_json("wlan list") or [])] if w}
+        eviltwins = [r for r in rogues
+                     if str(r.get("essid", "")).lower() in our_ssids]
+        if eviltwins:
+            for r in eviltwins[:5]:
+                essid, bssid = r.get("essid", "?"), r.get("bssid", "?")
+                f.add(CRITICAL, f"Evil-twin rogue AP broadcasting `{essid}` (BSSID {bssid})")
+                cprint(C.RED, f"  🔴 Evil-twin AP: {essid} @ {bssid}")
+            lines.append(f"Evil-twin rogue APs: **{len(eviltwins)}** (of {len(rogues)} neighbour APs seen)\n")
+        else:
+            cprint(C.GREEN, f"  🟢 No evil-twin APs ({len(rogues)} neighbour APs, none spoofing our SSIDs)")
+            lines.append(f"Rogue APs: **0 evil-twin** / {len(rogues)} neighbour APs\n")
+
+    # Admin-access audit trail (informational — visibility, not a finding)
+    admin = _unifi_json("log admin-activity --limit 5")
+    if admin:
+        cprint(C.GREEN, f"  🟢 Admin-access audit trail readable ({len(admin)} recent)")
+        lines.append("Recent controller admin access:\n")
+        for ev in admin[:5]:
+            a = ev.get("admin") if isinstance(ev.get("admin"), dict) else {}
+            lines.append(f"- {a.get('name','?')} from {ev.get('ip','?')} ({ev.get('platform','?')})\n")
 
     return f.worst(), f, "\n".join(lines)
 
@@ -1908,27 +1939,15 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
         cprint(C.GREEN, f"  🟢 No concerning medium-severity patterns ({med_total} medium total)")
     lines.append(f"\nMedium-severity alerts (level 7-11, 24h): **{med_total}**\n")
 
-    # --- Slice 3a: UniFi events (any level — they're already filtered) -------
-    body = {
-        "size": 0,
-        "query": {"bool": {"must": [
-            {"range": {"@timestamp": {"gte": "now-24h"}}},
-            {"match": {"decoder.name": "unifi"}},
-        ]}},
-        "aggs": {"by_rule": {"terms": {"field": "rule.description", "size": 10}}},
-    }
-    data = wz.query(body)
-    unifi_total = data["hits"]["total"]["value"] if data else 0
-    lines.append(f"\nUniFi events (24h): **{unifi_total}**\n")
-    if unifi_total > 0 and data:
-        lines.append("Top UniFi rules:\n")
-        for b in data["aggregations"]["by_rule"]["buckets"][:3]:
-            lines.append(f"- {b['key']}: {b['doc_count']}\n")
-    if unifi_total == 0:
-        cprint(C.YELLOW, "  🟡 0 UniFi events ingested (24h) — verify SIEM Server is forwarding")
-        f.add(WARNING, "Wazuh: 0 UniFi events in 24h — UniFi syslog flow may be broken")
-    else:
-        cprint(C.GREEN, f"  🟢 UniFi events flowing ({unifi_total} in 24h)")
+    # --- Slice 3a: UniFi is monitored natively via unifictl, not Wazuh syslog -
+    # This deployment has no `unifi` decoder/ruleset, so `decoder.name=unifi`
+    # is structurally always 0 — the old "0 events in 24h = syslog broken"
+    # check was a permanent false positive. UniFi threats (IPS/IDS alarms,
+    # evil-twin APs) and admin-access audit are checked directly against the
+    # controller in the "UniFi Network Security Audit" section via unifictl
+    # (stat alarm / stat rogueap / log admin-activity). Nothing to assert here.
+    cprint(C.CYAN, "  UniFi: monitored natively via unifictl (see UniFi section)")
+    lines.append("\nUniFi events: monitored natively via unifictl (stat alarm / rogueap / admin-activity), not Wazuh syslog\n")
 
     # --- Slice 3b: K8s container alerts (level >= 5, location *containers*) --
     body = {
