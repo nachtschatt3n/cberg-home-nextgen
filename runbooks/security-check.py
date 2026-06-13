@@ -198,6 +198,23 @@ def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
+def run_unifictl(cmd: str, timeout: int = 15, retries: int = 2, backoff: float = 2.0) -> str:
+    """run() for unifictl probes, retrying transient auth/empty blips.
+
+    The local UniFi controller occasionally 401s or times out when the
+    gateway is momentarily busy (high CPU/mem); a single such blip otherwise
+    manufactures a false "session expired" finding even though the session
+    is valid. Retry on empty output or a login-failed signature before
+    treating it as a real failure."""
+    out = run(cmd, timeout=timeout)
+    for _ in range(retries):
+        if out and "login failed" not in out.lower():
+            break
+        time.sleep(backoff)
+        out = run(cmd, timeout=timeout)
+    return out
+
+
 def run_lines(cmd: str, timeout: int = 30) -> list[str]:
     out = run(cmd, timeout=timeout)
     return [l for l in out.splitlines() if l.strip()]
@@ -1643,7 +1660,7 @@ def s11_unifi() -> tuple[str, Findings, str]:
     lines = []
 
     # Device inventory — use 'device list' subcommand
-    devices_raw = run("unifictl local device list 2>/dev/null", timeout=15)
+    devices_raw = run_unifictl("unifictl local device list 2>/dev/null", timeout=15)
     if not devices_raw or "login failed" in devices_raw:
         f.add(WARNING, "unifictl session expired — re-run `unifictl local configure`")
         cprint(C.YELLOW, "  🟡 unifictl session expired")

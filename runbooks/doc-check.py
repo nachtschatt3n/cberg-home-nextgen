@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -103,6 +104,24 @@ def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:
         return 1, "", str(e)
+
+
+def run_unifictl(cmd: str, timeout: int = 15, retries: int = 2, backoff: float = 2.0) -> tuple[int, str, str]:
+    """run_cmd for unifictl probes, retrying transient auth/empty blips.
+
+    The local UniFi controller occasionally 401s or times out when the
+    gateway is momentarily busy (high CPU/mem); a single such blip otherwise
+    manufactures a false "session expired" finding even though the session
+    is valid. Retry on empty output or login/unauthorized errors before
+    treating it as a real failure."""
+    rc, out, err = run_cmd(cmd, timeout=timeout)
+    for _ in range(retries):
+        transient = rc != 0 or not out or "login failed" in err.lower() or "unauthorized" in err.lower()
+        if not transient:
+            break
+        time.sleep(backoff)
+        rc, out, err = run_cmd(cmd, timeout=timeout)
+    return rc, out, err
 
 
 def run_lines(cmd: str, timeout: int = 30) -> list[str]:
@@ -350,7 +369,7 @@ def s2_network_docs() -> tuple[str, Findings, str]:
 
     # Fetch live VLANs from UniFi
     vlan_cmd = "unifictl local network list -o json"
-    vlan_rc, live_vlan_raw, vlan_err = run_cmd(vlan_cmd, timeout=15)
+    vlan_rc, live_vlan_raw, vlan_err = run_unifictl(vlan_cmd, timeout=15)
     if vlan_rc == 0 and live_vlan_raw and (live_vlan_raw.startswith("[") or live_vlan_raw.startswith("{")):
         try:
             parsed = json.loads(live_vlan_raw)
