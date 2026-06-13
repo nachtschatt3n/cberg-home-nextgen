@@ -125,6 +125,36 @@ spec:
                 popd >/dev/null
                 rm -rf "$DEB_TMP"
 
+                # poppler-utils gives the app container a PDF rasteriser
+                # (pdftoppm) plus text/info extractors. ImageMagick ships in
+                # the base image but its policy.xml blocks the PDF coder and
+                # the ghostscript delegate is absent, so `convert file.pdf`
+                # fails; pdftoppm is the safe path (no ghostscript, no
+                # policy.xml relaxation, no ImageMagick PDF-coder CVE surface).
+                # Same PVC-staging constraint as tmux/rg above.
+                echo "Staging poppler-utils (PDF tools) into PVC runtime-extras..."
+                DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends poppler-utils >/dev/null 2>&1 || \
+                  echo "WARN: poppler-utils install failed — PDF tools unavailable"
+                RE_BIN="$RUNTIME_EXTRAS/usr/bin"
+                RE_LIB="$RUNTIME_EXTRAS/usr/lib/x86_64-linux-gnu"
+                mkdir -p "$RE_BIN" "$RE_LIB"
+                for tool in pdftoppm pdftotext pdfinfo pdftocairo; do
+                  src="$(command -v "$tool" 2>/dev/null || true)"
+                  [ -n "$src" ] && cp -a "$src" "$RE_BIN/" && echo "Staged $tool"
+                done
+                # Only the poppler-specific libs are missing from the base
+                # image (libpoppler + the NSS/NSPR family it links). Copy by
+                # glob so a Debian point-release soname bump (libpoppler.so.126
+                # -> .127) doesn't break staging. Never stage core/imaging libs
+                # (libc, libstdc++, libjpeg, ...) — they ship in the base image
+                # and runtime-extras is FIRST on LD_LIBRARY_PATH, so a stale
+                # copy here would shadow the base and break everything.
+                for libglob in 'libpoppler.so.*' libnss3.so libsmime3.so libnssutil3.so libnspr4.so libplc4.so libplds4.so; do
+                  for lib in /usr/lib/x86_64-linux-gnu/$libglob /lib/x86_64-linux-gnu/$libglob; do
+                    [ -f "$lib" ] && cp -a "$lib" "$RE_LIB/" 2>/dev/null || true
+                  done
+                done
+
                 echo "Configuring passwordless sudo for node user..."
                 useradd -u 1000 -m -s /bin/bash node || true
                 echo "node ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/node
@@ -136,9 +166,9 @@ spec:
                 ln -sf /usr/bin/git "$BIN_DIR/git"
                 ln -sf /usr/bin/python3 "$BIN_DIR/python3"
                 rm -f "$BIN_DIR/gh" "$BIN_DIR/jq" "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
-                # Symlink the runtime-extras bins (tmux/rg) into BIN_DIR so
-                # PATH resolves them at runtime.
-                for bin in rg tmux; do
+                # Symlink the runtime-extras bins (tmux/rg + poppler PDF
+                # tools) into BIN_DIR so PATH resolves them at runtime.
+                for bin in rg tmux pdftoppm pdftotext pdfinfo pdftocairo; do
                   if [ -x "/home/node/.openclaw/runtime-extras/usr/bin/$bin" ]; then
                     ln -sf "/home/node/.openclaw/runtime-extras/usr/bin/$bin" "$BIN_DIR/$bin"
                     echo "Linked $bin from runtime-extras"
