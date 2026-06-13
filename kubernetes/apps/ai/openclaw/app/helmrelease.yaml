@@ -382,19 +382,50 @@ spec:
                 # talking to the home-automation pellets DB.
                 install_pip pg8000
 
-                # Playwright browsers + apt deps for the @playwright/mcp server.
-                # Browsers land in the PVC so they survive pod restarts.
+                # Playwright chromium + the ~40 system libs it needs.
+                # The browser bundle lands in the PVC (survives restarts).
+                # BUT the apt deps `install-deps` pulls land in THIS init
+                # container's EPHEMERAL fs and are gone at runtime — the exact
+                # bug that made the agent hand-download libgbm/libnss/etc. So,
+                # like tmux/rg and poppler above, diff the system lib dir
+                # before/after install-deps and stage the *added* .so files
+                # into runtime-extras (first on the app container's
+                # LD_LIBRARY_PATH). The before/after delta is precisely what's
+                # missing from the base image: it skips core libs (already
+                # present, must come from base) and catches dlopen()ed libs
+                # that `ldd` alone would miss. Chromium must run --no-sandbox
+                # on Talos (unprivileged userns blocked) — that flag lives in
+                # the @playwright/mcp args in mcporter-config.yaml, and /dev/shm
+                # is a Memory emptyDir (see persistence) so chromium doesn't
+                # OOM on the default 64M shm.
                 export PLAYWRIGHT_BROWSERS_PATH=/home/node/.openclaw/playwright-browsers
                 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
                 PLAYWRIGHT_BIN="/home/node/.openclaw/bin/playwright"
                 if [ -x "$PLAYWRIGHT_BIN" ]; then
-                  echo "Installing Playwright chromium + system deps..."
+                  echo "Installing Playwright chromium + staging system deps..."
+                  PW_LIBDIRS="/usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu"
+                  find $PW_LIBDIRS -maxdepth 1 -name '*.so*' 2>/dev/null | sort > /tmp/pwlibs.before || true
                   if ! "$PLAYWRIGHT_BIN" install-deps chromium; then
                     echo "WARN: playwright install-deps failed (continuing)"
                   fi
                   if ! "$PLAYWRIGHT_BIN" install chromium; then
                     echo "WARN: playwright install chromium failed (continuing)"
                   fi
+                  find $PW_LIBDIRS -maxdepth 1 -name '*.so*' 2>/dev/null | sort > /tmp/pwlibs.after || true
+                  PW_RE_LIB="$RUNTIME_EXTRAS/usr/lib/x86_64-linux-gnu"
+                  mkdir -p "$PW_RE_LIB"
+                  pw_added="$(comm -13 /tmp/pwlibs.before /tmp/pwlibs.after || true)"
+                  if [ -n "$pw_added" ]; then
+                    pw_n=0
+                    while IFS= read -r lib; do
+                      [ -f "$lib" ] || continue
+                      cp -a "$lib" "$PW_RE_LIB/" 2>/dev/null && pw_n=$((pw_n+1)) || true
+                    done <<< "$pw_added"
+                    echo "Staged $pw_n chromium system libs into runtime-extras"
+                  else
+                    echo "WARN: no new libs after install-deps — chromium may fail to launch at runtime"
+                  fi
+                  rm -f /tmp/pwlibs.before /tmp/pwlibs.after
                 else
                   echo "WARN: playwright CLI not found at $PLAYWRIGHT_BIN — skipping browser install"
                 fi
@@ -1230,6 +1261,17 @@ spec:
           openclaw:
             app:
               - path: /tmp
+
+      # Memory-backed /dev/shm so headless chromium (@playwright/mcp) doesn't
+      # crash on the container default 64M shared-memory segment.
+      dshm:
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 512Mi
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /dev/shm
 
       mcp-servers:
         type: configMap

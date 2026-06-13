@@ -38,6 +38,7 @@ data:
           "-y",
           "@playwright/mcp@latest",
           "--headless",
+          "--no-sandbox",
           "--browser=chromium",
           "--user-data-dir=/home/node/.openclaw/browser-profiles/default",
           "--isolated=false"
