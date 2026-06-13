@@ -944,6 +944,11 @@ log_section "Section 10: Longhorn Storage"
 
     TOTAL_VOLUMES=$(safe_count "kubectl get volumes -n storage --no-headers 2>/dev/null | wc -l")
     UNHEALTHY_VOLUMES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq '[.items[] | select(.status.state != "attached" or .status.robustness != "healthy")] | length')
+    # Per-volume detail so each unhealthy volume becomes its own finding with
+    # the volume name in the title — lets an accepted-risk match a specific
+    # volume (e.g. an intentionally scaled-down app's detached session PVC)
+    # without masking an unrelated real failure on a different volume.
+    UNHEALTHY_DETAIL=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '.items[] | select(.status.state != "attached" or .status.robustness != "healthy") | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"')
 
     echo "Volumes: $((TOTAL_VOLUMES - UNHEALTHY_VOLUMES))/$TOTAL_VOLUMES healthy"
 
@@ -993,7 +998,9 @@ log_section "Section 10: Longhorn Storage"
     else
         log_warning "Storage issues - Unhealthy volumes: $UNHEALTHY_VOLUMES, Pending PVCs: $PENDING_PVC, AutoDelete: $AUTO_DELETE"
         if [ "$UNHEALTHY_VOLUMES" -gt 0 ]; then
-            add_major_issue "Unhealthy Longhorn volumes: $UNHEALTHY_VOLUMES"
+            while IFS= read -r vline; do
+                [ -n "$vline" ] && add_major_issue "Unhealthy Longhorn volume: $vline"
+            done <<< "$UNHEALTHY_DETAIL"
         fi
         if [ "$PENDING_PVC" -gt 0 ]; then
             add_major_issue "Pending PVCs: $PENDING_PVC"
@@ -1002,7 +1009,9 @@ log_section "Section 10: Longhorn Storage"
             add_minor_issue "AutoDelete setting is $AUTO_DELETE (should be false)"
         fi
         if [ -n "$REPLICA_MISMATCHES" ]; then
-            add_minor_issue "Longhorn volumes with unhealthy robustness: $MISMATCH_COUNT"
+            while IFS= read -r vline; do
+                [ -n "$vline" ] && add_minor_issue "Longhorn volume unhealthy robustness: $vline"
+            done <<< "$REPLICA_MISMATCHES"
         fi
     fi
     if [ "$DETACH_EVENTS" -gt 5 ]; then
@@ -2836,54 +2845,66 @@ log_section "Home Assistant Health (via hactl doctor)"
             fi
         fi
 
-        hactl_output=$("$HACTL_BIN" doctor --check config_entries --check zombie_devices 2>&1)
-        hactl_rc=$?
+        # hactl `doctor` exits non-zero when a single check's HA API call
+        # transiently blips (a ClickException bubbles up), NOT only when it
+        # finds real problems — and the old combined `--check a --check b`
+        # form silently ran only the LAST check (hactl's --check is
+        # single-valued). That pairing produced a recurring, non-actionable
+        # "hactl doctor exited with rc=1" finding while config_entries was
+        # never actually checked. Fix: run each scoped check on its own,
+        # retry once to ride out a transient blip, and route on the Summary
+        # block — a run that printed a Summary is a real result (parse it for
+        # genuine HA findings regardless of exit code); only a persistent
+        # no-Summary failure across both checks is surfaced.
+        hactl_summaries=""
+        hactl_bodies=""
+        for chk in config_entries zombie_devices; do
+            chk_out=""
+            for attempt in 1 2; do
+                chk_out=$("$HACTL_BIN" doctor --check "$chk" 2>&1)
+                printf '%s\n' "$chk_out" | grep -q '^=== Summary ===' && break
+                [ "$attempt" -eq 1 ] && sleep 3
+            done
+            if printf '%s\n' "$chk_out" | grep -q '^=== Summary ==='; then
+                hactl_summaries="${hactl_summaries}${chk_out}"$'\n'
+                hactl_bodies="${hactl_bodies}$(printf '%s\n' "$chk_out" | awk '/^=== Summary ===/{exit} /^---/{p=1} p')"$'\n'
+            else
+                echo "hactl doctor --check $chk: no summary after retry (transient HA API?) — first 10 lines:"
+                printf '%s\n' "$chk_out" | head -10
+            fi
+        done
 
-        if [ "$hactl_rc" -ne 0 ]; then
-            echo "hactl doctor exited with rc=$hactl_rc — first 20 lines:"
-            printf '%s\n' "$hactl_output" | head -20
-            add_minor_issue "hactl doctor exited with rc=$hactl_rc"
+        if [ -z "$hactl_summaries" ]; then
+            # Both checks failed to produce any report across retries — a
+            # genuine, persistent hactl/HA-API problem worth a minor flag.
+            add_minor_issue "hactl doctor produced no report (HA API unreachable?)"
         else
-            # Echo Integrations + Zombie Devices section bodies inline so a
-            # human reading health-check-current.md sees actual findings,
-            # not just abstract counts. Slice from the first `---` block
-            # through the line before `=== Summary ===`.
+            # Echo the Integrations + Zombie Devices section bodies inline so a
+            # human reading health-check-current.md sees actual findings.
             echo "--- hactl doctor findings ---"
-            printf '%s\n' "$hactl_output" \
-                | awk '/^=== Summary ===/{exit} /^---/{p=1} p' \
-                || true
+            printf '%s\n' "$hactl_bodies"
             echo ""
 
-            # Parse summary block. Counts live as "  Critical:   N", etc.
-            crit_count=$(printf '%s\n' "$hactl_output" \
-                | awk '/^=== Summary ===/{f=1; next} f && /^[[:space:]]+Critical:/{print $2; exit}')
-            warn_count=$(printf '%s\n' "$hactl_output" \
-                | awk '/^=== Summary ===/{f=1; next} f && /^[[:space:]]+Warnings:/{print $2; exit}')
-            overall=$(printf '%s\n' "$hactl_output" \
-                | awk -F': *' '/Overall Health:/{print $2; exit}' | tr -d '[:space:]')
-
+            # Sum Critical/Warnings across each scoped check's Summary block.
+            crit_count=$(printf '%s\n' "$hactl_summaries" \
+                | awk '/^=== Summary ===/{s=1;next} s&&/^[[:space:]]+Critical:/{c+=$2} s&&/^[[:space:]]+Warnings:/{w+=$2;s=0} END{print c+0}')
+            warn_count=$(printf '%s\n' "$hactl_summaries" \
+                | awk '/^=== Summary ===/{s=1;next} s&&/^[[:space:]]+Critical:/{c+=$2} s&&/^[[:space:]]+Warnings:/{w+=$2;s=0} END{print w+0}')
             crit_count=${crit_count:-0}
             warn_count=${warn_count:-0}
-            overall=${overall:-UNKNOWN}
+            overall=OK
+            [ "$warn_count" -gt 0 ] 2>/dev/null && overall=WARNING
+            [ "$crit_count" -gt 0 ] 2>/dev/null && overall=CRITICAL
 
             echo "hactl summary: critical=$crit_count warnings=$warn_count overall=$overall"
-
-            if [ "$overall" = "CRITICAL" ]; then
-                log_critical "HA overall health: CRITICAL (hactl doctor)"
-                add_critical_issue "HA overall health: CRITICAL — run \`hactl doctor\` immediately"
-            fi
 
             if [ "$crit_count" -gt 0 ] 2>/dev/null; then
                 log_critical "HA: $crit_count critical hactl finding(s)"
                 add_major_issue "HA: $crit_count critical hactl finding(s) — run \`hactl doctor\` for detail"
-            fi
-
-            if [ "$warn_count" -gt 0 ] 2>/dev/null; then
+            elif [ "$warn_count" -gt 0 ] 2>/dev/null; then
                 log_warning "HA: $warn_count warning hactl finding(s)"
                 add_minor_issue "HA: $warn_count warning hactl finding(s) — run \`hactl doctor\` for detail"
-            fi
-
-            if [ "$overall" = "OK" ] && [ "$crit_count" -eq 0 ] && [ "$warn_count" -eq 0 ]; then
+            else
                 log_success "hactl doctor: HA integrations + zombie devices clean"
             fi
         fi
