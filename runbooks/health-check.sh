@@ -2872,18 +2872,22 @@ log_section "Home Assistant Health (via hactl doctor)"
         # single-valued). That pairing produced a recurring, non-actionable
         # "hactl doctor exited with rc=1" finding while config_entries was
         # never actually checked. Fix: run each scoped check on its own,
-        # retry once to ride out a transient blip, and route on the Summary
-        # block — a run that printed a Summary is a real result (parse it for
+        # retry with backoff to ride out a transient blip, and route on the
+        # Summary block — a run that printed a Summary is a real result (parse it for
         # genuine HA findings regardless of exit code); only a persistent
         # no-Summary failure across both checks is surfaced.
         hactl_summaries=""
         hactl_bodies=""
         for chk in config_entries zombie_devices; do
             chk_out=""
-            for attempt in 1 2; do
+            # Up to 3 attempts with progressive backoff (5s, 10s ≈ 15s/check) so
+            # a longer transient HA API blip — the cause of the recurring
+            # false-positive no-report finding — is ridden out before flagging.
+            # A genuinely unreachable API still fails all 3 and surfaces it.
+            for attempt in 1 2 3; do
                 chk_out=$("$HACTL_BIN" doctor --check "$chk" 2>&1)
                 printf '%s\n' "$chk_out" | grep -q '^=== Summary ===' && break
-                [ "$attempt" -eq 1 ] && sleep 3
+                [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
             done
             if printf '%s\n' "$chk_out" | grep -q '^=== Summary ==='; then
                 hactl_summaries="${hactl_summaries}${chk_out}"$'\n'
