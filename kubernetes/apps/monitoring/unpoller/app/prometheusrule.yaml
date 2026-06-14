@@ -73,14 +73,14 @@ spec:
       rules:
         - alert: UnifiControllerUnreachable
           expr: up{job="unpoller"} == 0
-          for: 5m
+          for: 15m
           labels:
             severity: critical
             category: network
             component: unifi
           annotations:
             summary: "UnPoller cannot reach UniFi controller"
-            description: "UnPoller has failed to scrape metrics from the UniFi controller for 5 minutes. Check controller availability and credentials."
+            description: "UnPoller has failed to scrape metrics from the UniFi controller for 15 minutes. Check controller availability and credentials. Note: UnPoller polls the controller inline per scrape, so transient UDM-Pro latency spikes can briefly mark the target down without the controller being truly unreachable."
 
         - alert: UnifiHighWirelessInterference
           expr: unifipoller_device_radio_channel_interference > 70
