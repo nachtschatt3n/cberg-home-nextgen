@@ -198,6 +198,14 @@ kubectl get pods -n ai -l app.kubernetes.io/name=openclaw
 # Access: https://openclaw.${SECRET_DOMAIN}
 ```
 
+**Voice fallback:** `say.py` uses ElevenLabs as the primary TTS provider with
+a local Qwen3-TTS fallback (mlx-audio, OpenAI-compatible) at
+`http://192.168.30.111:8000/v1` on the mini. The fallback base URL comes from
+the `OPENCLAW_TTS_FALLBACK_URL` key in the `openclaw-secret` SOPS secret
+(`kubernetes/apps/ai/openclaw/app/secret.sops.yaml`) and is triggered on
+ElevenLabs HTTP 401/429 (quota). It returns WAV, which `say.py` converts to
+OGG/Opus via the existing ffmpeg path — the `sendVoice` flow is unchanged.
+
 ### MCPO (`ai/mcpo`)
 
 Model Control Plane Orchestrator.

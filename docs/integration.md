@@ -59,6 +59,13 @@ Endpoints: /v1/chat/completions
 - Google Generative AI: conversation, TTS, AI task, STT
 - Google Translate: TTS
 
+**OpenClaw voice synthesis (say.py):** ElevenLabs (primary) with a local
+Qwen3-TTS fallback at `http://192.168.30.111:8000/v1` (mini, Trusted VLAN),
+env `OPENCLAW_TTS_FALLBACK_URL` (from SOPS secret `openclaw-secret`). The
+fallback is triggered when ElevenLabs returns HTTP 401/429 (quota) and
+returns WAV, which say.py converts to OGG/Opus via the existing ffmpeg path
+before `sendVoice` — keeping the voice flow unchanged.
+
 ### Testing Endpoints
 
 ```bash
