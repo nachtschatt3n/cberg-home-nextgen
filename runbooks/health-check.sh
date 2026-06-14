@@ -2620,6 +2620,114 @@ log_section "Section 24a: Network Infrastructure Services"
         elif [ "$CRON_STATUS" = "ok" ]; then
             log_success "openclaw Morning Briefing cron last run: ok (codex auth healthy)"
         fi
+
+        # openclaw voice — the morning-briefing voice note has two providers:
+        # the local Qwen3-TTS server (primary, OPENCLAW_TTS_FALLBACK_URL points at
+        # <host>/v1 so the health endpoint is <host>/health) and ElevenLabs (paid,
+        # quota-limited fallback). Severity is weighed against one briefing (~3500 chars).
+        echo "openclaw voice:"
+        TTS_HEALTH=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'u="${OPENCLAW_TTS_FALLBACK_URL%/v1}"; curl -fsS -m5 "$u/health" 2>/dev/null' 2>/dev/null)
+        TTS_OK=0
+        if printf '%s' "$TTS_HEALTH" | grep -q '"status"[: ]*"ok"'; then
+            TTS_OK=1
+            TTS_MODEL_LOADED=$(printf '%s' "$TTS_HEALTH" | jq -r '.model_loaded // empty' 2>/dev/null)
+            echo "  local TTS: ok (model_loaded=$TTS_MODEL_LOADED)"
+        else
+            echo "  local TTS: unreachable"
+        fi
+
+        EL_REMAIN=""
+        EL_SUB=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'curl -fsS -m8 -H "xi-api-key: $ELEVENLABS_API_KEY" https://api.elevenlabs.io/v1/user/subscription 2>/dev/null' 2>/dev/null)
+        if [ -n "$EL_SUB" ]; then
+            EL_LIMIT=$(printf '%s' "$EL_SUB" | jq -r '.character_limit // empty' 2>/dev/null)
+            EL_USED=$(printf '%s' "$EL_SUB" | jq -r '.character_count // empty' 2>/dev/null)
+            if [ -n "$EL_LIMIT" ] && [ -n "$EL_USED" ]; then
+                EL_REMAIN=$(( EL_LIMIT - EL_USED ))
+                echo "  ElevenLabs fallback quota: ${EL_REMAIN} chars remaining (${EL_USED}/${EL_LIMIT})"
+            fi
+        else
+            echo "  ElevenLabs subscription: unreachable / no key"
+        fi
+
+        EL_LOW=1
+        if [ -n "$EL_REMAIN" ] && [ "$EL_REMAIN" -ge 3500 ]; then EL_LOW=0; fi
+        if [ "$TTS_OK" -eq 0 ] && [ "$EL_LOW" -eq 1 ]; then
+            log_critical "openclaw voice: no working path (local TTS down AND ElevenLabs quota <3500 chars)"
+            add_critical_issue "openclaw voice broken — local Qwen3-TTS unreachable and ElevenLabs fallback quota exhausted; morning-briefing voice will fail."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif [ "$TTS_OK" -eq 0 ]; then
+            log_warning "openclaw voice: local TTS down — running on paid ElevenLabs fallback"
+            add_major_issue "openclaw local Qwen3-TTS (192.168.30.111:8000) unreachable — voice on ElevenLabs fallback (quota-limited). Restart the mlx-tts server."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif [ "$EL_LOW" -eq 1 ]; then
+            log_warning "openclaw voice: ElevenLabs fallback unavailable (quota low) — primary local TTS ok"
+            add_minor_issue "openclaw ElevenLabs fallback quota <3500 chars — fine while local TTS is healthy, but no fallback if it drops (resets monthly)."
+        else
+            log_success "openclaw voice: local TTS ok + ElevenLabs fallback available"
+        fi
+
+        # Last morning-briefing voice outcome — catches voice breakage even when
+        # codex auth is healthy (the briefing log records 'voice sent' on success).
+        BRIEF_LOG=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'tail -40 ~/clawd/state/morning-briefing/briefing.log 2>/dev/null; tail -40 ~/clawd/.tmp/morning-briefing/*.log 2>/dev/null' 2>/dev/null)
+        if [ -n "$BRIEF_LOG" ]; then
+            LAST_VOICE_SENT=$(printf '%s' "$BRIEF_LOG" | grep -E "voice sent" | tail -1)
+            if [ -n "$LAST_VOICE_SENT" ]; then
+                VTS_RAW=$(printf '%s' "$LAST_VOICE_SENT" | awk '{print $1}')
+                VTS=$(date -d "$VTS_RAW" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "${VTS_RAW%%+*}" +%s 2>/dev/null || echo "")
+                if [ -n "$VTS" ]; then
+                    VAGE_H=$(( ($(date +%s) - VTS) / 3600 ))
+                    echo "  last briefing voice sent ${VAGE_H}h ago"
+                    if [ "$VAGE_H" -gt 26 ]; then
+                        log_warning "openclaw morning briefing: last voice sent ${VAGE_H}h ago (>26h)"
+                        add_major_issue "openclaw morning-briefing voice last delivered ${VAGE_H}h ago — daily briefing may be failing."
+                    else
+                        log_success "openclaw morning briefing: voice delivered ${VAGE_H}h ago"
+                    fi
+                else
+                    log_success "openclaw morning briefing: voice sent (timestamp unparsed)"
+                fi
+            else
+                echo "  no 'voice sent' line in recent briefing log"
+                log_warning "openclaw morning briefing: no recent 'voice sent' confirmation"
+                add_major_issue "openclaw morning-briefing voice not confirmed sent — check ~/clawd/state/morning-briefing/briefing.log"
+            fi
+        fi
+
+        # openclaw skills + tool deps (shallow presence check)
+        echo "openclaw skills:"
+        SKILLS_PROBE=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc '
+            miss=""
+            for s in say ha mail sure paperless nc contacts pallet; do
+                [ -x "$HOME/.openclaw/bin/$s" ] || miss="$miss $s"
+            done
+            echo "SKILLS:$miss"
+            tmiss=""
+            for t in kubectl ffmpeg jq hactl; do
+                command -v "$t" >/dev/null 2>&1 || tmiss="$tmiss $t"
+            done
+            if [ -n "$PLAYWRIGHT_BROWSERS_PATH" ]; then
+                ls "$PLAYWRIGHT_BROWSERS_PATH"/chromium*/chrome-linux*/chrome >/dev/null 2>&1 || tmiss="$tmiss chromium"
+            fi
+            echo "TOOLS:$tmiss"
+        ' 2>/dev/null)
+        SK_MISS=$(printf '%s' "$SKILLS_PROBE" | sed -n 's/^SKILLS://p' | xargs)
+        TL_MISS=$(printf '%s' "$SKILLS_PROBE" | sed -n 's/^TOOLS://p' | xargs)
+        if [ -n "$SK_MISS" ]; then
+            log_warning "openclaw skills missing: $SK_MISS"
+            add_major_issue "openclaw skill binaries missing in ~/.openclaw/bin: $SK_MISS — re-check skills-configmap seeding."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif [ -n "$SKILLS_PROBE" ]; then
+            log_success "openclaw skills: all present (say ha mail sure paperless nc contacts pallet)"
+        fi
+        if [ -n "$TL_MISS" ]; then
+            log_warning "openclaw tool deps missing: $TL_MISS"
+            add_minor_issue "openclaw tool deps not resolvable in-pod: $TL_MISS — dependent skills will fail."
+        elif [ -n "$SKILLS_PROBE" ]; then
+            echo "  tool deps: kubectl ffmpeg jq hactl chromium ok"
+        fi
     fi
     echo ""
 
@@ -2814,19 +2922,28 @@ log_section "Home Assistant Health (via hactl doctor)"
     # section logs a single skip line and continues — it is informational
     # enrichment, never a script-fatal dependency.
 
-    # 1. Locate hactl. The binary lives under the hactl repo's mise-managed
-    #    Python install (separate from this repo's mise env, which pins
-    #    Python 3.12). Try PATH first, then known install dir.
-    HACTL_BIN=""
-    if command -v hactl >/dev/null 2>&1; then
-        HACTL_BIN="hactl"
+    # 1. Resolve how to invoke hactl. hactl lives in its OWN repo
+    #    (/Users/mu/code/hactl) with a separate mise-pinned Python. The bare
+    #    `hactl` PATH shim FAILS with "No version is set for shim" when run
+    #    from THIS repo, because cberg's .mise.toml doesn't define hactl — so
+    #    `command -v hactl` is a trap (it resolves the broken shim). Invoke
+    #    via `mise exec` from the hactl repo so mise picks the right version;
+    #    fall back to a direct install path. run_hactl() is the single entry.
+    HACTL_DIR=/Users/mu/code/hactl
+    HACTL_OK=0
+    if [ -f "$HACTL_DIR/.mise.toml" ] && command -v mise >/dev/null 2>&1 \
+        && (cd "$HACTL_DIR" && mise which hactl) >/dev/null 2>&1; then
+        run_hactl() { (cd "$HACTL_DIR" && mise exec -- hactl "$@"); }
+        HACTL_OK=1
     else
         for cand in \
             /Users/mu/.local/share/mise/installs/python/3.13.13/bin/hactl \
             /Users/mu/.local/bin/hactl \
             /opt/homebrew/bin/hactl; do
             if [ -x "$cand" ]; then
-                HACTL_BIN="$cand"
+                HACTL_CAND="$cand"
+                run_hactl() { "$HACTL_CAND" "$@"; }
+                HACTL_OK=1
                 break
             fi
         done
@@ -2843,7 +2960,7 @@ log_section "Home Assistant Health (via hactl doctor)"
         fi
     fi
 
-    if [ -z "$HACTL_BIN" ] || [ -z "${HASS_URL:-}" ] || [ -z "${HASS_TOKEN:-}" ]; then
+    if [ "$HACTL_OK" -eq 0 ] || [ -z "${HASS_URL:-}" ] || [ -z "${HASS_TOKEN:-}" ]; then
         echo "hactl unavailable, skipping HA-side health check"
     else
         # First: apply haghs_ignore labels to known-flaky devices from
@@ -2852,7 +2969,7 @@ log_section "Home Assistant Health (via hactl doctor)"
         # no-ops. Failures are non-fatal: doctor still runs.
         allowlist_path="$NOISE_ALLOWLIST"
         if [ -r "$allowlist_path" ]; then
-            label_output=$("$HACTL_BIN" label apply --from-allowlist "$allowlist_path" --label haghs_ignore --yes 2>&1)
+            label_output=$(run_hactl label apply --from-allowlist "$allowlist_path" --label haghs_ignore --yes 2>&1)
             label_rc=$?
             if [ "$label_rc" -eq 0 ]; then
                 applied=$(printf '%s\n' "$label_output" | grep -c '^[[:space:]]*+label haghs_ignore on device' || true)
@@ -2885,7 +3002,7 @@ log_section "Home Assistant Health (via hactl doctor)"
             # false-positive no-report finding — is ridden out before flagging.
             # A genuinely unreachable API still fails all 3 and surfaces it.
             for attempt in 1 2 3; do
-                chk_out=$("$HACTL_BIN" doctor --check "$chk" 2>&1)
+                chk_out=$(run_hactl doctor --check "$chk" 2>&1)
                 printf '%s\n' "$chk_out" | grep -q '^=== Summary ===' && break
                 [ "$attempt" -lt 3 ] && sleep $((attempt * 5))
             done
