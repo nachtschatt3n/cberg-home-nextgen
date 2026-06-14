@@ -1,0 +1,144 @@
+---
+# Real-time, laptop-independent voice probe for OpenClaw. Checks the local
+# Qwen3-TTS server and the ElevenLabs fallback quota, and fires/resolves an alert
+# via the Alertmanager v2 API so it flows through the existing Telegram receiver.
+# HTTP-only — no kubectl/exec, so the Job needs no RBAC/ServiceAccount perms.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-probe-script
+  namespace: ai
+data:
+  probe.py: |
+    import json, os, time, urllib.request
+
+    AM = os.environ.get("ALERTMANAGER_URL",
+                        "http://kube-prometheus-stack-alertmanager.monitoring.svc:9093")
+    TTS_URL = os.environ.get("OPENCLAW_TTS_FALLBACK_URL", "")
+    EL_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+    BRIEFING_CHARS = 3500  # one morning briefing ~= 3000-3500 chars
+
+    def _get(url, headers=None, timeout=8):
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode()
+
+    def tts_ok():
+        if not TTS_URL:
+            return False
+        base = TTS_URL[:-3] if TTS_URL.endswith("/v1") else TTS_URL.rstrip("/")
+        try:
+            return json.loads(_get(base + "/health", timeout=5)).get("status") == "ok"
+        except Exception as e:
+            print("tts health error:", e)
+            return False
+
+    def el_remaining():
+        if not EL_KEY:
+            return None
+        try:
+            d = json.loads(_get("https://api.elevenlabs.io/v1/user/subscription",
+                                headers={"xi-api-key": EL_KEY}))
+            return int(d["character_limit"]) - int(d["character_count"])
+        except Exception as e:
+            print("elevenlabs error:", e)
+            return None
+
+    def _ts(offset=0):
+        return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() + offset))
+
+    def post_alert(firing, severity, summary):
+        # endsAt in the future = firing; endsAt now = resolved (sendResolved notifies).
+        alert = [{
+            "labels": {"alertname": "OpenClawVoiceProviderDown", "namespace": "ai",
+                       "category": "openclaw", "component": "openclaw-voice",
+                       "severity": severity},
+            "annotations": {"summary": summary},
+            "startsAt": _ts(), "endsAt": _ts(35 * 60 if firing else 0),
+        }]
+        req = urllib.request.Request(
+            AM + "/api/v2/alerts", data=json.dumps(alert).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            print("alertmanager POST", r.status, "firing=%s severity=%s" % (firing, severity))
+
+    def main():
+        ok = tts_ok()
+        rem = el_remaining()
+        el_low = (rem is None) or (rem < BRIEFING_CHARS)
+        print("local_tts_ok=%s elevenlabs_remaining=%s el_low=%s" % (ok, rem, el_low))
+        if not ok and el_low:
+            post_alert(True, "critical",
+                       "OpenClaw voice down: local Qwen3-TTS unreachable AND ElevenLabs "
+                       "fallback quota exhausted — morning briefing voice will fail")
+        elif not ok:
+            post_alert(True, "warning",
+                       "OpenClaw local Qwen3-TTS unreachable — voice on ElevenLabs "
+                       "paid fallback (quota-limited)")
+        else:
+            # Healthy: resolve both possible firing severities. EL-low while local TTS
+            # is healthy is only a minor condition (handled by the daily sweep), not a
+            # real-time page.
+            post_alert(False, "critical", "OpenClaw voice healthy")
+            post_alert(False, "warning", "OpenClaw voice healthy")
+
+    main()
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openclaw-probe
+  namespace: ai
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              command: ["python", "/probe/probe.py"]
+              env:
+                - name: OPENCLAW_TTS_FALLBACK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: openclaw-secret
+                      key: OPENCLAW_TTS_FALLBACK_URL
+                - name: ELEVENLABS_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: openclaw-secret
+                      key: ELEVENLABS_API_KEY
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+              volumeMounts:
+                - name: probe-script
+                  mountPath: /probe
+                  readOnly: true
+          volumes:
+            - name: probe-script
+              configMap:
+                name: openclaw-probe-script

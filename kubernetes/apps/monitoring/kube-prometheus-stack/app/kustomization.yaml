@@ -11,6 +11,7 @@ resources:
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
+  - ./openclaw-alerts.yaml
   - ./librechat-alerts.yaml
   - ./next-ai-draw-io-alerts.yaml
   - ./paperclip-alerts.yaml

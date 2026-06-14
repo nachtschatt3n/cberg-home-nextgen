@@ -8,3 +8,4 @@ resources:
   - ./mcporter-config.yaml
   - ./skills-configmap.sops.yaml
   - ./helmrelease.yaml
+  - ./openclaw-probe.yaml

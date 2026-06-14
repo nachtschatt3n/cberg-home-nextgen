@@ -1,0 +1,56 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: openclaw-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: openclaw.pods.health
+    rules:
+    # The probe CronJob pods (openclaw-probe-*) are short-lived Jobs and are
+    # excluded so completed-Job pods don't trip the not-ready/restart rules.
+    - alert: OpenClawPodNotReady
+      annotations:
+        description: OpenClaw pod {{ $labels.pod }} has been not ready for more than
+          5 minutes. The agent (chat, skills, morning briefing) is unavailable.
+        summary: OpenClaw pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="ai", pod=~"openclaw-.*", pod!~"openclaw-probe-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: openclaw
+        component: openclaw
+        severity: critical
+    - alert: OpenClawPodCrashLooping
+      annotations:
+        description: OpenClaw pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Skills/tools are likely failing —
+          check init-container and app logs.
+        summary: OpenClaw pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"openclaw-.*", pod!~"openclaw-probe-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: openclaw
+        component: openclaw
+        severity: critical
+    - alert: OpenClawPodRestarted
+      annotations:
+        description: OpenClaw pod {{ $labels.pod }} has restarted at least once in
+          the last 15 minutes. Monitor for repeated restarts.
+        summary: OpenClaw pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"openclaw-.*", pod!~"openclaw-probe-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: openclaw
+        component: openclaw
+        severity: warning

@@ -1369,11 +1369,114 @@ class VersionChecker:
             "has_critical": False,
         })
 
+    def _get_npm_latest(self, pkg: str) -> Optional[str]:
+        """Fetch the latest published version of an npm package from the registry."""
+        try:
+            # Scope slash must be percent-encoded for the registry path.
+            url = "https://registry.npmjs.org/" + pkg.replace("/", "%2F")
+            req = urllib.request.Request(
+                url, headers={"Accept": "application/json", "User-Agent": "cberg-version-check"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+                return (data.get("dist-tags") or {}).get("latest")
+        except Exception as e:
+            print(f"  {Colors.YELLOW}⚠ Failed to fetch npm latest for {pkg}: {e}{Colors.RESET}")
+            return None
+
+    def _get_openclaw_pinned_versions(self) -> Dict[str, str]:
+        """Parse `install_npm <pkg>@<version>` pins from the openclaw init script."""
+        pins: Dict[str, str] = {}
+        try:
+            hr = (self.repo_root / "kubernetes" / "apps" / "ai" / "openclaw"
+                  / "app" / "helmrelease.yaml")
+            text = hr.read_text()
+        except Exception:
+            return pins
+        # Matches: install_npm openclaw@2026.5.18 / install_npm @openclaw/discord@2026.5.18
+        # (only version-pinned lines; unpinned `install_npm foo` are skipped).
+        for m in re.finditer(r'install_npm\s+(@?[\w./-]+)@([\w.\-]+)', text):
+            pins[m.group(1)] = m.group(2)
+        return pins
+
+    def check_openclaw_versions(self):
+        """Check the openclaw npm host + plugins for updates and host/plugin skew.
+
+        openclaw is installed fresh each pod boot from a version pinned in the init
+        script. The host and its @openclaw/* plugins are version-locked (the host's
+        plugin-API contract must match), so a divergent pin is a real breakage mode —
+        this is why the 2026.5.18 hold exists. We report newer npm releases and flag
+        any host/plugin skew.
+        """
+        print(f"\nChecking {Colors.CYAN}OpenClaw{Colors.RESET} (npm host + plugins)...")
+
+        pins = self._get_openclaw_pinned_versions()
+        if not pins:
+            print(f"  {Colors.YELLOW}⚠ No openclaw install_npm pins found in helmrelease{Colors.RESET}")
+            return
+
+        host_pin = pins.get("openclaw")
+        plugin_pins = {p: v for p, v in pins.items() if p.startswith("@openclaw/")}
+        skew_plugins = [p for p, v in plugin_pins.items() if host_pin and v != host_pin]
+
+        # The hold exists because openclaw >=2026.5.28 needs a codex-plugin export that
+        # @openclaw/codex hadn't shipped. Surface @openclaw/codex latest as the compat
+        # gate even though it is not install_npm-pinned here.
+        codex_latest = self._get_npm_latest("@openclaw/codex")
+
+        for pkg, cur in pins.items():
+            latest = self._get_npm_latest(pkg)
+            behind = False
+            update_type = None
+            if latest:
+                cv, lv = self.parse_version(cur), self.parse_version(latest)
+                if cv and lv and cv < lv:
+                    behind = True
+                    update_type = ("MAJOR" if cv[0] < lv[0]
+                                   else "MINOR" if cv[1] < lv[1] else "PATCH")
+            is_host = (pkg == "openclaw")
+            label = f"  {pkg}: {cur}"
+            if behind:
+                label += f" → {latest} ({update_type})"
+            print(label)
+            action = "review changelog, plan upgrade"
+            if is_host and behind:
+                action = (f"verify @openclaw/codex ships the codex-plugin export "
+                          f"(latest {codex_latest or 'unknown'}) and move @openclaw/* "
+                          f"plugins together before bumping openclaw")
+            self.external_infra_results.append({
+                "name": f"{pkg} (npm)",
+                "host": "registry.npmjs.org",
+                "current_version": cur,
+                "latest_version": latest,
+                "behind": behind,
+                "update_type": update_type,
+                # Skew, not version-behind, is the critical signal for openclaw — kept
+                # out of has_critical so the external_infra loop doesn't mislabel a
+                # plain "behind" as "major version behind".
+                "has_critical": False,
+                "action": action,
+                "nvd_cves": [],
+            })
+
+        # Emit skew as its own critical finding (handled in _emit_findings).
+        self.openclaw_skew = []
+        if skew_plugins:
+            plugins_str = ", ".join(f"{p}@{plugin_pins[p]}" for p in skew_plugins)
+            self.openclaw_skew.append({
+                "title": (f"OpenClaw host/plugin version skew: openclaw@{host_pin} vs "
+                          f"{plugins_str} — pins must match"),
+                "action": "realign openclaw host and @openclaw/* plugin pins in helmrelease",
+                "metadata": {"namespace": "ai", "host_pin": host_pin,
+                             "skew_plugins": {p: plugin_pins[p] for p in skew_plugins}},
+            })
+
     def check_external_infrastructure(self):
         """Check versions of external infrastructure not managed as Kubernetes HelmReleases."""
         print(f"\n{Colors.BLUE}=== Checking External Infrastructure ==={Colors.RESET}")
 
         self.check_talos_versions()
+        self.check_openclaw_versions()
 
         print(f"\nChecking {Colors.CYAN}UniFi Network Application{Colors.RESET} (192.168.30.1:8443)...")
 
@@ -2244,11 +2347,24 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
             writer.emit(
                 severity='warning',
                 title=f"{name} ({host}): {cur} → {latest}",
-                action="review changelog, plan upgrade",
+                action=x.get('action') or "review changelog, plan upgrade",
                 evidence_path=evidence_path,
                 subsection="external_infra",
                 metadata={"host": host, "current_version": cur, "latest_version": latest},
             )
+
+    # OpenClaw host/plugin version skew — a distinct critical condition (not a
+    # plain version-behind), emitted separately so its title/severity are accurate.
+    for s in getattr(checker, 'openclaw_skew', []):
+        crit += 1
+        writer.emit(
+            severity='critical',
+            title=s['title'],
+            action=s.get('action', 'realign openclaw host and plugin pins'),
+            evidence_path=evidence_path,
+            subsection="external_infra",
+            metadata=s.get('metadata', {}),
+        )
 
     return (crit, warn)
 
