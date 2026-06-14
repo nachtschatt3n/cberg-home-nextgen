@@ -630,8 +630,8 @@ spec:
                       maxTokens: 4096,
                     },
                     {
-                      id: 'gemma4:e2b',
-                      name: 'Gemma 4 (e2B, fast small)',
+                      id: 'gemma4:e2b-mlx',
+                      name: 'Gemma 4 (e2B MLX, fast small)',
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

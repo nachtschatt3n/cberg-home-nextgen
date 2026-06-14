@@ -36,7 +36,7 @@ spec:
               - name: OLLAMA_URL
                 value: "http://192.168.30.111:11434"
               - name: EDGE_MODEL
-                value: "gemma4:e2b"
+                value: "gemma4:e2b-mlx"
               - name: DENSE_MODEL
                 value: "gemma4:26b"
               - name: AUDIT_DB_PATH
