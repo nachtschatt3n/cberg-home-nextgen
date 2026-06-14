@@ -93,7 +93,9 @@ spec:
     clusterDomain: example.com
 
     annotations: {}
-    podAnnotations: {}
+    # Restart the pod when the TTS secret changes (Stakater Reloader).
+    podAnnotations:
+      secret.reloader.stakater.com/reload: open-webui-tts-secret
     replicaCount: 1
     # -- Open WebUI image tags can be found here: https://github.com/open-webui/open-webui/pkgs/container/open-webui
     image:
@@ -164,6 +166,24 @@ spec:
         value: *host
       - name: GLOBAL_LOG_LEVEL
         value: "DEBUG"
+      # --- Text-to-Speech: self-hosted mini OpenAI-compatible TTS server ---
+      # These AUDIO_TTS_* settings are Open WebUI "PersistentConfig" (ConfigVar)
+      # values: env seeds the DB on FIRST boot only. With PersistentConfig left
+      # ON (we do NOT set ENABLE_PERSISTENT_CONFIG=false), the DB value wins on
+      # subsequent boots. The user already set TTS in the UI, so the live value
+      # is correct today; this env block is the DECLARATIVE SEED so a fresh PVC
+      # comes up pointed at the mini instead of falling back to browser TTS.
+      # Non-sensitive values live here; the base URL + key live in the
+      # open-webui-tts-secret (wired via extraEnvFrom below).
+      - name: AUDIO_TTS_ENGINE
+        value: "openai"
+      # Model is ignored server-side (mini fixes the voice) but Open WebUI
+      # requires a non-empty value.
+      - name: AUDIO_TTS_MODEL
+        value: "qwen3-tts"
+      # Voice is ignored server-side (German voice is fixed) but required.
+      - name: AUDIO_TTS_VOICE
+        value: "alloy"
       # valueFrom:
       #   secretKeyRef:
       #     name: pipelines-api-key
@@ -175,6 +195,15 @@ spec:
       #       key: api-key
       # - name: OLLAMA_DEBUG
       #   value: "1"
+
+    # -- Env vars injected from a ConfigMap/Secret. Carries the sensitive TTS
+    # base URL + key for the self-hosted mini (per repo policy, the base URL
+    # goes in a SOPS secret like we did for openclaw). Note: extraEnvVars take
+    # precedence over extraEnvFrom, so the AUDIO_TTS_OPENAI_* keys must NOT be
+    # duplicated above.
+    extraEnvFrom:
+      - secretRef:
+          name: open-webui-tts-secret
 
     # -- Configure pod security context
     # ref: <https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-containe>
