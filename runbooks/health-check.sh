@@ -891,31 +891,51 @@ except: pass
 
 log_section "Section 9: Alertmanager Alerts"
 {
-    echo "Checking Alertmanager alerts via Prometheus API..."
+    echo "Checking alerts via Alertmanager API..."
     echo ""
 
-    # Port-forward in background
-    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 > /dev/null 2>&1 &
+    # Source the count from Alertmanager (not Prometheus): Alertmanager is the
+    # only component that knows about silences/inhibitions. A silenced alert is
+    # still "firing" in Prometheus /api/v1/alerts but is state="suppressed" in
+    # Alertmanager — counting from Prometheus produced false-positive findings
+    # for alerts an operator had already acknowledged via an AM silence (AR-044).
+    kubectl port-forward -n monitoring svc/kube-prometheus-stack-alertmanager 9093:9093 > /dev/null 2>&1 &
     PF_PID=$!
     sleep 3
 
-    ALERT_CHECK=$(curl -s 'http://localhost:9090/api/v1/alerts' 2>/dev/null || echo '{"status":"error"}')
+    ALERT_CHECK=$(curl -s 'http://localhost:9093/api/v2/alerts' 2>/dev/null || echo 'ERROR')
 
-    if echo "$ALERT_CHECK" | jq -e '.status == "success"' > /dev/null 2>&1; then
+    # Parse with python3, not jq: Alertmanager annotations can carry raw control
+    # characters (e.g. the Watchdog description) that jq rejects as invalid JSON
+    # but python3 tolerates — and CLAUDE.md mandates python over jq in pipes.
+    if printf '%s' "$ALERT_CHECK" | python3 -c "import sys,json; sys.exit(0 if isinstance(json.load(sys.stdin),list) else 1)" 2>/dev/null; then
         echo "Alert data retrieved successfully"
         echo ""
 
-        # Get all firing alerts excluding Watchdog
-        FIRING_ALERTS=$(echo "$ALERT_CHECK" | jq -r '[.data.alerts[] | select(.state == "firing" and .labels.alertname != "Watchdog" and .labels.alertname != "InfoInhibitor")] | length')
+        # Active = not silenced and not inhibited (suppressed alerts are excluded
+        # by Alertmanager's own per-alert .status.state). Watchdog/InfoInhibitor
+        # are meta-alerts and never actionable.
+        SUPPRESSED_COUNT=$(printf '%s' "$ALERT_CHECK" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for a in d if a.get('status',{}).get('state')=='suppressed'))")
+        FIRING_ALERTS=$(printf '%s' "$ALERT_CHECK" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for a in d if a.get('status',{}).get('state')=='active' and a['labels'].get('alertname') not in ('Watchdog','InfoInhibitor')))")
 
-        echo "Firing alerts (excluding Watchdog): $FIRING_ALERTS"
+        echo "Suppressed (silenced/inhibited, excluded): $SUPPRESSED_COUNT"
+        echo "Active alerts firing (excluding Watchdog): $FIRING_ALERTS"
         echo ""
 
         if [ "$FIRING_ALERTS" -gt 0 ]; then
             echo "Active Alerts:"
             # Tag each alert with [noise: ...] when it matches noise_allowlist.yaml
             # (alertname + namespace are included in the line so substring match works).
-            echo "$ALERT_CHECK" | jq -r '.data.alerts[] | select(.state == "firing" and .labels.alertname != "Watchdog" and .labels.alertname != "InfoInhibitor") | "  - \(.labels.alertname) [ns=\(.labels.namespace // "?")] (\(.labels.severity // "unknown")): \(.annotations.summary // .annotations.description // "No description")"' | head -20 \
+            printf '%s' "$ALERT_CHECK" | python3 -c "
+import sys, json
+for a in json.load(sys.stdin):
+    if a.get('status', {}).get('state') == 'active' and a['labels'].get('alertname') not in ('Watchdog', 'InfoInhibitor'):
+        l = a['labels']; an = a.get('annotations', {})
+        print('  - {} [ns={}] ({}): {}'.format(
+            l.get('alertname'), l.get('namespace', '?'),
+            l.get('severity', 'unknown'),
+            (an.get('summary') or an.get('description') or 'No description').replace(chr(10), ' ')))
+" | head -20 \
                 | while IFS= read -r _alert_line; do
                     tag=$(_noise_tag "$_alert_line")
                     printf '%s%s\n' "$_alert_line" "$tag"
@@ -924,11 +944,11 @@ log_section "Section 9: Alertmanager Alerts"
             log_warning "Active alerts firing: $FIRING_ALERTS"
             add_major_issue "Prometheus alerts firing: $FIRING_ALERTS"
         else
-            log_success "No alerts firing"
+            log_success "No active (non-silenced) alerts firing"
         fi
     else
-        log_warning "Unable to retrieve alert data from Prometheus"
-        add_minor_issue "Could not check Prometheus alerts"
+        log_warning "Unable to retrieve alert data from Alertmanager"
+        add_minor_issue "Could not check Alertmanager alerts"
     fi
 
     # Kill port-forward
