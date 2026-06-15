@@ -1,0 +1,131 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: arag-web
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/arag-web
+              tag: latest
+              pullPolicy: Always
+            env:
+              RAILS_ENV: production
+              DATABASE_PATH: /data/arag.sqlite
+              RAILS_SERVE_STATIC_FILES: "true"
+              RAILS_LOG_TO_STDOUT: "true"
+            envFrom:
+              - secretRef:
+                  name: arag-web-secret
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /up
+                    port: 80
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /up
+                    port: 80
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 50m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop: ["ALL"]
+        pod:
+          imagePullSecrets:
+            - name: arag-web-ghcr-pull
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: 80
+
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-arag-web-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
+          nginx.ingress.kubernetes.io/auth-signin: "https://arag.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$escaped_request_uri"
+          nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
+          nginx.ingress.kubernetes.io/auth-snippet: |
+            proxy_set_header X-Forwarded-Host $http_host;
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "ARAG"
+          gethomepage.dev/group: "Office"
+          gethomepage.dev/icon: "mdi-hospital-box"
+          gethomepage.dev/description: "ARAG health insurance tracker"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: arag.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - arag.${SECRET_DOMAIN}
+
+    persistence:
+      data:
+        existingClaim: arag-web-data
+        globalMounts:
+          - path: /data
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp

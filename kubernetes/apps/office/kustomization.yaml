@@ -19,3 +19,4 @@ resources:
  - ./nextcloud-mcp/ks.yaml
  - ./vaultwarden/ks.yaml
  - ./sure/ks.yaml
+ - ./arag-web/ks.yaml

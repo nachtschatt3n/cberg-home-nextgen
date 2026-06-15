@@ -14,7 +14,7 @@
 | home-automation | 20 |
 | databases | 10 |
 | monitoring | 11 |
-| office | 11 |
+| office | 12 |
 | media | 5 |
 | download | 2 |
 | kube-system | 12 |
@@ -126,6 +126,7 @@
 | penpot | Design and prototyping platform | Internal | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
+| arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster) | Internal | Office |
 
 ---
 

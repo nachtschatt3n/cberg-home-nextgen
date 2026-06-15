@@ -1,0 +1,55 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: arag-web-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: arag-web.pods.health
+    rules:
+    - alert: AragWebPodNotReady
+      annotations:
+        description: ARAG Web pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The health insurance tracker may be unavailable.
+        summary: ARAG Web pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="office", pod=~"arag-web-.*", condition="true"}
+          unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+        ) == 0
+      for: 5m
+      labels:
+        category: office
+        component: arag-web
+        severity: critical
+    - alert: AragWebPodCrashLooping
+      annotations:
+        description: ARAG Web pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Check logs for startup or database
+          errors.
+        summary: ARAG Web pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="office", pod=~"arag-web-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: office
+        component: arag-web
+        severity: critical
+    - alert: AragWebPodRestarted
+      annotations:
+        description: ARAG Web pod {{ $labels.pod }} has restarted at least once
+          in the last 15 minutes. Monitor for repeated restarts.
+        summary: ARAG Web pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="office", pod=~"arag-web-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: office
+        component: arag-web
+        severity: warning
