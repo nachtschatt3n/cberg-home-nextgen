@@ -39,6 +39,7 @@ spec:
               RAILS_SERVE_STATIC_FILES: "true"
               RAILS_LOG_TO_STDOUT: "true"
               TMPDIR: /rails/tmp
+              SOLID_QUEUE_IN_PUMA: "true"
             envFrom:
               - secretRef:
                   name: arag-web-secret
