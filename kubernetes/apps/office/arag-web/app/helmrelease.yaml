@@ -38,6 +38,7 @@ spec:
               DATABASE_PATH: /data/arag.sqlite
               RAILS_SERVE_STATIC_FILES: "true"
               RAILS_LOG_TO_STDOUT: "true"
+              TMPDIR: /rails/tmp
             envFrom:
               - secretRef:
                   name: arag-web-secret
