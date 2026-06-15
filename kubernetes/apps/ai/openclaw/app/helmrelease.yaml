@@ -332,14 +332,15 @@ spec:
                 find /home/node/.openclaw/lib/node_modules/@playwright -maxdepth 1 \
                   -type d -name '.[a-z]*-*' -mmin +1 -exec rm -rf {} + 2>/dev/null || true
 
-                # Pin: openclaw 2026.5.28+ host requires a codex-plugin
-                # export ('./plugin-sdk/codex-native-task-runtime') that
-                # the latest published @openclaw/codex (2026.6.1) does NOT
-                # ship — see the host-vs-plugin skew on 2026-06-03. Holding
-                # at the last known-good aligned version. Bump only when
-                # @openclaw/codex catches up; both pieces must move
-                # together.
-                install_npm openclaw@2026.5.18
+                # Pin: openclaw host + bundled @openclaw/codex + @openclaw/discord
+                # must move together (the host's plugin-API contract requires the
+                # codex/discord plugins to be built against the same plugin-sdk).
+                # The 2026-06-03 skew (host 2026.5.28+ wanted a codex plugin-sdk
+                # export that @openclaw/codex 2026.6.1 didn't ship) is RESOLVED:
+                # as of 2026-06-15 openclaw, @openclaw/codex and @openclaw/discord
+                # are all published in lockstep at 2026.6.6 and the host bundles
+                # the matching plugin-sdk. Keep all three on the same version.
+                install_npm openclaw@2026.6.6
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
@@ -363,13 +364,11 @@ spec:
                 install_npm @playwright/mcp
                 # Discord channel plugin: split out of openclaw core into
                 # @openclaw/discord. Provides the actual Discord Gateway
-                # WebSocket client that connects with the bot token.
-                # Same skew: pin to match the openclaw host above (the
-                # host's plugin-API contract requires the plugin to be
-                # built against the same version range). 2026.6.1 of this
-                # plugin advertises 'plugin API >=2026.6.1' and gets
-                # rejected by the 2026.5.18 host. Move them together.
-                install_npm @openclaw/discord@2026.5.18
+                # WebSocket client that connects with the bot token. Pin to
+                # match the openclaw host above — the host's plugin-API
+                # contract requires the plugin built against the same version
+                # range. Move it together with openclaw (both at 2026.6.6).
+                install_npm @openclaw/discord@2026.6.6
 
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
