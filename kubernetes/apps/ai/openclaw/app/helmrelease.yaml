@@ -370,6 +370,27 @@ spec:
                 # range. Move it together with openclaw (both at 2026.6.6).
                 install_npm @openclaw/discord@2026.6.6
 
+                # Realign openclaw's MANAGED plugin store (~/.openclaw/npm) with
+                # the running host version. That store is provisioned once at first
+                # gateway start and does NOT auto-refresh on host upgrades: after the
+                # 2026.5.18 -> 2026.6.6 bump it kept @openclaw/codex@2026.5.18, whose
+                # harness hardcodes providerIds=["codex"] and rejects openai/gpt-5.5
+                # ("provider is not one of: codex"), which broke ALL agent dispatch
+                # (upstream regression openclaw#87650). Pin the managed codex +
+                # discord plugins to the host version so the codex harness accepts
+                # the openai provider (ChatGPT/Codex OAuth path). Init runs as root,
+                # so chown the store back to the runtime uid afterward.
+                if [ -d /home/node/.openclaw/npm ]; then
+                  OC_VER=$(node -p "require('/home/node/.openclaw/lib/node_modules/openclaw/package.json').version" 2>/dev/null)
+                  if [ -n "$OC_VER" ]; then
+                    echo "Realigning managed @openclaw plugins to host $OC_VER..."
+                    if ! ( cd /home/node/.openclaw/npm && npm install --no-audit --no-fund --save "@openclaw/codex@$OC_VER" "@openclaw/discord@$OC_VER" ); then
+                      echo "WARN: managed plugin realign failed (continuing)"
+                    fi
+                    chown -R node:node /home/node/.openclaw/npm 2>/dev/null || true
+                  fi
+                fi
+
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 # himalaya was installed for the early IMAP-direct mail
