@@ -40,6 +40,11 @@ spec:
       PAPERLESS_OCR_LANGUAGE: "deu+eng"
       # Force re-OCR rather than trusting existing/garbage text layers.
       PAPERLESS_OCR_MODE: "redo"
+      # ES-580W duplex scans arrive mis-oriented; ocrmypdf's auto-rotate
+      # confidence sat right at the default threshold (12) — e.g. 11.52 left a
+      # page upside-down (garbled OCR) while 12.41 rotated. Lower to 7 so
+      # near-threshold pages get straightened. (ROTATE_PAGES defaults to true.)
+      PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD: 7
       # Reduce logging conflicts
       PAPERLESS_LOGROTATE_MAX_SIZE: "1048576"
       PAPERLESS_LOGROTATE_MAX_BACKUPS: "2"
