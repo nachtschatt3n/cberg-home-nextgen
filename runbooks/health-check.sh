@@ -2601,24 +2601,67 @@ log_section "Section 24a: Network Infrastructure Services"
             echo "  codex auth.json missing or unreadable"
         fi
 
-        # Signal 2: Morning Briefing cron's lastErrorReason — catches the case
-        # where the refresh chain has already died and the agent is wedging
-        # on every openai-codex dispatch (FailoverError).
-        # `openclaw cron get` has no -o/--format flag; output is JSON with a
-        # "Config warnings:" preamble. sed strips everything before the first
-        # `{` line so jq sees clean JSON.
+        # --- openclaw dispatch integrity ---
+        # The 2026-06-15 outage proved the old single-signal check (cron
+        # lastErrorReason=="auth", hardcoded cron id) was blind: the cron had
+        # *vanished* (get returned nothing → silent pass) and the real failure was
+        # a codex-harness/model mismatch, not "auth". These checks catch agent-turn
+        # failures regardless of root cause.
+
+        # Signal 2a: managed-plugin version skew. openclaw's managed plugin store
+        # (~/.openclaw/npm) does NOT auto-refresh on host upgrades. A stale
+        # @openclaw/codex whose harness pins providerIds=["codex"] rejects
+        # openai/gpt-5.5 ("provider is not one of: codex") and breaks every
+        # dispatch (incident 2026-06-15, upstream openclaw#87650).
+        OC_HOST_VER=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'jq -r .version /home/node/.openclaw/lib/node_modules/openclaw/package.json 2>/dev/null' 2>/dev/null)
+        OC_CODEX_PLUGIN_VER=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'jq -r .version /home/node/.openclaw/npm/node_modules/@openclaw/codex/package.json 2>/dev/null' 2>/dev/null)
+        echo "  versions: host=$OC_HOST_VER managed @openclaw/codex=$OC_CODEX_PLUGIN_VER"
+        if [ -n "$OC_HOST_VER" ] && [ -n "$OC_CODEX_PLUGIN_VER" ] && [ "$OC_HOST_VER" != "$OC_CODEX_PLUGIN_VER" ]; then
+            log_critical "openclaw managed @openclaw/codex ($OC_CODEX_PLUGIN_VER) != host ($OC_HOST_VER) — codex harness will reject openai/* dispatch"
+            add_critical_issue "openclaw host/plugin skew: @openclaw/codex $OC_CODEX_PLUGIN_VER vs host $OC_HOST_VER. The init script realigns it on boot — delete the pod to re-run init."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        fi
+
+        # Signal 2b: morning-briefing cron presence + last scheduled result. A
+        # MISSING cron is itself a failure (briefing silently stops — the 2026.6.6
+        # upgrade dropped it once). Any error status fires, not just auth.
         CRON_JSON=$(kubectl exec -n ai "$OC_POD" -c app -- \
             bash -lc 'openclaw cron get c1b12530-aa91-4711-83bd-cba2b0e7f36f 2>/dev/null' 2>/dev/null \
             | sed -n '/^{/,$p')
-        CRON_STATUS=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastRunStatus // empty' 2>/dev/null)
-        CRON_ERR_REASON=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastErrorReason // empty' 2>/dev/null)
-        echo "  Morning Briefing cron lastRunStatus=$CRON_STATUS lastErrorReason=$CRON_ERR_REASON"
-        if [ "$CRON_ERR_REASON" = "auth" ] && [ "$CRON_STATUS" = "error" ]; then
-            log_critical "openclaw openai-codex provider failing with FailoverError on every dispatch"
-            add_critical_issue "openclaw agent dispatch broken (lastErrorReason=auth) — refresh codex OAuth. Run: kubectl -n ai exec -it $OC_POD -c app -- codex login --device-auth, then delete the pod."
+        if [ -z "$CRON_JSON" ]; then
+            log_critical "openclaw Daily Morning Briefing cron (c1b12530) is MISSING — briefing will not run"
+            add_critical_issue "openclaw morning-briefing cron c1b12530 not found — re-add it (openclaw cron add). It vanished during the 2026.6.6 upgrade once."
             INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-        elif [ "$CRON_STATUS" = "ok" ]; then
-            log_success "openclaw Morning Briefing cron last run: ok (codex auth healthy)"
+        else
+            CRON_STATUS=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastRunStatus // empty' 2>/dev/null)
+            CRON_ERR_REASON=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastErrorReason // empty' 2>/dev/null)
+            echo "  Morning Briefing cron lastRunStatus=$CRON_STATUS lastErrorReason=$CRON_ERR_REASON"
+            if [ "$CRON_STATUS" = "error" ]; then
+                log_critical "openclaw Morning Briefing cron last scheduled run errored (reason=${CRON_ERR_REASON:-unknown})"
+                add_critical_issue "openclaw briefing cron lastRunStatus=error reason=${CRON_ERR_REASON:-unknown} — check the dispatch canary below and pod logs for FailoverError / 'provider is not one of' / 'Missing bearer'."
+                INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+            elif [ "$CRON_STATUS" = "ok" ]; then
+                log_success "openclaw Morning Briefing cron last run: ok"
+            fi
+        fi
+
+        # Signal 2c: dispatch canary — the catch-all. Actually runs one agent turn
+        # through the default model/harness. A failure means the agent cannot
+        # answer, whatever the cause (auth drift, harness/model mismatch, stale
+        # plugin, provider cooldown). No --deliver, throwaway session, short timeout.
+        CANARY_OUT=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
+            'openclaw agent -m "reply with the single word OK" --session-id healthcheck-canary --light-context --timeout 90 2>&1' 2>/dev/null | tail -4)
+        if printf '%s' "$CANARY_OUT" | grep -qiE 'FailoverError|does not support|provider is not one of|Missing bearer|No API key|Unauthorized|failed before reply'; then
+            CANARY_ERR=$(printf '%s' "$CANARY_OUT" | grep -oiE 'FailoverError[^<]*|does not support [^.]*|Missing bearer[^,]*|No API key[^"]*' | head -1)
+            log_critical "openclaw dispatch canary FAILED: ${CANARY_ERR:-see pod logs}"
+            add_critical_issue "openclaw agent dispatch canary failed — the agent cannot answer (chat, skills, briefing all affected). Reason: ${CANARY_ERR:-unknown}. Catch-all signal for auth/harness/model/provider failure."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif printf '%s' "$CANARY_OUT" | grep -qiE '(^|[^A-Za-z])OK([^A-Za-z]|$)|READY'; then
+            log_success "openclaw dispatch canary: agent replied (Codex/OAuth path healthy)"
+        else
+            log_warning "openclaw dispatch canary inconclusive: $(printf '%s' "$CANARY_OUT" | tr '\n' ' ' | tail -c 100)"
         fi
 
         # openclaw voice — the morning-briefing voice note is generated by the
