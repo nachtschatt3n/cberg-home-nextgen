@@ -134,3 +134,42 @@ parameters:
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
 
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-paperless-inbox"
+provisioner: smb.csi.k8s.io
+# Retain so a stray PVC delete cannot wipe the share. See docs/sops/storage-safety.md.
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+# NOTE: cache=none / actimeo=1 (unlike the cache=loose,actimeo=30 used by the
+# other paperless classes). The scanner-inbox validator must read fresh
+# size/mtime to detect a file the scanner is still writing; stale attribute
+# caching would make a growing file look "stable". Throughput is irrelevant on
+# this small staging share, so disabling the cache is free.
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - dir_mode=0777
+  - file_mode=0777
+  - uid=1000
+  - gid=1000
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=none
+  - actimeo=1
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/paperless_ngx"
+  subdir: "inbox"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
+

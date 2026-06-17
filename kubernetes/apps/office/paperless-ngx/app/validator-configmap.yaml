@@ -1,0 +1,132 @@
+---
+# Scan-inbox validator script. Runs in the scan-inbox-validator Deployment
+# (uses the paperless-ngx image, which ships python3 + pikepdf + qpdf).
+#
+# Flow: scanner -> SMB inbox -> THIS validates each PDF is complete + valid ->
+# atomic move into the paperless consume share -> paperless splits on PATCHT
+# separators + OCRs. Bad/corrupt scans are quarantined in inbox/_failed/.
+#
+# No ${...} tokens in this script: the cluster-wide Flux postBuild substitution
+# would strip them. (Config is read from env vars via os.environ.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scan-inbox-validator
+  namespace: office
+data:
+  validator.py: |
+    #!/usr/bin/env python3
+    """Validate scanner PDFs in the inbox and move good ones to consume."""
+    import logging
+    import os
+    import shutil
+    import time
+    import uuid
+
+    import pikepdf
+
+    INBOX = os.environ.get("INBOX_DIR", "/inbox")
+    CONSUME = os.environ.get("CONSUME_DIR", "/consume")
+    FAILED = os.path.join(INBOX, "_failed")
+
+    POLL = int(os.environ.get("POLL_SECONDS", "15"))
+    STABLE_POLLS = int(os.environ.get("STABLE_POLLS", "2"))
+    MIN_AGE = int(os.environ.get("MIN_MTIME_AGE_SECONDS", "20"))
+    MIN_SIZE = int(os.environ.get("MIN_SIZE_BYTES", "2048"))
+    GRACE = int(os.environ.get("FAIL_GRACE_SECONDS", "120"))
+
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+    log = logging.getLogger("scan-inbox-validator")
+
+    # name -> {"size": int, "stable": int, "first": float}
+    seen = {}
+
+    def is_valid_pdf(path):
+        try:
+            with pikepdf.open(path) as pdf:
+                return len(pdf.pages) > 0
+        except Exception as exc:
+            log.debug("pikepdf rejected %s: %s", path, exc)
+            return False
+
+    def move_to_consume(name, src):
+        # Copy to a paperless-ignored temp name in consume, then rename within
+        # the same mount (atomic) so paperless never reads a half-copied file.
+        tmp = os.path.join(CONSUME, "._incoming_" + uuid.uuid4().hex + ".pdf")
+        final = os.path.join(CONSUME, name)
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, final)
+        os.remove(src)
+        log.info("moved -> consume: %s", name)
+
+    def quarantine(name, src, reason):
+        os.makedirs(FAILED, exist_ok=True)
+        shutil.move(src, os.path.join(FAILED, name))
+        log.error("FAILED (%s): %s -> _failed/", reason, name)
+
+    def scan_once():
+        now = time.time()
+        files = []
+        for name in os.listdir(INBOX):
+            if name.startswith("."):
+                continue
+            path = os.path.join(INBOX, name)
+            if not os.path.isfile(path):
+                continue
+            if not name.lower().endswith(".pdf"):
+                continue
+            files.append((name, path))
+
+        present = {name for name, _ in files}
+        for gone in [n for n in seen if n not in present]:
+            del seen[gone]
+
+        for name, path in files:
+            try:
+                stat = os.stat(path)
+            except FileNotFoundError:
+                continue
+            size = stat.st_size
+            rec = seen.get(name)
+            if rec is None:
+                seen[name] = {"size": size, "stable": 0, "first": now}
+                continue
+            if size == rec["size"]:
+                rec["stable"] += 1
+            else:
+                rec["size"] = size
+                rec["stable"] = 0
+
+            if rec["stable"] < STABLE_POLLS:
+                continue
+            if (now - stat.st_mtime) < MIN_AGE:
+                continue
+
+            aged_out = (now - rec["first"]) > GRACE
+            if size < MIN_SIZE:
+                if aged_out:
+                    quarantine(name, path, "file too small")
+                    seen.pop(name, None)
+                continue
+            if is_valid_pdf(path):
+                move_to_consume(name, path)
+                seen.pop(name, None)
+            elif aged_out:
+                quarantine(name, path, "invalid or unreadable PDF")
+                seen.pop(name, None)
+            # else: still settling -> retry next loop
+
+    def main():
+        os.makedirs(FAILED, exist_ok=True)
+        log.info(
+            "validator started: inbox=%s consume=%s poll=%ss", INBOX, CONSUME, POLL
+        )
+        while True:
+            try:
+                scan_once()
+            except Exception:
+                log.exception("scan loop error")
+            time.sleep(POLL)
+
+    if __name__ == "__main__":
+        main()

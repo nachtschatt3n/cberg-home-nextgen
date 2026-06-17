@@ -6,4 +6,6 @@ resources:
   - pvc.yaml
   - storageclass.yaml
   - helmrelease.yaml
+  - validator-configmap.yaml
+  - validator-deployment.yaml
 

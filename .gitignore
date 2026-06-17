@@ -34,3 +34,6 @@ docs/*-current.md
 /config.yaml
 cloudflared.json
 .kube/
+
+# Local build artifacts (generated PDFs, etc.)
+scratch/

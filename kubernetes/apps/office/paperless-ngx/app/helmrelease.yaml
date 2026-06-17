@@ -51,6 +51,15 @@ spec:
       PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS: true
       PAPERLESS_CONSUMER_POLLING: 10
       PAPERLESS_CONSUMER_ENABLE_BARCODES: true
+      # ZXING detects the PATCHT separator barcode far more reliably than the
+      # default pyzbar, especially on 300dpi duplex scans from the ES-580W.
+      PAPERLESS_CONSUMER_BARCODE_SCANNER: "ZXING"
+      # Organize stored media by year/correspondent. REMOVE_NONE drops the path
+      # segment when a field is unset (paperless-ai assigns the correspondent
+      # only after ingest, so fresh docs are briefly None — without this they'd
+      # be filed under a literal "none/" folder).
+      PAPERLESS_FILENAME_FORMAT: "{created_year}/{correspondent}/{title}"
+      PAPERLESS_FILENAME_FORMAT_REMOVE_NONE: true
       PAPERLESS_EMAIL_HOST: smtp.gmail.com
       PAPERLESS_EMAIL_PORT: 587
       PAPERLESS_EMAIL_USE_TLS: true

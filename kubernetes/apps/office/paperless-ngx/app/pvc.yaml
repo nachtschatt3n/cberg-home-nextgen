@@ -58,3 +58,20 @@ spec:
     requests:
       storage: 5Gi
   storageClassName: cifs-paperless-consume
+
+---
+# Scanner staging inbox. The Epson ES-580W writes scans here over SMB; the
+# scan-inbox-validator Deployment QC-checks each PDF and moves the good ones
+# into the consume share. See docs and the validator ConfigMap.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-ngx-inbox
+  namespace: office
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: cifs-paperless-inbox

@@ -1,0 +1,80 @@
+---
+# Scan-inbox validator: polls the SMB inbox the Epson ES-580W writes to,
+# QC-checks each scan (complete + valid PDF), and atomically moves good ones
+# into the paperless consume share. Reuses the paperless-ngx image (ships
+# python3 + pikepdf + qpdf) so there is nothing extra to build/maintain.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scan-inbox-validator
+  namespace: office
+  labels:
+    app.kubernetes.io/name: scan-inbox-validator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scan-inbox-validator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scan-inbox-validator
+      annotations:
+        # Roll the pod when the script changes.
+        reloader.stakater.com/auto: "true"
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: validator
+          image: ghcr.io/paperless-ngx/paperless-ngx:2.20.15
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/scripts/validator.py"]
+          env:
+            - name: INBOX_DIR
+              value: /inbox
+            - name: CONSUME_DIR
+              value: /consume
+            - name: POLL_SECONDS
+              value: "15"
+            - name: STABLE_POLLS
+              value: "2"
+            - name: MIN_MTIME_AGE_SECONDS
+              value: "20"
+            - name: MIN_SIZE_BYTES
+              value: "2048"
+            - name: FAIL_GRACE_SECONDS
+              value: "120"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: inbox
+              mountPath: /inbox
+            - name: consume
+              mountPath: /consume
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pgrep -f validator.py"]
+            initialDelaySeconds: 15
+            periodSeconds: 60
+      volumes:
+        - name: scripts
+          configMap:
+            name: scan-inbox-validator
+        - name: inbox
+          persistentVolumeClaim:
+            claimName: paperless-ngx-inbox
+        - name: consume
+          persistentVolumeClaim:
+            claimName: paperless-ngx-consume
