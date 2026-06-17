@@ -614,32 +614,31 @@ spec:
                   cfg.agents.defaults = cfg.agents.defaults || {};
                   cfg.agents.defaults.workspace = cfg.agents.defaults.workspace || '/home/node/clawd';
                   cfg.agents.defaults.model = cfg.agents.defaults.model || {};
-                  // OPENCLAW_DEFAULT_MODEL selects the primary model
-                  // (openai/gpt-5.5 = ChatGPT/Codex subscription via Codex OAuth).
+                  // OPENCLAW_DEFAULT_MODEL selects the primary model. We want
+                  // openai/gpt-5.5 to run through the CODEX harness (our ChatGPT/
+                  // Codex OAuth subscription), NOT the direct OpenAI REST API: we have
+                  // no OPENAI_API_KEY, so the plain openai provider 401s with
+                  // "Missing bearer ... api.openai.com/v1/responses". Forcing the
+                  // codex agentRuntime for openai/* routes the turn through the Codex
+                  // app-server (which reads ~/.codex/auth.json OAuth) instead.
                   //
-                  // IMPORTANT (openclaw 2026.6.x): do NOT force an agentRuntime on
-                  // openai/* models. The host now auto-selects the native Codex
-                  // app-server harness for OpenAI agent turns when Codex OAuth is
-                  // present ("unset runtime config now selects the Codex harness").
-                  // The old 2026.5.x workaround of pinning
-                  // agents.defaults.models[openai/gpt-5.5].agentRuntime = {id:'codex'}
-                  // restricts the harness providerIds to ["codex"] and makes it
-                  // REJECT the "openai" provider with:
+                  // This override is only safe when the MANAGED @openclaw/codex plugin
+                  // matches the host (realigned above): its harness providerIds then
+                  // include "openai" and accept openai/gpt-5.5. When the managed plugin
+                  // went stale at 2026.5.18 (host 2026.6.6) its providerIds were
+                  // ["codex"] only and this same override produced
                   //   harness "codex" does not support openai/gpt-5.5
                   //   (provider is not one of: codex)
-                  // which broke all agent dispatch after the 2026.5.18 -> 2026.6.6
-                  // bump (upstream regression #87650/#88450). So we leave the
-                  // runtime unset AND actively strip any stale per-model override
-                  // left behind in the persisted PVC config.
+                  // — that was the stale plugin (upstream regression #87650), not the
+                  // override. The plugin realign above is the actual fix; this keeps
+                  // dispatch on the OAuth path.
                   const chosenModel = process.env.OPENCLAW_DEFAULT_MODEL || displayModel;
                   cfg.agents.defaults.model.primary = chosenModel;
                   delete cfg.agents.defaults.agentRuntime;
-                  if (cfg.agents.defaults.models) {
-                    for (const k of Object.keys(cfg.agents.defaults.models)) {
-                      if (cfg.agents.defaults.models[k] && cfg.agents.defaults.models[k].agentRuntime) {
-                        delete cfg.agents.defaults.models[k].agentRuntime;
-                      }
-                    }
+                  if (chosenModel.startsWith('openai/')) {
+                    cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                    cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
+                    cfg.agents.defaults.models[chosenModel].agentRuntime = { id: 'codex' };
                   }
 
                   // Update models
