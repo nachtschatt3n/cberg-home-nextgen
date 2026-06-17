@@ -38,8 +38,12 @@ spec:
       # auto-classification. deu tesseract data is bundled in the image; keep
       # eng as fallback for the occasional English doc.
       PAPERLESS_OCR_LANGUAGE: "deu+eng"
-      # Force re-OCR rather than trusting existing/garbage text layers.
-      PAPERLESS_OCR_MODE: "redo"
+      # Some German ARAG PDFs ship a broken embedded text layer (subsetted
+      # fonts → dingbat/control-char extraction). `redo` preserves that broken
+      # layer; `force` rasterizes the page and OCRs the image, yielding clean
+      # text. Trade-off: `force` re-OCRs every page (slower, larger output) but
+      # is correct for these documents.
+      PAPERLESS_OCR_MODE: "force"
       # ES-580W duplex scans arrive mis-oriented; ocrmypdf's auto-rotate
       # confidence sat right at the default threshold (12) — e.g. 11.52 left a
       # page upside-down (garbled OCR) while 12.41 rotated. Lower to 7 so
