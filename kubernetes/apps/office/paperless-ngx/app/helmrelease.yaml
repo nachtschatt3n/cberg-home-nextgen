@@ -34,6 +34,12 @@ spec:
       pullPolicy: IfNotPresent
     env:
       TZ: UTC
+      # Corpus is entirely German — default eng OCR garbles text and breaks
+      # auto-classification. deu tesseract data is bundled in the image; keep
+      # eng as fallback for the occasional English doc.
+      PAPERLESS_OCR_LANGUAGE: "deu+eng"
+      # Force re-OCR rather than trusting existing/garbage text layers.
+      PAPERLESS_OCR_MODE: "redo"
       # Reduce logging conflicts
       PAPERLESS_LOGROTATE_MAX_SIZE: "1048576"
       PAPERLESS_LOGROTATE_MAX_BACKUPS: "2"
