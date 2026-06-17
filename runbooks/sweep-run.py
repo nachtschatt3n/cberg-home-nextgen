@@ -68,7 +68,12 @@ def _activate_mise() -> None:
     if not mise:
         return
     os.environ["_MISE_ACTIVATED"] = "1"
-    os.execvp(str(mise), [str(mise), "-C", str(REPO_ROOT), "exec", "--", sys.executable, *sys.argv])
+    # Re-exec via the PATH-resolved "python3" (not sys.executable): under
+    # `mise exec` that resolves to the repo .venv interpreter, which carries
+    # PyYAML + psycopg. Using sys.executable here would re-exec the bare mise
+    # python with no venv site-packages, so the parent's lazy `import psycopg`
+    # (DB auto-close of resolved findings) silently failed — "auto-close skipped".
+    os.execvp(str(mise), [str(mise), "-C", str(REPO_ROOT), "exec", "--", "python3", *sys.argv])
 
 
 _activate_mise()
