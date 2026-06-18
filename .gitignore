@@ -37,3 +37,7 @@ cloudflared.json
 
 # Local build artifacts (generated PDFs, etc.)
 scratch/
+
+# Local Claude/Codex tooling artifacts (not part of GitOps)
+.claude/scheduled_tasks.lock
+.claude/worktrees/
