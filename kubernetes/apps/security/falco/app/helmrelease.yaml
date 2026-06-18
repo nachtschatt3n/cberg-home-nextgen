@@ -80,15 +80,19 @@ spec:
         - name: falco-host-output
           mountPath: /var/run/falco
           readOnly: false
-    # Resource budget per node: 100m CPU + 192Mi RAM × 3 nodes = 300m / 576Mi
+    # Resource budget per node: 100m CPU + 256Mi RAM × 3 nodes = 300m / 768Mi
     # cluster-wide. Modest given the 18-core, 192GiB cluster.
+    # Limit raised 512Mi→768Mi on 2026-06-18: falco's working set peaks ~537Mi
+    # on busy nodes, so the old 512Mi ceiling caused page-cache reclaim thrash
+    # (NodeMemoryMajorPagesFaults storm) and a liveness SIGKILL. 768Mi gives
+    # ~40% headroom over the observed peak.
     resources:
       requests:
         cpu: 100m
-        memory: 192Mi
+        memory: 256Mi
       limits:
         cpu: 1000m
-        memory: 512Mi
+        memory: 768Mi
     # Run on every node including the (hyper-converged) control planes.
     tolerations:
       - operator: Exists
