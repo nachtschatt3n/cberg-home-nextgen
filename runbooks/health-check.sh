@@ -2624,27 +2624,28 @@ log_section "Section 24a: Network Infrastructure Services"
             INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
         fi
 
-        # Signal 2b: morning-briefing cron presence + last scheduled result. A
-        # MISSING cron is itself a failure (briefing silently stops — the 2026.6.6
-        # upgrade dropped it once). Any error status fires, not just auth.
-        CRON_JSON=$(kubectl exec -n ai "$OC_POD" -c app -- \
-            bash -lc 'openclaw cron get c1b12530-aa91-4711-83bd-cba2b0e7f36f 2>/dev/null' 2>/dev/null \
-            | sed -n '/^{/,$p')
-        if [ -z "$CRON_JSON" ]; then
-            log_critical "openclaw Daily Morning Briefing cron (c1b12530) is MISSING — briefing will not run"
-            add_critical_issue "openclaw morning-briefing cron c1b12530 not found — re-add it (openclaw cron add). It vanished during the 2026.6.6 upgrade once."
+        # Signal 2b: morning-briefing cron presence + last result. Looked up BY
+        # NAME, not a hardcoded id — the id changes whenever the cron is recreated
+        # (it was rm+re-added 2026-06-18 to fix a false "couldn't generate a
+        # response" error), and a vanished cron must still be detectable (the
+        # 2026.6.6 upgrade dropped it once → silent miss with the old id check).
+        BRIEF_STATUS=$(kubectl exec -n ai "$OC_POD" -c app -- \
+            bash -lc 'openclaw cron list --json 2>/dev/null' 2>/dev/null \
+            | sed -n '/[[{]/,$p' \
+            | jq -r 'if type=="array" then . else (.jobs // .crons // []) end
+                     | map(select((.name // "") | test("Morning Briefing"; "i")))
+                     | (.[0].state.lastRunStatus // "MISSING")' 2>/dev/null)
+        echo "  Morning Briefing cron lastRunStatus=${BRIEF_STATUS:-unknown}"
+        if [ -z "$BRIEF_STATUS" ] || [ "$BRIEF_STATUS" = "MISSING" ]; then
+            log_critical "openclaw Daily Morning Briefing cron is MISSING — briefing will not run"
+            add_critical_issue "openclaw morning-briefing cron (name ~ 'Daily Morning Briefing') not found — re-add it (openclaw cron add). It vanished during the 2026.6.6 upgrade once."
             INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-        else
-            CRON_STATUS=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastRunStatus // empty' 2>/dev/null)
-            CRON_ERR_REASON=$(printf '%s' "$CRON_JSON" | jq -r '.state.lastErrorReason // empty' 2>/dev/null)
-            echo "  Morning Briefing cron lastRunStatus=$CRON_STATUS lastErrorReason=$CRON_ERR_REASON"
-            if [ "$CRON_STATUS" = "error" ]; then
-                log_critical "openclaw Morning Briefing cron last scheduled run errored (reason=${CRON_ERR_REASON:-unknown})"
-                add_critical_issue "openclaw briefing cron lastRunStatus=error reason=${CRON_ERR_REASON:-unknown} — check the dispatch canary below and pod logs for FailoverError / 'provider is not one of' / 'Missing bearer'."
-                INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-            elif [ "$CRON_STATUS" = "ok" ]; then
-                log_success "openclaw Morning Briefing cron last run: ok"
-            fi
+        elif [ "$BRIEF_STATUS" = "error" ]; then
+            log_critical "openclaw Morning Briefing cron last run errored"
+            add_critical_issue "openclaw briefing cron lastRunStatus=error — check the dispatch canary below and pod logs for FailoverError / 'couldn't generate a response' / 'provider is not one of' / 'Missing bearer'."
+            INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
+        elif [ "$BRIEF_STATUS" = "ok" ]; then
+            log_success "openclaw Morning Briefing cron last run: ok"
         fi
 
         # Signal 2c: dispatch canary — the catch-all. Actually runs one agent turn
