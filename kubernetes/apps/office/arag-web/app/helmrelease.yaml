@@ -31,7 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/arag-web
-              tag: sha-751d094
+              tag: sha-c4e8372
               pullPolicy: Always
             env:
               RAILS_ENV: production
