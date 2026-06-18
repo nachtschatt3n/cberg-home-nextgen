@@ -63,11 +63,18 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+          # Heartbeat-freshness probe. The paperless image has no pgrep/ps, so
+          # check the heartbeat file the script touches each loop via python3
+          # (which is present). Stale (>120s) => loop hung/dead => restart.
           livenessProbe:
             exec:
-              command: ["sh", "-c", "pgrep -f validator.py"]
-            initialDelaySeconds: 15
+              command:
+                - python3
+                - -c
+                - import os, sys, time; sys.exit(0 if time.time() - os.path.getmtime("/tmp/validator.heartbeat") < 120 else 1)
+            initialDelaySeconds: 30
             periodSeconds: 60
+            failureThreshold: 3
       volumes:
         - name: scripts
           configMap:

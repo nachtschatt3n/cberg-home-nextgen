@@ -28,6 +28,7 @@ data:
     INBOX = os.environ.get("INBOX_DIR", "/inbox")
     CONSUME = os.environ.get("CONSUME_DIR", "/consume")
     FAILED = os.path.join(INBOX, "_failed")
+    HEARTBEAT = os.environ.get("HEARTBEAT_FILE", "/tmp/validator.heartbeat")
 
     POLL = int(os.environ.get("POLL_SECONDS", "15"))
     STABLE_POLLS = int(os.environ.get("STABLE_POLLS", "2"))
@@ -122,6 +123,14 @@ data:
             "validator started: inbox=%s consume=%s poll=%ss", INBOX, CONSUME, POLL
         )
         while True:
+            # Heartbeat for the liveness probe: touched every loop, so a hung
+            # loop (e.g. a CIFS stall in os.listdir) goes stale and gets the
+            # pod restarted.
+            try:
+                with open(HEARTBEAT, "w") as fh:
+                    fh.write(str(time.time()))
+            except OSError:
+                pass
             try:
                 scan_once()
             except Exception:
