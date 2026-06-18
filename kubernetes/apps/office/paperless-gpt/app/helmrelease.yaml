@@ -27,6 +27,8 @@ spec:
   values:
     controllers:
       main:
+        annotations:
+          reloader.stakater.com/auto: "true"
         containers:
           main:
             image:
@@ -152,3 +154,15 @@ spec:
           main:
             main:
               - path: /app/db
+      # Override only the OCR prompt (the shipped default encourages
+      # hallucination). subPath leaves the other templates on the emptyDir,
+      # which paperless-gpt populates with its defaults on startup.
+      ocr-prompt:
+        type: configMap
+        name: paperless-gpt-prompts
+        advancedMounts:
+          main:
+            main:
+              - path: /app/prompts/ocr_prompt.tmpl
+                subPath: ocr_prompt.tmpl
+                readOnly: true
