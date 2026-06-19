@@ -218,8 +218,12 @@ spec:
       requests:
         cpu: 1000m
         memory: 2Gi
+      # 3Gi OOM-killed paperless when OCR_MODE=force re-OCRs a multi-page doc:
+      # ocrmypdf rasterizes+OCRs all pages concurrently (e.g. "processing 12
+      # pages concurrently"), spiking memory. force mode makes this the norm for
+      # any multi-page PDF, so the limit must accommodate it.
       limits:
-        memory: 3Gi
+        memory: 6Gi
     securityContext:
       #runAsUser: 1000
       #runAsGroup: 1000
