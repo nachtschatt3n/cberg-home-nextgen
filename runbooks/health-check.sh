@@ -2652,14 +2652,19 @@ log_section "Section 24a: Network Infrastructure Services"
         # through the default model/harness. A failure means the agent cannot
         # answer, whatever the cause (auth drift, harness/model mismatch, stale
         # plugin, provider cooldown). No --deliver, throwaway session, short timeout.
+        # Uses a distinctive sentinel (not "OK") so a CLI usage/parse error that
+        # echoes the prompt back cannot be mistaken for a real reply. Failure
+        # detection also catches usage errors ("Usage:" / "Try: openclaw" /
+        # "unknown option") — a wrong flag must fail loudly, not silently pass.
+        # (--light-context is NOT a valid `openclaw agent` flag — do not add it.)
         CANARY_OUT=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
-            'openclaw agent -m "reply with the single word OK" --session-id healthcheck-canary --light-context --timeout 90 2>&1' 2>/dev/null | tail -4)
-        if printf '%s' "$CANARY_OUT" | grep -qiE 'FailoverError|does not support|provider is not one of|Missing bearer|No API key|Unauthorized|failed before reply'; then
-            CANARY_ERR=$(printf '%s' "$CANARY_OUT" | grep -oiE 'FailoverError[^<]*|does not support [^.]*|Missing bearer[^,]*|No API key[^"]*' | head -1)
+            'openclaw agent -m "Reply with exactly this token and nothing else: CANARY7F3" --session-id healthcheck-canary --timeout 90 2>&1' 2>/dev/null | tail -4)
+        if printf '%s' "$CANARY_OUT" | grep -qiE 'FailoverError|does not support|provider is not one of|Missing bearer|No API key|Unauthorized|failed before reply|Usage:|Try: openclaw|unknown option'; then
+            CANARY_ERR=$(printf '%s' "$CANARY_OUT" | grep -oiE 'FailoverError[^<]*|does not support [^.]*|Missing bearer[^,]*|No API key[^"]*|unknown option[^ ]*|Try: openclaw[^|]*' | head -1)
             log_critical "openclaw dispatch canary FAILED: ${CANARY_ERR:-see pod logs}"
             add_critical_issue "openclaw agent dispatch canary failed — the agent cannot answer (chat, skills, briefing all affected). Reason: ${CANARY_ERR:-unknown}. Catch-all signal for auth/harness/model/provider failure."
             INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-        elif printf '%s' "$CANARY_OUT" | grep -qiE '(^|[^A-Za-z])OK([^A-Za-z]|$)|READY'; then
+        elif printf '%s' "$CANARY_OUT" | grep -q 'CANARY7F3'; then
             log_success "openclaw dispatch canary: agent replied (Codex/OAuth path healthy)"
         else
             log_warning "openclaw dispatch canary inconclusive: $(printf '%s' "$CANARY_OUT" | tr '\n' ' ' | tail -c 100)"
