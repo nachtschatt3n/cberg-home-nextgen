@@ -34,7 +34,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 - **Operating System**: [Talos Linux v1.13.4](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.34, Clang/ThinLTO build)
 - **Container Runtime**: [Containerd 2.2.3](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
-- **Networking**: [Cilium v1.19.3](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
+- **Networking**: [Cilium v1.19.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn v1.11.2](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
 - **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
 - **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
