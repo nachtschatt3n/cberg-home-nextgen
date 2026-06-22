@@ -108,6 +108,15 @@ SKIP_KEY_NAMES = {
 # and cause false positives. Real secrets have entropy markers (digits, case,
 # special chars). Trade-off: a weak all-lowercase password would slip through.
 DICTIONARY_WORD = re.compile(r"^[a-z]{1,15}$")
+# Space-delimited phrases of plain lowercase words, optionally quoted — e.g.
+# the OAuth scope `"openid email profile"`. These are public config strings
+# (OIDC scopes, capability lists) that legitimately appear verbatim in
+# manifests' OAuth/OIDC blocks but also get captured into cluster Secrets
+# that hold the same provider config. Same trade-off as DICTIONARY_WORD /
+# K8S_NAME: a weak space-separated word passphrase ("correct horse battery")
+# would also be filtered. Anchored to multi-word lowercase only, so any
+# secret with digits, case, or punctuation still gets scanned.
+SCOPE_PHRASE = re.compile(r'^"?[a-z]+( [a-z]+)+"?$')
 # DNS-1123-style Kubernetes resource names (lowercase + digits + hyphens,
 # must start with a letter, ≤30 chars). Examples we have actually hit as
 # false positives: `superset-postgresql` (Helm release name surfaced in a
@@ -160,6 +169,8 @@ for s in data.get("items", []):
         if "\n" in decoded:
             continue
         if DICTIONARY_WORD.match(decoded):
+            continue
+        if SCOPE_PHRASE.match(decoded):
             continue
         if K8S_NAME.match(decoded):
             continue
