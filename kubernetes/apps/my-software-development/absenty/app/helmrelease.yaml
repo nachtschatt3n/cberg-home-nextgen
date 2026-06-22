@@ -46,7 +46,7 @@ spec:
             command:
               - bash
               - -lc
-              - bundle config set --local path '/bundle' && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
+              - rm -f tmp/pids/server.pid && bundle config set --local path '/bundle' && bin/rails db:prepare && bundle exec rails server -b 0.0.0.0 -p 3000
             env:
               - name: TZ
                 value: "Europe/Berlin"
