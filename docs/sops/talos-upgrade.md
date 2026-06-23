@@ -1,11 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
-> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.4 + Kubernetes v1.36.0 (kernel 6.18.34-talos, Clang/ThinLTO) — rolled 2026-06-12.**
-> Version: `2026.05.03`
-> Last Updated: `2026-05-03`
+> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.5 + Kubernetes v1.36.0 (kernel 6.18.36-talos, Clang/ThinLTO) — rolled 2026-06-23.**
+> Version: `2026.06.23`
+> Last Updated: `2026-06-23`
 > Owner: `homelab-ops`
 
-> **Cluster state (2026-06-12):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.4` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
+> **Cluster state (2026-06-23):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.5` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
 
 ---
 
@@ -29,9 +29,9 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 
 | Setting | Value |
 |---------|-------|
-| Talos version | `v1.13.4` ✅ |
+| Talos version | `v1.13.5` ✅ |
 | Kubernetes version | `v1.36.0` ✅ |
-| Kernel | `6.18.24-talos` (Clang/ThinLTO) ✅ |
+| Kernel | `6.18.36-talos` (Clang/ThinLTO) ✅ |
 | `CONFIG_IPV6_MROUTE` | `=y` ✅ |
 | CPU governor | `powersave` |
 | `machine-intelgpu.yaml` | ✅ wired (i915.enable_guc=3, hugepages=1024) |
