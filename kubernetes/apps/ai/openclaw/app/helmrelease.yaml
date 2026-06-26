@@ -827,6 +827,16 @@ spec:
                     cfg.plugins.load.paths = [...paths];
                   }
 
+                  // Workboard is a bundled Control UI plugin, disabled by
+                  // default. Enable it so the dashboard Workboard tab works.
+                  // It ships in dist/extensions, so no plugins.load.paths entry
+                  // is needed — only the enable flag (per the dashboard's own
+                  // "set plugins.entries.workboard.enabled = true" instruction).
+                  cfg.plugins = cfg.plugins || {};
+                  cfg.plugins.entries = cfg.plugins.entries || {};
+                  cfg.plugins.entries.workboard = cfg.plugins.entries.workboard || {};
+                  cfg.plugins.entries.workboard.enabled = true;
+
                   // Reply delivery mode — keep heartbeats from swallowing
                   // user DMs. When unset, codex-backed runtimes default to
                   // tool-only delivery (heartbeat_respond), which sets
