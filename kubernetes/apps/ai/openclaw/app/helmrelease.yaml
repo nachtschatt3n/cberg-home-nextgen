@@ -72,6 +72,18 @@ spec:
                   fi
                 done
 
+                # Clear stale usage-cost-cache lock(s). The lock records the holder
+                # PID, but every gateway in this container runs as PID 1 — so after a
+                # crash mid-rebuild the next gateway sees "PID 1 alive" and waits
+                # forever on a lock the dead process held, leaving the dashboard usage
+                # panel stuck at "rebuilding... 0 cached" (the lock is in the PVC, so
+                # it survives pod rolls). The init container runs BEFORE the gateway
+                # starts, so any lock present here is stale by definition — remove it
+                # so the gateway re-acquires cleanly. (Incident 2026-06-26: a lock from
+                # 2026-05-25 blocked the rebuild across many rolls.)
+                rm -f /home/node/.openclaw/agents/main/sessions/.usage-cost-cache.json.lock \
+                      /home/node/.openclaw/agents/main/sessions/.usage-cost-cache.json.lock.*.tmp 2>/dev/null || true
+
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
                 export NPM_CONFIG_CACHE="/home/node/.npm"
