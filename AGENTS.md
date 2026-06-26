@@ -10,7 +10,9 @@ Recurring health/security/version/doc/media sweeps **must run as session-local l
 4. **UniFi controller**: Reachable only at 192.168.30.1 (Trusted VLAN). No internet exposure.
 5. **Home Assistant / Zigbee2MQTT**: Internal services on private VLANs only.
 
-**How to schedule**: Use `/loop` → pick "This session only" when prompted. The loop fires via `CronCreate` (session-local cron, dies when the Claude session ends). Daily cadence at 8:17am local is the current setting (job `de44f77b`).
+**How it's scheduled (current, 2026-06-27)**: An in-cluster OpenClaw cron — "Daily Operation Sweep Every 2 Days" (id `8163c139`), every 48h anchored 04:00 Europe/Berlin — **triggers** the sweep by driving the Mac mini `daily-operation` Claude session via the `operation sweep` skill (over iterm2-harness). The sweep still **runs on the Mac** (local SOPS key, `kubectl`, mise tooling all required), so the reasons above still hold — the cluster cron is only the trigger, not a cloud sandbox.
+
+The old session-local `/loop` at 8:17am (CronCreate job `de44f77b`) is **RETIRED — do not re-create it.** A second local loop would double-run the sweep and clash with the cluster-driven one.
 
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
