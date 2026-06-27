@@ -278,6 +278,50 @@ def _auto_close_stale_findings(
         return []
 
 
+def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
+    """Recompute and store the cycle verdict from the CURRENTLY-OPEN findings,
+    so it matches what the dashboard shows under "open findings".
+
+    red  = any open critical
+    yellow = any open warning
+    green = none of the above
+
+    "Open" = status IN (new, unchanged) AND severity NOT IN (accepted, clean),
+    i.e. post AR-suppression + auto-close. This overrides the provisional
+    verdict each section script wrote from its pre-suppression counts (which
+    miscounts AR-accepted CVEs as critical and, in a parallel fan-out, races).
+    Returns the verdict written, or None on failure / writes disabled.
+    """
+    try:
+        import psycopg  # lazy import — --no-write paths don't need it
+    except ImportError:
+        return None
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      count(*) FILTER (WHERE severity = 'critical') AS crit,
+                      count(*) FILTER (WHERE severity = 'warning')  AS warn
+                    FROM sweep_findings
+                    WHERE status IN ('new', 'unchanged')
+                      AND severity NOT IN ('accepted', 'clean')
+                    """
+                )
+                crit, warn = cur.fetchone()
+                verdict = "red" if crit else ("yellow" if warn else "green")
+                cur.execute(
+                    "UPDATE sweep_cycles SET verdict = %s WHERE cycle_id = %s",
+                    (verdict, cycle_id),
+                )
+            conn.commit()
+        return verdict
+    except Exception as e:  # noqa: BLE001
+        print(f"==> verdict reconcile failed: {type(e).__name__}: {e}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -414,6 +458,19 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"      ✓ resolved {sec}/{fid}: {title[:80]}")
                 if len(closed) > 20:
                     print(f"      … and {len(closed) - 20} more")
+
+        # Reconcile the cycle verdict from the ACTUAL open findings, AFTER
+        # AR-suppression + auto-close. The per-section scripts each write a
+        # provisional verdict via writer.close() from their pre-suppression
+        # crit/warn counts (so an AR-029 accepted-risk CVE counts as
+        # "critical"), and in a parallel fan-out the last section to finish
+        # wins the race — which is how a clean cycle ended up red. This makes
+        # the stored verdict match the open-findings list the dashboard shows.
+        if write_enabled and dsn:
+            verdict = _reconcile_verdict(dsn, cycle_id)
+            if verdict:
+                print()
+                print(f"==> cycle verdict reconciled from open findings: {verdict}")
 
         print()
         if not nonzero:
