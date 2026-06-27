@@ -284,22 +284,28 @@ class VersionChecker:
             return None
     
     def get_oci_chart_version(self, repo_url: str, chart_name: str) -> Optional[str]:
-        """Get latest version from OCI registry."""
+        """Get the latest version of an OCI-hosted Helm chart.
+
+        NOTE: `helm search repo` only matches locally-added repo NAMES (not
+        URLs) and cannot search OCI registries at all — the old implementation
+        passed a URL to it and so always returned None (every OCI chart showed
+        "could not check latest"). `helm show chart oci://<repo>/<chart>` pulls
+        the latest tag's Chart.yaml directly and we read its `version:`.
+        """
         try:
-            # Use helm to search OCI registry
-            cmd = ['helm', 'search', 'repo', '--output', 'json', f'{repo_url}/{chart_name}']
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
+            base = repo_url if repo_url.startswith('oci://') else f"oci://{repo_url}"
+            ref = f"{base.rstrip('/')}/{chart_name}"
+            result = subprocess.run(
+                ['helm', 'show', 'chart', ref],
+                capture_output=True, text=True, timeout=30,
+            )
             if result.returncode == 0:
-                data = json.loads(result.stdout)
-                if data and len(data) > 0:
-                    # Get the first (latest) version
-                    versions = [item.get('version', '') for item in data if item.get('name', '').endswith(chart_name)]
-                    if versions:
-                        return versions[0]
+                for line in result.stdout.splitlines():
+                    if line.startswith('version:'):
+                        return line.split(':', 1)[1].strip().strip('"\'')
         except Exception:
             pass
-        
+
         return None
     
     def get_helm_repo_chart_version(self, repo_url: str, chart_name: str) -> Optional[str]:
@@ -329,6 +335,62 @@ class VersionChecker:
         
         return None
     
+    # Shared semver tag pattern + picker, used by BOTH the GHCR and Docker Hub
+    # resolvers so they treat v-prefixed, 4-part (Plex/Jellyfin-style), and
+    # -<hash> build-suffixed tags identically. Previously GHCR used a strict
+    # `^\d+\.\d+\.\d+$` that silently dropped v0.3.0 / 10.11.11.x / -<hash> tags.
+    _SEMVER_TAG_RE = re.compile(r'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?$')
+    # Current-tag shapes that are unverifiable by design (rolling / self-built):
+    # git-sha pins and floating tags. We skip these cleanly instead of emitting
+    # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
+    _ROLLING_TAG_RE = re.compile(
+        r'^(sha-[0-9a-f]+|sha256:[0-9a-f]+|[0-9a-f]{7,40}|latest|stable|dev|edge|'
+        r'main|master|nightly|rolling)$',
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _semver_tag_key(tag: str) -> tuple:
+        """Sort key for semver-shaped tags: strip v-prefix and -<hash> suffix,
+        pad to 4 parts so 3- and 4-part tags order consistently."""
+        name = tag.lstrip('vV').split('-', 1)[0]
+        try:
+            nums = [int(p) for p in name.split('.')]
+        except ValueError:
+            return (0, 0, 0, 0)
+        while len(nums) < 4:
+            nums.append(0)
+        return tuple(nums[:4])
+
+    def _pick_latest_semver_tag(self, tags: list, current_tag: str = '') -> Optional[str]:
+        """Highest semver-shaped tag from `tags`, preferring current's major.
+        Returns None when no version-shaped tag exists — callers must NOT fall
+        back to a meaningless 'latest'."""
+        version_tags = [t for t in tags if t and self._SEMVER_TAG_RE.match(t)]
+        if not version_tags:
+            return None
+        version_tags.sort(key=self._semver_tag_key, reverse=True)
+        cp = self.parse_version(current_tag) if current_tag else None
+        if cp:
+            same_major = [t for t in version_tags if self._semver_tag_key(t)[0] == cp[0]]
+            if same_major:
+                return same_major[0]
+        return version_tags[0]
+
+    def is_rolling_tag(self, tag: str) -> bool:
+        """True if `tag` is a rolling/self-built pin we can't semver-compare
+        (git-sha like sha-53e9efa, floating tags like latest/stable/edge).
+        Real pre-release semver (0.5.1-alpha) is NOT rolling — it parses."""
+        if not tag:
+            return True
+        if self._ROLLING_TAG_RE.match(tag):
+            return True
+        # Leading hex-sha segment (e.g. '5d88656-unprivileged-v2') with no
+        # parseable semver shape → rolling.
+        if re.match(r'^[0-9a-f]{7,}(-|$)', tag) and not self._SEMVER_TAG_RE.match(tag):
+            return True
+        return False
+
     def get_latest_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest image tag from container registry."""
         if not repository:
@@ -370,93 +432,49 @@ class VersionChecker:
                 token = token_resp.json().get('token', '')
                 headers = {'Authorization': f'Bearer {token}'}
 
-                # Paginate through all tags (GHCR returns ~50 per page)
-                ver_pattern = re.compile(r'^\d+\.\d+\.\d+$')
-                all_ver_tags: List[str] = []
+                # Paginate through ALL tags (GHCR returns ~50 per page); the
+                # robust semver picker below handles v-prefix / 4-part / -<hash>.
+                all_tags: List[str] = []
                 next_url: Optional[str] = f"https://ghcr.io/v2/{image_path}/tags/list"
                 while next_url:
                     resp = requests.get(next_url, headers=headers, timeout=10)
                     if resp.status_code != 200:
                         break
-                    all_ver_tags.extend(
-                        t for t in resp.json().get('tags', []) if ver_pattern.match(t)
-                    )
+                    all_tags.extend(resp.json().get('tags', []))
                     # Follow Link header for next page (path-only, so prepend host)
                     link = resp.headers.get('Link', '')
                     m = re.search(r'<(/[^>]+)>;\s*rel="next"', link)
                     next_url = f"https://ghcr.io{m.group(1)}" if m else None
 
-                if all_ver_tags:
-                    def _ver_key(t: str) -> tuple:
-                        try:
-                            return tuple(int(x) for x in t.split('.'))  # type: ignore[return-value]
-                        except ValueError:
-                            return (0, 0, 0)
-                    all_ver_tags.sort(key=_ver_key, reverse=True)
-                    return all_ver_tags[0]
+                return self._pick_latest_semver_tag(all_tags, current_tag)
             
-            # For Docker Hub, try Docker Hub API
-            elif 'docker.io' in repository or not '/' in repository.split('://')[-1].split('/')[0]:
-                image_name = repository.replace('docker.io/', '').split(':')[0]
-                # Fetch more tags and filter for semantic versions
+            # Quay.io — list active tags and pick the highest SEMVER. The API's
+            # default ordering is by push time, not version, so the old limit=1
+            # could return a non-highest (e.g. a rebuilt older) tag.
+            elif 'quay.io' in repository:
+                image_name = repository.replace('quay.io/', '')
+                api_url = f"https://quay.io/api/v1/repository/{image_name}/tag?limit=100&onlyActiveTags=true"
+                response = requests.get(api_url, timeout=10)
+                if response.status_code == 200:
+                    tags = [t.get('name', '') for t in response.json().get('tags', [])]
+                    return self._pick_latest_semver_tag(tags, current_tag)
+
+            # Docker Hub (default registry): handles explicit `docker.io/...`,
+            # bare official images (`redis` → `library/redis`), and namespaced
+            # images (`apache/superset`). Foreign registries with their own
+            # host (public.ecr.aws, gcr.io) are rejected rather than misrouted.
+            else:
+                image_name = repository.split('://')[-1].replace('docker.io/', '').split(':')[0]
+                first = image_name.split('/')[0]
+                if '.' in first or ':' in first:
+                    return None  # not Docker Hub (e.g. public.ecr.aws/..., gcr.io/...)
+                if '/' not in image_name:
+                    image_name = f"library/{image_name}"  # Docker Hub official images
                 api_url = f"https://hub.docker.com/v2/repositories/{image_name}/tags?page_size=200"
                 response = requests.get(api_url, timeout=10)
                 if response.status_code == 200:
-                    data = response.json()
-                    if data.get('results'):
-                        # Determine preferred major version from current tag
-                        preferred_major = None
-                        if current_tag:
-                            current_parsed = self.parse_version(current_tag)
-                            if current_parsed:
-                                preferred_major = current_parsed[0]
-                        
-                        # Filter for semantic version tags (x.y.z or x.y.z.N, with
-                        # optional v prefix and optional -<hex> build-suffix).
-                        # Matches:
-                        #   1.2.3, v1.2.3, 0.107.65
-                        #   1.43.1.10611 (Plex-style 4-part)
-                        #   1.43.1.10611-1e34174b1 (Plex-style with git hash suffix)
-                        version_pattern = re.compile(r'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?$')
-                        version_tags = [tag for tag in data['results'] if version_pattern.match(tag.get('name', ''))]
-                        if version_tags:
-                            # Sort by version number (not by last_updated).
-                            # Supports 3- or 4-part versions; ignores -<hash> suffix for ordering.
-                            def version_key(tag):
-                                name = tag['name'].lstrip('vV').split('-', 1)[0]  # drop build-hash suffix
-                                parts = name.split('.')
-                                try:
-                                    nums = [int(p) for p in parts]
-                                except ValueError:
-                                    return (0, 0, 0, 0)
-                                # Pad to 4 so 3-part and 4-part tags sort consistently
-                                while len(nums) < 4:
-                                    nums.append(0)
-                                return tuple(nums[:4])
-                            version_tags.sort(key=version_key, reverse=True)
-
-                            # If we have a preferred major version, prefer tags from that major version
-                            if preferred_major is not None:
-                                same_major = [tag for tag in version_tags if version_key(tag)[0] == preferred_major]
-                                if same_major:
-                                    return same_major[0].get('name', '')
-
-                            # Otherwise return the highest version overall
-                            return version_tags[0].get('name', '')
-                        # If no version-shaped tags matched, return None rather than
-                        # falling back to whatever's first (which is usually "latest"
-                        # and produces a nonsense "→ latest ⚪ UNKNOWN" comparison).
-                        return None
-            
-            # For Quay.io, use Quay API
-            elif 'quay.io' in repository:
-                image_name = repository.replace('quay.io/', '')
-                api_url = f"https://quay.io/api/v1/repository/{image_name}/tag?limit=1&onlyActiveTags=true"
-                response = requests.get(api_url, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('tags'):
-                        return data['tags'][0].get('name', '')
+                    tags = [t.get('name', '') for t in response.json().get('results', [])]
+                    return self._pick_latest_semver_tag(tags, current_tag)
         except Exception:
             pass
         
@@ -1614,6 +1632,21 @@ class VersionChecker:
             # Check image versions
             for img in hr['images']:
                 if img['repository']:
+                    # Rolling / self-built pins (git-sha, latest, stable, …) have
+                    # no semver to compare against. Skip them cleanly instead of
+                    # emitting a noisy "could not check" or nonsense "→ 0.0.20".
+                    if self.is_rolling_tag(img['tag']):
+                        img_result = {
+                            'repository': img['repository'],
+                            'current_tag': img['tag'],
+                            'latest_tag': None,
+                            'path': img['path'],
+                            'rolling': True,
+                        }
+                        print(f"  {Colors.CYAN}Image {img['repository']}: {img['tag']} (rolling tag — skipped){Colors.RESET}")
+                        result['images'].append(img_result)
+                        continue
+
                     latest_tag = self.get_latest_image_tag(img['repository'], img['tag'])
                     img_result = {
                         'repository': img['repository'],
@@ -1621,7 +1654,7 @@ class VersionChecker:
                         'latest_tag': latest_tag,
                         'path': img['path']
                     }
-                    
+
                     if latest_tag and not self.tags_are_equal(latest_tag, img['tag']) and img['tag'] != 'latest':
                         # Assess update complexity
                         assessment = self.assess_update_complexity(img['tag'], latest_tag)
