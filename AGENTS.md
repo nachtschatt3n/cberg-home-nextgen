@@ -1,8 +1,8 @@
 # Agent-Specific Guidelines
 
-## Scheduled Sweeps — Session-Only (No Cloud Schedules)
+## Scheduled Sweeps — run on the Mac, triggered by the cluster cron
 
-Recurring health/security/version/doc/media sweeps **must run as session-local loops**, not as Anthropic cloud scheduled agents. Reasons:
+Recurring health/security/version/doc/media sweeps **must execute on this Mac mini** (in the `daily-operation` Claude session), **never** in an Anthropic cloud sandbox. Reasons:
 
 1. **Private cluster network**: All Kubernetes nodes are on VLAN 55 (192.168.55.0/24), unreachable from the internet. `kubectl`, `talosctl`, and Longhorn/Flux APIs are LAN-only.
 2. **Local SOPS age key**: The age key (`~/.config/sops/age/keys.txt`) used to decrypt all cluster secrets is stored on this machine only. Cloud agents cannot decrypt `.sops.yaml` files.
@@ -12,7 +12,7 @@ Recurring health/security/version/doc/media sweeps **must run as session-local l
 
 **How it's scheduled (current, 2026-06-27)**: An in-cluster OpenClaw cron — "Daily Operation Sweep Every 2 Days" (id `8163c139`), every 48h anchored 04:00 Europe/Berlin — **triggers** the sweep by driving the Mac mini `daily-operation` Claude session via the `operation sweep` skill (over iterm2-harness). The sweep still **runs on the Mac** (local SOPS key, `kubectl`, mise tooling all required), so the reasons above still hold — the cluster cron is only the trigger, not a cloud sandbox.
 
-The old session-local `/loop` at 8:17am (CronCreate job `de44f77b`) is **RETIRED — do not re-create it.** A second local loop would double-run the sweep and clash with the cluster-driven one.
+**Do NOT create session-local `/loop` sweeps.** The old 8:17am `/loop` (CronCreate `de44f77b`) is retired and confirmed gone (2026-06-28). A local loop would double-run the sweep and clash with the cluster-driven one. For an ad-hoc sweep, send `operation sweep` (or type "run a sweep" into the `daily-operation` session) — **once**, never on a `/loop` or `CronCreate` schedule.
 
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
