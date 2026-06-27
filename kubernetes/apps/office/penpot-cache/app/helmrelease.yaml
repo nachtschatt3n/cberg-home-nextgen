@@ -1,7 +1,11 @@
 ---
-# Standalone Valkey (cache only) for Penpot.
-# Decoupled from the penpot chart along with the DB. No persistence and
-# no auth — matches the previous bundled valkey (redis://host:6379/0).
+# Standalone Valkey (cache only) for Penpot — re-platformed off the deprecated
+# Bitnami chart onto the official `valkey/valkey` image via bjw-s app-template.
+# Cache only: no persistence, no auth (penpot uses redis://penpot-cache-primary:6379/0).
+#
+# Service name MUST stay `penpot-cache-primary` — the penpot chart's init
+# container and redis host both reference penpot-cache-primary:6379. The
+# `primary` service identifier renders to `<release>-primary` = penpot-cache-primary.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -11,13 +15,12 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: valkey
-      version: 3.0.31
+      chart: app-template
+      version: 3.7.3
       sourceRef:
         kind: HelmRepository
-        name: bitnami
+        name: bjw-s
         namespace: flux-system
-      interval: 15m
   install:
     remediation:
       retries: 3
@@ -26,22 +29,46 @@ spec:
     remediation:
       retries: 3
   values:
-    fullnameOverride: penpot-cache
-    # Bitnami deleted old tags from docker.io/bitnami/*; use the bitnamilegacy mirror.
-    image:
-      registry: docker.io
-      repository: bitnamilegacy/valkey
-    architecture: standalone
-    auth:
-      enabled: false
-    primary:
-      persistence:
-        enabled: false  # cache only
-      resourcesPreset: "none"
-      resources:
-        requests:
-          cpu: 100m
-          memory: 128Mi
-        limits:
-          cpu: 500m
-          memory: 256Mi
+    controllers:
+      penpot-cache:
+        containers:
+          app:
+            image:
+              repository: valkey/valkey
+              tag: "9.1.0"
+            # Cache only — no persistence (RDB + AOF off).
+            command:
+              - valkey-server
+              - --save
+              - ""
+              - --appendonly
+              - "no"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["valkey-cli", "ping"]
+                  initialDelaySeconds: 10
+                  periodSeconds: 20
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["valkey-cli", "ping"]
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
+    service:
+      primary:
+        controller: penpot-cache
+        ports:
+          redis:
+            port: 6379

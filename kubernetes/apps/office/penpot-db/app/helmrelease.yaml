@@ -1,9 +1,13 @@
 ---
-# Standalone PostgreSQL for Penpot.
-# Decoupled from the penpot chart: penpot 1.1.0 dropped the bundled
-# postgresql/valkey subcharts and now requires an external DB. Same
-# bitnami chart version (15.5.38) the bundled subchart used, so the
-# pg_dump from the old bundled instance restores cleanly.
+# Standalone PostgreSQL for Penpot — re-platformed off the deprecated Bitnami
+# chart. The bitnamilegacy mirror froze at PG17 and the current Bitnami charts
+# paywall pinned image tags (default `tag: latest`), so the chart 15→18 bump
+# could not actually deliver PG18. Now a plain official `postgres` image via
+# bjw-s app-template. Penpot held no meaningful data, so the cutover is a fresh
+# init (the old `data-penpot-db-0` PVC is wiped during migration).
+#
+# Service name MUST stay `penpot-db` and DB/user `penpot` — the penpot chart
+# connects to penpot-db:5432 with creds from penpot-secret (unchanged).
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -13,13 +17,12 @@ spec:
   interval: 30m
   chart:
     spec:
-      chart: postgresql
-      version: 15.5.38
+      chart: app-template
+      version: 3.7.3
       sourceRef:
         kind: HelmRepository
-        name: bitnami
+        name: bjw-s
         namespace: flux-system
-      interval: 15m
   install:
     remediation:
       retries: 3
@@ -28,32 +31,68 @@ spec:
     remediation:
       retries: 3
   values:
-    fullnameOverride: penpot-db
-    # Bitnami deleted old tags from docker.io/bitnami/*; use the bitnamilegacy
-    # mirror (same convention as nextcloud/superset/paperless in this repo).
-    image:
-      registry: docker.io
-      repository: bitnamilegacy/postgresql
-    architecture: standalone
-    auth:
-      username: penpot
-      database: penpot
-      existingSecret: penpot-secret
-      secretKeys:
-        # penpot-secret only carries one password; use it for both the
-        # postgres superuser (needed to CREATE EXTENSION "uuid-ossp" on
-        # restore) and the penpot user.
-        adminPasswordKey: PENPOT_POSTGRESQL_PASSWORD
-        userPasswordKey: PENPOT_POSTGRESQL_PASSWORD
-    primary:
-      persistence:
-        enabled: true
+    controllers:
+      penpot-db:
+        type: statefulset
+        containers:
+          app:
+            image:
+              repository: postgres
+              tag: "18.4"
+            env:
+              POSTGRES_USER: penpot
+              POSTGRES_DB: penpot
+              # PGDATA in a subdir so the volume's lost+found doesn't trip
+              # initdb's "directory not empty" check.
+              PGDATA: /var/lib/postgresql/data/pgdata
+              POSTGRES_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: penpot-secret
+                    key: PENPOT_POSTGRESQL_PASSWORD
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["pg_isready", "-U", "penpot", "-d", "penpot"]
+                  initialDelaySeconds: 20
+                  periodSeconds: 20
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["pg_isready", "-U", "penpot", "-d", "penpot"]
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+              limits:
+                memory: 1Gi
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+    service:
+      main:
+        controller: penpot-db
+        ports:
+          postgres:
+            port: 5432
+    persistence:
+      data:
         storageClass: longhorn
+        accessMode: ReadWriteOnce
         size: 10Gi
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: 1000m
-          memory: 1Gi
+        advancedMounts:
+          penpot-db:
+            app:
+              - path: /var/lib/postgresql/data
