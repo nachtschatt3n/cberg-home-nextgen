@@ -56,17 +56,17 @@ data:
            on the static <url> field; srcip scoping is deliberately avoided (the <srcip>
            element does not match this decoder's data.srcip field — see 100600
            history above). -->
-      <rule id="100610" level="0">
+      <rule id="100620" level="0">
         <if_sid>31101</if_sid>
         <url>richdocumentscode|/apps/notifications/api|/apps/whiteboard/</url>
         <description>Suppress 31101 — benign Nextcloud Office/Collabora editor 4xx (missing toolbar icons, WOPI), internal users</description>
       </rule>
-      <rule id="100611" level="0">
+      <rule id="100621" level="0">
         <if_sid>31122</if_sid>
         <url>richdocumentscode|/apps/notifications/api|/apps/whiteboard/</url>
         <description>Suppress 31122 — benign Nextcloud Office/Collabora editor 5xx churn on the editor asset path</description>
       </rule>
-      <rule id="100612" level="0">
+      <rule id="100622" level="0">
         <if_sid>31151</if_sid>
         <url>richdocumentscode|/apps/notifications/api|/apps/whiteboard/</url>
         <description>Suppress 31151 — benign repeated Nextcloud Office 400s from same internal user (icon probing)</description>
