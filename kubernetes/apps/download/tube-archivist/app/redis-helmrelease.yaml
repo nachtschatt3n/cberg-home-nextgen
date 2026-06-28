@@ -29,8 +29,14 @@ spec:
         containers:
           app:
             image:
-              repository: redis/redis-stack-server
-              tag: 7.4.0-v7
+              # Tube Archivist uses redis only as a Celery broker + result
+              # backend + cache (search is Elasticsearch) — it does NOT use the
+              # RediSearch/RedisJSON Stack modules (FT._LIST empty, no JSON keys).
+              # TA's own v0.5.x docker-compose ships plain `redis`, so we track
+              # that with the official image, consistent with the rest of the
+              # redis fleet. (Was redis-stack-server 7.4.0-v7 — unnecessary here.)
+              repository: redis
+              tag: 8-alpine
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
