@@ -128,6 +128,16 @@
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
 | arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster) | Internal | Office |
 
+> **Shared Sure API key — rotate in two places.** `openclaw` and `arag-web` both
+> authenticate to `sure` with the **same** Sure API key (sent via the `X-Api-Key`
+> header), stored in two SOPS secrets: `openclaw-secret` key `SURE_TOKEN` (`ai`
+> namespace, used by the openclaw `sure` skill) and `arag-web-secret` key
+> `SURE_API_KEY` (`office` namespace, used by arag-web's `SureSyncJob`). When the
+> Sure key is rotated, **update both secrets together** — a stale key fails closed
+> with a silent `401 unauthorized` on whichever consumer wasn't updated (this is
+> exactly how the openclaw skill broke: its copy of the key was stale while
+> arag-web's was current).
+
 ---
 
 ## Media (`media`)
