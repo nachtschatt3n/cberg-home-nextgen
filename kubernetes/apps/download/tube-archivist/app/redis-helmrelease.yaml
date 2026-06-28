@@ -36,7 +36,7 @@ spec:
               # that with the official image, consistent with the rest of the
               # redis fleet. (Was redis-stack-server 7.4.0-v7 — unnecessary here.)
               repository: redis
-              tag: 8-alpine
+              tag: 8.8.0-alpine
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}

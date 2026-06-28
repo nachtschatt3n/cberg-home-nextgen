@@ -29,7 +29,7 @@ spec:
           app:
             image:
               repository: redis
-              tag: 8-alpine
+              tag: 8.8.0-alpine
               pullPolicy: IfNotPresent
             command:
               - redis-server
