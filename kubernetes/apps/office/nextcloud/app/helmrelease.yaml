@@ -31,7 +31,7 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: nextcloud
-      tag: 33.0.4
+      tag: 34.0.0
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
@@ -273,7 +273,7 @@ spec:
             name: nextcloud-openclaw-mail-app
       extraSidecarContainers:
         - name: worker
-          image: nextcloud:33.0.4
+          image: nextcloud:34.0.0
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 33
