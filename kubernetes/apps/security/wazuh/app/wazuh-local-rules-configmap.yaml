@@ -35,4 +35,40 @@ data:
            unifi_rules.xml, so an if_sid=100110 here is dropped ("Signature ID
            100110 was not found"). 100600 works only because 31533 is a built-in
            rule loaded early. -->
+
+      <!-- Suppress benign Nextcloud Office (Collabora) web-accesslog 4xx/5xx
+           noise. The bundled built-in CODE server (richdocumentscode app, the
+           latest appstore build for NC34) does not ship every LibreOffice
+           command icon the richdocuments frontend requests, so opening a doc
+           emits a burst of 404s for missing `lc_*.svg` toolbar icons via
+           `/custom_apps/richdocumentscode/proxy.php?...` — plus WOPI 400s,
+           notifications-API 404s, and whiteboard 4xx. In 24h this was 128
+           level≥5 events, ALL from internal users (e.g. 192.168.50.146), zero
+           external/attack signatures — the upstream rules 31101/31122/31151
+           ("web 400/5xx error code", "multiple 400s from same IP") classify
+           them as attack/recon, a permanent false positive that flagged the
+           sweep's "high K8s container alert volume" warning.
+
+           Scoped by data.url to the three benign Office/collab paths only, so a
+           real web attack (path traversal, SQLi, cred-stuffing) on any other
+           URL still fires normally, and the signature-based web-attack rules
+           (31103/31104+) are untouched on every path. pcre2 for reliable
+           alternation; srcip scoping is deliberately avoided (the <srcip>
+           element does not match this decoder's data.srcip field — see 100600
+           history above). -->
+      <rule id="100610" level="0">
+        <if_sid>31101</if_sid>
+        <field name="url" type="pcre2">richdocumentscode|/apps/notifications/api|/apps/whiteboard/</field>
+        <description>Suppress 31101 — benign Nextcloud Office/Collabora editor 4xx (missing toolbar icons, WOPI), internal users</description>
+      </rule>
+      <rule id="100611" level="0">
+        <if_sid>31122</if_sid>
+        <field name="url" type="pcre2">richdocumentscode|/apps/notifications/api|/apps/whiteboard/</field>
+        <description>Suppress 31122 — benign Nextcloud Office/Collabora editor 5xx churn on the editor asset path</description>
+      </rule>
+      <rule id="100612" level="0">
+        <if_sid>31151</if_sid>
+        <field name="url" type="pcre2">richdocumentscode|/apps/notifications/api|/apps/whiteboard/</field>
+        <description>Suppress 31151 — benign repeated Nextcloud Office 400s from same internal user (icon probing)</description>
+      </rule>
     </group>
