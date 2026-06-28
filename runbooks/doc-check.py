@@ -1126,6 +1126,7 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     "wazuh-unifi-syslog.md",         # One-time UniFi controller setup procedure
                     "icloud-cookie-rotation.md",     # Interactive 2FA — kubectl exec procedure
                     "sure-data-audit.md",            # Agent-driven weekly audit, no script
+                    "sure-key-sync.md",              # Documents a Mac-local launchd job (~/.sure/sync-key.sh), not a repo script
                     "pikvm-update.md",               # SSH-on-device procedure, not GitOps/cluster
                 }
                 if runbook.name in MANUAL_RUNBOOKS:
