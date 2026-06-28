@@ -262,7 +262,14 @@ def load_sensitive() -> bool:
 
     _sensitive["DOMAIN"] = domain_raw
     _sensitive["NAME"]   = git_name
-    _sensitive["EMAIL"]  = git_email
+    # Only treat git user.email as a scannable EMAIL literal if it's actually
+    # email-shaped. Here git_email is a bare username ("mathiasuhl", no @), and
+    # fixed-string scanning that across the repo matched legitimate reverse-DNS
+    # launchd labels (com.mathiasuhl.*) as a "[EMAIL] literal" — a false
+    # positive. A bare handle isn't a meaningful email-leak signal.
+    _sensitive["EMAIL"]  = (
+        git_email if ("@" in git_email and "." in git_email.rsplit("@", 1)[-1]) else ""
+    )
     return True
 
 
