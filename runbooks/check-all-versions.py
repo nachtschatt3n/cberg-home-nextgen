@@ -383,6 +383,7 @@ class VersionChecker:
         Real pre-release semver (0.5.1-alpha) is NOT rolling — it parses."""
         if not tag:
             return True
+        tag = str(tag)  # defensive: YAML may hand us an int/float tag
         if self._ROLLING_TAG_RE.match(tag):
             return True
         # Leading hex-sha segment (e.g. '5d88656-unprivileged-v2') with no
@@ -1632,6 +1633,10 @@ class VersionChecker:
             # Check image versions
             for img in hr['images']:
                 if img['repository']:
+                    # Coerce the tag to a string: an unquoted numeric tag in a
+                    # HelmRelease (e.g. `tag: 8`) is parsed by YAML as an int,
+                    # which blows up the regex/semver helpers downstream.
+                    img['tag'] = str(img['tag'])
                     # Rolling / self-built pins (git-sha, latest, stable, …) have
                     # no semver to compare against. Skip them cleanly instead of
                     # emitting a noisy "could not check" or nonsense "→ 0.0.20".
