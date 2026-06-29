@@ -18,11 +18,17 @@ spec:
         description: Paperclip pod {{ $labels.pod }} has been not ready for more
           than 5 minutes. The agent orchestration service may be unavailable.
         summary: Paperclip pod {{ $labels.pod }} is not ready
-      # Exclude Succeeded-phase pods (completed CronJob runs like
-      # paperclip-backup-cleanup show ready=false as expected).
+      # Watch only the long-running app Deployment pods. The
+      # paperclip-backup-cleanup CronJob Job pods are excluded by name
+      # (pod!~"paperclip-backup.*") — a Job pod is never service-"ready",
+      # and when one is orphaned by a node reboot it lands in phase
+      # Failed/Unknown (not Succeeded), which slipped past the old
+      # Succeeded-only exclusion and tripped this critical alert
+      # (2026-06-29: nuc14-01 rebooted mid-run at 04:00). The Succeeded
+      # exclusion is kept as belt-and-braces for any other completed pod.
       expr: |
         sum by (namespace, pod) (
-          kube_pod_status_ready{namespace="ai", pod=~"paperclip-[^p].*", condition="true"}
+          kube_pod_status_ready{namespace="ai", pod=~"paperclip-[^p].*", pod!~"paperclip-backup.*", condition="true"}
           unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
         ) == 0
       for: 5m
@@ -36,7 +42,7 @@ spec:
           "%.0f" }} times in the last 15 minutes.
         summary: Paperclip pod {{ $labels.pod }} is crash looping
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*"}[15m]) * 900 > 2
+        rate(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*", pod!~"paperclip-backup.*"}[15m]) * 900 > 2
       for: 5m
       labels:
         category: ai
@@ -48,7 +54,7 @@ spec:
           in the last 15 minutes.
         summary: Paperclip pod {{ $labels.pod }} restarted
       expr: |
-        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*"}[15m]) > 0
+        increase(kube_pod_container_status_restarts_total{namespace="ai", pod=~"paperclip-[^p].*", pod!~"paperclip-backup.*"}[15m]) > 0
       for: 1m
       labels:
         category: ai
