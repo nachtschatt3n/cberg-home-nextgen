@@ -87,6 +87,24 @@ data:
         traces_index: traces-generic-default
         mapping:
           mode: otel
+      # Tier 2d: expose the kmsg hardware-error count to Prometheus (scraped via
+      # the hwmetrics ServiceMonitor endpoint) so a PrometheusRule can alert.
+      prometheus/hwerrors:
+        endpoint: 0.0.0.0:8889
+        send_timestamps: true
+        metric_expiration: 24h
+
+    connectors:
+      # Counts Talos kmsg lines matching hardware-error patterns (MCE / machine
+      # check / Hardware Error / thermal), labelled by source node, into a metric.
+      count/hwerrors:
+        logs:
+          talos_kernel_hardware_errors:
+            description: Talos kmsg hardware-error lines (mce/machine check/Hardware Error/thermal)
+            conditions:
+              - 'attributes["log_source"] == "talos-kernel" and IsString(body) and IsMatch(body, "(?i)(mce:|machine check|hardware error|uncorrected|cpu[0-9]+: machine check|thermal throttl|critical temperature)")'
+            attributes:
+              - key: net.peer.ip
 
     service:
       extensions: [health_check]
@@ -99,8 +117,13 @@ data:
           receivers: [udplog/talos-kernel]
           processors: [memory_limiter, batch]
           # shares logs-generic-default (proven path); filter by
-          # attributes.log_source=talos-kernel + attributes.net.peer.ip (node)
-          exporters: [elasticsearch/logs]
+          # attributes.log_source=talos-kernel + attributes.net.peer.ip (node).
+          # count/hwerrors also taps this stream to emit the hardware-error metric.
+          exporters: [elasticsearch/logs, count/hwerrors]
+        metrics/hwerrors:
+          receivers: [count/hwerrors]
+          processors: [batch]
+          exporters: [prometheus/hwerrors]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]

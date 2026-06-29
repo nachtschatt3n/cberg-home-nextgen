@@ -15,3 +15,7 @@ spec:
     - port: metrics
       interval: 30s
       path: /metrics
+    # Tier 2d: scrape the kmsg hardware-error count metric (prometheus exporter)
+    - port: hwmetrics
+      interval: 30s
+      path: /metrics

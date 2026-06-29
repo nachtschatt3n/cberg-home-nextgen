@@ -23,3 +23,7 @@ spec:
       port: 8888
       targetPort: 8888
       protocol: TCP
+    - name: hwmetrics
+      port: 8889
+      targetPort: 8889
+      protocol: TCP

@@ -39,6 +39,9 @@ spec:
             - name: talos-kmsg
               containerPort: 5171
               protocol: UDP
+            - name: hwmetrics
+              containerPort: 8889
+              protocol: TCP
           env:
             - name: ES_PASSWORD
               valueFrom:
