@@ -1,0 +1,125 @@
+---
+# Node hardware-health alerts — added 2026-06-29 after k8s-nuc14-01 silently
+# rebooted at 04:00:58 UTC and surfaced only as a downstream app alert
+# (PaperclipPodNotReady). These page directly on the node-level event.
+#
+# All metrics verified present on these Talos v1.13.5 / Intel NUC14 nodes:
+#   - node_boot_time_seconds                 (reboot detection)
+#   - node_thermal_zone_temp{type=x86_pkg_temp} + node_hwmon_temp_crit_alarm_celsius (thermal)
+#   - node_edac_{correctable,uncorrectable}_errors_total  (ECC memory; works here
+#     despite being unavailable on stock Talos — our image exposes the EDAC mc nodes)
+# An absent-guard alert flags if EDAC ever stops being scraped (e.g. a Talos
+# image change), since memory-error monitoring would silently go blind.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+  name: node-hardware-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: node.reboot.rules
+      interval: 30s
+      rules:
+        - alert: NodeUnexpectedReboot
+          # Fires when a node booted <10m ago AND it was already up >10m a
+          # moment before (offset guard => does not false-fire when a brand-new
+          # node first appears). node_boot_time_seconds is a timestamp — never
+          # rate()/increase() it.
+          expr: |
+            (time() - node_boot_time_seconds < 600)
+            and
+            (time() - 600 - (node_boot_time_seconds offset 10m) > 600)
+          for: 0m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: node
+          annotations:
+            summary: "Node rebooted: {{ $labels.instance }}"
+            description: >-
+              Node {{ $labels.instance }} rebooted in the last 10 minutes. No planned reboot
+              mechanism (kured / Talos upgrade) exists on this cluster — investigate for kernel
+              panic / hardware watchdog / power. Runbook: docs/troubleshooting/node-reboot-observability.md
+        - alert: NodeRebootFlapping
+          expr: changes(node_boot_time_seconds[1h]) > 1
+          for: 0m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: node
+          annotations:
+            summary: "Node rebooting repeatedly: {{ $labels.instance }}"
+            description: "{{ $labels.instance }} rebooted {{ $value }} times in the last hour — possible crash/power loop or failing hardware."
+    - name: node.thermal.rules
+      interval: 30s
+      rules:
+        - alert: NodeCPUTemperatureHigh
+          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 90
+          for: 10m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "CPU package temp high on {{ $labels.instance }}"
+            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>90°C for 10m). Tjmax on these NUC14 is ~110°C; investigate airflow/dust before it throttles."
+        - alert: NodeCPUTemperatureCritical
+          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 100
+          for: 2m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "CPU package temp critical on {{ $labels.instance }}"
+            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>100°C). Approaching Tjmax (~110°C) — thermal throttle/shutdown risk."
+        - alert: NodeCPUThermalCritAlarm
+          # The chip's own critical-temperature alarm flag — hardware-asserted.
+          expr: node_hwmon_temp_crit_alarm_celsius == 1
+          for: 1m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: cpu-thermal
+          annotations:
+            summary: "Hardware thermal critical alarm on {{ $labels.instance }}"
+            description: "Sensor {{ $labels.sensor }} on chip {{ $labels.chip }} asserted its critical-temperature alarm."
+    - name: node.memory-ecc.rules
+      interval: 60s
+      rules:
+        - alert: NodeMemoryECCCorrectableErrors
+          expr: increase(node_edac_correctable_errors_total[1h]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: memory-ecc
+          annotations:
+            summary: "Correctable ECC memory errors on {{ $labels.instance }}"
+            description: "{{ $value | printf \"%.0f\" }} correctable ECC error(s) in the last hour on controller {{ $labels.controller }}. A rising rate often precedes a DIMM failure."
+        - alert: NodeMemoryECCUncorrectableErrors
+          expr: increase(node_edac_uncorrectable_errors_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: memory-ecc
+          annotations:
+            summary: "Uncorrectable ECC memory errors on {{ $labels.instance }}"
+            description: "{{ $value | printf \"%.0f\" }} UNcorrectable ECC error(s) on controller {{ $labels.controller }} — imminent memory/hardware failure; this can hard-reset the node."
+        - alert: NodeEDACMetricsAbsent
+          # Memory-error monitoring is only as good as the EDAC metrics. These
+          # work on our current image but are absent on stock Talos — page (info)
+          # if they ever vanish so we know we've gone blind on ECC.
+          expr: absent(node_edac_correctable_errors_total)
+          for: 30m
+          labels:
+            severity: info
+            category: node-hardware
+            component: memory-ecc
+          annotations:
+            summary: "EDAC memory-error metrics absent cluster-wide"
+            description: "node_edac_* metrics are no longer being scraped — ECC memory-error monitoring is blind. Check a Talos image/kernel change or the node-exporter edac collector."

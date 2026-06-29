@@ -15,6 +15,7 @@ resources:
   - ./librechat-alerts.yaml
   - ./next-ai-draw-io-alerts.yaml
   - ./paperclip-alerts.yaml
+  - ./node-hardware-alerts.yaml
   - ./tube-archivist-alerts.yaml
   - ./library-tools-alerts.yaml
   - ./solarfocus-scraper-alerts.yaml
