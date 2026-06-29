@@ -1,0 +1,11 @@
+# Ship kernel logs (kmsg) off-box so an unexplained node reboot is diagnosable.
+# Separate Talos config document (KmsgLogConfig) — applies on `apply-config`
+# with NO reboot. Streams json_lines to the edot-collector tcplog receiver
+# (LoadBalancer 192.168.55.18:5171 in the monitoring namespace), which forwards
+# to Elasticsearch (log_source=talos-kernel). Captures mce:/Hardware Error/
+# thermal/panic lines that don't survive a reboot otherwise.
+# See docs/troubleshooting/node-reboot-observability.md (Tier 2).
+apiVersion: v1alpha1
+kind: KmsgLogConfig
+name: ship-kmsg-to-otel
+url: tcp://192.168.55.18:5171/
