@@ -102,7 +102,7 @@ data:
           talos_kernel_hardware_errors:
             description: Talos kmsg hardware-error lines (mce/machine check/Hardware Error/thermal)
             conditions:
-              - 'attributes["log_source"] == "talos-kernel"'
+              - 'attributes["log_source"] == "talos-kernel" and IsString(body) and IsMatch(body, "(?i)(mce:|machine check|hardware error|uncorrected|cpu[0-9]+: machine check|thermal throttl|critical temperature)")'
             attributes:
               - key: net.peer.ip
 

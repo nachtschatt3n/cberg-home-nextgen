@@ -124,3 +124,25 @@ spec:
           annotations:
             summary: "EDAC memory-error metrics absent cluster-wide"
             description: "node_edac_* metrics are no longer being scraped — ECC memory-error monitoring is blind. Check a Talos image/kernel change or the node-exporter edac collector."
+    - name: node.kmsg.rules
+      interval: 30s
+      rules:
+        - alert: NodeKernelHardwareError
+          # Tier 2d: kmsg lines matching mce:/Hardware Error/machine check/thermal,
+          # shipped from Talos via KmsgLogConfig and counted by the edot-collector
+          # count/hwerrors connector (metric labelled by net_peer_ip = node). Catches
+          # hardware errors that don't trip EDAC or crash the node outright.
+          expr: increase(talos_kernel_hardware_errors_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+            category: node-hardware
+            component: kernel-hwerror
+          annotations:
+            summary: "Kernel hardware-error log on node {{ $labels.net_peer_ip }}"
+            description: >-
+              {{ $value | printf "%.0f" }} kmsg hardware-error line(s) (mce/machine check/
+              Hardware Error/thermal) in the last hour from node {{ $labels.net_peer_ip }}.
+              Investigate in Kibana: attributes.log_source:talos-kernel AND
+              attributes.net.peer.ip:"{{ $labels.net_peer_ip }}". Runbook:
+              docs/troubleshooting/node-reboot-observability.md
