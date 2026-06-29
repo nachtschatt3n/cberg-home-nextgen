@@ -1,9 +1,35 @@
 # Node-reboot observability — implementation plan (Tiers 1–3)
 
-**Status:** Tier 1 DONE (live). **Tier 2 DONE (live, 2026-06-29)** — all 3 nodes
-ship kmsg to Elasticsearch. Tier 2d (ES MCE-pattern alert) and Tier 3
-(serial/netconsole) remain. Talos changes are applied out-of-band (talhelper +
-`talosctl`), not via Flux.
+**Status:** Tier 1 DONE (live). **Tier 2 + 2d DONE (live, 2026-06-29)** — all 3
+nodes ship kmsg to Elasticsearch, and `NodeKernelHardwareError` alerts on
+mce/Hardware-Error/thermal kmsg lines. Tier 3 (serial/netconsole) remains. Talos
+changes are applied out-of-band (talhelper + `talosctl`), not via Flux.
+
+### Tier 2d — hardware-error alert (DONE)
+
+edot-collector `count/hwerrors` connector taps the kmsg stream and emits
+`talos_kernel_hardware_errors_total{net_peer_ip=...}` (regex
+`mce:|machine check|hardware error|uncorrected|thermal throttl|critical temperature`)
+via a `prometheus/hwerrors` exporter on :8889, scraped by the `hwmetrics`
+ServiceMonitor endpoint. PrometheusRule `NodeKernelHardwareError`
+(`increase(...[1h]) > 0`, critical, labelled by node) in node-hardware-alerts.yaml.
+Verified end-to-end by transiently broadening the count regex to all-kmsg and
+confirming the metric in Prometheus, then restoring. NOTE: the metric is
+distroless-collector — verify via Prometheus, not `kubectl exec` (no shell/wget
+in the image).
+
+### kmsg-sender stall on collector restart (operational gotcha)
+
+A Talos node's UDP kmsg sender can **stall after the collector pod restarts**
+(connected-UDP socket pinned to the now-dead pod IP) — kmsg keeps appearing in
+`talosctl dmesg` but stops reaching ES. Kick it WITHOUT a reboot via a
+config-toggle once the collector is stable:
+`talosctl -n <node> patch mc --patch '{apiVersion: v1alpha1, kind: KmsgLogConfig,
+name: ship-kmsg-to-otel, url: udp://192.168.55.18:5172/}'` then patch back to
+`5171`. (The toggle only takes once the collector is no longer churning.) So:
+**minimize collector restarts**, and after an unavoidable one, spot-check
+per-node kmsg counts in ES and toggle any node that went silent. Detecting a
+silent node is a candidate for a future `absent`-style alert per node.
 
 ### Tier 2 — what was actually built + learnings (differs from the draft below)
 
