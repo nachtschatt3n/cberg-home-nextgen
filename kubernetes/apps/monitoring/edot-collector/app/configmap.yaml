@@ -64,18 +64,6 @@ data:
         logs_index: logs-generic-default
         mapping:
           mode: otel
-      elasticsearch/talos-kernel:
-        endpoints:
-          - https://elasticsearch-es-http.monitoring.svc:9200
-        user: elastic
-        password: $${env:ES_PASSWORD}
-        tls:
-          insecure_skip_verify: true
-        # dedicated index so kmsg fields (priority/facility/seq/clock) can't
-        # collide with app-log field types in logs-generic-default
-        logs_index: logs-talos.kernel-default
-        mapping:
-          mode: otel
       elasticsearch/metrics:
         endpoints:
           - https://elasticsearch-es-http.monitoring.svc:9200
@@ -107,7 +95,9 @@ data:
         logs/talos-kernel:
           receivers: [tcplog/talos-kernel]
           processors: [memory_limiter, batch]
-          exporters: [elasticsearch/talos-kernel]
+          # shares logs-generic-default (proven path); filter by
+          # attributes.log_source=talos-kernel + attributes.net.peer.ip (node)
+          exporters: [elasticsearch/logs]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]
