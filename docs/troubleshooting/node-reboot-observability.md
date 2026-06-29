@@ -1,7 +1,35 @@
 # Node-reboot observability — implementation plan (Tiers 1–3)
 
-**Status:** Tier 1 DONE (live). Tiers 2–3 below are DRAFTS for review — Talos
-changes are applied out-of-band (talhelper + `talosctl`), not via Flux.
+**Status:** Tier 1 DONE (live). **Tier 2 DONE (live, 2026-06-29)** — all 3 nodes
+ship kmsg to Elasticsearch. Tier 2d (ES MCE-pattern alert) and Tier 3
+(serial/netconsole) remain. Talos changes are applied out-of-band (talhelper +
+`talosctl`), not via Flux.
+
+### Tier 2 — what was actually built + learnings (differs from the draft below)
+
+- **UDP, not TCP.** Talos's kmsg sender does **not reconnect** after the sink
+  closes — over TCP it wedges in `CLOSE_WAIT` and silently stops on any collector
+  restart (and a wedged sender does NOT recover via config re-apply or even a
+  forced URL-toggle — only a node reboot clears it). UDP is connectionless and
+  survives collector restarts. KmsgLogConfig `url: udp://192.168.55.18:5171/`;
+  collector `udplog/talos-kernel` receiver; LB service + container port are UDP.
+- **Node attribution:** Talos kmsg carries no hostname. The `udplog` receiver
+  has `add_attributes: true`, so each record gets `attributes.net.peer.ip` =
+  the node (192.168.55.11/12/13). Query ES:
+  `attributes.log_source:talos-kernel AND attributes.net.peer.ip:192.168.55.11`.
+- **Index:** kmsg shares `logs-generic-default` (a dedicated
+  `logs-talos.kernel-default` index was tried and reverted — no matching ES
+  index template, so the data stream couldn't bootstrap).
+- **applies with no reboot** via `talosctl apply-config` — confirmed. BUT the
+  one node that went through the tcp→udp transition (nuc14-01) had a wedged
+  sender and needed a graceful `talosctl reboot` to start shipping. A reboot of
+  a node hosting many stateful DBs causes a multi-minute recovery (Longhorn RWO
+  volumes reattach; delete the reboot's orphaned `Error`/`ContainerStatusUnknown`
+  pods to release held volumes — `kubectl get pods -A | awk '$4=="Error"...'`).
+- **Verify:** `attributes.facility:kern` lines (incl. boot sequence) confirm
+  kernel-level capture; `facility:user` lines are Talos service logs also on kmsg.
+
+
 
 ## Why this exists
 
