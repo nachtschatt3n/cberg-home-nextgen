@@ -38,7 +38,7 @@ spec:
               protocol: TCP
             - name: talos-kmsg
               containerPort: 5171
-              protocol: TCP
+              protocol: UDP
           env:
             - name: ES_PASSWORD
               valueFrom:

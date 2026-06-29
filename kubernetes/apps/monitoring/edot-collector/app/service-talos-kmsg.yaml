@@ -17,4 +17,4 @@ spec:
     - name: talos-kmsg
       port: 5171
       targetPort: 5171
-      protocol: TCP
+      protocol: UDP

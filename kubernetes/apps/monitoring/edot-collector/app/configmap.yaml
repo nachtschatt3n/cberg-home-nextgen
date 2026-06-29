@@ -17,10 +17,13 @@ data:
             endpoint: 0.0.0.0:4317
           http:
             endpoint: 0.0.0.0:4318
-      # Talos kernel logs (kmsg) shipped via KmsgLogConfig as json_lines over TCP.
+      # Talos kernel logs (kmsg) shipped via KmsgLogConfig as json_lines over UDP.
+      # UDP (not TCP) on purpose: Talos's kmsg sender does NOT reconnect after the
+      # sink closes — over TCP it gets stuck in CLOSE_WAIT and silently stops on any
+      # collector restart. UDP is connectionless so it survives pod restarts.
       # Captures mce:/Hardware Error/thermal/panic lines that survive a reboot —
       # see docs/troubleshooting/node-reboot-observability.md (Tier 2).
-      tcplog/talos-kernel:
+      udplog/talos-kernel:
         listen_address: 0.0.0.0:5171
         # add_attributes => each record gets net.peer.ip = the source node
         # (192.168.55.11/12/13), the only way to attribute a kmsg line to a node
@@ -93,7 +96,7 @@ data:
           processors: [memory_limiter, filter/drop-malformed-json-log-keys, batch]
           exporters: [elasticsearch/logs]
         logs/talos-kernel:
-          receivers: [tcplog/talos-kernel]
+          receivers: [udplog/talos-kernel]
           processors: [memory_limiter, batch]
           # shares logs-generic-default (proven path); filter by
           # attributes.log_source=talos-kernel + attributes.net.peer.ip (node)

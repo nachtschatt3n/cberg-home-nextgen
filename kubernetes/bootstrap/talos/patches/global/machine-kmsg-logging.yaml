@@ -8,4 +8,7 @@
 apiVersion: v1alpha1
 kind: KmsgLogConfig
 name: ship-kmsg-to-otel
-url: tcp://192.168.55.18:5171/
+# UDP (not TCP): Talos's kmsg sender does not reconnect after the sink closes
+# (gets stuck CLOSE_WAIT on collector restart). UDP is connectionless and
+# survives collector pod restarts. Matches the Talos docs' own Vector example.
+url: udp://192.168.55.18:5171/
