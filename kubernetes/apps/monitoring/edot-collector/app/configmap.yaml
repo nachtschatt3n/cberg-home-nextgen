@@ -17,6 +17,23 @@ data:
             endpoint: 0.0.0.0:4317
           http:
             endpoint: 0.0.0.0:4318
+      # Talos kernel logs (kmsg) shipped via KmsgLogConfig as json_lines over TCP.
+      # Captures mce:/Hardware Error/thermal/panic lines that survive a reboot —
+      # see docs/troubleshooting/node-reboot-observability.md (Tier 2).
+      tcplog/talos-kernel:
+        listen_address: 0.0.0.0:5171
+        operators:
+          - type: json_parser
+            parse_from: body
+            parse_to: attributes
+            on_error: send_quiet
+          - type: move
+            from: attributes.msg
+            to: body
+            on_error: send_quiet
+          - type: add
+            field: attributes.log_source
+            value: talos-kernel
 
     processors:
       memory_limiter:
@@ -70,6 +87,10 @@ data:
         logs:
           receivers: [otlp]
           processors: [memory_limiter, filter/drop-malformed-json-log-keys, batch]
+          exporters: [elasticsearch/logs]
+        logs/talos-kernel:
+          receivers: [tcplog/talos-kernel]
+          processors: [memory_limiter, batch]
           exporters: [elasticsearch/logs]
         metrics:
           receivers: [otlp]

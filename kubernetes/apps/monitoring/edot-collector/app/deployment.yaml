@@ -36,6 +36,9 @@ spec:
             - name: health
               containerPort: 13133
               protocol: TCP
+            - name: talos-kmsg
+              containerPort: 5171
+              protocol: TCP
           env:
             - name: ES_PASSWORD
               valueFrom:

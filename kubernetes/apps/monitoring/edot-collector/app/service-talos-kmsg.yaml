@@ -1,0 +1,20 @@
+---
+# LoadBalancer on VLAN 55 so Talos nodes (host net 192.168.55.11-13) can ship
+# kmsg to the collector's tcplog receiver. Talos KmsgLogConfig points its
+# url at tcp://192.168.55.18:5171/. See docs/troubleshooting/node-reboot-observability.md
+apiVersion: v1
+kind: Service
+metadata:
+  name: edot-collector-talos-kmsg
+  namespace: monitoring
+  annotations:
+    lbipam.cilium.io/ips: "192.168.55.18"
+spec:
+  type: LoadBalancer
+  selector:
+    app: edot-collector
+  ports:
+    - name: talos-kmsg
+      port: 5171
+      targetPort: 5171
+      protocol: TCP
