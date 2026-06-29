@@ -16,6 +16,7 @@ metadata:
   labels:
     app.kubernetes.io/name: kube-prometheus-stack
     app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack  # required — Prometheus ruleSelector matchLabels
   name: node-hardware-alerts
   namespace: monitoring
 spec:
