@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: sure
-      version: 0.7.1
+      version: 0.7.2
       sourceRef:
         kind: HelmRepository
         name: sure
@@ -114,7 +114,7 @@ spec:
       repository: ghcr.io/we-promise/sure
       # Chart.appVersion is "v0.7.0" but the image is published as "0.7.0"
       # (no leading v). Pin explicitly to avoid ImagePullBackOff.
-      tag: "0.7.1"
+      tag: "0.7.2"
       pullPolicy: IfNotPresent
 
     # ---------------- Rails config ----------------
