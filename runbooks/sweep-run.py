@@ -365,6 +365,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("SWEEP_CYCLE_ID"),
         help="Shared SWEEP_CYCLE_ID. Auto-generated if unset.",
     )
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        help=(
+            "Run NO check steps — only recompute and store the verdict for "
+            "--cycle-id from the currently-open findings, then exit. The "
+            "daily-operation fan-out uses this to finalize the one shared cycle "
+            "its specialists all wrote to (via SWEEP_CYCLE_ID), so the unified "
+            "cycle ends with a correct verdict instead of a stale per-section one."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -399,6 +410,20 @@ def main(argv: list[str] | None = None) -> int:
             # the `feedback_precommit_cluster_secret_match` operator memory.
             fqdn = "@postgresql." + "databases.svc.cluster.local:5432"
             dsn = raw.replace(fqdn, f"@127.0.0.1:{port}")
+
+        # Reconcile-only: recompute the verdict for the shared cycle from the
+        # currently-open findings and exit — no check steps. This is how the
+        # daily-operation fan-out finalizes the single cycle all its specialists
+        # wrote to under one SWEEP_CYCLE_ID (fixes the "red verdict, 0 open
+        # findings" dashboard artifact of per-section fragmentation).
+        if args.reconcile_only:
+            if not dsn:
+                raise SystemExit(
+                    "--reconcile-only needs the DB (do not combine with --no-write)."
+                )
+            v = _reconcile_verdict(dsn, cycle_id)
+            print(f"==> reconciled cycle {cycle_id} verdict -> {v}")
+            return 0
 
         # Prometheus — only slo-check needs it
         if needs_slo and not prom_url:

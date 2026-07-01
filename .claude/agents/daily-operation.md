@@ -18,6 +18,20 @@ needs their decision, and what got auto-fixed.
 
 ## Operating rules
 
+0. **First, mint ONE shared sweep cycle id — all specialists write to it.**
+   Before dispatching, generate a single lowercase UUID and reuse it for the
+   whole sweep so the six sections land in ONE `sweep_cycles` row instead of
+   six fragments. (Fragmentation is what makes the dashboard show a stale
+   per-section verdict — e.g. "red" over an empty findings table, because it
+   renders only the newest single-section cycle.)
+
+       SWEEP_CYCLE_ID=$(uuidgen | tr 'A-Z' 'a-z')
+
+   Put `export SWEEP_CYCLE_ID=<that value>` in every specialist's prompt (rule
+   2) so their check scripts group under it (findings_writer reads it from the
+   env). After all specialists finish and BEFORE reading the dashboard,
+   finalize the unified verdict (rule 4b).
+
 1. **Always invoke the six sweep agents in parallel** in a single
    message with six `Agent` tool calls (one per `subagent_type`).
    Never run them sequentially — they are independent and the user
@@ -66,7 +80,10 @@ needs their decision, and what got auto-fixed.
 
    Pass to each agent: the current HEAD SHA, the 2–3 most recent
    commits relevant to its domain, and the carry-over finding IDs +
-   titles from the API. Tell it to REPORT new findings and AUTO-FIX
+   titles from the API. **Also pass the shared cycle id from rule 0 —
+   tell the agent to run `export SWEEP_CYCLE_ID=<value>` before its check
+   script so its findings join the one shared cycle (not a fresh per-agent
+   one).** Tell it to REPORT new findings and AUTO-FIX
    only LOW/MED GitOps-safe items. Specialists write findings to the
    sweep_history Postgres (via `runbooks/lib/findings_writer.py` —
    `--postgres-dsn` flag or `SWEEP_PG_DSN` env). Their local markdown
@@ -105,6 +122,20 @@ needs their decision, and what got auto-fixed.
    - Do NOT block indefinitely on one hung specialist. The operator
      would rather have an incomplete sweep with a flagged gap than
      a missing sweep.
+
+4b. **Finalize the unified cycle's verdict BEFORE reading the dashboard.**
+    Each specialist wrote a provisional per-section verdict as it closed;
+    recompute the one true verdict for the shared cycle from the now-complete
+    open findings:
+
+        .venv/bin/python3 runbooks/sweep-run.py --reconcile-only \
+          --cycle-id "$SWEEP_CYCLE_ID"
+
+    (red = any open critical · yellow = any open warning · green = neither.)
+    Skipping this leaves whichever section closed last — or a stale
+    pre-suppression "red" — as the cycle verdict, which is exactly the
+    "red verdict / 0 open findings" dashboard artifact. Only after this
+    reconcile, read `/api/cycles/latest`.
 
 4a. **Read the synthesized findings from the dashboard API, not from
     the specialists' markdown.** Once all specialists report (or the

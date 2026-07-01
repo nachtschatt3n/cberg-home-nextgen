@@ -132,7 +132,14 @@ class FindingsWriter:
         self.section = section
         self.dsn = dsn or None
         self._conn = None
-        self._cycle_id = cycle_id or str(uuid.uuid4())
+        # Cycle grouping precedence: explicit arg > SWEEP_CYCLE_ID env > new UUID.
+        # The env fallback is what lets the daily-operation fan-out group every
+        # specialist's check script into ONE shared sweep_cycles row (the
+        # orchestrator sets SWEEP_CYCLE_ID once and passes it to all specialists),
+        # instead of each check script minting its own cycle → dashboard fragments.
+        self._cycle_id = (
+            cycle_id or os.environ.get("SWEEP_CYCLE_ID") or str(uuid.uuid4())
+        )
         self._enabled = bool(self.dsn)
 
         if not self._enabled:
