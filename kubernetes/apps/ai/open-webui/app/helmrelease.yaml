@@ -59,6 +59,11 @@ spec:
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
       enabled: true
+      # Recreate (not RollingUpdate): the pipelines PVC is RWO, so a rolling
+      # update deadlocks — the new pod can't attach the volume the old pod holds
+      # (Multi-Attach error). Recreate tears the old pod down first.
+      strategy:
+        type: Recreate
       # -- This section can be used to pass required environment variables to your pipelines (e.g. Langfuse hostname)
       extraEnvVars:
       - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
