@@ -114,10 +114,11 @@ spec:
       repository: ghcr.io/nachtschatt3n/sure
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
-      # chart-version tag. On release the migrations job runs `rails db:migrate`,
-      # which applies the additive CreateContracts migration (contracts table +
-      # 3 pg enums). Reuses the existing office GHCR pull secret.
-      tag: "sha-3d3bdc9d6a6a996a4d79ce3450b84b926be48334"
+      # chart-version tag. On release the migrations job runs `rails db:migrate`.
+      # This bump improves the contract detector and adds one additive migration
+      # (AddPreviousAmountToContracts: nullable previous_amount column on
+      # contracts). Reuses the existing office GHCR pull secret.
+      tag: "sha-36c5f17939822c849606f29bff772e3e06070c65"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
