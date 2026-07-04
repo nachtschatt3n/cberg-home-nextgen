@@ -115,10 +115,11 @@ spec:
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
       # chart-version tag. On release the migrations job runs `rails db:migrate`.
-      # This bump is a code-only contract-detector fix (recovers
-      # provider-merchant-linked contracts) — no schema change / no new
-      # migration. Reuses the existing office GHCR pull secret.
-      tag: "sha-9682c1faa3a692ec3f88c233a18921b49b16ac84"
+      # This bump expands Contracts (description, linked-account, AI-enrichment)
+      # and carries ONE additive migration (20260704180000) that adds a
+      # `description` text column and a `linked_account_id` uuid FK to the
+      # `contracts` table. Reuses the existing office GHCR pull secret.
+      tag: "sha-5c846df86753a459d9ee727a27645fa388cb7e4e"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
