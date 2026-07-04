@@ -115,10 +115,13 @@ spec:
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
       # chart-version tag. On release the migrations job runs `rails db:migrate`.
-      # This bump is code-only: contract cards now render the category
-      # icon/color. No schema change — no new migration this release. Reuses
+      # This bump upgrades main + contracts + Trading212 (upstream PR #2513):
+      # rebases the Contracts fork onto upstream main and adds the Trading212
+      # brokerage integration. Runs 6 additive migrations (trading212_items /
+      # trading212_accounts tables + supporting columns); Contracts feature
+      # preserved. Longhorn snapshot of sure-pg-data taken pre-upgrade. Reuses
       # the existing office GHCR pull secret.
-      tag: "sha-d50e41fdca37d4952a3a259b714eb7eefcbd0537"
+      tag: "sha-a3e49ba471e359af8d3cb7c17f671ce7b7c47e05"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
