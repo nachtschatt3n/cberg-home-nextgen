@@ -26,3 +26,17 @@ spec:
         - "192.168.30.111:9100"
       labels:
         instance: mac-mini
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: arag-scrape
+  namespace: monitoring
+spec:
+  scrapeInterval: 60s
+  metricsPath: /metrics
+  staticConfigs:
+    - targets:
+        - "192.168.30.111:9102"
+      labels:
+        instance: mac-mini
