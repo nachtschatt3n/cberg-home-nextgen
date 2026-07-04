@@ -1326,6 +1326,11 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         else:
             cprint(C.GREEN, "  🟢 No stale debug pods")
 
+    # AR-023 (security/wazuh-) and AR-026 (security/falco-) exist specifically
+    # to accept the privileged/root findings for the security-namespace SIEM/IDS
+    # tooling itself (falco needs kernel module access, wazuh-agent needs host
+    # telemetry) — this section just never wired up suppression, unlike s3/s9.
+    f.suppress_accepted(_ACCEPTED_RISKS)
     lines.append(f.markdown())
     return f.worst(), f, "\n".join(lines)
 
@@ -1774,11 +1779,20 @@ def s11_unifi() -> tuple[str, Findings, str]:
     # WAN health
     wan = run("unifictl local wan get 2>/dev/null", timeout=10)
     wan_ok = "ok" in wan.lower()
-    lines.append(f"WAN health: **{'OK' if wan_ok else wan}**\n")
-    if not wan_ok:
+    if not wan.strip():
+        # Empty output = unifictl couldn't reach the controller (timeout,
+        # session expired, controller mid-upgrade/restart) — NOT a WAN
+        # outage. Emitting "WAN health not OK: ``" here was a recurring
+        # false positive (e.g. fired during the 10.4.57 controller upgrade).
+        lines.append("WAN health: **unknown (controller unreachable)**\n")
+        f.add(WARNING, "UniFi controller unreachable for WAN health check (unifictl returned no output — transient if the controller is restarting/upgrading)")
+        cprint(C.YELLOW, "  🟡 WAN: controller unreachable (no output)")
+    elif not wan_ok:
+        lines.append(f"WAN health: **{wan}**\n")
         f.add(WARNING, f"WAN health not OK: `{wan}`")
         cprint(C.YELLOW, f"  🟡 WAN: {wan}")
     else:
+        lines.append("WAN health: **OK**\n")
         cprint(C.GREEN, "  🟢 WAN OK")
 
     # New clients (24h)
