@@ -97,7 +97,11 @@ spec:
       interval: 30s
       rules:
         - alert: AragScrapeDown
-          expr: up{job="arag-scrape"} == 0
+          # prometheus-operator sets the job label on ScrapeConfig targets to
+          # scrapeConfig/<namespace>/<name>, not the bare name — so up{job="arag-scrape"}
+          # never matches (the sibling bank-refresh/findmy Down alerts are silently
+          # broken for this reason). Use the real operator-generated job label.
+          expr: up{job="scrapeConfig/monitoring/arag-scrape"} == 0
           for: 15m
           labels:
             severity: warning
