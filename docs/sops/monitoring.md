@@ -44,15 +44,28 @@ Source-of-truth manifests:
 
 ### External (macOS) Scrape Targets
 
-Two macOS menu bar apps on the Mac Mini (`192.168.30.111`) expose Prometheus metrics.
+Three macOS menu bar apps on the Mac Mini (`192.168.30.111`) expose Prometheus metrics.
 Scraped via `ScrapeConfig` CRDs (not `additionalScrapeConfigs`):
 
 | App | Port | Metrics path | ScrapeConfig |
 |-----|------|-------------|--------------|
 | findmy-traccar-sync | 9101 | `/metrics` | `macos-scrapeconfigs.yaml` |
 | bank-refresh | 9100 | `/metrics` | `macos-scrapeconfigs.yaml` |
+| arag-scrape | 9102 | `/metrics` | `macos-scrapeconfigs.yaml` |
 
-Alert rules: `macos-apps-alerts.yaml` (FindMyTraccarSyncDown, BankRefreshDown, etc.)
+Alert rules: `macos-apps-alerts.yaml` (FindMyTraccarSyncDown, BankRefreshDown,
+AragScrapeDown/Stale/Failing/EmulatorDown, etc.)
+
+> Note: prometheus-operator sets the `job` label on `ScrapeConfig` targets to
+> `scrapeConfig/<namespace>/<name>` (e.g. `scrapeConfig/monitoring/arag-scrape`),
+> not the bare app name. `up{job="<app>"}`-style exprs will not match; use the
+> full operator-generated label. `AragScrapeDown` uses the correct form; the
+> older FindMyTraccarSyncDown / BankRefreshDown `up{job="..."}` exprs are known
+> to be latent no-ops (metric-based rules still work).
+
+The arag-scrape app also ships OTLP/HTTP JSON logs (`service.name=arag-scrape`)
+to the edot-collector via the internal ingress `otlp.${SECRET_DOMAIN}` (backend
+`edot-collector:4318`); logs land in `logs-generic-default`.
 
 Source: `kubernetes/apps/monitoring/kube-prometheus-stack/app/macos-scrapeconfigs.yaml`
 
