@@ -92,3 +92,50 @@ spec:
           annotations:
             summary: "Bank refresh has not succeeded in over 24 hours"
             description: "The last successful bank refresh on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago."
+
+    - name: arag-scrape.health
+      interval: 30s
+      rules:
+        - alert: AragScrapeDown
+          expr: up{job="arag-scrape"} == 0
+          for: 15m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG scrape metrics endpoint is down"
+            description: "The arag-scrape metrics endpoint on {{ $labels.instance }} has been unreachable for more than 15 minutes. The menubar app may have been quit or the Mac may be offline."
+
+        - alert: AragScrapeStale
+          expr: time() - arag_scrape_last_success_timestamp_seconds > 46800
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG scrape has not succeeded recently"
+            description: "The last successful ARAG scrape on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago. Expected cycle is every 6 hours; this exceeds ~2 missed cycles."
+
+        - alert: AragScrapeFailing
+          expr: increase(arag_scrape_errors_total[6h]) > 2
+          for: 10m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG scrape is failing repeatedly"
+            description: "The arag-scrape pipeline on {{ $labels.instance }} has had {{ $value | printf \"%.0f\" }} errors in the last 6 hours."
+
+        - alert: AragScrapeEmulatorDown
+          expr: arag_scrape_emulator_up == 0
+          for: 30m
+          labels:
+            severity: warning
+            category: macos
+            component: arag-scrape
+          annotations:
+            summary: "ARAG scrape Android emulator is down"
+            description: "The Android emulator backing the arag-scrape pipeline on {{ $labels.instance }} has been reported down for more than 30 minutes. Scrapes cannot run without it."

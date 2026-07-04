@@ -1,0 +1,24 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edot-collector
+  namespace: monitoring
+  labels:
+    app: edot-collector
+spec:
+  ingressClassName: internal
+  rules:
+    - host: otlp.${SECRET_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edot-collector
+                port:
+                  number: 4318
+  tls:
+    - hosts:
+        - otlp.${SECRET_DOMAIN}
