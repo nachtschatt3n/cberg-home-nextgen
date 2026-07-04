@@ -744,6 +744,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -vE '[a-zA-Z_]+=\"\\$\\(' "
         # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
         "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
+        # sed/awk redaction-or-rotation commands: the matched credential text is a
+        # regex SEARCH pattern (a bracket character-class quantified with +/*, e.g.
+        # api_key = \"[a-f0-9]+\") and the replacement is a shell $VAR — it can never
+        # be a hardcoded literal secret. e.g. sed -E 's/api_key = \"[a-f0-9]+\"/.../'.
+        "| grep -vE '\\bsed\\b.*\\[[^]]+\\][+*]' "
     )
     # Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
