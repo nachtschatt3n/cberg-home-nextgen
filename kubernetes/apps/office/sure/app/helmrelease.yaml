@@ -111,11 +111,16 @@ spec:
                             done
   values:
     image:
-      repository: ghcr.io/we-promise/sure
-      # Chart.appVersion is "v0.7.0" but the image is published as "0.7.0"
-      # (no leading v). Pin explicitly to avoid ImagePullBackOff.
-      tag: "0.7.2"
+      repository: ghcr.io/nachtschatt3n/sure
+      # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
+      # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
+      # chart-version tag. On release the migrations job runs `rails db:migrate`,
+      # which applies the additive CreateContracts migration (contracts table +
+      # 3 pg enums). Reuses the existing office GHCR pull secret.
+      tag: "sha-3d3bdc9d6a6a996a4d79ce3450b84b926be48334"
       pullPolicy: IfNotPresent
+      imagePullSecrets:
+        - name: arag-web-ghcr-pull
 
     # ---------------- Rails config ----------------
     rails:
