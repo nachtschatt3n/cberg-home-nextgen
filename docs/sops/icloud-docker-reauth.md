@@ -34,6 +34,26 @@ needs enumerable trusted SMS devices (this account has **0**), so it never
 pushes and never completes. We bypass it with a tiny script that drives the
 **2FA** path directly (`validate_2fa_code` + `trust_session`).
 
+### iOS 26.4+ needs an explicit push request (icloudpy ≥ 0.9.0)
+
+**Primary root cause since early 2026.** Apple changed the auth flow around
+iOS 26.4: the 2FA code is **no longer auto-pushed** to trusted devices. The
+client must first send `PUT /verify/trusteddevice/securitycode` (empty body)
+to *request* the push. Without it, `requires_2fa` returns `True` but **no
+dialog appears on any device** (iPhone/iPad/Mac) — auth just stalls.
+Upstream: [mandarons/icloud-docker#453](https://github.com/mandarons/icloud-docker/issues/453),
+[#426](https://github.com/mandarons/icloud-docker/issues/426).
+
+The fix is **icloudpy 0.9.0** (2026-05-31), which adds
+`ICloudPyService.trigger_2fa_push_notification()`. It is **opt-in** — neither
+icloudpy nor icloud-docker's own auth loop calls it automatically, so the
+re-auth script below calls it explicitly right after `requires_2fa` is `True`.
+
+**Image requirement:** the icloud-docker `:latest`/release tag (v1.25.0) still
+bundles the broken icloudpy 0.8.0. The HelmRelease is therefore pinned to the
+`main` build digest (`sha256:91486ec1…`, icloudpy 0.9.0). If you ever see the
+script print `icloudpy < 0.9.0 in this image`, the pin regressed — restore it.
+
 ### The retry-storm / quota trap
 
 Apple rate-limits 2FA verification-code sends to a handful per day. If the
@@ -128,7 +148,20 @@ pw = os.environ["SECRET_ICLOUD_PASSWORD"]
 api = ICloudPyService(user, pw, cookie_directory="/config/session_data")
 
 if api.requires_2fa:
-    print(">> Modern 2FA required. Apple just pushed a 6-digit code to your trusted devices.")
+    print(">> Modern 2FA required.")
+    # iOS 26.4+ (early 2026): Apple NO LONGER auto-pushes the code to trusted
+    # devices. The client must explicitly request it via
+    # PUT /verify/trusteddevice/securitycode — icloudpy 0.9.0's
+    # trigger_2fa_push_notification() does exactly that. Without this call,
+    # requires_2fa is True but NO dialog appears on any device (the "no prompt
+    # on iPhone/iPad/Mac" symptom; upstream mandarons/icloud-docker#453).
+    if hasattr(api, "trigger_2fa_push_notification"):
+        api.trigger_2fa_push_notification()
+        print(">> Push requested — a 6-digit code should now appear on your iPhone/iPad/Mac.")
+    else:
+        print("!! icloudpy < 0.9.0 in this image — it CANNOT request the push that "
+              "iOS 26.4+ requires, so no code will ever arrive. Pin the image to a "
+              "0.9.0 build (tag `main`, digest sha256:91486ec1…) and retry."); sys.exit(3)
     code = input("Enter the 6-digit code shown on your device: ").strip()
     if not api.validate_2fa_code(code):
         print("!! Code rejected by Apple."); sys.exit(1)
