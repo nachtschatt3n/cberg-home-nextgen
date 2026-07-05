@@ -115,10 +115,10 @@ spec:
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
       # chart-version tag.
-      # This bump is code-only: a responsive Contracts header for mobile.
+      # This bump is code-only: Contracts status filter + form field improvements.
       # No schema change / no migration (the db-migrate job is a no-op here).
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-cd78c206e3c3c0b719b2e2d3c0c342886c2e469a"
+      tag: "sha-226531b1c4f5ea82fa7b8a45b34adb7046243175"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
