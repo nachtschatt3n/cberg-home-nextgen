@@ -342,11 +342,33 @@ build_grep_exclude() {
     echo "$result"
 }
 
+# Extract "integration:" pattern values from the known_ha_error_sources
+# section of NOISE_ALLOWLIST (DB-backed via `policy-cli.py noise add`).
+# _noise_tag() (below) only ANNOTATES matched alert/stale-pod/battery lines —
+# it never touches HA_ERRORS/RESMED_ERRORS etc. Those counters filter
+# exclusively via the hardcoded HA_FALSE_POSITIVES array, so an operator
+# adding a `known_ha_error_sources` row (e.g. resmed_myair, miele) had zero
+# effect on the actual error count — confirmed 2026-07-05. This wires the DB
+# entries into filter_ha_false_positives so `noise add` takes effect without
+# a manual HA_FALSE_POSITIVES edit + code deploy.
+ha_noise_patterns_from_db() {
+    [ -f "$NOISE_ALLOWLIST" ] || return 0
+    awk '/^known_ha_error_sources:/{f=1; next} /^[^ ]/{f=0} f' "$NOISE_ALLOWLIST" 2>/dev/null \
+        | grep -oE 'integration:[[:space:]]*"[^"]+"' \
+        | sed -E 's/^integration:[[:space:]]*"//; s/"$//'
+}
+
 # Filter out false positives from piped input
 # Usage: echo "$LOGS" | filter_ha_false_positives
 filter_ha_false_positives() {
     local exclude
-    exclude=$(build_grep_exclude "${HA_FALSE_POSITIVES[@]}")
+    local db_patterns
+    db_patterns=$(ha_noise_patterns_from_db)
+    if [ -n "$db_patterns" ]; then
+        exclude=$(build_grep_exclude "${HA_FALSE_POSITIVES[@]}" $db_patterns)
+    else
+        exclude=$(build_grep_exclude "${HA_FALSE_POSITIVES[@]}")
+    fi
     grep -vE "$exclude"
 }
 
