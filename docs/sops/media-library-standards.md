@@ -1,14 +1,14 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
 > Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
-> Version: `2026.04.27`
-> Last Updated: `2026-04-27`
+> Version: `2026.07.05`
+> Last Updated: `2026-07-05`
 > Owner: `media-manager`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.04.27 |
-| **Last Updated** | 2026-04-27 |
+| **Version** | 2026.07.05 |
+| **Last Updated** | 2026-07-05 |
 | **Owner** | media-manager |
 | **Applies to** | All content under `//${NAS_HOSTNAME}/media/data/` consumed by Plex (`media/plex`) and Jellyfin (`media/jellyfin`); JDownloader intake at `//${NAS_HOSTNAME}/media/downloads/jdownloader`; Tube Archivist content at `//${NAS_HOSTNAME}/media/downloads/tube-archivist` (bridged into the Plex view). |
 
@@ -129,6 +129,26 @@ ffprobe -v error -select_streams v:0 \
 ```
 
 Decision rule: prefer higher bitrate, native film fps (`23.976` over PAL `25`), longer/complete duration. Never overwrite without surfacing the probe diff to the user for explicit go/no-go.
+
+### Duplicate quarantine — `_duplicates/` requires a `.plexignore`, not just the prefix
+
+When a dedup decision keeps one release and quarantines the loser, the loser moves to `_duplicates/<original relative path>/` under the section root (e.g. `Movies/_duplicates/Title (Year) - old-release/`) rather than being deleted outright, so it's recoverable if the decision is later reversed.
+
+**The `_` prefix is a naming convention only — it has no effect on Plex or Jellyfin scanning.** Confirmed 2026-07-05: Plex's built-in "Special Keyword File/Folder Exclusion" auto-skips only `sample`, `extras`, `samples`, `bonus`, `bonus disc` (<https://support.plex.tv/articles/201381883-special-keyword-file-folder-exclusion/>) — nothing about a leading underscore or any custom prefix. Left unaddressed, Plex/Jellyfin will walk `_duplicates/` like any other folder, match it against metadata, and surface it as a second version (or a second item) in the library — exactly the failure the daily `plex-fs-classifier` CronJob's `skip_dir_leftover` bucket exists to catch (`kubernetes/apps/media/library-tools/app/plex-fs-classifier-cronjob.yaml`).
+
+**The actual fix**: write a `.plexignore` file (Plex's real gitignore-style scan-exclusion mechanism, read at each directory level during a scan) at each affected section root:
+
+```
+# <section root>/.plexignore, e.g. Movies/.plexignore
+_duplicates/
+_duplicates/**
+_archive/
+_archive/**
+```
+
+Apply via an ephemeral Job mounting the existing `plex-media-smb` PVC (same pattern as `organize.py` — write-only, no deletes), then force a Plex section refresh via `cluster-ops-agent` (`POST /library/sections/{id}/refresh?force=1`) so the new ignore rules are honored on the next directory walk. Jellyfin has its own equivalent ignore mechanism per library (check current Jellyfin version's docs — do not assume it matches Plex's `.plexignore` syntax) — verify separately if Jellyfin's Movies/TV Shows libraries also walk `_duplicates/`.
+
+**Known related gap**: the Plex "Movies" library section's configured root may be broader than `<mount>/Movies` (e.g. scoped to the whole mount root instead). A `.plexignore` at the `Movies/` level still works regardless, since Plex applies ignore rules cascading down from wherever the file lives in the tree. Correcting an overly-broad section root is a separate, out-of-scope change (Plex UI / library recreation, not covered by this SOP) — flag it to the user rather than changing it inline with a dedup fix.
 
 ### Audit thresholds
 
@@ -460,4 +480,5 @@ For the GitOps pieces (library-tools app): `git revert <commit>` on the introduc
 
 ## Version History
 
+- `2026.07.05`: Documented that `_duplicates/`/`_archive/` prefixes are naming-only and require a `.plexignore` file per section root to actually stop Plex from scanning them (found via daily sweep: a quarantined duplicate was still indexed under `Movies/_duplicates/`). Confirmed Plex's built-in keyword exclusion doesn't cover custom prefixes.
 - `2026.04.27`: Initial standard. Nested layout. Migration workflow from prior flat layout. Tube Archivist→Plex bridge. Audit thresholds.

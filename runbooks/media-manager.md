@@ -133,7 +133,7 @@ Compliance percentages below the threshold trigger a Prometheus alert if they pe
 | TA channel missing in Jellyfin | TA `:00`/`:30` jobs haven't completed yet — check `kubectl -n download get jobs \| grep tube-archivist`. Then trigger a Jellyfin rescan. |
 | Agent reports "0 items moved" but downloads dir not empty | Items still match no classification rule — agent asks via `AskUserQuestion`; check there are no pending questions. |
 | TMDb sidecar fetch returns HTTP 401 | Token in `media-manager-tokens.sops.yaml` is the v4 Bearer JWT. `sidecar.py` uses v3 query-param API. Replace with the short "API Key (v3 auth)" from <https://www.themoviedb.org/settings/api>. |
-| `_duplicates/` items showing up in Plex/Jellyfin Movies library | The `_` prefix only excludes `audit.py`; servers walk it. Either move `_duplicates/` outside `Movies/`, or add an exclusion path in each library's UI. |
+| `_duplicates/` items showing up in Plex/Jellyfin Movies library | The `_` prefix only excludes `audit.py` scoring — it is **not** a Plex/Jellyfin scan exclusion of any kind (Plex's built-in keyword exclusion only covers `sample`/`extras`/`samples`/`bonus`/`bonus disc`). Fix: write a `.plexignore` file (Plex's real gitignore-style exclusion mechanism) at the section root, e.g. `Movies/.plexignore` containing `_duplicates/` and `_archive/` patterns, via an ephemeral Job mounting `plex-media-smb`. Then force a Plex section refresh. Jellyfin has an equivalent "ignore" convention (`.ignore` file, or the "Ignore hidden/system folders" library option) — verify per-library if TA or other content is affected. |
 
 ## Common gotchas (from real bulk-organise session)
 
