@@ -965,6 +965,12 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL CVEs in {len(distinct_images)} running images "
                        "(no images had >5 HIGH either)")
 
+    # AR-029 ("HIGH CVEs" — upstream-tracked image CVE backlogs we don't
+    # rebuild) was accepted in the policy DB but this function never called
+    # suppress_accepted(), so it has been a complete no-op since inception:
+    # every Trivy CRITICAL+HIGH and HIGH-only finding surfaced as open every
+    # cycle regardless of acceptance. Wire it up like s3/s7/s9 do.
+    f.suppress_accepted(_ACCEPTED_RISKS)
     return f.worst(), f, f.markdown()
 
 
