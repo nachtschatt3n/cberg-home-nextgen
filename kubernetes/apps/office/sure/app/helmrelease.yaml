@@ -176,12 +176,12 @@ spec:
             secretKeyRef:
               name: sure-secret
               key: OPENAI_URI_BASE
-        # Plain value (model name is not sensitive). Switched from the
-        # secret-sourced gemma4:26b to gemma4:e2b-mlx: a smaller/faster
-        # Apple-Silicon (MLX) model on the same Ollama. 26b was too slow
-        # for the interactive assistant and caused chat timeouts.
+        # Plain value (model name is not sensitive). Switched back to the
+        # larger gemma4:26b for the agentic assistant: gemma4:e2b-mlx was
+        # too small/weak for reliable multi-turn tool-use, so we go back to
+        # the smarter 26b model on the same Ollama.
         - name: OPENAI_MODEL
-          value: "gemma4:e2b-mlx"
+          value: "gemma4:26b"
         # Widen the OpenAI HTTP client timeout (upstream default 60s) so
         # slow local LLM inference (Ollama on Mac Mini) finishes before
         # Net::ReadTimeout. Bumped from 900 → 1800 to leave headroom for
