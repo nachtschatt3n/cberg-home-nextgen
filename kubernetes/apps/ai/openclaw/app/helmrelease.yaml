@@ -84,6 +84,19 @@ spec:
                 rm -f /home/node/.openclaw/agents/main/sessions/.usage-cost-cache.json.lock \
                       /home/node/.openclaw/agents/main/sessions/.usage-cost-cache.json.lock.*.tmp 2>/dev/null || true
 
+                # Cap DREAMS.md growth. The memory-core dream diary is appended to
+                # every night and is loaded into the workspace bootstrap context, so
+                # an unbounded diary silently inflates the per-turn token cost (it had
+                # grown to ~58 KB). If it exceeds ~20 KB, keep the header + diary-start
+                # marker + the most recent ~180 lines (which retain the deep-dream
+                # markers at the tail), pruning older entries. Structure is preserved
+                # so the plugin keeps appending normally.
+                DREAMS=/home/node/clawd/DREAMS.md
+                if [ -f "$DREAMS" ] && [ "$(wc -c < "$DREAMS" 2>/dev/null || echo 0)" -gt 20000 ]; then
+                  { head -3 "$DREAMS"; echo "<!-- older diary entries pruned on boot to cap bootstrap context size -->"; tail -180 "$DREAMS"; } > "$DREAMS.tmp" 2>/dev/null \
+                    && mv "$DREAMS.tmp" "$DREAMS" && echo "Trimmed DREAMS.md to cap context size"
+                fi
+
                 export HOME="/home/node/.openclaw"
                 mkdir -p "$HOME"
                 export NPM_CONFIG_CACHE="/home/node/.npm"
@@ -848,6 +861,18 @@ spec:
                   cfg.plugins.entries = cfg.plugins.entries || {};
                   cfg.plugins.entries.workboard = cfg.plugins.entries.workboard || {};
                   cfg.plugins.entries.workboard.enabled = true;
+
+                  // Token budget: route the DAILY memory-dreaming turn to the free
+                  // local Ollama model instead of openai/gpt-5.5. Dreaming is a
+                  // background self-reflection pass — quality is non-critical and it
+                  // was burning ChatGPT/Codex weekly quota every night. Interactive
+                  // chat + the voice briefing stay on gpt-5.5. (2026-07-06: watching
+                  // dreaming quality on gemma4 for a few days.)
+                  cfg.plugins.entries['memory-core'] = cfg.plugins.entries['memory-core'] || {};
+                  cfg.plugins.entries['memory-core'].config = cfg.plugins.entries['memory-core'].config || {};
+                  cfg.plugins.entries['memory-core'].config.dreaming = cfg.plugins.entries['memory-core'].config.dreaming || {};
+                  cfg.plugins.entries['memory-core'].config.dreaming.enabled = true;
+                  cfg.plugins.entries['memory-core'].config.dreaming.model = 'ollama/gemma4:26b';
 
                   // Reply delivery mode — keep heartbeats from swallowing
                   // user DMs. When unset, codex-backed runtimes default to
