@@ -681,7 +681,9 @@ spec:
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      contextWindow: 32768,
+                      // Ollama loads gemma4:26b with num_ctx=131072 (arch max 256K).
+                      // The old 32768 under-reported it, risking over-compaction.
+                      contextWindow: 131072,
                       maxTokens: 4096,
                     },
                     {
@@ -690,7 +692,7 @@ spec:
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      contextWindow: 32768,
+                      contextWindow: 131072,
                       maxTokens: 4096,
                     },
                   ];
