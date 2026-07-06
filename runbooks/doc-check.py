@@ -1127,6 +1127,7 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     "icloud-cookie-rotation.md",     # Interactive 2FA — kubectl exec procedure
                     "sure-data-audit.md",            # Agent-driven weekly audit, no script
                     "sure-key-sync.md",              # Documents a Mac-local launchd job (~/.sure/sync-key.sh), not a repo script
+                    "sure-loan-amortization.md",      # Documents a Mac-local script (~/.sure/mortgage-amortize.rb), not a repo script — figures are private, intentionally never committed
                     "pikvm-update.md",               # SSH-on-device procedure, not GitOps/cluster
                 }
                 if runbook.name in MANUAL_RUNBOOKS:

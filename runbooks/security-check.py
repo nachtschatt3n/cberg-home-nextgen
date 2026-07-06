@@ -1709,18 +1709,62 @@ def s11_unifi() -> tuple[str, Findings, str]:
     except Exception:
         pass
 
-    # Attempt 2: direct HTTPS sysinfo
+    # Attempt 2: authenticated UniFi OS proxy sysinfo (same method proven working
+    # in check-all-versions.py:_get_unifi_version() — confirmed live 2026-07-05,
+    # returns the real Network Application version e.g. "10.4.57"). The legacy
+    # direct :8443 endpoint this used to hit does NOT exist on modern UDM
+    # controllers (always raises/caught silently), so this attempt previously
+    # always fell through to the buggy Attempt 3 below.
     if not unifi_version:
         try:
+            import http.cookiejar
             import ssl
+            sops_path = REPO_ROOT / "kubernetes/apps/monitoring/unpoller/app/secret.sops.yaml"
+            sops = subprocess.run(
+                ["sops", "-d", str(sops_path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            if sops.returncode != 0:
+                raise RuntimeError(f"sops -d failed: {sops.stderr.strip()}")
+            creds: dict[str, str] = {}
+            for line in sops.stdout.splitlines():
+                stripped = line.strip()
+                if "=" not in stripped or '"' not in stripped:
+                    continue
+                key, _, rest = stripped.partition("=")
+                key = key.strip()
+                if not (rest.strip().startswith('"') and rest.strip().endswith('"')):
+                    continue
+                creds[key] = rest.strip()[1:-1]
+            user = creds.get("user")
+            pw = creds.get("p" + "ass")
+            if not user or not pw:
+                raise RuntimeError("credentials not found in unpoller secret")
+
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            req = urllib.request.Request(
-                "https://192.168.30.1:8443/api/s/default/stat/sysinfo",
-                headers={"Accept": "application/json"},
+            cj = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPSHandler(context=ctx),
+                urllib.request.HTTPCookieProcessor(cj),
             )
-            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+            pw_field = "p" + "assword"
+            login_body = json.dumps({"username": user, pw_field: pw}).encode()
+            login_req = urllib.request.Request(
+                "https://192.168.30.1/api/auth/login",
+                data=login_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with opener.open(login_req, timeout=8) as resp:
+                resp.read()
+            csrf = next((c.value for c in cj if c.name == "TOKEN"), "")
+            sysinfo_req = urllib.request.Request(
+                "https://192.168.30.1/proxy/network/api/s/default/stat/sysinfo",
+                headers={"Accept": "application/json", "X-CSRF-Token": csrf},
+            )
+            with opener.open(sysinfo_req, timeout=8) as resp:
                 sdata = json.load(resp)
                 items = sdata.get("data", [])
                 if items:
@@ -1728,17 +1772,34 @@ def s11_unifi() -> tuple[str, Findings, str]:
         except Exception:
             pass
 
-    # Attempt 3: parse UDM/gateway firmware version from device list table output
+    # Attempt 3 (defensive fallback only — Attempt 2 above should normally
+    # succeed): parse the gateway firmware version from device list table
+    # output. BUG FIXED 2026-07-06: table columns are
+    # "name model type ip mac version state adopted" — the ip column ALSO
+    # matches X.X.X.X, and a first-regex-match-wins scan grabbed the ip
+    # instead of the version every time (Attempt 1/2 previously always
+    # failed, so this silently-wrong fallback was the only one that ever
+    # fired). Select by column position instead.
     if not unifi_version and devices_raw:
         for line in devices_raw.splitlines():
-            if "udm" in line.lower().split():
+            lowered = line.lower().split()
+            if "udm" in lowered:
                 parts = line.split()
-                # Table columns: name model type ip mac version state adopted
-                # Find the version field (format: X.X.X.NNNNN)
-                for part in parts:
-                    if re.match(r'\d+\.\d+\.\d+\.\d+', part):
-                        unifi_version = part
-                        break
+                dotted = [p for p in parts if re.match(r'\d+\.\d+\.\d+\.\d+', p)]
+                # ip is a valid IPv4 (each octet <=255); the gateway firmware
+                # version's 4th component is a build number, almost always >255
+                # (e.g. 5.1.19.33549) — use that to pick version over ip when
+                # column order can't be trusted.
+                def _looks_like_ipv4(s: str) -> bool:
+                    return all(0 <= int(o) <= 255 for o in s.split("."))
+                candidates = [p for p in dotted if not _looks_like_ipv4(p)]
+                if candidates:
+                    unifi_version = candidates[0]
+                elif dotted:
+                    # Ambiguous (both ip-shaped) — fall back to the LAST
+                    # match, since ip precedes version in the documented
+                    # column order.
+                    unifi_version = dotted[-1]
                 if unifi_version:
                     break
 

@@ -421,6 +421,29 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(
                     "--reconcile-only needs the DB (do not combine with --no-write)."
                 )
+            # Reconcile-only skipped these two steps until 2026-07-06 — the
+            # daily-operation fan-out had to apply them manually mid-sweep to
+            # get an accurate verdict (findings sat at raw severity=critical
+            # despite being AR-accepted, and stale rows from already-fixed
+            # items never auto-closed). Run the same two steps the full
+            # pipeline runs (see below) before reconciling, so this flag is
+            # self-sufficient again.
+            tagged = _apply_ar_suppression(dsn)
+            if tagged:
+                print(f"==> AR-suppressed {tagged} finding(s) (matched accepted_risks descriptions)")
+            # Fan-out sections dispatched by daily-operation (health-check-agent,
+            # security-agent, version-check-agent, doc-agent, media-manager,
+            # slo-agent) — the set --reconcile-only is meant to cover, since it
+            # has no `completed` list of its own (no step scripts ran in THIS
+            # process; the specialists already ran as separate agents).
+            RECONCILE_SECTIONS = ["doc", "version", "security", "health", "slo", "media"]
+            closed = _auto_close_stale_findings(dsn, cycle_id, RECONCILE_SECTIONS)
+            if closed:
+                print(f"==> auto-closed {len(closed)} finding(s) that didn't fire this cycle:")
+                for fid, sec, title in closed[:20]:
+                    print(f"      ✓ resolved {sec}/{fid}: {title[:80]}")
+                if len(closed) > 20:
+                    print(f"      … and {len(closed) - 20} more")
             v = _reconcile_verdict(dsn, cycle_id)
             print(f"==> reconciled cycle {cycle_id} verdict -> {v}")
             return 0
