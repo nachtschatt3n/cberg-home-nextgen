@@ -417,6 +417,20 @@ spec:
                   fi
                 fi
 
+                # Dream-diary narrative timeout. Upstream hardcodes
+                # NARRATIVE_TIMEOUT_MS=6e4 (60s) in dreaming-narrative-*.js.
+                # Our local dreaming model (ollama/gemma4:26b) needs several
+                # minutes per narrative, so every nightly diary run blew the
+                # 60s budget and fell back to the "details were unavailable in
+                # this run." placeholder — while the longer-budget promotion
+                # phase still succeeded. Speed is irrelevant for a 3am batch
+                # job, so raise it to 7 min. Idempotent; the glob covers the
+                # content-hashed filename across version bumps.
+                for f in /home/node/.openclaw/lib/node_modules/openclaw/dist/dreaming-narrative-*.js; do
+                  [ -f "$f" ] || continue
+                  sed -i 's/NARRATIVE_TIMEOUT_MS *= *6e4/NARRATIVE_TIMEOUT_MS = 42e4/' "$f"
+                done
+
                 export PIP_ROOT_USER_ACTION=ignore
                 install_pip obsidian-cli
                 # himalaya was installed for the early IMAP-direct mail
