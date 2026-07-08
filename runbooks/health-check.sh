@@ -1346,12 +1346,31 @@ log_section "Section 15: Backup System"
             log_warning "iCloud sync pod is not running (phase: $ICLOUD_PHASE)"
             add_minor_issue "icloud-docker-mu pod not running (phase: $ICLOUD_PHASE)"
         else
-            # Filter out known Apple API flakiness (throttles, 530 CF errors, PCS cookie refresh — all normal for iCloud)
-            # Scope to last 24h only; iCloud-docker has sparse logs and old errors shouldn't keep reappearing.
-            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs' | wc -l")
+            # Filter out known-benign, recurring noise so the count reflects REAL
+            # problems (tightened 2026-07-08 — was flagging ~78/24h of pure noise):
+            #  - Apple API flakiness (throttles, CF 5xx, PCS cookie refresh)
+            #  - INFO progress summaries that merely contain "failed"
+            #    ("N successful, M failed") — these are not errors
+            #  - Apple "package" bundles (.numbers/.app) icloud-docker can't unpack,
+            #    plus per-file package-type probes — benign tool limitations
+            # Scope to last 24h; icloud-docker has sparse logs.
+            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
             echo "  iCloud log errors (last 24h, filtered): $ICLOUD_LOG_ERRORS"
-            if [ "$ICLOUD_LOG_ERRORS" -gt 5 ]; then
-                log_warning "iCloud sync pod has errors in recent logs: $ICLOUD_LOG_ERRORS"
+            # Auth/session errors are the ones that actually need operator action
+            # (interactive re-auth per docs/sops/icloud-docker-reauth.md). Count
+            # them SEPARATELY and NEVER filter them, anchored to real signatures.
+            # Use [(]421[)] not a bare 421 — a bare 421 matches the ',421' in a
+            # millisecond timestamp (false positive). This dedicated check means a
+            # genuine session expiry is always surfaced with a clear "re-auth"
+            # title even when the generic filtered count is quiet, and must never
+            # be swallowed by a broad accepted-risk needle.
+            ICLOUD_AUTH_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -icE 'authentication required for account|[(]421[)]|2fa is required|2fa.*please|please log in|session (has )?expired|invalid session|missing.*bearer token'")
+            echo "  iCloud auth/session errors (last 24h): $ICLOUD_AUTH_ERRORS"
+            if [ "$ICLOUD_AUTH_ERRORS" -gt 0 ]; then
+                log_warning "iCloud session/auth errors — re-auth likely needed: $ICLOUD_AUTH_ERRORS"
+                add_minor_issue "icloud-docker-mu auth/session errors (re-auth needed): $ICLOUD_AUTH_ERRORS"
+            elif [ "$ICLOUD_LOG_ERRORS" -gt 25 ]; then
+                log_warning "iCloud sync pod has elevated errors in recent logs: $ICLOUD_LOG_ERRORS"
                 add_minor_issue "icloud-docker-mu recent log errors: $ICLOUD_LOG_ERRORS"
             else
                 log_success "iCloud sync pod running (restarts: $ICLOUD_RESTARTS)"
