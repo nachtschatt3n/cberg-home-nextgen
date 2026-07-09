@@ -1,8 +1,8 @@
 # SOP: UniFi Controller Login Rate Limit (unpoller)
 
 > Description: Operate, diagnose, and recover the unpoller → UniFi controller integration when the controller's login endpoint rate-limit (HTTP 429) interrupts metric collection. Covers the relationship between unpoller polling cadence, the controller's `/api/auth/login` throttle, and the SSH workflow on the gateway.
-> Version: `2026.05.03`
-> Last Updated: `2026-05-03`
+> Version: `2026.07.09`
+> Last Updated: `2026-07-09`
 > Owner: `homelab-ops`
 
 ---
@@ -28,7 +28,7 @@ This SOP describes the chosen polling interval, how to reset the controller-side
 | Namespace | `monitoring` |
 | Source of truth | `kubernetes/apps/monitoring/unpoller/app/secret.sops.yaml` |
 | HelmRelease | `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml` |
-| Polling interval (current) | `30s` (Prometheus + InfluxDB exporters) |
+| Polling interval (current) | `2m` (Prometheus + InfluxDB exporters) — widened from 30s on 2026-07-08 (commit `8ec66d00`) during the UniFi controller GC-exhaustion + login-lockout incident to cut login-attempt pressure; keep at 2m unless there's a specific need to tighten |
 | Backoff interval (after 429) | `2m` |
 | Effective login rate at 30s | ~4 logins/min per gateway IP |
 | Effective login rate at 2m | ~1 login/min per gateway IP |
@@ -50,9 +50,9 @@ This SOP describes the chosen polling interval, how to reset the controller-side
 dynamic = false
 
 [[unifi.controller]]
-url = "https://<gateway-ip>"
-user = "<service-account>"
-pass = "<password>"
+url = "https://<GATEWAY_IP>"
+user = "<SERVICE_ACCOUNT>"
+pass = "<PASSWORD>"          # placeholder — real value is SOPS-encrypted in secret.sops.yaml
 sites = ["all"]
 # ... save_* flags ...
 verify_ssl = false
@@ -60,14 +60,14 @@ verify_ssl = false
 [prometheus]
 http_listen = "0.0.0.0:9130"
 namespace = "unpoller"
-interval = "30s"     # ← tune here
+interval = "2m"      # ← tune here (current baseline; was 30s pre-2026-07-08)
 disable = false
 buffer = 50
 
 [influxdb]
 url = "http://influxdb-influxdb2.databases.svc.cluster.local:80"
 # ... credentials ...
-interval = "30s"     # ← keep equal to [prometheus].interval
+interval = "2m"      # ← keep equal to [prometheus].interval
 disable = false
 ```
 
@@ -148,7 +148,9 @@ ssh dmp-cberg "reboot"
 mise exec -- kubectl logs -n monitoring -l app.kubernetes.io/name=unpoller --tail=20 \
   | grep -E "Measurements Exported|429|Re-authenticating"
 
-# 4. Once stable for >30 minutes, optionally restore interval = "30s" via §4.1
+# 4. Leave interval at "2m" (the current baseline since 2026-07-08). Only tighten
+#    below 2m via §4.1 if you have a specific need AND the gateway is healthy —
+#    30s is what historically provoked the 429 lockouts.
 ```
 
 ---
