@@ -27,6 +27,37 @@ spec:
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
+        initContainers:
+          # Recent home-assistant images dropped "DigiCert Global Root CA" (the
+          # legacy 2006 root) from the certifi bundle, keeping only Global Root
+          # G2/G3. api.wyzecam.com serves a valid chain terminating at that
+          # legacy root, and HA's aiohttp client_context() loads certifi.where()
+          # directly (ignoring SSL_CERT_FILE), so the wyzeapi integration fails
+          # device-list TLS verification. This init container copies the image's
+          # certifi bundle to a shared volume and appends the missing root; the
+          # app container mounts the patched bundle back over certifi.where().
+          certifi-patch:
+            image:
+              repository: ghcr.io/home-assistant/home-assistant
+              tag: 2026.7.1
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                SRC="$(python3 -c 'import certifi; print(certifi.where())')"
+                EXPECTED="/usr/local/lib/python3.14/site-packages/certifi/cacert.pem"
+                if [ "$SRC" != "$EXPECTED" ]; then
+                  echo "certifi path changed ($SRC != $EXPECTED) — update the app-container mount path in helmrelease.yaml" >&2
+                  exit 1
+                fi
+                cp "$SRC" /patched-ca/cacert.pem
+                if ! grep -q "DigiCert Global Root CA" /extra-ca/digicert-global-root-ca.pem; then
+                  echo "extra-ca configMap missing expected root" >&2; exit 1
+                fi
+                printf '\n' >> /patched-ca/cacert.pem
+                cat /extra-ca/digicert-global-root-ca.pem >> /patched-ca/cacert.pem
+                echo "patched certifi bundle: $(grep -c 'BEGIN CERTIFICATE' /patched-ca/cacert.pem) certs"
         containers:
           app:
             image:
@@ -81,5 +112,28 @@ spec:
         enabled: true
         type: persistentVolumeClaim
         existingClaim: home-assistant-config
-        globalMounts:
-          - path: /config
+        advancedMounts:
+          home-assistant:
+            app:
+              - path: /config
+      # Public DigiCert Global Root CA, consumed only by the certifi-patch init.
+      extra-ca:
+        type: configMap
+        name: home-assistant-extra-ca
+        advancedMounts:
+          home-assistant:
+            certifi-patch:
+              - path: /extra-ca
+                readOnly: true
+      # Shared scratch: init writes the patched certifi bundle here, the app
+      # container mounts the single file back over certifi.where().
+      patched-ca:
+        type: emptyDir
+        advancedMounts:
+          home-assistant:
+            certifi-patch:
+              - path: /patched-ca
+            app:
+              - path: /usr/local/lib/python3.14/site-packages/certifi/cacert.pem
+                subPath: cacert.pem
+                readOnly: true
