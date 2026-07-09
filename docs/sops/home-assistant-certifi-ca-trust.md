@@ -21,10 +21,22 @@ APIs still serve a valid chain terminating at that legacy root — e.g.
 first HTTPS call with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer
 certificate`, even though the chain the server sends is complete.
 
-Key non-obvious fact: **Home Assistant's aiohttp `client_context()` loads
-`certifi.where()` directly and ignores `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE`**.
-So the OS trust store and env-var overrides do **not** fix it — the certifi
-bundle file itself must be patched.
+Key non-obvious fact: **there are TWO independent TLS consumer paths in a HA pod,
+and a complete fix must cover BOTH**:
+
+1. **HA core** uses `homeassistant.util.ssl.client_context()`, which loads
+   `certifi.where()` **directly** and **ignores** `SSL_CERT_FILE` /
+   `REQUESTS_CA_BUNDLE`. → Fixed only by patching the certifi bundle file.
+2. **Third-party integrations** (e.g. `wyzeapy`) create their **own**
+   `aiohttp.ClientSession()` with aiohttp's default `SSLContext`, which loads the
+   **OpenSSL system store** (`/etc/ssl/cert.pem`) and **honors `SSL_CERT_FILE`**
+   — it does **not** consult certifi. → Fixed by pointing `SSL_CERT_FILE` at the
+   patched bundle.
+
+So the fix is: **patch the certifi bundle (path 1) AND set
+`SSL_CERT_FILE` to that patched bundle (path 2)**. Patching only certifi leaves
+integration HTTP calls still failing; setting only `SSL_CERT_FILE` leaves HA core
+still failing. Both are required.
 
 - Scope: `home-automation/home-assistant` (pattern reusable for any HA integration
   that breaks on a dropped legacy root)
@@ -42,9 +54,10 @@ bundle file itself must be patched.
 | Namespace | `home-automation` |
 | Source of truth | `kubernetes/apps/home-automation/home-assistant/app/` |
 | Extra-CA ConfigMap | `home-assistant-extra-ca` (plaintext, PUBLIC cert — NOT SOPS) |
-| Patch mechanism | initContainer `certifi-patch` + `emptyDir` (`patched-ca`) mounted over `certifi.where()` |
+| Patch mechanism (path 1: HA core) | initContainer `certifi-patch` + `emptyDir` (`patched-ca`) mounted over `certifi.where()` |
+| Patch mechanism (path 2: integrations) | env `SSL_CERT_FILE=<patched certifi path>` on the app container |
 | certifi path (image-pinned) | `/usr/local/lib/python3.14/site-packages/certifi/cacert.pem` |
-| Critical caveat | HA `client_context()` uses `certifi.where()`, ignores `SSL_CERT_FILE` |
+| Critical caveat | HA `client_context()` uses `certifi.where()` (ignores `SSL_CERT_FILE`); integrations' aiohttp uses the system store (honors `SSL_CERT_FILE`) — BOTH must be covered |
 
 ---
 
@@ -77,6 +90,16 @@ initContainers:
         printf '\n' >> /patched-ca/cacert.pem
         cat /extra-ca/digicert-global-root-ca.pem >> /patched-ca/cacert.pem
 # app container mounts patched-ca emptyDir file over certifi.where() via subPath: cacert.pem (readOnly)
+# app container ALSO sets env SSL_CERT_FILE=<certifi path> so aiohttp's default
+# (system-store) context — used by integrations like wyzeapy — trusts the patched bundle.
+```
+
+App-container env (path 2 — the integration/aiohttp fix):
+
+```yaml
+env:
+  - name: SSL_CERT_FILE
+    value: "/usr/local/lib/python3.14/site-packages/certifi/cacert.pem"
 ```
 
 The init guard **hard-fails** if `certifi.where()` no longer matches the literal
@@ -97,10 +120,14 @@ path** in `helmrelease.yaml` (see Troubleshooting).
 3. **Add the ConfigMap** `*-extra-ca` with the PUBLIC root PEM (plaintext — do
    NOT SOPS a public cert; do NOT name it `*.sops.yaml`).
 4. **Add the `certifi-patch` initContainer** + `extra-ca` (configMap) and
-   `patched-ca` (emptyDir) volumes; mount the patched file over `certifi.where()`.
-5. **Validate**: `mise exec -- task kubeconform` (only pre-existing unrelated
+   `patched-ca` (emptyDir) volumes; mount the patched file over `certifi.where()`
+   (path 1 — HA core).
+5. **Set `SSL_CERT_FILE`** on the app container to the patched certifi path
+   (path 2 — integrations' aiohttp/system-store). Do NOT skip this if any
+   integration makes its own HTTPS calls (wyzeapy, etc.).
+6. **Validate**: `mise exec -- task kubeconform` (only pre-existing unrelated
    errors allowed).
-6. **Commit + push** (GitOps); let Flux reconcile.
+7. **Commit + push** (GitOps); let Flux reconcile.
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -174,6 +201,34 @@ If failed:
 - Re-dump the served chain (Example A); confirm the appended root is the correct
   terminating root for that chain.
 
+### Test 3: integration aiohttp/system-store path verifies the target host
+
+Proves the `SSL_CERT_FILE` half of the fix (the path wyzeapy-style integrations
+actually use). This must pass with **no manual env** — the env is baked into the
+container.
+
+```bash
+POD=$(mise exec -- kubectl get pods -n home-automation -l app.kubernetes.io/name=home-assistant \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+mise exec -- kubectl exec -n home-automation "$POD" -c app -- printenv SSL_CERT_FILE
+mise exec -- kubectl exec -n home-automation "$POD" -c app -- python3 -c '
+import asyncio, aiohttp
+async def main():
+    async with aiohttp.ClientSession() as s:
+        async with s.get("https://api.wyzecam.com/app/v2/home_page/get_object_list") as r:
+            print("aiohttp default session -> HTTP", r.status)
+asyncio.run(main())'
+```
+
+Expected:
+- `SSL_CERT_FILE` prints the patched certifi path.
+- aiohttp default session returns `HTTP 200`.
+
+If failed:
+- Confirm `SSL_CERT_FILE` is set (env missing → aiohttp falls back to the system
+  store and fails). Confirm `ssl.get_default_verify_paths().cafile` equals the
+  patched path.
+
 ---
 
 ## 7) Troubleshooting
@@ -184,6 +239,7 @@ If failed:
 | init exits 1: "configMap missing a PEM certificate" | ConfigMap key/content wrong | Ensure `ca-configmap.yaml` has a valid `-----BEGIN CERTIFICATE-----` block under `digicert-global-root-ca.pem` |
 | Still `CERTIFICATE_VERIFY_FAILED` after patch | Wrong terminating root appended (chain ends at a different root) | Dump served chain (Example A); append the actual terminating root |
 | HR flapping roll-forward/rollback | init guard bug during a rollout under `Recreate` | Fix the guard, push; let Flux settle — do not delete pods manually |
+| HA core TLS OK but an INTEGRATION still fails `CERTIFICATE_VERIFY_FAILED` | `SSL_CERT_FILE` missing — integration's own `aiohttp.ClientSession()` uses the system store, not certifi | Set `SSL_CERT_FILE` to the patched certifi path on the app container (path 2); push |
 
 ---
 
@@ -264,3 +320,7 @@ overlay in an emptyDir).
 
 - `2026.07.10`: Initial SOP — certifi legacy-root-drop patch pattern, born from
   the wyzeapi / DigiCert Global Root CA fix.
+- `2026.07.10`: Added the second consumer path — integrations' own
+  `aiohttp.ClientSession()` use the OpenSSL system store, not certifi; a complete
+  fix also requires `SSL_CERT_FILE` on the app container. Added Test 3,
+  troubleshooting row, and dual-path guidance throughout.
