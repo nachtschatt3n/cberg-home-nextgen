@@ -66,6 +66,17 @@ spec:
             env:
               - name: TZ
                 value: "Europe/Berlin"
+              # Point OpenSSL's default trust (used by Python's
+              # ssl.create_default_context(), and therefore by aiohttp's default
+              # SSLContext) at the certifi-patch bundle. HA core uses
+              # certifi.where() directly (already fixed via the mount), but
+              # integrations like wyzeapi/wyzeapy create their own
+              # aiohttp.ClientSession() with the *system* store — which lacks
+              # DigiCert Global Root CA. SSL_CERT_FILE redirects that path to the
+              # patched bundle. Verified in-pod: a real aiohttp GET to
+              # api.wyzecam.com returns HTTP 200 with this set.
+              - name: SSL_CERT_FILE
+                value: "/usr/local/lib/python3.14/site-packages/certifi/cacert.pem"
             resources:
               requests:
                 cpu: 1000m
