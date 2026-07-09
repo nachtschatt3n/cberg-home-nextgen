@@ -32,6 +32,28 @@ needs their decision, and what got auto-fixed.
    env). After all specialists finish and BEFORE reading the dashboard,
    finalize the unified verdict (rule 4b).
 
+0b. **Get the Postgres DSN from the canonical helper — NEVER hand-roll a
+   `5432:5432` port-forward.** The operator Mac runs a local Postgres on
+   `127.0.0.1:5432`. If you (or a specialist) port-forward to local `5432` and
+   use a DSN of `@127.0.0.1:5432`, the forward fails to bind and the DSN
+   silently connects to the LOCAL postgres — which has no `sweep_writer` role
+   and no sweep tables. Every write then fails with
+   `role "sweep_writer" does not exist`, the cycle persists **0 rows**, and the
+   reconcile writes a **false green over an empty cycle** (observed 2026-07-09).
+   Instead, source the helper, which picks a free port and *verifies it reached
+   the real cluster db* before handing out the DSN:
+
+       source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up || exit 1
+       # $SWEEP_PG_DSN is now exported (free port, sweep_findings confirmed).
+       # Pass this exact value to every specialist prompt as SWEEP_PG_DSN so
+       # they all write to the same cluster db (subagents share this Mac's
+       # localhost, so one port-forward serves all six), and use it for the
+       # rule-4b reconcile. Call `sweep_pg_dsn_down` when the sweep is done.
+
+   Include both `export SWEEP_CYCLE_ID=<id>` and `export SWEEP_PG_DSN=<dsn>` in
+   each specialist's prompt. If `sweep_pg_dsn_up` fails, STOP and report the DB
+   is unreachable — do not fall back to a bare `SWEEP_PG_DSN` or 5432.
+
 1. **Always invoke the six sweep agents in parallel** in a single
    message with six `Agent` tool calls (one per `subagent_type`).
    Never run them sequentially — they are independent and the user
