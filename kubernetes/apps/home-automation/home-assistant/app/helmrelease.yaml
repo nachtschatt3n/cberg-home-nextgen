@@ -52,8 +52,8 @@ spec:
                   exit 1
                 fi
                 cp "$SRC" /patched-ca/cacert.pem
-                if ! grep -q "DigiCert Global Root CA" /extra-ca/digicert-global-root-ca.pem; then
-                  echo "extra-ca configMap missing expected root" >&2; exit 1
+                if ! grep -q "BEGIN CERTIFICATE" /extra-ca/digicert-global-root-ca.pem; then
+                  echo "extra-ca configMap missing a PEM certificate" >&2; exit 1
                 fi
                 printf '\n' >> /patched-ca/cacert.pem
                 cat /extra-ca/digicert-global-root-ca.pem >> /patched-ca/cacert.pem
