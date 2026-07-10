@@ -246,9 +246,14 @@ check_file() {
     echo "$content" | grep -qE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' && violations="${violations}  - JWT token\n"
     echo "$content" | grep -qiE '(secret|credential|auth)["\s:=]+[A-Za-z0-9+/=]{32,}' && violations="${violations}  - Generic secret\n"
 
-    # Password patterns — guard against false-positives (templates, examples, ${VAR})
+    # Password patterns — guard against false-positives (templates, examples, ${VAR}).
+    # The value pattern here is [^"\s]{8,} (any non-space), so unlike the API-key/
+    # token detectors it matches a SOPS ciphertext blob after a `password:` key
+    # (e.g. `admin_password: ENC[AES256_GCM,...]`). An ENC[ marker means the value
+    # is encrypted (Layer 2 already verified the file carries a `sops:` block), so
+    # it is by definition not a plaintext password leak — exempt it.
     if echo "$content" | grep -qE '(password|passwd)["\s:=]+[^"\s]{8,}'; then
-        if ! echo "$content" | grep -qE '(example|sample|placeholder|your-password|CHANGEME|\$\{|\$\(\)|<[A-Z_]+>)'; then
+        if ! echo "$content" | grep -qE '(example|sample|placeholder|your-password|CHANGEME|\$\{|\$\(\)|<[A-Z_]+>|ENC\[)'; then
             violations="${violations}  - Password pattern\n"
         fi
     fi
