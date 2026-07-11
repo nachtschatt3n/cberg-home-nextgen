@@ -14,7 +14,10 @@ spec:
       interval: 30s
       rules:
         - alert: FindMyTraccarSyncDown
-          expr: up{job="findmy-traccar-sync"} == 0
+          # prometheus-operator sets the job label on ScrapeConfig targets to
+          # scrapeConfig/<namespace>/<name>, not the bare name — use the real
+          # operator-generated job label so this actually matches.
+          expr: up{job="scrapeConfig/monitoring/findmy-traccar-sync"} == 0
           for: 5m
           labels:
             severity: warning
@@ -36,7 +39,13 @@ spec:
             description: "The findmy-traccar-sync daemon on {{ $labels.instance }} has had {{ $value | printf \"%.0f\" }} errors in the last hour."
 
         - alert: FindMyTraccarSyncStale
-          expr: findmy_sync_last_success_timestamp_seconds > 0 and (time() - findmy_sync_last_success_timestamp_seconds) > 3600
+          # up == 1 gate: only fire when the target is reachable, so Down/Stale
+          # don't double-fire (Down covers the scrape-unreachable case). The
+          # `> 0` guard is dropped: the daemon now seeds the metric from the
+          # newest persisted lastSuccessAt on startup (before serving), so there
+          # is no reset-to-0 window on the 6h self-restart. Threshold 5400s (90m)
+          # ≈ 18 missed cycles at the 300s interval.
+          expr: up{job="scrapeConfig/monitoring/findmy-traccar-sync"} == 1 and (time() - findmy_sync_last_success_timestamp_seconds) > 5400
           for: 5m
           labels:
             severity: warning
@@ -44,13 +53,13 @@ spec:
             component: findmy-traccar-sync
           annotations:
             summary: "FindMy Traccar sync has not succeeded recently"
-            description: "The last successful sync on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago. Expected interval is 15 minutes."
+            description: "The last successful sync on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago. Expected interval is 5 minutes; this exceeds ~18 missed cycles."
 
         - alert: FindMyTraccarNoDevicesFound
           expr: findmy_sync_devices_found == 0 and findmy_sync_devices_total > 0
           for: 1h
           labels:
-            severity: warning
+            severity: critical
             category: macos
             component: findmy-traccar-sync
           annotations:
@@ -61,7 +70,10 @@ spec:
       interval: 30s
       rules:
         - alert: BankRefreshDown
-          expr: up{job="bank-refresh"} == 0
+          # prometheus-operator sets the job label on ScrapeConfig targets to
+          # scrapeConfig/<namespace>/<name>, not the bare name — use the real
+          # operator-generated job label so this actually matches.
+          expr: up{job="scrapeConfig/monitoring/bank-refresh"} == 0
           for: 5m
           labels:
             severity: warning
