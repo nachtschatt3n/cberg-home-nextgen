@@ -23,6 +23,14 @@ Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
 > The runtime-managed OpenClaw `voice` (gemma) agent and ha-mcp wiring stay:
 > ha-mcp gives every OpenClaw agent house control; the gemma agent is unused
 > by voice but available.
+>
+> **Bilingual (2026-07-12 late):** the Voice PE runs TWO wake words:
+> **"Okay Nabu" → "Local + OpenClaw" (German)** and **"Hey Jarvis" →
+> "Local + OpenClaw EN" (English)**. Same OpenClaw agent + Qwen3-TTS
+> (multilingual) behind both; whisper receives the language per-request from
+> the pipeline (service runs WITHOUT --language; --beam-size 1 for speed).
+> English local intents match natively (entity/area names are English);
+> German matching uses the added aliases.
 
 Goal: wake-word voice on the HA Voice PE satellite; common commands handled by
 HA's local intent engine (<2 s), free-form queries falling back to the OpenClaw
