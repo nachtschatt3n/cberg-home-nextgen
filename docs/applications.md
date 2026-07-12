@@ -62,7 +62,7 @@
 | pallet-price-monitor | Twice-daily ETL of German wood-pellet prices (PLZ 65520 / 6 t loose ENplus A1) plus leading indicators (Destatis EPI, Eurostat trade, DWD HDD), news (agrarheute, Holzkurier, DEPV), substitute fuels (Heizöl), and step-change events (Toll Collect). Computes a weighted spot+structural buy/wait verdict, persists in shared Postgres, surfaces via Grafana + Superset, alerts via AlertManager Telegram on BUY. Source: [github.com/nachtschatt3n/pellet-price-monitor](https://github.com/nachtschatt3n/pellet-price-monitor) (private). | Internal (CronJob, no UI) | Home Automation |
 | zigbee2mqtt | Zigbee device integration via MQTT | Internal | Home Automation |
 | mosquitto | MQTT broker for IoT communications | Internal (cluster) | — |
-| music-assistant-server | Multi-room audio management | Internal | Home Automation |
+| music-assistant-server | Multi-room audio management + Alexa skill bridge (alexa-skill sidecar, digest-pinned) | Internal UI; External `music-api`/`music-stream` (Alexa endpoints via Cloudflare) | Home Automation |
 | iobroker | IoT integration platform | Internal | Home Automation |
 | n8n | Workflow automation | Internal | Home Automation |
 | teslamate | Tesla data logger and analytics | Internal | Home Automation |

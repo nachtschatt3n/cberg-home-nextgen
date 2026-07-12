@@ -395,6 +395,7 @@ gh pr list --author app/renovate --state open \
 - **Not all registries supported**: Only GHCR, Docker Hub, and Quay.io are fully supported
 - **Tag format assumptions**: Assumes semantic versioning or release tags
 - **Latest tag ambiguity**: Can't determine if `latest` tag has changed
+- **Digest-pinned rolling tags**: `latest@sha256:<digest>` (Renovate-style pin) is treated as a rolling tag and skipped cleanly — Renovate's helm-values manager owns the digest bumps
 - **Private registries**: Requires authentication (not implemented)
 - **Rate limiting**: Registry APIs may rate limit requests
 

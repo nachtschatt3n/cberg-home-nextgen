@@ -1,8 +1,8 @@
 # SOP: Cloudflare Zone Management
 
 > Description: Spec-driven management of Cloudflare zone settings via Terraform with Kubernetes state backend. Covers how to change zone settings, manage bot protection, and detect configuration drift.
-> Version: `2026.05.06`
-> Last Updated: `2026-05-06`
+> Version: `2026.07.12`
+> Last Updated: `2026-07-12`
 > Owner: `homelab`
 
 ---
@@ -35,7 +35,7 @@ All Cloudflare zone settings are managed as code using Terraform. The state is s
 | `cloudflare_zone_setting.min_tls_version` | Min TLS | `1.2` |
 | `cloudflare_zone_setting.always_use_https` | Always HTTPS | `on` |
 | `cloudflare_zone_setting.security_header` | HSTS | `max_age=31536000, nosniff=true` |
-| `cloudflare_bot_management.main` | Bot Fight Mode | `true` |
+| `cloudflare_bot_management.main` | Bot Fight Mode | `false` (disabled 2026-07-12, AR-049 — BFM served managed challenges to Amazon's Alexa skill dispatcher; free plan cannot WAF-exempt BFM) |
 | `cloudflare_bot_management.main` | Block AI Bots | `block` |
 
 ### Settings NOT managed by Terraform
@@ -155,13 +155,17 @@ git add terraform/cloudflare/zone_settings.tf
 git commit -m "fix(cloudflare): raise security_level to high"
 ```
 
-### Example B: Disable Bot Fight Mode temporarily
+### Example B: Disable Bot Fight Mode
+
+> Applied permanently on 2026-07-12 (AR-049): BFM challenged Amazon's Alexa
+> skill dispatcher (POSTs from AWS IPs to `music-api`), and the free plan
+> offers no WAF skip rule for BFM. `ai_bots_protection` stays `block`.
 
 ```hcl
 # bot_protection.tf
 resource "cloudflare_bot_management" "main" {
   zone_id          = var.zone_id
-  fight_mode       = false          # was true
+  fight_mode       = false          # was true until 2026-07-12 (AR-049)
   ai_bots_protection = "block"
 }
 ```
