@@ -12,8 +12,15 @@
 #               browser user-data directory is persisted in the PVC so a
 #               logged-in session survives pod restarts.
 #
+#   homeassistant — remote SSE MCP server provided by Home Assistant's core
+#               "MCP Server" integration (Assist API: entity state + control).
+#               Used by the voice agent so Assist follow-up turns can control
+#               entities. URL/auth are substituted at container startup from
+#               HASS_URL/HASS_TOKEN (mapped from the openclaw-secret).
+#
 # The runtime container reads $NEXTCLOUD_MCP_URL / $NEXTCLOUD_MCP_AUTH_HEADER
-# from the openclaw-secret at startup and substitutes them into the JSON
+# (and HASS_URL / HASS_TOKEN for the homeassistant entry) from the
+# openclaw-secret at startup and substitutes them into the JSON
 # below before handing it to mcporter / openclaw.
 apiVersion: v1
 kind: ConfigMap
@@ -47,5 +54,13 @@ data:
           "PLAYWRIGHT_BROWSERS_PATH": "/home/node/.openclaw/playwright-browsers"
         },
         "description": "Headless Chromium for login-walled portals (ARAG, etc.). Read-only navigation + whitelisted clicks."
+      },
+      "homeassistant": {
+        "transport": "sse",
+        "url": "__HA_MCP_URL__",
+        "headers": {
+          "Authorization": "__HA_MCP_AUTH_HEADER__"
+        },
+        "description": "Home Assistant Assist API (entity state + control) via the HA core MCP Server integration."
       }
     }

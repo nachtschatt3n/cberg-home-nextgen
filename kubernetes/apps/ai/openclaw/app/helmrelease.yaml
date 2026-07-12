@@ -947,6 +947,24 @@ spec:
                   cfg.update = cfg.update || {};
                   cfg.update.checkOnStart = false;
 
+                  // ── HA voice fallback: OpenAI-compatible endpoint ──────────
+                  // Home Assistant Assist (custom_conversation) POSTs to
+                  // /v1/chat/completions on this gateway as its fallback
+                  // conversation agent. The OpenAI `model` field targets an
+                  // AGENT (`openclaw` = default, `openclaw/<agentId>`), not a
+                  // provider model. The dedicated small/fast "voice" agent is
+                  // runtime-managed (openclaw agents add voice …) and persists
+                  // in the PVC — this guard intentionally does not manage it.
+                  // SECURITY: this endpoint is full operator access to the
+                  // gateway. Reachable in-cluster/LAN only, bearer = gateway
+                  // token. Never route it through an ingress.
+                  cfg.gateway.http = cfg.gateway.http || {};
+                  cfg.gateway.http.endpoints = cfg.gateway.http.endpoints || {};
+                  cfg.gateway.http.endpoints.chatCompletions = {
+                    ...(cfg.gateway.http.endpoints.chatCompletions || {}),
+                    enabled: true,
+                  };
+
                   delete cfg.model;
 
                   fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
@@ -997,6 +1015,8 @@ spec:
                   sed \
                     -e "s|__NEXTCLOUD_MCP_URL__|$${NEXTCLOUD_MCP_URL:-}|g" \
                     -e "s|__NEXTCLOUD_MCP_AUTH_HEADER__|$${NEXTCLOUD_MCP_AUTH_HEADER:-}|g" \
+                    -e "s|__HA_MCP_URL__|$${HASS_URL:-}/mcp_server/sse|g" \
+                    -e "s|__HA_MCP_AUTH_HEADER__|Bearer $${HASS_TOKEN:-}|g" \
                     /etc/openclaw-mcp/mcp-servers.json \
                     > /home/node/.openclaw/mcp-servers.json
                   echo "MCP server defs written to ~/.openclaw/mcp-servers.json"

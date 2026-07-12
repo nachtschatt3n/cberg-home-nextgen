@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.04.04`
-> Last Updated: `2026-04-04`
+> Version: `2026.07.12`
+> Last Updated: `2026-07-12`
 > Owner: `Platform`
 
 ---
@@ -205,6 +205,38 @@ the `OPENCLAW_TTS_FALLBACK_URL` key in the `openclaw-secret` SOPS secret
 (`kubernetes/apps/ai/openclaw/app/secret.sops.yaml`) and is triggered on
 ElevenLabs HTTP 401/429 (quota). It returns WAV, which `say.py` converts to
 OGG/Opus via the existing ffmpeg path — the `sendVoice` flow is unchanged.
+
+**HA Assist fallback (conversation agent):** The gateway's OpenAI-compatible
+`/v1/chat/completions` endpoint is enabled (config-guard block in
+`kubernetes/apps/ai/openclaw/app/helmrelease.yaml`). Home Assistant Assist
+(`custom_conversation`) POSTs to it as its fallback conversation agent; the
+OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
+`openclaw/<agentId>`), not a provider model.
+
+- **Security:** this endpoint grants full operator access to the gateway.
+  Bearer auth = the gateway token; it is reachable in-cluster/LAN only and
+  must **never** be routed through an ingress.
+- **Voice agent:** a dedicated small/fast `voice` agent runs on
+  `ollama/gemma4:e2b-mlx`. It is runtime-managed
+  (`openclaw agents add voice …`) and persists in the PVC — the config-guard
+  intentionally does not manage it.
+- **HA MCP:** the `homeassistant` MCP server entry
+  (`kubernetes/apps/ai/openclaw/app/mcporter-config.yaml`) connects the voice
+  agent to HA's core "MCP Server" integration over SSE, so Assist follow-up
+  turns can read/control entities. URL/auth are substituted at container
+  startup from `HASS_URL`/`HASS_TOKEN` (mapped from `openclaw-secret`).
+
+**HA voice STT/TTS (Mac Mini):** In addition to Ollama, the Mac Mini
+(`192.168.30.111`) runs two host-managed (launchd) Wyoming services for the
+HA voice pipeline:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `wyoming-faster-whisper` | `10300` | Speech-to-text for HA Assist |
+| `wyoming-piper` | `10200` | Text-to-speech for HA Assist |
+
+These are host-managed on the mini (not in-cluster); HA connects to them via
+the Wyoming integration.
 
 ### MCPO (`ai/mcpo`)
 
