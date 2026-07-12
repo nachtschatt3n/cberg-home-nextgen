@@ -20,4 +20,4 @@ spec:
               service:
                 name: music-assistant-server
                 port:
-                  number: 8098
+                  number: 8097

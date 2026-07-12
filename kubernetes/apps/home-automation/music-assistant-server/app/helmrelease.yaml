@@ -46,11 +46,11 @@ spec:
               - name: http
                 containerPort: 8095
                 protocol: TCP
+              # MA streamserver: bind_port=80 (MA setting; publish_ip=music-stream.<domain>).
+              # MA has no separate publish_port, so the published stream URL is
+              # http://music-stream.<domain>:80 and must route via ingress to :80 here.
               - name: stream
-                containerPort: 8097
-                protocol: TCP
-              - name: stream-alt
-                containerPort: 8098
+                containerPort: 80
                 protocol: TCP
             resources:
               requests:
@@ -90,8 +90,11 @@ spec:
               repository: ghcr.io/alams154/music-assistant-skill
               tag: latest
             env:
+              # Public HTTPS host fronting MA's stream port (8097) via external
+              # ingress + Cloudflare. The skill rewrites stream URLs to this
+              # host for Alexa devices (scheme must be https).
               - name: MA_HOSTNAME
-                value: "http://localhost:8095"
+                value: "https://music-stream.${SECRET_DOMAIN}"
               - name: API_HOSTNAME
                 value: "http://localhost:3000"
               - name: PORT
@@ -124,10 +127,7 @@ spec:
             targetPort: 8095
           stream:
             port: 8097
-            targetPort: 8097
-          stream-alt:
-            port: 8098
-            targetPort: 8098
+            targetPort: 80 # MA streamserver bind_port (hostNetwork)
           alexa-api:
             port: 3000
             targetPort: 3000
