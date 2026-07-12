@@ -204,6 +204,7 @@ Infrastructure and topology reference:
 
 Zigbee2MQTT operations (permit_join API, device removal pre-flight, DB-injection recovery for CC2652-class router interview failures, backup/restore):
 - `docs/sops/zigbee2mqtt.md`
+- Sub-agent: `zigbee-agent` (global, `~/.claude/agents/zigbee-agent.md`) — SLZB-06P10 coordinator + SLZB-06 router topology, coordinator crash/socket-drop playbook, SLZB firmware-update impact, mesh-health snapshot. Delegates cluster mutations to cberg-agent/cluster-ops-agent and HA/firmware-flash to ha-agent.
 
 Media library curation (Plex / Jellyfin / Tube Archivist layout, naming, sidecar standards, intake-from-jdownloader workflow, audit thresholds):
 - `docs/sops/media-library-standards.md`
