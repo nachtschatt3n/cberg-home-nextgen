@@ -2,19 +2,27 @@
 
 Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
 
-> **OUTCOME NOTE (final architecture differs from the original plan):** the
-> OpenClaw `/v1` chat-completions path was abandoned for voice after testing —
-> OpenClaw 2026.6.11 drops the agent harness (MCP tools + persona) whenever a
-> request carries a `system` message or `user`/session field, which every HA
-> conversation component sends; the raw small model then echoes the input.
-> Verified with fresh sessions (not state pollution). Per the plan's bail-out
-> threshold, voice fallback now uses **HA's native Ollama integration**
-> (`conversation.voice_gemma_e2b`: `gemma4:e2b-mlx`, `think:false`,
-> `llm_hass_api: assist`, num_ctx 8192, one-sentence persona) — measured
-> **0.26 s local / 2.27 s LLM fallback**, 3-4× faster than the OpenClaw loop.
-> Everything OpenClaw-side (chatCompletions endpoint, `voice` agent, ha-mcp)
-> stays deployed: it gives OpenClaw itself house control and is ready if a
-> future OpenClaw release fixes the /v1 harness behavior.
+> **OUTCOME NOTE:** the design goal (per Mathias) is voice fallback into the
+> **full OpenClaw MAIN agent — skills + ChatGPT (openai/gpt-5.5 via Codex
+> harness)** — not a bare local LLM. Finding during build: OpenClaw 2026.6.11's
+> `/v1` endpoint drops the agent harness for **ollama-runtime agents** when a
+> request carries a `system` message or `user`/session field (raw model then
+> echoes; verified with fresh sessions) — but the **codex-runtime main agent
+> handles those shapes correctly**, so the intended design works by targeting
+> model `openclaw` (main agent) instead of a dedicated small ollama agent.
+>
+> Two pipelines exist; the Voice PE satellite uses **"Local + OpenClaw"**:
+> - **Local + OpenClaw** (satellite default): fallback →
+>   `conversation.openclaw` (custom_conversation → gateway `/v1`, model
+>   `openclaw`). Local 0.3 s; fallback 20–40 s but with FULL skills (verified:
+>   pellet-storage skill answered with live probe data) + memory + ChatGPT.
+> - **Local + Voice LLM** (fast alternative, one satellite-select away):
+>   fallback → `conversation.voice_gemma_e2b` (native Ollama gemma4:e2b-mlx,
+>   think:false, Assist tools). Local 0.26 s / fallback 2.3 s, no skills.
+>
+> The runtime-managed OpenClaw `voice` (gemma) agent and ha-mcp wiring stay:
+> ha-mcp gives every OpenClaw agent house control; the gemma agent is unused
+> by voice but available.
 
 Goal: wake-word voice on the HA Voice PE satellite; common commands handled by
 HA's local intent engine (<2 s), free-form queries falling back to the OpenClaw
