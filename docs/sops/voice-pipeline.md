@@ -101,6 +101,15 @@ Voice PE (09c778) ── wake "Okay Nabu"
   pipeline (kept for experiments; component-level HA-agent toggle disabled).
 - Watchdog automation `voice_stt_watchdog`: notifies if whisper unavailable
   10+ min.
+- **Doors/windows (2026-07-12):** 16 house contact sensors renamed, given
+  correct `device_class` (HomematicIP defaults everything to `door`) and
+  exposed to Assist. ⚠ HA's BUILT-IN "are any windows open" sentences map to
+  `domain=cover` (blinds), which matched with 0 targets → confident "Not any"
+  and no LLM fallback. Fix: `/config/custom_sentences/{en,de}/` override
+  files route window/door open-state questions to
+  `binary_sensor` + device_class (any/which/how_many responses). Custom
+  sentences beat built-ins; reload with service `conversation.reload`.
+  Car (Tessy) and appliance door sensors deliberately NOT exposed.
 - Automation `voice_openclaw_thinking_ack`: if the satellite stays in
   `processing` >3 s (only the OpenClaw fallback does; local intents finish
   <0.5 s), it speaks a cached "Moment." (0.6 s) on the PE media channel so
