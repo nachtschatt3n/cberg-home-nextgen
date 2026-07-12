@@ -46,9 +46,31 @@ from lib.slo.catalog import load as load_catalog, SloDef  # noqa: E402
 from lib.slo.clients import PromClient                    # noqa: E402
 from lib.slo.calc    import compute                       # noqa: E402
 from lib.slo.writer  import SloWriter                     # noqa: E402
+from lib.findings_writer import FindingsWriter            # noqa: E402
 
 
 DEFAULT_CATALOG = REPO_ROOT / "runbooks" / "slo-catalog.yaml"
+
+IN_CLUSTER_PROM = "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+LOCAL_PROM      = "http://localhost:9090"  # sweep-run port-forward convention
+
+
+def _default_prom_url() -> str:
+    """In-cluster service DNS when resolvable, else the port-forward URL.
+
+    Running on the Mac (the normal sweep case) the *.svc.cluster.local name
+    never resolves, which used to force every caller to pass --prom-url
+    manually. Explicit --prom-url / SLO_PROM_URL always win over this probe.
+    """
+    import socket
+    try:
+        socket.getaddrinfo(
+            "kube-prometheus-stack-prometheus.monitoring.svc.cluster.local",
+            9090,
+        )
+        return IN_CLUSTER_PROM
+    except OSError:
+        return LOCAL_PROM
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -67,8 +89,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--prom-url",
-        default=os.environ.get("SLO_PROM_URL", "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"),
-        help="Prometheus base URL (default: in-cluster service)",
+        default=os.environ.get("SLO_PROM_URL") or _default_prom_url(),
+        help="Prometheus base URL (default: in-cluster service when its DNS "
+             "resolves, else http://localhost:9090 for Mac-side runs)",
     )
     parser.add_argument(
         "--once",
@@ -157,6 +180,40 @@ def main(argv: list[str] | None = None) -> int:
             for snap in snaps:
                 w.emit(snap)
         print(f"\nWrote {len(snaps)} snapshot(s) to sweep-history.")
+
+        # Exhausted error budgets must ALSO land in sweep_findings — snapshots
+        # alone are invisible to the sweep's open-findings triage (the
+        # 2026-07-12 unifi-device-availability incident produced snapshots but
+        # no finding row, so the sweep report had to hand-assign N-01/N-02).
+        exhausted = [
+            s for s in snaps
+            if s.budget_remaining_pct is not None and s.budget_remaining_pct <= 0
+        ]
+        if exhausted:
+            fw = FindingsWriter(dsn=args.postgres_dsn, section="slo")
+            try:
+                for s in exhausted:
+                    fid = fw.emit(
+                        "warning",
+                        f"SLO error budget exhausted: {s.slo_name}",
+                        action=(
+                            f"Investigate {s.slo_name}: compliance "
+                            f"{s.compliance_pct:.3f}% vs target {s.target_pct:.2f}% "
+                            f"over {s.window_size}; budget {s.budget_remaining_pct:+.1f}%."
+                        ),
+                        subsection=s.slo_name,
+                        metadata={
+                            "compliance_pct": s.compliance_pct,
+                            "target_pct": s.target_pct,
+                            "budget_remaining_pct": s.budget_remaining_pct,
+                            "burn_rate_1h": s.burn_rate_1h,
+                            "burn_rate_6h": s.burn_rate_6h,
+                            "window": s.window_size,
+                        },
+                    )
+                    print(f"  ⚠ finding {fid}: budget exhausted for {s.slo_name}")
+            finally:
+                fw.close()
     elif args.no_write:
         print(f"\n--no-write set, {len(snaps)} snapshot(s) computed but NOT persisted.")
     else:
