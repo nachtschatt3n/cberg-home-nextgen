@@ -118,10 +118,22 @@ Voice PE (09c778) ── wake "Okay Nabu"
   stream wedges the PE** (LED spins forever). Fix: reload the ESPHome config
   entry (or reboot the PE). Avoid whisper restarts while voice is in use.
 
+## Local patch in custom_conversation (would be lost on HACS update!)
+`/config/custom_components/custom_conversation/conversation.py` line ~193:
+`json.dumps(content.tool_result)` → `json.dumps(content.tool_result, default=str)`.
+Upstream bug (v1.6.1, michelle-avery/custom-conversation): an LLM follow-up
+turn in a conversation whose history contains a locally-handled tool result
+with non-JSON-serializable objects (e.g. `time` from "What time is it?")
+crashes with `TypeError: Object of type time is not JSON serializable` →
+pipeline `intent-failed` → "conversation starts but never answers".
+Reproduced, patched, and fix-verified 2026-07-12. Re-apply after any
+component update until fixed upstream.
+
 ## Open items
-1. Optional: restrict OpenClaw `voice` agent tool profile (hardening; only
+1. File the serialization bug upstream (michelle-avery/custom-conversation).
+2. Optional: restrict OpenClaw `voice` agent tool profile (hardening; only
    relevant if OpenClaw /v1 path is revisited).
-2. Optional: upstream issue to OpenClaw about /v1 dropping the agent harness
+3. Optional: upstream issue to OpenClaw about /v1 dropping the agent harness
    on system/user-carrying requests (ollama-runtime agents only).
 
 ## Rollback
