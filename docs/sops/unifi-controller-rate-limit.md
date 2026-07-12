@@ -1,8 +1,8 @@
 # SOP: UniFi Controller Login Rate Limit (unpoller)
 
 > Description: Operate, diagnose, and recover the unpoller → UniFi controller integration when the controller's login endpoint rate-limit (HTTP 429) interrupts metric collection. Covers the relationship between unpoller polling cadence, the controller's `/api/auth/login` throttle, and the SSH workflow on the gateway.
-> Version: `2026.07.09`
-> Last Updated: `2026-07-09`
+> Version: `2026.07.12`
+> Last Updated: `2026-07-12`
 > Owner: `homelab-ops`
 
 ---
@@ -152,6 +152,36 @@ mise exec -- kubectl logs -n monitoring -l app.kubernetes.io/name=unpoller --tai
 #    below 2m via §4.1 if you have a specific need AND the gateway is healthy —
 #    30s is what historically provoked the 429 lockouts.
 ```
+
+### 4.4 Triage a reported unifictl "login problem" (don't be fooled)
+
+unifictl (and sweep agents wrapping it) sometimes report a login problem /
+"session expired" / "429 lockout" that is a transient fluke. Key facts:
+
+- The 429 throttle guards **only** `POST /api/auth/login`. An
+  already-authenticated unifictl session keeps working during a lockout —
+  a lockout can never break an existing session.
+- The per-IP window **slides closed on its own** within minutes once login
+  attempts stop. Every additional login attempt (including automated
+  re-auth retries) extends it.
+
+**Mandatory triage order — before declaring unifictl auth dead:**
+
+```bash
+# 1. Read-only probe using the CACHED session (does NOT touch /api/auth/login):
+mise exec -- unifictl local health get
+# → returns data: auth is FINE. The finding is a false positive; do NOT log in.
+
+# 2. Only if (1) fails with an auth error is a re-login even relevant.
+#    A single 429 AUTHENTICATION_FAILED_LIMIT_REACHED response = real lockout:
+#    STOP, do not retry, wait for the sliding window (§4.3 if it persists).
+#    `unifictl login` is operator-only (interactive password) — agents never run it.
+```
+
+Precedent: on 2026-07-12 a sweep escalated "unifictl auth dead — 429
+lockout, UniFi audits blind" while `unifictl local health get` returned
+live data the entire time. One `health get` would have falsified the
+finding immediately.
 
 ---
 

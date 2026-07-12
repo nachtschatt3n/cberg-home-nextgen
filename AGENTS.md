@@ -431,6 +431,15 @@ unifictl local event list
 > (`stat alarm` IPS/IDS · `stat rogueap` evil-twin · `log admin-activity`
 > audit). Requires unifictl ≥ 5.5.0 (`.mise.toml` pin); the legacy
 > `event list`/`log` endpoints 404 on this firmware before that release.
+>
+> **unifictl "login problem" triage rule (2026-07-12):** a reported
+> session-expired / 429-lockout is often a transient fluke. Before declaring
+> unifictl auth dead, run `unifictl local health get` — it uses the CACHED
+> session and never touches the rate-limited `/api/auth/login`. If it returns
+> data, auth is fine (false positive). Never retry logins into a 429 (the
+> per-IP window slides shut on its own; retries extend it), and never run
+> interactive `unifictl login` from an agent — operator-only. Full triage:
+> `docs/sops/unifi-controller-rate-limit.md` §4.4.
 
 **Client Connectivity:**
 ```bash
