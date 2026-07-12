@@ -22,6 +22,24 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
+  # Chart 2.1.0 renders templates/pod-monitor.yaml unconditionally — the
+  # podMonitor.enabled=false value below is silently ignored. Drop the
+  # chart's PodMonitor at render time so only the hand-tuned
+  # ServiceMonitor (servicemonitor.yaml, 60s interval) scrapes unpoller;
+  # a second 30s-default scrape doubles UniFi controller API load (429s)
+  # and duplicates every series.
+  postRenderers:
+    - kustomize:
+        patches:
+          - patch: |
+              apiVersion: monitoring.coreos.com/v1
+              kind: PodMonitor
+              metadata:
+                name: unifi-poller
+              $patch: delete
+            target:
+              kind: PodMonitor
+              name: unifi-poller
   valuesFrom:
     - kind: Secret
       name: unpoller-credentials
