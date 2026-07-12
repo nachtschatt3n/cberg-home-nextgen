@@ -343,9 +343,12 @@ class VersionChecker:
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
     # git-sha pins and floating tags. We skip these cleanly instead of emitting
     # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
+    # An optional '@sha256:<digest>' suffix (Renovate-style digest pin, e.g.
+    # 'latest@sha256:...') is still a rolling tag for OUR purposes — Renovate
+    # owns the digest bumps, so skip cleanly instead of emitting UNKNOWN.
     _ROLLING_TAG_RE = re.compile(
         r'^(sha-[0-9a-f]+|sha256:[0-9a-f]+|[0-9a-f]{7,40}|latest|stable|dev|edge|'
-        r'main|master|nightly|rolling)$',
+        r'main|master|nightly|rolling)(@sha256:[0-9a-f]{64})?$',
         re.IGNORECASE,
     )
 
