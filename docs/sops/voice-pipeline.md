@@ -1,6 +1,20 @@
-# Voice Pipeline — HA Voice PE → local intents → OpenClaw fallback
+# Voice Pipeline — HA Voice PE → local intents → local LLM fallback
 
-Version: 2026.07.12 · Status: **in build** · Owner: Mathias + Claude session log
+Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
+
+> **OUTCOME NOTE (final architecture differs from the original plan):** the
+> OpenClaw `/v1` chat-completions path was abandoned for voice after testing —
+> OpenClaw 2026.6.11 drops the agent harness (MCP tools + persona) whenever a
+> request carries a `system` message or `user`/session field, which every HA
+> conversation component sends; the raw small model then echoes the input.
+> Verified with fresh sessions (not state pollution). Per the plan's bail-out
+> threshold, voice fallback now uses **HA's native Ollama integration**
+> (`conversation.voice_gemma_e2b`: `gemma4:e2b-mlx`, `think:false`,
+> `llm_hass_api: assist`, num_ctx 8192, one-sentence persona) — measured
+> **0.26 s local / 2.27 s LLM fallback**, 3-4× faster than the OpenClaw loop.
+> Everything OpenClaw-side (chatCompletions endpoint, `voice` agent, ha-mcp)
+> stays deployed: it gives OpenClaw itself house control and is ready if a
+> future OpenClaw release fixes the /v1 harness behavior.
 
 Goal: wake-word voice on the HA Voice PE satellite; common commands handled by
 HA's local intent engine (<2 s), free-form queries falling back to the OpenClaw
@@ -59,12 +73,27 @@ Voice PE (09c778) ── wake "Okay Nabu"
 - Gate test #1 via `/v1` (`model=openclaw/voice`, German blinds question): agent attempted the HA tool call correctly but Ollama `/v1` rejected the replay → fix = commit `e0c375e9` (pod roll in progress at time of writing).
 - Qwen3-TTS through HA: ~1 s fetch, valid 24 kHz WAV.
 
-## Open items (at time of writing)
-1. Repoint agent `voice` → `ollama-native/gemma4:e2b-mlx`; re-run gate test (blinds query must answer via MCP tools; verify no thinking-token stall).
-2. Restrict voice agent tool profile (deny fs/exec/browser groups) — hardening after E2E works.
-3. Create HA pipeline "Local + OpenClaw" (whisper STT, custom_conversation→OpenClaw conv, Qwen TTS, prefer_local_intents=true, lang de) + set Voice PE satellite assistant + wake word `okay_nabu`.
-4. custom_conversation entry: base_url `http://openclaw.ai.svc.cluster.local:18789/v1`, bearer = `OPENCLAW_GATEWAY_TOKEN` (in openclaw-secret), model `openclaw/voice`.
-5. Latency benchmarks (local <2 s, fallback <10 s), prefer_local_intents regression check, STT-unavailable watchdog automation.
+## Final state (2026-07-12 evening)
+- Pipeline **"Local + Voice LLM"** (preferred): STT `stt.faster_whisper`,
+  conversation `conversation.voice_gemma_e2b` (native Ollama, think:false,
+  Assist API), TTS `tts.openai_tts_qwen3_voice`, `prefer_local_intents: true`,
+  language de. Voice PE satellite pointed at it, wake word **Okay Nabu**.
+- German **aliases** added: 13 areas (Küche, Wohnzimmer, Bad, …) + 8 key
+  entities (großes Licht, Rollladen im Wohnzimmer, Gartenbewässerung, …) —
+  required for local intent matching, since entity names are English.
+- `custom_conversation` entry (→ OpenClaw /v1) exists but is NOT in the
+  pipeline (kept for experiments; component-level HA-agent toggle disabled).
+- Watchdog automation `voice_stt_watchdog`: notifies if whisper unavailable
+  10+ min.
+- Benchmarks: local 0.26 s / built-in Q&A 0.04 s / LLM fallback 2.27 s
+  (targets were <2 s / <10 s).
+
+## Open items
+1. Live wake-word test on the Voice PE (pending user).
+2. Optional: restrict OpenClaw `voice` agent tool profile (hardening; only
+   relevant if OpenClaw /v1 path is revisited).
+3. Optional: upstream issue to OpenClaw about /v1 dropping the agent harness
+   on system/user-carrying requests.
 
 ## Rollback
 - HA voice: satellite `select.home_assistant_voice_09c778_assistant` → "Home Assistant Cloud" (one select).
