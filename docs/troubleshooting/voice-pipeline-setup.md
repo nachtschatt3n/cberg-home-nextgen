@@ -2,6 +2,13 @@
 
 Version: 2026.07.12 · Status: **live** · Owner: Mathias + Claude session log
 
+> **Doc type:** integration setup/build reference (not a procedural SOP) — this
+> is why it lives under `docs/troubleshooting/` and is exempt from the
+> `docs/sops/SOP-TEMPLATE.md` structure check. Relocated from `docs/sops/` on
+> 2026-07-13 (sweep finding F-4d3b0b69). Keep while the voice pipeline is live;
+> if it stabilises into a repeatable procedure, promote a trimmed SOP into
+> `docs/sops/` following the template.
+
 > **OUTCOME NOTE:** the design goal (per Mathias) is voice fallback into the
 > **full OpenClaw MAIN agent — skills + ChatGPT (openai/gpt-5.5 via Codex
 > harness)** — not a bare local LLM. Finding during build: OpenClaw 2026.6.11's
