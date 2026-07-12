@@ -58,49 +58,26 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 1Gi
-          alexa-api:
-            image:
-              repository: ghcr.io/alams154/music-assistant-alexa-api
-              tag: latest
-            # Removed USERNAME/PASSWORD to disable Basic Auth
-            # Alexa skill requests cannot send Basic Auth credentials
-            # env:
-            #   - name: USERNAME
-            #     valueFrom:
-            #       secretKeyRef:
-            #         name: music-assistant-alexa-secrets
-            #         key: alexa_username
-            #   - name: PASSWORD
-            #     valueFrom:
-            #       secretKeyRef:
-            #         name: music-assistant-alexa-secrets
-            #         key: alexa_password
-            ports:
-              - name: alexa-api
-                containerPort: 3000
-                protocol: TCP
-            resources:
-              requests:
-                cpu: 50m
-                memory: 64Mi
-              limits:
-                memory: 256Mi
+          # NOTE: former standalone alexa-api sidecar (:3000) removed 2026-07-12 —
+          # upstream folded the API into the skill container (mounted at /ma).
           alexa-skill:
             image:
               repository: ghcr.io/alams154/music-assistant-skill
-              tag: latest
+              # upstream only publishes :latest — pin the digest and bump manually
+              # (MA server's Alexa provider and this skill API must stay in sync)
+              tag: latest@sha256:ad7ec55a51d9304032a74d8ae0fda43743bf64ae68afa49dd6949d9477726ccf
             env:
               # Public HTTPS host fronting MA's stream port (8097) via external
               # ingress + Cloudflare. The skill rewrites stream URLs to this
               # host for Alexa devices (scheme must be https).
               - name: MA_HOSTNAME
                 value: "https://music-stream.${SECRET_DOMAIN}"
-              - name: API_HOSTNAME
-                value: "http://localhost:3000"
               - name: PORT
                 value: "5000"
-              - name: ASK_VERIFY_REQUESTS
-                value: "false"
+              # Locale of /alexa/intents served to MA's Alexa provider (the
+              # utterance set MA sends to the Echos; account region amazon.de)
+              - name: LOCALE
+                value: "de-DE"
             ports:
               - name: alexa-skill
                 containerPort: 5000
@@ -128,9 +105,6 @@ spec:
           stream:
             port: 8097
             targetPort: 80 # MA streamserver bind_port (hostNetwork)
-          alexa-api:
-            port: 3000
-            targetPort: 3000
           alexa-skill:
             port: 5000
             targetPort: 5000
