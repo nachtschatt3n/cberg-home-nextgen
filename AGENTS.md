@@ -206,6 +206,10 @@ Zigbee2MQTT operations (permit_join API, device removal pre-flight, DB-injection
 - `docs/sops/zigbee2mqtt.md`
 - Sub-agent: `zigbee-agent` (global, `~/.claude/agents/zigbee-agent.md`) — SLZB-06P10 coordinator + SLZB-06 router topology, coordinator crash/socket-drop playbook, SLZB firmware-update impact, mesh-health snapshot. Delegates cluster mutations to cberg-agent/cluster-ops-agent and HA/firmware-flash to ha-agent.
 
+Document management (paperless-ngx: Epson ES-580W scanner → SMB inbox → validator → consume pipeline, email ingestion, paperless-gpt vision-OCR + paperless-ai RAG, OCR tuning `deu+eng`/`force`/rotate, library curation):
+- `docs/sops/paperless.md`
+- Sub-agent: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`) — full ingestion-pipeline context, hard rules (OCR_MODE=force ⇒ 6Gi/OOM, inline-PDF email gotcha, gemma4 vision empty-response quirk, rotate-both-tesseract for flipped pages), "check paperless" health snapshot. Delegates cluster/PVC/manifest changes to cberg-agent/cluster-ops-agent, Ollama models to ollama-agent, scanner PoE/VLAN to unifi-agent.
+
 Media library curation (Plex / Jellyfin / Tube Archivist layout, naming, sidecar standards, intake-from-jdownloader workflow, audit thresholds):
 - `docs/sops/media-library-standards.md`
 - Sub-agent: `.claude/agents/media-manager.md`
