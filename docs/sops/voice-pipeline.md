@@ -104,12 +104,25 @@ Voice PE (09c778) ── wake "Okay Nabu"
 - Benchmarks: local 0.26 s / built-in Q&A 0.04 s / LLM fallback 2.27 s
   (targets were <2 s / <10 s).
 
+## Live-test results (2026-07-12) & operational quirks
+- Both wake words verified live: "Okay Nabu" (DE) incl. an OpenClaw
+  skills answer that consulted the Nextcloud calendar + memory (68 s worst
+  case); "Hey Jarvis" (EN) local command in 0.2 s.
+- STT model upgraded twice during testing: small-int8 → **large-v3-turbo
+  (int8, beam 1, no --language)** after code-switched German (English room
+  names) was mangled. Post-upgrade transcriptions clean.
+- **Quirk: changing wake_word_2 on the Voice PE needs a device reboot** to
+  load the second micro-wake-word model (select-cycling is not enough). The
+  hidden `button.home_assistant_voice_09c778_restart` was enabled for this.
+- **Quirk: restarting the whisper service while the satellite holds an open
+  stream wedges the PE** (LED spins forever). Fix: reload the ESPHome config
+  entry (or reboot the PE). Avoid whisper restarts while voice is in use.
+
 ## Open items
-1. Live wake-word test on the Voice PE (pending user).
-2. Optional: restrict OpenClaw `voice` agent tool profile (hardening; only
+1. Optional: restrict OpenClaw `voice` agent tool profile (hardening; only
    relevant if OpenClaw /v1 path is revisited).
-3. Optional: upstream issue to OpenClaw about /v1 dropping the agent harness
-   on system/user-carrying requests.
+2. Optional: upstream issue to OpenClaw about /v1 dropping the agent harness
+   on system/user-carrying requests (ollama-runtime agents only).
 
 ## Rollback
 - HA voice: satellite `select.home_assistant_voice_09c778_assistant` → "Home Assistant Cloud" (one select).
