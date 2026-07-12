@@ -101,6 +101,11 @@ Voice PE (09c778) ── wake "Okay Nabu"
   pipeline (kept for experiments; component-level HA-agent toggle disabled).
 - Watchdog automation `voice_stt_watchdog`: notifies if whisper unavailable
   10+ min.
+- Automation `voice_openclaw_thinking_ack`: if the satellite stays in
+  `processing` >3 s (only the OpenClaw fallback does; local intents finish
+  <0.5 s), it speaks a cached "Moment." (0.6 s) on the PE media channel so
+  long waits aren't silent. ⚠ Qwen3-TTS quirk: an ellipsis ("Moment...")
+  renders as a ~13 s clip — keep ack phrases plain.
 - Benchmarks: local 0.26 s / built-in Q&A 0.04 s / LLM fallback 2.27 s
   (targets were <2 s / <10 s).
 
