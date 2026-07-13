@@ -88,6 +88,36 @@ spec:
           annotations:
             summary: "Hardware thermal critical alarm on {{ $labels.instance }}"
             description: "Sensor {{ $labels.sensor }} on chip {{ $labels.chip }} asserted its critical-temperature alarm."
+    - name: node.cpu-throttle.rules
+      interval: 30s
+      rules:
+        - alert: CPUThrottlingHigh
+          # Relaxed replacement for the stock kube-prometheus-stack rule (which
+          # is disabled in helmvalues.yaml). Stock fired at >25% CFS-throttled
+          # for 15m — too noisy for this bursty homelab, where brief throttling
+          # against a CPU limit is normal and not actionable. Only sustained,
+          # heavy throttling (>50% for 30m) is worth surfacing. Expr mirrors the
+          # stock topk/sum-without shape so per-container accounting is identical.
+          expr: |
+            sum without (id, metrics_path, name, image, endpoint, job, node) (
+              topk by (cluster, namespace, pod, container, instance) (1,
+                increase(container_cpu_cfs_throttled_periods_total{container!="",job="kubelet",metrics_path="/metrics/cadvisor"}[5m])))
+            / on (cluster, namespace, pod, container, instance) group_left () sum without (id, metrics_path, name, image, endpoint, job, node) (
+              topk by (cluster, namespace, pod, container, instance) (1,
+                increase(container_cpu_cfs_periods_total{job="kubelet",metrics_path="/metrics/cadvisor"}[5m])))
+            > (50 / 100)
+          for: 30m
+          labels:
+            severity: info
+            category: node-hardware
+            component: cpu-throttle
+          annotations:
+            summary: "Sustained CPU throttling: {{ $labels.container }} in {{ $labels.namespace }}"
+            description: >-
+              {{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} has been
+              >50% CFS-throttled against its CPU limit for 30m ({{ $value | printf "%.0f%%" }}).
+              Sustained throttling this heavy usually means the container's CPU limit is too low for
+              its real workload — raise the limit rather than ignore.
     - name: node.memory-ecc.rules
       interval: 60s
       rules:

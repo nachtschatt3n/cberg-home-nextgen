@@ -14,6 +14,10 @@ data:
         KubeControllerManagerDown: true
         KubeSchedulerDown: true
         KubeletDown: true
+        # Stock CPUThrottlingHigh is too trigger-happy on this bursty homelab
+        # (>25% CFS-throttled for 15m). Replaced by a relaxed custom rule in
+        # node-hardware-alerts.yaml (>50% for 30m). See 2026-07-13.
+        CPUThrottlingHigh: true
       rules:
         kubeApiserverAvailability: false
         kubeControllerManager: false
