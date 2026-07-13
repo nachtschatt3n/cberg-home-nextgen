@@ -1040,7 +1040,7 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
         for ref in refs:
             ref_path = REPO_ROOT / ref
             # Only check directory-level paths (skip files with wildcards or placeholders)
-            if "{" in ref or "*" in ref:
+            if "{" in ref or "*" in ref or "..." in ref:
                 continue
             if not ref_path.exists():
                 sop_path_issues.append(f"`{sop_path.name}` references non-existent path `{ref}`")
