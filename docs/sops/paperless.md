@@ -160,6 +160,8 @@ process_mail_accounts.delay()
 | Vision-OCR (paperless-gpt) writes empty/garbage | gemma4 thinking model returns empty; default prompt encourages hallucination | retry empties, never overwrite with empty; strict `ocr_prompt.tmpl` is mounted |
 | Doc partly garbled (upside-down pages) | ocrmypdf OSD confidence too low to rotate | rotate-both-tesseract (Example C) |
 | validator CrashLoopBackOff | liveness probe used `pgrep` (absent in image) | heartbeat-file probe (already in `validator-deployment.yaml`) |
+| One PDF stuck in `/consume`, paperless crash-loops on it (tesseract `generate_hocr` ParseError / `SubprocessOutputError`) | under `OCR_MODE=force`, tesseract can ParseError on a **near-blank duplex back** (e.g. only hole-punch marks) and wedge the whole PDF on every 10s poll | pull the file via the `scan-inbox-validator` pod (stops the loop), drop/pre-OCR the blank page, re-consume the good page(s). Mitigate at source: **Skip Blank Pages ON** on the Epson preset (raise the blank threshold if hole-punches slip through) |
+| Document `created` date is a **birthdate** (e.g. 1980-12-10, 2020-04-08) not the doc date | paperless's date parser picks a DOB from the letter body over the real document date — systematic on medical Rezepte/Rechnungen and insurance forms | sanity-check dates on ingest for medical/insurance docs; re-set `created` from the printed invoice/letter date. Watch for it in any batch audit |
 
 ---
 
@@ -250,3 +252,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | Version | Date | Change |
 |---------|------|--------|
 | `2026.07.13` | 2026-07-13 | Initial SOP — pipeline, OCR/force+6Gi, email inline-PDF fix, vision-OCR + rotate-both-tesseract, health/security/rollback. |
+| `2026.07.13` | 2026-07-13 | Add troubleshooting for hOCR crash on near-blank duplex backs (force-mode wedge in `/consume`) and the DOB date-misparse on medical/insurance docs (surfaced in the 64-doc scan-batch audit). |
