@@ -153,6 +153,22 @@ spec:
           # 2026-06-07: 9/37). Legitimate office workload. Scope TIGHTLY to those
           # binaries / the AppImage path inside the nextcloud container only — a
           # different dropped binary in that pod still fires.
+          #
+          # mcpo runtime-setup: the mcpo pod (apps/ai/mcpo, MCP-over-OpenAPI
+          # proxy for open-webui) runs an initContainer named `runtime-setup` on
+          # a stock python:3.11-slim base whose sole job is to bootstrap the
+          # Node/npm toolchain and pip/npm-install the MCP servers into a shared
+          # volume on every pod start. That means curl (fetch nodesource gpg
+          # key), gpg (--dearmor the key), and node (npm install -g) all execute
+          # from a writable overlay layer (EXE_WRITABLE|EXE_UPPER_LAYER) → 3
+          # level-12 events per pod start (verified 2026-07-14 via falco.log:
+          # curl + gpg + node, container_name=runtime-setup, k8s_ns_name=ai).
+          # These aren't package-manager binaries (curl/gpg/node), so the apt/
+          # dpkg clauses above miss them, and the init container has no long-
+          # running workload to protect. Scope TIGHTLY to the ai-ns mcpo pod's
+          # runtime-setup container on the stock python image — a dropped binary
+          # in the mcpo `app` container, a differently-named pod, or any other
+          # namespace still fires (finding F-2804f72b).
           condition: >
             and not (
               proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
@@ -163,7 +179,8 @@ spec:
               proc.exe startswith /data/longhorn or
               proc.exepath startswith /data/longhorn or
               container.name in (install-openclaw, mount-cgroup, apply-sysctl-overwrites) or
-              (container.name = nextcloud and (proc.exepath startswith /tmp/appimage_extracted or proc.name in (coolwsd, coolforkit, coolforkit-ns, coolmount)))
+              (container.name = nextcloud and (proc.exepath startswith /tmp/appimage_extracted or proc.name in (coolwsd, coolforkit, coolforkit-ns, coolmount))) or
+              (k8s.ns.name = ai and k8s.pod.name startswith mcpo and container.name = runtime-setup and container.image.repository = docker.io/library/python)
             )
           override:
             condition: append
