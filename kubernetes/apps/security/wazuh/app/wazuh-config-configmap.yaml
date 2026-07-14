@@ -143,24 +143,36 @@ data:
            one-event-per-line semantics for our use case (JSON access
            logs, single-line app stdout).
 
-           Exclude wazuh-* containers to avoid a feedback loop: the manager's
-           own filebeat WARN lines look enough like a gitlab-shell-stderr
-           decoder match that rule 65618 was firing 350+ times per minute,
-           pegging the manager at its CPU limit. -->
+           EXCLUSIONS — Wazuh logcollector honors ONLY ONE <exclude> per
+           <localfile>: the config parser overwrites logf->exclude on each
+           element, so with several <exclude> tags only the LAST one is ever
+           applied. This bit us: three excludes were listed (wazuh-*,
+           longhorn-manager-*, falco-*) but only falco-* (the last) took
+           effect. The wazuh-manager-master-0 container log — the manager's
+           OWN stdout — was therefore re-ingested and matched rule 2501
+           ("syslog: User authentication failure") as a self-inflicted
+           feedback loop (~30k/day; confirmed 2026-07-14: 849 rule-2501
+           alerts sourced from the manager container log in a ~1.5-day
+           window, all forwarded by the node-01 agent). Rule 65618 (gitlab
+           decoder) noise from the same log is separately handled by the
+           0770-gitlab_rules.xml rule_exclude in master.conf.
+
+           Fix: a SINGLE glob that drops EVERY security-namespace container
+           log. The CRI symlink name is <pod>_<namespace>_<container>-<id>.log,
+           so `*_security_*.log` matches the whole wazuh stack
+           (manager/agent/indexer/dashboard — killing all self-loops) AND
+           falco. Falco events are NOT lost: they still arrive via the
+           dedicated falco.log JSON localfile below; only the duplicate
+           stdout copy is dropped. Longhorn-manager (longhorn-system ns) is
+           no longer globbed — but it was already un-excluded in production
+           by this same one-exclude bug and currently produces 0 alerts; if
+           rule 31533 "High amount of POST requests" noise returns, suppress
+           it with a local rule rather than a second (inert) <exclude>. -->
       <localfile>
         <log_format>multi-line-regex</log_format>
         <multiline_regex match="start">^\d{4}-\d{2}-\d{2}T</multiline_regex>
         <location>/host/var/log/containers/*.log</location>
-        <exclude>/host/var/log/containers/wazuh-*</exclude>
-        <!-- Longhorn manager emits routine inter-replica POSTs
-             (POST /v1/volumes/.../snapshotCRList every few seconds) that
-             trip rule 31533 "High amount of POST requests = likely bot".
-             Excluding longhorn-manager logs at the agent eliminates ~330
-             false-positive 'attack' events per day per node. -->
-        <exclude>/host/var/log/containers/longhorn-manager-*</exclude>
-        <!-- Falco DaemonSet stdout would double up with the file_output we
-             tail below; exclude to dedupe. -->
-        <exclude>/host/var/log/containers/falco-*</exclude>
+        <exclude>/host/var/log/containers/*_security_*.log</exclude>
       </localfile>
 
       <!-- Falco syscall events (JSON). Falco DaemonSet writes JSON-formatted
