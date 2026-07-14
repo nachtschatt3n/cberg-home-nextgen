@@ -362,11 +362,11 @@ spec:
                 # codex/discord plugins to be built against the same plugin-sdk).
                 # The 2026-06-03 skew (host 2026.5.28+ wanted a codex plugin-sdk
                 # export that @openclaw/codex 2026.6.1 didn't ship) is RESOLVED:
-                # as of 2026-07-14 openclaw, @openclaw/codex and @openclaw/discord
-                # are all published in lockstep at 2026.7.1 (@openclaw/discord
-                # 2026.7.1 declares peerDependencies openclaw>=2026.7.1) and the
+                # as of 2026-07-12 openclaw, @openclaw/codex and @openclaw/discord
+                # are all published in lockstep at 2026.6.11 (@openclaw/discord
+                # 2026.6.11 declares peerDependencies openclaw>=2026.6.11) and the
                 # host bundles the matching plugin-sdk. Keep all three on the same version.
-                install_npm openclaw@2026.7.1
+                install_npm openclaw@2026.6.11
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
@@ -393,8 +393,8 @@ spec:
                 # WebSocket client that connects with the bot token. Pin to
                 # match the openclaw host above — the host's plugin-API
                 # contract requires the plugin built against the same version
-                # range. Move it together with openclaw (both at 2026.7.1).
-                install_npm @openclaw/discord@2026.7.1
+                # range. Move it together with openclaw (both at 2026.6.11).
+                install_npm @openclaw/discord@2026.6.11
 
                 # Realign openclaw's MANAGED plugin store (~/.openclaw/npm) with
                 # the running host version. That store is provisioned once at first
