@@ -76,7 +76,12 @@ spec:
         recurringFailedJobsHistoryLimit: 1
         recurringJobMaxRetention: 2
         restoreVolumeRecurringJobs: false
-        orphanAutoDeletion: false
+        # Auto-clean orphaned replica directories (data with no owning volume,
+        # left by replica rebuilds/node reboots). Was false → 95 orphans had
+        # accumulated (59 on nuc14-03, dragging it to 24% free). Enabled
+        # 2026-07-14 after a manual sweep reclaimed ~220G. DataCleanable orphans
+        # only; never touches live replicas.
+        orphanAutoDeletion: true
         detachManuallyAttachedVolumesWhenCordoned: false
         nodeDownPodDeletionPolicy: do-nothing
         allowEmptyDiskSelectorVolume: true
