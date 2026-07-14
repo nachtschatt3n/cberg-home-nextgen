@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.06.04`
-> Last Updated: `2026-06-04`
+> Version: `2026.07.14`
+> Last Updated: `2026-07-14`
 > Owner: `cberg-home-ops`
 
 ---
@@ -198,6 +198,44 @@ git push
 mise exec -- flux get helmreleases -n home-automation zigbee2mqtt
 ```
 
+### 4f) SLZB router present on LAN but dropped from the mesh — remote radio-reboot + rejoin
+
+Use this when the **SLZB-06 router** (`0x00124b0031dffd19`, "SLZB-06 Router-tub-room") disappears from the mesh but the device itself is still powered and on the LAN. This is a **different failure** from the CC2652 interview bug (§4d) and from a real power/PoE outage at the location — do not confuse them.
+
+**Fingerprint (all four must hold):**
+
+1. The SLZB core answers on the LAN: `ping 192.168.32.21` succeeds, and `http://192.168.32.21/metrics` + `http://192.168.32.21/ha_sensors` respond.
+2. `/ha_sensors` shows **`"ethernet":true`** (PoE Ethernet link up) — so power + the Basement-SW-48 port-18 uplink are working. This **rules out a power/PoE outage** (would need a physical trip) and a down switch port.
+3. Z2M still has the router in the DB with `interview_completed: true` (via `bridge/devices`) — so this is **not** the §4d interview bug (which shows `interview_completed: false` / `interviewState=FAILED`).
+4. A live networkmap scan shows the router node with **`failed: ["lqi","routingTable"]` and 0 links**, and a **stale `lastSeen`** (days/weeks old). This is the definitive "radio is not in the mesh right now" signal.
+
+```bash
+# Fingerprint checks
+ping -c3 192.168.32.21
+curl -s http://192.168.32.21/ha_sensors    # want "ethernet":true
+# Router DB state (interview_completed should be true → NOT the §4d bug):
+mise exec -- kubectl -n home-automation exec deploy/mosquitto -c app -- mosquitto_sub \
+  -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/devices -C 1 -W 8 \
+  | python3 -c "import sys,json;[print(x.get('interview_completed'),x.get('type')) for x in json.load(sys.stdin) if x.get('ieee_address')=='0x00124b0031dffd19']"
+# Live mesh state (want links>0 and no 'failed' fields):
+mise exec -- kubectl -n home-automation exec deploy/mosquitto -c app -- mosquitto_pub \
+  -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/request/networkmap -m '{"type":"raw","routes":true}'
+# then read zigbee2mqtt/bridge/response/networkmap and inspect the router node's 'failed' + link count
+```
+
+Note: the router has `availability:false` in Z2M (CC2652 routers fail Z2M's ZDO availability pings), so **`+/availability` and `bridge/health` will NOT tell you it dropped** — the networkmap `failed`/link check and `lastSeen` are the only reliable live signals. A childless router that rejoins may also stay silent in Z2M logs; re-run the networkmap to confirm, don't wait for a log line.
+
+**Recovery ladder — remote-first, least-invasive first. The device is reachable, so none of steps 1–3 need a physical trip:**
+
+1. **Radio-only restart (least invasive).** SLZB web UI `http://192.168.32.21` → **Settings and Tools → General settings → "Zigbee Restart"** (button, left of the row; **do NOT** click the adjacent "Zigbee Flash Mode" — that drops the CC2652 into the bootloader and risks the NV/IEEE). This resets only the CC2652 (`zb_temp` in `/ha_sensors` jumps; `device uptime` is unchanged because the ESP32 core is not rebooted). Wait ~2 min, re-run the networkmap. If the router now has links and a fresh `lastSeen` → done, go to the re-home step.
+2. **If no rejoin: "Router Reconnect" and/or a full device Reboot.** Same General-settings page has a **"Router Reconnect"** button (tells the router to reconnect to its commissioned network) — no `permit_join` needed. A full device **Reboot** (bottom-left of the UI) power-cycles Core + Radio (device drops off the LAN ~10–20 s, then rejoins from NV); heavier but sometimes needed when a radio-only restart doesn't take.
+3. **If still no rejoin: re-join with `permit_join`.** Open `permit_join` on the coordinator (§4a, `{"time":254}`), trigger the join from the SLZB UI ("Router Reconnect"), watch for the device announce, then **close `permit_join`** (`{"time":0}`). This is the escalation gate — get operator go-ahead before opening the join window.
+4. **Physical trip only as last resort.** If steps 1–3 all fail with the core still healthy, the CC2652 radio hardware is suspect — inspect/replace on site.
+
+**After the router is back:** re-home any sleepy end-devices that were parented through it and got orphaned when it dropped (they show a stale `lastSeen` from the same event; Aqara devices don't re-parent on their own). Open `permit_join` briefly and press the device's pair button once — see §5 Example A. Track which children were affected via each device's `lastSeen` in the networkmap.
+
+**Worked example (2026-07-14):** the tub-room router had been out of the mesh since 2026-06-03 (`lastSeen` 40.7 days stale, networkmap `failed:[lqi,routingTable]`, 0 links) while the core stayed LAN-reachable with `ethernet:true` and `interview_completed:true` — matching this fingerprint, not §4d and not a power outage (the same event orphaned the "Entry Door" Aqara child, which shares the 2026-06-03 `lastSeen`). A **step-1 radio-only "Zigbee Restart" alone did NOT bring it back** — the radio reset (`zb_temp` moved) but did not rejoin from NV; the post-restart networkmap was unchanged. Escalation to step 2/3 (Router Reconnect → device reboot → `permit_join` + join) was the required next round.
+
 ---
 
 ## 5) Examples
@@ -285,6 +323,7 @@ Expected:
 | Symptom | Likely Cause | First Fix |
 |---|---|---|
 | `Interview failed because can not get node descriptor` on a SLZB router | Class-wide CC2652 ZDO bug | §4d DB injection — **do not reflash** |
+| Router `lastSeen` stale (days/weeks) + networkmap `failed:[lqi,routingTable]` + 0 links, but core pingable & `/ha_sensors` `ethernet:true` | Radio dropped from mesh while device stays powered/on-LAN (not the §4d interview bug, not a power outage) | §4f: SLZB UI **General settings → "Zigbee Restart"**; if no rejoin → "Router Reconnect" / device Reboot → `permit_join` + join; physical trip only if all fail |
 | `bridge/request/permit_join` returns `Invalid payload` | Used `{"value": false}` to close | Use `{"time": 0}` — see §4a |
 | Device suddenly missing from `bridge/devices` | Z2M restart + low-prior-message device may have been pruned (esp. with `leave_count > 0`) | Restore from the daily Longhorn backup of `zigbee2mqtt-data`, or rejoin via permit_join |
 | HA entities for a device vanish after rename | Z2M cleared the old HA discovery configs and republished under new friendly_name | Update HA dashboards/automations to the new entity IDs |
@@ -430,4 +469,5 @@ If the DB is corrupted beyond surgical repair: restore from the daily backup of 
 
 ## Version History
 
+- `2026.07.14`: add §4f (SLZB router present on LAN but dropped from the mesh — remote radio-reboot + rejoin ladder) and matching troubleshooting row. Distinguishes this failure (stale `lastSeen` + networkmap `failed:[lqi,routingTable]` + core reachable/`ethernet:true`) from the §4d interview bug and from a real power/PoE outage. Captures the 2026-07-14 tub-room recovery: a radio-only "Zigbee Restart" did not rejoin the mesh, requiring escalation.
 - `2026.06.04`: initial SOP. Captures lessons from the 2026-06-04 incident: SLZB-06P7 force-remove → reflash cycle → Node Descriptor failure → DB-injection recovery; corrects `permit_join` close API; documents Longhorn backup retention bump 1→7; adds CC2652-router-as-router workaround procedure.
