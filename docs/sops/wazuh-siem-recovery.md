@@ -1,8 +1,8 @@
 # SOP: Wazuh SIEM Event-Flow Recovery (agents Active but SIEM silent)
 
 > Description: Recover Wazuh alert ingestion when `agent_control -l` shows agents Active but the indexer/SIEM shows no events — typically after the wazuh-indexer loses its data (e.g. on a node reboot), which drops the filebeat ingest pipeline and index template that the long-running manager filebeat never re-pushes.
-> Version: `2026.07.13`
-> Last Updated: `2026-07-13`
+> Version: `2026.07.14`
+> Last Updated: `2026-07-14`
 > Owner: `platform-operator`
 
 ---
@@ -15,7 +15,7 @@ Root cause pattern: the `wazuh-indexer` comes up on an **empty data directory** 
 
 - Scope: `security` namespace — `wazuh-manager-master-0`, `wazuh-indexer-0`, `wazuh-agent` DaemonSet.
 - Prerequisites: `kubectl` exec into the manager pod; indexer credentials from `kubernetes/apps/security/wazuh/app/secret.sops.yaml` (`INDEXER_USERNAME` / `INDEXER_PASSWORD`).
-- Out of scope: *why* the indexer lost data (Longhorn replica / OpenSearch reinit) — see §7 and disaster-recovery.md. This SOP restores event flow; the underlying data-loss trigger is a separate investigation.
+- Root cause of the data loss (RESOLVED 2026-07-14): the indexer's OpenSearch `path.data` was unset, so with `OPENSEARCH_PATH_CONF=/usr/share/wazuh-indexer/config` it defaulted to `$ES_HOME/data` (`/usr/share/wazuh-indexer/data`) on the **ephemeral container overlay** — NOT the Longhorn PVC mounted at `/var/lib/wazuh-indexer`. Every pod restart/node reboot wiped the data. Fixed by pinning `path.data: /var/lib/wazuh-indexer` in `wazuh-indexer-statefulset.yaml`. This SOP still applies for the one-time re-`setup` after that fix rolled the pod (the PVC bootstrapped fresh), and for any future indexer reset.
 
 ---
 
@@ -129,7 +129,7 @@ If failed: confirm alerts.json is fresh (`stat /var/ossec/logs/alerts/alerts.jso
 | Agents Active in `agent_control -l` but SIEM/sweep says silent | filebeat ingest pipeline + template lost after indexer data reset | §4 `filebeat setup --index-management --pipelines` |
 | filebeat log: `pipeline ... does not exist` | pipeline dropped from indexer; filebeat never re-`setup` | §4 setup |
 | Only `wazuh-states-inventory-*` indices exist, no `wazuh-alerts-*` | native connector works, filebeat path broken | §4 setup |
-| Recovery works, then breaks again on next reboot | **indexer lost its Longhorn data on reboot** (root cause upstream) | investigate indexer volume; see Version History note + disaster-recovery.md |
+| Recovery works, then breaks again on next reboot | ~~indexer lost its Longhorn data on reboot~~ **FIXED 2026-07-14**: `path.data` was unset → data lived on the ephemeral overlay, not the PVC | verify `path.data: /var/lib/wazuh-indexer` is present in `wazuh-indexer-statefulset.yaml`'s opensearch.yml; `df -h /var/lib/wazuh-indexer` inside the pod must show `/dev/longhorn/...` |
 | One node agent still silent minutes after fix | that node is simply low-volume (no rule match yet) | confirm it produces events in `alerts.json`; wait or trigger a real alert |
 
 ```bash
@@ -220,4 +220,5 @@ kubectl exec -n security wazuh-manager-master-0 -c wazuh-manager -- \
 
 ## Version History
 
+- `2026.07.14`: **Root cause of the data loss found and fixed.** The indexer's OpenSearch `path.data` was never set; with `OPENSEARCH_PATH_CONF=/usr/share/wazuh-indexer/config`, `path.data` defaulted to `$ES_HOME/data` (`/usr/share/wazuh-indexer/data`) on the ephemeral container overlay instead of the Longhorn PVC mounted at `/var/lib/wazuh-indexer` (verified live: the 12M active `nodes/` dir sat on overlay while the PVC held only a stale 212K May-7 bootstrap). Every pod restart/reboot bootstrapped an empty data dir. Fixed by pinning `path.data: /var/lib/wazuh-indexer` in `wazuh-indexer-statefulset.yaml` + a `checksum/indexer-config` pod annotation to roll it. Post-roll the PVC bootstrapped fresh (`.opendistro_security` survived from the old PVC data, so no securityadmin re-run was needed); this SOP's `filebeat setup` restored the pipeline + template and event flow resumed. The data-loss trigger is now closed — reboots no longer wipe the indexer.
 - `2026.07.13`: Initial SOP. Written after the 2026-07-12 Talos v1.13.6 reboot reset the wazuh-indexer to an empty data dir, dropping the `filebeat-7.10.2-wazuh-alerts-pipeline` and `wazuh` template; the long-running manager filebeat never re-`setup`, so all alerts were rejected (`pipeline ... does not exist`) and dropped — the daily sweep flagged all 3 node agents "silent >2h" while `agent_control -l` showed them Active. Fix: `filebeat setup --index-management --pipelines`. Open follow-up: determine why the indexer's Longhorn volume (`healthy`, 2 replicas) came up empty on reboot.
