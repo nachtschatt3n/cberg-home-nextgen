@@ -14,7 +14,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Attribute | Value |
 |-----------|-------|
 | Kubernetes | v1.36.0 |
-| Talos Linux | v1.13.4 |
+| Talos Linux | v1.13.6 |
 | Flux | v2.5.0 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.19.4 |
@@ -104,7 +104,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 |-------|-----------|-------|---------|-----------|
 | 1 | Cilium | `cilium/cilium` | 1.19.4 | kube-system | (bootstrap seed aligned to running v1.19.4; Flux HelmRelease also pins 1.19.4) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.46.0 | kube-system |
-| 3 | cert-manager | `jetstack/cert-manager` | v1.20.0 | cert-manager |
+| 3 | cert-manager | `jetstack/cert-manager` | v1.21.0 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.14.0 | flux-system |
 | 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.14.0 | flux-system |
 
@@ -117,13 +117,13 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.13.4 (immutable, minimal, Kubernetes-focused; kernel 6.18.34, Clang/ThinLTO) |
+| OS | Talos Linux v1.13.6 (immutable, minimal, Kubernetes-focused; kernel 6.18.38, Clang/ThinLTO) |
 | Container Runtime | Containerd 2.2.4 + Spegel (distributed image caching) |
 | CNI | Cilium v1.19.4 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS (cluster-internal) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
 | Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
-| Certificate Management | cert-manager v1.20.2 + Let's Encrypt |
+| Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
 | Identity Provider | Authentik (forward auth for all ingress) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
@@ -196,14 +196,14 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
-| Talos Linux | v1.13.4 | Cluster OS |
+| Talos Linux | v1.13.6 | Cluster OS |
 | Flux | v2.5.0 (pinned; see note above) | GitOps operator |
 | Cilium | v1.19.4 | CNI / network |
 | Longhorn | v1.11.2 | Distributed storage |
-| cert-manager | v1.20.2 | TLS management |
+| cert-manager | v1.21.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
-| talosctl | v1.13.4 | CLI (client) — matches cluster OS |
+| talosctl | v1.13.4 | CLI (client) — one patch behind cluster OS (v1.13.6); `.mise.toml` pin |
 | talhelper | 3.1.11 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |
