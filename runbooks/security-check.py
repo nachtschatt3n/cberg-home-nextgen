@@ -1685,9 +1685,24 @@ def s11_unifi() -> tuple[str, Findings, str]:
     # Device inventory — use 'device list' subcommand
     devices_raw = run_unifictl("unifictl local device list 2>/dev/null", timeout=15)
     if not devices_raw or "login failed" in devices_raw:
-        f.add(WARNING, "unifictl session expired — re-run `unifictl local configure`")
-        cprint(C.YELLOW, "  🟡 unifictl session expired")
-        return f.worst(), f, f.markdown()
+        # SOP §4.4 (docs/sops/unifi-controller-rate-limit.md): a reported
+        # "session expired" is usually a transient fluke. The 429 throttle
+        # and short timeouts only affect the login/inventory path — an
+        # already-authenticated session keeps working. Before declaring auth
+        # dead, VERIFY with the cheap cached-session read `health get`, which
+        # never touches /api/auth/login. If it returns data, the session is
+        # fine and this is a false positive (recurred 07-05/09/12/13/14).
+        # Only emit the finding when the cached read ALSO fails.
+        verify = run("unifictl local health get 2>/dev/null", timeout=10)
+        if verify and "login failed" not in verify:
+            cprint(C.GREEN, "  ✅ unifictl device-list blip, but cached session healthy (health get ok) — not flagging")
+            # Session confirmed alive → the empty list was transient; re-fetch
+            # once so the device-level checks below still have inventory.
+            devices_raw = run_unifictl("unifictl local device list 2>/dev/null", timeout=15) or ""
+        else:
+            f.add(WARNING, "unifictl session unreachable — `device list` AND `health get` both failed; re-run `unifictl local configure` (verify it is not a transient 429/timeout first, per SOP §4.4)")
+            cprint(C.YELLOW, "  🟡 unifictl session unreachable (verified via health get)")
+            return f.worst(), f, f.markdown()
 
     # --- UniFi Network Application version check (NVD-backed) ---
     unifi_version: str | None = None
