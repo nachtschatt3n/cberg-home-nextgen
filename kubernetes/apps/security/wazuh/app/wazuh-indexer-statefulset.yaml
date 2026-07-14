@@ -22,6 +22,10 @@ spec:
     metadata:
       labels:
         app: wazuh-indexer
+      annotations:
+        # Bump to force a pod roll when opensearch.yml changes (the config is
+        # mounted via subPath, which does not receive live ConfigMap updates).
+        checksum/indexer-config: "pathdata-fix-2026-07-14"
     spec:
       initContainers:
         - name: volume-mount-hack
@@ -158,6 +162,16 @@ data:
     node.name: wazuh-indexer
     cluster.name: wazuh-indexer-cluster
     discovery.type: single-node
+    # CRITICAL — persist OpenSearch data on the Longhorn PVC.
+    # The PVC (volumeClaimTemplate wazuh-indexer-data) is mounted at
+    # /var/lib/wazuh-indexer, but with OPENSEARCH_PATH_CONF pointed at
+    # /usr/share/wazuh-indexer/config, path.data defaulted to
+    # $ES_HOME/data (/usr/share/wazuh-indexer/data) on the EPHEMERAL
+    # container overlay — so every pod restart/node reboot bootstrapped an
+    # empty data dir, wiping the indices/template/pipeline and silently
+    # breaking the SIEM (incident 2026-07-12; SOP wazuh-siem-recovery.md).
+    # Pinning path.data to the PVC mount makes the data durable.
+    path.data: /var/lib/wazuh-indexer
     # Wazuh-shipped Filebeat 7.10.2 sends `_type` in bulk requests
     # (legacy ES7 format). OpenSearch 2.x rejects this without the
     # compat flag, breaking alerts.json → wazuh-alerts-* shipping.
