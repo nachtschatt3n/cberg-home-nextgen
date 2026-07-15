@@ -285,6 +285,28 @@ safe_count() {
     fi
 }
 
+# Authoritative backup-freshness signal: the newest lastBackupAt across all
+# Longhorn volumes, in whole hours. Used when the backup Job object has been
+# TTL-reaped (expected after a successful run) so absence of the Job doesn't
+# read as "no backups". Prints an integer hour count, or "NONE" if no volume
+# has ever recorded a backup timestamp. See docs/sops/monitoring.md.
+longhorn_backup_age_hours() {
+    kubectl get volumes -n storage -o json 2>/dev/null | python3 -c "
+import sys, json, datetime
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    print('NONE'); sys.exit()
+times = [v.get('status', {}).get('lastBackupAt') for v in items
+         if v.get('status', {}).get('lastBackupAt')]
+if not times:
+    print('NONE'); sys.exit()
+latest = max(times)
+t = datetime.datetime.fromisoformat(latest.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() // 3600))
+" 2>/dev/null || echo "NONE"
+}
+
 # =========================================
 # KNOWN FALSE POSITIVES
 # =========================================
@@ -564,11 +586,34 @@ log_section "Section 2: Jobs & CronJobs"
     kubectl get jobs -A --sort-by='.status.startTime' | tail -20
     echo ""
 
-    FAILED_JOBS=$(safe_count "kubectl get jobs -A 2>/dev/null | grep -E '(0/1|Failed)' | wc -l")
-    echo "Failed jobs (last 7 days): $FAILED_JOBS"
+    # Count only GENUINELY failed jobs (a Failed condition set True). The old
+    # `grep '0/1'` also matched in-flight/running jobs (0 completions so far)
+    # and TTL-reaped ones, producing false "Failed jobs: 1" warnings.
+    FAILED_JOBS=$(kubectl get jobs -A -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    print(0); sys.exit()
+print(sum(1 for j in items
+          if any(c.get('type') == 'Failed' and c.get('status') == 'True'
+                 for c in (j.get('status', {}).get('conditions') or []))))
+" 2>/dev/null || echo 0)
+    echo "Failed jobs (Failed condition): $FAILED_JOBS"
 
-    # Check backup job
-    BACKUP_JOB=$(kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null | grep -o 'daily-backup-all-volumes[^ ]*' | head -1 || echo "")
+    # Check backup job. Filter ALL storage jobs by the backup name (newest
+    # first) — the old code grepped only the single most-recent storage job, so
+    # an in-flight trim job made it miss the backup and warn "no backup jobs".
+    BACKUP_JOB=$(kubectl get jobs -n storage -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    print(''); sys.exit()
+b = [j for j in items if j['metadata']['name'].startswith('daily-backup-all-volumes')]
+b.sort(key=lambda j: j['metadata'].get('creationTimestamp', ''), reverse=True)
+print(b[0]['metadata']['name'] if b else '')
+" 2>/dev/null || echo "")
     if [ -n "$BACKUP_JOB" ]; then
         BACKUP_STATUS=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
         BACKUP_TIME=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "Not completed")
@@ -581,8 +626,19 @@ log_section "Section 2: Jobs & CronJobs"
             add_minor_issue "Backup job status unclear"
         fi
     else
-        log_warning "No backup jobs found"
-        add_minor_issue "No backup jobs found in storage namespace"
+        # No backup Job object present is EXPECTED — successful backup jobs are
+        # TTL-reaped. Fall back to the authoritative signal: Longhorn volume
+        # lastBackupAt freshness (per docs/sops/monitoring.md).
+        BACKUP_AGE_H=$(longhorn_backup_age_hours)
+        if [ "$BACKUP_AGE_H" == "NONE" ]; then
+            log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
+            add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
+        elif [ "$BACKUP_AGE_H" -gt 48 ]; then
+            log_warning "Backup job reaped; latest Longhorn backup is stale: ${BACKUP_AGE_H}h ago"
+            add_major_issue "Backup stale: latest Longhorn lastBackupAt was ${BACKUP_AGE_H}h ago (expected daily)"
+        else
+            log_success "Backup job reaped (TTL) but Longhorn backups fresh (latest: ${BACKUP_AGE_H}h ago)"
+        fi
     fi
 
     if [ "$FAILED_JOBS" -gt 0 ]; then
@@ -1306,7 +1362,19 @@ log_section "Section 15: Backup System"
     kubectl get cronjob -n storage daily-backup-all-volumes 2>/dev/null || echo "Backup CronJob not found"
     echo ""
 
-    BACKUP_JOB=$(kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null | grep -o 'daily-backup-all-volumes[^ ]*' | head -1 || echo "")
+    # Filter storage jobs by the backup name (newest first) rather than grepping
+    # only the single most-recent job — avoids a false "no backup jobs" when an
+    # in-flight trim job is newest or the backup Job was TTL-reaped after success.
+    BACKUP_JOB=$(kubectl get jobs -n storage -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    items = json.load(sys.stdin).get('items', [])
+except Exception:
+    print(''); sys.exit()
+b = [j for j in items if j['metadata']['name'].startswith('daily-backup-all-volumes')]
+b.sort(key=lambda j: j['metadata'].get('creationTimestamp', ''), reverse=True)
+print(b[0]['metadata']['name'] if b else '')
+" 2>/dev/null || echo "")
     if [ -n "$BACKUP_JOB" ]; then
         echo "Last backup job:"
         kubectl get job -n storage "$BACKUP_JOB" 2>/dev/null || echo "Job details not available"
@@ -1330,8 +1398,18 @@ log_section "Section 15: Backup System"
             add_minor_issue "Backup job has no completion timestamp - may still be running or failed"
         fi
     else
-        log_warning "No backup jobs found"
-        add_minor_issue "No backup jobs found"
+        # Backup Job TTL-reaped after success is normal — fall back to the
+        # authoritative Longhorn lastBackupAt freshness instead of warning.
+        BACKUP_AGE_H=$(longhorn_backup_age_hours)
+        if [ "$BACKUP_AGE_H" == "NONE" ]; then
+            log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
+            add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
+        elif [ "$BACKUP_AGE_H" -gt 48 ]; then
+            log_warning "Backup job reaped; latest Longhorn backup is stale: ${BACKUP_AGE_H}h ago"
+            add_major_issue "Backup stale: latest Longhorn lastBackupAt was ${BACKUP_AGE_H}h ago (expected daily)"
+        else
+            log_success "Backup job reaped (TTL) but Longhorn backups fresh (latest: ${BACKUP_AGE_H}h ago)"
+        fi
     fi
 
     # iCloud sync check

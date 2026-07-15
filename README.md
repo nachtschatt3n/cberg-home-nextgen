@@ -42,7 +42,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
 - **GitOps**: [Flux v2.5.0](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
-- **Certificate Management**: [cert-manager v1.20.2](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
+- **Certificate Management**: [cert-manager v1.21.0](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
 ### GitOps Workflow
 
