@@ -93,7 +93,7 @@ grep "k8s-nuc14" docs/infrastructure.md
 - `docs/infrastructure.md` exists and is non-empty
 - K8s server version appears in the doc
 - All node names (k8s-nuc14-01, k8s-nuc14-02, k8s-nuc14-03) are listed
-- Mac Mini IP (192.168.30.111) and NAS IP (192.168.31.230) are mentioned
+- Mac Mini IP (192.168.30.111) and NAS IP (192.168.55.240) are mentioned
 
 **Severity:**
 - 🔴 Critical if `docs/infrastructure.md` is missing

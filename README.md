@@ -74,7 +74,7 @@ The cluster runs on enterprise-grade Intel NUC systems with high-speed networkin
 | k8s-nuc14-03 | Intel NUC14 Pro | 18 cores | ~64GB | NVMe SSD | GbE (uplink 10GbE) | Control Plane + Worker |
 
 **Additional Infrastructure:**
-- **NAS**: UNAS-CBERG at `192.168.31.230` provides bulk storage, backups, and SMB/NFS shares
+- **NAS**: UNAS-CBERG at `192.168.55.240` provides bulk storage, backups, and SMB/NFS shares
 - **AI Compute**: Mac Mini M4 Pro (`192.168.30.111`) running Ollama on port 11434 with gemma 4 for GPU-accelerated LLM inference with Metal Performance Shaders (MPS). Provides OpenAI-compatible API endpoints for cluster applications.
 - **Remote Management**: PiKVM devices provide KVM-over-IP access to all Kubernetes nodes
 - **Network**: UniFi infrastructure with 10GbE backbone and 2.5GbE to compute nodes
@@ -402,7 +402,7 @@ Wazuh alerts. Accepted-risk record: `accepted_risks` table in sweep_history Post
 ### CIFS/SMB to the NAS
 
 The [csi-driver-smb](kubernetes/apps/kube-system/csi-driver-smb) connects
-cluster pods to bulk shares on UNAS-CBERG (`192.168.31.230`). Media libraries
+cluster pods to bulk shares on UNAS-CBERG (`192.168.55.240`). Media libraries
 (Plex / Jellyfin), JDownloader intake, Frigate recordings, Tube Archivist
 output, iCloud sync, Nextcloud data, and Paperless consume/export buckets all
 land on per-class StorageClasses defined in `kubernetes/apps/storage/csi-driver-smb`.
