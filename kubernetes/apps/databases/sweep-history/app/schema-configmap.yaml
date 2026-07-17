@@ -114,7 +114,12 @@ data:
       target_pct           NUMERIC(5,2),
       burn_rate_1h         NUMERIC,
       burn_rate_6h         NUMERIC,
-      budget_remaining_pct NUMERIC(5,2),
+      -- Deeply-breached SLOs (e.g. a Prometheus scrape gap driving compliance
+      -- to ~0 against a 99.9% target) produce budget_remaining well below
+      -- -999.99, which overflowed NUMERIC(5,2) and crashed the whole canonical
+      -- SLO write, silently emptying the cycle (F-02c920ce, 2026-07-17).
+      -- Widened to NUMERIC(8,2); calc.budget_remaining() also floors the value.
+      budget_remaining_pct NUMERIC(8,2),
       window_size          VARCHAR(8),   -- 7d|30d; `window` is a Postgres reserved word
       source               VARCHAR(16),
       raw_numerator        NUMERIC,
@@ -122,6 +127,14 @@ data:
     );
     CREATE INDEX IF NOT EXISTS idx_slo_snapshots_name_time
       ON slo_snapshots(slo_name, taken_at DESC);
+
+    -- Migration (2026-07-17, F-02c920ce): widen budget_remaining_pct for
+    -- databases created before the column was NUMERIC(8,2). A deeply-breached
+    -- SLO (compliance ~0 vs a 99.9% target, e.g. during a Prometheus scrape
+    -- gap) overflowed NUMERIC(5,2) and crashed the whole canonical SLO write,
+    -- silently emptying the cycle. Idempotent: a no-op once already 8,2.
+    ALTER TABLE slo_snapshots
+      ALTER COLUMN budget_remaining_pct TYPE NUMERIC(8,2);
 
     -- ─── schema v3: operator-curated policy tables ──────────────────
     -- Replaces docs/security-accepted-risks.md, runbooks/slo-catalog.yaml,

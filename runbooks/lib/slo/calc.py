@@ -76,7 +76,13 @@ def budget_remaining(compliance: float | None, target: float) -> float | None:
         return 0.0 if compliance >= 1.0 else -100.0
     consumed_rate = 1.0 - compliance
     used_fraction = consumed_rate / budget_rate
-    return (1.0 - used_fraction) * 100.0
+    pct = (1.0 - used_fraction) * 100.0
+    # Floor the value so a pathological reading (e.g. a scrape gap driving
+    # compliance to ~0 against a 99.9% target → thousands of percent breached)
+    # can never overflow the slo_snapshots.budget_remaining_pct column and crash
+    # the canonical write, silently emptying the cycle (F-02c920ce). The column
+    # is NUMERIC(8,2); -1e5 fits with headroom and still reads as "catastrophic".
+    return max(pct, -100_000.0)
 
 
 def compute(
