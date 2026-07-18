@@ -22,7 +22,14 @@ spec:
     timeout: 15m
     cleanupOnFail: false
     remediation:
-      retries: 3
+      # TEMP (2026-07-18): rollback DISABLED for the 2026.7.1 landing. The
+      # 2026.7.1 startup migration crashes the app container until the init's
+      # `openclaw doctor --fix` migrates the state; with rollback on, Flux
+      # reverted to 2026.6.11 before that init pod could ever run. retries:0 +
+      # remediateLastFailure:false lets the corrected spec stick so the init
+      # runs. Restore retries:3 once 2026.7.1 is confirmed healthy.
+      retries: 0
+      remediateLastFailure: false
   uninstall:
     keepHistory: false
   values:
