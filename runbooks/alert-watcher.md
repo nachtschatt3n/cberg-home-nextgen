@@ -31,6 +31,21 @@ Uptime Kuma  ───┘   (push, 1s grp)   (HTTP POST)      :8788 → :8787   
   `monitor_status` series into alerts so Kuma-tracked endpoints flow through the
   same pipe (and telegram). Permanent improvement, independent of the watcher.
 
+## The smart half — `alert-triage-agent`
+The bridge only *relays*; the judgment lives in `.claude/agents/alert-triage-agent.md`.
+On each Monitor `ws` event, the main session hands the alert to that agent, which
+decides EXPECTED vs SURFACE and **conservatively auto-silences only clear matches**:
+1. an **active-update marker** (`runbooks/update-marker.sh check <app> <ns>`) — the
+   update SOP drops one via `update-marker.sh add <app> <ns> <hours>`;
+2. the **`noise_suppressions`** policy table (`runbooks/policy-cli.py noise`);
+3. a **documented recurrence** (e.g. UniFi GC spiral).
+It NEVER auto-silences `critical`/security alerts, scopes silences to the specific
+alert with a short TTL, and SURFACEs everything else. The main loop keeps owning
+the `ws` listen (the agent only rules on what it's handed — see the sub-agent note
+below for why the listen can't move into an agent). Note Alertmanager doesn't even
+notify on *already-silenced* alerts, so the update SOP's pre-silence step keeps the
+watcher quiet during planned updates; the agent handles the leftovers.
+
 ## Why session-scoped (not an in-cluster Deployment)
 The consumer is Claude via the `Monitor` tool, which only exists while a session
 is alive. A permanent in-cluster bridge would push into the void when no session

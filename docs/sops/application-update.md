@@ -58,6 +58,13 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
 Prefer a short TTL (4h) so it self-clears. Delete early once healthy:
 `curl -s -X DELETE localhost:9093/api/v2/silences/<id>`.
 
+**Also drop an active-update marker** so the `alert-triage-agent` treats any
+alerts that slip through (fired before the silence, or a new one) as EXPECTED and
+auto-silences them instead of paging:
+```bash
+runbooks/update-marker.sh add <app> <ns> 4 "vX->Y upgrade"   # window in hours
+```
+
 **Step 2 — disable rollback for an attended/migration-risk update** (so the fixed
 spec sticks and any init migration runs). Edit the HelmRelease:
 ```yaml
@@ -72,8 +79,9 @@ spec sticks and any init migration runs). Edit the HelmRelease:
 **Step 4 — watch the rollout** (see §6). For immutable-selector charts, delete the
 Deployments once so Helm recreates them; do NOT hand-delete pods mid-`Recreate`.
 
-**Step 5 — on success:** restore `retries: 3`, drop the silence, commit.
-**On failure:** revert (see §11).
+**Step 5 — on success:** restore `retries: 3`, drop the silence, clear the marker
+(`runbooks/update-marker.sh clear <app>`), commit.
+**On failure:** revert (see §11); clear the marker.
 
 ## 5) Examples
 
