@@ -40,7 +40,7 @@ spec:
           install-openclaw:
             image:
               repository: node
-              tag: 22-bookworm
+              tag: 22.22.3-bookworm
             command:
               - bash
               - -lc
@@ -360,13 +360,13 @@ spec:
                 # Pin: openclaw host + bundled @openclaw/codex + @openclaw/discord
                 # must move together (the host's plugin-API contract requires the
                 # codex/discord plugins to be built against the same plugin-sdk).
-                # The 2026-06-03 skew (host 2026.5.28+ wanted a codex plugin-sdk
-                # export that @openclaw/codex 2026.6.1 didn't ship) is RESOLVED:
-                # as of 2026-07-12 openclaw, @openclaw/codex and @openclaw/discord
-                # are all published in lockstep at 2026.6.11 (@openclaw/discord
-                # 2026.6.11 declares peerDependencies openclaw>=2026.6.11) and the
-                # host bundles the matching plugin-sdk. Keep all three on the same version.
-                install_npm openclaw@2026.6.11
+                # They ship in lockstep — @openclaw/discord 2026.7.1 declares
+                # peerDependencies openclaw>=2026.7.1 and the host bundles the
+                # matching plugin-sdk, so pinning the host alone carries the plugins.
+                # 2026.7.1 requires node >=22.22.3 (NOT node 26 — the base image
+                # tag above is pinned to 22.22.3-bookworm to satisfy it while
+                # staying on node 22). Keep the host pin and node tag in sync.
+                install_npm openclaw@2026.7.1-2
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
@@ -550,7 +550,7 @@ spec:
           app:
             image:
               repository: node
-              tag: 22-bookworm
+              tag: 22.22.3-bookworm
               pullPolicy: IfNotPresent
 
             command:
