@@ -22,11 +22,7 @@ spec:
     timeout: 15m
     cleanupOnFail: false
     remediation:
-      # TEMP (2026-07-18): rollback DISABLED for the 2026.7.1 landing so the
-      # corrected spec sticks and the init (peer-link + doctor --fix) runs.
-      # Restore retries:3 once 2026.7.1 is confirmed healthy.
-      retries: 0
-      remediateLastFailure: false
+      retries: 3
   uninstall:
     keepHistory: false
   values:
@@ -44,7 +40,7 @@ spec:
           install-openclaw:
             image:
               repository: node
-              tag: 22.22.3-bookworm
+              tag: 22-bookworm
             command:
               - bash
               - -lc
@@ -361,16 +357,16 @@ spec:
                 find /home/node/.openclaw/lib/node_modules/@playwright -maxdepth 1 \
                   -type d -name '.[a-z]*-*' -mmin +1 -exec rm -rf {} + 2>/dev/null || true
 
-                # Pin: openclaw host + @openclaw/codex + @openclaw/discord move
-                # together (the plugin-API contract requires the plugins built
-                # against the same plugin-sdk). Use PLAIN 2026.7.1 — the host
-                # publishes 2026.7.1/-1/-2 but @openclaw/codex is 2026.7.1/-1 and
-                # @openclaw/discord ONLY 2026.7.1, so plain 2026.7.1 is the one
-                # version all three share (the managed realign below installs
-                # plugins @$OC_VER = host version, which must exist for all).
-                # 2026.7.1 needs node >=22.22.3 (NOT node 26) — base image tag is
-                # pinned to 22.22.3-bookworm above. Keep host+discord+node in sync.
-                install_npm openclaw@2026.7.1
+                # Pin: openclaw host + bundled @openclaw/codex + @openclaw/discord
+                # must move together (the host's plugin-API contract requires the
+                # codex/discord plugins to be built against the same plugin-sdk).
+                # The 2026-06-03 skew (host 2026.5.28+ wanted a codex plugin-sdk
+                # export that @openclaw/codex 2026.6.1 didn't ship) is RESOLVED:
+                # as of 2026-07-12 openclaw, @openclaw/codex and @openclaw/discord
+                # are all published in lockstep at 2026.6.11 (@openclaw/discord
+                # 2026.6.11 declares peerDependencies openclaw>=2026.6.11) and the
+                # host bundles the matching plugin-sdk. Keep all three on the same version.
+                install_npm openclaw@2026.6.11
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
@@ -397,8 +393,8 @@ spec:
                 # WebSocket client that connects with the bot token. Pin to
                 # match the openclaw host above — the host's plugin-API
                 # contract requires the plugin built against the same version
-                # range. Move it together with openclaw (both at 2026.7.1).
-                install_npm @openclaw/discord@2026.7.1
+                # range. Move it together with openclaw (both at 2026.6.11).
+                install_npm @openclaw/discord@2026.6.11
 
                 # Realign openclaw's MANAGED plugin store (~/.openclaw/npm) with
                 # the running host version. That store is provisioned once at first
@@ -417,41 +413,9 @@ spec:
                     if ! ( cd /home/node/.openclaw/npm && npm install --no-audit --no-fund --save "@openclaw/codex@$OC_VER" "@openclaw/discord@$OC_VER" ); then
                       echo "WARN: managed plugin realign failed (continuing)"
                     fi
-                    # 2026.7.x managed-store peer-link (upstream openclaw#78185).
-                    # From 2026.7.x the managed @openclaw/* plugins import the host
-                    # `openclaw` package (bare + `openclaw/plugin-sdk/*`) via normal
-                    # Node resolution. The raw `npm install` above SKIPS peer
-                    # materialization; the host would normally reassert a
-                    # plugin-local node_modules/openclaw symlink after its own
-                    # install/update/doctor flows, but our shell install never
-                    # triggers that host flow, so codex/discord crash-loop with
-                    #   Cannot find package 'openclaw' imported from
-                    #   .../@openclaw/codex/dist/session-binding-*.js
-                    # Recreate the exact link the host would (junction to host
-                    # openclaw root). Must run AFTER the install (a fresh install
-                    # strips a link doctor --fix made). Idempotent.
-                    HOST_OC=/home/node/.openclaw/lib/node_modules/openclaw
-                    for pkg in @openclaw/codex @openclaw/discord; do
-                      d=/home/node/.openclaw/npm/node_modules/$pkg
-                      [ -d "$d" ] || continue
-                      mkdir -p "$d/node_modules"
-                      ln -sfn "$HOST_OC" "$d/node_modules/openclaw"
-                      echo "Linked openclaw peer -> $d/node_modules/openclaw"
-                    done
                     chown -R node:node /home/node/.openclaw/npm 2>/dev/null || true
                   fi
                 fi
-
-                # Startup state migration (openclaw >=2026.7.1). The host runs a
-                # "Memory Core -> SQLite" preflight; with existing rows it SKIPS
-                # the import and then the gateway REFUSES to start ("startup
-                # migrations did not complete cleanly") until `openclaw doctor
-                # --fix` runs against the state. Run it here (state PVC mounted,
-                # host+plugins installed + peer-linked, HOME set) so the app boots
-                # clean. Idempotent; self-heals this + future upgrade migrations.
-                echo "openclaw doctor --fix (state migration preflight)..."
-                su -s /bin/bash node -c 'HOME=/home/node/.openclaw PATH=/home/node/.openclaw/bin:$PATH openclaw doctor --fix' \
-                  || echo "WARN: openclaw doctor --fix returned non-zero (continuing)"
 
                 # Dream-diary narrative timeout. Upstream hardcodes
                 # NARRATIVE_TIMEOUT_MS=6e4 (60s) in dreaming-narrative-*.js.
@@ -586,7 +550,7 @@ spec:
           app:
             image:
               repository: node
-              tag: 22.22.3-bookworm
+              tag: 22-bookworm
               pullPolicy: IfNotPresent
 
             command:
