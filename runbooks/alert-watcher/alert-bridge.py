@@ -67,9 +67,13 @@ class _Webhook(BaseHTTPRequestHandler):
         except Exception:
             return
         # Alertmanager v4 webhook: {alerts:[{status,labels,annotations,...}]}
+        # Drop synthetic control-plane alerts that carry no real condition
+        # (Watchdog = always-firing heartbeat; InfoInhibitor = fires to drive
+        # info-level inhibition). Both are routed to "null" in the telegram config.
+        _SYNTHETIC = {"Watchdog", "InfoInhibitor"}
         for a in payload.get("alerts", []):
             lbl = a.get("labels", {})
-            if lbl.get("alertname") == "Watchdog":
+            if lbl.get("alertname") in _SYNTHETIC:
                 continue
             evt = {
                 "source": "alertmanager",
