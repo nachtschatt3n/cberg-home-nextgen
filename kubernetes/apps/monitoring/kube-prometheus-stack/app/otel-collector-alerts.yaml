@@ -114,3 +114,45 @@ spec:
               The OTel daemon collector DaemonSet does not have a running pod on all
               nodes. Logs and host metrics will be missing from affected nodes.
               Check: kubectl get pods -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator
+
+    - name: otel-collector.es-ingestion
+      interval: 30s
+      rules:
+        # Closes the 2026-07-17 blind spot: ES metric ingestion stalled for ~32h
+        # (RED corrupt shard + a stalled TSDB rollover -> timestamp_error) with NO
+        # alert firing. The failure-based alerts above key off send_failed_* series
+        # that this collector build does not export; the *sent* counters ARE
+        # exported and reliable, so a flat sent-rate is the true "ingestion stopped"
+        # signal. The elasticsearch-obs-recovery CronJob auto-heals both causes;
+        # this fires only if it could not.
+        - alert: EsMetricsIngestionStalled
+          expr: rate(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/metrics"}[10m]) == 0
+          for: 15m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "Elasticsearch metric ingestion has stalled (0 points/s for 25m+)"
+            description: >-
+              The edot-collector elasticsearch/metrics exporter has persisted 0 metric
+              points for 15m+. Likely causes: ES cluster RED (corrupt shard) or a
+              stalled TSDB rollover (write-index time_series window expired ->
+              timestamp_error). The elasticsearch-obs-recovery CronJob should auto-heal
+              within ~10m; if this is still firing it could not. Check its last run
+              (kubectl get jobs -n monitoring | grep obs-recovery) and
+              GET _cluster/health / _data_stream/metrics-generic.otel-default.
+        - alert: EsLogIngestionStalled
+          expr: rate(otelcol_exporter_sent_log_records_total{exporter="elasticsearch/logs"}[10m]) == 0
+          for: 15m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "Elasticsearch log ingestion has stalled (0 records/s for 25m+)"
+            description: >-
+              The edot-collector elasticsearch/logs exporter has persisted 0 log
+              records for 15m+. Likely ES RED or an exporter/connectivity failure —
+              application logs are not being stored. Check ES cluster health and
+              edot-collector logs.

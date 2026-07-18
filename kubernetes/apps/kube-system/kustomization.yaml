@@ -16,6 +16,7 @@ resources:
   - ./node-feature-discovery/ks.yaml
   - ./descheduler/ks.yaml
   - ./authentik/ks.yaml
+  - ./crash-ghost-reaper/ks.yaml
 patches:
   # PSA override: privileged required for cilium (eBPF + hostNetwork),
   # csi-driver-smb (mount), and other system-level workloads.

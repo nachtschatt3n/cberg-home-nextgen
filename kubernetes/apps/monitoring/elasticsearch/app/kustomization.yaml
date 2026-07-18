@@ -8,6 +8,8 @@ resources:
   - ./elasticsearch.yaml
   - ./otel-ilm-configmap.yaml
   - ./otel-ilm-job.yaml
+  - ./obs-recovery-configmap.yaml
+  - ./obs-recovery-cronjob.yaml
 patches:
   - target:
       kind: Namespace

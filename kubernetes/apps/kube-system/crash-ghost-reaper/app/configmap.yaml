@@ -1,0 +1,116 @@
+---
+# Reaps "crash ghost" pods left behind by an ungraceful node reboot (e.g. the
+# 2026-07-17 power outage). When a node loses power, kubelet cannot clean up its
+# running pods; after the node returns Ready the pods linger in phase Running
+# with every container terminated reason=Unknown, holding RWO/Longhorn volumes
+# in a CSI mount-deadlock so the replacement pod is stuck FailedMount forever
+# (observed: paperclip pod, 9h of FailedMount). A force-delete lets the owner
+# (Deployment/StatefulSet/…) recreate cleanly and the volume re-attach.
+#
+# SAFETY: only pods that (a) are owner-managed (so they get recreated),
+# (b) have NO deletionTimestamp, and (c) carry the unambiguous node-loss
+# signature — status.reason=NodeLost OR every container terminated with
+# reason=Unknown — AND (d) have been in that state longer than GRACE_MINUTES.
+# A healthy pod never has terminated-reason=Unknown, so false positives are
+# essentially impossible. Set DRY_RUN=true to log candidates without deleting.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crash-ghost-reaper
+  namespace: kube-system
+data:
+  reap.py: |
+    #!/usr/bin/env python3
+    """Force-delete node-loss ghost pods. See ConfigMap header for the contract."""
+    import json
+    import os
+    import ssl
+    import sys
+    import urllib.error
+    import urllib.request
+    from datetime import datetime, timezone
+
+    HOST = os.environ["KUBERNETES_SERVICE_HOST"]
+    PORT = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+    API = f"https://{HOST}:{PORT}"
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+    TOKEN = open(f"{SA}/token").read().strip()
+    DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+    GRACE_MIN = int(os.environ.get("GRACE_MINUTES", "10"))
+
+    _ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+
+    def log(*a):
+        print(datetime.now(timezone.utc).strftime("%H:%M:%SZ"), *a, flush=True)
+
+    def api(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(API + path, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        if data:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, context=_ctx, timeout=30) as r:
+                return r.status, json.loads(r.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            return e.code, {"raw": e.read().decode()[:300]}
+
+    def ghost_reason(pod):
+        m = pod.get("metadata", {})
+        s = pod.get("status", {})
+        if m.get("deletionTimestamp"):
+            return None  # already terminating
+        if not m.get("ownerReferences"):
+            return None  # unmanaged — would not be recreated; leave it
+        css = s.get("containerStatuses") or []
+        node_lost = s.get("reason") == "NodeLost"
+        all_unknown = bool(css) and all(
+            (c.get("state", {}).get("terminated", {}) or {}).get("reason") == "Unknown"
+            for c in css
+        )
+        if not (node_lost or all_unknown):
+            return None
+        # Age guard: give a genuinely-recovering node time to reconcile first.
+        fins = [
+            (c.get("state", {}).get("terminated", {}) or {}).get("finishedAt")
+            for c in css
+        ]
+        fins = [f for f in fins if f]
+        if fins:
+            newest = max(
+                datetime.fromisoformat(f.replace("Z", "+00:00")) for f in fins
+            )
+            age = (datetime.now(timezone.utc) - newest).total_seconds() / 60.0
+            if age < GRACE_MIN:
+                log(f"  hold {m['namespace']}/{m['name']}: ghost only {age:.0f}m old (< {GRACE_MIN}m)")
+                return None
+        return "NodeLost" if node_lost else "all-containers-terminated-Unknown"
+
+    def main():
+        st, resp = api("GET", "/api/v1/pods")
+        if st != 200:
+            log("cannot list pods:", resp)
+            return 1
+        reaped = 0
+        for pod in resp.get("items", []):
+            reason = ghost_reason(pod)
+            if not reason:
+                continue
+            ns = pod["metadata"]["namespace"]
+            name = pod["metadata"]["name"]
+            node = pod.get("spec", {}).get("nodeName", "?")
+            act = "DRY-RUN would reap" if DRY_RUN else "reaping"
+            log(f"{act} {ns}/{name} on {node} — {reason}")
+            if not DRY_RUN:
+                code, r = api(
+                    "DELETE",
+                    f"/api/v1/namespaces/{ns}/pods/{name}",
+                    {"gracePeriodSeconds": 0, "propagationPolicy": "Background"},
+                )
+                log(f"  -> {code}")
+                reaped += 1
+        log(f"done — {reaped} pod(s) reaped" if not DRY_RUN else "done (dry-run)")
+        return 0
+
+    if __name__ == "__main__":
+        sys.exit(main())

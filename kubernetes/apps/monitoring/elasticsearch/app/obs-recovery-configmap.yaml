@@ -1,0 +1,186 @@
+---
+# Self-healing script for the single-node Elasticsearch OTel observability
+# data streams. Runs on a CronJob (see obs-recovery-cronjob.yaml).
+#
+# Why this exists (2026-07-17 incident): a power outage hard-rebooted all
+# nodes. The single-node ES (0 replicas) came back with a truncated translog
+# on the metrics write index -> shard ALLOCATION_FAILED after 5 retries ->
+# cluster RED. Separately the TSDB rollover stalled, so once wall-clock passed
+# the write index's time_series.end_time, every metric was rejected with
+# timestamp_error and ingestion silently stalled for ~32h. Operator policy:
+# these are ephemeral obs streams (14d retention) — "losing a bit is fine",
+# so automate recovery instead of adding a UPS/disabling the drive cache.
+#
+# HARD SAFETY RULES (do not weaken):
+#   * Only ever DELETE indices whose name starts with one of ALLOW_PREFIXES
+#     (.ds-metrics- / .ds-logs- / .ds-traces-). Anything else is logged and
+#     left for a human — NEVER deleted.
+#   * Only run the destructive path when the cluster is RED.
+#   * Only delete a shard that is UNASSIGNED and has settled as a failed
+#     allocation (ALLOCATION_FAILED / exceeded retries) — not one still
+#     initializing or relocating.
+#   * Proactive rollover only fires when a write window has ALREADY expired
+#     (end_time <= now), which is gap-free-ish; it never rolls a still-valid
+#     window (that would itself create a look_ahead-sized ingestion gap).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-obs-recovery
+  namespace: monitoring
+data:
+  obs_recovery.py: |
+    #!/usr/bin/env python3
+    """Recover the single-node ES OTel obs data streams. See ConfigMap header."""
+    import base64
+    import json
+    import os
+    import ssl
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+    from datetime import datetime, timezone
+
+    ES_URL = os.environ.get("ES_URL", "https://elasticsearch-es-http.monitoring.svc:9200")
+    CA = os.environ.get("ES_CACERT", "/certs/ca.crt")
+    PW = os.environ["ELASTIC_PASSWORD"]
+    DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+    # Only these (ephemeral, 14d-retention OTel obs streams) may ever be deleted.
+    ALLOW_PREFIXES = (".ds-metrics-", ".ds-logs-", ".ds-traces-")
+
+    _ctx = ssl.create_default_context(cafile=CA)
+    _auth = "Basic " + base64.b64encode(f"elastic:{PW}".encode()).decode()
+
+    def log(*a):
+        print(datetime.now(timezone.utc).strftime("%H:%M:%SZ"), *a, flush=True)
+
+    def es(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(ES_URL + path, data=data, method=method)
+        req.add_header("Authorization", _auth)
+        if data:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, context=_ctx, timeout=30) as r:
+                raw = r.read().decode()
+                return r.status, (json.loads(raw) if raw else {})
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode()
+            try:
+                return e.code, json.loads(raw)
+            except Exception:
+                return e.code, {"raw": raw[:400]}
+
+    def allowed(index):
+        return isinstance(index, str) and any(index.startswith(p) for p in ALLOW_PREFIXES)
+
+    def data_streams():
+        st, d = es("GET", "/_data_stream")
+        return d.get("data_streams", []) if st == 200 else []
+
+    def find_parent(index, streams):
+        for ds in streams:
+            names = [i["index_name"] for i in ds.get("indices", [])]
+            if index in names:
+                return ds["name"], (names[-1] == index)
+        return None, False
+
+    def recover_red():
+        """RED path: rollover+delete corrupt allowlisted obs backing indices."""
+        st, shards = es("GET", "/_cat/shards?format=json&h=index,shard,prirep,state")
+        if st != 200:
+            log("could not list shards:", shards)
+            return
+        unassigned = [s for s in shards if s.get("state") == "UNASSIGNED"]
+        targets = [s for s in unassigned if allowed(s.get("index"))]
+        for s in unassigned:
+            if not allowed(s.get("index")):
+                log(f"SKIP non-allowlisted unassigned shard {s.get('index')}[{s.get('shard')}]"
+                    f" — not an obs data stream; leaving for operator")
+        if not targets:
+            log("RED but no allowlisted obs shards unassigned — nothing this job may safely do")
+            return
+        # Cheap transient retry first (fixes non-corruption retry-exhaustion).
+        if not DRY_RUN:
+            log("POST _cluster/reroute?retry_failed")
+            es("POST", "/_cluster/reroute?retry_failed=true&metric=none")
+            time.sleep(10)
+        st, shards = es("GET", "/_cat/shards?format=json&h=index,shard,prirep,state")
+        unassigned = [s for s in shards if s.get("state") == "UNASSIGNED"]
+        targets = [s for s in unassigned if allowed(s.get("index"))]
+        streams = data_streams()
+        done = set()
+        for s in targets:
+            idx = s["index"]
+            if idx in done:
+                continue
+            st, expl = es("POST", "/_cluster/allocation/explain",
+                          {"index": idx, "shard": int(s["shard"]),
+                           "primary": s.get("prirep") == "p"})
+            info = (expl.get("unassigned_info") or {})
+            decisions = expl.get("node_allocation_decisions") or []
+            expls = " ".join((d.get("deciders", [{}]) or [{}])[0].get("explanation", "")
+                             for d in decisions)
+            settled = info.get("reason") == "ALLOCATION_FAILED" or "exceeded" in expls
+            if not settled:
+                log(f"SKIP {idx}: allocation not settled-failed yet (reason={info.get('reason')})")
+                continue
+            parent, is_write = find_parent(idx, streams)
+            # HARD GUARD: never issue a DELETE for a non-allowlisted index.
+            if not allowed(idx):
+                log(f"REFUSE delete {idx}: failed allowlist guard")
+                continue
+            if parent and is_write:
+                log(f"{idx} is WRITE index of {parent}: rollover before delete")
+                if not DRY_RUN:
+                    es("POST", f"/{parent}/_rollover")
+            act = "DRY-RUN would DELETE" if DRY_RUN else "DELETE"
+            log(f"{act} corrupt obs backing index {idx} (accepting ephemeral gap)")
+            if not DRY_RUN:
+                code, resp = es("DELETE", f"/{idx}")
+                log(f"  -> {code} {resp.get('acknowledged', resp)}")
+            done.add(idx)
+
+    def keep_windows_fresh():
+        """GREEN path: if a TSDB write window has already EXPIRED (poll/rollover
+        stalled), roll over so ingestion resumes. Never touches a still-valid
+        window — that would create its own gap."""
+        now = datetime.now(timezone.utc)
+        for ds in data_streams():
+            name = ds["name"]
+            indices = ds.get("indices", [])
+            if not indices:
+                continue
+            write_idx = indices[-1]["index_name"]
+            if not allowed(write_idx):
+                continue
+            st, s = es("GET", f"/{write_idx}/_settings/index.time_series.end_time?flat_settings=true")
+            end_raw = (s.get(write_idx, {}).get("settings", {}) or {}).get("index.time_series.end_time")
+            if not end_raw:
+                continue  # not a TSDB stream
+            end = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
+            mins = (end - now).total_seconds() / 60.0
+            if mins <= 0:
+                log(f"{name}: write window EXPIRED {abs(mins):.0f}m ago — rolling over to resume ingestion")
+                if not DRY_RUN:
+                    es("POST", f"/{name}/_rollover")
+            else:
+                log(f"{name}: write window healthy ({mins:.0f}m left)")
+
+    def main():
+        st, health = es("GET", "/_cluster/health")
+        if st != 200:
+            log("cannot reach ES:", health)
+            return 1
+        status = health.get("status")
+        log(f"cluster status={status} unassigned={health.get('unassigned_shards')} "
+            f"dry_run={DRY_RUN}")
+        if status == "red":
+            recover_red()
+        # Always check windows (a stalled rollover keeps the cluster GREEN).
+        keep_windows_fresh()
+        log("done")
+        return 0
+
+    if __name__ == "__main__":
+        sys.exit(main())

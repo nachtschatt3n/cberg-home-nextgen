@@ -1,0 +1,58 @@
+---
+# Every 15 min, reap node-loss "ghost" pods (see configmap.yaml). Runs cluster-
+# wide; scope + safety guards live in the script. DRY_RUN=true logs candidates
+# without deleting.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crash-ghost-reaper
+  namespace: kube-system
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: crash-ghost-reaper
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reaper
+              image: docker.io/library/python:3.12-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/reap.py"]
+              env:
+                - name: DRY_RUN
+                  value: "false"
+                - name: GRACE_MINUTES
+                  value: "10"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 48Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: crash-ghost-reaper

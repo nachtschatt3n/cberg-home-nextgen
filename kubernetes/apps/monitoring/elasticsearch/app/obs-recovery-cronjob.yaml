@@ -1,0 +1,73 @@
+---
+# Self-heals the single-node ES OTel obs data streams every 10 min:
+#   * RED from a corrupt/truncated shard on a .ds-(metrics|logs|traces)-*
+#     backing index (power-loss translog corruption) -> rollover + delete.
+#   * A stalled TSDB rollover (write window expired -> timestamp_error) ->
+#     rollover to resume ingestion.
+# Scope + hard safety rules live in obs-recovery-configmap.yaml. Set env
+# DRY_RUN=true to observe decisions without mutating.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: elasticsearch-obs-recovery
+  namespace: monitoring
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: recover
+              image: docker.io/library/python:3.12-alpine
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "/script/obs_recovery.py"]
+              env:
+                - name: DRY_RUN
+                  value: "false"
+                - name: ELASTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: elasticsearch-es-elastic-user
+                      key: elastic
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 48Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /script
+                  readOnly: true
+                - name: es-certs
+                  mountPath: /certs
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: elasticsearch-obs-recovery
+            - name: es-certs
+              secret:
+                secretName: elasticsearch-es-http-certs-public
+                items:
+                  - key: tls.crt
+                    path: ca.crt
