@@ -1,0 +1,32 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: uptime-kuma-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: uptime-kuma.monitors
+      interval: 30s
+      rules:
+        # Bridges Uptime Kuma's own monitors into Alertmanager so a Kuma-tracked
+        # endpoint going DOWN routes through the normal notification path (telegram
+        # + the Claude push watcher). Kuma monitor_status: 1=up, 0=down, 2=pending,
+        # 3=maintenance. Scraped every 30s via the kuma /metrics ServiceMonitor.
+        - alert: KumaMonitorDown
+          expr: monitor_status == 0
+          for: 2m
+          labels:
+            severity: warning
+            category: uptime
+            component: uptime-kuma
+          annotations:
+            summary: "Uptime Kuma monitor down: {{ $labels.monitor_name }}"
+            description: >-
+              Uptime Kuma reports {{ $labels.monitor_name }} ({{ $labels.monitor_type }}
+              {{ $labels.monitor_url }}) DOWN for 2+ minutes. Check the target service
+              and the Kuma dashboard.

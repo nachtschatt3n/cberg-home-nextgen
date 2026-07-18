@@ -36,3 +36,4 @@ resources:
   - ./cloudflared-alerts.yaml
   - ./wazuh-alerts.yaml
   - ./arag-web-alerts.yaml
+  - ./uptime-kuma-alerts.yaml
