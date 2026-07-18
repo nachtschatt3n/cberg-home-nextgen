@@ -109,19 +109,21 @@ spec:
 
     # --- Bundled Redis (broker/cache) ---
     # Same Bitnami image-mirror workaround as above.
-    # Auth disabled: the chart's generated superset_config.py builds Celery/cache
-    # Redis URLs WITHOUT the password (redis://HOST:PORT/DB), so enabling Bitnami
-    # Redis auth breaks worker → broker and app → cache connections with
-    # "Authentication required" errors. Redis is a ClusterIP-only service reached
-    # solely by Superset pods in the same namespace — network isolation is
-    # sufficient in this context.
+    # Auth MUST be enabled from chart 0.20.0 onward: unlike 0.17.2 (which built
+    # Celery/cache Redis URLs WITHOUT a password, so auth had to be disabled),
+    # 0.20.0's generated superset_config.py always injects the password into the
+    # broker/cache URL. With auth disabled the worker then sends `AUTH <pw>` to a
+    # passwordless Redis and crash-loops ("AUTH called without any password
+    # configured for the default user"). Enabling auth lets the chart generate one
+    # password and wire it to BOTH the Redis server and the superset URLs.
+    # Redis is a ClusterIP-only service reached solely by Superset pods.
     redis:
       enabled: true
       image:
         registry: docker.io
         repository: bitnamilegacy/redis
       auth:
-        enabled: false
+        enabled: true
       master:
         persistence:
           enabled: false
