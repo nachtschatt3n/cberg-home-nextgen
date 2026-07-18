@@ -366,7 +366,10 @@ spec:
                 # 2026.7.1 requires node >=22.22.3 (NOT node 26 — the base image
                 # tag above is pinned to 22.22.3-bookworm to satisfy it while
                 # staying on node 22). Keep the host pin and node tag in sync.
-                install_npm openclaw@2026.7.1-2
+                # Pin PLAIN 2026.7.1 (not the -1/-2 host re-releases): it is the
+                # only version @openclaw/codex AND @openclaw/discord both publish,
+                # so the managed-plugin realign below ($OC_VER) resolves cleanly.
+                install_npm openclaw@2026.7.1
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
@@ -393,8 +396,8 @@ spec:
                 # WebSocket client that connects with the bot token. Pin to
                 # match the openclaw host above — the host's plugin-API
                 # contract requires the plugin built against the same version
-                # range. Move it together with openclaw (both at 2026.6.11).
-                install_npm @openclaw/discord@2026.6.11
+                # range. Move it together with openclaw (both at 2026.7.1).
+                install_npm @openclaw/discord@2026.7.1
 
                 # Realign openclaw's MANAGED plugin store (~/.openclaw/npm) with
                 # the running host version. That store is provisioned once at first
@@ -416,6 +419,19 @@ spec:
                     chown -R node:node /home/node/.openclaw/npm 2>/dev/null || true
                   fi
                 fi
+
+                # Startup state migration (openclaw >=2026.7.1). The host now runs
+                # a "Memory Core -> SQLite" preflight; when SQLite rows already
+                # exist it SKIPS the legacy import and then the gateway REFUSES to
+                # start ("startup migrations did not complete cleanly"), telling
+                # you to run `openclaw doctor --fix`. Run it here in the init (state
+                # PVC mounted, host+plugins installed, HOME set) so the app
+                # container boots clean. Idempotent: a no-op once state is migrated,
+                # so it self-heals this and future upgrade migrations. Runs as the
+                # runtime uid against the node-owned state.
+                echo "openclaw doctor --fix (state migration preflight)..."
+                su -s /bin/bash node -c 'HOME=/home/node/.openclaw PATH=/home/node/.openclaw/bin:$PATH openclaw doctor --fix' \
+                  || echo "WARN: openclaw doctor --fix returned non-zero (continuing)"
 
                 # Dream-diary narrative timeout. Upstream hardcodes
                 # NARRATIVE_TIMEOUT_MS=6e4 (60s) in dreaming-narrative-*.js.
