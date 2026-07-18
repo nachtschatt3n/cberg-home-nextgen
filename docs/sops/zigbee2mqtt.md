@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.07.14`
-> Last Updated: `2026-07-14`
+> Version: `2026.07.18`
+> Last Updated: `2026-07-18`
 > Owner: `cberg-home-ops`
 
 ---
@@ -361,10 +361,14 @@ If unclear:
 If a router (e.g. `0x00124b00xxxxxxxx`) shows up after a SLZB reflash and you only have N physical SLZB devices, the chip's factory-default IEEE may have briefly beaconed during the reflash, leaving a ghost row in Z2M.
 
 ```bash
-# Confirm: count physical SLZBs on the LAN
+# Confirm: count physical SLZBs on the LAN.
+# Use /ha_info — a side-effect-free read. Do NOT probe with
+# /api2?action=4&cmd=0: per SMLIGHT's pysmlight that is CMD_ZB_ROUTER_RECON
+# (action=4=API_CMD, cmd=0=router reconnect), so it re-commissions the router
+# radio on every call rather than just pinging it.
 for ip in 192.168.32.20 192.168.32.21 ...; do
-  resp=$(curl -sS --max-time 2 "http://$ip/api2?action=4&cmd=0")
-  [[ "$resp" == "ok" ]] && echo "SLZB at $ip"
+  curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "http://$ip/ha_info" \
+    | grep -q '^200$' && echo "SLZB at $ip"
 done
 ```
 
@@ -469,5 +473,6 @@ If the DB is corrupted beyond surgical repair: restore from the daily backup of 
 
 ## Version History
 
+- `2026.07.18`: fix the §8 ghost-scan liveness probe. It used `/api2?action=4&cmd=0`, which per SMLIGHT's `pysmlight` is `CMD_ZB_ROUTER_RECON` (a router reconnect), so it re-commissioned the router radio on every call instead of just probing. Switched to the side-effect-free `GET /ha_info`. (Found while wiring the SLZB `/api2` codes into the `zigbeectl` CLI; full endpoint map lives in that repo's `docs/slzb-api.md`.)
 - `2026.07.14`: add §4f (SLZB router present on LAN but dropped from the mesh — remote radio-reboot + rejoin ladder) and matching troubleshooting row. Distinguishes this failure (stale `lastSeen` + networkmap `failed:[lqi,routingTable]` + core reachable/`ethernet:true`) from the §4d interview bug and from a real power/PoE outage. Captures the 2026-07-14 tub-room recovery: a radio-only "Zigbee Restart" did not rejoin the mesh, requiring escalation.
 - `2026.06.04`: initial SOP. Captures lessons from the 2026-06-04 incident: SLZB-06P7 force-remove → reflash cycle → Node Descriptor failure → DB-injection recovery; corrects `permit_join` close API; documents Longhorn backup retention bump 1→7; adds CC2652-router-as-router workaround procedure.
