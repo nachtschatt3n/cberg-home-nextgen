@@ -1,0 +1,29 @@
+# EPHEMERAL — applied with kubectl for a Claude watch session, NOT GitOps.
+# Alertmanager pushes every alert (in parallel to telegram; the operator sets
+# continue:true per AlertmanagerConfig) to the Mac-side alert-bridge, which relays
+# to the Monitor `ws`. MUST be deleted when the watch ends, or Alertmanager keeps
+# POSTing to a dead bridge and eventually trips AlertmanagerFailedToSendAlerts:
+#   kubectl delete alertmanagerconfig -n monitoring claude-watch-webhook
+# NOTE: the url points at the operator Mac mini on the trusted VLAN. If that host's
+# IP changes, update it here.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: claude-watch-webhook
+  namespace: monitoring
+  labels:
+    alertmanager-config: claude-watch
+    app.kubernetes.io/managed-by: claude-code-ephemeral
+spec:
+  route:
+    receiver: claude-webhook
+    groupBy: [alertname]
+    groupWait: 1s
+    groupInterval: 5s
+    repeatInterval: 4h
+    matchers: []            # all alerts
+  receivers:
+    - name: claude-webhook
+      webhookConfigs:
+        - url: http://192.168.30.111:8788/alertmanager
+          sendResolved: true
