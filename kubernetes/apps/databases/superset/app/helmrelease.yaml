@@ -9,15 +9,12 @@ spec:
   chart:
     spec:
       chart: superset
-      # Held at 0.17.2: chart 0.20.0 ships the SAME app (appVersion 6.1.0, image
-      # apache/superset:5.0.0) so the bump is cosmetic, but 0.20.0 changed the
-      # bundled-Redis auth wiring — it injects a password into the celery/cache
-      # URLs even with auth disabled, and with auth enabled the auto-generated
-      # server password doesn't match superset's config (WRONGPASS crash-loop).
-      # Moving to 0.20.0+ needs an explicit SOPS-managed redis.auth.password wired
-      # to BOTH the server and superset's URLs — do that deliberately, not as a
-      # drive-by chart bump. See commit history 2026-07-18.
-      version: 0.17.2
+      # NOTE: bumping this chart across the 0.17→0.20 selector relabel needs a
+      # one-time delete of the superset/superset-worker/superset-celerybeat
+      # Deployments (immutable spec.selector) so Helm can recreate them, then a
+      # `flux reconcile hr superset --force`. See the redis block below for the
+      # Redis-auth wiring 0.20.0 requires.
+      version: 0.20.0
       sourceRef:
         kind: HelmRepository
         name: apache-superset
@@ -117,19 +114,24 @@ spec:
 
     # --- Bundled Redis (broker/cache) ---
     # Same Bitnami image-mirror workaround as above.
-    # Auth disabled: on chart 0.17.2 the generated superset_config.py builds
-    # Celery/cache Redis URLs WITHOUT the password (redis://HOST:PORT/DB), so
-    # enabling Bitnami Redis auth breaks worker → broker and app → cache
-    # connections. Redis is a ClusterIP-only service reached solely by Superset
-    # pods in the same namespace — network isolation is sufficient here.
-    # (Chart 0.20.0 changes this wiring — see the version comment above.)
+    # Chart 0.20.0's superset_config.py builds the Celery/cache Redis URL from
+    # env('REDIS_PASSWORD') at RUNTIME — a known upstream fix for the old
+    # "password only wired from a Helm value, not a secret" limitation
+    # (apache/superset #16246, #13995, PR #14274). superset-secrets already
+    # supplies REDIS_PASSWORD (== redis-password, identical value) via
+    # envFromSecrets, so the CLIENT is authenticated. Point the Redis SERVER at
+    # that SAME SOPS secret so both sides share one password — no plaintext in
+    # git. Verified by `helm template` render (2026-07-18): server
+    # secretKeyRef=superset-secrets/redis-password, client env('REDIS_PASSWORD').
     redis:
       enabled: true
       image:
         registry: docker.io
         repository: bitnamilegacy/redis
       auth:
-        enabled: false
+        enabled: true
+        existingSecret: superset-secrets
+        existingSecretPasswordKey: redis-password
       master:
         persistence:
           enabled: false
