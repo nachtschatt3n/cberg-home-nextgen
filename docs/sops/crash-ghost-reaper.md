@@ -1,7 +1,7 @@
 # SOP: crash-ghost-reaper — reaping node-loss "ghost" pods
 
-> Version: `2026.07.18`
-> Last Updated: `2026-07-18`
+> Version: `2026.07.22`
+> Last Updated: `2026-07-22`
 
 ## 1) Description
 
@@ -34,7 +34,9 @@ Related: [[project_power_outage_es_corruption]], `docs/sops/storage-safety.md`.
   1. `metadata.deletionTimestamp` is empty (not already terminating), AND
   2. `metadata.ownerReferences` present (so a controller will recreate it), AND
   3. `status.reason == "NodeLost"` **OR** every `containerStatuses[].state.
-     terminated.reason == "Unknown"`, AND
+     terminated.reason` is a node-loss reason (`Unknown` or
+     `ContainerStatusUnknown` — the latter added 2026-07-22 after the review
+     found jellyfin/scrypted ghosts of that class the Unknown-only check missed), AND
   4. the newest container `finishedAt` is older than `GRACE_MINUTES` (default
      10) — gives a genuinely-recovering node time to reconcile first.
 - **Safety knob:** `DRY_RUN` env. `true` = log `would reap …` only, delete
@@ -228,3 +230,4 @@ patch cronjob crash-ghost-reaper -p '{"spec":{"suspend":true}}'`.
 | Version | Date | Change |
 |---|---|---|
 | 2026.07.18 | 2026-07-18 | Initial SOP; reaper shipped `DRY_RUN=true` for a 4-day observation window (review 2026-07-22). |
+| 2026.07.22 | 2026-07-22 | Go/no-go review PASSED: 0 pods flagged over the 4-day window (0 false positives). Flipped `DRY_RUN=false` (active). Broadened the ghost signature to also match `ContainerStatusUnknown`. |

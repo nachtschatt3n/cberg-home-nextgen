@@ -32,13 +32,12 @@ spec:
               imagePullPolicy: IfNotPresent
               command: ["python3", "/script/reap.py"]
               env:
-                # OBSERVE-ONLY until 2026-07-22: log "would reap" candidates
-                # without deleting, so we can confirm over a 4-day window that
-                # the reaper only ever flags genuine node-loss ghosts (never a
-                # healthy pod). Flip to "false" after the review passes — see
-                # docs/sops/crash-ghost-reaper.md §6/§9.
+                # ACTIVE (reaping) since the 2026-07-22 go/no-go review: the 4-day
+                # observe window flagged 0 pods (zero false positives) and the
+                # 2026-07-17 accuracy test correctly ID'd real ghosts among 283
+                # pods. Set DRY_RUN=true to return to observe-only if ever needed.
                 - name: DRY_RUN
-                  value: "true"
+                  value: "false"
                 - name: GRACE_MINUTES
                   value: "10"
               securityContext:

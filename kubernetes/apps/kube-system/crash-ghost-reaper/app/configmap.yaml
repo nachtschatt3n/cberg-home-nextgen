@@ -64,11 +64,16 @@ data:
             return None  # unmanaged — would not be recreated; leave it
         css = s.get("containerStatuses") or []
         node_lost = s.get("reason") == "NodeLost"
-        all_unknown = bool(css) and all(
-            (c.get("state", {}).get("terminated", {}) or {}).get("reason") == "Unknown"
+        # Both reasons mean the kubelet lost the pod on an ungraceful node reboot;
+        # a healthy pod never has either. ContainerStatusUnknown was added after
+        # the 2026-07-22 review found ghosts of that class (jellyfin/scrypted, the
+        # 2026-07-17 power outage) that the Unknown-only check missed.
+        _LOST = {"Unknown", "ContainerStatusUnknown"}
+        all_lost = bool(css) and all(
+            (c.get("state", {}).get("terminated", {}) or {}).get("reason") in _LOST
             for c in css
         )
-        if not (node_lost or all_unknown):
+        if not (node_lost or all_lost):
             return None
         # Age guard: give a genuinely-recovering node time to reconcile first.
         fins = [
@@ -84,7 +89,7 @@ data:
             if age < GRACE_MIN:
                 log(f"  hold {m['namespace']}/{m['name']}: ghost only {age:.0f}m old (< {GRACE_MIN}m)")
                 return None
-        return "NodeLost" if node_lost else "all-containers-terminated-Unknown"
+        return "NodeLost" if node_lost else "all-containers-terminated-node-loss"
 
     def main():
         st, resp = api("GET", "/api/v1/pods")
