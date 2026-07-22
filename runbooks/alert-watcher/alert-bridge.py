@@ -15,6 +15,8 @@ import asyncio
 import json
 import os
 import threading
+import time
+from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -22,10 +24,14 @@ import websockets
 
 WS_PORT = int(os.environ.get("WS_PORT", "8787"))
 HTTP_PORT = int(os.environ.get("HTTP_PORT", "8788"))
+REPLAY_SECS = int(os.environ.get("REPLAY_SECS", "300"))  # replay recent alerts on (re)connect
 
 _loop = asyncio.new_event_loop()
 _clients: set = set()
 _queue: "asyncio.Queue" = asyncio.Queue()
+# ring buffer of (monotonic_ts, event) so a reconnecting Monitor isn't blind to
+# alerts that fired during a brief WS idle-drop.
+_recent: "deque" = deque(maxlen=200)
 
 
 def _ts():
@@ -37,6 +43,15 @@ async def _ws_handler(ws):
     # greet so the Monitor shows the watcher is live and connected
     await ws.send(json.dumps({"source": "bridge", "event": "connected", "ts": _ts(),
                               "note": "alert-bridge WS ready; awaiting pushed alerts"}))
+    # Replay alerts from the last REPLAY_SECS so a reconnect after an idle-drop
+    # doesn't miss anything that fired in the gap. Marked replayed to avoid alarm.
+    cutoff = time.monotonic() - REPLAY_SECS
+    for mono, evt in list(_recent):
+        if mono >= cutoff:
+            try:
+                await ws.send(json.dumps({**evt, "replayed": True}))
+            except Exception:
+                break
     try:
         await ws.wait_closed()
     finally:
@@ -46,6 +61,7 @@ async def _ws_handler(ws):
 async def _fanout():
     while True:
         item = await _queue.get()
+        _recent.append((time.monotonic(), item))
         data = json.dumps(item)
         for ws in list(_clients):
             try:
@@ -106,7 +122,11 @@ async def _main():
     asyncio.create_task(_fanout())
     print(f"[{_ts()}] alert-bridge up: webhook http://0.0.0.0:{HTTP_PORT}/alertmanager "
           f"| ws ws://127.0.0.1:{WS_PORT}/", flush=True)
-    async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT):
+    # ping_interval keeps the connection warm through quiet stretches (control
+    # frames, not data — so they don't become Monitor events); the generous
+    # ping_timeout tolerates a slow client before declaring the socket dead.
+    async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT,
+                                ping_interval=20, ping_timeout=60):
         await asyncio.Future()
 
 
