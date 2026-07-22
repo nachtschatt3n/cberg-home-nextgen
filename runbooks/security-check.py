@@ -742,6 +742,10 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -vE 'kubectl (edit|get|describe) secret|`kubectl edit secret' "
         # Shell command substitution — value captured at runtime, never hardcoded:
         "| grep -vE '[a-zA-Z_]+=\"\\$\\(' "
+        # Runtime file/env reads — the value is a function call, not a literal.
+        # e.g. `TOKEN = open(f\"{SA}/token\").read().strip()` reading the in-pod
+        # Kubernetes service-account token; never a hardcoded secret.
+        "| grep -ivE '(token|password|secret|api.?key)\\s*[:=]\\s*(open|Path|os\\.getenv|getenv|os\\.environ)\\(' "
         # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
         "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
         # sed/awk redaction-or-rotation commands: the matched credential text is a
