@@ -135,7 +135,13 @@ spec:
             description: "The last successful ARAG scrape on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago. Expected cycle is every 6 hours; this exceeds ~2 missed cycles."
 
         - alert: AragScrapeFailing
-          expr: increase(arag_scrape_errors_total[6h]) > 3
+          # increase() extrapolates to the range boundaries, so a genuine
+          # single best-effort cycle (+3 raw, all three area-walks hiccup)
+          # evaluates to ~3.01. Comparing against 3.5 keeps that single-cycle
+          # case silent while 2+ cycles of best-effort failures (~4.01+) or
+          # best-effort churn combined with a core-step failure still fire.
+          # AragScrapeStale (13h) remains the real down-signal.
+          expr: increase(arag_scrape_errors_total[6h]) > 3.5
           for: 10m
           labels:
             severity: warning

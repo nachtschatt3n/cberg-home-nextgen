@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.05.05`
-> Last Updated: `2026-05-05`
+> Version: `2026.07.23`
+> Last Updated: `2026-07-23`
 > Owner: `Platform`
 
 ---
@@ -293,6 +293,20 @@ kubectl get alertmanager kube-prometheus-stack -n monitoring \
 **If the fix is lost** (e.g., after a chart upgrade that resets the spec): re-apply via
 `helmvalues.yaml` → `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type: None`
 and reconcile.
+
+### Alert Rule Authoring Gotchas
+
+**Never compare `increase()` / `rate()` against exact integers.** PromQL
+`increase()` (and `rate()`) extrapolate to the range boundaries, so a genuine
+counter delta of exactly N over the window evaluates to slightly *more* than N
+(e.g. a raw +3 reads as ~3.01). An `expr: increase(foo[6h]) > 3` therefore
+still fires on a real +3. Allow for the boundary overshoot — use an `N.5`
+threshold (`> 3.5`) or an `>= N+1` with headroom, so a single expected burst
+stays silent while sustained/multi-cycle failures still trip.
+
+This trap bit two consecutive tuning commits on the `AragScrapeFailing` rule
+(`kubernetes/apps/monitoring/kube-prometheus-stack/app/macos-apps-alerts.yaml`)
+before landing on `> 3.5`.
 
 ### View Active Alerts
 
