@@ -25,6 +25,18 @@ read-only). Full contract: `docs/sops/auto-update.md`. To hold a component back,
 add a deny rule to the policy YAML (git-tracked, code-reviewed) and bump its
 version.
 
+**NON-safe (held) updates flow to scheduled maintenance windows.** Everything
+the auto-updater holds is planned + executed via the maintenance-window pipeline
+(`docs/sops/maintenance-windows.md`): 3 windows/week
+(`runbooks/maintenance-windows.yaml`); the sweep (rule 4d) dispatches an
+`upgrade-planner-agent` per held update to write an executable plan under
+`runbooks/maintenance/plans/`; the `maintenance-window-agent` vets those plans
+for interference + side effects, sequences them, and runs the operator-approved
+set during a window (delegating cluster changes to cberg-agent). The sweep also
+reports the window schedule (next window, queue, capacity/interference/missed
+warnings) via `runbooks/maintenance-plan.py`. Non-safe updates are operator
+go/no-go by default — never run fully unattended.
+
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
 - Lint Kubernetes manifests: `kubeconform -summary -fail-on error kubernetes/apps/`

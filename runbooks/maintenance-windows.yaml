@@ -1,0 +1,50 @@
+# maintenance-windows — when NON-safe (held) updates get executed.
+#
+# The auto-updater (runbooks/auto-update.py) merges patch/minor SAFE updates on
+# the scheduled sweep. Everything it HOLDS (majors, breaking-despite-patch,
+# deny-listed components, node-reboot items) flows here instead: an
+# upgrade-planner-agent preps an executable plan per held update, and the
+# maintenance-window-agent vets those plans for interference + side effects and
+# runs the approved sequence during one of these windows.
+#
+# 3 windows/week. Times are low-traffic; Tue/Thu align with the Renovate scan
+# cadence + the every-48h sweep, Sunday is a longer weekend slot for
+# higher-risk / operator-present work. Edit freely (git-tracked); bump `version`.
+version: "2026.07.25"
+timezone: Europe/Berlin
+
+windows:
+  - id: tue-early
+    day: tuesday
+    start: "05:00"
+    duration_min: 60
+    capacity_risk: 4        # sum of plan risk-weights this window can hold
+                            # (low=1, medium=2, high=3) — keeps a window sane
+    allow_reboot: false     # node-reboot plans (Talos) not in a 1h weekday slot
+  - id: thu-early
+    day: thursday
+    start: "05:00"
+    duration_min: 60
+    capacity_risk: 4
+    allow_reboot: false
+  - id: sun-window
+    day: sunday
+    start: "09:00"
+    duration_min: 90
+    capacity_risk: 6
+    allow_reboot: true      # rolling node reboots (Talos) go here, operator-present
+
+execution:
+  # NON-safe updates are never executed fully unattended by default. The
+  # window agent prepares + vets + sequences, then requires operator go/no-go.
+  # A plan may opt into unattended execution via `auto_execute: true` in its
+  # frontmatter, but only when policy below allows it AND its risk is 'low'.
+  default_mode: operator-go-no-go
+  unattended_allowed: false          # global kill-switch for auto_execute
+  max_unattended_risk: low           # even if enabled, never above this
+
+planning:
+  # A held update needs a fresh plan before its window. A plan is STALE if the
+  # PR's target version moved or the PR closed since the plan was generated.
+  stale_after_days: 14               # re-investigate if a plan sits unused
+  plans_dir: runbooks/maintenance/plans

@@ -201,6 +201,33 @@ needs their decision, and what got auto-fixed.
     dashboard read (rule 4a) automatically. If `--apply` is refused because
     the trigger isn't cron, that's the guard working — note it and move on.
 
+4d. **Check the maintenance-window schedule + keep held updates planned.**
+    Everything the auto-updater HELD (rule 4c) is a non-safe update that flows
+    to a scheduled maintenance window (`runbooks/maintenance-windows.yaml`, 3/
+    week). Run the reconciler:
+
+        .venv/bin/python3 runbooks/maintenance-plan.py --json
+
+    It reports, read-only: held updates with NO plan, stale/orphan plans, the
+    next window + what's queued, and capacity/reboot/interference warnings. Then:
+
+    - **For each held update in `needs_plan`, dispatch an `upgrade-planner-agent`**
+      (one Agent call per update, in parallel) so every non-safe update gets an
+      executable plan before its window. Brief each with the held update's
+      component / PR / current→target / hold-reason. The planner writes a plan
+      file under `runbooks/maintenance/plans/` and does not touch the cluster.
+      (On a manual/dry-run sweep you may report the gap instead of dispatching —
+      planners are read-only + write only a plan file, so dispatching is safe,
+      but keep the count sane.)
+    - **Surface the schedule in the summary:** the next window (date/time), what's
+      queued for it, any `warnings` (over-capacity, reboot-in-nonreboot-window,
+      interference, MISSED windows), and how many held updates are still
+      unplanned or stale. A MISSED window or an OVER-CAPACITY/INTERFERENCE
+      warning is a ⚠️ action row.
+    - **Do NOT execute upgrades here.** Running a window is the
+      `maintenance-window-agent`'s job (vets interference + side effects,
+      sequences, operator go/no-go). The sweep only plans + schedules + reports.
+
 4a. **Read the synthesized findings from the dashboard API, not from
     the specialists' markdown.** Once all specialists report (or the
     8-min deadline fires), query the dashboard:

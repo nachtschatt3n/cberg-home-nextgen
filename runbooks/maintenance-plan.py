@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""maintenance-plan — reconcile held updates ↔ plans ↔ maintenance windows.
+
+The auto-updater HOLDS every non-safe update; each such update is supposed to
+get an executable plan (written by an upgrade-planner-agent) that runs in one of
+the scheduled maintenance windows (runbooks/maintenance-windows.yaml). This
+script is the glue + the read the SWEEP uses to "check the schedule":
+
+  * which held updates still have NO plan  → the sweep dispatches a planner
+  * which plans are stale (PR moved/closed since the plan was written)
+  * which window is next, and what's queued for it
+  * capacity / reboot / interference warnings per window
+
+It changes NOTHING (no merges, no git). Read-only reporting + JSON.
+
+Usage:
+    python3 runbooks/maintenance-plan.py            # human schedule report
+    python3 runbooks/maintenance-plan.py --json     # machine-readable
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import yaml
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+REPO_ROOT = SCRIPT_DIR.parent
+WINDOWS_YAML = SCRIPT_DIR / "maintenance-windows.yaml"
+RISK_WEIGHT = {"low": 1, "medium": 2, "high": 3}
+_WD = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+       "friday": 4, "saturday": 5, "sunday": 6}
+
+
+def load_windows():
+    return yaml.safe_load(WINDOWS_YAML.read_text())
+
+
+def plans_dir(cfg):
+    return REPO_ROOT / cfg.get("planning", {}).get("plans_dir", "runbooks/maintenance/plans")
+
+
+def load_plans(cfg):
+    """Parse frontmatter of every plan file. Returns list of dicts (+ _path)."""
+    out = []
+    d = plans_dir(cfg)
+    for p in sorted(d.glob("*.md")):
+        if p.name.lower() == "readme.md":
+            continue
+        text = p.read_text()
+        if not text.startswith("---"):
+            continue
+        try:
+            fm = text.split("---", 2)[1]
+            meta = yaml.safe_load(fm) or {}
+        except Exception:
+            continue
+        meta["_path"] = str(p.relative_to(REPO_ROOT))
+        out.append(meta)
+    return out
+
+
+def get_held():
+    """Held (non-safe) updates from the auto-updater, decoupled via subprocess."""
+    try:
+        p = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "auto-update.py"), "--json"],
+            capture_output=True, text=True, timeout=120,
+        )
+        data = json.loads(p.stdout or "{}")
+        return data.get("held", [])
+    except Exception as e:
+        print(f"!! could not read held updates: {e}", file=sys.stderr)
+        return []
+
+
+def next_occurrence(day_name, start_hhmm, today):
+    wd = _WD[day_name.lower()]
+    delta = (wd - today.weekday()) % 7
+    # if it's the same weekday, still schedule the upcoming one (today counts as 0)
+    d = today + timedelta(days=delta)
+    return d
+
+
+def upcoming_windows(cfg, today, horizon_days=14):
+    """List concrete window occurrences within the horizon, soonest first."""
+    occ = []
+    for w in cfg["windows"]:
+        d = next_occurrence(w["day"], w["start"], today)
+        for bump in (0, 7):  # this week + next, to fill the horizon
+            dd = d + timedelta(days=bump)
+            if (dd - today).days <= horizon_days:
+                occ.append({**w, "date": dd.isoformat(),
+                            "slot": f"{w['id']}:{dd.isoformat()}"})
+    occ.sort(key=lambda x: (x["date"], x["start"]))
+    return occ
+
+
+def held_key(h):
+    """Stable id for a held update: prefer PR number, else dep."""
+    return f"pr{h['number']}" if h.get("number") else h.get("dep", "?")
+
+
+def reconcile(cfg, today):
+    held = get_held()
+    plans = load_plans(cfg)
+    plans_by_pr = {str(p.get("pr")): p for p in plans if p.get("pr")}
+    plans_by_comp = {}
+    for p in plans:
+        plans_by_comp.setdefault(str(p.get("component", "")).lower(), []).append(p)
+
+    # 1) held updates lacking a fresh plan
+    needs_plan, stale = [], []
+    for h in held:
+        pr = str(h.get("number", ""))
+        comp = (h.get("dep", "").split("/")[-1] or "").lower()
+        plan = plans_by_pr.get(pr) or (plans_by_comp.get(comp, [None])[0])
+        if not plan:
+            needs_plan.append({"key": held_key(h), "dep": h.get("dep"),
+                               "pr": h.get("number"), "cur": h.get("cur"),
+                               "new": h.get("new"), "gate": h.get("gate"),
+                               "reason": h.get("reason")})
+            continue
+        # stale if the plan's target no longer matches the held PR's target
+        if plan.get("target") and h.get("new") and str(plan["target"]) != str(h["new"]):
+            stale.append({"plan": plan["_path"], "plan_target": plan.get("target"),
+                          "now_target": h.get("new"), "component": plan.get("component")})
+        # stale by age
+        gen = plan.get("generated")
+        if gen:
+            try:
+                age = (today - date.fromisoformat(str(gen))).days
+                if age > cfg["planning"]["stale_after_days"] and plan.get("status") not in {"executed", "superseded"}:
+                    stale.append({"plan": plan["_path"], "age_days": age,
+                                  "component": plan.get("component"), "reason": "unused > stale_after_days"})
+            except Exception:
+                pass
+
+    # plans whose PR is no longer held (merged elsewhere / closed) → superseded
+    held_prs = {str(h.get("number")) for h in held}
+    orphan = [p["_path"] for p in plans
+              if p.get("pr") and str(p["pr"]) not in held_prs
+              and p.get("status") not in {"executed", "superseded"}]
+
+    # 2) window occupancy + warnings
+    occ = upcoming_windows(cfg, today)
+    win_by_slot = {w["slot"]: w for w in occ}
+    scheduled = {}
+    for p in plans:
+        slot = p.get("window")
+        if slot:
+            scheduled.setdefault(slot, []).append(p)
+
+    warnings = []
+    for slot, ps in scheduled.items():
+        w = win_by_slot.get(slot)
+        # missed window (date in the past, not executed)
+        try:
+            wdate = date.fromisoformat(slot.split(":", 1)[1])
+            if wdate < today and any(p.get("status") != "executed" for p in ps):
+                warnings.append(f"MISSED window {slot}: {sum(1 for p in ps if p.get('status')!='executed')} plan(s) not executed")
+        except Exception:
+            wdate = None
+        if not w:
+            continue
+        load = sum(RISK_WEIGHT.get(p.get("risk", "medium"), 2) for p in ps)
+        if load > w.get("capacity_risk", 4):
+            warnings.append(f"OVER-CAPACITY {slot}: risk-load {load} > {w['capacity_risk']}")
+        if any(p.get("needs_reboot") for p in ps) and not w.get("allow_reboot"):
+            warnings.append(f"REBOOT-IN-NONREBOOT {slot}: a needs_reboot plan is in a window with allow_reboot:false")
+        # shallow interference flag (the window agent does the deep check)
+        for i in range(len(ps)):
+            for j in range(i + 1, len(ps)):
+                a, b = ps[i], ps[j]
+                sa = set((a.get("touches") or {}).get("namespaces", [])) & set((b.get("touches") or {}).get("namespaces", []))
+                sh = set((a.get("touches") or {}).get("shared", [])) & set((b.get("touches") or {}).get("shared", []))
+                if sa or sh:
+                    warnings.append(f"INTERFERENCE {slot}: {a.get('plan_id')} ⋂ {b.get('plan_id')} share {sorted(sa|sh)}")
+
+    return {
+        "today": today.isoformat(),
+        "held_count": len(held),
+        "needs_plan": needs_plan,
+        "stale": stale,
+        "orphan_plans": orphan,
+        "next_windows": occ[:6],
+        "scheduled": {k: [p.get("plan_id") for p in v] for k, v in scheduled.items()},
+        "warnings": warnings,
+        "plan_status": {s: sum(1 for p in plans if p.get("status") == s)
+                        for s in ["draft", "vetted", "scheduled", "executed", "blocked", "superseded"]},
+    }
+
+
+def human(r, cfg):
+    L = [f"== maintenance schedule · {r['today']} · {r['held_count']} held update(s) =="]
+    nxt = r["next_windows"][0] if r["next_windows"] else None
+    if nxt:
+        L.append(f"next window: {nxt['slot']} {nxt['start']} {cfg['timezone']} "
+                 f"({nxt['duration_min']}m, cap {nxt['capacity_risk']}, reboot={'yes' if nxt.get('allow_reboot') else 'no'})")
+    if r["needs_plan"]:
+        L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner-agent for each:")
+        for n in r["needs_plan"]:
+            L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
+    else:
+        L.append("\nall held updates have a plan ✅")
+    if r["stale"]:
+        L.append(f"\nSTALE plans ({len(r['stale'])}) — re-investigate:")
+        for s in r["stale"]:
+            L.append(f"  • {s.get('component')}: {s}")
+    if r["orphan_plans"]:
+        L.append(f"\nORPHAN plans (PR no longer held) → mark superseded/delete: {r['orphan_plans']}")
+    if r["scheduled"]:
+        L.append("\nscheduled:")
+        for slot, ids in r["scheduled"].items():
+            L.append(f"  {slot}: {ids}")
+    if r["warnings"]:
+        L.append("\n⚠️  WARNINGS:")
+        for w in r["warnings"]:
+            L.append(f"  ! {w}")
+    L.append(f"\nplan status: {r['plan_status']}")
+    return "\n".join(L)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args(argv)
+    cfg = load_windows()
+    today = datetime.now().date()
+    r = reconcile(cfg, today)
+    if args.json:
+        print(json.dumps(r, indent=2))
+    else:
+        print(human(r, cfg))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
