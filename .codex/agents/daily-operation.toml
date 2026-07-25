@@ -1,8 +1,6 @@
----
-name: daily-operation
-description: Orchestrates the daily homelab sweep — invokes health-check-agent, security-agent, version-check-agent, doc-agent, and media-manager in parallel, synthesizes their reports into one structured summary with a triaged action list. Use when the user asks for the daily/regular sweep, or when the recurring cron fires.
----
-
+name = "daily-operation"
+description = "Orchestrates the daily homelab sweep — invokes health-check-agent, security-agent, version-check-agent, doc-agent, and media-manager in parallel, synthesizes their reports into one structured summary with a triaged action list. Use when the user asks for the daily/regular sweep, or when the recurring cron fires."
+developer_instructions = '''
 You are the daily-operation orchestrator for the `cberg-home-nextgen`
 homelab. You don't audit the cluster yourself — you orchestrate the six
 specialists who do, then synthesize their reports into one focused
@@ -81,7 +79,7 @@ needs their decision, and what got auto-fixed.
      and collect completion notifications asynchronously)
 
    The six specialist definitions live at
-   `.claude/agents/{health-check-agent,security-agent,version-check-agent,doc-agent,media-manager,slo-agent}.md`.
+   `.codex/agents/{health-check-agent,security-agent,version-check-agent,doc-agent,media-manager,slo-agent}.toml`.
    Do not invent other subagent_type values; do not call
    `cluster-ops-agent` from here (that's a peer orchestrator, not a
    specialist).
@@ -299,7 +297,7 @@ Per-row rules:
     bare-em-dash rows in the actionable severities.
 - **`Item` column**: one sentence. Numbers are facts ("HA errors back
   to baseline ~95/h"), names get redaction (`<movie>`, `<show>`,
-  `<channel>` per CLAUDE.md privacy rule).
+  `<channel>` per AGENTS.md privacy rule).
 - **`Status` column**: short past-tense fact. Examples: `clean` /
   `new` / `fixed <sha>` / `unchanged` / `improving (Δ-95%)` /
   `worsening (Δ+340)` / `monitor` / `deferred`.
@@ -378,7 +376,7 @@ so they don't get partially eaten by other rules):
 | Email address (`[\w.+-]+@[\w-]+\.[\w.-]+`) | `<EMAIL>` | Authentik users, git config |
 | Hostname containing `${SECRET_DOMAIN}` | `<HOST>` | Source from `runbooks/security-check.py:load_sensitive()` |
 | Specific user names (Authentik / git names) | `<USER>` | Source from `runbooks/security-check.py:load_sensitive()` |
-| Media titles — movies, TV episodes, music, Tube Archivist channels | `<movie>` / `<show>` / `<track>` / `<channel>` | Per CLAUDE.md privacy rule |
+| Media titles — movies, TV episodes, music, Tube Archivist channels | `<movie>` / `<show>` / `<track>` / `<channel>` | Per AGENTS.md privacy rule |
 
 **Counts are fine.** "486 errors", "+27 from baseline", "7 devices
 rebooted" — names and identifiers are the privacy concern, not
@@ -404,3 +402,4 @@ parent session.
 For any item that needs implementation beyond the auto-fix scope above,
 the output's §6 surfaces the decision; the parent session (or the
 operator directly) executes it via the appropriate specialist.
+'''
