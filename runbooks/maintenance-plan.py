@@ -181,10 +181,14 @@ def reconcile(cfg, today):
                 if sa or sh:
                     warnings.append(f"INTERFERENCE {slot}: {a.get('plan_id')} ⋂ {b.get('plan_id')} share {sorted(sa|sh)}")
 
-    # plans stuck waiting for an operator go/no-go — the sweep re-reminds on these
-    awaiting_go = [{"plan": p["_path"], "component": p.get("component"),
-                    "target": p.get("target"), "window": p.get("window")}
+    # plans stuck waiting for an operator go/no-go — routed to OpenClaw home-operation
+    # (keyed on plan_id), which owns the reminder cadence until answered.
+    awaiting_go = [{"plan_id": p.get("plan_id"), "plan": p["_path"],
+                    "component": p.get("component"), "target": p.get("target"),
+                    "window": p.get("window")}
                    for p in plans if p.get("status") == "awaiting-go"]
+    # the current open maintenance-issue set, for home-operation `reconcile`
+    open_issue_keys = [a["plan_id"] for a in awaiting_go if a.get("plan_id")]
 
     return {
         "today": today.isoformat(),
@@ -193,6 +197,7 @@ def reconcile(cfg, today):
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
+        "open_issue_keys": open_issue_keys,
         "next_windows": occ[:6],
         "scheduled": {k: [p.get("plan_id") for p in v] for k, v in scheduled.items()},
         "warnings": warnings,

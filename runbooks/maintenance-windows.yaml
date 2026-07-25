@@ -45,10 +45,14 @@ execution:
   unattended_allowed: true           # low-risk opt-in plans may auto-run
   max_unattended_risk: low           # never auto-run above this, regardless
 
-  # Operator MUST be notified (Telegram, via runbooks/lib/notify.py) on every
-  # event below. A go/no-go is never silently skipped or silently auto-decided.
+  # Operator MUST be told on every event below, and a go/no-go is never silently
+  # skipped or auto-decided. Since 2026-07-25 OpenClaw's `home-operation` skill
+  # OWNS notification + the open-issue store + the reminder cadence (emitters
+  # route via `kubectl exec ... home-operation ingest`; see maintenance-windows
+  # SOP). runbooks/lib/notify.py is only the FALLBACK when the openclaw pod is
+  # unreachable, so an alert is never lost.
   notify:
-    channel: telegram                # runbooks/lib/notify.py (home-operation)
+    channel: openclaw-home-operation # primary; notify.py (telegram) is fallback
     events:                          # NB: key is `events` not `on` — YAML parses
                                      # a bare `on:` as boolean true (Norway problem)
       - decision-needed              # go/no-go before executing a non-auto plan
@@ -56,14 +60,15 @@ execution:
       - blocked                      # a plan failed verification + was rolled back
       - reverted                     # auto-update post-apply revert
       - window-complete              # end-of-window summary
-    urgent:                          # audible push (disable_notification=false)
+    urgent:                          # critical → immediate audible push
       - decision-needed
       - interference-conflict
       - blocked
       - reverted
-    # If a go/no-go isn't answered during the window, DEFER (don't hang/auto-run)
-    # and re-remind on the next scheduled sweep until answered or superseded.
-    reminder: every-sweep
+    # If a go/no-go isn't answered during the window, DEFER (don't hang/auto-run).
+    # OpenClaw reminds on its own escalating `tick` cron; the sweep just re-syncs
+    # its open-issue set (ingest + reconcile) every cycle until answered/superseded.
+    reminder: openclaw-tick
 
 planning:
   # A held update needs a fresh plan before its window. A plan is STALE if the

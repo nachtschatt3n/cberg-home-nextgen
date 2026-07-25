@@ -224,13 +224,25 @@ needs their decision, and what got auto-fixed.
       interference, MISSED windows), and how many held updates are still
       unplanned or stale. A MISSED window or an OVER-CAPACITY/INTERFERENCE
       warning is a ⚠️ action row.
-    - **Re-remind on pending decisions.** For every plan in `awaiting_go` (a
-      window agent asked for go/no-go and you haven't answered), send a reminder
-      so it doesn't get lost — one consolidated Telegram ping:
-      `python3 runbooks/lib/notify.py "🔔 <N> maintenance plan(s) awaiting your
-      go/no-go: <components>. Run the maintenance-window-agent to decide."` —
-      and list them as ⚠️ rows. This is the `execution.notify.reminder:
-      every-sweep` contract from `maintenance-windows.yaml`.
+    - **Sync pending decisions to OpenClaw (it owns the reminders).** OpenClaw's
+      `home-operation` skill holds the open-issue + reminder + decision lifecycle
+      (`docs/sops/maintenance-windows.md`). Route the reconciler's output to it —
+      ingest the `awaiting_go` plans + any `warnings`, then reconcile so cleared
+      issues auto-close:
+
+          # one ingest per awaiting_go plan (key on plan_id), then reconcile the set
+          kubectl -n ai exec deploy/openclaw -c app -- \
+            /home/node/.openclaw/bin/home-operation ingest --json '<[{key:plan_id, kind:go_no_go, action:"approve,deny,defer", source:"maintenance", title, component, target, window, plan_path}, ...]>'
+          kubectl -n ai exec deploy/openclaw -c app -- \
+            /home/node/.openclaw/bin/home-operation reconcile --source maintenance \
+            --open '<open_issue_keys from maintenance-plan.py --json>'
+
+      Optionally also ingest `warnings` as `kind:window_warning` awareness issues.
+      If the openclaw pod is unreachable, fall back to a single
+      `python3 runbooks/lib/notify.py "🔔 <N> maintenance plan(s) await go/no-go"`
+      so nothing is lost. Still list `awaiting_go` + `warnings` as ⚠️ rows in the
+      table. OpenClaw does the actual escalating reminders (its `tick` cron) —
+      the sweep only keeps its issue set in sync.
     - **Do NOT execute upgrades here.** Running a window is the
       `maintenance-window-agent`'s job (vets interference + side effects,
       sequences, operator go/no-go). The sweep only plans + schedules + reports.

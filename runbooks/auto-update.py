@@ -458,24 +458,36 @@ def main(argv=None):
         reverted = revert_batch([c.get("merge_sha") for c in merged])
         result["reverted"] = reverted
         reconcile(all_apps)  # push cluster back to reverted state
-        try:
-            sys.path.insert(0, str(SCRIPT_DIR / "lib"))
-            from notify import notify  # type: ignore
-            notify("⛔ *Auto-update reverted* — a merged bump regressed the cluster:\n"
-                   + "\n".join(f"• {c['dep']}→{c['new']}" for c in merged)
-                   + "\nProblems: " + "; ".join(problems[:4])
-                   + "\nBatch reverted; cluster restored. Needs a look.", urgent=True)
-        except Exception as e:
-            log(f"  (operator notify failed: {e})")
+        title = f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster"
+        # Emit the sweep finding first so we can key the OpenClaw issue on its
+        # stable finding_id (the fingerprint id, same across cycles).
+        fid = None
         if w:
             with w:
-                w.emit("critical",
-                       f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster",
-                       action="Investigate the reverted bumps; they are back on the deny path until fixed",
-                       subsection="auto-update",
-                       metadata={"reverted": reverted,
-                                 "problems": problems[:20],
-                                 "merged": [f"#{c['number']} {c['dep']}→{c['new']}" for c in merged]})
+                fid = w.emit("critical", title,
+                             action="Investigate the reverted bumps; they are back on the deny path until fixed",
+                             subsection="auto-update",
+                             metadata={"reverted": reverted, "problems": problems[:20],
+                                       "merged": [f"#{c['number']} {c['dep']}→{c['new']}" for c in merged]})
+        # Route to OpenClaw (owner of the open-issue + reminder lifecycle);
+        # notify.py is only the fallback when the openclaw pod is unreachable.
+        merged_line = ", ".join(f"{c['dep']}→{c['new']}" for c in merged)
+        try:
+            sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+            from notify import ingest_or_notify  # type: ignore
+            route = ingest_or_notify(
+                {"key": fid or f"auto-update-revert-{merged[0]['number']}",
+                 "kind": "auto_update_revert", "source": "auto-update",
+                 "severity": "critical", "action": "ack",
+                 "title": title, "component": merged_line,
+                 "detail": "reverted after post-apply health failure: " + "; ".join(problems[:6])},
+                fallback_text=("⛔ *Auto-update reverted* — a merged bump regressed the cluster:\n"
+                               + merged_line + "\nProblems: " + "; ".join(problems[:4])
+                               + "\nBatch reverted; cluster restored. Needs a look."),
+                urgent=True)
+            log(f"  operator issue routed via: {route}")
+        except Exception as e:
+            log(f"  (operator notify failed: {e})")
         log("\n== ALERT: batch auto-reverted; cluster restored to pre-merge state ==")
         if args.json:
             print(json.dumps(result, indent=2))

@@ -56,14 +56,38 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   the trivial runs itself. Everything else (any medium/high plan, any
   interference/side-effect conflict, any rollback) is **operator go/no-go** and
   is never silently skipped or auto-decided.
-- **Operator notifications (`runbooks/lib/notify.py` → Telegram, the same
-  channel Alertmanager pages):** an **urgent** push fires on `decision-needed`,
-  `interference-conflict`, `blocked`, and `reverted`; a non-urgent one on
-  `window-complete`. A go/no-go left unanswered during a window **defers** (never
-  hangs, never auto-runs above `max_unattended_risk`); the plan sits
-  `status: awaiting-go` and the **sweep re-reminds you every cycle** until you
-  answer or it's superseded. So you always get a proper reminder when a decision
-  is yours to make.
+- **Notifications + open-issue tracking are owned by OpenClaw** (skill
+  `home-operation`, since 2026-07-25). Emitters route each issue to it via
+  `kubectl exec` (contract below); OpenClaw pushes to the operator's Clawd DM,
+  holds the open-issue store (keyed by `plan_id`/`finding_id`), reminds on an
+  **escalating `tick` cadence** (critical immediately, go/no-go 6h→12h→24h),
+  lets the operator **approve/deny/defer conversationally**, surfaces open issues
+  in the **morning briefing**, and can **run a plan on say-so** ("run the redis
+  upgrade now"). `runbooks/lib/notify.py` (raw Telegram) is only the **fallback**
+  when the openclaw pod is unreachable — an alert is never lost. A go/no-go left
+  unanswered **defers** (never hangs, never auto-runs above `max_unattended_risk`);
+  the plan sits `status: awaiting-go` and OpenClaw keeps reminding until you
+  answer or it's superseded.
+
+  **Contract (emitters → OpenClaw):**
+  ```bash
+  # ingest/UPSERT an issue (or JSON array), idempotent by `key`
+  kubectl -n ai exec deploy/openclaw -c app -- \
+    /home/node/.openclaw/bin/home-operation ingest --json '<issue>'
+  # auto-close issues no longer open (pass the current open-key set)
+  ... home-operation reconcile --source maintenance --open '<[plan_id,...]>'
+  # window agent: pull cleared-to-run decisions, then ack execution
+  ... home-operation decisions --json --pending-exec
+  ... home-operation resolve --issue <key> --by executed|denied|superseded [--note <commit>]
+  ```
+  Issue fields: `key` (plan_id|finding_id, required), `kind`
+  (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|`window_warning`),
+  `source`, `severity` (`info`|`warning`|`critical`), `title`, `action` (csv;
+  containing `approve`/`deny` marks it a decision), + optional `component`,
+  `target`, `window`, `plan_path`, `detail`, `url`. **Decision → execution:**
+  OpenClaw only records the decision (`exec_state=pending`); the
+  maintenance-window-agent pulls it and does the GitOps via `cberg-agent` —
+  OpenClaw never mutates the cluster.
 
 ## 3) Blueprints
 

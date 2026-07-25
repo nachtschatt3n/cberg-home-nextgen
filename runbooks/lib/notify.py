@@ -103,6 +103,41 @@ def notify(text: str, *, urgent: bool = False) -> bool:
         return False
 
 
+# ── OpenClaw home-operation contract ─────────────────────────────────────────
+# Since 2026-07-25 OpenClaw OWNS the open-issue + reminder + decision lifecycle
+# (skill `home-operation`, see docs/sops/maintenance-windows.md). Emitters route
+# issues to it via `kubectl exec` into the openclaw pod; this raw Telegram send
+# is only the FALLBACK for when that pod is unreachable, so an alert is never
+# lost. Contract owner: the openclaw-agent.
+_HOME_OP_EXEC = [
+    "kubectl", "-n", "ai", "exec", "deploy/openclaw", "-c", "app", "--",
+    "/home/node/.openclaw/bin/home-operation",
+]
+
+
+def ingest_issue(payload) -> bool:
+    """UPSERT one issue (or a list) into OpenClaw's home-operation store.
+    `payload` follows the contract: key (plan_id|finding_id), kind, source,
+    severity, title, action, + optional context. Returns True on rc 0."""
+    try:
+        p = subprocess.run(_HOME_OP_EXEC + ["ingest", "--json", json.dumps(payload)],
+                           capture_output=True, text=True, timeout=60)
+        return p.returncode == 0
+    except Exception as e:
+        print(f"notify: home-operation ingest failed ({e})", file=sys.stderr)
+        return False
+
+
+def ingest_or_notify(payload, *, fallback_text: str, urgent: bool = False) -> str:
+    """Primary path: hand the issue to OpenClaw (it notifies + reminds + tracks).
+    Fallback: if the pod is unreachable, send a raw Telegram so nothing is lost.
+    Returns 'openclaw' or 'notify-fallback'."""
+    if ingest_issue(payload):
+        return "openclaw"
+    notify(fallback_text, urgent=urgent)
+    return "notify-fallback"
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     urgent = False

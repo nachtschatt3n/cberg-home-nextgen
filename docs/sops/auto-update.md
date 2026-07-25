@@ -50,7 +50,11 @@ Related: `runbooks/version-check.md`, `.github/renovate.json5`,
   the affected kustomizations → wait `AUTO_UPDATE_RECONCILE_WAIT` (default 150s)
   → assert Flux HR/Ks Ready + no CrashLoop/ImagePull/high-restart pods in the
   affected namespaces. On failure → `git revert` the batch, re-reconcile, emit a
-  **critical** finding. Exit codes: `0` ok, `2` applied-then-reverted, `1` error.
+  **critical** finding, and route an `auto_update_revert` issue (keyed on the
+  finding_id) to OpenClaw's `home-operation` skill for the operator — with
+  `runbooks/lib/notify.py` as the fallback if the openclaw pod is down (see
+  `docs/sops/maintenance-windows.md` for the contract). Exit codes: `0` ok,
+  `2` applied-then-reverted, `1` error.
 - **Fail-safe:** if `auto-update-policy.yaml` is missing/unparseable, the engine
   **denies everything**.
 

@@ -47,7 +47,7 @@ Produce an **ordered execution sequence** (shared-infra first, then by
 dependency, riskiest-with-most-headroom early), an explicit **deferred list**
 with reasons, and a one-line blast-radius note per step.
 
-## Step 3 — go/no-go (ALWAYS notify when a decision is needed)
+## Step 3 — go/no-go via OpenClaw (it owns the decision + reminders)
 Present: the window, the ordered sequence (each: component, current→target,
 risk, duration, blast radius, rollback one-liner), the deferred list, and total
 risk-load vs capacity.
@@ -58,23 +58,38 @@ WITHOUT asking only if `auto_execute: true` AND `risk: low` AND
 else requires operator go/no-go**, and a go/no-go is NEVER silently skipped or
 auto-decided.
 
-Whenever a decision is needed — a non-auto plan to approve, or an
-interference/side-effect conflict you can't safely resolve — **send an urgent
-operator notification** and wait:
+For each plan needing a decision (a non-auto plan, or an interference/side-effect
+conflict you can't safely resolve), **hand the issue to OpenClaw's
+`home-operation` skill** — it pushes to the operator's Clawd DM, reminds on an
+escalating cadence, and lets them approve/deny/defer conversationally
+(contract in `docs/sops/maintenance-windows.md`):
 
 ```bash
-python3 runbooks/lib/notify.py --urgent "🛠 Maintenance window <slot>: <N> plan(s) need go/no-go
-<one line per plan: component cur→target · risk · blast radius>
-Conflicts: <interference summary or 'none'>
-Reply in the operation session to approve/deny (subset OK)."
+kubectl -n ai exec deploy/openclaw -c app -- \
+  /home/node/.openclaw/bin/home-operation ingest --json \
+  '{"key":"<plan_id>","kind":"go_no_go","source":"maintenance","action":"approve,deny,defer",
+    "severity":"warning","title":"<component> <cur>→<target> — <risk>, <blast radius>",
+    "component":"<component>","target":"<target>","window":"<slot>","plan_path":"<path>"}'
 ```
 
-Then set those plans `status: awaiting-go` and **do not execute them**. If the
-operator does not respond during the window, **DEFER** — never hang, never
-auto-run above `max_unattended_risk`. Deferred plans stay `awaiting-go`; the
-sweep re-reminds every cycle (`execution.notify.reminder: every-sweep`) until
-answered or superseded. Only auto-execute the low-risk opt-in plans that cleared
-the autonomy bar above; they still get a (non-urgent) heads-up notification.
+If that exec fails (pod down), fall back to
+`python3 runbooks/lib/notify.py --urgent "<same summary>"` so nothing is lost.
+Then set those plans `status: awaiting-go` and **do not execute them now** — DEFER
+(never hang, never auto-run above `max_unattended_risk`). OpenClaw carries the
+reminders from here; the sweep keeps its issue set in sync each cycle. Only
+auto-execute the low-risk opt-in plans that cleared the autonomy bar above.
+
+**Pull decisions before executing.** An approval may arrive between windows (the
+operator decides in Telegram, or says "run it now"). At the start of execution,
+fetch what's approved-and-pending:
+
+```bash
+kubectl -n ai exec deploy/openclaw -c app -- \
+  /home/node/.openclaw/bin/home-operation decisions --json --pending-exec
+```
+
+Execute only plans that are either in this cleared-to-run set or passed the
+autonomy bar.
 
 ## Step 4 — execute the approved sequence (one plan at a time)
 For each approved plan, in order:
@@ -83,22 +98,29 @@ For each approved plan, in order:
    changes to `cberg-agent`** (this agent orchestrates; cberg-agent mutates).
    Never `kubectl edit` the cluster directly.
 3. Run its **Verification**. If it fails → run its **Rollback** immediately
-   (revert + confirm restore), mark the plan `blocked`, and **send an urgent
-   notification** (`python3 runbooks/lib/notify.py --urgent "⛔ <component> upgrade
-   rolled back during window <slot>: <failure>. Cluster restored. Needs you."`),
-   then STOP the sequence (do not start the next plan on a degraded cluster).
-4. On success: mark the plan `status: executed`, and delete the plan file in the
-   same commit that lands the upgrade (plans are transient; git keeps history).
+   (revert + confirm restore), mark the plan `blocked`, **ingest a blocked
+   issue** (`home-operation ingest --json '{"key":"<plan_id>","kind":"blocked_plan",
+   "source":"maintenance","severity":"critical","action":"ack,defer","title":
+   "<component> rolled back during <slot>: <failure>"}'`; notify.py fallback if the
+   pod is down), then STOP the sequence (do not start the next plan on a degraded
+   cluster).
+4. On success: mark the plan `status: executed`, **ack OpenClaw**
+   (`home-operation resolve --issue <plan_id> --by executed --note <commit>`), and
+   delete the plan file in the same commit that lands the upgrade (plans are
+   transient; git keeps history). On an operator deny, `resolve --issue <plan_id>
+   --by denied|superseded` instead of executing.
 5. Between plans that share infra, re-verify cluster-wide health before the next.
 
-## Step 5 — report + notify
+## Step 5 — report + close-out
 Summarize: executed (with resulting versions/SHAs), rolled-back/blocked (with
 the failure), deferred/awaiting-go (with the window they moved to), and the
 remaining held-update backlog. Emit an `auto-update`/`maintenance` finding to the
-sweep DB if anything blocked. Send a **window-complete** notification with the
-one-line result (`python3 runbooks/lib/notify.py "✅ Maintenance window <slot>
-done: <x> applied, <y> awaiting-go, <z> blocked."`) so you always get a close-out
-even when nothing needed a decision.
+sweep DB if anything blocked. Ingest a **window-complete** awareness issue
+(`home-operation ingest --json '{"key":"window-<slot>","kind":"window_warning",
+"source":"maintenance","severity":"info","action":"ack","title":"Window <slot>
+done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets a
+close-out even when nothing needed a decision. OpenClaw surfaces it in the
+briefing.
 
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent
