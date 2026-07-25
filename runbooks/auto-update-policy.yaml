@@ -26,10 +26,8 @@ version: "2026.07.25"
 deny:
   - match: "*app-template*"
     reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40 HelmReleases — must be done deliberately, once."
-  - match: "*/affine"
-    reason: "affine image bumps carry breaking env→config.json changes even on patch tags (0.27.3)."
   - match: "*affine*"
-    reason: "affine chart/image — see env→config.json breaking change; hold for manual review."
+    reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*mariadb*"
     reason: "MariaDB chart major (25→26) + bitnami-legacy posture; a DB-engine bump is never unattended-safe."
     max: patch

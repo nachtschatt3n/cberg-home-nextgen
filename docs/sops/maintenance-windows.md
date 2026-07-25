@@ -185,8 +185,10 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 - Execution runs only the operator-approved sequence, one plan at a time, via
   GitOps through `cberg-agent`; nothing here decrypts secrets outside the normal
   SOPS flow.
-- Non-safe updates are operator go/no-go by default; the `unattended_allowed`
-  kill-switch (default false) + `max_unattended_risk` bound any opt-in.
+- Non-safe updates are operator go/no-go by default. `unattended_allowed: true`
+  (enabled 2026-07-25) permits ONLY `auto_execute: true` + `risk: low` plans to
+  run without asking; `max_unattended_risk: low` is the hard ceiling and set
+  `unattended_allowed: false` to disable all self-running.
 - Node-reboot plans run only in an `allow_reboot: true` window and follow
   `docs/sops/talos-upgrade.md`.
 
