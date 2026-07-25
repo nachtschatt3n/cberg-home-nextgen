@@ -18,6 +18,10 @@ data:
         # (>25% CFS-throttled for 15m). Replaced by a relaxed custom rule in
         # node-hardware-alerts.yaml (>50% for 30m). See 2026-07-13.
         CPUThrottlingHigh: true
+        # Stock etcdDatabaseHighFragmentationRatio flaps on this tiny 3-node
+        # etcd (100 MiB floor, 10m). Replaced by a relaxed rule in
+        # etcd-alerts.yaml (512 MiB floor, 1h). See 2026-07-25.
+        etcdDatabaseHighFragmentationRatio: true
       rules:
         kubeApiserverAvailability: false
         kubeControllerManager: false

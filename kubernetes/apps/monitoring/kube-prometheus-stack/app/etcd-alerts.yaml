@@ -1,0 +1,47 @@
+---
+# etcd alerts — relaxed replacement for the stock kube-prometheus-stack
+# `etcdDatabaseHighFragmentationRatio` (disabled in helmvalues.yaml).
+#
+# Why: the stock rule fires when in-use/allocated < 50% AND in-use > 100 MiB,
+# for 10m. On this small 3-node Talos etcd (data ~117 MiB) that threshold is
+# chronically flappy — after every compaction the DB re-fragments to ~38% in-use
+# at ~300 MiB total and pages, then self-resolves minutes later (observed
+# 2026-07-25: fired + resolved across all three members inside ~90s). A 300 MiB
+# fragmented etcd is operationally harmless: it's tiny against etcd's multi-GiB
+# quota, so the wasted space is not a capacity or stability risk.
+#
+# Fragmentation only actually matters when the DB is LARGE and approaching the
+# backend quota (that's when defrag reclaims meaningful space before etcd goes
+# read-only). So this replacement:
+#   - raises the in-use floor 100 MiB -> 512 MiB (536870912): only alert once
+#     the live dataset is genuinely large (total > ~1 GiB when >50% wasted),
+#     never on the normal ~117 MiB working set here.
+#   - stretches for: 10m -> 1h: fragmentation is slow-moving, so a 1h window
+#     drops the flapping without missing a real, sustained condition.
+# Expr, labels (severity: warning), and annotations are otherwise identical to
+# stock so the alert reads the same and the defrag runbook still applies.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack  # required — Prometheus ruleSelector matchLabels
+  name: etcd-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: etcd-tuned
+      rules:
+        - alert: etcdDatabaseHighFragmentationRatio
+          expr: |-
+            (last_over_time(etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"}[5m]) / last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m])) < 0.5
+            and
+            etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"} > 536870912
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            description: 'etcd cluster "{{ $labels.job }}": database size in use on instance {{ $labels.instance }} is {{ $value | humanizePercentage }} of the actual allocated disk space, please run defragmentation (e.g. etcdctl defrag) to retrieve the unused fragmented disk space.'
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/etcd/etcddatabasehighfragmentationratio
+            summary: etcd database size in use is less than 50% of the actual allocated storage.
