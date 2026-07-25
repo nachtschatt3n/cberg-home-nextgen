@@ -88,6 +88,16 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   OpenClaw only records the decision (`exec_state=pending`); the
   maintenance-window-agent pulls it and does the GitOps via `cberg-agent` —
   OpenClaw never mutates the cluster.
+- **Durability caveats (both PVC-only, not git):** (1) the `home-operation`
+  issue store + the `tick` reminder cron live in OpenClaw's PVC — the skill
+  itself is in git (`skills-configmap.sops.yaml`) and re-seeds on boot, but the
+  cron must be recreated on PVC loss. (2) The morning-briefing hook is a patch to
+  the in-pod `~/clawd/scripts/morning_briefing.py`, which is intentionally NOT in
+  git (PII rule). It survives pod rolls but **not a PVC rebuild or a
+  briefing-script restore** — the open-issues block would silently vanish. The
+  patch is marker-guarded and idempotent (safe to re-run); on a PVC rebuild,
+  re-apply it (backup: `morning_briefing.py.bak-*`). If the block disappears from
+  the briefing, that's the first thing to check.
 
 ## 3) Blueprints
 

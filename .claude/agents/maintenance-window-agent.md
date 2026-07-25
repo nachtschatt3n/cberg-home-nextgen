@@ -91,6 +91,12 @@ kubectl -n ai exec deploy/openclaw -c app -- \
 Execute only plans that are either in this cleared-to-run set or passed the
 autonomy bar.
 
+**If this `decisions` exec FAILS (non-zero — e.g. the openclaw pod is mid-roll):
+treat it as "no confirmed approvals available," NOT as "approved."** Retry a few
+times with a short backoff; if it stays down, DEFER execution to the next window
+rather than guessing — never execute an unread/unconfirmed plan. (The reverse
+direction — a failed `ingest` — is already covered by the notify.py fallback.)
+
 ## Step 4 — execute the approved sequence (one plan at a time)
 For each approved plan, in order:
 1. Run its **Pre-checks**; abort the plan if the pre-state is unsafe.
@@ -109,6 +115,11 @@ For each approved plan, in order:
    delete the plan file in the same commit that lands the upgrade (plans are
    transient; git keeps history). On an operator deny, `resolve --issue <plan_id>
    --by denied|superseded` instead of executing.
+   **A failed `resolve` exec (pod rolling) MUST NOT trigger a rollback** — the
+   upgrade already succeeded and is committed; the resolve is only the ack. Retry
+   it; if it still fails, leave it — `resolve` is idempotent and the issue is
+   auto-closed by the next sweep's `reconcile` (the plan_id is no longer in the
+   open set). Never undo a healthy upgrade because the ack didn't land.
 5. Between plans that share infra, re-verify cluster-wide health before the next.
 
 ## Step 5 — report + close-out
