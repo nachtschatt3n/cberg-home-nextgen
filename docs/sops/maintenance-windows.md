@@ -82,9 +82,28 @@ Authentik/Homepage/Longhorn objects.
 - **Run a window:** invoke `maintenance-window-agent` ("run the maintenance
   window"). It vets interference/side effects, sequences, and asks go/no-go.
 - **Trigger at the window time:** the sweep reports upcoming windows so nothing
-  is silently missed; to *auto-fire* the window agent at each slot, add a cluster
-  OpenClaw cron per window (mirrors the sweep cron; openclaw-agent + operator
-  own cron creation). Until then, run it on operator command.
+  is silently missed. Each slot also *auto-fires* the window agent via a cluster
+  OpenClaw cron that drives the Mac `daily-operation`/`server-operation` session
+  (mirrors the every-48h sweep cron `8163c139`; same `command`-payload shape).
+  The crons run the `maintenance-window` skill (`maintenance-window run --window
+  <id>`), which resolves the operation pane with the same fail-loud handoff as
+  the `operation` skill and pages the operator on Telegram if the handoff fails
+  — so an unattended 05:00/09:00 window is never silently skipped. Firing while
+  the operator sleeps is by design: the agent notifies + defers on anything above
+  low-risk (it does not auto-run risky/reboot changes unattended). Cron runs are
+  tagged `MAINTENANCE_WINDOW_TRIGGER=cron`.
+
+  | Window | Cron (Europe/Berlin) | OpenClaw cron id |
+  | --- | --- | --- |
+  | `tue-early` | `0 5 * * 2` | `335e4a3e-36e1-481a-81a7-6c59caa1be65` |
+  | `thu-early` | `0 5 * * 4` | `a9325ac9-443a-41d3-a386-d8f6402e0ea3` |
+  | `sun-window` | `0 9 * * 0` | `d8b8f2a0-61c5-45e7-92ca-aecc8e971917` |
+
+  **Durability caveat:** these crons live only in OpenClaw's PVC sqlite (the
+  gateway cron store), **not** in git — same as the sweep cron. They survive pod
+  rolls but not PVC loss; recreate them with `openclaw cron add` (see the
+  `maintenance-window` skill) if the PVC is rebuilt. The `maintenance-window`
+  skill itself *is* in git (`skills-configmap.sops.yaml`) and re-seeds on boot.
 
 ## 5) Examples
 
