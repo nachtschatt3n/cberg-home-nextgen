@@ -1,0 +1,62 @@
+# auto-update-policy — what the scheduled sweep may auto-merge unattended.
+#
+# Model: the operator chose a "patch + minor" safe tier. So an OPEN Renovate PR
+# auto-merges only when ALL of these hold (see runbooks/auto-update.py):
+#   G1 type     : update_type in {patch, minor}
+#   G2 policy   : depName is NOT blocked by a `deny` rule below
+#   G3 breaking : no breaking-change signal in the target release notes
+#                 (reuses check-all-versions' detect_breaking_changes)
+#   G4 ci       : PR mergeable + flux-local CI checks all green
+# and APPLY is only performed on the cron-triggered sweep (SWEEP_TRIGGER=cron),
+# never a manual read-only `operation sweep`.
+#
+# This file encodes operator knowledge that a component is risky REGARDLESS of
+# its semver label — the human layer on top of the automated gates. Fail-safe:
+# if this file is missing or unparseable, auto-update.py denies EVERYTHING.
+#
+# Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
+# must be code-reviewed, not a mutable DB row). Bump `version` on every change.
+version: "2026.07.25"
+
+# ── Hard blocks by dependency name ──────────────────────────────────────────
+# `match` is a shell-style glob against the Renovate depName (the token between
+# "update " and " (" in the PR title — image repo or chart name).
+# `max` (optional): the highest update_type still allowed for a match. Omit to
+# block the component entirely. e.g. max: patch  → allow patch, hold minor+.
+deny:
+  - match: "*app-template*"
+    reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40 HelmReleases — must be done deliberately, once."
+  - match: "*/affine"
+    reason: "affine image bumps carry breaking env→config.json changes even on patch tags (0.27.3)."
+  - match: "*affine*"
+    reason: "affine chart/image — see env→config.json breaking change; hold for manual review."
+  - match: "*mariadb*"
+    reason: "MariaDB chart major (25→26) + bitnami-legacy posture; a DB-engine bump is never unattended-safe."
+    max: patch
+  - match: "*mcpo*"
+    reason: "python init base image major (3.11→3.14) rides these tags."
+  - match: "*nextcloud*"
+    reason: "chart+image must bump together and run occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised only."
+  - match: "*openclaw*"
+    reason: "held at 2026.6.11 pending the Memory Core→SQLite migration (2026.7.1 blocked)."
+  - match: "*@openclaw/*"
+    reason: "openclaw plugins (discord/codex) move in lockstep with the held host."
+  - match: "siderolabs/*"
+    reason: "Talos node image — needs a rolling node-reboot maintenance window, not a git merge."
+  - match: "*talos*"
+    reason: "Talos/Kubernetes node-level component — reboot window required."
+
+# ── Hard blocks by Renovate manager ─────────────────────────────────────────
+# github-actions patch/minor are already auto-merged by Renovate itself
+# (packageRules in .github/renovate.json5); don't double-handle them here.
+deny_managers:
+  - github-actions
+
+# ── Extra-caution namespaces (informational; still gated the same) ──────────
+# Stateful/data services — the post-apply health gate watches these closest.
+# Not a block, just documents where a bad merge hurts most.
+sensitive_namespaces:
+  - databases
+  - storage
+  - kube-system
+  - flux-system

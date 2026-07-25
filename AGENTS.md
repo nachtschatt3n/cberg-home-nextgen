@@ -14,6 +14,17 @@ Recurring health/security/version/doc/media sweeps **must execute on this Mac mi
 
 **Do NOT create session-local `/loop` sweeps.** The old 8:17am `/loop` (CronCreate `de44f77b`) is retired and confirmed gone (2026-06-28). A local loop would double-run the sweep and clash with the cluster-driven one. For an ad-hoc sweep, send `operation sweep` (or type "run a sweep" into the `daily-operation` session) — **once**, never on a `/loop` or `CronCreate` schedule.
 
+**The scheduled (cron) sweep AUTO-MERGES safe version updates.** Since
+2026-07-25 the `daily-operation` sweep runs `runbooks/auto-update.py` (rule 4c):
+on a **cron** run (`SWEEP_TRIGGER=cron`) it merges the *safe* subset of open
+Renovate PRs — patch/minor, not on the `runbooks/auto-update-policy.yaml`
+deny-list, no breaking-change signal in release notes, mergeable with green
+flux-local CI — then Flux-reconciles, health-gates, and **auto-reverts** the
+batch on regression. A **manual** `operation sweep` is dry-run only (stays
+read-only). Full contract: `docs/sops/auto-update.md`. To hold a component back,
+add a deny rule to the policy YAML (git-tracked, code-reviewed) and bump its
+version.
+
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
 - Lint Kubernetes manifests: `kubeconform -summary -fail-on error kubernetes/apps/`

@@ -171,6 +171,36 @@ needs their decision, and what got auto-fixed.
     "red verdict / 0 open findings" dashboard artifact. Only after this
     reconcile, read `/api/cycles/latest`.
 
+4c. **Auto-apply SAFE version updates — CRON RUNS ONLY.** After the
+    version specialist has finished (so open-PR + CI state is fresh) and
+    the verdict is reconciled, run the auto-updater. It is a strict,
+    deny-by-default classifier over open Renovate PRs — full contract in
+    `docs/sops/auto-update.md` and `runbooks/auto-update-policy.yaml`.
+
+    - **Scheduled (cron) run** — `SWEEP_TRIGGER=cron` is set (rule 0): APPLY.
+      The merge + Flux reconcile + post-apply health gate + auto-revert all
+      run inside the script:
+
+          SWEEP_TRIGGER=cron .venv/bin/python3 runbooks/auto-update.py --apply --json
+
+      It only merges a PR that is patch/minor, not blocked by the policy
+      deny-list, carries NO breaking-change signal in its release notes, and
+      is mergeable with green CI (flux-local). On a post-apply health
+      regression it `git revert`s the batch, re-reconciles, and emits a
+      **critical** `auto-update` finding. Exit 2 = applied-then-reverted.
+
+    - **Manual (operator) run** — no cron trigger: DRY-RUN only, never merge
+      (the manual sweep stays read-only):
+
+          .venv/bin/python3 runbooks/auto-update.py --json
+
+    Fold the result into the summary: report `merged` (count + deps),
+    `reverted` (if any — surface prominently, it's a regression), and how
+    many safe updates are queued for the next scheduled run. The script
+    writes its own findings to the shared cycle, so they appear in the
+    dashboard read (rule 4a) automatically. If `--apply` is refused because
+    the trigger isn't cron, that's the guard working — note it and move on.
+
 4a. **Read the synthesized findings from the dashboard API, not from
     the specialists' markdown.** Once all specialists report (or the
     8-min deadline fires), query the dashboard:
