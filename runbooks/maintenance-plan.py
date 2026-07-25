@@ -181,17 +181,23 @@ def reconcile(cfg, today):
                 if sa or sh:
                     warnings.append(f"INTERFERENCE {slot}: {a.get('plan_id')} ⋂ {b.get('plan_id')} share {sorted(sa|sh)}")
 
+    # plans stuck waiting for an operator go/no-go — the sweep re-reminds on these
+    awaiting_go = [{"plan": p["_path"], "component": p.get("component"),
+                    "target": p.get("target"), "window": p.get("window")}
+                   for p in plans if p.get("status") == "awaiting-go"]
+
     return {
         "today": today.isoformat(),
         "held_count": len(held),
         "needs_plan": needs_plan,
         "stale": stale,
         "orphan_plans": orphan,
+        "awaiting_go": awaiting_go,
         "next_windows": occ[:6],
         "scheduled": {k: [p.get("plan_id") for p in v] for k, v in scheduled.items()},
         "warnings": warnings,
         "plan_status": {s: sum(1 for p in plans if p.get("status") == s)
-                        for s in ["draft", "vetted", "scheduled", "executed", "blocked", "superseded"]},
+                        for s in ["draft", "vetted", "scheduled", "awaiting-go", "executed", "blocked", "superseded"]},
     }
 
 
@@ -213,6 +219,10 @@ def human(r, cfg):
             L.append(f"  • {s.get('component')}: {s}")
     if r["orphan_plans"]:
         L.append(f"\nORPHAN plans (PR no longer held) → mark superseded/delete: {r['orphan_plans']}")
+    if r.get("awaiting_go"):
+        L.append(f"\n🔔 AWAITING YOUR GO/NO-GO ({len(r['awaiting_go'])}) — re-remind the operator:")
+        for a in r["awaiting_go"]:
+            L.append(f"  • {a['component']} → {a['target']} (window {a.get('window')}) [{a['plan']}]")
     if r["scheduled"]:
         L.append("\nscheduled:")
         for slot, ids in r["scheduled"].items():

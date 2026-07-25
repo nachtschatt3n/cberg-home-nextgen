@@ -458,6 +458,15 @@ def main(argv=None):
         reverted = revert_batch([c.get("merge_sha") for c in merged])
         result["reverted"] = reverted
         reconcile(all_apps)  # push cluster back to reverted state
+        try:
+            sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+            from notify import notify  # type: ignore
+            notify("⛔ *Auto-update reverted* — a merged bump regressed the cluster:\n"
+                   + "\n".join(f"• {c['dep']}→{c['new']}" for c in merged)
+                   + "\nProblems: " + "; ".join(problems[:4])
+                   + "\nBatch reverted; cluster restored. Needs a look.", urgent=True)
+        except Exception as e:
+            log(f"  (operator notify failed: {e})")
         if w:
             with w:
                 w.emit("critical",

@@ -50,10 +50,20 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   queue, and capacity/reboot/interference warnings.
 - **Agents:** `.claude/agents/upgrade-planner-agent.md` (one per held update),
   `.claude/agents/maintenance-window-agent.md` (runs a window).
-- **Execution posture:** non-safe updates are **operator go/no-go** by default
-  (`execution.default_mode`). A plan may opt into unattended execution
-  (`auto_execute: true`) only if `risk: low` AND `execution.unattended_allowed:
-  true` (default false). Held updates are never run fully unattended by default.
+- **Execution posture (limited autonomy, enabled 2026-07-25):** a plan runs
+  unattended only if `auto_execute: true` AND `risk: low` AND
+  `execution.unattended_allowed: true` AND it has no unresolved interference —
+  the trivial runs itself. Everything else (any medium/high plan, any
+  interference/side-effect conflict, any rollback) is **operator go/no-go** and
+  is never silently skipped or auto-decided.
+- **Operator notifications (`runbooks/lib/notify.py` → Telegram, the same
+  channel Alertmanager pages):** an **urgent** push fires on `decision-needed`,
+  `interference-conflict`, `blocked`, and `reverted`; a non-urgent one on
+  `window-complete`. A go/no-go left unanswered during a window **defers** (never
+  hangs, never auto-runs above `max_unattended_risk`); the plan sits
+  `status: awaiting-go` and the **sweep re-reminds you every cycle** until you
+  answer or it's superseded. So you always get a proper reminder when a decision
+  is yours to make.
 
 ## 3) Blueprints
 

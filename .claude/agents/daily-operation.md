@@ -224,6 +224,13 @@ needs their decision, and what got auto-fixed.
       interference, MISSED windows), and how many held updates are still
       unplanned or stale. A MISSED window or an OVER-CAPACITY/INTERFERENCE
       warning is a ⚠️ action row.
+    - **Re-remind on pending decisions.** For every plan in `awaiting_go` (a
+      window agent asked for go/no-go and you haven't answered), send a reminder
+      so it doesn't get lost — one consolidated Telegram ping:
+      `python3 runbooks/lib/notify.py "🔔 <N> maintenance plan(s) awaiting your
+      go/no-go: <components>. Run the maintenance-window-agent to decide."` —
+      and list them as ⚠️ rows. This is the `execution.notify.reminder:
+      every-sweep` contract from `maintenance-windows.yaml`.
     - **Do NOT execute upgrades here.** Running a window is the
       `maintenance-window-agent`'s job (vets interference + side effects,
       sequences, operator go/no-go). The sweep only plans + schedules + reports.

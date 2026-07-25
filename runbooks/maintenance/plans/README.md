@@ -31,7 +31,10 @@ touches:                          # interference surface — be precise
                                   # cni/cilium, coredns, a shared DB, storage/longhorn
 depends_on: []                    # other plan_ids that must run first
 conflicts_with: []               # plan_ids that must NOT share a window
-status: draft                     # draft | vetted | scheduled | executed | blocked | superseded
+status: draft                     # draft | vetted | scheduled | awaiting-go |
+                                  #   executed | blocked | superseded
+                                  # awaiting-go = window agent asked for go/no-go;
+                                  # the sweep re-reminds you every cycle until answered
 window: null                      # e.g. "sun-window:2026-07-27" once scheduled
 auto_execute: false               # opt-in unattended (only honored if risk:low + policy allows)
 sops_refs:                        # SOPs the executor must follow

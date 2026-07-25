@@ -35,13 +35,35 @@ windows:
     allow_reboot: true      # rolling node reboots (Talos) go here, operator-present
 
 execution:
-  # NON-safe updates are never executed fully unattended by default. The
-  # window agent prepares + vets + sequences, then requires operator go/no-go.
-  # A plan may opt into unattended execution via `auto_execute: true` in its
-  # frontmatter, but only when policy below allows it AND its risk is 'low'.
+  # Limited autonomy (enabled 2026-07-25): a plan may run WITHOUT asking only if
+  # ALL hold — `auto_execute: true` in its frontmatter, `risk: low`, and no
+  # unresolved interference. Everything else (any medium/high plan, any
+  # interference/side-effect conflict, any blocked/rollback) ALWAYS notifies the
+  # operator and waits for go/no-go. So the trivial runs itself; anything that
+  # needs a decision reaches your phone.
   default_mode: operator-go-no-go
-  unattended_allowed: false          # global kill-switch for auto_execute
-  max_unattended_risk: low           # even if enabled, never above this
+  unattended_allowed: true           # low-risk opt-in plans may auto-run
+  max_unattended_risk: low           # never auto-run above this, regardless
+
+  # Operator MUST be notified (Telegram, via runbooks/lib/notify.py) on every
+  # event below. A go/no-go is never silently skipped or silently auto-decided.
+  notify:
+    channel: telegram                # runbooks/lib/notify.py (home-operation)
+    events:                          # NB: key is `events` not `on` — YAML parses
+                                     # a bare `on:` as boolean true (Norway problem)
+      - decision-needed              # go/no-go before executing a non-auto plan
+      - interference-conflict        # plans clash → operator must choose
+      - blocked                      # a plan failed verification + was rolled back
+      - reverted                     # auto-update post-apply revert
+      - window-complete              # end-of-window summary
+    urgent:                          # audible push (disable_notification=false)
+      - decision-needed
+      - interference-conflict
+      - blocked
+      - reverted
+    # If a go/no-go isn't answered during the window, DEFER (don't hang/auto-run)
+    # and re-remind on the next scheduled sweep until answered or superseded.
+    reminder: every-sweep
 
 planning:
   # A held update needs a fresh plan before its window. A plan is STALE if the
