@@ -21,7 +21,7 @@ touches:
 depends_on: []
 conflicts_with: []                 # nothing else planned; but see Interference —
                                    # do NOT co-schedule any other reboot/infra plan
-status: draft
+status: awaiting-go
 window: "sun-window:2026-07-26"
 auto_execute: false                # medium + reboot → always operator go/no-go
 sops_refs:
