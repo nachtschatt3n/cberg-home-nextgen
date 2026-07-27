@@ -7,8 +7,15 @@
 
 weights:
   buckets:
-    spot: 0.6667         # 2/3, per the source-catalog methodology
-    structural: 0.3333
+    # Three views of the buy decision, renormalised across whichever have
+    # data: spot = today's market, structural = supply-side fundamentals,
+    # forecast = the model's own forward price path. The forecast bucket
+    # exists so the verdict can never contradict the Kaessler forecast (a
+    # projected rise should pull toward BUY, not WAIT). Spot stays the single
+    # largest voice; forecast is a substantial second.
+    spot: 0.45
+    structural: 0.25
+    forecast: 0.30
 
   spot:
     hp24_local_delta_1w: 1.5
@@ -26,6 +33,12 @@ weights:
     propellets_at_delta_1m: 0.8
     borkenkaefer_severity: 0.8
     toll_collect_recent_step: 0.5
+
+  forecast:
+    # The 3-month horizon is the primary "buy now vs. wait a couple months"
+    # decision window, so it outweighs the 1-month.
+    forecast_expected_1m: 1.0
+    forecast_expected_3m: 1.5
 
 thresholds:
   composite_buy: 70.0          # composite >= 70 → BUY
