@@ -742,10 +742,12 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -vE 'kubectl (edit|get|describe) secret|`kubectl edit secret' "
         # Shell command substitution — value captured at runtime, never hardcoded:
         "| grep -vE '[a-zA-Z_]+=\"\\$\\(' "
-        # Runtime file/env reads — the value is a function call, not a literal.
-        # e.g. `TOKEN = open(f\"{SA}/token\").read().strip()` reading the in-pod
-        # Kubernetes service-account token; never a hardcoded secret.
-        "| grep -ivE '(token|password|secret|api.?key)\\s*[:=]\\s*(open|Path|os\\.getenv|getenv|os\\.environ)\\(' "
+        # Runtime/computed values — the RHS is a FUNCTION CALL (any identifier or
+        # dotted path followed by `(`), never a hardcoded literal. Covers
+        # `open(...)`, `os.getenv(...)`, `Path(...).read()` AND custom helpers
+        # like `token = _bot_token()` (the 2026-07-27 false positive). A literal
+        # secret is a quoted string or a bare token — it is never `identifier(...)`.
+        "| grep -ivE '(token|password|secret|api.?key)\\s*[:=]\\s*[A-Za-z_][A-Za-z0-9_.]*\\(' "
         # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
         "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
         # sed/awk redaction-or-rotation commands: the matched credential text is a
@@ -2061,24 +2063,35 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     cprint(C.CYAN, "  UniFi: monitored natively via unifictl (see UniFi section)")
     lines.append("\nUniFi events: monitored natively via unifictl (stat alarm / rogueap / admin-activity), not Wazuh syslog\n")
 
-    # --- Slice 3b: K8s container alerts (level >= 5, location *containers*) --
-    body = {
-        "size": 0,
-        "query": {"bool": {"must": [
-            {"range": {"@timestamp": {"gte": "now-24h"}}},
-            {"wildcard": {"location": "*containers*"}},
-            {"range": {"rule.level": {"gte": 5}}},
-        ]}},
-        "aggs": {"by_rule": {"terms": {"field": "rule.description", "size": 10}}},
-    }
-    data = wz.query(body)
-    k8s_total = data["hits"]["total"]["value"] if data else 0
-    lines.append(f"\nK8s container alerts (level≥5, 24h): **{k8s_total}**\n")
-    if k8s_total > 100:
-        f.add(WARNING, f"Wazuh: high K8s container alert volume ({k8s_total}/24h, level≥5) — possible noisy app or rule mis-tune")
-        cprint(C.YELLOW, f"  🟡 K8s container alerts elevated ({k8s_total}/24h)")
+    # --- Slice 3b: K8s container alerts --------------------------------------
+    # Report total volume (level>=5) for visibility, but only WARN on NOTABLE
+    # severity (level>=7). Per this module's own taxonomy (see docstring) level
+    # 5-6 is ROUTINE — container syslog auth-fail noise sits there and was
+    # tripping a false-positive volume warning (2026-07-27: 185/24h, 78% level-5
+    # auth-fail, level>=12 == 0). Slice 2 already covers concerning level 7-11
+    # categories cluster-wide; gating the container-volume warning on level>=7
+    # stops routine noise from inflating it. Fixed at the audit root cause here,
+    # not via an AR suppression of the symptom.
+    def _k8s_container_alerts(min_level: int) -> int:
+        d = wz.query({
+            "size": 0,
+            "query": {"bool": {"must": [
+                {"range": {"@timestamp": {"gte": "now-24h"}}},
+                {"wildcard": {"location": "*containers*"}},
+                {"range": {"rule.level": {"gte": min_level}}},
+            ]}},
+        })
+        return d["hits"]["total"]["value"] if d else 0
+
+    k8s_total   = _k8s_container_alerts(5)  # incl. routine level 5-6 — reported only
+    k8s_notable = _k8s_container_alerts(7)  # notable+ — this drives the warning
+    lines.append(f"\nK8s container alerts (24h): **{k8s_total}** total (level≥5), "
+                 f"**{k8s_notable}** notable (level≥7)\n")
+    if k8s_notable > 100:
+        f.add(WARNING, f"Wazuh: high NOTABLE K8s container alert volume ({k8s_notable}/24h, level≥7) — possible noisy app or rule mis-tune")
+        cprint(C.YELLOW, f"  🟡 Notable K8s container alerts elevated ({k8s_notable}/24h level≥7; {k8s_total} total incl. routine)")
     else:
-        cprint(C.GREEN, f"  🟢 K8s container alert volume normal ({k8s_total}/24h)")
+        cprint(C.GREEN, f"  🟢 K8s container alert volume normal ({k8s_notable}/24h notable, {k8s_total} total incl. routine)")
 
     # --- Slice 4: per-agent heartbeat (catch agent compromise / death) -------
     # An agent that stops reporting may be compromised, OOMKilled, or evicted.

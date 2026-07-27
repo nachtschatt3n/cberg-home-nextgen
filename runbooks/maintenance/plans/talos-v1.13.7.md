@@ -21,8 +21,11 @@ touches:
 depends_on: []
 conflicts_with: []                 # nothing else planned; but see Interference —
                                    # do NOT co-schedule any other reboot/infra plan
-status: awaiting-go
-window: "sun-window:2026-07-26"
+status: scheduled                  # operator APPROVED via OpenClaw 2026-07-26
+                                   # (home-operation decision=approve, exec_state
+                                   # pending); 07-26 reboot window had already
+                                   # passed → re-targeted to the next reboot slot
+window: "sun-window:2026-08-02"
 auto_execute: false                # medium + reboot → always operator go/no-go
 sops_refs:
   - docs/sops/talos-upgrade.md

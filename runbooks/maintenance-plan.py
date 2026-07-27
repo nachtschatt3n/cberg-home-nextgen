@@ -187,8 +187,15 @@ def reconcile(cfg, today):
                     "component": p.get("component"), "target": p.get("target"),
                     "window": p.get("window")}
                    for p in plans if p.get("status") == "awaiting-go"]
-    # the current open maintenance-issue set, for home-operation `reconcile`
-    open_issue_keys = [a["plan_id"] for a in awaiting_go if a.get("plan_id")]
+    # Keys that must stay OPEN in OpenClaw's home-operation store, for the
+    # sweep's `reconcile` call. This is EVERY non-terminal plan — not just
+    # awaiting-go. Critically it includes SCHEDULED plans whose decision is
+    # approved-and-pending-execution (e.g. an approved Talos upgrade queued for
+    # its reboot window): reconcile must NOT auto-close those before the window
+    # agent executes + resolves them, or the approval is lost. Only
+    # executed/superseded plans drop out of the set (and get auto-closed).
+    open_issue_keys = [p.get("plan_id") for p in plans
+                       if p.get("plan_id") and p.get("status") not in ("executed", "superseded")]
 
     return {
         "today": today.isoformat(),
