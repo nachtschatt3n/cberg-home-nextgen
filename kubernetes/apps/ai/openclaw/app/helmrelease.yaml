@@ -1255,8 +1255,17 @@ spec:
               # CLI reads ChatGPT-subscription OAuth tokens from
               # /home/node/.codex/auth.json (persisted in the PVC after a
               # one-time `codex login`).
+              #
+              # 2026-07-28: bumped gpt-5.5 -> gpt-5.6-terra (GPT-5.6 family GA
+              # 2026-07-09). Validated on THIS ChatGPT-account Codex path via
+              # `codex exec -m gpt-5.6-terra` (returns output). Terra = balanced
+              # tier: ~272K ctx over Codex (1.05M on the raw API), multimodal,
+              # Feb-2026 knowledge cutoff. NOTE: the bare `gpt-5.6` alias (=Sol)
+              # is REJECTED on a ChatGPT account ("model is not supported when
+              # using Codex with a ChatGPT account") — only the explicit
+              # -terra/-luna variants work here, so pin the variant, not the alias.
               - name: OPENCLAW_DEFAULT_MODEL
-                value: "openai/gpt-5.5"
+                value: "openai/gpt-5.6-terra"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
               # Half 2 of the update-check disable (half 1 is
