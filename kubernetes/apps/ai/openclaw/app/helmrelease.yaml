@@ -781,6 +781,18 @@ spec:
                   if (cfg.models.providers.openai && cfg.models.providers.openai.agentRuntime && cfg.models.providers.openai.agentRuntime.id === 'codex') {
                     delete cfg.models.providers.openai;
                   }
+                  // Self-heal: the 2026-07-28 gpt-5.6-terra experiment wrote a
+                  // bare models.providers['codex-cli'] overlay (models[] only, no
+                  // baseUrl) into the PVC config. openclaw rejects it at startup
+                  // ("custom model providers must declare baseUrl; overlays
+                  // without baseUrl are only supported for bundled providers"),
+                  // and because ~/.openclaw is on the Longhorn PVC the bad key
+                  // survives pod rolls and crashloops every replacement pod. The
+                  // init container runs as root before the gateway, so strip it
+                  // here unconditionally to break the loop.
+                  if (cfg.models && cfg.models.providers && cfg.models.providers['codex-cli']) {
+                    delete cfg.models.providers['codex-cli'];
+                  }
 
                   // Talk voice (classic batch TTS). ElevenLabs picks up
                   // ELEVENLABS_API_KEY from env. modelId / voiceId can be
