@@ -690,6 +690,34 @@ spec:
                   if (chosenModel.startsWith('openai/')) {
                     cfg.agents.defaults.models[chosenModel].agentRuntime = { id: 'codex' };
                   }
+                  // codex-cli/<model> resolves against models.providers['codex-cli']
+                  // .models[]. The bundled openai plugin registers the codex-cli
+                  // BACKEND (command) but ships NO model catalog (confirmed: it
+                  // appears in no `openclaw models list` output), so a bare
+                  // codex-cli/gpt-5.6-terra ref FailoverErrors ("Unknown model ...
+                  // no models.providers['codex-cli'].models[] entry"). We own this
+                  // catalog entirely (no plugin entries to merge/clobber), so
+                  // register the chosen codex-cli model's metadata here. Routing
+                  // still goes through the codex CLI; this only supplies the
+                  // catalog row the resolver needs.
+                  if (chosenModel.startsWith('codex-cli/')) {
+                    const bareId = chosenModel.slice('codex-cli/'.length);
+                    cfg.models = cfg.models || {};
+                    cfg.models.providers = cfg.models.providers || {};
+                    const cc = cfg.models.providers['codex-cli'] = cfg.models.providers['codex-cli'] || {};
+                    cc.models = cc.models || [];
+                    if (!cc.models.some((m) => m.id === bareId)) {
+                      cc.models.push({
+                        id: bareId,
+                        name: bareId,
+                        reasoning: true,
+                        input: ['text', 'image'],
+                        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                        contextWindow: 272000,
+                        maxTokens: 128000,
+                      });
+                    }
+                  }
 
                   // Update models
                   cfg.models = cfg.models || {};
