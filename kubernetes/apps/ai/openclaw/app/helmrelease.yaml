@@ -679,6 +679,42 @@ spec:
                     cfg.agents.defaults.models = cfg.agents.defaults.models || {};
                     cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
                     cfg.agents.defaults.models[chosenModel].agentRuntime = { id: 'codex' };
+                    // Keep gpt-5.5 allowlisted as a manual fallback path
+                    // (openclaw agent --model openai/gpt-5.5) while the
+                    // primary is a 5.6-family model.
+                    cfg.agents.defaults.models['openai/gpt-5.5'] = cfg.agents.defaults.models['openai/gpt-5.5'] || {};
+                    cfg.agents.defaults.models['openai/gpt-5.5'].agentRuntime = { id: 'codex' };
+                  }
+                  // GPT-5.6 family (GA 2026-07-09) is missing from the pinned
+                  // @openclaw/codex 2026.6.11 plugin's openai catalog (stops at
+                  // gpt-5.5), so a 5.6 ref FailoverErrors at request time. Fix
+                  // per the error's own instruction: register the model as a
+                  // models.providers.openai OVERLAY. 'openai' is in openclaw's
+                  // BUILT_IN_MODEL_PROVIDER_OVERLAY_IDS, so an overlay WITHOUT
+                  // baseUrl passes config validation (zod-schema.core: overlays
+                  // without baseUrl are allowed for bundled providers ONLY —
+                  // never do this for a non-bundled id like 'codex-cli'; that
+                  // crashloops the gateway, see the 2026-07-28 incident).
+                  // Verified live 2026-07-28: terra turn returns PONG and the
+                  // overlay MERGES with the plugin catalog (gpt-5.5 still works).
+                  if (chosenModel.startsWith('openai/gpt-5.6')) {
+                    const bareId = chosenModel.slice('openai/'.length);
+                    cfg.models = cfg.models || {};
+                    cfg.models.providers = cfg.models.providers || {};
+                    const op = cfg.models.providers.openai = cfg.models.providers.openai || {};
+                    op.models = op.models || [];
+                    if (!op.models.some((m) => m.id === bareId)) {
+                      op.models.push({
+                        id: bareId,
+                        name: bareId,
+                        reasoning: true,
+                        input: ['text', 'image'],
+                        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                        // Codex caps GPT-5.6 context at ~272K (1.05M on raw API)
+                        contextWindow: 272000,
+                        maxTokens: 128000,
+                      });
+                    }
                   }
 
                   // Update models
@@ -1276,14 +1312,33 @@ spec:
               - name: OLLAMA_API_KEY
                 value: "ollama"
               # Route the embedded agent through the codex CLI backend.
-              # Canonical model ref in openclaw 2026.5.x is `openai/gpt-5.5`
-              # with the per-model agentRuntime.id pinned to `codex` (the
-              # legacy `codex-cli/<model>` form is deprecated). The codex
-              # CLI reads ChatGPT-subscription OAuth tokens from
-              # /home/node/.codex/auth.json (persisted in the PVC after a
-              # one-time `codex login`).
+              # Canonical model ref form is `openai/<model>` with the
+              # per-model agentRuntime.id pinned to `codex` (the legacy
+              # `codex-cli/<model>` form is deprecated). The codex CLI reads
+              # ChatGPT-subscription OAuth tokens from /home/node/.codex/
+              # auth.json (persisted in the PVC after a one-time `codex login`).
+              #
+              # 2026-07-28: gpt-5.5 -> gpt-5.6-terra (GPT-5.6 GA 2026-07-09;
+              # balanced tier; ~272K ctx over Codex). Verified end-to-end live
+              # before this commit (terra turn returns PONG; gpt-5.5 kept as
+              # allowlisted fallback). Needs BOTH the models.providers.openai
+              # overlay in the init script AND the app-server bin override
+              # below. The bare `gpt-5.6` alias (=Sol) is REJECTED on a
+              # ChatGPT account — pin the explicit -terra/-luna variant.
               - name: OPENCLAW_DEFAULT_MODEL
-                value: "openai/gpt-5.5"
+                value: "openai/gpt-5.6-terra"
+              # The @openclaw/codex plugin spawns its VENDORED codex for the
+              # app-server (0.139.0 in the pinned 2026.6.11 plugin), and
+              # OpenAI's backend gates GPT-5.6 on codex >= ~0.145: "The
+              # 'gpt-5.6-terra' model requires a newer version of Codex".
+              # This env var is the plugin's sanctioned override (checked in
+              # its config resolution: config command ?? env ?? managed) and
+              # points the app-server at the init-installed, unpinned
+              # @openai/codex CLI instead (0.145.0 at rollout, tracks latest
+              # each boot). Plugin<->0.145 app-server protocol compat was
+              # proven live before enabling this.
+              - name: OPENCLAW_CODEX_APP_SERVER_BIN
+                value: "/home/node/.openclaw/bin/codex"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
               # Half 2 of the update-check disable (half 1 is
