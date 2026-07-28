@@ -684,6 +684,21 @@ spec:
                   // Update models
                   cfg.models = cfg.models || {};
                   cfg.models.providers = cfg.models.providers || {};
+                  // One-time repair (2026-07-28): a short-lived build wrote a
+                  // `codex-cli` provider overlay carrying a models[] catalog but
+                  // no baseUrl. This seeding step PRESERVES the existing on-PVC
+                  // openclaw.json (cfg = existing above), so that overlay sticks
+                  // across rolls. On host 2026.6.11 the config validator rejects
+                  // it ("custom model providers must declare baseUrl; provider
+                  // overlays without baseUrl are only supported for bundled
+                  // providers") and the gateway refuses to boot → CrashLoopBackOff.
+                  // codex-cli is not used on this host (default is openai/gpt-5.5
+                  // through the codex harness), so drop any baseUrl-less codex-cli
+                  // provider so the PVC config validates again.
+                  if (cfg.models.providers['codex-cli'] && !cfg.models.providers['codex-cli'].baseUrl) {
+                    delete cfg.models.providers['codex-cli'];
+                    console.log('Repaired: removed baseUrl-less codex-cli provider from openclaw.json');
+                  }
                   // Register the local Ollama catalog. Models are picked at
                   // runtime via `openclaw models set ollama/<id>` (or by the
                   // agent itself on Mathias's request). Default stays
