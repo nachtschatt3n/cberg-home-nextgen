@@ -675,9 +675,19 @@ spec:
                   const chosenModel = process.env.OPENCLAW_DEFAULT_MODEL || displayModel;
                   cfg.agents.defaults.model.primary = chosenModel;
                   delete cfg.agents.defaults.agentRuntime;
+                  // Allowlist the chosen primary. agents.defaults.models is in
+                  // allowlist mode, so the primary MUST be present or the gateway
+                  // rejects it ("Model ... is not allowed for agent main").
+                  // openai/* additionally needs the codex agentRuntime; codex-cli/*
+                  // routes straight through the bundled codex CLI backend, which
+                  // needs NO provider catalog entry. That is how we reach
+                  // gpt-5.6-terra: it is absent from the pinned @openclaw/codex
+                  // plugin's openai catalog (<= gpt-5.5), so openai/gpt-5.6-terra
+                  // FailoverErrors ("Unknown model ... no models.providers.openai
+                  // .models[] entry"); codex-cli/gpt-5.6-terra bypasses that.
+                  cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                  cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
                   if (chosenModel.startsWith('openai/')) {
-                    cfg.agents.defaults.models = cfg.agents.defaults.models || {};
-                    cfg.agents.defaults.models[chosenModel] = cfg.agents.defaults.models[chosenModel] || {};
                     cfg.agents.defaults.models[chosenModel].agentRuntime = { id: 'codex' };
                   }
 
@@ -1260,12 +1270,17 @@ spec:
               # 2026-07-09). Validated on THIS ChatGPT-account Codex path via
               # `codex exec -m gpt-5.6-terra` (returns output). Terra = balanced
               # tier: ~272K ctx over Codex (1.05M on the raw API), multimodal,
-              # Feb-2026 knowledge cutoff. NOTE: the bare `gpt-5.6` alias (=Sol)
-              # is REJECTED on a ChatGPT account ("model is not supported when
-              # using Codex with a ChatGPT account") — only the explicit
-              # -terra/-luna variants work here, so pin the variant, not the alias.
+              # Feb-2026 knowledge cutoff.
+              #
+              # MUST use the codex-cli/ prefix, NOT openai/: the pinned
+              # @openclaw/codex plugin (2026.6.11) predates 5.6, so its openai
+              # model catalog stops at gpt-5.5 and openai/gpt-5.6-terra
+              # FailoverErrors ("Unknown model"). codex-cli/<model> routes
+              # straight through the local codex CLI with no catalog needed.
+              # Also NOTE: the bare `gpt-5.6` alias (=Sol) is REJECTED on a
+              # ChatGPT account — only explicit -terra/-luna variants work here.
               - name: OPENCLAW_DEFAULT_MODEL
-                value: "openai/gpt-5.6-terra"
+                value: "codex-cli/gpt-5.6-terra"
               - name: OPENCLAW_DOMAIN
                 value: "${SECRET_DOMAIN}"
               # Half 2 of the update-check disable (half 1 is
