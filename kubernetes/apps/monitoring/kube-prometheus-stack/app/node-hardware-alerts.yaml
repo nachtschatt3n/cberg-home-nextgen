@@ -176,3 +176,42 @@ spec:
               Investigate in Kibana: attributes.log_source:talos-kernel AND
               attributes.net.peer.ip:"{{ $labels.net_peer_ip }}". Runbook:
               docs/troubleshooting/node-reboot-observability.md
+    - name: node.memory.rules
+      rules:
+        - alert: NodeMemoryMajorPagesFaults
+          # Memory-pressure-GATED replacement for the stock node-exporter rule
+          # (disabled in helmvalues.yaml). Stock fired on
+          # rate(node_vmstat_pgmajfault[5m]) > 500 for 15m — but SWAP IS DISABLED
+          # on these Talos nodes (SwapTotal=0), so a "major page fault" is almost
+          # always a file-backed mmap read (Elasticsearch Lucene segments, Frigate
+          # video, the nightly Longhorn backup), NOT swap thrashing. The stock
+          # rule therefore fired on ordinary disk-I/O bursts with the node at
+          # ~54% memory and MemoryPressure=False (observed 2026-07-29: 03:00
+          # backup on nuc14-01 @4494/s, 13:09 ES/Frigate on nuc14-02 @1951/s —
+          # both benign, self-resolved in ~3m).
+          #
+          # Only a genuinely memory-STARVED node re-faults its file-cache fast
+          # enough to matter, so gate on BOTH a high fault rate AND low available
+          # memory, sustained. The memory gate (<10% available) is the real
+          # discriminator: normal mmap bursts happen at ~46% available and never
+          # fire; only file-cache thrashing under memory starvation does.
+          expr: |
+            rate(node_vmstat_pgmajfault{job="node-exporter"}[5m]) > 1000
+            and on (instance)
+            (
+              node_memory_MemAvailable_bytes{job="node-exporter"}
+              / node_memory_MemTotal_bytes{job="node-exporter"}
+            ) < 0.10
+          for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: memory-faults
+          annotations:
+            summary: "Sustained major page faults under memory pressure on {{ $labels.instance }}"
+            description: >-
+              {{ $labels.instance }} is major-faulting >1000 pages/s while <10% of
+              memory is available, sustained 30m — genuine file-cache thrashing under
+              memory starvation (swap is disabled, so this is not swap thrash). Check
+              the node's top memory consumers; a pod likely needs a limit bump or the
+              node is overcommitted.

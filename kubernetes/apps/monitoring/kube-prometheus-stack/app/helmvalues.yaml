@@ -22,6 +22,12 @@ data:
         # etcd (100 MiB floor, 10m). Replaced by a relaxed rule in
         # etcd-alerts.yaml (512 MiB floor, 1h). See 2026-07-25.
         etcdDatabaseHighFragmentationRatio: true
+        # Stock NodeMemoryMajorPagesFaults (rate(pgmajfault[5m])>500 for 15m)
+        # is meaningless here: SWAP IS DISABLED (SwapTotal=0), so major faults
+        # are file-backed mmap reads (ES/Frigate/backup I/O), not swap thrash —
+        # it fired on ordinary disk bursts at ~54% mem, no pressure. Replaced by
+        # a memory-pressure-gated rule in node-hardware-alerts.yaml. See 2026-07-29.
+        NodeMemoryMajorPagesFaults: true
       rules:
         kubeApiserverAvailability: false
         kubeControllerManager: false
