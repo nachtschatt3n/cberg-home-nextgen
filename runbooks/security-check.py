@@ -864,7 +864,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, "  🟡 trivy not on PATH — skipping running-image CVE scan")
         return f.worst(), f, f.markdown()
 
-    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache.json"
+    # -v2: cache schema changed to split fixable vs no-upstream-fix counts
+    # (2026-07-30). A v1 cache has no crit_fix/crit_nofix keys, so use a new
+    # file rather than crash the new emission on stale entries.
+    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v2.json"
     cache_age_sec = 86400  # 24h
 
     cached: dict | None = None
@@ -916,19 +919,34 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 report = json.loads(stdout)
             except Exception:
                 return img, None
-            crit = high = 0
-            sample_ids: list[str] = []
+            # Split by fix-availability. A CVE with a non-empty FixedVersion has
+            # an upstream fix → actionable (update the image). One with no
+            # FixedVersion (Status affected/will_not_fix/fix_deferred/end_of_life)
+            # cannot be patched until upstream ships — that's the AR-029 accepted
+            # class. Severity does NOT decide acceptance; fix-availability does.
+            cf = cn = hf = hn = 0  # crit-fixable, crit-nofix, high-fixable, high-nofix
+            fix_ids: list[str] = []
+            nofix_ids: list[str] = []
             for tgt in report.get("Results", []) or []:
                 for v in tgt.get("Vulnerabilities", []) or []:
                     sev = v.get("Severity", "")
+                    fixable = bool(v.get("FixedVersion"))
+                    vid = v.get("VulnerabilityID")
                     if sev == "CRITICAL":
-                        crit += 1
+                        cf, cn = (cf + 1, cn) if fixable else (cf, cn + 1)
                     elif sev == "HIGH":
-                        high += 1
-                    if (crit + high) <= 5 and v.get("VulnerabilityID"):
-                        sample_ids.append(v["VulnerabilityID"])
-            if crit or high:
-                return img, {"critical": crit, "high": high, "sample": sample_ids[:5]}
+                        hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
+                    else:
+                        continue
+                    if vid:
+                        if fixable and len(fix_ids) < 5:
+                            fix_ids.append(vid)
+                        elif not fixable and len(nofix_ids) < 5:
+                            nofix_ids.append(vid)
+            if cf or cn or hf or hn:
+                return img, {"crit_fix": cf, "crit_nofix": cn,
+                             "high_fix": hf, "high_nofix": hn,
+                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5]}
             return img, None
 
         # 6 parallel scans is enough to overlap registry latency without
@@ -953,30 +971,44 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         if img in distinct_images
     }
 
-    # Surface findings: any image with >0 CRITICAL = CRITICAL audit finding;
-    # >5 HIGH on a single image = WARNING (noise floor for CVE accumulation).
+    # Surface findings by FIX-AVAILABILITY, not raw severity. A CVE with an
+    # upstream fix is actionable (update the image) and must surface regardless
+    # of severity; a CVE with no upstream fix can't be patched yet and is the
+    # AR-029 accepted class. This replaces the old severity-only emission whose
+    # "N CRITICAL + M HIGH CVEs" message was swept into `accepted` by AR-029's
+    # blunt "HIGH CVEs" substring — masking FIXABLE criticals (2026-07-30 fix).
     if findings_per_image:
+        n_actionable = n_accepted = 0
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
-            sample = ", ".join(r["sample"][:3]) + ("…" if len(r["sample"]) > 3 else "")
-            if r["critical"] > 0:
-                f.add(CRITICAL, f"`{tag}`: {r['critical']} CRITICAL + {r['high']} HIGH CVEs — {sample}")
-                cprint(C.RED, f"  🔴 {tag}: {r['critical']}C/{r['high']}H — {sample}")
-            elif r["high"] > 5:
-                f.add(WARNING, f"`{tag}`: {r['high']} HIGH CVEs — {sample}")
-                cprint(C.YELLOW, f"  🟡 {tag}: {r['high']} HIGH — {sample}")
-        cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images "
-                       f"with CRITICAL or >5 HIGH CVEs")
+            fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
+            # FIXABLE — upstream fix exists → actionable, always surfaces.
+            if r["crit_fix"] > 0:
+                f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — upstream fix available, update the image — {fix_s}")
+                cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL — {fix_s}")
+                n_actionable += 1
+            elif r["high_fix"] > 5:
+                f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — update available — {fix_s}")
+                cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH — {fix_s}")
+                n_actionable += 1
+            # NO UPSTREAM FIX — nothing to patch until upstream ships; accepted
+            # per AR-029. Tagged ACCEPTED directly (precise), not via substring.
+            if r["crit_nofix"] > 0 or r["high_nofix"] > 0:
+                f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_nofix']} CRITICAL + {r['high_nofix']} HIGH CVE(s) with no upstream fix (accepted — unpatchable until upstream ships)")
+                n_accepted += 1
+        cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs "
+                       f"— {n_actionable} with a FIXABLE backlog (actionable), {n_accepted} no-upstream-fix (accepted)")
     else:
-        cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL CVEs in {len(distinct_images)} running images "
-                       "(no images had >5 HIGH either)")
+        cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL/HIGH CVEs in {len(distinct_images)} running images")
 
-    # AR-029 ("HIGH CVEs" — upstream-tracked image CVE backlogs we don't
-    # rebuild) was accepted in the policy DB but this function never called
-    # suppress_accepted(), so it has been a complete no-op since inception:
-    # every Trivy CRITICAL+HIGH and HIGH-only finding surfaced as open every
-    # cycle regardless of acceptance. Wire it up like s3/s7/s9 do.
-    f.suppress_accepted(_ACCEPTED_RISKS)
+    # AR-029 ("HIGH CVEs") is now applied PRECISELY above by fix-availability
+    # (no-upstream-fix → accepted, fixable → surfaced regardless of severity),
+    # so EXCLUDE its blunt "HIGH CVEs" substring from the generic suppressor —
+    # it was matching the "N CRITICAL + M HIGH CVEs" message and masking fixable
+    # criticals. The other image ARs (AR-047 openclaw, AR-048 mcpo, AR-010
+    # mariadb) still apply via suppress_accepted.
+    _ar_ex029 = {k: v for k, v in _ACCEPTED_RISKS.items() if k != "AR-029"}
+    f.suppress_accepted(_ar_ex029)
     return f.worst(), f, f.markdown()
 
 
