@@ -799,6 +799,48 @@ def s3_git_history() -> tuple[str, Findings, str]:
     return f.worst(), f, f.markdown()
 
 
+_VER_CHECKER = None  # lazy-loaded VersionChecker (registry tag lookups)
+
+
+def _newer_upstream_tag_exists(image_ref: str):
+    """Is there a newer upstream image TAG than the one we run?
+
+    Returns True  → a newer tag exists → a fixable CVE is actionable by a bump.
+            False → we're already on the newest tag, OR a floating tag
+                    (latest/main/git-sha) whose fix would require an upstream
+                    REBUILD — which we don't do (we consume upstream images).
+            None  → undeterminable (registry error / no tag). Caller must fail
+                    toward SURFACING (never hide a critical on a lookup error).
+
+    This is the "we don't rebuild, we run source tags" refinement: a CVE Trivy
+    calls "fixable" (a patched package exists in some base repo) is only
+    actionable for us if the vendor has published a newer image tag carrying it.
+    """
+    global _VER_CHECKER
+    try:
+        if _VER_CHECKER is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "check_all_versions", SCRIPT_DIR / "check-all-versions.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _VER_CHECKER = mod.VersionChecker(
+                str(SCRIPT_DIR.parent),
+                github_token=os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
+        vc = _VER_CHECKER
+        repo, _, tag = image_ref.split("@")[0].rpartition(":")
+        if not repo or not tag:
+            return None
+        if vc.is_rolling_tag(tag):
+            return False  # latest/main/sha — as current as the tag allows
+        latest = vc.get_latest_image_tag(repo, tag)
+        if not latest:
+            return None  # can't determine → surface (security-safe)
+        return not vc.tags_are_equal(latest, tag)
+    except Exception:
+        return None
+
+
 def s4_cve_check() -> tuple[str, Findings, str]:
     section_header(4, "CVE / Vulnerability Check")
     f = Findings()
@@ -978,26 +1020,38 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # "N CRITICAL + M HIGH CVEs" message was swept into `accepted` by AR-029's
     # blunt "HIGH CVEs" substring — masking FIXABLE criticals (2026-07-30 fix).
     if findings_per_image:
-        n_actionable = n_accepted = 0
+        n_actionable = n_latest = n_accepted = 0
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
             fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
-            # FIXABLE — upstream fix exists → actionable, always surfaces.
-            if r["crit_fix"] > 0:
-                f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — upstream fix available, update the image — {fix_s}")
-                cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL — {fix_s}")
-                n_actionable += 1
-            elif r["high_fix"] > 5:
-                f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — update available — {fix_s}")
-                cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH — {fix_s}")
-                n_actionable += 1
-            # NO UPSTREAM FIX — nothing to patch until upstream ships; accepted
-            # per AR-029. Tagged ACCEPTED directly (precise), not via substring.
+            # FIXABLE CVEs are actionable ONLY if a newer upstream TAG exists to
+            # bump to — we consume upstream images and never rebuild, so a fix
+            # that lives only in a base-repo the vendor hasn't re-published is
+            # not actionable by us (2026-07-31 refinement). newer: True/None →
+            # surface (None = undeterminable, fail toward surfacing); False →
+            # already on the newest/floating tag → accept (needs upstream rebuild).
+            if r["crit_fix"] > 0 or r["high_fix"] > 5:
+                newer = _newer_upstream_tag_exists(img)
+                if newer is False:
+                    f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)")
+                    cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
+                    n_latest += 1
+                elif r["crit_fix"] > 0:
+                    f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — newer upstream tag available, bump the image — {fix_s}")
+                    cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (bump available) — {fix_s}")
+                    n_actionable += 1
+                else:
+                    f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}")
+                    cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (bump available) — {fix_s}")
+                    n_actionable += 1
+            # NO UPSTREAM FIX at all — nothing to patch until upstream ships;
+            # accepted per AR-029. Tagged ACCEPTED directly (precise).
             if r["crit_nofix"] > 0 or r["high_nofix"] > 0:
                 f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_nofix']} CRITICAL + {r['high_nofix']} HIGH CVE(s) with no upstream fix (accepted — unpatchable until upstream ships)")
                 n_accepted += 1
-        cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs "
-                       f"— {n_actionable} with a FIXABLE backlog (actionable), {n_accepted} no-upstream-fix (accepted)")
+        cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs — "
+                       f"{n_actionable} actionable (newer tag → bump), {n_latest} fixable-but-already-latest (accepted), "
+                       f"{n_accepted} no-upstream-fix (accepted)")
     else:
         cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL/HIGH CVEs in {len(distinct_images)} running images")
 
