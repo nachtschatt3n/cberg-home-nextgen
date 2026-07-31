@@ -10,10 +10,13 @@ PRs so the cluster stays current without the operator hand-merging every
 patch/minor bump — while a mis-classified "safe" update (e.g. a patch tag that
 is actually breaking) is still held for review.
 
-The engine is `runbooks/auto-update.py`, driven by the `daily-operation`
-orchestrator (rule 4c). It is **strict deny-by-default**: a PR merges only when
-every gate passes AND the run is the scheduled cron sweep. A manual
-`operation sweep` is dry-run only, keeping it read-only.
+The engine is `runbooks/auto-update.py`. It is **strict deny-by-default**: a PR
+merges only when every gate passes. **Where it APPLIES (updated 2026-07-31):**
+safe updates land in the **maintenance windows** — the `maintenance-window-agent`
+runs `AUTO_UPDATE_APPLY=1 auto-update.py --apply` at Step 0 of every tue/thu/sun
+window. The daily **sweep is read-only** and only DRY-RUNS the engine (rule 4c)
+to report what will land next window. This split keeps observability read-only
+while safe patch/minor bumps still flow automatically on the window cadence.
 
 The core requirement — *"assess the safe level correctly"* — is met by four
 independent gates, not the semver label alone: the label is necessary but not

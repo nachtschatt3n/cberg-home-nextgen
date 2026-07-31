@@ -171,35 +171,21 @@ needs their decision, and what got auto-fixed.
     "red verdict / 0 open findings" dashboard artifact. Only after this
     reconcile, read `/api/cycles/latest`.
 
-4c. **Auto-apply SAFE version updates — CRON RUNS ONLY.** After the
-    version specialist has finished (so open-PR + CI state is fresh) and
-    the verdict is reconciled, run the auto-updater. It is a strict,
-    deny-by-default classifier over open Renovate PRs — full contract in
-    `docs/sops/auto-update.md` and `runbooks/auto-update-policy.yaml`.
+4c. **Report the safe-update queue — REPORT-ONLY (the sweep never merges).**
+    The sweep is read-only observability; SAFE updates are APPLIED in the
+    maintenance windows (the `maintenance-window-agent`'s Step 0 runs
+    `auto-update.py --apply` every tue/thu/sun window), NOT here. So here just
+    DRY-RUN the auto-updater to show what will land next window:
 
-    - **Scheduled (cron) run** — `SWEEP_TRIGGER=cron` is set (rule 0): APPLY.
-      The merge + Flux reconcile + post-apply health gate + auto-revert all
-      run inside the script:
+        .venv/bin/python3 runbooks/auto-update.py --json
 
-          SWEEP_TRIGGER=cron .venv/bin/python3 runbooks/auto-update.py --apply --json
-
-      It only merges a PR that is patch/minor, not blocked by the policy
-      deny-list, carries NO breaking-change signal in its release notes, and
-      is mergeable with green CI (flux-local). On a post-apply health
-      regression it `git revert`s the batch, re-reconciles, and emits a
-      **critical** `auto-update` finding. Exit 2 = applied-then-reverted.
-
-    - **Manual (operator) run** — no cron trigger: DRY-RUN only, never merge
-      (the manual sweep stays read-only):
-
-          .venv/bin/python3 runbooks/auto-update.py --json
-
-    Fold the result into the summary: report `merged` (count + deps),
-    `reverted` (if any — surface prominently, it's a regression), and how
-    many safe updates are queued for the next scheduled run. The script
-    writes its own findings to the shared cycle, so they appear in the
-    dashboard read (rule 4a) automatically. If `--apply` is refused because
-    the trigger isn't cron, that's the guard working — note it and move on.
+    Fold the result into the summary: how many PRs are classified safe (and their
+    deps) — these auto-merge at the next maintenance window — plus any that are
+    held/deny-listed. Do NOT pass `--apply` from the sweep: keeping application
+    in the windows is what lets the sweep stay strictly read-only while safe
+    updates still flow automatically. (The full engine contract — deny-list,
+    breaking-change scan, CI gate, health gate + auto-revert — is in
+    `docs/sops/auto-update.md`.)
 
 4d. **Check the maintenance-window schedule + keep held updates planned.**
     Everything the auto-updater HELD (rule 4c) is a non-safe update that flows
