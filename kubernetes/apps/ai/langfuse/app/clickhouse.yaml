@@ -32,6 +32,30 @@ data:
             <replica>langfuse_clickhouse_1</replica>
         </macros>
     </clickhouse>
+  system-log-ttl.xml: |
+    <clickhouse>
+        <!--
+          Cap ClickHouse's internal system-log tables. These ship with NO TTL and
+          had grown to ~13 GiB on langfuse-clickhouse-data (asynchronous_metric_log
+          alone was 10.5 GiB / 20.6B rows), flapping the PVC usage warning, while the
+          actual langfuse trace data is only a couple of MiB. Langfuse does not read
+          these tables (they are ClickHouse server diagnostics only), so an aggressive
+          3-day retention is safe and durable across pod/PVC recreation.
+        -->
+        <asynchronous_metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></asynchronous_metric_log>
+        <metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></metric_log>
+        <trace_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
+        <query_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_log>
+        <query_views_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_views_log>
+        <part_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></part_log>
+        <opentelemetry_span_log><ttl>finish_date + INTERVAL 3 DAY DELETE</ttl></opentelemetry_span_log>
+        <!--
+          Collect async metrics every 60s instead of the 1s default — this was the
+          main write-volume driver (~86M rows/day into asynchronous_metric_log). 60s
+          cuts that ~60x while retaining server diagnostics.
+        -->
+        <asynchronous_metrics_update_period_s>60</asynchronous_metrics_update_period_s>
+    </clickhouse>
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -77,6 +101,9 @@ spec:
         - name: config
           mountPath: /etc/clickhouse-server/config.d/cluster.xml
           subPath: cluster.xml
+        - name: config
+          mountPath: /etc/clickhouse-server/config.d/system-log-ttl.xml
+          subPath: system-log-ttl.xml
         readinessProbe:
           httpGet:
             path: /ping
