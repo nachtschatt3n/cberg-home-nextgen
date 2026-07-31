@@ -48,7 +48,14 @@ data:
         <query_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_log>
         <query_views_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_views_log>
         <part_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></part_log>
-        <opentelemetry_span_log><ttl>finish_date + INTERVAL 3 DAY DELETE</ttl></opentelemetry_span_log>
+        <!--
+          NOTE: opentelemetry_span_log is intentionally omitted. ClickHouse's base
+          config.xml defines it with an explicit <engine> block, and CH rejects a
+          separate <ttl> tag alongside an <engine> ("TTL parameters should be
+          specified directly inside 'engine'", BAD_ARGUMENTS) — which aborts server
+          startup. That table is tiny (<1 MiB) and not a growth concern, so it is
+          left at its default (no TTL).
+        -->
         <!--
           Collect async metrics every 60s instead of the 1s default — this was the
           main write-volume driver (~86M rows/day into asynchronous_metric_log). 60s
