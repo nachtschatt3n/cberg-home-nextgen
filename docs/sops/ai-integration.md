@@ -198,13 +198,16 @@ kubectl get pods -n ai -l app.kubernetes.io/name=openclaw
 # Access: https://openclaw.${SECRET_DOMAIN}
 ```
 
-**Voice fallback:** `say.py` uses ElevenLabs as the primary TTS provider with
-a local Qwen3-TTS fallback (mlx-audio, OpenAI-compatible) at
-`http://192.168.30.111:8000/v1` on the mini. The fallback base URL comes from
-the `OPENCLAW_TTS_FALLBACK_URL` key in the `openclaw-secret` SOPS secret
-(`kubernetes/apps/ai/openclaw/app/secret.sops.yaml`) and is triggered on
-ElevenLabs HTTP 401/429 (quota). It returns WAV, which `say.py` converts to
-OGG/Opus via the existing ffmpeg path — the `sendVoice` flow is unchanged.
+**Voice / TTS:** `say.py` uses the local **Qwen3-TTS** (mlx-audio,
+OpenAI-compatible) on the mini (`192.168.30.111`, port 8000) as the
+**PRIMARY** provider, with **ElevenLabs as the fallback** — reversed from the
+earlier ElevenLabs-primary setup so the default is free local TTS and cloud is
+used only when the local server is unavailable (verified deployed 2026-08-01).
+The local base URL comes from the `OPENCLAW_TTS_FALLBACK_URL` key (name is
+legacy, from when Qwen3 was the fallback) in the `openclaw-secret` SOPS secret
+(`kubernetes/apps/ai/openclaw/app/secret.sops.yaml`); `ELEVENLABS_API_KEY`
+provides the fallback. Qwen3 returns WAV, which `say.py` converts to OGG/Opus
+via the existing ffmpeg path — the `sendVoice` flow is unchanged.
 
 **HA Assist fallback (conversation agent):** The gateway's OpenAI-compatible
 `/v1/chat/completions` endpoint is enabled (config-guard block in
