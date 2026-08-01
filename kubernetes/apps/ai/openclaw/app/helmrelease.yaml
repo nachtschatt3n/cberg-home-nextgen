@@ -1151,11 +1151,15 @@ spec:
                   fi
                 }
                 seed_workspace_file /etc/openclaw-skills/workspace-soul.md      /home/node/clawd/SOUL.md      "Describe who the assistant is, tone, and boundaries."
-                # Marker "- **Name:**" exists in BOTH the old Clawd identity
-                # (so the 2026-08-01 Juno rename replaces it once) and the new
-                # Juno content (so future configmap edits keep propagating —
-                # see the TOOLS.md freeze trap above).
-                seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "- **Name:**"
+                # PVC-OWNED persona (2026-08-01): the marker below intentionally
+                # matches NOTHING in the live content, so this seeds ONLY when
+                # IDENTITY.md is missing (first boot / PVC loss). The PVC copy is
+                # the living original that Juno may self-edit; the configmap key
+                # is just the encrypted first-boot default. Do NOT switch back to
+                # an in-content marker — that makes git clobber self-edits every
+                # boot. (SOUL.md already behaves this way: its marker no longer
+                # matches, so it is PVC-owned too.)
+                seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "openclaw-bootstrap-placeholder-only"
                 seed_workspace_file /etc/openclaw-skills/workspace-user.md      /home/node/clawd/USER.md      "- Preferred address:"
                 # Marker MUST be a stable string that exists in the current
                 # workspace-tools.md, or the file freezes and edits never
