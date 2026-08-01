@@ -1151,7 +1151,11 @@ spec:
                   fi
                 }
                 seed_workspace_file /etc/openclaw-skills/workspace-soul.md      /home/node/clawd/SOUL.md      "Describe who the assistant is, tone, and boundaries."
-                seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "- Creature:"
+                # Marker "- **Name:**" exists in BOTH the old Clawd identity
+                # (so the 2026-08-01 Juno rename replaces it once) and the new
+                # Juno content (so future configmap edits keep propagating —
+                # see the TOOLS.md freeze trap above).
+                seed_workspace_file /etc/openclaw-skills/workspace-identity.md  /home/node/clawd/IDENTITY.md  "- **Name:**"
                 seed_workspace_file /etc/openclaw-skills/workspace-user.md      /home/node/clawd/USER.md      "- Preferred address:"
                 # Marker MUST be a stable string that exists in the current
                 # workspace-tools.md, or the file freezes and edits never
