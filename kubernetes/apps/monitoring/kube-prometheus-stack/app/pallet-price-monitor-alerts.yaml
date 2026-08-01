@@ -62,9 +62,12 @@ spec:
     - alert: PalletBuySignalActive
       annotations:
         description: |
-          The pellet-price-monitor reports a BUY verdict at composite_score
-          {{ $value }}. Local PLZ 65520 price is at the buy threshold or
-          below — review the Grafana dashboard and consider placing the order.
+          The pellet-price-monitor reports a BUY verdict (composite buy-pressure
+          score {{ with query "pellet_composite_score" }}{{ . | first | value | printf "%.1f" }}{{ end }}/100).
+          Actionable price — cheapest deliverable ENplus A1, PLZ 65520, 6 t loose:
+          €{{ with query "pellet_local_price_eur_per_t" }}{{ . | first | value | printf "%.2f" }}{{ end }}/t
+          (national avg €{{ with query "pellet_national_avg_eur_per_t" }}{{ . | first | value | printf "%.2f" }}{{ end }}/t).
+          Review the Grafana dashboard and consider placing the order.
         summary: 🔔 Pellet BUY signal — order window open
       expr: |
         max(pellet_buy_signal_active) == 1

@@ -45,7 +45,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/pellet-price-monitor
-              tag: sha-90403d0
+              tag: sha-5c7b85e
               pullPolicy: IfNotPresent
             env:
               - { name: TZ, value: "Europe/Berlin" }
