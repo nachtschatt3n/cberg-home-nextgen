@@ -1319,10 +1319,10 @@ spec:
                   chown -R 1000:1000 "$fws" 2>/dev/null || true
                 }
                 seed_family_ws /home/node/clawd-juno-andrea   workspace-soul.md       workspace-identity.md       workspace-agents-juno-andrea.md workspace-user-andrea.md        ALL
-                seed_family_ws /home/node/clawd-vita-mathias  workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-mathias.md  "paperless nextcloud-mail calendar nc"
-                seed_family_ws /home/node/clawd-vita-andrea   workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-andrea.md   "paperless nextcloud-mail calendar nc"
-                seed_family_ws /home/node/clawd-vita-margaret workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-margaret.md "paperless nextcloud-mail calendar nc"
-                seed_family_ws /home/node/clawd-vita-cora     workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-cora.md     "paperless nextcloud-mail calendar nc"
+                seed_family_ws /home/node/clawd-vita-mathias  workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-mathias.md  "paperless nextcloud-mail calendar nc health vorsorge"
+                seed_family_ws /home/node/clawd-vita-andrea   workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-andrea.md   "paperless nextcloud-mail calendar nc health vorsorge"
+                seed_family_ws /home/node/clawd-vita-margaret workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-margaret.md "paperless nextcloud-mail calendar nc health vorsorge"
+                seed_family_ws /home/node/clawd-vita-cora     workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-cora.md     "paperless nextcloud-mail calendar nc health vorsorge"
                 seed_family_ws /home/node/clawd-jerry-mathias workspace-soul-jerry.md workspace-identity-jerry.md workspace-agents-jerry.md       workspace-user-jerry-mathias.md "sure paperless"
                 seed_family_ws /home/node/clawd-jerry-andrea  workspace-soul-jerry.md workspace-identity-jerry.md workspace-agents-jerry.md       workspace-user-jerry-andrea.md  "sure paperless"
 
