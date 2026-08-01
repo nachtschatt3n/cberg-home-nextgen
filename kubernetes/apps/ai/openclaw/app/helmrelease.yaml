@@ -962,6 +962,23 @@ spec:
                     if (idAndrea) specB.push({ agentId: 'jerry-andrea',
                       match: { channel: 'telegram', accountId: 'jerry', peer: { kind: 'direct', id: idAndrea } } });
                   }
+                  // Kids' health groups on the Vita bot (both parents members).
+                  const gMarg = (process.env.TELEGRAM_GROUP_MARGARET || '').trim();
+                  const gCora = (process.env.TELEGRAM_GROUP_CORA || '').trim();
+                  if (vitaTok && (gMarg || gCora)) {
+                    cfg.channels.telegram.groups = cfg.channels.telegram.groups || {};
+                    cfg.channels.telegram.accounts.vita.groups = cfg.channels.telegram.accounts.vita.groups || {};
+                    const addG = (gid, agentId) => {
+                      cfg.channels.telegram.groups[gid] = Object.assign(
+                        {}, cfg.channels.telegram.groups[gid], { requireMention: false });
+                      cfg.channels.telegram.accounts.vita.groups[gid] = Object.assign(
+                        {}, cfg.channels.telegram.accounts.vita.groups[gid], { requireMention: false });
+                      specB.unshift({ agentId: agentId,
+                        match: { channel: 'telegram', accountId: 'vita', peer: { kind: 'group', id: gid } } });
+                    };
+                    if (gCora) addG(gCora, 'vita-cora');
+                    if (gMarg) addG(gMarg, 'vita-margaret');
+                  }
                   if (specB.length) {
                     const specKeys = new Set(specB.map((b) => b.agentId + '|' + b.match.accountId + '|' + b.match.peer.id));
                     const rest = cfg.bindings.filter((b) => {
