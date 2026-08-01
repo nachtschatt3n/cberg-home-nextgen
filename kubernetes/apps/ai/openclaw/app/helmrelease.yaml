@@ -935,6 +935,42 @@ spec:
                   if (idMathias) famAllow.add(idMathias);
                   if (idAndrea) famAllow.add(idAndrea);
                   if (famAllow.size) cfg.channels.telegram.allowFrom = Array.from(famAllow).sort();
+                  // Specialist bots (Phase 4): additional telegram ACCOUNTS, env-gated.
+                  // Adding a named account requires defaultAccount to be explicit
+                  // (doctor warns otherwise). accountId-qualified exact-peer
+                  // bindings are prepended (same tier as the Juno peer bindings —
+                  // accountId+peer is more specific than peer-only).
+                  const vitaTok = (process.env.TELEGRAM_VITA_BOT_TOKEN || '').trim();
+                  const jerryTok = (process.env.TELEGRAM_JERRY_BOT_TOKEN || '').trim();
+                  if (vitaTok || jerryTok) cfg.channels.telegram.defaultAccount = 'default';
+                  const specB = [];
+                  if (vitaTok) {
+                    cfg.channels.telegram.accounts = cfg.channels.telegram.accounts || {};
+                    cfg.channels.telegram.accounts.vita =
+                      Object.assign({}, cfg.channels.telegram.accounts.vita, { botToken: vitaTok });
+                    if (idMathias) specB.push({ agentId: 'vita-mathias',
+                      match: { channel: 'telegram', accountId: 'vita', peer: { kind: 'direct', id: idMathias } } });
+                    if (idAndrea) specB.push({ agentId: 'vita-andrea',
+                      match: { channel: 'telegram', accountId: 'vita', peer: { kind: 'direct', id: idAndrea } } });
+                  }
+                  if (jerryTok) {
+                    cfg.channels.telegram.accounts = cfg.channels.telegram.accounts || {};
+                    cfg.channels.telegram.accounts.jerry =
+                      Object.assign({}, cfg.channels.telegram.accounts.jerry, { botToken: jerryTok });
+                    if (idMathias) specB.push({ agentId: 'jerry-mathias',
+                      match: { channel: 'telegram', accountId: 'jerry', peer: { kind: 'direct', id: idMathias } } });
+                    if (idAndrea) specB.push({ agentId: 'jerry-andrea',
+                      match: { channel: 'telegram', accountId: 'jerry', peer: { kind: 'direct', id: idAndrea } } });
+                  }
+                  if (specB.length) {
+                    const specKeys = new Set(specB.map((b) => b.agentId + '|' + b.match.accountId + '|' + b.match.peer.id));
+                    const rest = cfg.bindings.filter((b) => {
+                      const k = b.agentId + '|' + (b.match && b.match.accountId) + '|' +
+                        (b.match && b.match.peer && b.match.peer.id);
+                      return !specKeys.has(k);
+                    });
+                    cfg.bindings = specB.concat(rest);
+                  }
 
                   // Talk voice (classic batch TTS). ElevenLabs picks up
                   // ELEVENLABS_API_KEY from env. modelId / voiceId can be
