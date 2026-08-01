@@ -7,15 +7,19 @@
 
 weights:
   buckets:
-    # Three views of the buy decision, renormalised across whichever have
-    # data: spot = today's market, structural = supply-side fundamentals,
-    # forecast = the model's own forward price path. The forecast bucket
-    # exists so the verdict can never contradict the Kaessler forecast (a
-    # projected rise should pull toward BUY, not WAIT). Spot stays the single
-    # largest voice; forecast is a substantial second.
-    spot: 0.45
-    structural: 0.25
-    forecast: 0.30
+    # Four views of the buy decision, renormalised across whichever have data:
+    # spot = today's market, structural = supply-side fundamentals, forecast =
+    # the model's own forward price path, seasonal = where the local price sits
+    # relative to its rolling low (post-trough rebound vs. still at the low).
+    # The forecast bucket keeps the verdict from contradicting the Kaessler
+    # forecast; the seasonal bucket keeps it from sitting on HOLD once the
+    # trough has clearly passed. Spot stays the largest single voice. (The old
+    # 3-bucket split spot 0.45 / structural 0.25 / forecast 0.30 is preserved in
+    # ratio, scaled to 0.80, with seasonal taking the remaining 0.20.)
+    spot: 0.36
+    structural: 0.20
+    forecast: 0.24
+    seasonal: 0.20
 
   spot:
     hp24_local_delta_1w: 1.5
@@ -40,7 +44,24 @@ weights:
     forecast_expected_1m: 1.0
     forecast_expected_3m: 1.5
 
+  seasonal:
+    # Single component: buy-pressure from how far the local price has rebounded
+    # off its rolling 30-day low, gated on positive 1-month momentum.
+    seasonal_rebound: 1.0
+
 thresholds:
   composite_buy: 70.0          # composite >= 70 → BUY
   composite_wait_below: 40.0   # composite <= 40 → WAIT
   explicit_floor_eur_per_t: 330.0   # local price <= 330 EUR/t → BUY regardless of composite
+
+  # Seasonal rebound-from-trough BUY override (data-driven, not calendar-based —
+  # the seasonal trough month moves year to year). Promotes BUY when ALL hold:
+  #   - local price is >= rebound_buy_min_pct above its rolling 30-day low
+  #   - the 1-month trend (delta_1m) is > rebound_trend_1m_min
+  #   - max(forecast_score, structural_score) >= rebound_pressure_min
+  # Tuned to the 2026-08-01 false-HOLD (rebound +14.6%, trend +50.6, pressure
+  # 88.6) while leaving low/flat regimes (small rebound or flat/negative trend)
+  # on HOLD/WAIT.
+  rebound_buy_min_pct: 10.0
+  rebound_trend_1m_min: 0.0
+  rebound_pressure_min: 65.0
