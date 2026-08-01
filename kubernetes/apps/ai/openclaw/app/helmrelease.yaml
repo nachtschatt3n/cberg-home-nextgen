@@ -521,6 +521,11 @@ spec:
                   echo "WARN: /home/node/.openclaw/bin/openclaw missing — npm install probably failed; runtime will retry"
                 fi
                 echo "Seeding Ollama auth profile..."
+                # AUTH GUARD (2026-08-01): seed auth profiles for agents/main
+                # ONLY. Every other agent (juno-andrea, vita-*, jerry-*) must
+                # have NO local auth-profiles.json — they reach gpt-5.6-terra
+                # via OAuth READ-THROUGH to the default agent (main). A local
+                # profile under any other agentDir silently breaks that.
                 AUTH_DIR="/home/node/.openclaw/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
                 printf '%s\n' \
@@ -830,6 +835,107 @@ spec:
                     delete cfg.models.providers['codex-cli'];
                   }
 
+                  // ── Multi-user family config (2026-08-01) ──────────────────
+                  // Declarative, idempotent merge. Rules:
+                  //  * agents merged BY ID: insert if missing, else enforce only
+                  //    invariants (workspace/agentDir/name/identity/subagents/
+                  //    tools) — NEVER touches `voice` or unknown entries.
+                  //  * bindings: managed exact-peer entries first, unmanaged
+                  //    preserved, channel-wide fallback last.
+                  //  * telegram allowFrom is a UNION (runtime pairing survives).
+                  //  * Andrea pieces are env-gated (TELEGRAM_ID_ANDREA) so code
+                  //    ships before secrets exist.
+                  //  * `main` (= juno-mathias) MUST stay `default: true` — it is
+                  //    the codex OAuth read-through anchor for ALL other agents.
+                  //    NEVER seed auth-profiles.json under any other agentDir.
+                  const idMathias = (process.env.TELEGRAM_ID_MATHIAS || '').trim();
+                  const idAndrea = (process.env.TELEGRAM_ID_ANDREA || '').trim();
+                  cfg.session = cfg.session || {};
+                  cfg.session.dmScope = 'per-channel-peer';
+                  cfg.agents.list = cfg.agents.list || [{ id: 'main' }];
+                  const famById = {};
+                  cfg.agents.list.forEach((a) => { famById[a.id] = a; });
+                  if (!famById['main']) {
+                    const m = { id: 'main' };
+                    cfg.agents.list.unshift(m); famById['main'] = m;
+                  }
+                  const mainAgent = famById['main'];
+                  mainAgent.default = true;
+                  mainAgent.name = 'Juno (Mathias)';
+                  mainAgent.identity = Object.assign({}, mainAgent.identity, { name: 'Juno' });
+                  mainAgent.subagents = {
+                    allowAgents: ['vita-mathias', 'jerry-mathias', 'vita-margaret', 'vita-cora'],
+                    requireAgentId: true,
+                  };
+                  const famManaged = [
+                    { id: 'juno-andrea', name: 'Juno (Andrea)',
+                      identity: { name: 'Juno' },
+                      workspace: '/home/node/clawd-juno-andrea',
+                      agentDir: '/home/node/.openclaw/agents/juno-andrea/agent',
+                      subagents: { allowAgents: ['vita-andrea', 'jerry-andrea', 'vita-margaret', 'vita-cora'],
+                                   requireAgentId: true } },
+                    { id: 'vita-mathias', name: 'Vita (Mathias)', identity: { name: 'Vita' },
+                      workspace: '/home/node/clawd-vita-mathias',
+                      agentDir: '/home/node/.openclaw/agents/vita-mathias/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    { id: 'vita-andrea', name: 'Vita (Andrea)', identity: { name: 'Vita' },
+                      workspace: '/home/node/clawd-vita-andrea',
+                      agentDir: '/home/node/.openclaw/agents/vita-andrea/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    { id: 'vita-margaret', name: 'Vita (Margaret)', identity: { name: 'Vita' },
+                      workspace: '/home/node/clawd-vita-margaret',
+                      agentDir: '/home/node/.openclaw/agents/vita-margaret/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    { id: 'vita-cora', name: 'Vita (Cora)', identity: { name: 'Vita' },
+                      workspace: '/home/node/clawd-vita-cora',
+                      agentDir: '/home/node/.openclaw/agents/vita-cora/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    { id: 'jerry-mathias', name: 'Jerry (Mathias)', identity: { name: 'Jerry' },
+                      workspace: '/home/node/clawd-jerry-mathias',
+                      agentDir: '/home/node/.openclaw/agents/jerry-mathias/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                    { id: 'jerry-andrea', name: 'Jerry (Andrea)', identity: { name: 'Jerry' },
+                      workspace: '/home/node/clawd-jerry-andrea',
+                      agentDir: '/home/node/.openclaw/agents/jerry-andrea/agent',
+                      tools: { deny: ['sessions_spawn'] }, subagents: { allowAgents: [] } },
+                  ];
+                  famManaged.forEach((spec) => {
+                    const cur = famById[spec.id];
+                    if (!cur) {
+                      cfg.agents.list.push(spec);
+                      famById[spec.id] = spec;
+                    } else {
+                      cur.name = spec.name;
+                      cur.workspace = spec.workspace;
+                      cur.agentDir = spec.agentDir;
+                      cur.identity = Object.assign({}, cur.identity, spec.identity);
+                      if (spec.tools) cur.tools = spec.tools;
+                      if (spec.subagents) cur.subagents = spec.subagents;
+                    }
+                  });
+                  // Bindings: managed peers first, unmanaged preserved, fallback last.
+                  const famBindings = [];
+                  if (idMathias) famBindings.push({ agentId: 'main',
+                    match: { channel: 'telegram', peer: { kind: 'direct', id: idMathias } } });
+                  if (idAndrea) famBindings.push({ agentId: 'juno-andrea',
+                    match: { channel: 'telegram', peer: { kind: 'direct', id: idAndrea } } });
+                  const famOther = (cfg.bindings || []).filter((b) => {
+                    const pid = b && b.match && b.match.peer && String(b.match.peer.id);
+                    const isManagedPeer = pid && (pid === idMathias || pid === idAndrea);
+                    const isFallback = b && b.agentId === 'main' && b.match &&
+                      b.match.channel === 'telegram' && !b.match.peer;
+                    return !isManagedPeer && !isFallback;
+                  });
+                  cfg.bindings = famBindings.concat(famOther,
+                    [{ agentId: 'main', match: { channel: 'telegram' } }]);
+                  // allowFrom union
+                  cfg.channels = cfg.channels || {};
+                  cfg.channels.telegram = cfg.channels.telegram || {};
+                  const famAllow = new Set((cfg.channels.telegram.allowFrom || []).map(String));
+                  if (idMathias) famAllow.add(idMathias);
+                  if (idAndrea) famAllow.add(idAndrea);
+                  if (famAllow.size) cfg.channels.telegram.allowFrom = Array.from(famAllow).sort();
+
                   // Talk voice (classic batch TTS). ElevenLabs picks up
                   // ELEVENLABS_API_KEY from env. modelId / voiceId can be
                   // overridden via OPENCLAW_TALK_MODEL / OPENCLAW_TALK_VOICE
@@ -1050,6 +1156,9 @@ spec:
                 NODE
                 chown 1000:1000 "$CONFIG_PATH"
 
+                # AUTH GUARD (2026-08-01): agents/main ONLY — see the guard at
+                # the init-container seeding site. Other agents rely on OAuth
+                # read-through to main; never create their auth-profiles.json.
                 AUTH_DIR="/home/node/.openclaw/agents/main/agent"
                 mkdir -p "$AUTH_DIR"
                 AUTH_FILE="$AUTH_DIR/auth-profiles.json"
@@ -1170,6 +1279,52 @@ spec:
                 seed_workspace_file /etc/openclaw-skills/workspace-tools.md     /home/node/clawd/TOOLS.md     "## Custom skills on PATH"
                 seed_workspace_file /etc/openclaw-skills/workspace-agents.md    /home/node/clawd/AGENTS.md    "If you refer to the home lab"
                 seed_workspace_file /etc/openclaw-skills/workspace-heartbeat.md /home/node/clawd/HEARTBEAT.md "Optional: keep a tiny checklist"
+
+                # ── Multi-user family workspaces (2026-08-01) ─────────────
+                # Bootstrap + persona seeding for juno-andrea and the
+                # Vita/Jerry specialist fleet. Persona files (SOUL/IDENTITY/
+                # AGENTS/USER) use the never-matching marker: seeded ONLY when
+                # missing (first boot / PVC loss) — PVC-owned and agent-
+                # editable afterwards. Skill SKILL.md files refresh each boot
+                # (git-owned policy), scoped per agent type.
+                seed_family_ws() {
+                  fws="$1"; fsoul="$2"; fident="$3"; fagents="$4"; fuser="$5"; fskills="$6"
+                  mkdir -p "$fws/memory" "$fws/skills"
+                  seed_workspace_file "/etc/openclaw-skills/$fsoul"   "$fws/SOUL.md"     "openclaw-bootstrap-placeholder-only"
+                  seed_workspace_file "/etc/openclaw-skills/$fident"  "$fws/IDENTITY.md" "openclaw-bootstrap-placeholder-only"
+                  seed_workspace_file "/etc/openclaw-skills/$fagents" "$fws/AGENTS.md"   "openclaw-bootstrap-placeholder-only"
+                  seed_workspace_file "/etc/openclaw-skills/$fuser"   "$fws/USER.md"     "openclaw-bootstrap-placeholder-only"
+                  if [ "$fskills" = "ALL" ]; then
+                    for fsrc in /etc/openclaw-skills/skill-*.md; do
+                      [ -f "$fsrc" ] || continue
+                      fbase=$(basename "$fsrc" .md)
+                      fname=$${fbase#skill-}
+                      mkdir -p "$fws/skills/$fname"
+                      cp "$fsrc" "$fws/skills/$fname/SKILL.md"
+                    done
+                  else
+                    for fname in $fskills; do
+                      fsrc="/etc/openclaw-skills/skill-$fname.md"
+                      if [ -f "$fsrc" ]; then
+                        mkdir -p "$fws/skills/$fname"
+                        cp "$fsrc" "$fws/skills/$fname/SKILL.md"
+                      fi
+                    done
+                  fi
+                  # Vita workspaces get the ARAG reimbursement playbook as context
+                  case "$fws" in *clawd-vita-*)
+                    [ -f /etc/openclaw-skills/arag-plan.md ] && cp /etc/openclaw-skills/arag-plan.md "$fws/arag-plan.md" ;;
+                  esac
+                  [ -d "$fws/.git" ] || git -C "$fws" init -q 2>/dev/null || true
+                  chown -R 1000:1000 "$fws" 2>/dev/null || true
+                }
+                seed_family_ws /home/node/clawd-juno-andrea   workspace-soul.md       workspace-identity.md       workspace-agents-juno-andrea.md workspace-user-andrea.md        ALL
+                seed_family_ws /home/node/clawd-vita-mathias  workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-mathias.md  "paperless nextcloud-mail calendar"
+                seed_family_ws /home/node/clawd-vita-andrea   workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-andrea.md   "paperless nextcloud-mail calendar"
+                seed_family_ws /home/node/clawd-vita-margaret workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-margaret.md "paperless nextcloud-mail calendar"
+                seed_family_ws /home/node/clawd-vita-cora     workspace-soul-vita.md  workspace-identity-vita.md  workspace-agents-vita.md        workspace-user-vita-cora.md     "paperless nextcloud-mail calendar"
+                seed_family_ws /home/node/clawd-jerry-mathias workspace-soul-jerry.md workspace-identity-jerry.md workspace-agents-jerry.md       workspace-user-jerry-mathias.md "sure paperless"
+                seed_family_ws /home/node/clawd-jerry-andrea  workspace-soul-jerry.md workspace-identity-jerry.md workspace-agents-jerry.md       workspace-user-jerry-andrea.md  "sure paperless"
 
                 # 6. Codex CLI sandbox tuning.
                 #
