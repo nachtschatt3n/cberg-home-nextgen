@@ -17,6 +17,7 @@ resources:
   - ./paperclip-alerts.yaml
   - ./node-hardware-alerts.yaml
   - ./etcd-alerts.yaml
+  - ./ingress-nginx-availability-alerts.yaml
   - ./tube-archivist-alerts.yaml
   - ./library-tools-alerts.yaml
   - ./solarfocus-scraper-alerts.yaml

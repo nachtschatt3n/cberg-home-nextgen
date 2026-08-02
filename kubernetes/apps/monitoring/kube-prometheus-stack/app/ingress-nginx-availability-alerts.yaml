@@ -1,0 +1,42 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: ingress-nginx-availability-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: ingress-nginx.availability
+    rules:
+    # Sustained ingress-nginx 5xx = a real backend AVAILABILITY outage (IT-ops).
+    # This is the Prometheus counterpart to the 2026-08-02 Wazuh N-04 retune: the
+    # Wazuh rule 100504 was reclassified out of the `attack` SIEM bucket into
+    # `availability`, so intrusion detection no longer double-duties as outage
+    # detection. This rule is where a genuine sustained 5xx flood now surfaces.
+    # The `for: 10m` is deliberate — a deploy/rollout/node-reboot blip clears in
+    # <2m (Longhorn reconverges, pods reschedule) and must NOT page; only a
+    # backend that keeps 5xx-ing for 10m+ is a real outage. authentik is excluded
+    # here because it has dedicated coverage (AuthentikIngressAuthBackendError).
+    - alert: IngressNginx5xxSustained
+      annotations:
+        summary: Ingress backend {{ $labels.exported_service }} serving sustained 5xx
+        description: |
+          ingress-nginx has served > 0.1 5xx/s for backend
+          `{{ $labels.exported_service }}` over the last 10 minutes
+          ({{ $value | printf "%.2f" }}/s). This is a real backend availability
+          outage, not a deploy/reboot blip (those clear well within the 10m
+          window). Check the backend's pods, its upstream health, and recent
+          Flux changes.
+      expr: |
+        sum by (exported_service) (
+          rate(nginx_ingress_controller_requests{status=~"5..", exported_service!~".*authentik.*"}[5m])
+        ) > 0.1
+      for: 10m
+      labels:
+        category: availability
+        component: ingress-nginx
+        severity: warning
