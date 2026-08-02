@@ -30,11 +30,31 @@ This merges every OPEN Renovate PR that is patch/minor, not on the
 green CI — then Flux-reconciles, health-gates, and **auto-reverts** the batch on
 regression (all built into the engine). It NEVER touches majors, breaking
 changes (affine), the Flux control plane, node-reboot items, or anything
-deny-listed — those only move via the vetted plans below. Report what it merged
-(or reverted). This runs in EVERY window including the no-reboot tue/thu slots,
-so safe patch/minor bumps flow automatically without an operator asking. If it
-auto-reverts, that's already surfaced via OpenClaw — note it and continue to the
-plans.
+deny-listed — those only move via the vetted plans below.
+
+**Then close the AUTO lane completely (hybrid) — the no-cracks half.** The step
+above only covers safe updates that HAVE a Renovate PR. A safe update with no PR
+yet would otherwise wait days for Renovate's schedule (the crack). So next, run
+the coverage reconciler and direct-bump the safe ones that have no PR:
+
+```bash
+.venv/bin/python3 runbooks/coverage.py --json
+```
+
+For each item in the **AUTO** lane whose `reason` is NOT `Renovate PR #…` (i.e.
+safe, but no PR exists), **bump its manifest tag directly** via GitOps (delegate
+the edit to `cberg-agent`: find the image/chart in its helmrelease, set the
+`target` tag, commit, push). Do them as ONE batch, then Flux-reconcile and apply
+the **same health gate + auto-revert** discipline as the PR path (if a bumped
+app regresses, `git revert` it + alert). This is the "hybrid": PR-merge when a
+PR exists (CI-gated), direct-bump when it doesn't — so **no safe update ever
+stalls waiting on Renovate.** REBUILD-lane items (self-built) and PLAN-lane items
+are NOT touched here — they go through their source-repo rebuild / vetted plans.
+
+Report what merged, what was direct-bumped, and any revert. This runs in EVERY
+window (incl. no-reboot tue/thu), so safe bumps flow automatically without an
+operator asking. Auto-reverts are already surfaced via OpenClaw — note and
+continue to the plans.
 
 ## Step 1 — establish the window + candidate set
 - Read `runbooks/maintenance-windows.yaml`. Identify the target window (the one

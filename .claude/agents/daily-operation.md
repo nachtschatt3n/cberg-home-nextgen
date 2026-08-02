@@ -187,6 +187,36 @@ needs their decision, and what got auto-fixed.
     breaking-change scan, CI gate, health gate + auto-revert — is in
     `docs/sops/auto-update.md`.)
 
+4d0. **NO-CRACKS COVERAGE GUARANTEE — run this FIRST.** Every actionable update
+    must land in a lane; nothing falls through. The auto-updater only sees open
+    Renovate PRs, so `runbooks/coverage.py` closes that hole by enumerating the
+    FULL actionable universe (from `version-check-current.md`) and assigning each
+    a lane:
+
+        .venv/bin/python3 runbooks/coverage.py --json
+
+    Lanes: **AUTO** (safe → applied in the window, rule 4c/window Step 0),
+    **PLAN** (major/deny-listed → needs an assessed window plan), **REBUILD**
+    (self-built `ghcr.io/nachtschatt3n/*` → rebuild in its source repo),
+    **HELD** (explicitly accepted), **CRACK** (unclassifiable — must be zero).
+    Then:
+    - **For EVERY `needs_plan` item, dispatch an `upgrade-planner-agent`** (one
+      per item, in parallel) so every non-safe actionable update — not just
+      deny-listed open PRs — gets a window plan. This is the mechanism that makes
+      the PLAN lane cover the whole universe. (Manual/dry-run sweep: report the
+      gap instead of dispatching, but never leave `needs_plan` unactioned across
+      cycles.)
+    - **If `covered` is false (any CRACK) → emit a CRITICAL `coverage` finding
+      AND page via OpenClaw home-operation.** An actionable update with no lane
+      is the exact failure this guarantee exists to prevent — it must be loud.
+    - **Surface the lane counts** (AUTO n / PLAN n / REBUILD n / HELD n / CRACK n)
+      in the summary. **REBUILD** items are a ⚠️ human action-row ("rebuild
+      `<img>` in its source repo → new tag → cberg-agent bump"), since the
+      cluster pipeline can't tag-bump them.
+    - The **AUTO lane applies in the maintenance WINDOW** (window-agent Step 0,
+      hybrid: merge the Renovate PR if present, else direct-bump), NOT in this
+      read-only sweep.
+
 4d. **Check the maintenance-window schedule + keep held updates planned.**
     Everything the auto-updater HELD (rule 4c) is a non-safe update that flows
     to a scheduled maintenance window (`runbooks/maintenance-windows.yaml`, 3/
