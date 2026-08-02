@@ -343,6 +343,7 @@ overlay in an emptyDir).
 - `kubernetes/apps/home-automation/home-assistant/app/ca-configmap.yaml`
 - `kubernetes/apps/home-automation/home-assistant/app/helmrelease.yaml`
 - `docs/sops/monitoring.md` (minimal-container caveat: use port-forward, not exec-curl)
+- `docs/sops/home-assistant-updates.md` (post-update checklist that verifies this pattern after every HA restart)
 - `docs/applications.md` (home-assistant inventory row)
 
 ---

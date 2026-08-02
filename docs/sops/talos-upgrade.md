@@ -715,6 +715,9 @@ git push
 
 ## 12) References
 
+### Related SOPs
+- `docs/sops/home-assistant-updates.md` — **run its post-restart checklist after every rolling reboot**: HA reinstalls HACS requirements on each boot (certifi/EBUSY class failures) and restarts tend to wedge the HmIP cloud session.
+
 ### Official Talos documentation
 - [Talos v1.12.0 release notes](https://github.com/siderolabs/talos/releases/tag/v1.12.0) — What's new, kernel 6.18, K8s 1.35
 - [Talos v1.12.6 release notes](https://github.com/siderolabs/talos/releases/tag/v1.12.6) — Latest patch
