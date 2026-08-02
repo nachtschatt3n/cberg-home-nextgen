@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.07.25`
-> Last Updated: `2026-07-25`
+> Version: `2026.08.02`
+> Last Updated: `2026-08-02`
 
 ## 1) Description
 
@@ -34,10 +34,17 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
 
 ## 2) Overview
 
-- **Schedule:** `runbooks/maintenance-windows.yaml` — 3 windows/week
-  (Tue 05:00, Thu 05:00 weekday 1h slots; Sun 09:00 90m reboot-capable
-  operator-present slot). Each window has a `capacity_risk` (risk-weight budget,
-  low1/med2/high3) and an `allow_reboot` flag. Times/capacities are editable
+- **Schedule:** `runbooks/maintenance-windows.yaml` — 4 windows/week
+  (Tue 05:00 + Thu 05:00 weekday 1h no-reboot slots; Sat 09:00 90m no-reboot
+  slot; Sun 09:00 90m reboot-capable operator-present slot). Sat was added
+  2026-08-02 as an aggressive-drain lever — an idle window costs nothing, so it
+  gives app-template's tiers a 2nd weekend slot (Sat+Sun) and the no-reboot
+  heavies more capacity during a backlog; drop it once drained. **Slot by
+  reboot-need, not risk:** Sun is the only reboot-capable window, so reserve it
+  for Talos + app-template churn and push every `needs_reboot: false` plan to
+  Tue/Thu/Sat. Each window has a `capacity_risk` (risk-weight budget,
+  low1/med2/high3; weekdays raised 4→6 on 2026-08-02) and an `allow_reboot`
+  flag. Times/capacities are editable
   (git-tracked; bump `version`).
 - **Plans:** `runbooks/maintenance/plans/<component>-<target>.md` — frontmatter
   (component, PR, current→target, risk, duration, `needs_reboot`, precise
@@ -48,6 +55,23 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
 - **Reconciler:** `runbooks/maintenance-plan.py` — read-only glue the sweep runs.
   Reports held-updates-without-a-plan, stale/orphan plans, the next window + its
   queue, and capacity/reboot/interference warnings.
+- **Coverage guarantee (no cracks):** `runbooks/coverage.py` (added 2026-08-02)
+  closes the hole that the auto-updater only ever sees OPEN Renovate PRs. It
+  enumerates the FULL actionable universe from `version-check-current.md` and
+  assigns every update a **lane** so nothing falls between the cracks:
+  - **AUTO** — safe (patch/minor, not deny-listed): applied in the window
+    (window-agent Step 0, **hybrid** — merge the Renovate PR if one exists, else
+    **direct-bump** the manifest tag, so a safe update never stalls waiting on
+    Renovate's schedule).
+  - **PLAN** — major/deny-listed: needs an assessed window plan. The sweep (rule
+    4d0) dispatches an `upgrade-planner-agent` for **every** `needs_plan` item —
+    the whole non-safe universe, not just deny-listed open PRs — so the PLAN lane
+    covers everything.
+  - **REBUILD** — self-built `ghcr.io/nachtschatt3n/*`: can't be tag-bumped,
+    surfaced as a human action-row (rebuild in its source repo).
+  - **HELD** — explicitly accepted (e.g. openclaw node 22). **CRACK** —
+    actionable but in none of the above; **must be zero** → a CRITICAL finding +
+    OpenClaw page. The sweep reports lane counts and fails loud on any CRACK.
 - **Agents:** `.claude/agents/upgrade-planner-agent.md` (one per held update),
   `.claude/agents/maintenance-window-agent.md` (runs a window).
 - **Execution posture (limited autonomy, enabled 2026-07-25):** a plan runs
@@ -256,3 +280,4 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 | Version | Date | Change |
 |---|---|---|
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
+| 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |

@@ -5,7 +5,10 @@ pr: null                            # not found in the current open PR set (194/
                                     # window agent: reconcile the real Renovate PR # before executing
 kind: chart
 current: "87.17.0"
-target: "88.0.1"
+target: "88.1.2"                     # target moved 88.0.1 → 88.1.2 (sweep 2026-08-02);
+                                    # analysis below was done at 88.0.1 — the executor
+                                    # MUST re-check the 88.1.0→88.1.2 point-release delta
+                                    # (operator/CRD changes) before running the window.
 update_type: major
 risk: high                          # severity is medium; set HIGH deliberately — this is the
                                     # cluster-wide observability substrate + a CRD-changing major.
