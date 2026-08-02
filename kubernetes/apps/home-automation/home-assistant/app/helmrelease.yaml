@@ -31,11 +31,18 @@ spec:
           # Recent home-assistant images dropped "DigiCert Global Root CA" (the
           # legacy 2006 root) from the certifi bundle, keeping only Global Root
           # G2/G3. api.wyzecam.com serves a valid chain terminating at that
-          # legacy root, and HA's aiohttp client_context() loads certifi.where()
-          # directly (ignoring SSL_CERT_FILE), so the wyzeapi integration fails
-          # device-list TLS verification. This init container copies the image's
-          # certifi bundle to a shared volume and appends the missing root; the
-          # app container mounts the patched bundle back over certifi.where().
+          # legacy root, so the wyzeapi integration fails device-list TLS
+          # verification. This init copies the image's certifi bundle to the
+          # patched-ca emptyDir, appends the missing root, and drops in the
+          # sitecustomize.py shim (from the extra-ca ConfigMap) that redirects
+          # certifi.where() to the patched bundle.
+          # IMPORTANT: the patched bundle lives at a NEUTRAL path
+          # (/patched-ca/cacert.pem) — never mount it over certifi's own
+          # site-packages file. Since certifi 2026.7.22, HA's runtime installer
+          # (uv/pip) upgrades certifi at boot; a rename over a subPath-mounted
+          # cacert.pem fails with EBUSY "Resource busy (os error 16)" and kills
+          # requirements install for every HACS integration that pulls certifi
+          # (alexa_devices, dirigera_platform, dwd_weather, custom_conversation).
           certifi-patch:
             image:
               repository: ghcr.io/home-assistant/home-assistant
@@ -46,18 +53,20 @@ spec:
               - |
                 set -eu
                 SRC="$(python3 -c 'import certifi; print(certifi.where())')"
-                EXPECTED="/usr/local/lib/python3.14/site-packages/certifi/cacert.pem"
-                if [ "$SRC" != "$EXPECTED" ]; then
-                  echo "certifi path changed ($SRC != $EXPECTED) — update the app-container mount path in helmrelease.yaml" >&2
-                  exit 1
-                fi
                 cp "$SRC" /patched-ca/cacert.pem
                 if ! grep -q "BEGIN CERTIFICATE" /extra-ca/digicert-global-root-ca.pem; then
                   echo "extra-ca configMap missing a PEM certificate" >&2; exit 1
                 fi
                 printf '\n' >> /patched-ca/cacert.pem
                 cat /extra-ca/digicert-global-root-ca.pem >> /patched-ca/cacert.pem
-                echo "patched certifi bundle: $(grep -c 'BEGIN CERTIFICATE' /patched-ca/cacert.pem) certs"
+                cp /extra-ca/sitecustomize.py /patched-ca/sitecustomize.py
+                # Self-test: with PYTHONPATH=/patched-ca (as set on the app
+                # container) certifi.where() must resolve to the patched bundle.
+                GOT="$(PYTHONPATH=/patched-ca python3 -c 'import certifi; print(certifi.where())')"
+                if [ "$GOT" != "/patched-ca/cacert.pem" ]; then
+                  echo "sitecustomize redirect failed: certifi.where() -> $GOT" >&2; exit 1
+                fi
+                echo "patched certifi bundle: $(grep -c 'BEGIN CERTIFICATE' /patched-ca/cacert.pem) certs; certifi.where() redirected OK"
         containers:
           app:
             image:
@@ -66,17 +75,20 @@ spec:
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # Point OpenSSL's default trust (used by Python's
-              # ssl.create_default_context(), and therefore by aiohttp's default
-              # SSLContext) at the certifi-patch bundle. HA core uses
-              # certifi.where() directly (already fixed via the mount), but
-              # integrations like wyzeapi/wyzeapy create their own
-              # aiohttp.ClientSession() with the *system* store — which lacks
-              # DigiCert Global Root CA. SSL_CERT_FILE redirects that path to the
-              # patched bundle. Verified in-pod: a real aiohttp GET to
-              # api.wyzecam.com returns HTTP 200 with this set.
+              # TLS trust patch — both consumer paths point at the NEUTRAL
+              # patched bundle (see certifi-patch init):
+              # 1. HA core's util.ssl.client_context() hardcodes certifi.where()
+              #    and ignores SSL_CERT_FILE → covered by the sitecustomize.py
+              #    shim loaded via PYTHONPATH (redirects certifi.where()).
+              # 2. Integrations' own aiohttp.ClientSession()/requests use the
+              #    OpenSSL default context / system store, which honors
+              #    SSL_CERT_FILE / REQUESTS_CA_BUNDLE.
               - name: SSL_CERT_FILE
-                value: "/usr/local/lib/python3.14/site-packages/certifi/cacert.pem"
+                value: "/patched-ca/cacert.pem"
+              - name: REQUESTS_CA_BUNDLE
+                value: "/patched-ca/cacert.pem"
+              - name: PYTHONPATH
+                value: "/patched-ca"
             resources:
               requests:
                 cpu: 1000m
@@ -136,8 +148,12 @@ spec:
             certifi-patch:
               - path: /extra-ca
                 readOnly: true
-      # Shared scratch: init writes the patched certifi bundle here, the app
-      # container mounts the single file back over certifi.where().
+      # Shared scratch: init writes the patched certifi bundle + the
+      # sitecustomize.py shim here; the app container mounts the whole dir at a
+      # neutral path. Do NOT subPath-mount anything over certifi's file in
+      # site-packages — HA's runtime installer upgrades certifi at boot and a
+      # rename over a mounted file fails with EBUSY (os error 16), breaking
+      # requirements install for HACS integrations.
       patched-ca:
         type: emptyDir
         advancedMounts:
@@ -145,6 +161,5 @@ spec:
             certifi-patch:
               - path: /patched-ca
             app:
-              - path: /usr/local/lib/python3.14/site-packages/certifi/cacert.pem
-                subPath: cacert.pem
+              - path: /patched-ca
                 readOnly: true

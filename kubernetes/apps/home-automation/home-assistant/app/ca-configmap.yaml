@@ -10,8 +10,12 @@ data:
   # home-assistant images (Alpine 3.24 / certifi ships Global Root G2/G3 only).
   # api.wyzecam.com serves a complete chain that terminates at this legacy root,
   # so the wyzeapi integration fails device-list TLS verification without it.
-  # HA's aiohttp client_context() loads certifi.where() directly and ignores
-  # SSL_CERT_FILE, so the fix must patch the certifi bundle itself (see initContainer).
+  # The certifi-patch initContainer appends this root to a copy of the certifi
+  # bundle at /patched-ca/cacert.pem (a neutral path OUTSIDE site-packages, so
+  # pip/uv can upgrade certifi at runtime without hitting a mount — EBUSY).
+  # HA core's util.ssl.client_context() hardcodes certifi.where() and ignores
+  # SSL_CERT_FILE, so certifi.where() is redirected to the patched bundle via
+  # the sitecustomize.py shim below (loaded through PYTHONPATH=/patched-ca).
   digicert-global-root-ca.pem: |
     -----BEGIN CERTIFICATE-----
     MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh
@@ -35,3 +39,34 @@ data:
     YSEY1QSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk
     CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=
     -----END CERTIFICATE-----
+  # Loaded at interpreter startup in every Python process of the app container
+  # via PYTHONPATH=/patched-ca (the certifi-patch init copies it there).
+  # Redirects certifi.where()/contents() to the patched bundle so HA core's
+  # client_context() — which ignores SSL_CERT_FILE — still trusts the appended
+  # legacy root, even after pip/uv replaces certifi in site-packages at runtime
+  # (a fresh certifi install ships WITHOUT DigiCert Global Root CA).
+  sitecustomize.py: |
+    """certifi.where() redirect shim — see helmrelease.yaml (certifi-patch)."""
+    import os
+
+    _BUNDLE = "/patched-ca/cacert.pem"
+
+    if os.path.isfile(_BUNDLE):
+        try:
+            import certifi
+            import certifi.core as _core
+
+            def _where() -> str:
+                return _BUNDLE
+
+            def _contents() -> str:
+                with open(_BUNDLE, encoding="ascii") as f:
+                    return f.read()
+
+            certifi.where = _where
+            certifi.contents = _contents
+            _core.where = _where
+            _core.contents = _contents
+        except Exception:
+            # Never break interpreter startup; worst case is stock certifi.
+            pass
