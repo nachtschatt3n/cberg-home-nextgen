@@ -174,17 +174,29 @@ data:
         <group>web,ingress,</group>
       </rule>
 
-      <!-- Sustained 5xx burst — a backend genuinely down (outage) or under
-           a DoS, as opposed to a single deploy/restart blip. 12+ ingress 5xx
-           in 120s is well above routine rollout churn at this homelab's
-           traffic volume. Level 7 = surfaces in the sweep's level>=5 count
-           and SIEM, where a real outage belongs. Planned maintenance windows
-           (e.g. Talos node rolls) will legitimately trip this — correlate
-           with change activity before treating as an incident. -->
+      <!-- Sustained 5xx burst — a backend genuinely down (outage), as opposed
+           to a single deploy/restart blip. 12+ ingress 5xx in 120s is well
+           above routine rollout churn at this homelab's traffic volume. Level 7
+           = surfaces in the sweep's level>=5 count and SIEM, where a real
+           outage belongs. Planned maintenance windows (e.g. Talos node rolls)
+           will legitimately trip this — correlate with change activity before
+           treating as an incident.
+
+           CLASSIFICATION (Wazuh finding N-04, 2026-08-02): this is an
+           AVAILABILITY signal, not an intrusion. A sustained ingress 5xx burst
+           means backends are unreachable — that's reboot/maintenance/outage
+           churn, not an attack. It was previously grouped `web,ingress,attack`,
+           so a Talos rolling reboot (14 5xx while pods rescheduled) surfaced in
+           the SIEM under the `attack` group and read as an intrusion. Moved to
+           `web,ingress,availability` so a real 5xx flood still surfaces as a
+           web/availability signal (level 7 unchanged — NOT suppressed) but no
+           longer reads as an attack. DoS framing dropped: a genuine
+           volumetric DoS shows in the 4xx scanner rule 100503 / cf ip
+           correlation, not here. -->
       <rule id="100504" level="7" frequency="12" timeframe="120">
         <if_matched_sid>100502</if_matched_sid>
-        <description>Ingress-nginx: 12+ 5xx in 120s — sustained backend outage or DoS</description>
-        <group>web,ingress,attack,</group>
+        <description>Ingress-nginx: 12+ 5xx in 120s — sustained backend outage (availability)</description>
+        <group>web,ingress,availability,</group>
       </rule>
 
       <!-- Suppress the Tube Archivist channel-search 500. TA v0.5.10 returns
