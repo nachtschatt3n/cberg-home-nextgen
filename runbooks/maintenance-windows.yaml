@@ -7,10 +7,18 @@
 # maintenance-window-agent vets those plans for interference + side effects and
 # runs the approved sequence during one of these windows.
 #
-# 3 windows/week. Times are low-traffic; Tue/Thu align with the Renovate scan
-# cadence + the every-48h sweep, Sunday is a longer weekend slot for
-# higher-risk / operator-present work. Edit freely (git-tracked); bump `version`.
-version: "2026.07.25"
+# 4 windows/week (aggressive-drain cadence, 2026-08-02). Times are low-traffic;
+# Tue/Thu align with the Renovate scan cadence + the every-48h sweep, Sat/Sun are
+# longer weekend slots for higher-risk / operator-present work. An IDLE window
+# costs nothing (nothing runs unless a plan is slotted into it) — the extra
+# Saturday slot + the raised weekday capacity exist to DRAIN the current backlog
+# (app-template's ~5 tiers + the no-reboot heavies) in ~2-3 weeks instead of
+# ~6-8. Once the backlog clears you can drop sat-early / lower caps back — it's
+# git-tracked. Slot by REBOOT-NEED, not risk: Sunday is the only reboot-capable
+# window (Talos), so reserve it for reboot + app-template churn and push every
+# needs_reboot:false plan (kube-prom-stack, mariadb, nextcloud*) to Tue/Thu/Sat.
+# Edit freely (git-tracked); bump `version`.
+version: "2026.08.02"
 timezone: Europe/Berlin
 
 windows:
@@ -18,15 +26,24 @@ windows:
     day: tuesday
     start: "05:00"
     duration_min: 60
-    capacity_risk: 4        # sum of plan risk-weights this window can hold
-                            # (low=1, medium=2, high=3) — keeps a window sane
+    capacity_risk: 6        # sum of plan risk-weights this window can hold
+                            # (low=1, medium=2, high=3). Raised 4→6 (2026-08-02)
+                            # so a weekday slot can hold one high-solo (3) or two
+                            # mediums (4) during the backlog drain.
     allow_reboot: false     # node-reboot plans (Talos) not in a 1h weekday slot
   - id: thu-early
     day: thursday
     start: "05:00"
     duration_min: 60
-    capacity_risk: 4
+    capacity_risk: 6        # raised 4→6 (2026-08-02), see tue-early
     allow_reboot: false
+  - id: sat-early
+    day: saturday
+    start: "09:00"
+    duration_min: 90        # NEW (2026-08-02): a 2nd weekend no-reboot slot so
+    capacity_risk: 6        # app-template tiers run 2×/week (sat+sun) and the
+    allow_reboot: false     # no-reboot heavies get more slots. No reboots here —
+                            # keep node drains on Sunday.
   - id: sun-window
     day: sunday
     start: "09:00"

@@ -42,7 +42,13 @@ conflicts_with:
   - authentik-2026.5.6             # auth is on the ingress/SSO path many of these apps use
   - reloader-v2                     # cluster-wide controller change; keep high-risk plans serialized
 status: draft
-window: null                        # window agent assigns; MUST be sun-window (operator-present); batched across multiple sun-windows
+window: "sat-early:2026-08-15"      # CANARY tier. needs_reboot:false ⇒ run tiers 2×/
+                                    # week across Sat+Sun (both operator-present, no
+                                    # reboot competes): canary Sat 08-15 → tier1 Sun
+                                    # 08-16 → tier2 Sat 08-22 → tier3 Sun 08-23 →
+                                    # tier4 Sat 08-29. Window-agent advances the
+                                    # window as each tier passes verification. Still
+                                    # SOLO per window (no other high-risk plan).
 auto_execute: false                 # never unattended — risk:high
 sops_refs:
   - docs/sops/application-update.md

@@ -40,7 +40,9 @@ depends_on: []
 conflicts_with: []                  # no hard resource conflict, but see Interference notes:
                                     # run FIRST/solo — its rollout briefly blinds cluster-wide alerting
 status: draft
-window: null
+window: "sat-early:2026-08-08"      # no-reboot ⇒ Sat, not Sun. SOLO (alerting blind
+                                    # 2-5m); scheduled FIRST so monitoring is current
+                                    # before the app-template churn starts.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

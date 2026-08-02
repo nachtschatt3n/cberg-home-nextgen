@@ -38,7 +38,10 @@ depends_on: []
 conflicts_with: []                  # none hard; do NOT co-schedule a nextcloud-mcp upgrade or
                                     # anything that depends on nextcloud being reachable (see §6)
 status: draft
-window: null                        # window agent assigns — needs an operator-present slot
+window: "thu-early:2026-08-13"      # no-reboot ⇒ weekday. SOLO — do NOT co-schedule
+                                    # the nextcloud-mcp bump here (isolate the occ
+                                    # migration; mcp follows in the NEXT window once
+                                    # this nextcloud is verified healthy).
 auto_execute: false                 # medium + occ-migration trap → operator go/no-go always
 sops_refs:
   - docs/sops/application-update.md
