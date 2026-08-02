@@ -20,7 +20,11 @@ touches:
 depends_on: []
 conflicts_with: []                   # none pending; DO NOT co-schedule with any openclaw restart/upgrade (ai ns consumes this MCP endpoint — see Interference)
 status: draft
-window: null                         # window agent assigns a tue/thu-early (no-reboot) slot
+window: "tue-early:2026-08-18"       # the window AFTER nextcloud (thu 08-13), so it's
+                                     # tested against the already-upgraded + verified
+                                     # nextcloud, but NOT sharing its occ-migration
+                                     # window. Do NOT co-schedule any openclaw restart
+                                     # (ai ns consumes this MCP endpoint).
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
