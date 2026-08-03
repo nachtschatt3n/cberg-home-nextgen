@@ -339,7 +339,19 @@ class VersionChecker:
     # resolvers so they treat v-prefixed, 4-part (Plex/Jellyfin-style), and
     # -<hash> build-suffixed tags identically. Previously GHCR used a strict
     # `^\d+\.\d+\.\d+$` that silently dropped v0.3.0 / 10.11.11.x / -<hash> tags.
-    _SEMVER_TAG_RE = re.compile(r'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?$')
+    # OS/variant suffixes (-alpine, -slim, …). A variant is NOT a version
+    # difference: '8.10.0-alpine' and '8.10.0' are the same release built on a
+    # different base. We must (a) recognise variant tags as version-shaped so
+    # they can be candidates at all, and (b) never propose a CROSS-variant tag
+    # as an "update" (2026-08-03: redis 8.10.0-alpine → 8.10.0 was a false
+    # positive — that's the debian build, not a newer release).
+    _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
+                      r'focal|jammy|noble')
+    _VARIANT_RE = re.compile(rf'-({_VARIANT_NAMES})$', re.IGNORECASE)
+    _SEMVER_TAG_RE = re.compile(
+        rf'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_NAMES}))?$',
+        re.IGNORECASE,
+    )
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
     # git-sha pins and floating tags. We skip these cleanly instead of emitting
     # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
@@ -352,18 +364,29 @@ class VersionChecker:
         re.IGNORECASE,
     )
 
-    @staticmethod
-    def _semver_tag_key(tag: str) -> tuple:
-        """Sort key for semver-shaped tags: strip v-prefix and -<hash> suffix,
-        pad to 4 parts so 3- and 4-part tags order consistently."""
-        name = tag.lstrip('vV').split('-', 1)[0]
+    @classmethod
+    def _tag_variant(cls, tag: str) -> str:
+        """The OS/variant suffix of a tag ('alpine', 'slim', …), '' if none."""
+        m = cls._VARIANT_RE.search(str(tag or ''))
+        return m.group(1).lower() if m else ''
+
+    @classmethod
+    def _semver_tag_key(cls, tag: str) -> tuple:
+        """Sort key for semver-shaped tags: strip v-prefix, variant and -<hash>
+        suffix, pad to 4 parts so 3- and 4-part tags order consistently.
+        The 5th element is a CLEAN-TAG tiebreaker: for the same version, a
+        plain tag outranks a build-sha-suffixed one (2026-08-03: n8n 2.33.3 →
+        2.33.3-12d3f08 was a false positive — same release, sha-pinned build,
+        and the equal-key stable sort picked it arbitrarily)."""
+        name = cls._VARIANT_RE.sub('', str(tag)).lstrip('vV').split('-', 1)[0]
         try:
             nums = [int(p) for p in name.split('.')]
         except ValueError:
-            return (0, 0, 0, 0)
+            return (0, 0, 0, 0, 0)
         while len(nums) < 4:
             nums.append(0)
-        return tuple(nums[:4])
+        has_build_suffix = bool(re.search(r'-[0-9a-f]+$', cls._VARIANT_RE.sub('', str(tag))))
+        return tuple(nums[:4]) + (0 if has_build_suffix else 1,)
 
     def _pick_latest_semver_tag(self, tags: list, current_tag: str = '') -> Optional[str]:
         """Highest semver-shaped tag from `tags`, preferring current's major.
@@ -372,6 +395,16 @@ class VersionChecker:
         version_tags = [t for t in tags if t and self._SEMVER_TAG_RE.match(t)]
         if not version_tags:
             return None
+        # Stay on the SAME build variant as the current pin. Crossing variants
+        # (alpine → debian) is a rebase of the base image, not an upgrade, and
+        # must never be proposed as one. If we're on a variant, only same-variant
+        # tags are candidates; if we're on a plain tag, exclude variant tags.
+        if current_tag:
+            cur_variant = self._tag_variant(current_tag)
+            same_variant = [t for t in version_tags
+                            if self._tag_variant(t) == cur_variant]
+            if same_variant:
+                version_tags = same_variant
         version_tags.sort(key=self._semver_tag_key, reverse=True)
         cp = self.parse_version(current_tag) if current_tag else None
         if cp:
