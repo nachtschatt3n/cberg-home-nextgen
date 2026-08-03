@@ -118,7 +118,7 @@ spec:
       # This bump is code-only: Contracts status filter + form field improvements.
       # No schema change / no migration (the db-migrate job is a no-op here).
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-498fd583e2fa7977ed6d116e61819aebae315332"
+      tag: "sha-40428d74d36e7c0ba4ba826dc5068136dbd395b5"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
