@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.07.25"
+version: "2026.08.03"
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
@@ -28,6 +28,8 @@ deny:
     reason: "app-template 3.7.3→5.0.0 is a breaking chart migration wrapping ~40 HelmReleases — must be done deliberately, once."
   - match: "*affine*"
     reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
+  - match: "*cilium*"
+    reason: "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA streaming before upgrading; never an unattended bump."
   - match: "*mariadb*"
     reason: "MariaDB chart major (25→26) + bitnami-legacy posture; a DB-engine bump is never unattended-safe."
     max: patch
