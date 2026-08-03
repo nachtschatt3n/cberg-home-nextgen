@@ -35,7 +35,7 @@ spec:
           app:
             image:
               repository: valkey/valkey
-              tag: "9.1.0"
+              tag: "9.1.1"
             # Cache only — no persistence (RDB + AOF off).
             command:
               - valkey-server
