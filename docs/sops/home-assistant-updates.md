@@ -4,8 +4,8 @@
 > or Talos rolling reboot that recreates the HA pod. Institutionalizes the
 > 2026-08-02 certifi/EBUSY incident, the recurring HmIP cloud-session wedge, and
 > the custom-code regression surface that core version bumps can silently break.
-> Version: `2026.08.02`
-> Last Updated: `2026-08-02`
+> Version: `2026.08.03`
+> Last Updated: `2026-08-03`
 > Owner: `sre`
 
 ---
@@ -34,8 +34,9 @@ pod, plus the extra regression list for **core version bumps**.
 | 1. Boot requirements install | HACS integrations `alexa_devices`, `dirigera_platform`, `dwd_weather`, `custom_conversation` | pip/uv failures at boot (e.g. certifi EBUSY 2026-08-02) — all four fail setup on every boot |
 | 2. certifi/site-packages rule | init `certifi-patch` log + no site-packages mounts | Mount over `site-packages` blocking runtime pip upgrades |
 | 3. HmIP cloud session | `homematicip_cloud` entities available ≤ 15 min post-boot | HA restart wedges the eQ-3 cloud session (HA core bug #155194) |
-| 4. Custom-code regression (version bumps) | custom_sentences, packages, scripts, prompts, automations, dashboards | Core schema/behaviour changes silently disabling local customizations |
-| 5. Z2M `unavailable` triage | Z2M logs + database `lastSeen` | Misreading a sleeping battery device as dead (July 2026 valve lesson) |
+| 4. Alexa shopping/to-do sync | `todo/get_items` + add/remove round-trip on the two `alexa_devices` todo entities | HACS `alexa_devices` silently not syncing after a boot-time requirements failure |
+| 5. Custom-code regression (version bumps) | custom_sentences, packages, scripts, prompts, automations, dashboards | Core schema/behaviour changes silently disabling local customizations |
+| 6. Z2M `unavailable` triage | Z2M logs + database `lastSeen` | Misreading a sleeping battery device as dead (July 2026 valve lesson) |
 
 ---
 
@@ -49,7 +50,7 @@ pattern is specified in `docs/sops/home-assistant-certifi-ca-trust.md`.
 
 ## 4) Operational Instructions
 
-Run top-to-bottom after ANY HA pod recreation. Steps 4 applies only to core
+Run top-to-bottom after ANY HA pod recreation. Step 5 applies only to core
 version bumps.
 
 ### Step 1 — boot requirements install (ALWAYS)
@@ -106,7 +107,53 @@ Within ~15 min of boot, verify (template API or ha-agent):
   `last_triggered` is stale, only then investigate (entry reload is the fix; the
   automation should have done it).
 
-### Step 4 — custom-code regression list (CORE VERSION BUMPS)
+### Step 4 — Alexa shopping / to-do list sync (ALWAYS)
+
+`alexa_devices` is a HACS component and is one of the Step 1 canaries — it has
+broken at boot before (certifi / requirements failures). A loaded config entry
+alone does not prove the lists still sync. It exposes **two** todo entities per
+Amazon account:
+
+| Entity | List | `unique_id` suffix (base64-decoded) |
+|--------|------|-------------------------------------|
+| `todo.<alexa_account>` | Alexa **Shopping List** | `-SHOPPING_ITEM` |
+| `todo.<alexa_account>_2` | Alexa **To-Do list** | `-TASK` |
+
+> **The `_2` entity is NOT a stale duplicate.** It is a genuinely separate list
+> and must never be purged as registry dust — it was nearly misclassified during
+> the 2026-08-02 Alexa ghost cleanup. Tell the two apart by base64-decoding the
+> `unique_id` suffix, never by the entity-id number.
+
+Quick read check (HA token; `POST`, `return_response` is required):
+
+```
+POST /api/services/todo/get_items?return_response
+{"entity_id": "todo.<alexa_account>"}
+```
+
+Expect items returned, the `alexa_devices` config entry `loaded` (Step 1), and
+no `alexa` errors in `/api/error_log`.
+
+Definitive round-trip test (verified working 2026-08-03) — the only check that
+proves the Amazon side rather than a local cache:
+
+1. `todo/add_item` a throwaway item, e.g. `ZZ HA sync test (ignore)`.
+2. Confirm the entity's item count increments.
+3. `todo/get_items`, read the **stored** summary back, then `todo/remove_item`
+   using that exact string (or the item `uid`).
+
+> GOTCHA: Amazon **normalizes** the item text — `ZZ HA sync test (ignore)` is
+> stored as `Zz ha sync test (ignore)` (sentence case). `todo/remove_item`
+> matching on the string you *sent* fails with HTTP 500. Always remove using the
+> stored summary/uid. The normalization is itself positive proof of a real
+> Amazon round-trip.
+
+CAVEAT: `alexa_devices` entities can sit frozen at the boot timestamp with no
+state changes for days when the house is empty/idle. That is NOT evidence of a
+broken coordinator — judge health with the round-trip test, never with history
+freshness.
+
+### Step 5 — custom-code regression list (CORE VERSION BUMPS)
 
 Spot-check after any `ghcr.io/home-assistant/home-assistant` version bump
 (minor or major — patch bumps at your discretion):
@@ -123,7 +170,7 @@ Spot-check after any `ghcr.io/home-assistant/home-assistant` version bump
 Deep regression is the **ha-agent**'s job — dispatch it after any core bump;
 this table is the minimum spot-check list.
 
-### Step 5 — Z2M `unavailable` triage rule (WHEN APPLICABLE)
+### Step 6 — Z2M `unavailable` triage rule (WHEN APPLICABLE)
 
 HA `unavailable` on a Zigbee2MQTT **battery** device does NOT mean the device is
 dead — sleepy end devices check in rarely. Before concluding hardware failure:
@@ -138,17 +185,18 @@ zigbee-agent only if `lastSeen` is genuinely stale.
 ### Example A: routine Talos rolling reboot (no HA version change)
 
 ```bash
-# Steps 1-3 only; total ~5 min
+# Steps 1-4 only; total ~5 min
 POD=$(mise exec -- kubectl get pods -n home-automation -l app.kubernetes.io/name=home-assistant \
   --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
 mise exec -- kubectl logs -n home-automation "$POD" -c app | grep -cE "Unable to install|Setup failed" # 0
 mise exec -- kubectl logs -n home-automation "$POD" -c certifi-patch                                   # redirected OK
 # + config entries loaded, HmIP available, sustained-outage boolean off (Step 1/3)
+# + Alexa todo round-trip: add / count++ / remove by STORED summary (Step 4)
 ```
 
 ### Example B: HA core version bump (e.g. 2026.7 → 2026.8)
 
-Steps 1–3, then Step 4's full table, then dispatch the ha-agent for deep
+Steps 1–4, then Step 5's full table, then dispatch the ha-agent for deep
 custom-code regression. Only mark the bump verified after both report clean.
 
 ---
@@ -176,6 +224,14 @@ Template API: `integration_entities('homematicip_cloud') | select('is_state',
 'unavailable') | list | length` → `0` within 15 min of boot;
 `input_boolean.hmip_sustained_outage` → `off`.
 
+### Test 4: Alexa todo round-trip
+
+`todo/get_items` returns items for both `todo.<alexa_account>` (Shopping List,
+`-SHOPPING_ITEM`) and `todo.<alexa_account>_2` (To-Do list, `-TASK`); an
+`add_item` increments the count and `remove_item` **by the stored (normalized)
+summary or uid** returns the count to baseline. Frozen state timestamps are not
+a failure signal.
+
 ---
 
 ## 7) Troubleshooting
@@ -186,7 +242,10 @@ Template API: `integration_entities('homematicip_cloud') | select('is_state',
 | Canary entries `setup_retry`/`setup_error` but no install error | Integration-specific breakage (API change, credentials) | Check `/api/error_log` for that domain; treat per-integration |
 | HmIP unavailable > 15 min, self-heal not triggered | Automation disabled/broken by an update | Verify `automation.hmip_cloud_session_self_heal` is `on`; check its trace; reload entry `01JRZY6QRWHRW34RP7ZPASGKTS` manually only as last resort |
 | Custom sentences stop matching after bump | Core intent schema change | Compare against release notes; adjust `/config/custom_sentences/` |
-| Z2M battery device `unavailable` | Sleepy device, not dead | Step 5 triage BEFORE replacing hardware |
+| `todo/remove_item` → HTTP 500 on an item you just added | Amazon normalized the summary to sentence case | `todo/get_items` first, remove by the stored summary or uid (Step 4) |
+| Alexa todo entity state frozen at boot timestamp for days | Empty/idle house — no list activity to report | Not a fault; run the Step 4 round-trip instead of judging by history freshness |
+| Alexa `_2` todo entity looks like a duplicate | It is the separate To-Do list (`-TASK`) | Never purge it; decode the `unique_id` suffix (Step 4) |
+| Z2M battery device `unavailable` | Sleepy device, not dead | Step 6 triage BEFORE replacing hardware |
 
 ---
 
@@ -239,7 +298,7 @@ This SOP is read-only verification. For a failed HA image bump:
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 git revert <bump-sha>
-git push   # Flux rolls HA back; then re-run Steps 1-3 of this SOP
+git push   # Flux rolls HA back; then re-run Steps 1-4 of this SOP
 ```
 
 ---
@@ -255,6 +314,11 @@ git push   # Flux rolls HA back; then re-run Steps 1-3 of this SOP
 
 ## Version History
 
+- `2026.08.03`: Added Step 4 — Alexa shopping/to-do list sync verification
+  (two-entity `-SHOPPING_ITEM` / `-TASK` distinction, the "`_2` is not a
+  duplicate" rule from the 2026-08-02 ghost cleanup, the add/remove round-trip
+  and Amazon's summary normalization, and the idle-freeze caveat). Renumbered
+  the former Steps 4-5.
 - `2026.08.02`: Initial SOP — born from the certifi 2026.7.22 EBUSY incident
   (four HACS integrations failing setup every boot), the HmIP restart wedge
   pattern, and the vacation-stack custom-code regression surface.
