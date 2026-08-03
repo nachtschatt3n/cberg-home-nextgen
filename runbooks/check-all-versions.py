@@ -445,8 +445,11 @@ class VersionChecker:
             elif 'gcr.io' in repository or 'k8s.gcr.io' in repository:
                 return self.get_gcr_image_tag(repository)
             else:
-                # Try generic Docker Hub API
-                return self.get_dockerhub_image_tag(repository)
+                # Try generic Docker Hub API. current_tag MUST be threaded through
+                # or the variant/clean-tag filtering in _pick_latest_semver_tag
+                # can't apply (bare Docker Hub images like redis/traccar/node-red
+                # would get cross-variant proposals — 2026-08-03 regression).
+                return self.get_dockerhub_image_tag(repository, current_tag)
         except Exception as e:
             print(f"{Colors.YELLOW}Warning: Could not check image tag for {repository}: {e}{Colors.RESET}")
             return None
@@ -517,9 +520,9 @@ class VersionChecker:
         
         return None
     
-    def get_dockerhub_image_tag(self, repository: str) -> Optional[str]:
+    def get_dockerhub_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest tag from Docker Hub."""
-        return self.get_registry_image_tag(repository)
+        return self.get_registry_image_tag(repository, current_tag)
     
     def get_gcr_image_tag(self, repository: str) -> Optional[str]:
         """Get latest tag from GCR (not fully implemented)."""
