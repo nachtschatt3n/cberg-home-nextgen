@@ -51,6 +51,21 @@ data:
         error_mode: ignore
         log_conditions:
           - 'IsString(log.body) and IsMatch(log.body, "(?s)^\\s*\\{.*(?:\"\\.[^\"]*\"\\s*:|\"[^\"]*\\.\\.[^\"]*\"\\s*:|\"[^\"]*\\.\"\\s*:).*")'
+      # Strip Kubernetes managedFields (server-side-apply bookkeeping) from the
+      # k8s_objects Event logs that otel-operator-daemon forwards via OTLP. Their
+      # metadata.managedFields.fieldsV1 tree uses "." as a key, which ES rejects
+      # with document_parsing_exception ("field name cannot contain only dots") —
+      # dropping the WHOLE doc (was ~0.5% of all log records). The drop-malformed
+      # filter above misses these because here body is a structured map, not a
+      # JSON string (IsString(body) is false). managedFields is pure SSA noise, so
+      # delete it and keep the useful Event. IsMap guards make it a no-op on the
+      # string-bodied app logs. See docs/troubleshooting/node-reboot-observability.md.
+      transform/strip-k8s-managedfields:
+        error_mode: ignore
+        log_statements:
+          - context: log
+            statements:
+              - delete_key(body["structured"]["object"]["metadata"], "managedFields") where IsMap(body) and IsMap(body["structured"]) and IsMap(body["structured"]["object"]) and IsMap(body["structured"]["object"]["metadata"]) and body["structured"]["object"]["metadata"]["managedFields"] != nil
       batch:
         send_batch_size: 1000
         send_batch_max_size: 1500
@@ -111,7 +126,7 @@ data:
       pipelines:
         logs:
           receivers: [otlp]
-          processors: [memory_limiter, filter/drop-malformed-json-log-keys, batch]
+          processors: [memory_limiter, filter/drop-malformed-json-log-keys, transform/strip-k8s-managedfields, batch]
           exporters: [elasticsearch/logs]
         logs/talos-kernel:
           receivers: [udplog/talos-kernel]
