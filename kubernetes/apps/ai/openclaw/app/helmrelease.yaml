@@ -852,6 +852,23 @@ spec:
                   const idAndrea = (process.env.TELEGRAM_ID_ANDREA || '').trim();
                   cfg.session = cfg.session || {};
                   cfg.session.dmScope = 'per-channel-peer';
+                  // Headless browser (operator-approved 2026-08-04): managed
+                  // profile on the pod's playwright chromium. SSRF policy left
+                  // at default (private-network blocked). executablePath is
+                  // resolved at boot since the playwright dir is versioned.
+                  const chromeHits = require('fs').existsSync('/home/node/.openclaw/playwright-browsers')
+                    ? require('fs').readdirSync('/home/node/.openclaw/playwright-browsers')
+                        .filter((d) => d.startsWith('chromium-')).sort() : [];
+                  if (chromeHits.length) {
+                    cfg.browser = Object.assign({}, cfg.browser, {
+                      enabled: true,
+                      defaultProfile: 'openclaw',
+                      headless: true,
+                      noSandbox: true,
+                      executablePath: '/home/node/.openclaw/playwright-browsers/'
+                        + chromeHits[chromeHits.length - 1] + '/chrome-linux64/chrome',
+                    });
+                  }
                   cfg.agents.list = cfg.agents.list || [{ id: 'main' }];
                   const famById = {};
                   cfg.agents.list.forEach((a) => { famById[a.id] = a; });
