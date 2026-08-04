@@ -1,0 +1,73 @@
+# kill-job endpoint for iterm2-harness (local patch, 2026-08-04)
+#
+# WHY: a wedged full-context Claude TUI ignores edit keys from the harness;
+# kill-job signals the pane's foreground job so 'operation restart' can
+# recover the operations console remotely (see docs in the operation skill).
+#
+# RE-APPLY after every 'brew upgrade iterm2-harness':
+#   patch /opt/homebrew/Cellar/iterm2-harness/<ver>/iterm2-harness.py < runbooks/patches/iterm2-harness-kill-job.patch
+#   curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:6770/api/v1/reload
+#
+--- /private/tmp/claude-501/-Users-mu-code-cberg-home-nextgen/62d10da0-8008-42e1-a9e6-f1344a5642b1/scratchpad/harness-orig/iterm2-harness-main/iterm2-harness.py	2026-06-01 07:29:39
++++ /opt/homebrew/Cellar/iterm2-harness/0.1.0/iterm2-harness.py	2026-08-04 14:39:15
+@@ -417,6 +417,7 @@
+     ("POST", r"/api/v1/sessions/(?P<sid>[^/]+)/send-text$", "handle_send_text"),
+     ("POST", r"/api/v1/sessions/(?P<sid>[^/]+)/send-key$",  "handle_send_key"),
+     ("POST", r"/api/v1/sessions/(?P<sid>[^/]+)/set-title$", "handle_set_title"),
++    ("POST", r"/api/v1/sessions/(?P<sid>[^/]+)/kill-job$",  "handle_kill_job"),
+     ("GET",  r"/api/v1/files$",                             "handle_file_read"),
+     ("POST", r"/api/v1/files$",                             "handle_file_write"),
+     ("DELETE", r"/api/v1/files$",                           "handle_file_delete"),
+@@ -719,6 +720,44 @@
+     payload = text + ("\r" if enter else "")
+     await session.async_send_text(payload)
+     return 200, {"ok": True, "sent": payload, "enter": enter}
++
++
++async def handle_kill_job(sid, body=None, **_):
++    """Send a signal to the pane's foreground job (local addition, 2026-08-04).
++
++    Exists because a wedged full-context Claude TUI ignores edit keys from
++    send-key/send-text, leaving no remote way to clear it. Kills ONLY the
++    foreground job of the addressed pane. Body: {"signal": "TERM"|"INT"|"KILL"}
++    (default TERM). NOTE: patched into the brew Cellar file — re-apply after
++    `brew upgrade iterm2-harness` (see cberg memory project_operation_console_wedge).
++    """
++    import signal as _signal
++    session = await _find_session(sid)
++    if not session:
++        return 404, {
++            "error": f"Session '{sid}' not found",
++            "hint": "Call GET /api/v1/sessions to list current session_ids.",
++        }
++    sig_name = str((body or {}).get("signal", "TERM")).upper()
++    sig_map = {"TERM": _signal.SIGTERM, "INT": _signal.SIGINT, "KILL": _signal.SIGKILL}
++    if sig_name not in sig_map:
++        return 400, {"error": f"Unknown signal: '{sig_name}'", "hint": "Use TERM, INT or KILL."}
++    job_pid = await session.async_get_variable("jobPid")
++    try:
++        job_pid = int(job_pid)
++    except (TypeError, ValueError):
++        return 409, {"error": "No foreground job pid for this session",
++                     "jobPid": job_pid}
++    if job_pid <= 1:
++        return 409, {"error": f"Refusing to signal pid {job_pid}"}
++    job_name = await session.async_get_variable("jobName")
++    try:
++        os.kill(job_pid, sig_map[sig_name])
++    except ProcessLookupError:
++        return 409, {"error": f"Process {job_pid} not found (already exited?)"}
++    except PermissionError:
++        return 403, {"error": f"Not permitted to signal pid {job_pid}"}
++    return 200, {"ok": True, "pid": job_pid, "job_name": job_name, "signal": sig_name}
+ 
+ 
+ async def handle_set_title(sid, body=None, **_):
+@@ -1141,6 +1180,7 @@
+     "handle_send_text": handle_send_text,
+     "handle_send_key": handle_send_key,
+     "handle_set_title": handle_set_title,
++    "handle_kill_job": handle_kill_job,
+     "handle_file_read": handle_file_read,
+     "handle_file_write": handle_file_write,
+     "handle_file_delete": handle_file_delete,
