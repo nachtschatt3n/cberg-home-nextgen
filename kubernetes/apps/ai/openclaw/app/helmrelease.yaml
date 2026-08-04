@@ -867,6 +867,11 @@ spec:
                       noSandbox: true,
                       executablePath: '/home/node/.openclaw/playwright-browsers/'
                         + chromeHits[chromeHits.length - 1] + '/chrome-linux64/chrome',
+                      // drop the HeadlessChrome UA token — portals (MeinDG)
+                      // serve blank SPA pages to headless user agents
+                      extraArgs: ['--user-agent=Mozilla/5.0 (X11; Linux x86_64) '
+                        + 'AppleWebKit/537.36 (KHTML, like Gecko) '
+                        + 'Chrome/151.0.0.0 Safari/537.36'],
                     });
                   }
                   cfg.agents.list = cfg.agents.list || [{ id: 'main' }];
