@@ -20,7 +20,11 @@ touches:
   shared: []                       # no shared infra perturbed: ingress class "internal" unchanged, no cert-manager/cni/coredns/shared-DB touch
 depends_on: []
 conflicts_with: []
-status: scheduled
+status: awaiting-go                  # 2026-08-04 tue-early (unattended cron): risk
+                                    # medium + auto_execute:false → fails the
+                                    # unattended bar (max_unattended_risk: low).
+                                    # go/no-go pushed to operator (openclaw
+                                    # home-operation + urgent Telegram). NOT applied.
 window: "tue-early:2026-08-04"
 auto_execute: false
 sops_refs:

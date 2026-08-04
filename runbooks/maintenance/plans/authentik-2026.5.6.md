@@ -34,7 +34,16 @@ depends_on: []
 conflicts_with: []                  # no other plan competes; but do NOT co-schedule
                                     # any plan for an app that sits behind authentik
                                     # forward-auth (see Interference notes)
-status: scheduled
+status: awaiting-go                  # 2026-08-04 tue-early (unattended cron): risk
+                                    # medium + auto_execute:false → fails the
+                                    # unattended bar (max_unattended_risk: low).
+                                    # Also NOT unattendable by construction: pre-check
+                                    # 2.2 requires an interactive SSO login.
+                                    # CVE re-scan 2026-08-04: 2026.5.6 does NOT clear
+                                    # the carried critical — CVE-2026-31789 (openssl
+                                    # 3.5.5-1~deb13u1) present identically in
+                                    # proxy:2026.5.5 and :2026.5.6 → no security
+                                    # urgency. go/no-go pushed. NOT applied.
 window: "tue-early:2026-08-04"
 auto_execute: false                 # medium + auth path → operator go/no-go always
 sops_refs:
