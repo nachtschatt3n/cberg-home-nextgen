@@ -121,10 +121,18 @@ spec:
         # Closes the 2026-07-17 blind spot: ES metric ingestion stalled for ~32h
         # (RED corrupt shard + a stalled TSDB rollover -> timestamp_error) with NO
         # alert firing. The failure-based alerts above key off send_failed_* series
-        # that this collector build does not export; the *sent* counters ARE
-        # exported and reliable, so a flat sent-rate is the true "ingestion stopped"
-        # signal. The elasticsearch-obs-recovery CronJob auto-heals both causes;
-        # this fires only if it could not.
+        # that this collector build does not export. The sent-rate alerts below
+        # catch the case where the collector stops sending entirely (dead/ES
+        # unreachable -> sent rate truly 0).
+        #
+        # 2026-08-05 correction: sent-rate is NOT sufficient on its own. During a
+        # 3h ES-metrics outage (corrupt write-index shard, cluster RED) the
+        # sent_metric_points counter kept incrementing at ~220/s and rate(sent)==0
+        # never tripped — the ES _bulk API returns HTTP 200 even when every item
+        # is rejected by an unavailable shard, so "sent" tracks bulk dispatch, not
+        # doc-level ingestion. The reliable ES-side-stall signal is the export
+        # QUEUE pinned at 100% (EsExportQueueStuckFull, below). Keep both: sent==0
+        # catches collector-death, queue-stuck catches ES-side rejection stalls.
         - alert: EsMetricsIngestionStalled
           expr: rate(otelcol_exporter_sent_metric_points_total{exporter="elasticsearch/metrics"}[10m]) == 0
           for: 15m
@@ -156,3 +164,29 @@ spec:
               records for 15m+. Likely ES RED or an exporter/connectivity failure —
               application logs are not being stored. Check ES cluster health and
               edot-collector logs.
+
+        # 2026-08-05 backstop: the ES-side-rejection stall that the sent-rate
+        # alerts miss. When ES stops accepting writes (cluster RED / corrupt
+        # shard / rejected bulk items), the exporter's async queue fills and
+        # stays pinned at capacity. This DID fire in the 2026-08-05 incident
+        # (metrics queue 10/10 for 3h) while sent-rate looked healthy. Per
+        # exporter (metrics/logs/traces) so any ES-side stall pages critically.
+        - alert: EsExportQueueStuckFull
+          expr: otelcol_exporter_queue_size{exporter=~"elasticsearch/.*"} >= otelcol_exporter_queue_capacity{exporter=~"elasticsearch/.*"}
+          for: 15m
+          labels:
+            severity: critical
+            category: logging
+            component: otel-collector
+          annotations:
+            summary: "Elasticsearch export queue stuck 100% full on {{ $labels.instance }} ({{ $labels.exporter }})"
+            description: >-
+              The edot-collector {{ $labels.exporter }} export queue has been at
+              100% capacity for 15m+ — Elasticsearch is not accepting writes
+              (cluster RED / corrupt shard / rejected bulk items). Unlike the
+              sent-rate alerts, this catches an ES-side stall even while the
+              collector's sent_* counters keep incrementing on HTTP-200 bulk
+              responses with per-item failures. Telemetry is backing up and will
+              be dropped. Check GET _cluster/health, the elasticsearch-obs-recovery
+              CronJob (kubectl get jobs -n monitoring | grep obs-recovery), and
+              GET _data_stream/{{ $labels.exporter }} write-index shard state.

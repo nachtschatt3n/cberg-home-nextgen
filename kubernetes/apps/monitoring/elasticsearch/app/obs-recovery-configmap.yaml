@@ -11,14 +11,26 @@
 # these are ephemeral obs streams (14d retention) — "losing a bit is fine",
 # so automate recovery instead of adding a UPS/disabling the drive cache.
 #
+# 2026-08-05 incident + fixes: the metrics write-index primary corrupted again
+# (Lucene checksum failure) but sat as reason=MANUAL_ALLOCATION /
+# last_allocation_status=no_valid_shard_copy. The old `settled` check only
+# recognised ALLOCATION_FAILED/"exceeded", so this job SKIPPED it every cycle
+# and metrics ingestion stayed stalled ~3h with no page. Two fixes:
+#   1) `settled` now also triggers on no_valid_shard_copy (a corrupt primary
+#      with no good copy NEVER self-recovers -> safe to rollover+delete).
+#   2) On any RED run this job POSTs an ElasticsearchClusterRed critical alert
+#      to Alertmanager (there is no ES exporter scraped by Prometheus, so RED
+#      has no metric-backed alert otherwise). It auto-resolves 30m after the
+#      last RED run.
+#
 # HARD SAFETY RULES (do not weaken):
 #   * Only ever DELETE indices whose name starts with one of ALLOW_PREFIXES
 #     (.ds-metrics- / .ds-logs- / .ds-traces-). Anything else is logged and
 #     left for a human — NEVER deleted.
 #   * Only run the destructive path when the cluster is RED.
-#   * Only delete a shard that is UNASSIGNED and has settled as a failed
-#     allocation (ALLOCATION_FAILED / exceeded retries) — not one still
-#     initializing or relocating.
+#   * Only delete a shard that is UNASSIGNED and has settled as an
+#     unrecoverable allocation (ALLOCATION_FAILED / exceeded retries /
+#     no_valid_shard_copy) — not one still initializing or relocating.
 #   * Proactive rollover only fires when a write window has ALREADY expired
 #     (end_time <= now), which is gap-free-ish; it never rolls a still-valid
 #     window (that would itself create a look_ahead-sized ingestion gap).
@@ -39,12 +51,16 @@ data:
     import time
     import urllib.error
     import urllib.request
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     ES_URL = os.environ.get("ES_URL", "https://elasticsearch-es-http.monitoring.svc:9200")
     CA = os.environ.get("ES_CACERT", "/certs/ca.crt")
     PW = os.environ["ELASTIC_PASSWORD"]
     DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+    # Alertmanager v2 API — RED cluster has no Prometheus metric (no ES exporter),
+    # so this job is the notification path for it.
+    AM_URL = os.environ.get("ALERTMANAGER_URL",
+                            "http://kube-prometheus-stack-alertmanager.monitoring.svc:9093")
     # Only these (ephemeral, 14d-retention OTel obs streams) may ever be deleted.
     ALLOW_PREFIXES = (".ds-metrics-", ".ds-logs-", ".ds-traces-")
 
@@ -71,6 +87,43 @@ data:
             except Exception:
                 return e.code, {"raw": raw[:400]}
 
+    def notify_am(status, health, summary):
+        """Push an ElasticsearchClusterRed critical alert to Alertmanager so a
+        human is paged through the normal pipeline. Best-effort: a notify failure
+        must never break recovery. Auto-resolves 30m after the last RED run
+        (endsAt), so a recovered cluster clears it with no action."""
+        now = datetime.now(timezone.utc)
+        body = [{
+            "labels": {
+                "alertname": "ElasticsearchClusterRed",
+                "severity": "critical",
+                "namespace": "monitoring",
+                "component": "elasticsearch",
+                "category": "logging",
+                "service": "elasticsearch",
+            },
+            "annotations": {
+                "summary": f"Elasticsearch cluster is {str(status).upper()} "
+                           f"({health.get('unassigned_shards')} unassigned shard(s))",
+                "description": "elasticsearch-obs-recovery observed cluster "
+                               f"status={status}. {summary} "
+                               "OTel metrics/logs/traces ingestion may be stalled. "
+                               "If it persists, a corrupt obs shard needs "
+                               "rollover+delete or an operator decision "
+                               "(GET _cluster/allocation/explain).",
+            },
+            "startsAt": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "endsAt": (now + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        }]
+        try:
+            req = urllib.request.Request(AM_URL + "/api/v2/alerts",
+                                         data=json.dumps(body).encode(), method="POST")
+            req.add_header("Content-Type", "application/json")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                log(f"notified Alertmanager ElasticsearchClusterRed: HTTP {r.status}")
+        except Exception as e:
+            log(f"WARN Alertmanager notify failed: {e}")
+
     def allowed(index):
         return isinstance(index, str) and any(index.startswith(p) for p in ALLOW_PREFIXES)
 
@@ -86,11 +139,12 @@ data:
         return None, False
 
     def recover_red():
-        """RED path: rollover+delete corrupt allowlisted obs backing indices."""
+        """RED path: rollover+delete corrupt allowlisted obs backing indices.
+        Returns a short human summary of what it did (for the Alertmanager note)."""
         st, shards = es("GET", "/_cat/shards?format=json&h=index,shard,prirep,state")
         if st != 200:
             log("could not list shards:", shards)
-            return
+            return "could not list shards"
         unassigned = [s for s in shards if s.get("state") == "UNASSIGNED"]
         targets = [s for s in unassigned if allowed(s.get("index"))]
         for s in unassigned:
@@ -99,7 +153,7 @@ data:
                     f" — not an obs data stream; leaving for operator")
         if not targets:
             log("RED but no allowlisted obs shards unassigned — nothing this job may safely do")
-            return
+            return "RED with a non-obs unassigned shard — operator attention needed"
         # Cheap transient retry first (fixes non-corruption retry-exhaustion).
         if not DRY_RUN:
             log("POST _cluster/reroute?retry_failed")
@@ -110,6 +164,7 @@ data:
         targets = [s for s in unassigned if allowed(s.get("index"))]
         streams = data_streams()
         done = set()
+        skipped = set()
         for s in targets:
             idx = s["index"]
             if idx in done:
@@ -121,9 +176,18 @@ data:
             decisions = expl.get("node_allocation_decisions") or []
             expls = " ".join((d.get("deciders", [{}]) or [{}])[0].get("explanation", "")
                              for d in decisions)
-            settled = info.get("reason") == "ALLOCATION_FAILED" or "exceeded" in expls
+            # no_valid_shard_copy = the primary is corrupt with no good/replica
+            # copy (single-node power-loss corruption). It will NEVER self-recover,
+            # so treat it as settled-failed and let the rollover+delete path run.
+            # (Was the 2026-08-05 gap: the shard sat as reason=MANUAL_ALLOCATION /
+            # last_allocation_status=no_valid_shard_copy and this check skipped it
+            # every cycle, so ingestion stayed stalled ~3h.)
+            settled = (info.get("reason") == "ALLOCATION_FAILED"
+                       or "exceeded" in expls
+                       or info.get("last_allocation_status") == "no_valid_shard_copy")
             if not settled:
                 log(f"SKIP {idx}: allocation not settled-failed yet (reason={info.get('reason')})")
+                skipped.add(idx)
                 continue
             parent, is_write = find_parent(idx, streams)
             # HARD GUARD: never issue a DELETE for a non-allowlisted index.
@@ -140,6 +204,13 @@ data:
                 code, resp = es("DELETE", f"/{idx}")
                 log(f"  -> {code} {resp.get('acknowledged', resp)}")
             done.add(idx)
+        if done:
+            verb = "would rollover+delete" if DRY_RUN else "auto-recovered (rollover+delete)"
+            return f"{verb} {len(done)} corrupt obs index(es): {sorted(done)}"
+        if skipped:
+            return (f"{len(skipped)} unassigned obs shard(s) not yet settled/actionable: "
+                    f"{sorted(skipped)}")
+        return "RED handled; no actionable allowlisted obs shards this run"
 
     def keep_windows_fresh():
         """GREEN path: if a TSDB write window has already EXPIRED (poll/rollover
@@ -176,7 +247,10 @@ data:
         log(f"cluster status={status} unassigned={health.get('unassigned_shards')} "
             f"dry_run={DRY_RUN}")
         if status == "red":
-            recover_red()
+            summary = recover_red() or "no action taken"
+            # Page on every RED run (no ES exporter -> RED has no Prometheus
+            # metric). Alertmanager dedups; it auto-resolves once RED clears.
+            notify_am(status, health, summary)
         # Always check windows (a stalled rollover keeps the cluster GREEN).
         keep_windows_fresh()
         log("done")
