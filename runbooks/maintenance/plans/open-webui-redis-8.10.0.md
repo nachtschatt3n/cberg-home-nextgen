@@ -22,8 +22,8 @@ touches:
                                   # instance, NOT langfuse-redis, NOT any bitnami redis.
 depends_on: []
 conflicts_with: []
-status: draft
-window: null                      # suggest a weekend / operator-present window (major bump)
+status: scheduled                   # scheduled 2026-08-06 for thu-early window (operator go/no-go at window)
+window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

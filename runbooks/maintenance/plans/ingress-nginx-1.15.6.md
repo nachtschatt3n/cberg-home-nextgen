@@ -40,8 +40,8 @@ conflicts_with: []                  # no hard resource conflict, but DO NOT co-s
                                     # that (a) touches cloudflared / cert-manager / a public ingress,
                                     # or (b) verifies via an ingressed endpoint — its check will read
                                     # false during the ingress blip. See Interference notes.
-status: draft
-window: null                        # window agent assigns. SUGGEST: a no-reboot, OPERATOR-PRESENT
+status: awaiting-go                  # BLOCKED: needs Chainguard cgr.dev pull creds (operator subscription) before it can run
+window: null                        # HELD until cgr.dev creds exist; then an attended weekend slot (sat/sun), NOT with cloudflared/cert-manager
                                     # slot (e.g. sat-early). NOT auto/unattended — supply-chain source
                                     # change + public-ingress blast radius + an operator go/no-go on
                                     # trusting the fork image (§Pre-checks P0).

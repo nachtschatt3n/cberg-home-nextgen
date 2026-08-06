@@ -31,8 +31,8 @@ touches:
 depends_on: []
 conflicts_with: []                  # don't co-schedule with anything that itself relies on
                                     # metrics.k8s.io being continuously up (none pending)
-status: draft
-window: null                        # SUGGESTION: soonest no-reboot slot — sat-early:2026-08-08
+status: scheduled                   # scheduled 2026-08-06 for thu-early window (operator go/no-go at window)
+window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
                                     # (risk-weight low=1, fits any no-reboot window trivially;
                                     # CVE-urgency argues for the nearest slot). Window agent assigns.
 auto_execute: false                 # low-risk + trivial ⇒ eligible for the unattended fast-track,
