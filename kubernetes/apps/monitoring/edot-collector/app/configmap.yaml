@@ -92,6 +92,14 @@ data:
         metrics:
           metric:
             - 'type == METRIC_DATA_TYPE_NONE'
+            # info/label-carrier series — ES rejects its points continuously
+            # ("wrong ValueType Empty"); fully available in Prometheus.
+            - 'name == "flux_resource_info"'
+          datapoint:
+            # Prometheus STALENESS markers (NoRecordedValue points, e.g. the
+            # node_network_*/node_arp_entries burst on scrape churn) — carry no
+            # value by design; ES can never index them.
+            - 'flags == FLAG_NO_RECORDED_VALUE'
       batch:
         send_batch_size: 1000
         send_batch_max_size: 1500
