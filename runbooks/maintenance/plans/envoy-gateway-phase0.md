@@ -30,8 +30,8 @@ touches:
 depends_on: []
 conflicts_with: []                  # do not co-schedule with cloudflared/cert-manager
                                     # plans as a general rule for this migration
-status: draft
-window: null                        # next free no-reboot slot (tue/thu/sat); fits
+status: scheduled                   # operator-scheduled 2026-08-07
+window: "sat-early:2026-08-15"      # with app-template canary (cap-fit 6/6) + phase1 if time allows; window-agent sequences: P0 before P1, defer P1 to sun-08-16 on overrun
                                     # alongside light plans (risk weight 1)
 auto_execute: false                 # new infra component → operator go/no-go
 sops_refs:
@@ -138,4 +138,6 @@ HTTPRoute objects first, then CRDs.)
   those pods — brief (<30s) blips in internal DNS resolution / dashboard.
   Not user-visible in practice; note in the window log.
 - Phase 1 (pilots incl. authentik ext-auth + homepage discovery gates) is a
-  SEPARATE plan/window — do not chain into it in the same window.
+  SEPARATE plan (envoy-gateway-phase1.md). Operator decision 2026-08-07: both
+  run in sat-early:2026-08-15 — phase1 starts ONLY after phase0 verification
+  passes in full, and defers to sun-window:2026-08-16 on time overrun.
