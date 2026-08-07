@@ -40,7 +40,7 @@ conflicts_with: []                  # no hard resource conflict, but DO NOT co-s
                                     # that (a) touches cloudflared / cert-manager / a public ingress,
                                     # or (b) verifies via an ingressed endpoint — its check will read
                                     # false during the ingress blip. See Interference notes.
-status: awaiting-go                  # BLOCKED: needs Chainguard cgr.dev pull creds (operator subscription) before it can run
+status: superseded                  # 2026-08-07: superseded by the Envoy Gateway migration decision (docs/troubleshooting/ingress-migration-plan.md). BREAK-GLASS contingency only: revive if the migration slips past ~8 weeks OR an actively-exploited critical lands on v1.15.1 mid-migration.
 window: null                        # HELD until cgr.dev creds exist; then an attended weekend slot (sat/sun), NOT with cloudflared/cert-manager
                                     # slot (e.g. sat-early). NOT auto/unattended — supply-chain source
                                     # change + public-ingress blast radius + an operator go/no-go on
