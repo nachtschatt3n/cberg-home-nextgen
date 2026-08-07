@@ -69,6 +69,29 @@ data:
           - context: log
             statements:
               - delete_key(log.body["object"]["metadata"], "managedFields") where IsMap(log.body) and IsMap(log.body["object"]) and IsMap(log.body["object"]["metadata"]) and log.body["object"]["metadata"]["managedFields"] != nil
+      # ES otel-mode rejects CUMULATIVE-temporality histograms — the exporter
+      # logged ~9.2k/24h "dropping cumulative temporality histogram" for these
+      # four (silently lost). Convert just them to delta so they index.
+      # New histogram metrics that appear later will log the same drop — the
+      # health-check ES-rejection assertion (added 2026-08-07) catches that.
+      cumulativetodelta/es-histograms:
+        include:
+          match_type: strict
+          metrics:
+            - otelcol_processor_batch_batch_send_size
+            - workqueue_queue_duration_seconds
+            - workqueue_work_duration_seconds
+            - controller_runtime_reconcile_time_seconds
+      # ES rejects data points with Empty value type ("invalid number data
+      # point ... wrong ValueType Empty" — flux_resource_info, node_network_*,
+      # node_arp_entries; ~470/24h). They're untyped/info-style series that ES
+      # can never store; they remain fully available in Prometheus. Drop them
+      # here so they stop erroring on every batch.
+      filter/drop-es-invalid-metrics:
+        error_mode: ignore
+        metrics:
+          metric:
+            - 'type == METRIC_DATA_TYPE_NONE'
       batch:
         send_batch_size: 1000
         send_batch_max_size: 1500
@@ -144,7 +167,7 @@ data:
           exporters: [prometheus/hwerrors]
         metrics:
           receivers: [otlp]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, filter/drop-es-invalid-metrics, cumulativetodelta/es-histograms, batch]
           exporters: [elasticsearch/metrics]
         traces:
           receivers: [otlp]

@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.07.23`
-> Last Updated: `2026-07-23`
+> Version: `2026.08.07`
+> Last Updated: `2026-08-07`
 > Owner: `Platform`
 
 ---
@@ -192,6 +192,48 @@ kube_persistentvolumeclaim_status_phase
 longhorn_volume_actual_size_bytes
 longhorn_volume_state
 ```
+
+---
+
+## ES Rejected Documents (edot-collector silent telemetry loss)
+
+The edot-collector can look perfectly healthy (Ready, 0 restarts, ingestion
+volume normal) while Elasticsearch **rejects** part of what it sends — the
+docs/points are silently lost and only the collector's own logs show it.
+`runbooks/health-check.sh` asserts on this hourly rate since 2026-08-07.
+
+Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector`):
+
+1. **`document_parsing_exception` / `failed to index document`** — the whole
+   log/doc is rejected. `error.reason` is usually **empty** in the exporter log;
+   to see the real reason, temporarily enable the data-stream failure store,
+   read the rejected docs, then revert:
+   ```bash
+   # enable (diagnostic), read, disable — see memory/incident 2026-08-05
+   PUT  /_data_stream/logs-generic-default/_options {"failure_store":{"enabled":true}}
+   GET  /logs-generic-default::failures/_search?size=5&sort=@timestamp:desc
+   DELETE /_data_stream/logs-generic-default/_options
+   ```
+   Known instance (fixed 2026-08-05): k8s Event `managedFields` carries a `"."`
+   key → "field name cannot contain only dots" → fixed by the
+   `transform/strip-k8s-managedfields` processor. NB the OTLP record path is
+   `log.body["object"]…` — the `body.structured.*` seen in ES is the otel-mode
+   wrapper, not the record path.
+
+2. **`validation errors` on `elasticsearch/metrics`** — individual metric
+   points dropped:
+   - *"dropping cumulative temporality histogram X"* — ES otel-mode only
+     accepts **delta** histograms. Fix: add X to the
+     `cumulativetodelta/es-histograms` include list in
+     `kubernetes/apps/monitoring/edot-collector/app/configmap.yaml`.
+   - *"invalid number data point X, wrong ValueType Empty"* — untyped/info
+     series ES can never store; the `filter/drop-es-invalid-metrics`
+     processor (`type == METRIC_DATA_TYPE_NONE`) drops them pre-export
+     (they remain in Prometheus).
+
+Always validate an edot config change before rolling (throwaway pod:
+`otel/opentelemetry-collector-contrib:<ver> validate --config=...`, dummy
+`ES_PASSWORD`) — a bad config crashloops the cluster-wide telemetry path.
 
 ---
 

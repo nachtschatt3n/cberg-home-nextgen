@@ -3472,6 +3472,26 @@ except:
         add_minor_issue "edot-collector restart count high: $EDOT_RESTARTS"
     fi
 
+    # ES exporter REJECTION rate (added 2026-08-07 — closes the silent-drop gap:
+    # readiness/restarts/volume said "healthy" while ES rejected ~750 docs/hr).
+    # Two silent-loss classes in the edot logs:
+    #   - "failed to index document" / document_parsing_exception  (whole doc lost)
+    #   - "validation errors"  (metric points dropped: cumulative histograms,
+    #     Empty-ValueType) — see docs/sops/monitoring.md "ES rejected documents"
+    EDOT_REJECTS=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
+        grep -cE "document_parsing_exception|failed to index document" || echo "0")
+    EDOT_VALIDATION=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
+        grep -c "validation errors" || echo "0")
+    echo "edot-collector ES rejections last 1h: parse=${EDOT_REJECTS} validation=${EDOT_VALIDATION}"
+    if [ "${EDOT_REJECTS:-0}" -gt 10 ]; then
+        log_warning "edot-collector: ES rejecting documents (${EDOT_REJECTS}/h document_parsing) — telemetry silently lost"
+        add_minor_issue "edot ES document rejections: ${EDOT_REJECTS}/h (SOP: monitoring.md 'ES rejected documents')"
+    fi
+    if [ "${EDOT_VALIDATION:-0}" -gt 50 ]; then
+        log_warning "edot-collector: ES exporter validation errors (${EDOT_VALIDATION}/h) — metric points silently dropped"
+        add_minor_issue "edot ES validation errors: ${EDOT_VALIDATION}/h (SOP: monitoring.md 'ES rejected documents')"
+    fi
+
     # otel-operator DaemonSet (daemon collectors per node)
     OTEL_DAEMON_READY=$(kubectl get daemonset -n monitoring -l app.kubernetes.io/managed-by=opentelemetry-operator -o json 2>/dev/null | python3 -c "
 import sys, json
