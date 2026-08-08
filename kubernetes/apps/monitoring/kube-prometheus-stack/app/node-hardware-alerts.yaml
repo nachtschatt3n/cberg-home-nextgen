@@ -58,15 +58,25 @@ spec:
       interval: 30s
       rules:
         - alert: NodeCPUTemperatureHigh
-          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 90
-          for: 10m
+          # Retuned 2026-08-09: was >90 for 10m, which nagged continuously during
+          # legitimate sustained GPU/CPU work — an Immich transcode batch parks the
+          # package at 85-90°C for hours, and a warning that fires through every
+          # normal batch trains you to ignore it.
+          # >93 for 20m instead: the 14-day baseline ceiling for these nodes is
+          # 70-85°C, so 20 minutes above 93°C is genuinely abnormal rather than
+          # merely busy. This would still have fired during the 2026-08-08 thermal
+          # incident, which sat at 100-103°C for over an hour.
+          # NodeCPUTemperatureCritical below is deliberately UNCHANGED — it is the
+          # rule that caught that incident and must stay sensitive.
+          expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 93
+          for: 20m
           labels:
             severity: warning
             category: node-hardware
             component: cpu-thermal
           annotations:
             summary: "CPU package temp high on {{ $labels.instance }}"
-            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>90°C for 10m). Tjmax on these NUC14 is ~110°C; investigate airflow/dust before it throttles."
+            description: "CPU package temperature is {{ $value | printf \"%.0f\" }}°C (>93°C for 20m). Tjmax on these NUC14 is ~110°C; investigate airflow/dust, and check whether a bulk media job is running uncapped."
         - alert: NodeCPUTemperatureCritical
           expr: max by (instance) (node_thermal_zone_temp{type="x86_pkg_temp"}) > 100
           for: 2m
