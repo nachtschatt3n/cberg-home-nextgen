@@ -84,6 +84,74 @@ Key Talos facts (verified against `siderolabs/pkgs` kernel config + issue #13192
 
 ---
 
+## 2026-08-08 — nuc14-01 thermal reset (the payoff: cause identified)
+
+At **20:05:56 UTC** control-plane node **k8s-nuc14-01** hard-reset. Unlike
+2026-06-29 the cause **was** identified, because Tier 1 alerts fired and Tier 2
+kmsg was flowing. This is the first time this tooling earned its keep.
+
+**Cause.** Immich was deployed that afternoon (`f3badbda`) and started its
+initial library scan over ~54k assets. `immich-server` ran **software** ffmpeg
+(Immich's `ffmpeg.accel` defaults to `disabled`) and drew a sustained **12–24
+cores**, pinning the package temperature at **100–103 °C for over an hour** —
+against a 14-day normal ceiling of 70–85 °C for this node.
+`NodeCPUTemperatureHigh` fired 18:51, `NodeCPUTemperatureCritical` 19:16. Last
+kmsg line **20:03:30**, kernel boot **20:05:55**. XFS EPHEMERAL needed log
+recovery ⇒ unclean shutdown. In parallel `immich-machine-learning` pushed
+nuc14-03 to 85–96 °C — a second near-miss on a different node.
+
+**Ruled out with evidence:** OOM (31 GiB free), ECC (`node_edac_*` = 0), MCE /
+`Hardware Error` (none in shipped kmsg), Talos upgrade (`install sequence:
+0 phase(s)`, same v1.13.7 + kernel 6.18.39 as the other nodes), automated
+reboot controller (no kured / system-upgrade-controller in cluster or git).
+
+**Undetermined:** the exact trip mechanism. 103 °C is at the throttle point, not
+the ~125 °C THERMTRIP, so a VRM/power-delivery protection cut is as plausible as
+a thermal trip. Nothing was logged in the final 2m25s. The load/thermal
+correlation is unambiguous; the specific protection that fired is not.
+
+### Remediation applied
+- CPU caps as a deliberate exception to the repo no-cpu-limit norm:
+  `immich-server` 4 (`ffc3bee6`), `immich-machine-learning` 3 (`5e103647` —
+  tighter because nuc14-03 also hosts home-assistant + zigbee2mqtt and is the
+  busiest node). Remove once the initial scan drains.
+- **GPU offload** (`a034c545`): `gpu.intel.com/i915` on immich-server. Measured
+  on a real 10-bit HEVC 1080p60 library file: software-decode + QSV-encode =
+  115 fps / 4.75× and **pinned all 4 CPU cores**; full hardware decode + encode
+  = **580 fps / 24× at 288m CPU**. Same job, ~14× less CPU. Node peaked 71 °C.
+- **Image GC** (`a3b31ee8`): kubelet `imageGCHighThresholdPercent: 70` /
+  `Low: 65`. Freed **687 GiB** across the three nodes (nodes were 71–74% full
+  carrying ~380 GiB of images each, of which only ~7 GiB was referenced).
+- **2-replica standardisation** (`cdf26dc3`): all 83 Longhorn volumes.
+
+### Lessons
+1. **A new workload's first bulk scan is the thermal worst case.** Immich was
+   fine in steady state; it was the one-off ingest that cooked the node.
+   Consider a default CPU ceiling on any newly deployed bulk-processing app.
+2. **Same node, 6 weeks apart, different causes.** 2026-06-29 was 55–68 °C and
+   load ~3; 2026-08-08 was 100–103 °C and load ~23. Do not assume a repeat
+   reboot on the same host shares a root cause.
+3. **Check that "hardware acceleration" is actually on.** Immich exposes it in
+   **DB-backed runtime config** (Administration → Settings → Video Transcoding),
+   not in helm values — the manifest can look correct while the work still runs
+   on CPU. Note the OIDC block lives in that same `system_config` row, so a
+   partial `IMMICH_CONFIG_FILE` would silently reset `oauth.enabled` and break
+   SSO.
+4. **A remediation can make a fault *look* healthy — the most useful lesson
+   here.** `media/immich-upload` had lost a replica and sat `degraded`, honestly
+   reporting a real problem. Dropping its replica count 3 → 2 flipped it to
+   `robustness: healthy, Scheduled: True` **while both surviving replicas were
+   still on nuc14-03** — zero node redundancy, now invisible to every dashboard
+   and alert. Degraded-but-honest beats healthy-but-wrong. After any change to
+   replica counts, assert on **replica placement across distinct nodes**, not on
+   the robustness field.
+5. **Longhorn scheduling math must include `storageReserved`.** Headroom is
+   `min(available − reserved − 25% floor, max − reserved − scheduled)`. Omitting
+   the reserve overestimated capacity by >100 GiB and produced a migration plan
+   that could not schedule.
+
+---
+
 ## Tier 1 — node-level alerts (DONE, live)
 
 `kubernetes/apps/monitoring/kube-prometheus-stack/app/node-hardware-alerts.yaml`
