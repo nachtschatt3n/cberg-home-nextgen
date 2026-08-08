@@ -57,6 +57,10 @@ spec:
                 value: /cache
             resources:
               requests:
+                # cpu stays at 500m ON PURPOSE: the request sets the CFS weight,
+                # so keeping it low makes ML *yield* to home-assistant and
+                # zigbee2mqtt under contention (all three land on nuc14-03).
+                # Thermal ceiling is enforced by the limit below, not by this.
                 cpu: 500m
                 memory: 3Gi
                 gpu.intel.com/i915: 1
@@ -64,6 +68,18 @@ spec:
                 # 8Gi: the initial full-library scan (OpenVINO models + face/CLIP/OCR
                 # batches) peaks near 6Gi; headroom avoids an OOM-kill mid-scan.
                 memory: 8Gi
+                # CPU cap (same deliberate exception to the repo "no cpu limit"
+                # norm as immich-server). During the initial scan this container
+                # drew a sustained 5-7 cores and took nuc14-03 from 62C to 85-96C,
+                # tripping NodeCPUTemperatureHigh — the same mechanism that
+                # thermally reset nuc14-01 on 2026-08-08. Capped at 3 (not the
+                # server's 4): nuc14-03 is the busiest node (108 pods, cpu limits
+                # already 108% overcommitted) AND hosts home-assistant +
+                # zigbee2mqtt, so it gets a tighter thermal budget. Inference runs
+                # on the iGPU (OpenVINO), so CPU here is decode/preprocess feeding
+                # the GPU — throughput degrades sub-linearly with the cap.
+                # Remove once the initial scan drains.
+                cpu: "3"
                 gpu.intel.com/i915: 1
             probes:
               liveness:
