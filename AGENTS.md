@@ -39,7 +39,7 @@ go/no-go by default — never run fully unattended.
 
 ## Build/Lint/Test Commands
 - Validate cluster manifests: `task template:configure -- --strict`
-- Lint Kubernetes manifests: `kubeconform -summary -fail-on error kubernetes/apps/`
+- Lint Kubernetes manifests: `kubeconform -summary -exit-on-error -ignore-missing-schemas kubernetes/apps/`
 - Validate Talos configs: `talhelper validate kubernetes/bootstrap/talos/clusterconfig/`
 - Run all tests: `task test` (checks template rendering, config validation)
 - Test single component: `kubeconform -summary kubernetes/apps/[category]/[app]`
@@ -196,7 +196,7 @@ On 2026-04-26, a routine `kubectl delete pvc` on a `cifs-jellyfin-media`-class P
 
 1. **No CIFS/SMB/NFS PVC deletes without 3-step pre-flight.** Inspect `spec.csi.volumeAttributes.subdir`, `spec.persistentVolumeReclaimPolicy`, and the StorageClass before the action. If `subdir` is `/`/empty/`..`-traversed AND `reclaimPolicy` is `Delete`: **STOP**. Patch the PV to `Retain` first, or surface to the user with inventory and ask explicit go/no-go.
 2. **"Tear down the Job + PVC" is not routine for shared-fs PVCs.** Blast radius is set by the StorageClass, not the brief.
-3. **Catastrophic classes** (full share wipe on PVC delete): `cifs-jellyfin-media`, `cifs-plex-media`. **Severe** (per-app share wipe): `cifs-frigate-media`, `cifs-scrypted-media`, `cifs-icloud-docker-mu`, `cifs-jdownloader-media`, `cifs-makemkv-media`, `cifs-tube-archivist-media`, `cifs-nextcloud-data`, `cifs-paperless-{consume,export,log,media}`. Full table with sources/subdirs in `docs/sops/storage-safety.md`.
+3. **Catastrophic classes** (full share wipe on PVC delete): `cifs-jellyfin-media`, `cifs-plex-media`. **Severe** (per-app share wipe): `cifs-frigate-media`, `cifs-scrypted-media`, `cifs-icloud-docker-{mu,andrea}`, `cifs-jdownloader-media`, `cifs-makemkv-media`, `cifs-tube-archivist-media`, `cifs-nextcloud-data`, `cifs-paperless-{consume,export,log,media}`. Full table with sources/subdirs in `docs/sops/storage-safety.md`.
 4. **Sub-agent dispatch propagates these rules verbatim.** Do not assume a sub-agent will self-discover the risk.
 5. **New StorageClasses must not pair `subdir: /` with `reclaim: Delete`.** Prefer `Retain` for any class pointing at user data. Update the table in `docs/sops/storage-safety.md` in the same PR.
 

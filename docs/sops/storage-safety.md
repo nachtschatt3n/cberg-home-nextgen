@@ -101,7 +101,6 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 |---|---|---|---|
 | `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Delete |
 | `cifs-scrypted-media` | `//192.168.55.240/scrypted` | `/media` | Delete |
-| `cifs-icloud-docker-mu` | `//192.168.55.240/backups` | `icloud-backup/mu` | Delete |
 | `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Delete |
 | `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Delete |
 | `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Delete |
@@ -115,6 +114,8 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 | StorageClass | Notes |
 |---|---|
+| `cifs-icloud-docker-andrea` | Retain — `//192.168.55.240/backups` `icloud-backup/andrea`; PV must be cleaned up manually |
+| `cifs-icloud-docker-mu` | Retain — `//192.168.55.240/backups` `icloud-backup/mu`; PV must be cleaned up manually. **Moved here 2026-08-08**: this row previously sat in the `Delete` table above, but the class has been `Retain` since commit `f14af609` |
 | `cifs-opencode-andreamosteller` | Retain — PV must be cleaned up manually |
 | `cifs-penpot-assets` | Retain — same |
 

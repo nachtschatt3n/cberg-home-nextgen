@@ -1329,6 +1329,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
     ACCEPTED_ROOT_UID = {
         "ai/openclaw",                    # install-openclaw init container
         "ai/paperclip",                   # tools container
+        "backup/icloud-docker-andrea",    # iCloud sync agent (requires root for keychain)
         "backup/icloud-docker-mu",        # iCloud sync agent (requires root for keychain)
         "home-automation/node-red",       # legacy image design
         "home-automation/scrypted",       # same as privileged rationale

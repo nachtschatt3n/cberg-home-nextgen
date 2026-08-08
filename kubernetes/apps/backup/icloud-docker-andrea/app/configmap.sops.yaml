@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icloud-docker-andrea-config
+  namespace: backup
+data:
+  config.yaml: ENC[AES256_GCM,data:aRvmRHyaZWl8WcbxUaXPU948D+EvZcnQsAyIL3rIZFc3a4Z6YMeZvG/c4aQjhAhs9d1uuVrobKIr9oNKZxGMfr58GLQBc2EG0cLxRF8j5eSiTvn079HkYUfMGjnnV9Ha9G2q59q771OMd+yAwvK/6PW9V0Ny+DXoDq058wtzG9t6nw2M2oHWUri3d+ydWjN2Ai/fZ9x1RceE5E2nPVeN5Bdq0yqvPmRgJtEvqcLqFThMMlXT1KEOlLi1SDGinVSNUv0yVB7CT7lRH1moysTJea3fJOuwOF6UHwMuamTOfagHANzPj9XOsLz8740Qalwhk6gMuCHy5rUcrY0Eu/gjgJ0YmIo6ILMfMejd6i6+UWBFxpahJDQ5ofyYS/yiBWbHGY6/1er/VZ65v2GTwOUn7XTk6U0/Hx3m0iSWob5wwz2h7cCRMHy9wi9e/VRgpoS+By3MK8vp7frU/DVYhBKE7Wx2xYt4/gZ69QcuawCW1/82OkJ57OGF3kuGd/BJxMfB0sGQ3eH87Ouy/r4aSAGn/dMWSiLfLcTl7BcAvCaAqFVX84qEZHqmQ3owB6Noy9fFHxW0UusgQz1CnE6rbx14wDveuAeBsv42dgovbs/zp0OLgtFTOsd9Fo9kGOLJAvXbXBCIfKzCF06ZMPtrZjTqntVwLyOR2ihPcoMBaBE8Z44vyZKAjFe4nlbyOsPCdvlwn+LF88s=,iv:g59Gvx8TnFB+goQlzZ4XC4qALsk7NN/A857/j51gXd8=,tag:T4wQEnxv9ykvWC4nGoYflQ==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBNQ0pTcStibnhwL1p1SHJj
+        UzcrQUtuK2l2RW9odWU2WXJCSnZKRWs2KzEwClIvTlNJQjZxR0JOQUxTOXB0MWFz
+        UzA0VzBaUnRkUDZDdnRrSHRITmNCTnMKLS0tIHdUYXdKazBSbnM0M0lOTVU2KzB0
+        SHk5d0YwSk4zSGVqb1FSSkY4R09WVnMKcCAaMDR47OtZcQyAQ0GBvQTNJD4H0jcO
+        4bOlGDnS+bijiKweELMsCh2AHV13r+5rxxJiROAOeNPyqKR6AL8dVg==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1nw624gkjpl0sattullahnekdswjcvsgarf8gwwyf9jdqc0zm9enqyp2pf6
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-08-08T10:54:36Z"
+  mac: ENC[AES256_GCM,data:J3dhf9Ixqg7nx1q5LFTAMO0lDkUW5hW/vvGw/ASgLZ3dzHlY3C4onlokrQw7/89f2YjA3WFk6tt99P2TxFerZWfPBdtdSgFbITrRDmvyOTNGGQIlPPF1JpCLqNmJSprU4aZ2SXmGPUmwm61JoYGraHu3J3YWDr/Fp8JORLIFpEI=,iv:dF0FZ312XAnZG+ltKMHV5F/7kAz2x87yLb9WLkuvb3Q=,tag:c4lkp1Ayxw6wmZJDBKYvdQ==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.0

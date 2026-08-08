@@ -1,15 +1,16 @@
 # SOP: iCloud Docker Re-authentication (2FA session recovery)
 
-> Description: Recover the `icloud-docker-mu` (mandarons/icloud-drive) Apple session when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
-> Version: `2026.06.13`
-> Last Updated: `2026-06-13`
+> Description: Recover the Apple session of any `icloud-docker-*` instance (mandarons/icloud-drive) when it expires, including the modern-2FA flow that the bundled `icloud` CLI gets wrong, and the quota-exhaustion mitigation (stop the retry loop before re-auth).
+> Version: `2026.08.08`
+> Last Updated: `2026-08-08`
 > Owner: `operator`
 
 ---
 
 ## 1) Description
 
-`icloud-docker-mu` keeps a local mirror of iCloud Drive. Its Apple session
+Each `icloud-docker-<instance>` deployment keeps a local mirror of one Apple
+ID's iCloud Drive + Photos. Its Apple session
 expires every ~30-60 days; when it does, every sync cycle (~10 min) fails with
 `Authentication required for Account. (421)` / `2FA is required. Please log in.`
 and the container loops, re-attempting auth on each cycle.
@@ -18,8 +19,19 @@ This SOP covers re-authenticating the session. The account uses **modern 2FA**
 (`hsaVersion 2`), and the re-auth must be done **interactively** by the operator
 (only they can approve the iPhone 2FA push and read the code).
 
-- Scope: `backup` namespace, deployment `icloud-docker-mu`, session PVC
-  `icloud-docker-mu-session` (CIFS, **ReadWriteOnce**).
+**Set `INSTANCE` before running any command in this SOP:**
+
+```bash
+export INSTANCE=mu        # or: andrea
+```
+
+- Scope: `backup` namespace, deployment `icloud-docker-$INSTANCE`, session PVC
+  `icloud-docker-$INSTANCE-session` (**ReadWriteOnce**; Longhorn — `mu` is on
+  `longhorn-static`, `andrea` on dynamic `longhorn`).
+- **Instances are independent.** Session, secret, config and data are all
+  per-instance, and Apple's 2FA quota is per Apple ID. Re-authing one never
+  touches the other — scale down only the instance you are fixing; the other
+  keeps syncing.
 - Prerequisites: `kubectl` + `flux` (via mise shims), operator's Apple device to
   approve the 2FA push, the Apple ID + password already in the SOPS secret.
 - Out of scope: changing Apple credentials (separate — edit `secret.sops.yaml`).
@@ -68,23 +80,24 @@ stop the loop first** (scale to 0 + suspend Flux), then re-auth once.
 
 | Setting | Value |
 |---------|-------|
+| Instance | `mu` · `andrea` — export `INSTANCE` before running anything below |
 | Namespace | `backup` |
-| Deployment | `icloud-docker-mu` |
-| HelmRelease | `icloud-docker-mu` (Flux-managed) |
-| Session dir | `/config/session_data` (PVC `icloud-docker-mu-session`, CIFS, RWO) |
+| Deployment | `icloud-docker-$INSTANCE` |
+| HelmRelease | `icloud-docker-$INSTANCE` (Flux-managed) |
+| Session dir | `/config/session_data` (PVC `icloud-docker-$INSTANCE-session`, Longhorn, RWO) |
 | Session files | `<appleid-slug>` + `<appleid-slug>.session` (slug = Apple ID with `@`/`.` stripped) |
-| Credentials | secret `icloud-docker-mu-secrets` → `SECRET_ICLOUD_USERNAME`, `SECRET_ICLOUD_PASSWORD` |
+| Credentials | secret `icloud-docker-$INSTANCE-secrets` → `SECRET_ICLOUD_USERNAME`, `SECRET_ICLOUD_PASSWORD` |
 | CIFS file owner | uid/gid **1000** (real pod remaps `abc` 911→1000 via `PUID=1000`) |
-| Auth library | `icloudpy` 0.8.0 (endpoint `idmsa.apple.com/appleauth/auth`) |
+| Auth library | `icloudpy` 0.9.0 via the pinned image digest (endpoint `idmsa.apple.com/appleauth/auth`) |
 | Session lifetime | ~30-60 days |
 
 ---
 
 ## 3) Blueprints
 
-- App manifests: `kubernetes/apps/backup/icloud-docker-mu/app/`
+- App manifests: `kubernetes/apps/backup/icloud-docker-$INSTANCE/app/`
   (`helmrelease.yaml`, `secret.sops.yaml`, `configmap.sops.yaml`, `pvc.yaml`).
-- Credentials source of truth: `kubernetes/apps/backup/icloud-docker-mu/app/secret.sops.yaml`
+- Credentials source of truth: `kubernetes/apps/backup/icloud-docker-$INSTANCE/app/secret.sops.yaml`
   (SOPS-encrypted; never edit decrypted outside the repo path).
 
 The re-auth pod and script below are **ephemeral / not committed** — spawn them
@@ -97,15 +110,19 @@ one pod can mount it) and must run as **uid 1000** so the new session files are
 owned correctly (a `sleep` override skips the image's `PUID` remap, leaving
 `abc` at its image-default uid 911 → CIFS write `Permission denied`).
 
+The pod name and both refs are instance-scoped. **Never point one instance's
+re-auth pod at the other instance's session PVC** — you would overwrite a
+healthy trusted session with the wrong Apple ID's cookies.
+
 ```bash
-cat <<'EOF' | kubectl apply -f -
+cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Pod
 metadata:
-  name: icloud-reauth
+  name: icloud-reauth-$INSTANCE
   namespace: backup
   labels:
-    app.kubernetes.io/name: icloud-reauth
+    app.kubernetes.io/name: icloud-reauth-$INSTANCE
 spec:
   restartPolicy: Never
   securityContext:
@@ -114,23 +131,27 @@ spec:
     fsGroup: 1000
   containers:
     - name: app
-      image: mandarons/icloud-drive:latest
+      # MUST be the same pinned digest as the HelmRelease. `:latest` (v1.25.0)
+      # ships icloudpy 0.8.0, which has no trigger_2fa_push_notification() —
+      # the script below would abort with `icloudpy < 0.9.0 in this image`
+      # and no 2FA push would ever arrive.
+      image: mandarons/icloud-drive:main@sha256:91486ec1eaeb382e7af264b7ffa935c5ba110f11c3c2f1805976782ff5017917
       command: ["sleep", "infinity"]
       env:
         - name: HOME
           value: /tmp
       envFrom:
         - secretRef:
-            name: icloud-docker-mu-secrets
+            name: icloud-docker-$INSTANCE-secrets
       volumeMounts:
         - name: session
           mountPath: /config/session_data
   volumes:
     - name: session
       persistentVolumeClaim:
-        claimName: icloud-docker-mu-session
+        claimName: icloud-docker-$INSTANCE-session
 EOF
-kubectl -n backup wait --for=condition=Ready pod/icloud-reauth --timeout=120s
+kubectl -n backup wait --for=condition=Ready pod/icloud-reauth-$INSTANCE --timeout=120s
 ```
 
 ### Re-auth script (`/tmp/reauth2fa.py`)
@@ -139,7 +160,7 @@ Reads the Apple ID + password from the secret-provided env vars (no PII in the
 repo). Drives the modern-2FA flow directly.
 
 ```bash
-kubectl -n backup exec -i icloud-reauth -c app -- sh -c 'cat > /tmp/reauth2fa.py' <<'PY'
+kubectl -n backup exec -i icloud-reauth-$INSTANCE -c app -- sh -c 'cat > /tmp/reauth2fa.py' <<'PY'
 import os, sys
 from icloudpy import ICloudPyService
 
@@ -188,9 +209,10 @@ PY
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-kubectl -n backup scale deploy icloud-docker-mu --replicas=0
-flux suspend helmrelease icloud-docker-mu -n backup   # stops the 30-min reconcile re-scaling to 1
-kubectl -n backup wait --for=delete pod -l app.kubernetes.io/name=icloud-docker-mu --timeout=90s
+export INSTANCE=mu        # or: andrea — everything below is scoped to it
+kubectl -n backup scale deploy icloud-docker-$INSTANCE --replicas=0
+flux suspend helmrelease icloud-docker-$INSTANCE -n backup   # stops the 30-min reconcile re-scaling to 1
+kubectl -n backup wait --for=delete pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE --timeout=90s
 ```
 
 ### Step 2 — Let the 2FA quota reset (if pushes are dead)
@@ -207,7 +229,7 @@ Apply the pod manifest and write the script (both in section 3).
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-kubectl -n backup exec -it icloud-reauth -c app -- python3 /tmp/reauth2fa.py
+kubectl -n backup exec -it icloud-reauth-$INSTANCE -c app -- python3 /tmp/reauth2fa.py
 ```
 
 Approve the iPhone push, type the 6-digit code, Enter. Expect
@@ -219,9 +241,9 @@ The session PVC is RWO — **delete the re-auth pod BEFORE scaling the app up**,
 or the app pod can't mount the volume.
 
 ```bash
-kubectl -n backup delete pod icloud-reauth
-flux resume helmrelease icloud-docker-mu -n backup   # scales back to 1
-kubectl -n backup rollout status deploy/icloud-docker-mu --timeout=120s
+kubectl -n backup delete pod icloud-reauth-$INSTANCE
+flux resume helmrelease icloud-docker-$INSTANCE -n backup   # scales back to 1
+kubectl -n backup rollout status deploy/icloud-docker-$INSTANCE --timeout=120s
 ```
 
 ### Step 6 — Clear the accepted-risk (if one was opened)
@@ -254,7 +276,7 @@ If the outage was parked under an AR (e.g. AR-044), disable it after recovery:
 ### Test 1: auth state is clean
 
 ```bash
-kubectl -n backup exec -i icloud-reauth -c app -- python3 - <<'PY'
+kubectl -n backup exec -i icloud-reauth-$INSTANCE -c app -- python3 - <<'PY'
 import os
 from icloudpy import ICloudPyService
 api = ICloudPyService(os.environ["SECRET_ICLOUD_USERNAME"], os.environ["SECRET_ICLOUD_PASSWORD"], cookie_directory="/config/session_data")
@@ -271,7 +293,7 @@ If failed:
 ### Test 2: sync recovers after restart
 
 ```bash
-NEW=$(kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-mu -o name | head -1)
+NEW=$(kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | head -1)
 kubectl -n backup logs $NEW --tail=30 | grep -iE "syncing|incorrect|530|421|2fa"
 ```
 
@@ -290,7 +312,7 @@ If failed:
 | CLI prints `Two-step authentication required. Please enter validation code` | bundled `icloud` CLI takes the dead 2SA branch | Use `reauth2fa.py` (drives 2FA directly), not the `icloud` CLI |
 | No push on iPhone **or** Mac, `requires_2fa: True` | Apple 2FA send-quota exhausted by the retry loop | Stop the loop (step 1), wait for reset (step 2), retry once |
 | `PermissionError: ... /config/session_data/...session` | re-auth pod ran as `abc` uid 911; CIFS owns files as 1000 | Run the pod as `runAsUser: 1000` (manifest in §3), not root + su-exec |
-| App pod stuck `ContainerCreating`, volume in use | `icloud-reauth` still holds the RWO PVC | Delete `icloud-reauth` before scaling the app up |
+| App pod stuck `ContainerCreating`, volume in use | `icloud-reauth-$INSTANCE` still holds the RWO PVC | Delete `icloud-reauth-$INSTANCE` before scaling the app up |
 | `Authentication required for Account. (421)` loop | session expired | Full SOP from step 1 |
 
 ---
@@ -300,7 +322,7 @@ If failed:
 ### Diagnose Example 1: is it 2FA or genuine 2SA?
 
 ```bash
-kubectl -n backup exec -i icloud-reauth -c app -- python3 - <<'PY'
+kubectl -n backup exec -i icloud-reauth-$INSTANCE -c app -- python3 - <<'PY'
 import os
 from icloudpy import ICloudPyService
 api = ICloudPyService(os.environ["SECRET_ICLOUD_USERNAME"], os.environ["SECRET_ICLOUD_PASSWORD"], cookie_directory="/tmp/diag")
@@ -331,8 +353,8 @@ If unclear:
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-kubectl -n backup get deploy icloud-docker-mu -o jsonpath='replicas={.spec.replicas}{"\n"}'
-POD=$(kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-mu -o name | head -1)
+kubectl -n backup get deploy icloud-docker-$INSTANCE -o jsonpath='replicas={.spec.replicas}{"\n"}'
+POD=$(kubectl -n backup get pod -l app.kubernetes.io/name=icloud-docker-$INSTANCE -o name | head -1)
 kubectl -n backup logs $POD --tail=50 | grep -ciE "421|2fa is required"
 ```
 
@@ -340,7 +362,7 @@ Expected:
 - `replicas=1`, count `0` of `421`/`2FA is required` in recent logs.
 
 The daily sweep flags this via the `health` finding
-`icloud-docker-mu recent log errors: N` — a non-zero count after a session
+`icloud-docker-$INSTANCE recent log errors: N` — a non-zero count after a session
 expiry is the trigger to run this SOP.
 
 ---
@@ -356,7 +378,7 @@ rg -n "@me\.com|SECRET_ICLOUD_PASSWORD\s*[:=]" docs/ runbooks/ kubernetes/ \
 Expected:
 - `clean` — Apple ID and password live only in the SOPS secret; the re-auth pod
   reads them from env, and this SOP hardcodes neither.
-- The `icloud-reauth` pod is ephemeral and must be deleted after use (§5/step 5).
+- The `icloud-reauth-$INSTANCE` pod is ephemeral and must be deleted after use (§5/step 5).
 
 ---
 
@@ -368,15 +390,15 @@ session worse off, wipe and retry:
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 # (loop already stopped) clear stale cookies, keep lost+found
-kubectl -n backup exec icloud-reauth -c app -- sh -c 'rm -f /config/session_data/*.session /config/session_data/[!l]*'
+kubectl -n backup exec icloud-reauth-$INSTANCE -c app -- sh -c 'rm -f /config/session_data/*.session /config/session_data/[!l]*'
 # then re-run step 4
 ```
 
 To abandon and restore the prior (broken-but-running) state:
 
 ```bash
-kubectl -n backup delete pod icloud-reauth --ignore-not-found
-flux resume helmrelease icloud-docker-mu -n backup
+kubectl -n backup delete pod icloud-reauth-$INSTANCE --ignore-not-found
+flux resume helmrelease icloud-docker-$INSTANCE -n backup
 ```
 
 ---
@@ -385,7 +407,8 @@ flux resume helmrelease icloud-docker-mu -n backup
 
 - `runbooks/icloud-cookie-rotation.md` (older quick-rotation note; superseded by
   this SOP for 2FA accounts)
-- `kubernetes/apps/backup/icloud-docker-mu/app/` (manifests + SOPS secret)
+- `kubernetes/apps/backup/icloud-docker-{mu,andrea}/app/` (manifests + SOPS secret)
+- `kubernetes/apps/backup/TODO.md` (what else of an Apple account is backed up)
 - `docs/sops/policy-cli.md` (AR lifecycle — park/disable accepted risks)
 - `docs/sops/cifs-mount-options.md` (CIFS ownership/`uid=1000` context)
 
@@ -397,3 +420,11 @@ flux resume helmrelease icloud-docker-mu -n backup
   the broken `icloud` 2SA CLI, the quota-exhaustion mitigation (stop loop +
   suspend Flux before re-auth), the uid-1000 RWO re-auth pod, and the AR-044
   revisit procedure (2026-06-18).
+
+- `2026.08.08`: Parameterized for N instances via `$INSTANCE` — a second
+  deployment (`icloud-docker-andrea`) now exists alongside `icloud-docker-mu`.
+  Pod/secret/PVC/config names are instance-scoped, the re-auth pod manifest
+  heredoc is unquoted so `$INSTANCE` expands, and the 2FA quota is documented as
+  per-Apple-ID (so instances are independent). Corrected two stale rows in the
+  Overview table: `Auth library` was `icloudpy 0.8.0` (the pinned digest ships
+  0.9.0) and the session PVC was described as CIFS (it is Longhorn).

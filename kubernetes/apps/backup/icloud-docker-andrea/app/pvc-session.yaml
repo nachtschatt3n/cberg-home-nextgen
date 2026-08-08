@@ -1,0 +1,24 @@
+---
+# Apple 2FA trusted-session cookies (~30-60 day lifetime), mounted at
+# /config/session_data. Dynamic `longhorn` per AGENTS.md ("Do NOT create
+# longhorn-static if dynamic provisioning works") — UUID PV names are expected.
+#
+# NOTE: `longhorn` has reclaimPolicy Delete. Deleting this PVC, or pruning the
+# Flux Kustomization, destroys the trusted session and forces a full interactive
+# re-auth per docs/sops/icloud-docker-reauth.md. That is an accepted, recoverable
+# cost — the volume holds no unique data. Do NOT "fix" this to longhorn-static.
+#
+# Deliberately committed to Git, unlike icloud-docker-mu-session, which was
+# hand-created off-Git and is therefore unmanaged cluster drift.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: icloud-docker-andrea-session
+  namespace: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: longhorn

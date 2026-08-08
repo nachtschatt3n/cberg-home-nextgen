@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.05.04`
-> Last Updated: `2026-05-04`
+> Version: `2026.08.08`
+> Last Updated: `2026-08-08`
 > Owner: `Platform`
 
 ---
@@ -21,7 +21,7 @@ before and after cluster changes.
 | Backup System | What | Schedule | Target |
 |--------------|------|---------|--------|
 | Longhorn volume backup | All PV data | Daily 3:00 AM | UNAS-CBERG NAS |
-| iCloud backup | iCloud Drive sync | Continuous | iCloud cloud storage |
+| iCloud backup | iCloud Drive + Photos, one instance per Apple ID (2) | Continuous | UNAS-CBERG NAS (`backups/icloud-backup/<name>`) |
 
 Related cluster CronJob (non-backup): `kube-system/descheduler`.
 When checking `kubectl get cronjobs -A`, do not treat it as a backup workload.
@@ -36,7 +36,7 @@ N/A for dedicated blueprint resources.
 
 Source-of-truth manifests:
 - Longhorn backup cronjob/resources in `kubernetes/apps/storage/longhorn/`
-- iCloud integration in `kubernetes/apps/backup/icloud-docker-mu/`
+- iCloud integration in `kubernetes/apps/backup/icloud-docker-{mu,andrea}/`
 
 ---
 
@@ -215,20 +215,37 @@ Scale down the original deployment, delete old PVC, apply new PVC, scale back up
 
 ## iCloud Backup Integration
 
-**Deployment:** `kubernetes/apps/backup/icloud-docker-mu/`
+**Deployments:** `kubernetes/apps/backup/icloud-docker-mu/`,
+`kubernetes/apps/backup/icloud-docker-andrea/`
 
-Syncs Apple iCloud Drive to the cluster for archival purposes.
+One instance per Apple ID, syncing that account's iCloud **Drive + Photos** to
+the NAS for archival. The instances share nothing but the `csi-driver-smb`
+credential and the image digest: each has its own SOPS secret, ConfigMap, CIFS
+StorageClass (`cifs-icloud-docker-<name>` → `icloud-backup/<name>`) and Longhorn
+session PVC. Apple's 2FA quota is per account, so they fail and recover
+independently.
 
 ```bash
-# Check iCloud sync pod status
+# Check iCloud sync pod status (one deployment per Apple ID)
 kubectl get pods -n backup
 
-# View sync logs
+# View sync logs for one instance
 kubectl logs -n backup -l app.kubernetes.io/name=icloud-docker-mu --tail=50
+kubectl logs -n backup -l app.kubernetes.io/name=icloud-docker-andrea --tail=50
 
-# Check sync volume
+# Check sync volumes (one -data + one -session per instance)
 kubectl get pvc -n backup
 ```
+
+Sessions expire every ~30-60 days and need an interactive re-auth:
+`docs/sops/icloud-docker-reauth.md` (export `INSTANCE` first). The daily sweep
+surfaces this as `icloud-docker-<instance> auth/session errors (re-auth
+needed): N` — the leading token tells you which Apple ID.
+
+**Coverage beyond Drive + Photos** — contacts, calendars, mail, Health,
+Messages — is tracked in `kubernetes/apps/backup/TODO.md`. Note `icloud-docker`
+itself supports only `app`/`drive`/`photos`; everything else needs a different
+mechanism.
 
 ---
 
@@ -365,7 +382,7 @@ Expected:
 
 ```bash
 # Revert backup configuration changes if jobs begin failing after update
-git log -- kubernetes/apps/storage/longhorn kubernetes/apps/backup/icloud-docker-mu
+git log -- kubernetes/apps/storage/longhorn kubernetes/apps/backup/
 git revert <commit-sha>
 git push
 ```

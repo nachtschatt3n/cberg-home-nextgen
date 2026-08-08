@@ -242,7 +242,12 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
+| icloud-docker-andrea | Apple iCloud Drive + Photos sync for the second household Apple ID. Same `main` build digest pin as `icloud-docker-mu` — **bump both together** or the un-bumped one silently loses the iOS 26.4+ 2FA push. Data on `cifs-icloud-docker-andrea` (`icloud-backup/andrea`), session PVC on dynamic `longhorn`. | None | — |
 | icloud-docker-mu | Apple iCloud Drive sync. Image pinned to a `main` build digest (not a release tag) to get icloudpy 0.9.0's iOS 26.4+ 2FA push trigger — deliberate exception, see `docs/sops/icloud-docker-reauth.md`. | None | — |
+
+One instance per Apple ID; they share nothing but the `csi-driver-smb` credential
+and the image digest. Coverage of non-Drive/Photos iCloud data (contacts,
+calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 ---
 

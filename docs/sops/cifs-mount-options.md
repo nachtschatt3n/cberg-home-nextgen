@@ -146,6 +146,7 @@ The URL is the cluster's only backup config. A bad change breaks daily backups f
 | StorageClass | Source / subdir | Profile |
 |---|---|---|
 | `cifs-frigate-media` | `//.../frigate` `/media` | A |
+| `cifs-icloud-docker-andrea` | `//.../backups` `/icloud-backup/andrea` | A |
 | `cifs-icloud-docker-mu` | `//.../backups` `/icloud-backup/mu` | A |
 | `cifs-jellyfin-media` | `//.../media` `/` | A |
 | `cifs-makemkv-media` | `//.../media` `/Transcode` | A |

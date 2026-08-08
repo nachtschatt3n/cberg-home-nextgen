@@ -50,7 +50,10 @@ _SUBSECTION_PREFIXES: list[tuple[str, str]] = [
     ("HA overall health",          "home_assistant"),
     ("High Home Assistant error",  "home_assistant"),
     ("UniFi",                      "unifi"),
-    ("icloud-docker-mu",           "icloud_docker"),
+    # Prefix, not the full instance name — routes every icloud-docker-<instance>
+    # finding (mu, andrea, ...) into the same subsection. No other prefix here
+    # collides with it.
+    ("icloud-docker",              "icloud_docker"),
     ("Frigate",                    "frigate"),
     ("Failed jobs",                "kubernetes_jobs"),
     ("Services without endpoints", "kubernetes_services"),

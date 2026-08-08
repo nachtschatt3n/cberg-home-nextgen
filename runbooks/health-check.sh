@@ -307,6 +307,72 @@ print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() // 
 " 2>/dev/null || echo "NONE"
 }
 
+# check_icloud_instance <deployment-name>
+# Health for ONE icloud-docker-* instance in the `backup` namespace. Called once
+# per instance discovered in Section 16, so adding a third Apple ID needs no
+# change here.
+#
+# Finding titles (add_minor_issue) MUST keep the instance name as the leading
+# token: runbooks/health-check.py routes them into the `icloud_docker`
+# subsection by prefix, and accepted-risk / noise needles substring-match on
+# them. For icloud-docker-mu the strings produced are byte-identical to the
+# pre-2026-08-08 single-instance version.
+check_icloud_instance() {
+    local app="$1"
+    local pod phase restarts log_errors auth_errors
+
+    echo ""
+    echo "iCloud sync ($app):"
+    pod=$(kubectl get pods -n backup -l "app.kubernetes.io/name=$app" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -z "$pod" ]; then
+        echo "  iCloud sync pod not found (namespace: backup, app: $app)"
+        return 0
+    fi
+
+    phase=$(kubectl get pod -n backup "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+    restarts=$(kubectl get pod -n backup "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
+    echo "  iCloud pod: $pod, phase: $phase, restarts: $restarts"
+
+    if [ "$phase" != "Running" ]; then
+        log_warning "iCloud sync pod is not running ($app, phase: $phase)"
+        add_minor_issue "$app pod not running (phase: $phase)"
+        return 0
+    fi
+
+    # Filter out known-benign, recurring noise so the count reflects REAL
+    # problems (tightened 2026-07-08 — was flagging ~78/24h of pure noise):
+    #  - Apple API flakiness (throttles, CF 5xx, PCS cookie refresh)
+    #  - INFO progress summaries that merely contain "failed"
+    #    ("N successful, M failed") — these are not errors
+    #  - Apple "package" bundles (.numbers/.app) icloud-docker can't unpack,
+    #    plus per-file package-type probes — benign tool limitations
+    # Scope to last 24h; icloud-docker has sparse logs.
+    log_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
+    echo "  iCloud log errors (last 24h, filtered): $log_errors"
+
+    # Auth/session errors are the ones that actually need operator action
+    # (interactive re-auth per docs/sops/icloud-docker-reauth.md). Count
+    # them SEPARATELY and NEVER filter them, anchored to real signatures.
+    # Use [(]421[)] not a bare 421 — a bare 421 matches the ',421' in a
+    # millisecond timestamp (false positive). This dedicated check means a
+    # genuine session expiry is always surfaced with a clear "re-auth"
+    # title even when the generic filtered count is quiet, and must never
+    # be swallowed by a broad accepted-risk needle.
+    auth_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -icE 'authentication required for account|[(]421[)]|2fa is required|2fa.*please|please log in|session (has )?expired|invalid session|missing.*bearer token'")
+    echo "  iCloud auth/session errors (last 24h): $auth_errors"
+
+    if [ "$auth_errors" -gt 0 ]; then
+        log_warning "iCloud session/auth errors ($app) — re-auth likely needed: $auth_errors"
+        add_minor_issue "$app auth/session errors (re-auth needed): $auth_errors"
+    elif [ "$log_errors" -gt 25 ]; then
+        log_warning "iCloud sync pod has elevated errors in recent logs ($app): $log_errors"
+        add_minor_issue "$app recent log errors: $log_errors"
+    else
+        log_success "iCloud sync pod running ($app, restarts: $restarts)"
+    fi
+    return 0
+}
+
 # =========================================
 # KNOWN FALSE POSITIVES
 # =========================================
@@ -1412,50 +1478,20 @@ print(b[0]['metadata']['name'] if b else '')
         fi
     fi
 
-    # iCloud sync check
-    echo ""
-    echo "iCloud sync (icloud-docker-mu):"
-    ICLOUD_POD=$(kubectl get pods -n backup -l app.kubernetes.io/name=icloud-docker-mu -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    if [ -n "$ICLOUD_POD" ]; then
-        ICLOUD_PHASE=$(kubectl get pod -n backup "$ICLOUD_POD" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-        ICLOUD_RESTARTS=$(kubectl get pod -n backup "$ICLOUD_POD" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0")
-        echo "  iCloud pod: $ICLOUD_POD, phase: $ICLOUD_PHASE, restarts: $ICLOUD_RESTARTS"
-        if [ "$ICLOUD_PHASE" != "Running" ]; then
-            log_warning "iCloud sync pod is not running (phase: $ICLOUD_PHASE)"
-            add_minor_issue "icloud-docker-mu pod not running (phase: $ICLOUD_PHASE)"
-        else
-            # Filter out known-benign, recurring noise so the count reflects REAL
-            # problems (tightened 2026-07-08 — was flagging ~78/24h of pure noise):
-            #  - Apple API flakiness (throttles, CF 5xx, PCS cookie refresh)
-            #  - INFO progress summaries that merely contain "failed"
-            #    ("N successful, M failed") — these are not errors
-            #  - Apple "package" bundles (.numbers/.app) icloud-docker can't unpack,
-            #    plus per-file package-type probes — benign tool limitations
-            # Scope to last 24h; icloud-docker has sparse logs.
-            ICLOUD_LOG_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
-            echo "  iCloud log errors (last 24h, filtered): $ICLOUD_LOG_ERRORS"
-            # Auth/session errors are the ones that actually need operator action
-            # (interactive re-auth per docs/sops/icloud-docker-reauth.md). Count
-            # them SEPARATELY and NEVER filter them, anchored to real signatures.
-            # Use [(]421[)] not a bare 421 — a bare 421 matches the ',421' in a
-            # millisecond timestamp (false positive). This dedicated check means a
-            # genuine session expiry is always surfaced with a clear "re-auth"
-            # title even when the generic filtered count is quiet, and must never
-            # be swallowed by a broad accepted-risk needle.
-            ICLOUD_AUTH_ERRORS=$(safe_count "kubectl logs -n backup '$ICLOUD_POD' --since=24h 2>/dev/null | grep -icE 'authentication required for account|[(]421[)]|2fa is required|2fa.*please|please log in|session (has )?expired|invalid session|missing.*bearer token'")
-            echo "  iCloud auth/session errors (last 24h): $ICLOUD_AUTH_ERRORS"
-            if [ "$ICLOUD_AUTH_ERRORS" -gt 0 ]; then
-                log_warning "iCloud session/auth errors — re-auth likely needed: $ICLOUD_AUTH_ERRORS"
-                add_minor_issue "icloud-docker-mu auth/session errors (re-auth needed): $ICLOUD_AUTH_ERRORS"
-            elif [ "$ICLOUD_LOG_ERRORS" -gt 25 ]; then
-                log_warning "iCloud sync pod has elevated errors in recent logs: $ICLOUD_LOG_ERRORS"
-                add_minor_issue "icloud-docker-mu recent log errors: $ICLOUD_LOG_ERRORS"
-            else
-                log_success "iCloud sync pod running (restarts: $ICLOUD_RESTARTS)"
-            fi
-        fi
+    # iCloud sync check — every icloud-docker-* instance in the `backup` ns.
+    # Discovered from live Deployments rather than a hardcoded list or a repo
+    # scan: the Deployment name equals the app.kubernetes.io/name label value,
+    # so one query yields both the iteration key and the pod selector, and a
+    # new Apple ID needs no change here.
+    ICLOUD_INSTANCES=$(kubectl get deploy -n backup -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+        | grep '^icloud-docker-' | sort || true)
+    if [ -z "$ICLOUD_INSTANCES" ]; then
+        echo ""
+        echo "iCloud sync: no icloud-docker-* deployments found (namespace: backup)"
     else
-        echo "  iCloud sync pod not found (namespace: backup)"
+        for ICLOUD_APP in $ICLOUD_INSTANCES; do
+            check_icloud_instance "$ICLOUD_APP"
+        done
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
