@@ -4,6 +4,14 @@ Thumbs.db
 # k8s
 kubeconfig
 talosconfig
+# Talos generated machine configs — these embed the full cluster PKI (CA keys,
+# bootstrap tokens, disk-encryption secrets). talhelper rewrites this directory's
+# OWN .gitignore on every `genconfig` and lists node files by EXACT filename, so
+# adding a 4th node would silently produce an untracked-but-not-ignored config
+# that `git add -A` would commit to this PUBLIC repo. This rule is pattern-based
+# and lives outside the generated directory, so it cannot be clobbered.
+kubernetes/bootstrap/talos/clusterconfig/**
+!kubernetes/bootstrap/talos/clusterconfig/.gitignore
 .decrypted~*.yaml
 *.agekey
 *.pub

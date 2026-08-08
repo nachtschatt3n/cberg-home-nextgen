@@ -27,5 +27,15 @@ spec:
       namespace: kube-system
   values:
     name: intel-gpu-plugin
-    sharedDevNum: 3
+    # How many containers may share each physical iGPU. Raised 3 -> 5 on
+    # 2026-08-08: at 3, nuc14-02 (frigate + scrypted + jellyfin) and nuc14-03
+    # (immich-ml + makemkv + plex) were both FULL, so adding the i915 claim to
+    # immich-server pinned it to nuc14-01 with no failover — on the very node
+    # that had just thermally reset.
+    # Trade-off: this is pure oversubscription, not extra capacity. The iGPU is
+    # still one physical device; 5 concurrent heavy users (e.g. a jellyfin
+    # transcode + frigate detection + an immich bulk scan) will contend and each
+    # gets slower. Acceptable here because these workloads rarely peak together
+    # and the alternative is no scheduling headroom at all.
+    sharedDevNum: 5
     nodeFeatureRule: false
