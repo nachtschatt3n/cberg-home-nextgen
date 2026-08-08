@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://kubernetesjsonschema.dev/v1.18.1-standalone-strict/persistentvolumeclaim.json
+---
+# External-library originals: read-only CIFS mount of the icloud-backup PARENT
+# (mu/photos + andrea/photos both visible under /libraries). Dynamically bound
+# from the cifs-immich-icloud-backup StorageClass, same mechanism as plex-media-smb.
+# The SC mounts `ro`, so Immich indexes but never writes/deletes the iCloud originals.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Ti
+  storageClassName: cifs-immich-icloud-backup
+---
+# Postgres (VectorChord) data — app database, so dynamic `longhorn` per the repo
+# Longhorn SOP ("Use longhorn for app databases. Default choice"; longhorn-static
+# is discouraged unless a volume must survive namespace deletion). media/ is a
+# permanent namespace, so dynamic (2 replicas, HA) is correct and keeps this
+# fully GitOps with no manual Longhorn Volume CR step.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-pg-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn
+---
+# Immich media location (/data): thumbnails, encoded video, uploaded/profile
+# assets and generated data. Grows with the library; dynamic longhorn.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-upload
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Gi
+  storageClassName: longhorn
+---
+# Machine-learning model cache (CLIP + face-detection ONNX models). Re-downloadable,
+# but persisting avoids re-pull on every ML pod restart.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-ml-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn

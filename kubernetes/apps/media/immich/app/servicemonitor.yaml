@@ -1,0 +1,34 @@
+---
+# Explicit ServiceMonitor for the immich-server Prometheus endpoints. The repo
+# convention is explicit YAML SMs (chart-generated ones hit a scrape-discovery
+# gap — see mosquitto/zero-export-controller). Selects the app-template service
+# by its `app.kubernetes.io/name: immich-server` label (= HelmRelease name) and
+# scrapes both telemetry ports: API metrics (8081) + microservices metrics (8082).
+#
+# NOTE: immich-machine-learning metrics are intentionally not scraped here — its
+# metrics port is unconfirmed for this release; the server-side job/queue metrics
+# already surface ML face-detection/CLIP job outcomes. Add an ML SM once verified.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: immich-server-metrics
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - media
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich-server
+  endpoints:
+    - port: metrics-api
+      path: /metrics
+      scheme: http
+      interval: 60s
+      scrapeTimeout: 30s
+    - port: metrics-ms
+      path: /metrics
+      scheme: http
+      interval: 60s
+      scrapeTimeout: 30s

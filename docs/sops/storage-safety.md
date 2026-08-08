@@ -116,6 +116,7 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 |---|---|
 | `cifs-icloud-docker-andrea` | Retain — `//192.168.55.240/backups` `icloud-backup/andrea`; PV must be cleaned up manually |
 | `cifs-icloud-docker-mu` | Retain — `//192.168.55.240/backups` `icloud-backup/mu`; PV must be cleaned up manually. **Moved here 2026-08-08**: this row previously sat in the `Delete` table above, but the class has been `Retain` since commit `f14af609` |
+| `cifs-immich-icloud-backup` | Retain — `//192.168.55.240/backups` `icloud-backup` (**parent**, mounted **read-only** via `ro`); Immich external-library viewer indexes the iCloud originals but cannot write or delete them. PV must be cleaned up manually. **Added 2026-08-08** with the Immich rollout |
 | `cifs-opencode-andreamosteller` | Retain — PV must be cleaned up manually |
 | `cifs-penpot-assets` | Retain — same |
 

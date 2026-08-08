@@ -1,0 +1,121 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: immich-machine-learning
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    timeout: 20m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 20m
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        strategy: Recreate
+        pod:
+          annotations:
+            reloader.stakater.com/auto: "true"
+          # Runs as root for Intel iGPU (OpenVINO) /dev/dri access — same proven
+          # pattern as the jellyfin HelmRelease. `privileged` is set at the
+          # CONTAINER securityContext below (it is not a valid pod-level field).
+          # NOTE: OpenVINO uses the iGPU (gpu.intel.com/i915), NOT the NPU
+          # (unsupported upstream).
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            fsGroup: 0
+        containers:
+          main:
+            # Same Immich version as immich-server; -openvino variant = iGPU accel.
+            # Fallback on OpenVINO regressions: swap to the plain `v3.1.0` (CPU) tag.
+            # renovate: image=ghcr.io/immich-app/immich-machine-learning
+            image:
+              repository: ghcr.io/immich-app/immich-machine-learning
+              tag: v3.1.0-openvino
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: ${TIMEZONE}
+              - name: MACHINE_LEARNING_CACHE_FOLDER
+                value: /cache
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2Gi
+                gpu.intel.com/i915: 1
+              limits:
+                memory: 6Gi
+                gpu.intel.com/i915: 1
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: &port 3003
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 60
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                  - SYS_ADMIN
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          ml:
+            port: *port
+
+    persistence:
+      cache:
+        enabled: true
+        existingClaim: immich-ml-cache
+        globalMounts:
+          - path: /cache
+      dev-dri:
+        type: hostPath
+        hostPath: /dev/dri
+        hostPathType: Directory
+        globalMounts:
+          - path: /dev/dri

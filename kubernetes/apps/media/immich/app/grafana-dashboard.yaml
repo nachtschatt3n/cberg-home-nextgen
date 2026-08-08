@@ -1,0 +1,97 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: immich-dashboard
+  namespace: media
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Media
+    # Prevent Flux postBuild var substitution from mangling ${...} tokens in JSON.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  immich.json: |
+    {
+      "title": "Immich",
+      "uid": "immich",
+      "schemaVersion": 41,
+      "version": 1,
+      "refresh": "1m",
+      "time": { "from": "now-6h", "to": "now" },
+      "tags": ["immich", "media"],
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Pods Ready (immich-*)",
+          "id": 1,
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(kube_pod_status_ready{namespace=\"media\", condition=\"true\", pod=~\"immich-.*\"})"
+            }
+          ],
+          "options": { "colorMode": "value", "graphMode": "none" }
+        },
+        {
+          "type": "stat",
+          "title": "Metrics Targets Up",
+          "id": 2,
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "expr": "sum(up{namespace=\"media\", service=~\"immich-server.*\"})"
+            }
+          ],
+          "options": { "colorMode": "value", "graphMode": "none" }
+        },
+        {
+          "type": "timeseries",
+          "title": "Container Memory (working set)",
+          "id": 3,
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "legendFormat": "{{pod}}",
+              "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"media\", pod=~\"immich-.*\", container!=\"\"})"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Container CPU (cores)",
+          "id": 4,
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "legendFormat": "{{pod}}",
+              "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"media\", pod=~\"immich-.*\", container!=\"\"}[5m]))"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Immich Metrics (immich_*, discovery)",
+          "id": 5,
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "description": "Populates once IMMICH_TELEMETRY_INCLUDE=all metrics are scraped from immich-server (:8081/:8082).",
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus" },
+              "legendFormat": "{{__name__}}",
+              "expr": "sum by (__name__) (rate({__name__=~\"immich_.+\", namespace=\"media\"}[5m]))"
+            }
+          ]
+        }
+      ]
+    }

@@ -218,6 +218,84 @@ The `wazuh-blueprint.yaml` entry in the configmap shows this migration end-to-en
 
 ---
 
+## OIDC / OAuth2 Provider Pattern
+
+Use OIDC (not forward-auth, not SAML) when the app **has its own user model** and
+speaks OpenID Connect — e.g. Grafana, pgAdmin, Superset, Sure, **Immich**. The app
+redirects to Authentik, gets an ID token, and provisions/logs in its own user.
+
+### Blueprint shape
+
+An OIDC integration is two entries in a single `*-oauth2-blueprint.yaml` data key:
+an `oauth2provider` and an `application` that references it. Modeled on the
+existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
+
+```yaml
+- id: <app>-oauth2-provider
+  model: authentik_providers_oauth2.oauth2provider
+  state: present
+  identifiers:
+    name: <app>
+  attrs:
+    name: <app>
+    client_id: "<43-char alphanumeric, unique per app>"     # openssl rand
+    client_secret: "<128-char alphanumeric>"                # openssl rand
+    client_type: confidential
+    authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"   # default-provider-authorization-implicit-consent
+    invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"    # default-provider-invalidation-flow
+    redirect_uris:
+      - matching_mode: strict
+        url: "https://<app>.<SECRET_DOMAIN>/<the app's exact callback path>"
+      # add more strict URIs for extra callbacks (e.g. mobile custom schemes)
+    signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+    property_mappings:
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+      - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+
+- id: <app>-application
+  model: authentik_core.application
+  state: present
+  identifiers:
+    slug: <app>
+  attrs:
+    name: <App>
+    slug: <app>
+    provider: !KeyOf <app>-oauth2-provider
+    meta_launch_url: "https://<app>.<SECRET_DOMAIN>"
+    meta_icon: "https://raw.githubusercontent.com/walkxcode/dashboard-icons/main/png/<app>.png"
+```
+
+### Rules & gotchas
+
+- **`client_id` must be unique** across all providers. Reusing one throws a
+  provider-collision error that leaves the blueprint in `errored` state (the
+  whole app then fails SSO). Generate a fresh one: `openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 43`.
+- **`client_secret` is committed in TWO places** — the blueprint here *and* the
+  app's own `secret.sops.yaml` (both SOPS-encrypted). They MUST match; rotate
+  together in one commit. The app reads its copy at runtime.
+- **`redirect_uris` are literal** — `${SECRET_DOMAIN}` does **not** substitute
+  inside ConfigMap data, so write the real `SECRET_DOMAIN` value literally in the
+  blueprint (the encrypted ConfigMap keeps it out of plaintext). Each callback URL the app can
+  use needs its own `strict` entry (web login, settings page, mobile scheme…).
+  A missing/wrong redirect URI is the #1 cause of a `redirect_uri mismatch` error.
+- **Auto-provisioning is app-side**, not Authentik-side. The blueprint only makes
+  Authentik willing to issue tokens; the app decides whether to create a local
+  user (e.g. Immich's "Auto Register" toggle, Grafana's `allow_sign_up`).
+- **Reuse the flow UUIDs** in `## Key UUIDs` above and the shared self-signed
+  signing key via `!Find` — do not create per-app flows or keys.
+- Adding the data key is enough — the init container `cp /blueprints-source/*.yaml`
+  wildcard picks it up and Reloader rolls the pods. No `helmrelease.yaml` edit.
+
+Verify a new OIDC blueprint loaded without error:
+
+```bash
+kubectl exec -n kube-system deploy/authentik-server -- \
+  ak show_blueprints | grep -i <app>      # state should be "present"/successful, not "errored"
+```
+
+---
+
 ## Integrating a New Application
 
 ### Step 1: Create Blueprint File

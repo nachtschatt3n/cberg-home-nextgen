@@ -1,0 +1,38 @@
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-immich-icloud-backup"
+provisioner: smb.csi.k8s.io
+# READ-ONLY external-library mount. subdir points at the icloud-backup PARENT
+# (mu/ + andrea/ both visible) and the mount adds `ro`, so Immich can never
+# write to or delete the iCloud originals — iCloud stays the source of truth.
+# reclaimPolicy MUST stay Retain so a PVC delete cannot recursively wipe the
+# share. See docs/sops/storage-safety.md (2026-04-26 incident).
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - ro
+  - dir_mode=0555
+  - file_mode=0444
+  - uid=1000
+  - gid=1000
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/backups"
+  subdir: "icloud-backup"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"

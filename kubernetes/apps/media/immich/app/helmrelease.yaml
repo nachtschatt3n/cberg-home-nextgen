@@ -1,0 +1,222 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: immich-server
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    timeout: 20m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 20m
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  dependsOn:
+    - name: immich-postgres
+    - name: immich-redis
+  values:
+    controllers:
+      main:
+        strategy: Recreate
+        pod:
+          annotations:
+            reloader.stakater.com/auto: "true"
+            secret.reloader.stakater.com/reload: immich-secret
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+        initContainers:
+          wait-for-postgres:
+            image:
+              repository: busybox
+              tag: stable
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z immich-postgres 5432; do
+                  echo "waiting for immich-postgres:5432..."
+                  sleep 2
+                done
+                echo "postgres reachable"
+          wait-for-redis:
+            image:
+              repository: busybox
+              tag: stable
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z immich-redis 6379; do
+                  echo "waiting for immich-redis:6379..."
+                  sleep 2
+                done
+                echo "redis reachable"
+        containers:
+          main:
+            # Server + machine-learning are pinned to the SAME Immich version.
+            # renovate: image=ghcr.io/immich-app/immich-server
+            image:
+              repository: ghcr.io/immich-app/immich-server
+              tag: v3.1.0
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: ${TIMEZONE}
+              - name: DB_HOSTNAME
+                value: immich-postgres
+              - name: DB_PORT
+                value: "5432"
+              - name: DB_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: immich-secret
+                    key: DB_USERNAME
+              - name: DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: immich-secret
+                    key: DB_PASSWORD
+              - name: DB_DATABASE_NAME
+                valueFrom:
+                  secretKeyRef:
+                    name: immich-secret
+                    key: DB_DATABASE_NAME
+              - name: DB_VECTOR_EXTENSION
+                value: vectorchord
+              - name: REDIS_HOSTNAME
+                value: immich-redis
+              - name: REDIS_PORT
+                value: "6379"
+              - name: IMMICH_MACHINE_LEARNING_URL
+                value: http://immich-machine-learning:3003
+              - name: IMMICH_MEDIA_LOCATION
+                value: /data
+              # Prometheus telemetry — exposes API metrics on :8081 and
+              # microservices metrics on :8082 (scraped by servicemonitor.yaml).
+              - name: IMMICH_TELEMETRY_INCLUDE
+                value: all
+              - name: IMMICH_API_METRICS_PORT
+                value: "8081"
+              - name: IMMICH_MICROSERVICES_METRICS_PORT
+                value: "8082"
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                memory: 4Gi
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/server/ping
+                    port: &port 2283
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/server/ping
+                    port: *port
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/server/ping
+                    port: *port
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 60
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities: { drop: ["ALL"] }
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+          metrics-api:
+            port: 8081
+          metrics-ms:
+            port: 8082
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          external-dns.alpha.kubernetes.io/target: external.${SECRET_DOMAIN}
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Immich"
+          gethomepage.dev/group: "Media"
+          gethomepage.dev/icon: "immich.png"
+          gethomepage.dev/description: "Self-hosted photo and video library"
+          nginx.ingress.kubernetes.io/proxy-body-size: "0"
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host immich.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+
+    persistence:
+      # Immich media location (/data): thumbnails, encoded video, uploads, profile,
+      # and the internal library. Generated data lives here (Longhorn), not on the NAS.
+      data:
+        enabled: true
+        existingClaim: immich-upload
+        globalMounts:
+          - path: /data
+      # External-library originals — read-only CIFS mount of the icloud-backup parent.
+      # Admin assigns per-user libraries to /libraries/<user>/photos.
+      library:
+        enabled: true
+        existingClaim: immich-library
+        globalMounts:
+          - path: /libraries
+            readOnly: true
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
