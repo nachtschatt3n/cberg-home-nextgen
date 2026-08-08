@@ -103,11 +103,20 @@ spec:
         # only; never touches live replicas.
         # RENAMED + RETYPED (Longhorn 1.12): orphanAutoDeletion (bool) became
         # orphanResourceAutoDeletion, a semicolon-separated LIST of orphan kinds
-        # (e.g. "replica-data;instance"). Live value is empty = nothing is
-        # auto-deleted, so the 2026-07-14 auto-clean described above is NOT in
-        # effect any more. Matched to live here; re-enabling it is a deliberate
-        # decision — see the TODO block at the end of defaultSettings.
-        orphanResourceAutoDeletion: ""
+        # (e.g. "replica-data;instance").
+        # RE-ENABLED 2026-08-09 (TODO item 2) after the 1.12 rename had silently
+        # disabled it: 8 orphaned replica dirs had sat on nuc14-03 since the
+        # 2026-08-02 reboot. Set live to "replica-data" and swept them within 30s,
+        # reclaiming 7.6 GiB, with all 83 volumes healthy and the live replica
+        # count unchanged at 172. Deliberately NOT "instance" as well — there are
+        # no orphaned instances today, so enabling it would add a second class of
+        # automatic deletion with nothing to attribute a regression to.
+        # Longhorn only deletes orphans whose DataCleanable condition is True, and
+        # each of the 8 was cross-checked against every live replica's
+        # dataDirectoryName first (zero collisions).
+        # NOTE this block is still inert (see header) — the live settings CR was
+        # patched directly and this value mirrors it, so un-nesting stays a no-op.
+        orphanResourceAutoDeletion: "replica-data"
         detachManuallyAttachedVolumesWhenCordoned: false
         nodeDownPodDeletionPolicy: do-nothing
         allowEmptyDiskSelectorVolume: true
@@ -128,11 +137,9 @@ spec:
         #    Pure preference; stops Longhorn phoning home for version checks.
         #    Zero operational risk.
         #
-        # 2. orphanResourceAutoDeletion: "" -> "replica-data"
-        #    Restores the auto-clean that reclaimed ~220G on 2026-07-14 (95 orphaned
-        #    replica dirs had accumulated, 59 on nuc14-03). Lost when the setting was
-        #    renamed+retyped in 1.12 and nobody noticed. Verify DataCleanable-only
-        #    semantics on this version before enabling.
+        # 2. DONE 2026-08-09 — orphanResourceAutoDeletion set to "replica-data".
+        #    Swept 8 orphans (all from the 2026-08-02 reboot), reclaimed 7.6 GiB.
+        #    Consider adding ";instance" later if orphaned instances ever appear.
         #
         # 3. nodeDrainPolicy: always-allow -> block-if-contains-last-replica
         #    Genuinely safer: refuses to drain a node holding the last healthy
