@@ -23,3 +23,13 @@ machine:
       # 18 vCPU + 62 GiB; 200 leaves comfortable headroom. Triggered KubeletTooManyPods
       # alert at 98% in 2026-04-30 audit.
       maxPods: 200
+      # Image garbage collection. The kubelet imageFs is the SAME filesystem as
+      # Longhorn's /var/lib/longhorn (both on the Talos EPHEMERAL partition), so
+      # unreclaimed container images directly starve Longhorn replica scheduling.
+      # 2026-08-08 audit: nodes sat at 71-74% full with ~380 GiB of images each,
+      # of which only ~7 GiB was referenced by running pods (649 image digests on
+      # nuc14-03, 597 unreferenced). Stock thresholds (85/80) never fired, leaving
+      # nuc14-03 with 7.9 GiB of Longhorn headroom against the 25% floor.
+      # 70/65 keeps GC active well before the actual-space floor binds.
+      imageGCHighThresholdPercent: 70
+      imageGCLowThresholdPercent: 65
