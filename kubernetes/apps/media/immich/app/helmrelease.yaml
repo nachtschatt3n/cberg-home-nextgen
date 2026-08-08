@@ -136,9 +136,18 @@ spec:
                 memory: 6Gi
                 # CPU cap (deliberate exception to the repo "no cpu limit" norm):
                 # the uncapped bulk scan drove nuc14-01 to 102C and triggered a
-                # thermal NodeUnexpectedReboot (2026-08-08). Cap thermal load so a
-                # node can't be cooked again. Remove once the initial scan drains.
-                cpu: "4"
+                # thermal NodeUnexpectedReboot (2026-08-08).
+                # Raised 4 -> 8 once QSV hardware transcoding was confirmed live:
+                # video now costs ~288m (measured, 24x realtime on a 1080p60 HEVC
+                # file), so the remaining CPU consumer is thumbnail generation,
+                # which is image-side and gets no GPU benefit (concurrency 3, and
+                # ~13.6k assets still pending). 8 roughly doubles drain rate while
+                # still bounding a runaway to under half of this 18-core node.
+                # This limit is the BLAST-RADIUS BOUND, not the fix: it is what
+                # makes it impossible for a software-fallback ffmpeg to take the
+                # whole box. ffmpeg's own thread count is bounded separately in
+                # Immich's runtime config (ffmpeg.threads, was 0 = unlimited).
+                cpu: "8"
                 gpu.intel.com/i915: 1
             probes:
               liveness:
