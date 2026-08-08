@@ -223,7 +223,11 @@ spec:
       # and the internal library. Generated data lives here (Longhorn), not on the NAS.
       data:
         enabled: true
-        existingClaim: immich-upload
+        # Migrated 2026-08-08 from immich-upload (200Gi) to immich-upload-v2
+        # (75Gi). The old volume was too large for any second node to hold a
+        # replica, so both replicas sat on nuc14-03 and a single node loss would
+        # have taken /data offline. v2 has 2 replicas on 2 distinct nodes.
+        existingClaim: immich-upload-v2
         globalMounts:
           - path: /data
       # External-library originals — read-only CIFS mount of the icloud-backup parent.
