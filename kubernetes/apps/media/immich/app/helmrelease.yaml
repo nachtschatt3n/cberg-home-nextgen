@@ -120,6 +120,15 @@ spec:
               requests:
                 cpu: 200m
                 memory: 1Gi
+                # Intel iGPU for QSV hardware transcoding (same pattern as the
+                # jellyfin / frigate / scrypted HelmReleases). The claim is what
+                # grants /dev/dri; the `ffmpeg.accel: qsv` switch itself lives in
+                # Immich's DB-backed runtime system config, NOT here.
+                # SCHEDULING CONSTRAINT: intel-device-plugin advertises
+                # sharedDevNum=3 per node and nuc14-02/03 are already full
+                # (frigate+scrypted+jellyfin / immich-ml+makemkv+plex), so this
+                # pins immich-server to nuc14-01 until sharedDevNum is raised.
+                gpu.intel.com/i915: 1
               limits:
                 # 6Gi: the initial full-library scan forks ffmpeg for thumbnail +
                 # video encoding across ~54k assets and OOM-killed at 4Gi. Raise
@@ -130,6 +139,7 @@ spec:
                 # thermal NodeUnexpectedReboot (2026-08-08). Cap thermal load so a
                 # node can't be cooked again. Remove once the initial scan drains.
                 cpu: "4"
+                gpu.intel.com/i915: 1
             probes:
               liveness:
                 enabled: true
