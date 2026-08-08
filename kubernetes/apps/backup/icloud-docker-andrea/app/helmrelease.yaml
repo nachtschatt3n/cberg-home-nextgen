@@ -27,12 +27,15 @@ spec:
     controllers:
       main:
         strategy: Recreate
-        # Starts at 0 ON PURPOSE. A container with no trusted session loops on
-        # auth failure and burns Apple's per-day 2FA code-send quota; Apple then
-        # silently stops pushing codes to every device on the account while still
-        # reporting requires_2fa: True. Complete the interactive re-auth first
-        # (docs/sops/icloud-docker-reauth.md, INSTANCE=andrea), THEN set this to 1.
-        replicas: 0
+        # Trusted session established 2026-08-08 (interactive 2FA re-auth).
+        #
+        # If this instance ever needs a fresh re-auth, set this back to 0 FIRST:
+        # a container with no trusted session loops on auth failure and burns
+        # Apple's per-day 2FA code-send quota, after which Apple silently stops
+        # pushing codes to every device on the account while still reporting
+        # requires_2fa: True. See docs/sops/icloud-docker-reauth.md
+        # (export INSTANCE=andrea).
+        replicas: 1
         containers:
           app:
             image:
