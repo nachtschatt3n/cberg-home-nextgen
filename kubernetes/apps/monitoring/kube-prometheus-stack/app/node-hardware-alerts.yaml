@@ -176,6 +176,50 @@ spec:
               Investigate in Kibana: attributes.log_source:talos-kernel AND
               attributes.net.peer.ip:"{{ $labels.net_peer_ip }}". Runbook:
               docs/troubleshooting/node-reboot-observability.md
+        - alert: TalosKmsgNodeSilent
+          # A node's UDP kmsg sender wedges when the collector pod restarts (the
+          # socket stays pinned to the dead pod IP): kmsg keeps appearing in
+          # `talosctl dmesg` but stops reaching Elasticsearch. On 2026-08-04
+          # nuc14-03 went silent this way and it was only noticed on 08-08, while
+          # investigating a reboot on a DIFFERENT node. Had the reboot hit
+          # nuc14-03 we'd have had no kernel logs at all.
+          # Counting DISTINCT shipping nodes (rather than alerting per node)
+          # fires correctly whether the series goes stale or just stops moving.
+          expr: count(count by (net_peer_ip) (increase(talos_kernel_kmsg_lines_total[1h]) > 0)) < 3
+          for: 30m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: kernel-kmsg
+          annotations:
+            summary: "A Talos node has stopped shipping kernel logs"
+            description: >-
+              Only {{ $value | printf "%.0f" }} of 3 nodes shipped kmsg in the last
+              hour. Find the silent one by comparing per-node counts in Kibana
+              (attributes.log_source:talos-kernel, group by attributes.net.peer.ip).
+              Fix WITHOUT a reboot by toggling the sender's port and back:
+              talosctl -n <node> patch mc --mode=no-reboot --patch
+              '{"apiVersion":"v1alpha1","kind":"KmsgLogConfig","name":"ship-kmsg-to-otel","url":"udp://192.168.55.18:5172/"}'
+              then repeat with 5171. Runbook:
+              docs/troubleshooting/node-reboot-observability.md
+        - alert: TalosKmsgPipelineDown
+          # Guard for the guard: if the metric vanishes entirely (collector down,
+          # connector renamed, ServiceMonitor broken) the rule above silently
+          # stops evaluating and we go blind without any signal.
+          expr: absent(talos_kernel_kmsg_lines_total)
+          for: 15m
+          labels:
+            severity: warning
+            category: node-hardware
+            component: kernel-kmsg
+          annotations:
+            summary: "Talos kmsg->Elasticsearch pipeline is not reporting"
+            description: >-
+              talos_kernel_kmsg_lines_total is absent, so kernel-log shipping from
+              ALL nodes is unverifiable. Check the edot-collector pod and its
+              prometheus/hwerrors exporter on :8889 (distroless image — verify via
+              Prometheus, not kubectl exec). Runbook:
+              docs/troubleshooting/node-reboot-observability.md
     - name: node.memory.rules
       rules:
         - alert: NodeMemoryMajorPagesFaults

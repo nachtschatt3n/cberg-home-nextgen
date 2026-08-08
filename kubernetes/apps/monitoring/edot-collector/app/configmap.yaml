@@ -154,6 +154,18 @@ data:
               - 'attributes["log_source"] == "talos-kernel" and IsString(body) and IsMatch(body, "(?i)(mce:|machine check|hardware error|uncorrected|cpu[0-9]+: machine check|thermal throttl|critical temperature)")'
             attributes:
               - key: net.peer.ip
+          # Counts EVERY kmsg line per node, so we can tell a node has gone
+          # SILENT. Added 2026-08-08 after nuc14-03 stopped shipping kmsg on
+          # 08-04 and nobody noticed for 4 days — the UDP sender wedges when the
+          # collector pod restarts (see docs/troubleshooting/node-reboot-
+          # observability.md). A silent node means the next unexplained reboot on
+          # it is undiagnosable, which is exactly what Tier 2 exists to prevent.
+          talos_kernel_kmsg_lines:
+            description: All Talos kmsg lines received, labelled by source node
+            conditions:
+              - 'attributes["log_source"] == "talos-kernel"'
+            attributes:
+              - key: net.peer.ip
 
     service:
       extensions: [health_check]
