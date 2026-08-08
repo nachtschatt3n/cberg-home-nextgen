@@ -15,6 +15,6 @@ spec:
     driver: driver.longhorn.io
     fsType: ext4
     volumeAttributes:
-      numberOfReplicas: "3"
+      numberOfReplicas: "2"
       staleReplicaTimeout: "30"
     volumeHandle: jdownloader-config

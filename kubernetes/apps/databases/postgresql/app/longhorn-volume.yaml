@@ -6,7 +6,7 @@ metadata:
   namespace: storage
 spec:
   size: "5368709120"  # 5Gi in bytes
-  numberOfReplicas: 3
+  numberOfReplicas: 2
   dataEngine: v1
   accessMode: rwo
   frontend: blockdev
