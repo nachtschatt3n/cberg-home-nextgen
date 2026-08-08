@@ -17,6 +17,21 @@ spec:
   values:
     longhorn:
       namespaceOverride: storage
+      # ============================ READ THIS FIRST ============================
+      # THIS ENTIRE `longhorn:` BLOCK IS CURRENTLY INERT. This HelmRelease installs
+      # the `longhorn` chart DIRECTLY and that chart has no subchart named
+      # `longhorn`, so Helm silently discards everything nested under this key.
+      # Proof: ~60 settings are declared below, but only 2 (both chart defaults)
+      # render into the longhorn-default-setting ConfigMap. The live cluster
+      # matches intent only because these values were set out-of-band and persist
+      # in the settings.longhorn.io CRs.
+      #
+      # As of 2026-08-09 every value below has been ALIGNED TO THE LIVE CLUSTER, so
+      # that un-nesting this block (moving it up one level, alongside `persistence`)
+      # becomes a provable no-op rather than a 60-setting big-bang. Do that in a
+      # planned window — see the TODO at the end of this block for the changes that
+      # are still WANTED, to be made deliberately one at a time AFTER un-nesting.
+      # =========================================================================
       defaultSettings:
         defaultDataPath: /var/lib/longhorn
         replicaSoftAntiAffinity: true
@@ -28,9 +43,14 @@ spec:
         # cluster overcommit while still keeping non-zero headroom for Longhorn.
         guaranteedInstanceManagerCpu: 8
         defaultLonghornStaticStorageClass: longhorn-static
-        backupTarget: "cifs://192.168.55.240/backups?cifsOptions=soft,cache=loose,retrans=5,actimeo=10,closetimeo=10,echo_interval=60,nosharesock"
-        backupTargetCredentialSecret: "longhorn-backup-credentials"
-        allowRecurringJobWhileVolumeDetached: true
+        # REMOVED (Longhorn 1.12): backupTarget / backupTargetCredentialSecret /
+        # backupstorePollInterval are no longer settings — they moved to the
+        # BackupTarget CR (`kubectl get backuptarget -n storage default`), which
+        # owns backupTargetURL, credentialSecret and pollInterval. None of the 112
+        # live settings CRs carries these names, so leaving them here would be inert
+        # clutter that a future reader could mistake for the live configuration.
+        # Do NOT re-add them; edit the BackupTarget CR instead.
+        allowRecurringJobWhileVolumeDetached: false
         storageOverProvisioningPercentage: 100
         storageMinimalAvailablePercentage: 25
         # Default 30% reserved was leaving nuc14-03 at 71.8% scheduled
@@ -39,49 +59,55 @@ spec:
         # per node while still keeping a safety margin. Existing disks
         # retain their old reservation until patched manually.
         storageReservedPercentageForDefaultDisk: 20
-        backupstorePollInterval: 300
         taintToleration: ""
         systemManagedComponentsNodeSelector: ""
-        allowNodeDrainWithLastHealthyReplica: true
-        nodeDrainPolicy: block-if-contains-last-replica
+        # REMOVED (Longhorn 1.12): allowNodeDrainWithLastHealthyReplica no longer
+        # exists; drain behaviour is governed solely by nodeDrainPolicy above.
+        nodeDrainPolicy: always-allow
         offlineReplicaRebuilding: enabled
         disableSchedulingOnCordonedNode: true
         replicaZoneSoftAntiAffinity: true
         removeSnapshotsDuringFilesystemTrim: true
         snapshotDataIntegrity: disabled
-        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: false
+        snapshotDataIntegrityImmediateCheckAfterSnapshotCreation: true
         snapshotMaxCount: 250
         backupCompressionMethod: lz4
         backupExecutionTimeout: 5
         defaultBackupBlockSize: 16
         backupConcurrentLimit: 5
-        concurrentVolumeBackupRestorePerNodeLimit: 10
+        concurrentVolumeBackupRestorePerNodeLimit: 5
         restoreConcurrentLimit: 2
         failedBackupTTL: 1440
         fastReplicaRebuildEnabled: true
-        engineReplicaTimeout: 12
-        instanceManagerPodLivenessProbeTimeout: 60
+        engineReplicaTimeout: 8
+        instanceManagerPodLivenessProbeTimeout: 30
         replicaFileSyncHttpClientTimeout: 30
         replicaDiskSoftAntiAffinity: true
         autoDeletePodWhenVolumeDetachedUnexpectedly: false
-        replicaReplenishmentWaitInterval: 300
-        concurrentReplicaRebuildPerNodeLimit: 2
+        replicaReplenishmentWaitInterval: 600
+        concurrentReplicaRebuildPerNodeLimit: 8
         systemManagedPodsImagePullPolicy: if-not-present
         allowVolumeCreationWithDegradedAvailability: true
-        mkfsExt4Parameters: ""
+        # REMOVED (Longhorn 1.12): mkfsExt4Parameters is no longer a setting.
         priorityClass: longhorn-critical
         autoCleanupRecurringJobBackupSnapshot: true
         autoCleanupSystemGeneratedSnapshot: true
         recurringSuccessfulJobsHistoryLimit: 1
         recurringFailedJobsHistoryLimit: 1
-        recurringJobMaxRetention: 2
+        recurringJobMaxRetention: 100
         restoreVolumeRecurringJobs: false
         # Auto-clean orphaned replica directories (data with no owning volume,
         # left by replica rebuilds/node reboots). Was false → 95 orphans had
         # accumulated (59 on nuc14-03, dragging it to 24% free). Enabled
         # 2026-07-14 after a manual sweep reclaimed ~220G. DataCleanable orphans
         # only; never touches live replicas.
-        orphanAutoDeletion: true
+        # RENAMED + RETYPED (Longhorn 1.12): orphanAutoDeletion (bool) became
+        # orphanResourceAutoDeletion, a semicolon-separated LIST of orphan kinds
+        # (e.g. "replica-data;instance"). Live value is empty = nothing is
+        # auto-deleted, so the 2026-07-14 auto-clean described above is NOT in
+        # effect any more. Matched to live here; re-enabling it is a deliberate
+        # decision — see the TODO block at the end of defaultSettings.
+        orphanResourceAutoDeletion: ""
         detachManuallyAttachedVolumesWhenCordoned: false
         nodeDownPodDeletionPolicy: do-nothing
         allowEmptyDiskSelectorVolume: true
@@ -89,11 +115,50 @@ spec:
         allowCollectingLonghornUsageMetrics: true
         kubernetesClusterAutoscalerEnabled: false
         logLevel: Info
-        upgradeChecker: false
+        upgradeChecker: true
         v1DataEngine: true
         v2DataEngine: false
-        v2DataEngineGuaranteedInstanceManagerCPU: 1250
-        v2DataEngineHugepageLimit: 2048
+        # ---------------------- TODO after un-nesting ----------------------
+        # The values above deliberately mirror the LIVE cluster so un-nesting is a
+        # no-op. These are the ones we may actually want CHANGED afterwards — each
+        # is a separate, deliberate decision, applied and observed one at a time.
+        # Ordered least to most disruptive.
+        #
+        # 1. upgradeChecker: true -> false
+        #    Pure preference; stops Longhorn phoning home for version checks.
+        #    Zero operational risk.
+        #
+        # 2. orphanResourceAutoDeletion: "" -> "replica-data"
+        #    Restores the auto-clean that reclaimed ~220G on 2026-07-14 (95 orphaned
+        #    replica dirs had accumulated, 59 on nuc14-03). Lost when the setting was
+        #    renamed+retyped in 1.12 and nobody noticed. Verify DataCleanable-only
+        #    semantics on this version before enabling.
+        #
+        # 3. nodeDrainPolicy: always-allow -> block-if-contains-last-replica
+        #    Genuinely safer: refuses to drain a node holding the last healthy
+        #    replica. Changes drain behaviour, so land it when no maintenance is in
+        #    flight, and know that a drain can now legitimately block.
+        #
+        # 4. recurringJobMaxRetention: 100 -> lower (only if wanted)
+        #    CAUTION: this is a validation bound on RecurringJob.spec.retain. Setting
+        #    it below 7 makes the Flux-managed daily-backup-all-volumes job (retain:
+        #    7) fail admission on the next re-apply — a broken reconcile, though it
+        #    does NOT retroactively delete backups. Leave at 100 unless there is a
+        #    reason.
+        #
+        # 5. instanceManagerPodLivenessProbeTimeout: 30 -> 60  [MOST DISRUPTIVE]
+        #    Changing this RESTARTS the instance-manager pods, which disturbs every
+        #    volume in the cluster. Only in a maintenance window, with all volumes
+        #    healthy beforehand and verified healthy after.
+        #
+        # Not planned: concurrentReplicaRebuildPerNodeLimit, engineReplicaTimeout,
+        # replicaReplenishmentWaitInterval, concurrentVolumeBackupRestorePerNodeLimit,
+        # allowRecurringJobWhileVolumeDetached, snapshotDataIntegrityImmediateCheck…
+        # The live values are fine; git previously disagreed only by accident.
+        # -------------------------------------------------------------------
+        # REMOVED (Longhorn 1.12): v2DataEngineGuaranteedInstanceManagerCPU folded
+        # into guaranteedInstanceManagerCpu (set above), and v2DataEngineHugepageLimit
+        # became data-engine-hugepage-enabled. The v2 engine is disabled here anyway.
       persistence:
         defaultClass: true
         defaultClassReplicaCount: 2
