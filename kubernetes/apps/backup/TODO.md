@@ -50,6 +50,10 @@ same Drive path — no cluster changes.
 
 ## Advanced Data Protection — the constraint behind this whole table
 
+**Status: confirmed OFF on both Apple IDs (2026-08-08).** Re-check before adding
+a third account, and treat any future "Drive/Photos suddenly stopped syncing,
+credentials unchanged" as a possible ADP toggle before debugging anything else.
+
 With ADP enabled, Apple's web servers hold no decryption keys. `icloud-docker`
 authenticates exactly like iCloud.com, so **Drive and Photos sync stop working
 entirely**. This is cryptographic, not a missing feature (`icloudpy#20`, open
