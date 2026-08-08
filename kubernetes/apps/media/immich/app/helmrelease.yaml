@@ -137,17 +137,25 @@ spec:
                 # CPU cap (deliberate exception to the repo "no cpu limit" norm):
                 # the uncapped bulk scan drove nuc14-01 to 102C and triggered a
                 # thermal NodeUnexpectedReboot (2026-08-08).
-                # Raised 4 -> 8 once QSV hardware transcoding was confirmed live:
-                # video now costs ~288m (measured, 24x realtime on a 1080p60 HEVC
-                # file), so the remaining CPU consumer is thumbnail generation,
-                # which is image-side and gets no GPU benefit (concurrency 3, and
-                # ~13.6k assets still pending). 8 roughly doubles drain rate while
-                # still bounding a runaway to under half of this 18-core node.
+                # REVERTED 8 -> 4 on 2026-08-09. Raising it to 8 was WRONG and the
+                # cluster proved it: within ~90 minutes nuc14-01 climbed 60C -> 89
+                # -> 97 -> 101 -> 104C, i.e. straight back into the regime that
+                # hard-reset the node the night before. immich-server sat pinned at
+                # 7.99 cores, throttled 100% of CFS periods, and was ~95% of all CPU
+                # on the node.
+                # The reasoning that failed: I costed the GPU transcode at ~288m and
+                # concluded CPU was nearly free. But the iGPU shares the package
+                # power/thermal budget with the cores, so 8 busy cores PLUS a
+                # saturated QSV pipeline is hotter than 8 busy cores alone -- and
+                # hardware DECODE falls back to software on 10-bit HEVC (see the
+                # ffmpeg.threads note), so the CPU side is far busier than a
+                # "GPU does the work" model predicts. 4 measured ~66C under the same
+                # workload shape.
                 # This limit is the BLAST-RADIUS BOUND, not the fix: it is what
                 # makes it impossible for a software-fallback ffmpeg to take the
                 # whole box. ffmpeg's own thread count is bounded separately in
                 # Immich's runtime config (ffmpeg.threads, was 0 = unlimited).
-                cpu: "8"
+                cpu: "4"
                 gpu.intel.com/i915: 1
             probes:
               liveness:
