@@ -109,13 +109,16 @@ spec:
           annotations:
             summary: Immich upload volume is {{ $value | printf "%.0f" }}% full
             description: >-
-              The immich-upload PVC (thumbnails, encoded video, uploads) is over 85%
-              full. Expand the PVC or prune generated data before it fills.
+              The immich-upload-v2 PVC (thumbnails, encoded video, uploads) is over
+              85% full. Expand the PVC or prune generated data before it fills.
+              NOTE 75Gi was sized against a ~60GiB projection at full scan, so 85%
+              (~64GiB) means the projection was low, not merely that the scan is
+              progressing.
           expr: |
             (
-              kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="immich-upload"}
+              kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="immich-upload-v2"}
               /
-              kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="immich-upload"}
+              kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="immich-upload-v2"}
             ) * 100 > 85
           for: 15m
           labels:
