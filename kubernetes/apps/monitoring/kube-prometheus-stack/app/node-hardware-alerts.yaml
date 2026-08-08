@@ -186,32 +186,21 @@ spec:
               Investigate in Kibana: attributes.log_source:talos-kernel AND
               attributes.net.peer.ip:"{{ $labels.net_peer_ip }}". Runbook:
               docs/troubleshooting/node-reboot-observability.md
-        - alert: TalosKmsgNodeSilent
-          # A node's UDP kmsg sender wedges when the collector pod restarts (the
-          # socket stays pinned to the dead pod IP): kmsg keeps appearing in
-          # `talosctl dmesg` but stops reaching Elasticsearch. On 2026-08-04
-          # nuc14-03 went silent this way and it was only noticed on 08-08, while
-          # investigating a reboot on a DIFFERENT node. Had the reboot hit
-          # nuc14-03 we'd have had no kernel logs at all.
-          # Counting DISTINCT shipping nodes (rather than alerting per node)
-          # fires correctly whether the series goes stale or just stops moving.
-          expr: count(count by (net_peer_ip) (increase(talos_kernel_kmsg_lines_total[1h]) > 0)) < 3
-          for: 30m
-          labels:
-            severity: warning
-            category: node-hardware
-            component: kernel-kmsg
-          annotations:
-            summary: "A Talos node has stopped shipping kernel logs"
-            description: >-
-              Only {{ $value | printf "%.0f" }} of 3 nodes shipped kmsg in the last
-              hour. Find the silent one by comparing per-node counts in Kibana
-              (attributes.log_source:talos-kernel, group by attributes.net.peer.ip).
-              Fix WITHOUT a reboot by toggling the sender's port and back:
-              talosctl -n <node> patch mc --mode=no-reboot --patch
-              '{"apiVersion":"v1alpha1","kind":"KmsgLogConfig","name":"ship-kmsg-to-otel","url":"udp://192.168.55.18:5172/"}'
-              then repeat with 5171. Runbook:
-              docs/troubleshooting/node-reboot-observability.md
+        # REMOVED 2026-08-09: TalosKmsgNodeSilent fired continuously and falsely.
+        # The rule assumed talos_kernel_kmsg_lines_total behaves as a monotonic
+        # counter, but the OTel count-connector/prometheus-exporter pair reports a
+        # value of 1 for every node and never increments, so increase()[1h] reads 0
+        # for all of them and the "fewer than 3 nodes shipping" test was always
+        # true. Ground truth at the time: Elasticsearch had 59/31/33 kmsg docs in
+        # the preceding 10 minutes from .11/.12/.13 respectively — all three were
+        # shipping fine.
+        # The DETECTION GAP IS STILL REAL (nuc14-03 shipped nothing for 4 days and
+        # nobody noticed), so this needs re-implementing against a signal that
+        # actually moves. Options: fix the connector's temporality so the counter
+        # accumulates, or drive the check from Elasticsearch (where the data
+        # demonstrably is) via an Uptime Kuma json-query monitor per node.
+        # Not left in place at a longer `for:` — a rule that is permanently true
+        # would just page forever.
         - alert: TalosKmsgPipelineDown
           # Guard for the guard: if the metric vanishes entirely (collector down,
           # connector renamed, ServiceMonitor broken) the rule above silently
