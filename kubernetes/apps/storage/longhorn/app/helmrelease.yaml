@@ -103,3 +103,27 @@ spec:
           type: ClusterIP
       csi:
         kubeletRootDir: /var/lib/kubelet
+    # ---------------------------------------------------------------------
+    # NOTE (2026-08-08): everything above is nested under `longhorn:`, but this
+    # HelmRelease installs the `longhorn` chart DIRECTLY and that chart has no
+    # subchart of that name — so Helm silently DISCARDS the whole block. Proof:
+    # 64 settings are declared above, but only 2 (both chart defaults) render
+    # into the longhorn-default-setting ConfigMap. The live cluster matches
+    # intent only because these values were set out-of-band and persist in the
+    # settings.longhorn.io CRs; a Longhorn reinstall would revert all of them.
+    #
+    # Un-nesting the whole block is NOT safe to do casually — it would impose 10
+    # settings that currently differ from live, including
+    # `recurringJobMaxRetention: 2` against a daily-backup job that retains 7
+    # (risk of pruning backup history) and `backupTarget`, which is no longer a
+    # setting at all in Longhorn 1.12 (it moved to the BackupTarget CR).
+    # See the full live-vs-intended diff in the 2026-08-08 incident notes.
+    #
+    # `persistence` is un-nested here on its own because it is provably a no-op
+    # against live (defaultClass is already true, and the replica count only
+    # affects the generated StorageClass, not any existing volume) while being
+    # the one value that must apply for the `longhorn` StorageClass to stop
+    # handing new volumes 3 replicas.
+    persistence:
+      defaultClass: true
+      defaultClassReplicaCount: 2
