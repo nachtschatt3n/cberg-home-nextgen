@@ -58,10 +58,12 @@ spec:
             resources:
               requests:
                 cpu: 500m
-                memory: 2Gi
+                memory: 3Gi
                 gpu.intel.com/i915: 1
               limits:
-                memory: 6Gi
+                # 8Gi: the initial full-library scan (OpenVINO models + face/CLIP/OCR
+                # batches) peaks near 6Gi; headroom avoids an OOM-kill mid-scan.
+                memory: 8Gi
                 gpu.intel.com/i915: 1
             probes:
               liveness:

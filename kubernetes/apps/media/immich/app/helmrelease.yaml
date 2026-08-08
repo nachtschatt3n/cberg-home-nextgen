@@ -121,7 +121,10 @@ spec:
                 cpu: 200m
                 memory: 1Gi
               limits:
-                memory: 4Gi
+                # 6Gi: the initial full-library scan forks ffmpeg for thumbnail +
+                # video encoding across ~54k assets and OOM-killed at 4Gi. Raise
+                # headroom; steady-state sits well below this once the scan drains.
+                memory: 6Gi
             probes:
               liveness:
                 enabled: true
