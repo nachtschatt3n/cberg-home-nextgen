@@ -203,6 +203,47 @@ PY
 
 ---
 
+### Non-interactive variant (agent-driven, no TTY)
+
+The script above uses `input()`, so it needs an interactive terminal. If you are
+driving this from an automation/agent context that cannot type into a TTY, do
+**not** split it into two `kubectl exec` calls — one to request the push and a
+second to validate. `ICloudPyService.__init__` re-authenticates, and with no
+trusted session yet `_validate_token()` fails, so it re-signs in and mints a
+fresh `scnt`/`session_id`. The code Apple already pushed belongs to the previous
+session and is rejected — costing a code from the daily quota each attempt.
+
+Keep it to **one process** and hand the code in through a file it polls:
+
+```python
+# ... after api.trigger_2fa_push_notification() ...
+CODE_FILE = "/tmp/code.txt"
+code = None
+for _ in range(600):                      # 10 min
+    if os.path.exists(CODE_FILE):
+        c = open(CODE_FILE).read().strip()
+        if len(c) >= 6:
+            code = c
+            break
+    time.sleep(1)
+if not code:
+    print("!! Timed out waiting for the code."); sys.exit(2)
+```
+
+Run it backgrounded (`kubectl -n backup exec <pod> -c app -- python3 -u
+/tmp/reauth2fa.py &`), then deliver the code once the operator reads it off the
+device:
+
+```bash
+kubectl -n backup exec icloud-reauth-$INSTANCE -c app -- \
+  sh -c 'printf "123456" > /tmp/code.txt'
+```
+
+Use `python3 -u` so the "PUSH SENT" line is not stuck in a stdio buffer. Verified
+working on the `andrea` first-auth, 2026-08-08.
+
+---
+
 ## 4) Operational Instructions
 
 ### Step 1 — Stop the retry loop (mandatory, before anything else)
@@ -427,4 +468,9 @@ flux resume helmrelease icloud-docker-$INSTANCE -n backup
   heredoc is unquoted so `$INSTANCE` expands, and the 2FA quota is documented as
   per-Apple-ID (so instances are independent). Corrected two stale rows in the
   Overview table: `Auth library` was `icloudpy 0.8.0` (the pinned digest ships
-  0.9.0) and the session PVC was described as CIFS (it is Longhorn).
+  0.9.0) and the session PVC was described as CIFS (it is Longhorn).  Added the non-interactive
+  (agent-driven) variant: one process polling a code file, because splitting
+  push and validate across two exec calls re-signs in and invalidates the
+  pushed code. Pinned the ephemeral re-auth pod to the same image digest as the
+  HelmRelease — it previously said `:latest`, which ships icloudpy 0.8.0 and
+  would abort on the script's own version guard.
