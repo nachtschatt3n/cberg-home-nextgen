@@ -40,13 +40,6 @@ spec:
 ---
 # Immich media location (/data): thumbnails, encoded video, uploaded/profile
 # assets and generated data. Grows with the library; dynamic longhorn.
-#
-# SUPERSEDED by immich-upload-v2 below (2026-08-08) — kept temporarily as the
-# rollback target. Delete once v2 has proven itself for a few days.
-# It was 200Gi holding 33GiB, and at 3 replicas that reserved 600GiB of Longhorn
-# scheduling space. Nothing that big fits on a second node, so Longhorn parked
-# BOTH surviving replicas on nuc14-03 — a single node loss would have taken the
-# volume offline.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -57,25 +50,6 @@ spec:
   resources:
     requests:
       storage: 200Gi
-  storageClassName: longhorn
----
-# Immich media location (/data) — right-sized replacement for immich-upload.
-# Contents are 100% DERIVED (thumbs + encoded video); the iCloud originals live
-# on the read-only CIFS library mount, so `library/` and `upload/` stay ~empty.
-# Sizing from measurement, not guesswork: at 69% of thumbnails and 53% of video
-# transcodes complete, thumbs were 13GiB and encoded-video 21GiB, projecting to
-# ~19GiB + ~40GiB = ~60GiB at full scan. 100Gi leaves ~40GiB of growth headroom
-# and, at 2 replicas, fits on a second node so the volume gets real redundancy.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: immich-upload-v2
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 100Gi
   storageClassName: longhorn
 ---
 # Machine-learning model cache (CLIP + face-detection ONNX models). Re-downloadable,
