@@ -161,6 +161,7 @@ alerts** cluster-wide (Watchdog excluded); edot ES-rejection rate still 0.
 |---|---|---|
 | ML `CrashLoopBackOff` after image pull | OpenVINO per-release regression / iGPU init | Swap ML tag to the plain `v3.1.0` (CPU) tag; re-open a GH issue upstream |
 | ML logs "No GPU"/falls back to CPU | `/dev/dri` not mounted or i915 not allocated | Confirm `intel-device-plugin-gpu` Ready, `/dev/dri/renderD128` present, pod privileged |
+| SSO fails: `invalid_request` "The request is otherwise malformed" | provider `grant_types` empty (blueprint-only provider, Authentik ≥2026.5) | Blueprint must set `grant_types: [authorization_code, refresh_token]`; the redirect_uri is a red herring. See `docs/sops/authentik.md` OIDC gotchas |
 | Server `redirect_uri mismatch` on SSO | callback URL missing from blueprint | Add the exact URL as a `strict` redirect_uri; re-encrypt configmap; wait for Reloader |
 | SSO works but no user created | Auto Register disabled | Enable it in Immich Admin → OAuth |
 | External assets show but thumbnails fail | `immich-upload` PVC full or perms | Check `ImmichUploadPVCFillingUp`; verify fsGroup 1000 on `/data` |

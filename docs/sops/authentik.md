@@ -241,6 +241,9 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
     client_id: "<43-char alphanumeric, unique per app>"     # openssl rand
     client_secret: "<128-char alphanumeric>"                # openssl rand
     client_type: confidential
+    grant_types:                     # REQUIRED for blueprint-only providers (see gotchas)
+      - authorization_code
+      - refresh_token
     authorization_flow: "0cdf1b8c-88f9-4b90-a063-a14e18192f74"   # default-provider-authorization-implicit-consent
     invalidation_flow: "b8a97e00-f02f-48d9-b854-b26bf837779c"    # default-provider-invalidation-flow
     redirect_uris:
@@ -268,6 +271,16 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
 
 ### Rules & gotchas
 
+- **`grant_types` MUST be set explicitly** (Authentik ≥2026.5). A blueprint that
+  omits it leaves the field **empty `[]`**, and then EVERY authorize request fails
+  with `invalid_request` / "The request is otherwise malformed" (rejected at
+  `authorize.py`: `grant_type not in provider.grant_types`). This bites
+  **blueprint-only** providers — the existing grafana/pgadmin/superset entries dodged
+  it because they were UI-created first (the UI seeds the default grant-type set),
+  then imported by `identifiers.name`. Set `[authorization_code, refresh_token]`
+  (add `implicit`/`hybrid` only if the app needs them). Symptom is identical to a
+  redirect-uri problem but the redirect_uri is fine — confirm with
+  `ak shell -c "from authentik.providers.oauth2.models import OAuth2Provider; print(OAuth2Provider.objects.get(name='<app>').grant_types)"`.
 - **`client_id` must be unique** across all providers. Reusing one throws a
   provider-collision error that leaves the blueprint in `errored` state (the
   whole app then fails SSO). Generate a fresh one: `openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 43`.
