@@ -125,6 +125,11 @@ spec:
                 # video encoding across ~54k assets and OOM-killed at 4Gi. Raise
                 # headroom; steady-state sits well below this once the scan drains.
                 memory: 6Gi
+                # CPU cap (deliberate exception to the repo "no cpu limit" norm):
+                # the uncapped bulk scan drove nuc14-01 to 102C and triggered a
+                # thermal NodeUnexpectedReboot (2026-08-08). Cap thermal load so a
+                # node can't be cooked again. Remove once the initial scan drains.
+                cpu: "4"
             probes:
               liveness:
                 enabled: true
