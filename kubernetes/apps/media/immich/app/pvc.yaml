@@ -60,8 +60,13 @@ spec:
       storage: 75Gi
   storageClassName: longhorn
 ---
-# Machine-learning model cache (CLIP + face-detection ONNX models). Re-downloadable,
-# but persisting avoids re-pull on every ML pod restart.
+# Machine-learning model cache (CLIP + face-detection + OCR ONNX models, plus
+# OpenVINO compiled-kernel/cl_cache blobs). The OpenVINO cache grows per unique
+# OCR input shape — the initial 54k-asset scan pushed /cache/ocr to ~8GB (57k
+# cl_cache/blob files) and filled the original 10Gi (LonghornVolumeUsageCritical,
+# 2026-08-09). Sized to 30Gi for headroom; it plateaus once common text shapes
+# are cached. If it fills again, OCR shape-caching is the driver — either disable
+# Immich OCR (text search) or cap the OpenVINO cache.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -71,5 +76,5 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 30Gi
   storageClassName: longhorn
