@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -75,31 +76,57 @@ def _chat_id():
     return _DEFAULT_CHAT
 
 
-def notify(text: str, *, urgent: bool = False) -> bool:
-    """Send `text` to the operator channel. Returns True on success."""
-    token = _bot_token()
-    if not token:
-        print("notify: no Telegram bot token available — skipping", file=sys.stderr)
-        return False
-    payload = json.dumps({
-        "chat_id": _chat_id(),
-        "text": text,
-        "parse_mode": "Markdown",
-        "disable_notification": not urgent,  # urgent → audible push
-        "disable_web_page_preview": True,
-    }).encode()
+def _post(token: str, payload_dict: dict) -> bool:
+    """POST one sendMessage payload; return Telegram's `ok`. Raises on HTTP error."""
+    payload = json.dumps(payload_dict).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=payload, headers={"Content-Type": "application/json"}, method="POST",
     )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return bool(json.loads(r.read().decode() or "{}").get("ok", False))
+
+
+def notify(text: str, *, urgent: bool = False) -> bool:
+    """Send `text` to the operator channel. Returns True on success.
+
+    Sends as legacy Markdown (nice formatting when the body is valid Markdown),
+    but transparently RETRIES AS PLAIN TEXT if Telegram rejects it with HTTP 400.
+    Operational messages carry arbitrary technical strings (paths, version tags,
+    `needs_reboot`) whose stray `_`/`*`/`` ` `` would otherwise trip the Markdown
+    parser and silently drop the alert — the plain-text retry guarantees delivery.
+    """
+    token = _bot_token()
+    if not token:
+        print("notify: no Telegram bot token available — skipping", file=sys.stderr)
+        return False
+    base = {
+        "chat_id": _chat_id(),
+        "text": text,
+        "disable_notification": not urgent,  # urgent → audible push
+        "disable_web_page_preview": True,
+    }
+    # Attempt 1 — Markdown.
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            ok = json.loads(r.read().decode() or "{}").get("ok", False)
-            if not ok:
-                print("notify: Telegram API returned ok=false", file=sys.stderr)
-            return bool(ok)
+        if _post(token, {**base, "parse_mode": "Markdown"}):
+            return True
+        print("notify: Telegram ok=false with Markdown — retrying as plain text", file=sys.stderr)
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            print(f"notify: send failed ({e})", file=sys.stderr)
+            return False
+        print("notify: Telegram HTTP 400 (Markdown parse) — retrying as plain text", file=sys.stderr)
     except Exception as e:
         print(f"notify: send failed ({e})", file=sys.stderr)
+        return False
+    # Attempt 2 — plain text (no parse_mode); never trips a formatting parser.
+    try:
+        ok = _post(token, base)
+        if not ok:
+            print("notify: Telegram API returned ok=false (plain text)", file=sys.stderr)
+        return ok
+    except Exception as e:
+        print(f"notify: plain-text send failed ({e})", file=sys.stderr)
         return False
 
 
