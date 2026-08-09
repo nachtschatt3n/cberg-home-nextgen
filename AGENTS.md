@@ -14,16 +14,21 @@ Recurring health/security/version/doc/media sweeps **must execute on this Mac mi
 
 **Do NOT create session-local `/loop` sweeps.** The old 8:17am `/loop` (CronCreate `de44f77b`) is retired and confirmed gone (2026-06-28). A local loop would double-run the sweep and clash with the cluster-driven one. For an ad-hoc sweep, send `operation sweep` (or type "run a sweep" into the `daily-operation` session) — **once**, never on a `/loop` or `CronCreate` schedule.
 
-**The scheduled (cron) sweep AUTO-MERGES safe version updates.** Since
-2026-07-25 the `daily-operation` sweep runs `runbooks/auto-update.py` (rule 4c):
-on a **cron** run (`SWEEP_TRIGGER=cron`) it merges the *safe* subset of open
-Renovate PRs — patch/minor, not on the `runbooks/auto-update-policy.yaml`
-deny-list, no breaking-change signal in release notes, mergeable with green
-flux-local CI — then Flux-reconciles, health-gates, and **auto-reverts** the
-batch on regression. A **manual** `operation sweep` is dry-run only (stays
-read-only). Full contract: `docs/sops/auto-update.md`. To hold a component back,
-add a deny rule to the policy YAML (git-tracked, code-reviewed) and bump its
-version.
+**Safe version updates are AUTO-APPLIED IN THE MAINTENANCE WINDOWS, not in the
+sweep** (architecture updated 2026-07-31 — do NOT revert to the older
+"sweep-applies" model). The `daily-operation` **sweep is READ-ONLY**: it only
+DRY-RUNS `runbooks/auto-update.py` (rule 4c) to report what *will* land next
+window. The **`maintenance-window-agent` actually applies them at Step 0 of
+EVERY window** — `AUTO_UPDATE_APPLY=1 auto-update.py --apply` (safe open Renovate
+PRs) plus `runbooks/coverage.py` (direct-bump for safe updates with no PR) —
+applying only the *safe* subset (patch/minor, not on the
+`runbooks/auto-update-policy.yaml` deny-list, no breaking-change signal in
+release notes, green flux-local CI), then Flux-reconciles, health-gates, and
+**auto-reverts** the batch on regression. **Therefore NEVER scope a
+maintenance-window run to "just the assigned plans" — Step 0 (safe-update apply)
+runs FIRST, every window, even on unattended cron runs.** Full contract:
+`docs/sops/auto-update.md`. To hold a component back, add a deny rule to the
+policy YAML (git-tracked, code-reviewed) and bump its version.
 
 **NON-safe (held) updates flow to scheduled maintenance windows.** Everything
 the auto-updater holds is planned + executed via the maintenance-window pipeline
