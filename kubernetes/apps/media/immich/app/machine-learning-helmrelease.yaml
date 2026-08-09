@@ -78,7 +78,9 @@ spec:
                 # zigbee2mqtt, so it gets a tighter thermal budget. Inference runs
                 # on the iGPU (OpenVINO), so CPU here is decode/preprocess feeding
                 # the GPU — throughput degrades sub-linearly with the cap.
-                # Remove once the initial scan drains.
+                # KEEP PERMANENTLY (operator decision 2026-08-09): retained as a
+                # standing thermal-safety bound on nuc14-03, NOT just a scan-time
+                # measure. Do not remove without an explicit operator go-ahead.
                 cpu: "3"
                 gpu.intel.com/i915: 1
             probes:

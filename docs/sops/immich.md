@@ -69,8 +69,10 @@ library Scan). Rules:
   repo no-cpu-limit norm; comments in the HelmReleases). Server `cpu > 4`
   reproduced the reboot; the cap is the real thermal control (iGPU QSV only
   offloads *video*, not photo thumbnails, which are CPU/sharp).
-- These caps are tagged **"remove once the initial scan drains"** — relax them
-  for full steady-state performance only after the scan completes.
+- These caps are **retained permanently** (operator decision 2026-08-09) as a
+  standing thermal-safety bound — the server `cpu:4` is the blast-radius bound
+  that stops a software-fallback ffmpeg cooking the box, and ML `cpu:3` protects
+  nuc14-03. Do **not** remove them without an explicit operator go-ahead.
 - Watch `NodeCPUTemperatureHigh/Critical` (`x86_pkg_temp > 90 / 100`) during the
   scan; brief 100°C touches that throttle back are safe, *sustained* >100°C is
   the reboot risk.
