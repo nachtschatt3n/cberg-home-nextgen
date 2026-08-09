@@ -1325,6 +1325,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "home-automation/scrypted",       # Hardware transcoding
         "media/jellyfin",                 # HW-accelerated transcoding
         "media/makemkv",                  # Optical drive access
+        "media/immich-machine-learning",  # OpenVINO iGPU (i915) — same rationale as jellyfin (AR-009)
     }
     ACCEPTED_ROOT_UID = {
         "ai/openclaw",                    # install-openclaw init container
@@ -1335,6 +1336,7 @@ def s7_rbac_pod_security() -> tuple[str, Findings, str]:
         "home-automation/scrypted",       # same as privileged rationale
         "media/jellyfin",                 # same as privileged rationale
         "media/makemkv",                  # same as privileged rationale
+        "media/immich-machine-learning",  # same as privileged rationale (iGPU)
         "databases/superset",             # apache/superset image default (runs as root)
         "databases/superset-celerybeat",  # same image
         "databases/superset-worker",      # same image

@@ -57,6 +57,24 @@ deletes the originals (`:ro` CIFS mount).
 2. Bring-up order is enforced by `dependsOn`: postgres + redis → server; ML is
    independent. All four are app-template `3.7.3` HelmReleases.
 
+### ⚠️ Hard rule — CPU caps during bulk (re)scans (thermal)
+On these NUC14 (Meteor Lake) nodes, an **uncapped** Immich bulk scan will
+thermally reset a node. On 2026-08-08 the initial 54k-asset scan drove
+`immich-server` (CPU ffmpeg thumbnailing) on nuc14-01 to **102°C → thermal
+`NodeUnexpectedReboot`** — which flushed the ephemeral Redis job queue and
+stalled the scan at 69% (recover by re-queuing: Job Queues → "Missing", or a
+library Scan). Rules:
+- Keep `immich-server` **`cpu` limit ≤ 4** and `immich-machine-learning`
+  **`cpu` limit ≤ 3** during any initial/bulk scan (deliberate exception to the
+  repo no-cpu-limit norm; comments in the HelmReleases). Server `cpu > 4`
+  reproduced the reboot; the cap is the real thermal control (iGPU QSV only
+  offloads *video*, not photo thumbnails, which are CPU/sharp).
+- These caps are tagged **"remove once the initial scan drains"** — relax them
+  for full steady-state performance only after the scan completes.
+- Watch `NodeCPUTemperatureHigh/Critical` (`x86_pkg_temp > 90 / 100`) during the
+  scan; brief 100°C touches that throttle back are safe, *sustained* >100°C is
+  the reboot risk.
+
 ### First-run interactive steps (cannot be GitOps)
 1. **First-boot admin** — visit `https://immich.${SECRET_DOMAIN}`, create the
    local admin (cannot be seeded).
