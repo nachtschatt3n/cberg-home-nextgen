@@ -95,15 +95,15 @@ spec:
                 icon: pikvm.png
                 description: KVM over IP
                 ping: 192.168.30.154
-            - "Zigbee Router GF":
+            - "Zigbee Router Tubroom":
                 href: http://192.168.32.21
                 icon: zigbee2mqtt-light.png
-                description: SLZB-06 Zigbee Router Ground Floor
+                description: SLZB-06 Zigbee Router (Tubroom)
                 ping: 192.168.32.21
-            - "Zigbee Coordinator":
+            - "Zigbee Coordinator Office":
                 href: http://192.168.32.20
                 icon: zigbee2mqtt.png
-                description: SLZB-06P10 Zigbee Coordinator
+                description: SLZB-06P10 Zigbee Coordinator (Office)
                 ping: 192.168.32.20
             - "Unifi NAS Pro":
                 href: http://192.168.55.240
@@ -115,6 +115,20 @@ spec:
                 href: http://192.168.32.201
                 description: Epson ES-580W
                 ping: 192.168.32.201
+            - "Flic Hub LR":
+                href: https://hubsdk.flic.io
+                icon: mdi-gesture-tap-button
+                description: Flic smart-button hub (LR)
+            - "Tibber Pulse":
+                href: http://192.168.32.229
+                icon: tibber.png
+                description: Tibber Pulse smart-meter bridge
+                ping: 192.168.32.229
+            - "Tesla Wall Connector":
+                href: http://192.168.32.146
+                icon: tesla.png
+                description: TeslaWallConnector_A5CCE5 (EV charger)
+                ping: 192.168.32.146
         - "Home Automation":
             - Balkonkraftwerk:
                 href: https://hass.${SECRET_DOMAIN}/dashboard-balkonkraftwerk
