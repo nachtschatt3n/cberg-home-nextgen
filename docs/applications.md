@@ -144,6 +144,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
+| immich | Self-hosted photo and video library — read-only external-library viewer over the NAS iCloud backup, Intel iGPU ML, Authentik OIDC SSO. See `docs/sops/immich.md`. | Internal | Media |
 | jellyfin | Open-source media server | Internal | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
