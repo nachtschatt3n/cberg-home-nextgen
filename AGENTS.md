@@ -612,16 +612,26 @@ volumeHandle patterns, common mistakes, debugging commands):
 
 Quick agent rules (anything more, read the SOP):
 
-- **Use `longhorn`** for app databases, growing data, caches, StatefulSet
-  PVCs. PV name is auto-generated UUID. Default choice.
-- **Use `longhorn-static`** ONLY for small config volumes that must
-  survive namespace deletion AND need clean PV names. Requires manually
-  pre-creating the Longhorn `Volume` CRD with `frontend: blockdev`
-  before the PV/PVC. **Do NOT create longhorn-static if dynamic
-  provisioning works** — the manual-Volume step is the most common
-  failure source.
-- PVC naming pattern: `{app}-{purpose}` (e.g. `postgres-data`,
-  `home-assistant-config`).
+- **Default: `longhorn-static` with a SPEAKING PV NAME.** Volumes must be
+  identifiable without a lookup: Longhorn's UI, its backup list, and every
+  disaster-recovery procedure key on the **PV** name, so a `pvc-<uuid>` PV
+  forces a `claimRef` lookup at exactly the moment you are under pressure.
+  The Longhorn `Volume`, the `PV`, the PVC's `volumeName`, the PV's
+  `volumeHandle` and the PVC name must **all be the same identifier**
+  (`{app}-{purpose}`, e.g. `pgadmin-data`, `home-assistant-config`).
+  This is already the house majority: 50 static / 33 dynamic, 48 named PVs.
+- **Use `longhorn` (dynamic, UUID PV) ONLY when a name is impossible:**
+  StatefulSet `volumeClaimTemplates` (one PVC per replica, generated at
+  scale time — you cannot pre-create PVs for replicas that do not exist
+  yet), or genuinely ephemeral/recreatable scratch data.
+- **Cost you must accept for a static volume:** the Longhorn `Volume` CR
+  takes ONE manual `kubectl apply` — Flux cannot own it, because the app
+  Kustomization's `targetNamespace` silently overrides the CR's
+  `namespace: storage` and creates a broken duplicate Longhorn ignores.
+  Keep `longhorn-volume.yaml` in the app folder as version-controlled
+  source, apply it by hand, and let Flux manage only `pv.yaml` + the PVC.
+  Skipping the apply leaves the PVC `Pending` — that is the expected
+  failure, not a reason to fall back to dynamic.
 - Storage Debugging entry point:
   ```bash
   kubectl get volume -n storage              # all Longhorn volumes

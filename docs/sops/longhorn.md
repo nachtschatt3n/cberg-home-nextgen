@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.05.01`
-> Last Updated: `2026-05-01`
+> Version: `2026.08.09`
+> Last Updated: `2026-08-09`
 > Owner: `Platform`
 
 ---
@@ -45,8 +45,12 @@ Declarative source-of-truth:
 
 ## Operational Instructions
 
-1. Choose `longhorn` or `longhorn-static` based on workload pattern.
-2. Apply PVC/PV/Volume manifests through GitOps.
+1. Default to `longhorn-static` with a speaking name; use `longhorn` only
+   where a name is impossible (StatefulSet volumeClaimTemplates).
+2. Apply the PV + PVC through GitOps. The Longhorn `Volume` CR must be applied
+   MANUALLY (`kubectl apply -f .../longhorn-volume.yaml`) and kept OUT of
+   `app/kustomization.yaml` — Flux's `targetNamespace` would override its
+   `namespace: storage` and create a broken duplicate.
 3. Validate attachment, mount, and workload readiness.
 4. Verify backups and health before major upgrades.
 
@@ -122,30 +126,54 @@ kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
 
 ## Storage Class Selection
 
-### Use `longhorn` (Dynamic Provisioning) For:
-- Application databases (PostgreSQL, MariaDB, Redis, etc.)
-- Application data that grows dynamically
-- Cache volumes and StatefulSet volumes
-- Any volume where automatic provisioning is preferred
+### Default: `longhorn-static` — volumes MUST have speaking names
 
-**PV naming:** Auto-generated UUID (e.g., `pvc-df1999c2-c73c-4e54-a0a7-9f30571e8636`) — expected.
+**Use `longhorn-static` unless a name is technically impossible.** This is the
+house standard and the cluster majority (50 static / 33 dynamic, 48 named PVs).
 
-### Use `longhorn-static` For:
-- Configuration directories with fixed, known size
-- Volumes you want to manually manage and preserve
-- Volumes that should survive namespace deletions
-- Volumes requiring specific Longhorn settings
-- Volumes where you need stable, human-readable PV names
+Why the PV name matters more than it looks: the Longhorn UI, the backup list,
+and every restore/DR procedure are keyed on the **PV** name, not the PVC. A
+`pvc-<uuid>` PV means that when a volume is degraded or you are restoring from
+backup at 02:00, you cannot tell what you are looking at without a `claimRef`
+lookup — precisely when you least want an extra indirection.
 
-**PV naming:** Human-readable, matching the Longhorn volume name.
-**Important:** StatefulSet workloads should continue using `longhorn` dynamic provisioning.
+Applies to: configuration directories, application databases, any volume you
+would want to find in a backup list, anything that should survive a namespace
+deletion, anything needing specific Longhorn settings.
+
+**PV naming:** human-readable, and the **same identifier everywhere** — the
+Longhorn `Volume`, the `PV`, the PVC's `volumeName`, the PV's `volumeHandle`
+and the PVC name are all `{app}-{purpose}`.
+
+### Use `longhorn` (Dynamic, UUID PV) only when a name is impossible
+
+- **StatefulSet `volumeClaimTemplates`** — one PVC is generated per replica at
+  scale time, so you cannot pre-create PVs for replicas that do not exist yet.
+  This is the main legitimate case.
+- Genuinely ephemeral or trivially recreatable scratch/cache data.
+
+**PV naming:** auto-generated UUID (e.g. `pvc-df1999c2-…`) — unavoidable here,
+and only here.
+
+### The one cost of a static volume — do not let it push you back to dynamic
+
+The Longhorn `Volume` CR needs **one manual `kubectl apply`**. Flux cannot own
+it: the app Kustomization's `targetNamespace` silently overrides the CR's
+`namespace: storage`, producing a duplicate in the app namespace that Longhorn
+does not manage. Keep `longhorn-volume.yaml` in the app folder as
+version-controlled source, apply it by hand once, and let Flux manage `pv.yaml`
+and the PVC.
+
+If you skip it the PVC sits `Pending` — that is the expected failure mode and a
+prompt to apply the Volume, **not** a reason to switch to dynamic provisioning.
 
 ### Naming Standards
 
 For new PVCs, use descriptive names: `{app}-{purpose}`.
 
-- ✅ `langfuse-postgresql-data` (`longhorn` → UUID PV is expected)
-- ✅ `home-assistant-config` (`longhorn-static` → clean PV name)
+- ✅ `home-assistant-config` (`longhorn-static` → clean PV name) — the default
+- ✅ `data-authentik-postgresql-0` (StatefulSet template → UUID PV is expected)
+- ❌ Reaching for `longhorn` just to avoid the manual Volume-CR apply
 - ❌ Manually creating UUID-like PV names for static volumes
 
 ---

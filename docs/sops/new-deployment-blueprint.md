@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.05.04`
-> Last Updated: `2026-05-04`
+> Version: `2026.08.09`
+> Last Updated: `2026-08-09`
 > Owner: `Platform`
 
 ---
@@ -29,7 +29,7 @@ It defines where the app should live, how it should be configured, and how to ve
 | Namespace placement | Follow existing namespace model in `docs/applications.md` and `docs/infrastructure.md` |
 | App structure | `kubernetes/apps/{namespace}/{app}/` with `ks.yaml` + `app/` manifests |
 | Secrets | Must be SOPS-encrypted (`*.sops.yaml`) before commit |
-| Storage | Use `longhorn` by default; use `longhorn-static` only for explicitly managed volumes |
+| Storage | Use `longhorn-static` with a speaking PV name by default; `longhorn` (dynamic, UUID PV) only where a name is impossible — StatefulSet volumeClaimTemplates |
 | Homepage | All user-facing web apps must include Homepage annotations + label |
 | Monitoring | Every new app must have rollout health checks and logs/events verification |
 | AlertManager | Every new app must have a PrometheusRule in `kubernetes/apps/monitoring/kube-prometheus-stack/app/` covering pod readiness, crash looping, and restarts |
@@ -109,16 +109,18 @@ Storage blueprint:
 
 ```yaml
 spec:
-  storageClassName: longhorn
+  storageClassName: longhorn-static
+  volumeName: {app}-{purpose}          # speaking name, never a UUID
 ```
 
-**Longhorn volume naming rule** (mandatory for `longhorn-static`):
+**Longhorn volume naming rule:**
 
-- **Default: use `longhorn` (dynamic).** PVCs get auto-generated UUID PV names — this is fine for app data that can be recreated from backup.
-- **Use `longhorn-static` when you want a stable, speaking volume name** (reviewed/grep-able/backup-auditable). The PV **must not** be a UUID — it must match the PVC's `volumeName` exactly.
-- **The Longhorn Volume, the PV, the PVC's `volumeName`, the PV's `volumeHandle`, and the PVC name must all be the SAME speaking identifier.** Convention: `{app}-{purpose}-data` (e.g. `pgadmin-data`, `superset-postgresql-data`).
+- **Default: use `longhorn-static` with a speaking name.** Longhorn's UI, backup list and every restore procedure key on the **PV** name, so a `pvc-<uuid>` PV cannot be identified without a `claimRef` lookup — exactly the indirection you do not want mid-incident.
+- **The Longhorn Volume, the PV, the PVC's `volumeName`, the PV's `volumeHandle`, and the PVC name must all be the SAME speaking identifier.** Convention: `{app}-{purpose}` (e.g. `pgadmin-data`, `superset-postgresql-data`).
+- **Use `longhorn` (dynamic, UUID PV) only when a name is impossible** — StatefulSet `volumeClaimTemplates` generate one PVC per replica at scale time, so PVs cannot be pre-created. Also acceptable for genuinely ephemeral scratch/cache data.
+- **The manual Volume-CR apply is not a reason to fall back to dynamic.** A `Pending` PVC means you have not applied `longhorn-volume.yaml` yet (see the Flux `targetNamespace` note below) — apply it, do not switch class.
 
-Three-file pattern when using `longhorn-static` (see `kubernetes/apps/databases/pgadmin/app/` or `kubernetes/apps/databases/superset/app/` for working references).
+Three-file pattern for `longhorn-static` (see `kubernetes/apps/databases/pgadmin/app/` or `kubernetes/apps/databases/superset/app/` for working references).
 
 **High-churn data (logs / metrics / time-series) — enforce app-side retention.** Longhorn's nightly `global-filesystem-trim` (02:00, covers every volume in the `default` group automatically) only reclaims blocks the *application* has freed. If the app never deletes its own old data, the volume fills with live data and trips `LonghornVolumeUsage*` alerts — trim can't help. So for any app that continuously writes (Elasticsearch/OTel datastreams, Prometheus, Loki, time-series DBs): verify its retention/ILM/DSL actually deletes old data. Watch for the Elasticsearch gotcha where `index.lifecycle.prefer_ilm: true` makes a no-delete ILM policy win over DSL `data_retention` (see the `filesystem-trim` note in `docs/sops/longhorn.md`).
 
