@@ -52,14 +52,14 @@ conflicts_with:
                                     # reboot is unacceptable. (talos-v1.13.7 is targeted
                                     # sun-window:2026-08-02 — put this in a DIFFERENT
                                     # sun window, or run it first + fully verified.)
-status: awaiting-go               # deferred 2026-08-09 sun-window (unattended cron
-                                    # run, operator asleep) — risk:high + auto_execute:
-                                    # false ⇒ URGENT go/no-go sent via notify.py.
-                                    # Do NOT execute until operator approves; run in the
-                                    # next operator-present sun-window. NB: sun-window
-                                    # 2026-08-16 holds talos-v1.13.8 (node reboot) —
-                                    # honor the conflicts_with-a-reboot rule when reslotting.
-window: "sun-window:2026-08-09"
+status: scheduled                 # operator APPROVED 2026-08-10 ("go"). Was awaiting-go
+                                    # after the 2026-08-09 sun-window deferred it (unattended
+                                    # cron, high-risk). Reslotted to sun-window 2026-08-23 —
+                                    # the next operator-present sun-window; 2026-08-16 is
+                                    # skipped because it holds talos-v1.13.8 (node reboot) and
+                                    # this conflicts_with a reboot (no control-plane upgrade
+                                    # alongside a node reboot).
+window: "sun-window:2026-08-23"
                                     # operator-present, reboot-capable slot (sun-window)
                                     # ONLY — never the unattended tue/thu 05:00 slots.
                                     # This plan must run FIRST + Ready-verified before

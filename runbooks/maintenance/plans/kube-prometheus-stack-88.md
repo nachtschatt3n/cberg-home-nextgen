@@ -42,10 +42,12 @@ touches:
 depends_on: []
 conflicts_with: []                  # no hard resource conflict, but see Interference notes:
                                     # run FIRST/solo — its rollout briefly blinds cluster-wide alerting
-status: draft
-window: "sat-early:2026-08-08"      # no-reboot ⇒ Sat, not Sun. SOLO (alerting blind
-                                    # 2-5m); scheduled FIRST so monitoring is current
-                                    # before the app-template churn starts.
+status: draft                       # still DRAFT — must be finalized (vetted→scheduled)
+                                    # before it will execute; reslotted only (2026-08-10).
+window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
+                                    # not Sun. SOLO (alerting blind 2-5m) — 2026-08-15 sat
+                                    # is taken by app-template-5.0 ⋂ envoy phase0/1, so this
+                                    # gets the next clean solo Sat window.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
