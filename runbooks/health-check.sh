@@ -347,7 +347,7 @@ check_icloud_instance() {
     #  - Apple "package" bundles (.numbers/.app) icloud-docker can't unpack,
     #    plus per-file package-type probes — benign tool limitations
     # Scope to last 24h; icloud-docker has sparse logs.
-    log_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
+    log_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '410|429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
     echo "  iCloud log errors (last 24h, filtered): $log_errors"
 
     # Auth/session errors are the ones that actually need operator action
