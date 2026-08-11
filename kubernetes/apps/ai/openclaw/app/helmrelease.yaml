@@ -203,14 +203,14 @@ spec:
                 echo "Installing kubectl..."
                 # Use a known stable version as fallback if latest check fails
                 KUBECTL_VER="$(curl -L -s https://dl.k8s.io/release/stable.txt 2>/dev/null || echo 'v1.31.4')"
-                echo "Kubectl version: ${KUBECTL_VER}"
-                KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl"
-                if curl -L -f "${KUBECTL_URL}" -o "$BIN_DIR/kubectl" 2>/dev/null; then
+                echo "Kubectl version: $${KUBECTL_VER}"
+                KUBECTL_URL="https://dl.k8s.io/release/$${KUBECTL_VER}/bin/linux/amd64/kubectl"
+                if curl -L -f "$${KUBECTL_URL}" -o "$BIN_DIR/kubectl" 2>/dev/null; then
                   chmod +x "$BIN_DIR/kubectl"
                   echo "kubectl installed successfully"
                   "$BIN_DIR/kubectl" version --client --short 2>/dev/null || true
                 else
-                  echo "Failed to download kubectl from ${KUBECTL_URL}, trying v1.31.4..."
+                  echo "Failed to download kubectl from $${KUBECTL_URL}, trying v1.31.4..."
                   # Fallback to known version
                   if curl -L -f "https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl" -o "$BIN_DIR/kubectl"; then
                     chmod +x "$BIN_DIR/kubectl"
@@ -222,9 +222,9 @@ spec:
 
                 echo "Installing mise..."
                 MISE_TMP="$(mktemp -d)"
-                curl -fsSL https://mise.jdx.dev/install.sh -o "${MISE_TMP}/install.sh"
-                sh "${MISE_TMP}/install.sh" --yes --bin-dir "$BIN_DIR"
-                rm -rf "${MISE_TMP}"
+                curl -fsSL https://mise.jdx.dev/install.sh -o "$${MISE_TMP}/install.sh"
+                sh "$${MISE_TMP}/install.sh" --yes --bin-dir "$BIN_DIR"
+                rm -rf "$${MISE_TMP}"
 
                 echo "Installing gh CLI..."
                 rm -rf /tmp/gh-cli
@@ -1256,9 +1256,9 @@ spec:
 
                 echo "Wiring personal-knowledge integrations..."
 
-                # NOTE on $$: Flux kustomize-controller does `${VAR}` substitution
+                # NOTE on $$: Flux kustomize-controller does `$${VAR}` substitution
                 # against cluster-settings/cluster-secrets. Doubling the dollar
-                # ($${VAR}) escapes one pass, leaving ${VAR} for bash at runtime.
+                # ($${VAR}) escapes one pass, leaving $${VAR} for bash at runtime.
 
                 # NOTE: HASS_URL/HASS_TOKEN for hactl are now mapped from the
                 # secret in the container env: block, so they're available to

@@ -92,11 +92,11 @@ spec:
                 if [ ! -f /paperclip/.local/bin/gh ]; then
                   echo "Installing gh CLI..."
                   GH_VERSION=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-                  curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" | \
+                  curl -fsSL "https://github.com/cli/cli/releases/download/v$${GH_VERSION}/gh_$${GH_VERSION}_linux_amd64.tar.gz" | \
                     tar -xz -C /tmp
-                  cp /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /paperclip/.local/bin/gh
+                  cp /tmp/gh_$${GH_VERSION}_linux_amd64/bin/gh /paperclip/.local/bin/gh
                   chmod +x /paperclip/.local/bin/gh
-                  rm -rf /tmp/gh_${GH_VERSION}_linux_amd64
+                  rm -rf /tmp/gh_$${GH_VERSION}_linux_amd64
                   echo "gh installed: $(/paperclip/.local/bin/gh --version)"
                 fi
                 # Always ensure gh uses HTTPS (SSH may not be available in container)
@@ -254,8 +254,8 @@ spec:
                   [ -f /paperclip/toolroot/lib64/ld-linux-x86-64.so.2 ] && \
                     echo "ld-linux: OK" >> "$LOGF" || echo "WARN: ld-linux-x86-64.so.2 missing from toolroot/lib64" >> "$LOGF"
                   # Derive GCC_REAL from the detected package name to avoid picking up stale binaries.
-                  GCC_REAL=/paperclip/toolroot/usr/bin/${GCC_PKG}
-                  GPP_REAL=/paperclip/toolroot/usr/bin/${GPP_PKG}
+                  GCC_REAL=/paperclip/toolroot/usr/bin/$${GCC_PKG}
+                  GPP_REAL=/paperclip/toolroot/usr/bin/$${GPP_PKG}
                   [ -f "$GCC_REAL" ] || GCC_REAL=$(ls /paperclip/toolroot/usr/bin/gcc-[0-9]* 2>/dev/null | sort -V | tail -1)
                   [ -f "$GPP_REAL" ] || GPP_REAL=$(ls /paperclip/toolroot/usr/bin/g++-[0-9]* 2>/dev/null | sort -V | tail -1)
                   # Debian trixie moved cc1 to usr/libexec/gcc/ but kept crt*.o in usr/lib/gcc/.

@@ -284,19 +284,19 @@ spec:
               sync_whiteboard_jwt() {
                 local secret_file="/run/secrets/whiteboard/whiteboard-jwt-secret"
 
-                if [ ! -s "${secret_file}" ]; then
+                if [ ! -s "$${secret_file}" ]; then
                   echo "whiteboard jwt secret unavailable; skipping sync"
                   return
                 fi
 
                 local desired current
-                desired="$(cat "${secret_file}")"
+                desired="$(cat "$${secret_file}")"
                 current="$(php /var/www/html/occ config:app:get whiteboard jwt_secret_key 2>/dev/null || true)"
-                if [ "${current}" = "${desired}" ]; then
+                if [ "$${current}" = "$${desired}" ]; then
                   return
                 fi
 
-                if php /var/www/html/occ config:app:set whiteboard jwt_secret_key --value="${desired}" >/dev/null 2>&1; then
+                if php /var/www/html/occ config:app:set whiteboard jwt_secret_key --value="$${desired}" >/dev/null 2>&1; then
                   echo "whiteboard jwt_secret_key synced from Kubernetes secret"
                 else
                   echo "whiteboard jwt_secret_key sync failed"
@@ -327,7 +327,7 @@ spec:
               next_sync=0
               while true; do
                 now="$(date +%s)"
-                if [ "${now}" -ge "${next_sync}" ]; then
+                if [ "$${now}" -ge "$${next_sync}" ]; then
                   sync_whiteboard_jwt
                   next_sync="$((now + 300))"
                 fi
