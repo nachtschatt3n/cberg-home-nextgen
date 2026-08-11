@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: flux-operator
-      version: 0.14.0
+      version: 0.57.0
       sourceRef:
         kind: HelmRepository
         name: controlplaneio
@@ -18,10 +18,10 @@ spec:
     remediation:
       retries: 3
   upgrade:
-    cleanupOnFail: true
+    cleanupOnFail: false            # keep the failed release inspectable
     remediation:
-      strategy: rollback
-      retries: 3
+      retries: 0                    # do NOT auto-rollback mid-migration
+      strategy: rollback            # (irrelevant with retries:0; restored in 3e)
   valuesFrom:
     - kind: ConfigMap
       name: flux-operator-helm-values
