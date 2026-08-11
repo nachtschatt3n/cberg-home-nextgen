@@ -164,6 +164,30 @@ The `library-tools` audit CronJob computes a per-item compliance record. Library
 
 Poster minimum: 600 px wide, aspect ratio ≈ 2:3. Fanart minimum: 1280 px wide, aspect ratio ≈ 16:9.
 
+### Phantom "Various Artists" artist (divergent `albumartist` tag)
+
+**Symptom:** the Music audit shows one item unmatched (no summary/thumb/art) as a
+metadata-less **"Various Artists"** artist, even though the album sits on disk
+under the correct artist folder with full sidecars (`folder.jpg`, `album.nfo`).
+
+**Cause:** Plex groups an album by its *set* of album-artist tags. A single track
+with a divergent `albumartist` (classically a guest-collab track tagged to the
+other artist) makes the album span two album-artists, so Plex files the whole
+album under a synthetic, art-less "Various Artists" artist.
+
+**Fix (two parts — correcting the tag alone is NOT enough):**
+1. Normalize the divergent track's `albumartist`/`TPE2` so all tracks share one
+   album-artist, and collapse any duplicate `<albumartist>` in `album.nfo`.
+   Mount-only edit — rewrite the ID3 tag frame only; leave the audio stream and
+   the track's *display* `artist` credit intact.
+2. **A rescan will NOT re-parent an already-created album — not a plain scan, not
+   a forced scan, not even after an mtime `touch`.** Use a Plex-native artist
+   merge (no file writes):
+   `PUT /library/metadata/<real-artist-ratingKey>/merge?ids=<phantom-ratingKey>`.
+   The album moves under the real artist and the phantom drops (GET → 404). With
+   the tags now consistent, a later rescan keeps it there; reversible via Plex
+   "Split Apart". (2026-08-10: cleared the last Music unmatched item this way → 100%.)
+
 ### Intake from JDownloader
 
 The `media-manager` sub-agent owns the loop. Summary:
