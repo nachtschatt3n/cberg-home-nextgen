@@ -18,10 +18,10 @@ spec:
     remediation:
       retries: 3
   upgrade:
-    cleanupOnFail: false            # keep the failed release inspectable
+    cleanupOnFail: true
     remediation:
-      retries: 0                    # do NOT auto-rollback mid-migration
-      strategy: rollback            # (irrelevant with retries:0; restored in 3e)
+      strategy: rollback
+      retries: 3
   valuesFrom:
     - kind: ConfigMap
       name: flux-operator-helm-values
