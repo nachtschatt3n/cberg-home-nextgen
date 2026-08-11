@@ -10,7 +10,7 @@ _... managed with Talos, Flux, and GitHub Actions_ 🤖
 
 [![Talos](https://img.shields.io/badge/Talos-v1.13.7-blue?style=for-the-badge&logo=talos&logoColor=white)](https://www.talos.dev)&nbsp;&nbsp;
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.36.0-blue?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io)&nbsp;&nbsp;
-[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.5.0-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
+[![Flux](https://img.shields.io/badge/GitOps-Flux%20v2.9.3-blue?style=for-the-badge&logo=flux&logoColor=white)](https://fluxcd.io)&nbsp;&nbsp;
 [![Renovate](https://img.shields.io/badge/Renovate-enabled-brightgreen?style=for-the-badge&logo=renovatebot&logoColor=white)](https://github.com/renovatebot/renovate)&nbsp;&nbsp;
 [![SOPS](https://img.shields.io/badge/SOPS-age-2C3E50?style=for-the-badge&logo=probot&logoColor=white)](https://github.com/getsops/sops)
 
@@ -40,7 +40,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 - **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
 - **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation).
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
-- **GitOps**: [Flux v2.5.0](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
+- **GitOps**: [Flux v2.9.3](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
 - **Certificate Management**: [cert-manager v1.21.0](https://github.com/cert-manager/cert-manager) with Let's Encrypt for automated TLS certificates
 
@@ -552,7 +552,7 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 **Managed Tools** (versions from [`.mise.toml`](.mise.toml)):
 - **Python 3.12** + **uv** - Automation scripts and fast package install
 - **kubectl 1.36.0** - Kubernetes CLI
-- **flux 2.8.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.5.0`)
+- **flux 2.9.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.9.3`)
 - **talosctl 1.13.0** + **talhelper 3.1.9** - Talos Linux management
 - **sops 3.13.0** + **age 1.3.1** - Secrets encryption
 - **helm 3.20.0** - Kubernetes package manager

@@ -15,7 +15,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 |-----------|-------|
 | Kubernetes | v1.36.0 |
 | Talos Linux | v1.13.7 |
-| Flux | v2.5.0 |
+| Flux | v2.9.3 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.19.4 |
 | Storage | Longhorn v1.11.2 |
@@ -105,8 +105,8 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 | 1 | Cilium | `cilium/cilium` | 1.19.4 | kube-system | (bootstrap seed aligned to running v1.19.4; Flux HelmRelease also pins 1.19.4) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.47.0 | kube-system |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.21.0 | cert-manager |
-| 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.14.0 | flux-system |
-| 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.14.0 | flux-system |
+| 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.57.0 | flux-system |
+| 5 | Flux Instance | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-instance` | 0.57.0 | flux-system |
 
 These are bootstrapped via Helmfile (not Flux) on initial cluster setup. After bootstrap, Flux
 manages all subsequent deployments including upgrades to these components.
@@ -128,7 +128,7 @@ manages all subsequent deployments including upgrades to these components.
 | Identity Provider | Authentik (forward auth for all ingress) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
 
-> **Note:** Flux distribution is pinned to v2.5.0 due to a CRD incompatibility between flux-operator v0.14.0 and Flux v2.6+. The `flux` CLI tool (mise) is v2.8.0 but the running cluster distribution is v2.5.0.
+> **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.57.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`.
 
 > **Note — bjw-s app-template frozen at 3.7.3:** The `bjw-s/app-template` chart is intentionally held at v3.7.3 cluster-wide (~40 apps). Upgrading to 4.x requires a schema-breaking values migration (`controllers`, `containers`, `persistence` key paths all changed). This will be done as a dedicated multi-week migration project. Do not bump individual apps to 4.x ahead of the bulk migration — mixed versions create inconsistent maintenance overhead.
 
@@ -197,7 +197,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
 | Talos Linux | v1.13.7 | Cluster OS |
-| Flux | v2.5.0 (pinned; see note above) | GitOps operator |
+| Flux | v2.9.3 | GitOps operator |
 | Cilium | v1.19.4 | CNI / network |
 | Longhorn | v1.11.2 | Distributed storage |
 | cert-manager | v1.21.0 | TLS management |
