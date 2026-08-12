@@ -123,10 +123,14 @@ async def _main():
     print(f"[{_ts()}] alert-bridge up: webhook http://0.0.0.0:{HTTP_PORT}/alertmanager "
           f"| ws ws://127.0.0.1:{WS_PORT}/", flush=True)
     # ping_interval keeps the connection warm through quiet stretches (control
-    # frames, not data — so they don't become Monitor events); the generous
-    # ping_timeout tolerates a slow client before declaring the socket dead.
+    # frames, not data — so they don't become Monitor events). ping_timeout=None:
+    # the Monitor WS client does NOT send pong replies, so any finite pong-timeout
+    # made the server tear the socket down every ~ping_interval+timeout (~80s → the
+    # observed recurring 1006 close). Disable the pong deadline so a non-ponging but
+    # otherwise-live client isn't killed; liveness still comes from TCP + the
+    # per-client send-failure discard in _fanout, and reconnect+REPLAY covers any gap.
     async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT,
-                                ping_interval=20, ping_timeout=60):
+                                ping_interval=20, ping_timeout=None):
         await asyncio.Future()
 
 
