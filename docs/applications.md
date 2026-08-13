@@ -10,7 +10,7 @@
 
 | Namespace | App Count |
 |-----------|-----------|
-| ai | 10 |
+| ai | 9 |
 | home-automation | 20 |
 | databases | 10 |
 | monitoring | 11 |
