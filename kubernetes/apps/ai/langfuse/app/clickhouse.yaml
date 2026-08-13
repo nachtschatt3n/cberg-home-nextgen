@@ -154,6 +154,51 @@ spec:
     port: 9000
     targetPort: 9000
 ---
+# Durable storage for ZooKeeper.
+#
+# WHY THIS EXISTS: until 2026-08-13 this Deployment declared NO volumes at all, so
+# ZooKeeper's /data lived in the container's writable layer. When the container
+# restarted (2026-08-08, exit 255) the ZK database was recreated empty, destroying
+# /clickhouse/tables/* — the replication metadata for every default.* Replicated*
+# MergeTree table. ClickHouse then held all of them is_readonly=1 (readable but NOT
+# writable), which surfaced as langfuse-web crashlooping on its ClickHouse schema
+# migration ("Code 999 ... No node, path /clickhouse/tables/<uuid>/1/log").
+# The Longhorn Volume CR lives in ./zookeeper-longhorn-volume.yaml and is applied
+# MANUALLY (targetNamespace would break it) — see CLAUDE.md / docs/sops/longhorn.md.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: langfuse-zookeeper-data
+spec:
+  capacity:
+    storage: 2Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    volumeHandle: langfuse-zookeeper-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: langfuse-zookeeper-data
+  namespace: ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: longhorn-static
+  volumeName: langfuse-zookeeper-data
+---
 # Simple ZooKeeper for ClickHouse clustering
 apiVersion: apps/v1
 kind: Deployment
@@ -162,6 +207,8 @@ metadata:
   namespace: ai
 spec:
   replicas: 1
+  strategy:
+    type: Recreate  # Required for RWO volumes - terminates old pod before starting new one
   selector:
     matchLabels:
       app: langfuse-zookeeper
@@ -184,6 +231,13 @@ spec:
           value: "1"
         - name: ZOO_SERVERS
           value: "server.1=0.0.0.0:2888:3888;2181"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+          subPath: data
+        - name: data
+          mountPath: /datalog
+          subPath: datalog
         resources:
           requests:
             memory: "256Mi"
@@ -191,6 +245,10 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "200m"
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: langfuse-zookeeper-data
 ---
 apiVersion: v1
 kind: Service

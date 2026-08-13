@@ -1,0 +1,18 @@
+---
+# NOTE: applied MANUALLY (kubectl apply -f), intentionally NOT in kustomization.yaml.
+# The langfuse Flux Kustomization sets `targetNamespace: ai`, which would override this
+# CR's `namespace: storage` and create a broken duplicate Longhorn ignores.
+# See CLAUDE.md "Longhorn Storage Management" and docs/sops/longhorn.md.
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: langfuse-zookeeper-data
+  namespace: storage
+spec:
+  size: "2147483648"  # 2Gi in bytes (2 * 1024^3)
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
