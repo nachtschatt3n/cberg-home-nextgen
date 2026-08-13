@@ -45,6 +45,20 @@ conflicts_with: []                  # no hard resource conflict, but see Interfe
 status: draft                       # still DRAFT — must be finalized (vetted→scheduled)
                                     # before it will execute; reslotted only (2026-08-10).
 window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
+
+cve_impact: |                         # added 2026-08-14 during CVE triage
+  This chart bump is the single highest-value CVE action open. It clears THREE
+  of the 25 open fixable-CRITICAL findings at once, all of them inside the
+  kube-prometheus-stack render:
+    - docker.io/grafana/grafana:12.3.1        9 fixable CRITICAL (-> 12.4.8 / 12.3.10)
+    - quay.io/kiwigrid/k8s-sidecar:2.5.0      2 fixable CRITICAL (-> 2.10.1)
+    - docker.io/curlimages/curl:8.9.1         2 fixable CRITICAL (-> 8.21.0)
+  = 13 criticals. The curl one is NOT the otel-ilm Job (that is already pinned
+  at 8.21.0 in git) — it is grafana's dashboard-download sidecar, which is why
+  it has no git pin of its own and only moves with this chart.
+  Target drift: plan says 88.1.2, upstream is now 88.3.0 — re-target before the
+  window. Verify the rendered grafana/sidecar/curl tags with `helm template`
+  before commit, and check the Deployment images afterwards (not just HR Ready).
                                     # not Sun. SOLO (alerting blind 2-5m) — 2026-08-15 sat
                                     # is taken by app-template-5.0 ⋂ envoy phase0/1, so this
                                     # gets the next clean solo Sat window.
