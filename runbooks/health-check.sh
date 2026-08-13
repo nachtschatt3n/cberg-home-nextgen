@@ -2630,7 +2630,7 @@ log_section "Section 24: Database Health"
         log_success "Databases healthy"
     fi
 
-    # Redis health (shared cache used by multiple apps including langfuse)
+    # Redis health (shared cache used by multiple apps)
     # Deployed as a Deployment (not StatefulSet) named "redis" in databases namespace
     echo ""
     echo "Redis:"
@@ -2640,7 +2640,7 @@ log_section "Section 24: Database Health"
     echo "Redis pods: $REDIS_READY/$REDIS_DESIRED ready"
     if [ "$REDIS_READY" != "$REDIS_DESIRED" ]; then
         log_warning "Redis not fully ready: $REDIS_READY/$REDIS_DESIRED"
-        add_major_issue "Redis pods not ready: $REDIS_READY/$REDIS_DESIRED (affects langfuse and other cache-dependent apps)"
+        add_major_issue "Redis pods not ready: $REDIS_READY/$REDIS_DESIRED (affects cache-dependent apps)"
         DB_ISSUES=$((DB_ISSUES + 1))
     fi
 
@@ -2692,7 +2692,7 @@ log_section "Section 24a: Network Infrastructure Services"
     echo ""
 
     # Ollama Mac Mini AI inference backend at 192.168.30.111
-    # All AI apps (open-webui, langfuse, openclaw) depend on this host.
+    # All AI apps (open-webui, openclaw, mcpo) depend on this host.
     # Use curl to Ollama API — more accurate than ping (checks actual service availability)
     echo "Ollama AI backend (Mac Mini at 192.168.30.111):"
     if curl -s --connect-timeout 2 http://192.168.30.111:11434/api/version -o /dev/null 2>/dev/null; then
@@ -2700,7 +2700,7 @@ log_section "Section 24a: Network Infrastructure Services"
         log_success "Ollama AI backend (192.168.30.111) reachable"
     else
         echo "Ollama host unreachable"
-        log_warning "Ollama AI backend (192.168.30.111) not reachable - AI features (open-webui, langfuse) may be broken"
+        log_warning "Ollama AI backend (192.168.30.111) not reachable - AI features (open-webui, openclaw) may be broken"
         add_major_issue "Ollama host 192.168.30.111 not reachable from cluster - AI inference unavailable"
         INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
     fi

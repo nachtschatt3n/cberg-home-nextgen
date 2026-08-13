@@ -15,7 +15,7 @@ The fix is a one-line `initContainer` per app that blocks the main container unt
 
 **Status as of 2026-05-01** — wait-for is wired in:
 - `office/affine`, `ai/paperclip` (seed implementations, bjw-s app-template)
-- `office/paperless-ngx`, `office/nextcloud`, `kube-system/authentik`, `office/penpot`, `ai/langfuse`, `office/sure` (added 2026-05-01)
+- `office/paperless-ngx`, `office/nextcloud`, `kube-system/authentik`, `office/penpot`, `office/sure` (added 2026-05-01)
 - `databases/superset` — chart already ships default `wait-for-postgres` init; no edit needed
 - `ai/openclaw`, `home-automation/n8n` — no external dep (SQLite-only); skipped
 
@@ -117,7 +117,6 @@ Apps that crashlooped after the 2026-04-30 upgrade — apply first:
 - `office/penpot` (penpot-postgresql, penpot-redis)
 - `databases/superset` (superset-postgresql, superset-redis)
 - `kube-system/authentik` (authentik-postgresql, authentik-redis)
-- `ai/langfuse` (langfuse-postgresql, langfuse-redis, langfuse-clickhouse, langfuse-minio)
 - `ai/paperclip` (paperclip-postgresql)
 - `ai/openclaw` (openclaw-postgresql)
 - `office/sure` (sure-pg, sure-redis)

@@ -17,7 +17,6 @@ touches:
     - "~76 internal Ingress -> HTTPRoute conversions (app-template route: block where possible)"
     - "9 remaining forward-auth apps -> SecurityPolicy pattern from phase1 pilot"
     - "nextcloud/whiteboard security headers -> ResponseHeaderModifier"
-    - "langfuse: HTTPRoute + app-side cookie env (NextAuth) + explicit OAuth test"
     - "wazuh/kibana: HTTPRoute + EG Backend tls.insecureSkipVerify"
     - "HARDENING MILESTONE: allow-snippet-annotations=false on both nginx HRs"
   shared: [auth]                    # forward-auth apps convert one at a time;
@@ -42,10 +41,12 @@ Ingress→HTTPRoute in the same commit (no double discovery). app-template apps
 (~60) use the chart's native `route:` block; foreign charts get standalone
 httproute.yaml. Forward-auth apps replicate the pilot-B pattern (HTTPRoute +
 outpost route + ReferenceGrant + SecurityPolicy + ak provider mode flip).
-langfuse keeps its Ingress until its OAuth loop is proven on the new path.
+(langfuse, which would have kept its Ingress until its OAuth loop was proven
+on the new path, was removed from the cluster on 2026-08-13 — one fewer
+forward-auth conversion and no cookie workaround needed.)
 
-**Session 2 exit criterion:** zero internal Ingresses left except langfuse
-(if still soaking) → set `allow-snippet-annotations: false` +
+**Session 2 exit criterion:** zero internal Ingresses left → set
+`allow-snippet-annotations: false` +
 `annotations-risk-level: High` on BOTH nginx HelmReleases (neutralizes the
 injection-CVE class per AR-055's compensating-control commitment).
 

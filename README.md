@@ -455,8 +455,8 @@ quarterly.
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md);
 this section is a category-level map.
 
-### 🤖 AI (`ai` — 10)
-ai-sre · anythingllm · hermes-agent · langfuse · librechat · mcpo ·
+### 🤖 AI (`ai` — 9)
+ai-sre · anythingllm · hermes-agent · librechat · mcpo ·
 next-ai-draw-io · open-webui · openclaw · paperclip
 
 > **External Ollama** on Mac Mini M4 Pro (`192.168.30.111:11434`, gemma 4 +

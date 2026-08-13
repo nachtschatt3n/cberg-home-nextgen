@@ -36,7 +36,6 @@
 |-----|---------|---------|---------------|
 | open-webui | Chat interface for AI models (LLM frontend) | Internal | AI |
 | librechat | Multi-provider AI chat interface (Ollama via Mac Mini) | External | AI |
-| langfuse | LLM observability, tracing, and analytics | Internal | AI |
 | openclaw | AI agent platform | Internal | AI |
 | anythingllm | Private RAG workspace with local AI | Internal | AI |
 | mcpo | Model Control Plane Orchestrator | Internal | AI |

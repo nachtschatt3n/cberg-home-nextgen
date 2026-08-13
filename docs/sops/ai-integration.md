@@ -23,7 +23,7 @@ port 11434, using Metal Performance Shaders (MPS) for GPU acceleration.
 
 Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
 
-In-cluster AI services (Open WebUI, Langfuse, hermes-agent, etc.) connect to this external endpoint.
+In-cluster AI services (Open WebUI, hermes-agent, etc.) connect to this external endpoint.
 
 **hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b` as its LLM backend. It is on the `internal` ingress class only; the Telegram bot token provides external reachability via the Telegram API, not via cluster ingress.
 
@@ -178,16 +178,6 @@ kubectl logs -n ai -l app.kubernetes.io/name=open-webui --tail=50
 
 **Configuration:** `kubernetes/apps/ai/open-webui/app/helmrelease.yaml`
 **Endpoint:** `http://192.168.30.111:11434`
-
-### Langfuse (`ai/langfuse`)
-
-LLM observability, tracing, and analytics.
-
-```bash
-kubectl get pods -n ai -l app.kubernetes.io/name=langfuse
-kubectl logs -n ai -l app.kubernetes.io/name=langfuse --tail=50
-# Access: https://langfuse.${SECRET_DOMAIN}
-```
 
 ### OpenClaw (`ai/openclaw`)
 
@@ -599,8 +589,6 @@ for required in ['gemma4:26b', 'nomic-embed-text:latest']:
 # Check all AI namespace pods are running
 kubectl get pods -n ai
 
-# Check Langfuse is receiving traces (via UI)
-# https://langfuse.${SECRET_DOMAIN}
 ```
 
 ---

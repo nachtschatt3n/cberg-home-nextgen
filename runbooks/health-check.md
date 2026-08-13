@@ -1728,7 +1728,7 @@ kubectl get pvc -n office
 
 **AdGuard Home** is the network-level DNS resolver and ad-blocker serving IoT and LAN clients at `192.168.55.5`. If it goes down, devices on the IoT and Trusted VLANs lose DNS resolution.
 
-**Ollama** runs on the Mac Mini M4 Pro at `192.168.30.111` (not in-cluster). All AI apps (open-webui, langfuse, openclaw, mcpo) use it as the LLM inference backend. A ping failure means AI features will silently break.
+**Ollama** runs on the Mac Mini M4 Pro at `192.168.30.111` (not in-cluster). All AI apps (open-webui, openclaw, mcpo) use it as the LLM inference backend. A ping failure means AI features will silently break.
 
 **Manual Investigation** (if checks fail):
 ```bash
@@ -1769,7 +1769,7 @@ done
 ES_PASS=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &>/dev/null &
 sleep 5
-for app in anythingllm open-webui langfuse; do
+for app in anythingllm open-webui openclaw; do
   count=$(curl -sk -u "elastic:$ES_PASS" "https://localhost:9200/logs-generic-default/_count" \
     -H "Content-Type: application/json" \
     -d "{\"query\":{\"bool\":{\"must\":[{\"term\":{\"resource.attributes.k8s.namespace.name\":\"ai\"}},{\"term\":{\"resource.attributes.k8s.container.name\":\"$app\"}}]}}}" \

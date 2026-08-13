@@ -313,7 +313,7 @@ kill $ES_PID 2>/dev/null
 
 **Objective**: Detect scanning, injection attempts, and unusual traffic against externally exposed services.
 
-Expected external services: `authentik`, `langfuse`, `nextcloud`, `paperless-ngx`, `uptime-kuma`, `music-assistant`
+Expected external services: `authentik`, `nextcloud`, `paperless-ngx`, `uptime-kuma`, `music-assistant`
 
 **Commands:**
 
@@ -498,7 +498,7 @@ if not found:
 
 **Objective**: Confirm only expected services are publicly reachable; flag surprises.
 
-Expected external ingresses: `authentik`, `langfuse`, `flux-webhook`, `music-assistant` (alexa endpoints), `uptime-kuma`, `nextcloud`, `paperless-ngx`
+Expected external ingresses: `authentik`, `flux-webhook`, `music-assistant` (alexa endpoints), `uptime-kuma`, `nextcloud`, `paperless-ngx`
 
 **Commands:**
 
@@ -549,7 +549,7 @@ kubectl get certificate -A \
 
 echo ""
 echo "=== TLS validity check for external hostnames ==="
-for host in auth nextcloud paperless langfuse; do
+for host in auth nextcloud paperless; do
   result=$(echo | openssl s_client \
     -connect "${host}.${DOMAIN}:443" \
     -servername "${host}.${DOMAIN}" \

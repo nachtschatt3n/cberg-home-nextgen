@@ -41,9 +41,10 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
 
 - The "13 snippets" decompose: 10× identical `auth-snippet` one-liner
   (vanishes with ext-auth), 2× the same five security headers
-  (→ ResponseHeaderModifier), **1 real item**: langfuse
-  `proxy_cookie_path` — no equivalent on EG *or* Traefik → app-side fix
-  (NextAuth cookie env) or a ~10-line Lua filter (EnvoyExtensionPolicy).
+  (→ ResponseHeaderModifier). The one genuinely hard item was langfuse's
+  `proxy_cookie_path` (no equivalent on EG *or* Traefik), but **langfuse was
+  removed from the cluster on 2026-08-13** — that item is gone, and with it
+  the need for an app-side NextAuth cookie fix or a Lua EnvoyExtensionPolicy.
 - ~60 apps are bjw-s app-template → `ingress:` → `route:` values swap
   (mechanical; route syntax survives the separate 3.7.3→5.x chart plan).
 - k8s-gateway supports watching HTTPRoute (per-app DNS flips automatically);
@@ -94,8 +95,8 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
 - **P2 — Internal bulk** (~76 objects, 2–3 sessions), batch-per-namespace,
   one commit each. Hardening milestone when last snippet consumer converts:
   `allow-snippet-annotations: false` on both nginx HRs (neutralizes the
-  injection-CVE class before migration ends). langfuse converts here w/
-  app-side cookie fix + explicit OAuth test.
+  injection-CVE class before migration ends). No snippet consumer needs an
+  app-side workaround any more (langfuse, the only one, is gone).
 - **P3 — External + tunnel** (~26 objects, 1–2 sessions): HTTPRoutes on
   envoy-external; per-hostname cloudflared canaries (incl. authentik itself
   + one auth'd app + nextcloud websockets), soak, then wildcard flip
@@ -107,8 +108,8 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
   new-deployment-blueprint → HTTPRoute pattern, homepage SOP).
 
 **Effort:** ~6–8 attended sessions ≈ 3–6 weeks at 4 windows/week.
-**Highest-risk moments:** P1 auth pilot, langfuse OAuth, wildcard flip —
-each individually revertible. Never co-schedule with cloudflared /
+**Highest-risk moments:** P1 auth pilot, wildcard flip — each individually
+revertible. (langfuse OAuth was the third; removed with the app 2026-08-13.) Never co-schedule with cloudflared /
 cert-manager / authentik plans.
 
 ## References

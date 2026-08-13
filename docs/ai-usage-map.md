@@ -57,7 +57,6 @@ Ports 11435 and 11436 are no longer in use.
 
 | App | Namespace | Role | Config Location |
 |-----|-----------|------|-----------------|
-| Langfuse | ai | LLM observability/tracing platform | `kubernetes/apps/ai/langfuse/app/langfuse.yaml` |
 | MCPO | ai | MCP protocol server orchestrator (GitHub, etc.) | `kubernetes/apps/ai/mcpo/app/helmrelease.yaml` |
 | AI-SRE | ai | MCP-based SRE tooling (cluster ops, not LLM inference) | `kubernetes/apps/ai/ai-sre/app/helmrelease.yaml` |
 

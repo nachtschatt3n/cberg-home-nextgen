@@ -125,7 +125,7 @@ Use the exact group names defined in the Homepage layout:
 
 | Group Name | For Apps Like |
 |-----------|--------------|
-| `AI` | Open WebUI, Langfuse, OpenClaw, AI-SRE |
+| `AI` | Open WebUI, OpenClaw, AI-SRE |
 | `Databases` | pgAdmin, phpMyAdmin, NocoDB, RedisInsight |
 | `System` | Authentik, Longhorn, Headlamp |
 | `Network Services` | AdGuard Home, Grafana (network context) |
