@@ -29,7 +29,20 @@ touches:
 depends_on: []
 conflicts_with: []                    # none pending. Co-tenant caution (openclaw + other ai-ns apps) is a
                                       # scheduling note, not shared data — see Interference.
-status: awaiting-go                 # thu-early:2026-08-13 unattended run: medium risk ⇒ deferred, go/no-go routed via home-operation (issue langfuse-3.225.1)
+status: blocked                     # thu-early:2026-08-13 operator-present GO, APPLIED (commit 0a864b23) then ROLLED BACK (git revert 0431e41c).
+                                    # FAILURE: langfuse-web 3.225.1 crashlooped applying ClickHouse migrations —
+                                    # `Code 999 Coordination::Exception: No node, path /clickhouse/tables/<uuid>/1/log`.
+                                    # ALL default.* ReplicatedMergeTree tables are is_readonly=1 (readable, NOT writable);
+                                    # system.zookeeper '/clickhouse/tables' is EMPTY → the CH replica metadata is missing
+                                    # from ZooKeeper. ZooKeeper pod did NOT restart (age 4d9h) → this is a PRE-EXISTING
+                                    # broken-replication state (likely lost in an earlier ZK/power event), NOT caused by
+                                    # the image bump. 3.111.0 tolerated it (no pending CH migration to write); 3.225.1's
+                                    # first `INSERT INTO schema_migrations` hit the readonly wall. Postgres migrations were
+                                    # a no-op ("No pending migrations to apply") and the CH INSERT failed BEFORE committing
+                                    # any schema change → plan §5 "revert image only" path used (no restore-from-backup needed).
+                                    # PREREQUISITE before re-attempt: repair CH replication (SYSTEM RESTORE REPLICA / re-attach
+                                    # the ZK metadata for default.* tables) so the tables are writable, THEN re-run this plan.
+                                    # Data intact throughout (observations=77, traces=11 before+after). CVE still LIVE (unremediated).
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
                                       # chosen over the 60-min weekday slots for migration headroom;
                                       # operator-present preferred (it mutates two data stores).
