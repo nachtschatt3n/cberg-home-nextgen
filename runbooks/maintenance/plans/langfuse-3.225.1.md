@@ -29,20 +29,36 @@ touches:
 depends_on: []
 conflicts_with: []                    # none pending. Co-tenant caution (openclaw + other ai-ns apps) is a
                                       # scheduling note, not shared data — see Interference.
-status: blocked                     # thu-early:2026-08-13 operator-present GO, APPLIED (commit 0a864b23) then ROLLED BACK (git revert 0431e41c).
-                                    # FAILURE: langfuse-web 3.225.1 crashlooped applying ClickHouse migrations —
-                                    # `Code 999 Coordination::Exception: No node, path /clickhouse/tables/<uuid>/1/log`.
-                                    # ALL default.* ReplicatedMergeTree tables are is_readonly=1 (readable, NOT writable);
-                                    # system.zookeeper '/clickhouse/tables' is EMPTY → the CH replica metadata is missing
-                                    # from ZooKeeper. ZooKeeper pod did NOT restart (age 4d9h) → this is a PRE-EXISTING
-                                    # broken-replication state (likely lost in an earlier ZK/power event), NOT caused by
-                                    # the image bump. 3.111.0 tolerated it (no pending CH migration to write); 3.225.1's
-                                    # first `INSERT INTO schema_migrations` hit the readonly wall. Postgres migrations were
-                                    # a no-op ("No pending migrations to apply") and the CH INSERT failed BEFORE committing
-                                    # any schema change → plan §5 "revert image only" path used (no restore-from-backup needed).
-                                    # PREREQUISITE before re-attempt: repair CH replication (SYSTEM RESTORE REPLICA / re-attach
-                                    # the ZK metadata for default.* tables) so the tables are writable, THEN re-run this plan.
-                                    # Data intact throughout (observations=77, traces=11 before+after). CVE still LIVE (unremediated).
+status: executed                    # thu-early:2026-08-13 operator-approved RETRY, SUCCESSFUL (commit 6a7fbacb).
+                                    # ATTEMPT 1 (0a864b23, reverted 0431e41c) failed: langfuse-web crashlooped on the
+                                    # ClickHouse migration — "Code 999 Coordination::Exception: No node, path
+                                    # /clickhouse/tables/<uuid>/1/log"; all 7 default.* Replicated*MergeTree tables were
+                                    # is_readonly=1.
+                                    # ROOT CAUSE (found on retry): the langfuse-zookeeper Deployment declared NO volumes,
+                                    # so ZK's /data sat in the container writable layer. Its 2026-08-08 container restart
+                                    # (exit 255) recreated the ZK db empty, destroying /clickhouse/tables/*. NOT caused by
+                                    # the image bump; 3.111.0 tolerated it because it had no pending CH migration to write.
+                                    # FIX: commit 45d47692 gave ZK a 2Gi longhorn-static volume (langfuse-zookeeper-data,
+                                    # mounted /data + /datalog, strategy Recreate; Longhorn Volume CR applied manually as
+                                    # targetNamespace: ai would break it), then SYSTEM RESTART REPLICAS + SYSTEM RESTORE
+                                    # REPLICA on all 7 tables -> is_readonly=0, verified with an end-to-end replicated
+                                    # INSERT probe (create/insert/select/drop).
+                                    # RESULT: CH 25.3.14.14, langfuse 3.225.1 web+worker, 0 restarts. CH migrations 27->37
+                                    # applied clean (schema_migrations 52 -> 74 rows, final dirty=0). ZERO DATA LOSS:
+                                    # traces=11, observations=77, scores=0, blob_storage_file_log=110,
+                                    # project_environments=1, dataset_run_items_rmt=0 — all identical to baseline; 0
+                                    # detached parts in default.*. Postgres: 424/424 prisma migrations applied, 0
+                                    # unfinished/rolled-back, projects=1 users=1 api_keys=2. NOTE: the Postgres migrations
+                                    # actually landed at 05:34Z during ATTEMPT 1 (the earlier "no-op" note was wrong) and
+                                    # are forward-only — the revert left PG ahead of the 3.111.0 binary, which ran fine.
+                                    # health = 200 {"status":"OK","version":"3.225.1"} in-cluster AND via external ingress.
+                                    # CVE OUTCOME (partial): langfuse/langfuse:3.225.1 -> 0 fixable CRITICAL (16 cleared).
+                                    # clickhouse 25.3-alpine -> still 2 fixable CRITICAL, but DIFFERENT ones: 24.1-alpine's
+                                    # pair (CVE-2024-24790, CVE-2025-68121, both Go stdlib v1.19.10) IS cleared; the image
+                                    # inherits CVE-2026-31789 (libcrypto3/libssl3 3.5.5 -> needs 3.5.6). The plan's premise
+                                    # that the 2026-02-02 rebuild cleared OpenSSL/musl was wrong. NO in-band tag fixes it:
+                                    # 25.3-alpine is the newest rebuild <= the >25.5.2 instability band (next rebuilds are
+                                    # 25.8.x, 2026-08-05, above the band). Residual CH OpenSSL CVE = OPERATOR DECISION.
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
                                       # chosen over the 60-min weekday slots for migration headroom;
                                       # operator-present preferred (it mutates two data stores).
