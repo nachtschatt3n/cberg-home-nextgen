@@ -22,7 +22,7 @@ touches:
                                   # instance, NOT langfuse-redis, NOT any bitnami redis.
 depends_on: []
 conflicts_with: []
-status: scheduled                   # scheduled 2026-08-06 for thu-early window (operator go/no-go at window)
+status: awaiting-go                 # thu-early:2026-08-13 unattended run: medium risk ⇒ deferred, go/no-go routed via home-operation (issue open-webui-redis-8.10.0); serialize after langfuse (shared ai ns)
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
 auto_execute: false
 sops_refs:

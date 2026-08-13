@@ -29,7 +29,7 @@ touches:
 depends_on: []
 conflicts_with: []                    # none pending. Co-tenant caution (openclaw + other ai-ns apps) is a
                                       # scheduling note, not shared data — see Interference.
-status: scheduled                   # scheduled 2026-08-06 for thu-early window (operator go/no-go at window)
+status: awaiting-go                 # thu-early:2026-08-13 unattended run: medium risk ⇒ deferred, go/no-go routed via home-operation (issue langfuse-3.225.1)
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
                                       # chosen over the 60-min weekday slots for migration headroom;
                                       # operator-present preferred (it mutates two data stores).
