@@ -31,7 +31,7 @@ touches:
 depends_on: []
 conflicts_with: []                  # don't co-schedule with anything that itself relies on
                                     # metrics.k8s.io being continuously up (none pending)
-status: awaiting-go                 # thu-early:2026-08-13 unattended run: auto_execute:false ⇒ not fast-tracked; deferred, go/no-go routed via home-operation (issue metrics-server-v0.9.0)
+status: executed                    # thu-early:2026-08-13 operator-present GO (live "run it now"); applied+verified 2026-08-13, commit 6d4c7e0a. pod v0.9.0 1/1 0-restarts, metrics.k8s.io Available, kubectl top OK, 0 firing alerts.
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
                                     # (risk-weight low=1, fits any no-reboot window trivially;
                                     # CVE-urgency argues for the nearest slot). Window agent assigns.
