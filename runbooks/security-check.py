@@ -1113,13 +1113,29 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                     f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)")
                     cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
                     n_latest += 1
+                # newer is True (a newer tag really exists) or None (lookup
+                # undeterminable). Both surface — that fail-safe is correct — but
+                # they must NOT read the same. Saying "newer upstream tag
+                # available, bump the image" on a None asserts something we never
+                # measured, and sends whoever acts on it hunting for a tag that
+                # may not exist (2026-08-14: immich v3.1.0-openvino reported as
+                # "bump available" while v3.1.0 was already the latest release
+                # and the pinned postgres digest was unchanged upstream).
                 elif r["crit_fix"] > 0:
-                    f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — newer upstream tag available, bump the image — {fix_s}")
-                    cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (bump available) — {fix_s}")
+                    if newer is None:
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — could NOT determine whether a newer upstream tag exists (surfaced by fail-safe); verify upstream before planning a bump — {fix_s}")
+                        cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (newer-tag lookup UNDETERMINED) — {fix_s}")
+                    else:
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — newer upstream tag available, bump the image — {fix_s}")
+                        cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (bump available) — {fix_s}")
                     n_actionable += 1
                 else:
-                    f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}")
-                    cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (bump available) — {fix_s}")
+                    if newer is None:
+                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer-tag lookup undetermined; verify upstream — {fix_s}")
+                        cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (newer-tag lookup UNDETERMINED) — {fix_s}")
+                    else:
+                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}")
+                        cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (bump available) — {fix_s}")
                     n_actionable += 1
             # NO UPSTREAM FIX at all — nothing to patch until upstream ships;
             # accepted per AR-029. Tagged ACCEPTED directly (precise).
