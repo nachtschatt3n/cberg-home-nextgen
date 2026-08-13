@@ -177,7 +177,8 @@ class Findings:
 
 def find_helmrelease_apps() -> dict[str, list[str]]:
     """
-    Scan kubernetes/apps/ for all app directories containing a HelmRelease.
+    Scan kubernetes/apps/ for all app directories: those containing a
+    HelmRelease, and raw-manifest apps identified by their ks.yaml.
     Handles both helmrelease.yaml and helm-release.yaml filenames.
     Handles network/ namespace with external/ and internal/ subdirs.
     Skips directories starting with _.
@@ -221,6 +222,16 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
                     elif any((sub / name).exists() for name in HR_NAMES):
                         if sub.name not in result[ns]:
                             result[ns].append(sub.name)
+
+            # A raw-manifest app is still an app. The repo's canonical app unit
+            # is the Flux Kustomization (ks.yaml), not the HelmRelease — counting
+            # only HelmReleases left raw-manifest apps out of the DENOMINATOR, so
+            # section 3 could never flag them as undocumented no matter what
+            # docs/applications.md said. That hid sweep-history (named in
+            # CLAUDE.md as the policy DB), sweep-dashboard and crash-ghost-reaper
+            # (which has its own SOP) behind an "Undocumented apps: 0" result.
+            if not has_hr:
+                has_hr = (app_dir / "ks.yaml").exists()
 
             if has_hr:
                 result[ns].append(app_dir.name)
@@ -482,7 +493,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     # Get all deployed apps from cluster
     cluster_apps = find_helmrelease_apps()
     total_cluster = sum(len(apps) for apps in cluster_apps.values())
-    cprint(C.CYAN, f"  Total HelmRelease apps found: {total_cluster}")
+    cprint(C.CYAN, f"  Total apps found (HelmRelease + raw-manifest): {total_cluster}")
     lines.append(f"Apps in cluster: **{total_cluster}**\n")
 
     # Infrastructure apps that are intentionally not listed in applications.md
@@ -506,10 +517,17 @@ def s3_application_docs() -> tuple[str, Findings, str]:
             app_nohyphen = app_lower.replace("-", "")
             # Check various forms: exact, without hyphens, name part only
             app_words = app_lower.replace("-", " ")
+            # NOTE: a fuzzy "any word longer than 4 chars matches" clause used to
+            # live here. It made this check a false-negative machine —
+            # `sweep-history` "passed" because the word "history" appears
+            # somewhere in the doc, `prometheus-pushgateway` because
+            # "prometheus" does, `crash-ghost-reaper` because "crash" does.
+            # Four genuinely undocumented apps were hidden behind it while the
+            # section reported "Undocumented apps: 0". Match on the real name
+            # only: exact, or with hyphens/spaces stripped.
             found = (
                 app_lower in content.lower()
                 or app_nohyphen in content.lower().replace("-", "").replace(" ", "")
-                or any(word in content.lower() for word in app_words.split() if len(word) > 4)
             )
             if not found:
                 undocumented.append(f"{ns}/{app}")
