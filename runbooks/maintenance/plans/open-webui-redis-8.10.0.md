@@ -22,7 +22,30 @@ touches:
                                   # instance, NOT langfuse-redis, NOT any bitnami redis.
 depends_on: []
 conflicts_with: []
-status: awaiting-go                 # thu-early:2026-08-13 unattended run: medium risk ⇒ deferred, go/no-go routed via home-operation (issue open-webui-redis-8.10.0); serialize after langfuse (shared ai ns)
+status: executed                    # thu-early:2026-08-13 operator-approved, SUCCESSFUL (commit 03541f0f).
+                                    # Serialized AFTER langfuse-3.225.1 as required (shared ai ns).
+                                    # Pinned websocket.redis.image.tag; verified with `helm template` against chart
+                                    # 16.0.0 BEFORE commit that it renders open-webui-redis -> redis:8.10.0-alpine
+                                    # (the values path is a chart default, so a wrong path would silently no-op).
+                                    # GOTCHA: the first `flux reconcile helmrelease` ran before the Kustomization had
+                                    # synced the new HR spec, so Helm upgraded with the OLD values and the deployment
+                                    # still showed 7.4.2 while the HR reported Ready. A second reconcile (after the HR
+                                    # spec carried the pin) applied it. Check the DEPLOYMENT image, not just HR Ready.
+                                    # RESULT: redis 8.10.0 standalone, PING=PONG, SET/GET probe OK, open-webui
+                                    # reconnected. CVEs: 7.4.2-alpine3.21 had 6 fixable CRITICAL
+                                    # (CVE-2023-24538/24540, CVE-2024-24790, CVE-2025-68121, CVE-2026-31789)
+                                    # -> 8.10.0-alpine has 0. Ingress /health = 200 {"status":true}.
+                                    # SIDE EFFECT (handled): the redis pod swap killed open-webui's asyncio task
+                                    # periodic_session_pool_cleanup ("Connection closed by server", Task finished ->
+                                    # does NOT self-restart; it had been ticking every 2 min until 06:46:51). The
+                                    # app pod itself did NOT roll on the Helm upgrade, as the plan predicted, so the
+                                    # dead task would have persisted silently. Fixed with a rollout restart of
+                                    # statefulset/open-webui (safe: durable data on open-webui-20g PVC); task
+                                    # confirmed ticking again at 06:53:58. FUTURE RUNS: expect this and plan the
+                                    # app restart as a step, not an afterthought.
+                                    # PRE-EXISTING (not caused by this upgrade, left alone): that cleanup task logs
+                                    # "Unable to renew session cleanup lock. Retrying cleanup ownership." every 2 min
+                                    # on BOTH redis 7.4.2 and 8.10.0. Worth a separate look, out of scope here.
 window: "thu-early:2026-08-13"       # CVE remediation batch (no-reboot); window-agent sequences w/ the others
 auto_execute: false
 sops_refs:
