@@ -3559,10 +3559,18 @@ except:
     #   - "failed to index document" / document_parsing_exception  (whole doc lost)
     #   - "validation errors"  (metric points dropped: cumulative histograms,
     #     Empty-ValueType) — see docs/sops/monitoring.md "ES rejected documents"
+    # NOTE: `grep -c ... || echo "0"` is WRONG here. grep -c already prints 0 and
+    # then exits 1 on no-match, so the fallback APPENDS a second zero, yielding
+    # "0\n0" — and the `-gt` tests below then abort with "integer expression
+    # expected". Net effect: whenever the count was genuinely zero, this
+    # silent-telemetry-loss detector could not evaluate at all. Use `|| true` to
+    # swallow grep's exit status without adding output, and strip any newline.
     EDOT_REJECTS=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
-        grep -cE "document_parsing_exception|failed to index document" || echo "0")
+        grep -cE "document_parsing_exception|failed to index document" || true)
+    EDOT_REJECTS=$(printf '%s' "${EDOT_REJECTS:-0}" | tr -d '\n')
     EDOT_VALIDATION=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
-        grep -c "validation errors" || echo "0")
+        grep -c "validation errors" || true)
+    EDOT_VALIDATION=$(printf '%s' "${EDOT_VALIDATION:-0}" | tr -d '\n')
     echo "edot-collector ES rejections last 1h: parse=${EDOT_REJECTS} validation=${EDOT_VALIDATION}"
     if [ "${EDOT_REJECTS:-0}" -gt 10 ]; then
         log_warning "edot-collector: ES rejecting documents (${EDOT_REJECTS}/h document_parsing) — telemetry silently lost"

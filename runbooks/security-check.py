@@ -756,6 +756,36 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # be a hardcoded literal secret. e.g. sed -E 's/api_key = \"[a-f0-9]+\"/.../'.
         "| grep -vE '\\bsed\\b.*\\[[^]]+\\][+*]' "
     )
+    # Cross-line variable-reference filter.
+    #
+    # A JS/TS object literal like `{ botToken: jerryTok }` matches the credential
+    # regex, but the RHS is a VARIABLE — its value came from `process.env` on a
+    # line the grep pipeline never sees, because every filter above is
+    # single-line. That produced the 2026-08-13 `jerryTok` false positive.
+    #
+    # Rather than guess from the line alone (which risks hiding a real secret in
+    # YAML, where an unquoted scalar IS the literal), ask a question a hardcoded
+    # secret can never answer yes to: is this identifier ever DECLARED as a
+    # variable anywhere in history? If yes, the hit is a reference. This cannot
+    # create a false negative — a literal has no declaration.
+    #
+    # The extra history pass only runs when there are surviving hits.
+    _ident_rhs = re.compile(
+        r"(?:token|password|secret|api.?key)\s*[:=]\s*([A-Za-z_][A-Za-z0-9_]{2,})\s*[,}\)]?\s*$",
+        re.I,
+    )
+    _candidates = {m.group(1) for h in cred_hits if (m := _ident_rhs.search(h))}
+    if _candidates:
+        declared = set(re.findall(
+            r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
+            run_cmd("git log --all -p --no-color", timeout=180)[1] or "",
+        ))
+        if declared:
+            cred_hits = [
+                h for h in cred_hits
+                if not ((m := _ident_rhs.search(h)) and m.group(1) in declared)
+            ]
+
     # Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
     if cred_hits:
@@ -909,7 +939,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # -v2: cache schema changed to split fixable vs no-upstream-fix counts
     # (2026-07-30). A v1 cache has no crit_fix/crit_nofix keys, so use a new
     # file rather than crash the new emission on stale entries.
-    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v2.json"
+    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v3.json"
     cache_age_sec = 86400  # 24h
 
     cached: dict | None = None
@@ -930,7 +960,25 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         "'{range .items[*].spec.containers[*]}{.image}{\"\\n\"}{end}"
         "{range .items[*].spec.initContainers[*]}{.image}{\"\\n\"}{end}'",
     )
-    distinct_images = sorted({i.strip().strip("'") for i in images_raw.splitlines() if i.strip()})
+    def _canon_image(img: str) -> str:
+        """Canonical name for dedup.
+
+        Kubernetes reports each image exactly as its manifest spells it, so the
+        SAME Docker Hub image appears both bare (`postgres:17.10-bookworm`) and
+        fully qualified (`docker.io/library/postgres:17.10-bookworm`) depending
+        on the app. Deduping on the raw string scanned it twice and, worse,
+        reported it as two separate findings — inflating the critical count and
+        making the same CVE look like two pieces of work.
+        """
+        for prefix in ("index.docker.io/library/", "docker.io/library/",
+                       "index.docker.io/", "docker.io/"):
+            if img.startswith(prefix):
+                return img[len(prefix):]
+        return img
+
+    distinct_images = sorted({
+        _canon_image(i.strip().strip("'")) for i in images_raw.splitlines() if i.strip()
+    })
 
     findings_per_image: dict[str, dict] = {}
     scan_failed: list[str] = []
