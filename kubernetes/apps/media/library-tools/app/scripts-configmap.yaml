@@ -44,6 +44,10 @@ data:
     # `(1080)` / `(720)` / `(2160)` — resolution leaked into the folder name —
     # which silently breaks year-restricted TMDb queries downstream.
     YEAR_RE     = re.compile(r"\((19[0-9]{2}|20[0-9]{2})\)")
+    # SOP layout is `Show Name - SXXEYY - Episode Title`. Release-scene names
+    # like `Show.S01E01.BDRip.x264-GROUP` carry the SxxExx token but not the
+    # " - SxxExx - " separator form, so require the spaced-hyphen shape.
+    EPISODE_NAME_RE = re.compile(r" - S[0-9]{2}E[0-9]{2}\b", re.I)
     YT_ID_RE    = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
 
     # Redaction guard: ban the printing of arbitrary filename text.
@@ -427,7 +431,12 @@ data:
             "nested":               len(nested),
             "flat":                 len(flat),
             "compliant":            compliant,
-            "layout_pct":           round(100 * len(nested) / total, 1),
+            # nested/total answers "is it in a folder", NOT "is the layout
+            # compliant". A folder whose name lacks a valid (YYYY) fails the
+            # per-record `layout` flag but still counted as 100% here, so
+            # malformed names were invisible behind a green layout_pct.
+            "layout_pct":           round(100 * sum(r["layout"] for r in nested) / total, 1),
+            "nested_pct":           round(100 * len(nested) / total, 1),
             "nfo_pct":              round(100 * sum(r["nfo"] for r in nested) / max(len(nested), 1), 1),
             "poster_pct":           round(100 * sum(r["poster"] for r in nested) / max(len(nested), 1), 1),
             "fanart_pct":           round(100 * sum(r["fanart"] for r in nested) / max(len(nested), 1), 1),
@@ -444,6 +453,7 @@ data:
         # Filter `_*` housekeeping folders (same reason as audit_movies)
         shows = [s for s in sorted(root.iterdir()) if s.is_dir() and not s.name.startswith('_')]
         episodes_total, episodes_in_season = 0, 0
+        episodes_with_nfo, episodes_with_thumb, episodes_named_ok = 0, 0, 0
         series_compliant = 0
         for show in shows:
             tvshow_nfo = show / "tvshow.nfo"
@@ -454,12 +464,23 @@ data:
                          and fanart_w >= FANART_MIN_WIDTH)
             if series_ok:
                 series_compliant += 1
-            # Walk episodes
+            # Walk episodes.
+            # NOTE: this used to count ONLY episodes_total/episodes_in_season, so
+            # the SOP's episode-level NFO floor (>=80%) and the `Show - SXXEYY`
+            # naming rule were never computed at all — the section reported PASS
+            # while actual NFO coverage sat at 2.5%. A threshold that is never
+            # measured is not a passing threshold.
             for ep in show.rglob("*"):
                 if ep.is_file() and ep.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
                     episodes_total += 1
                     if ep.parent.name.lower().startswith("season"):
                         episodes_in_season += 1
+                    if ep.with_suffix(".nfo").exists():
+                        episodes_with_nfo += 1
+                    if (ep.parent / f"{ep.stem}-thumb.jpg").exists():
+                        episodes_with_thumb += 1
+                    if EPISODE_NAME_RE.search(ep.stem):
+                        episodes_named_ok += 1
         return {
             "section":              "tv",
             "shows":                len(shows),
@@ -467,6 +488,11 @@ data:
             "episodes_total":       episodes_total,
             "episodes_in_season":   episodes_in_season,
             "season_layout_pct":    round(100 * episodes_in_season / max(episodes_total, 1), 1),
+            "episodes_with_nfo":    episodes_with_nfo,
+            "episode_nfo_pct":      round(100 * episodes_with_nfo / max(episodes_total, 1), 1),
+            "episode_thumb_pct":    round(100 * episodes_with_thumb / max(episodes_total, 1), 1),
+            "episodes_named_ok":    episodes_named_ok,
+            "episode_naming_pct":   round(100 * episodes_named_ok / max(episodes_total, 1), 1),
             "series_compliance_pct": round(100 * series_compliant / max(len(shows), 1), 1),
         }
 
