@@ -832,6 +832,23 @@ def s3_git_history() -> tuple[str, Findings, str]:
 _VER_CHECKER = None  # lazy-loaded VersionChecker (registry tag lookups)
 
 
+# Head-of-line floating tags: a bare MAJOR (optionally `v`/`pg` prefixed, with
+# optional distro/variant suffixes) or a bare codename. Conservative BY DESIGN —
+# a false positive here would classify a genuinely-bumpable image as accepted and
+# hide a real CVE, so major.minor and anything more specific must NOT match
+# (17.10-bookworm, 18.4, 8.19.15, 0.5.1-alpha, v3.1.0-openvino all stay pinned).
+_FLOATING_LINE_TAG_RE = re.compile(
+    r'^(?:(?:v|pg)?\d{1,3}'
+    r'|lts|bookworm|bullseye|trixie|alpine|jammy|noble|focal)'
+    r'(?:-(?:alpine|slim|bookworm|bullseye|trixie|jammy|noble|focal|lts|openvino|cuda|debian\d*))*$',
+    re.IGNORECASE,
+)
+
+
+def _is_floating_line_tag(tag: str) -> bool:
+    return bool(tag) and bool(_FLOATING_LINE_TAG_RE.match(str(tag)))
+
+
 def _newer_upstream_tag_exists(image_ref: str):
     """Is there a newer upstream image TAG than the one we run?
 
@@ -863,6 +880,21 @@ def _newer_upstream_tag_exists(image_ref: str):
             return None
         if vc.is_rolling_tag(tag):
             return False  # latest/main/sha — as current as the tag allows
+        if _is_floating_line_tag(tag):
+            # Head-of-line tag (postgres:18, postgres:17-alpine, node:lts-alpine,
+            # pgvector:pg16, node:22-bookworm). Upstream continuously rebuilds
+            # these, and Trivy scans the CURRENT registry content — so a fixable
+            # CVE here means upstream has NOT rebuilt yet. There is no newer tag
+            # to move to; the only "newer" thing is the next MAJOR line, which is
+            # a deliberate upgrade decision, not a CVE remediation. Same
+            # remediation shape as a rolling tag: needs an upstream rebuild.
+            #
+            # Deliberately NOT added to is_rolling_tag(): that would make
+            # check-all-versions skip these images as "no semver to compare",
+            # losing the legitimate "postgres 17 -> 18 available" signal. The two
+            # questions differ — "can I semver-compare this?" vs "can a newer tag
+            # fix this CVE?".
+            return False
         latest = vc.get_latest_image_tag(repo, tag)
         if not latest:
             return None  # can't determine → surface (security-safe)
