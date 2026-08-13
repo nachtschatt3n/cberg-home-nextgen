@@ -64,7 +64,7 @@ spec:
       # (Multi-Attach error). Recreate tears the old pod down first.
       strategy:
         type: Recreate
-      # -- This section can be used to pass required environment variables to your pipelines (e.g. Langfuse hostname)
+      # -- This section can be used to pass required environment variables to your pipelines
       extraEnvVars:
       - name: RAG_EMBEDDING_MODEL_AUTO_UPDATE
         value: "False"

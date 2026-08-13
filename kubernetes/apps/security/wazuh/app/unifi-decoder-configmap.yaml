@@ -622,7 +622,7 @@ data:
 
       <!-- Suppress Falco "Read sensitive file untrusted" when triggered by
            PostgreSQL's pg_isready liveness/readiness probe. Every postgres-
-           backed app (sure-pg, langfuse-pg, traccar-postgres, affine-pg,
+           backed app (sure-pg, traccar-postgres, affine-pg,
            authentik-pg, etc.) runs pg_isready every few seconds; the
            binary is wrapped by a perl shell helper that reads /etc/shadow
            as part of its uid/gid lookup. Evidence: 11,001 of 11,033 (99.7%)
