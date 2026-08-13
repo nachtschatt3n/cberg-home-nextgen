@@ -933,8 +933,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     distinct_images = sorted({i.strip().strip("'") for i in images_raw.splitlines() if i.strip()})
 
     findings_per_image: dict[str, dict] = {}
+    scan_failed: list[str] = []
     if cached is not None:
         findings_per_image = cached.get("results", {})
+        scan_failed = cached.get("failed", [])
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -949,18 +951,24 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         cprint(C.CYAN, f"  Scanning {len(scan_targets)} distinct images "
                        "with trivy (parallel, cached 24h)...")
 
-        def _scan_one(img: str) -> tuple[str, dict | None]:
+        def _scan_one(img: str, trivy_to: str = "30s", proc_to: int = 45) -> tuple[str, dict | None, bool]:
+            # Returns (img, result_or_None, scan_ok). scan_ok=False means the
+            # trivy invocation FAILED (timeout / non-zero rc / empty / unparsable)
+            # — which is NOT the same as "scanned clean". Conflating the two lets
+            # a transient scan failure silently drop a still-running vulnerable
+            # image, after which the orchestrator's auto-close falsely resolves
+            # its open CVE findings (2026-08-12 false-negative fix).
             rc, stdout, _stderr = run_cmd(
                 f"trivy image --severity CRITICAL,HIGH --exit-code 0 "
-                f"--quiet --format json --timeout 30s {img}",
-                timeout=45,
+                f"--quiet --format json --timeout {trivy_to} {img}",
+                timeout=proc_to,
             )
             if rc != 0 or not stdout:
-                return img, None
+                return img, None, False
             try:
                 report = json.loads(stdout)
             except Exception:
-                return img, None
+                return img, None, False
             # Split by fix-availability. A CVE with a non-empty FixedVersion has
             # an upstream fix → actionable (update the image). One with no
             # FixedVersion (Status affected/will_not_fix/fix_deferred/end_of_life)
@@ -988,19 +996,40 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             if cf or cn or hf or hn:
                 return img, {"crit_fix": cf, "crit_nofix": cn,
                              "high_fix": hf, "high_nofix": hn,
-                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5]}
-            return img, None
+                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5]}, True
+            return img, None, True
 
         # 6 parallel scans is enough to overlap registry latency without
         # hammering the local Trivy DB lock.
+        failed_scans: list[str] = []
         with ThreadPoolExecutor(max_workers=6) as ex:
             futures = {ex.submit(_scan_one, img): img for img in scan_targets}
             for fut in as_completed(futures):
-                img, result = fut.result()
+                img, result, ok = fut.result()
                 if result:
                     findings_per_image[img] = result
+                elif not ok:
+                    failed_scans.append(img)
+
+        # Retry images whose parallel scan FAILED — almost always a 30s-timeout
+        # under 6-way load on a larger image, not a real absence of CVEs. Serial
+        # retry with a generous timeout recovers them; a silently-dropped failure
+        # would otherwise let the orchestrator auto-close a still-running image's
+        # real open criticals (2026-08-12 fix; e.g. redis-alpine, spegel,
+        # k8s-sidecar, harness-home-server, nextcloud-mcp-server, postgres:15/17).
+        if failed_scans:
+            cprint(C.YELLOW, f"  · retrying {len(failed_scans)} image(s) that failed the parallel scan (90s timeout)...")
+            still = []
+            for img in failed_scans:
+                _img, result, ok = _scan_one(img, trivy_to="90s", proc_to=120)
+                if result:
+                    findings_per_image[img] = result
+                elif not ok:
+                    still.append(img)
+            failed_scans = still
+        scan_failed = failed_scans
         try:
-            trivy_cache.write_text(json.dumps({"results": findings_per_image}))
+            trivy_cache.write_text(json.dumps({"results": findings_per_image, "failed": scan_failed}))
         except Exception:
             pass
 
@@ -1054,6 +1083,17 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                        f"{n_accepted} no-upstream-fix (accepted)")
     else:
         cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL/HIGH CVEs in {len(distinct_images)} running images")
+
+    # Coverage gap: images that could not be scanned even after retry. Surface
+    # this as a WARNING so a silent false-negative can't hide — an unscannable
+    # running image has UNKNOWN CVE status, not a clean bill, and must not be
+    # mistaken for "no findings" (which the orchestrator would auto-close).
+    # Stable title (no varying count/list) keeps the finding fingerprint steady.
+    scan_failed = [i for i in scan_failed if i in distinct_images]
+    if scan_failed:
+        f.add(WARNING, "Trivy scan coverage gap: one or more running images unscannable after retry — CVE status UNKNOWN (may hide fixable criticals); investigate trivy timeouts/registry access")
+        cprint(C.YELLOW, f"  🟡 {len(scan_failed)} running image(s) unscannable after retry: "
+                          + ", ".join(sorted(i.split('@')[0] for i in scan_failed)[:8]))
 
     # AR-029 ("HIGH CVEs") is now applied PRECISELY above by fix-availability
     # (no-upstream-fix → accepted, fixable → surfaced regardless of severity),
