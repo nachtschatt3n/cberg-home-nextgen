@@ -157,7 +157,13 @@ spec:
           revision: 1
           datasource: Prometheus
         cert-manager:
-          url: https://raw.githubusercontent.com/monitoring-mixins/website/master/assets/cert-manager/dashboards/cert-manager.json
+          # Upstream RENAMED this file: .../dashboards/cert-manager.json now 404s
+          # and the dashboard is cert-manager-overview.json. The old URL made the
+          # init container write a 0-byte file, so Grafana logged
+          # `failed to load dashboard ... error=EOF` on every start while the
+          # dashboard silently did not exist. Verified 2026-08-14: 200, 47 KB,
+          # valid JSON, title "Cert Manager / Overview", 10 panels.
+          url: https://raw.githubusercontent.com/monitoring-mixins/website/master/assets/cert-manager/dashboards/cert-manager-overview.json
           datasource: Prometheus
         node-exporter-full:
           gnetId: 1860 # https://grafana.com/grafana/dashboards/1860?tab=revisions
