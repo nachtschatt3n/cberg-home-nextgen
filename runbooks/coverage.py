@@ -53,9 +53,20 @@ HELD = {
 }
 # Self-built images we own — remediation is a rebuild in the source repo, not a
 # cluster tag bump. (Matched against the component name.)
+# NOTE the matching key: this is compared against the COMPONENT name (the app /
+# HelmRelease name), NOT the image name. `harness-home-frontend` was listed here
+# and never matched, because that app's component is `ha-ai-harness` — so a
+# self-built image with no upstream was being routed to the AUTO lane, where the
+# auto-updater would try to "bump" it to a tag that can never exist. `ai-sre`
+# only worked by coincidence: its app and image names happen to be identical.
+# Verified 2026-08-15 against the running inventory of ghcr.io/nachtschatt3n/*.
 SELF_BUILT = {
-    "ai-sre", "harness-home-frontend", "sure", "sweep-dashboard", "arag-web",
+    "ai-sre", "ha-ai-harness", "sure", "sweep-dashboard", "arag-web",
     "opencode-project_name", "opencode-andreamosteller", "paperclip",
+    # Added 2026-08-15 — all confirmed self-built (ghcr.io/nachtschatt3n/*) and
+    # running, but absent from this set, so each had the same mis-routing bug:
+    "absenty", "andreamosteller", "pellet-price-monitor", "solarfocus-scraper",
+    "zero-export-controller", "gas-price-monitor", "rainbow-rescue",
 }
 RANK = {"patch": 0, "minor": 1, "major": 2}
 
