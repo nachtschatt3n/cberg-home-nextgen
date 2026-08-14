@@ -36,7 +36,7 @@ depends_on: []
 conflicts_with: []                  # nothing competes for the same resources; but do NOT
                                     # co-schedule a phpMyAdmin upgrade in the same window
                                     # (its only backend is this DB) — see Interference.
-status: draft
+status: blocked
 window: "sat-early:2026-09-12"       # MOVED 2026-08-15 off tue-early:2026-08-25 on CAPACITY,
                                       # not preference: this plan is est 60m and absenty-rebuild
                                       # is 45m, in a 60m window — a 105m overrun. absenty keeps
@@ -451,3 +451,122 @@ mise exec -- kubectl exec -i -n databases mariadb-0 -c mariadb -- \
   `mariadb-upgrade` / `mariadb-dump` / `mariadb-check` `kubectl exec` calls and the
   interactive phpMyAdmin checks are the operator-present in-cluster actions; the
   Longhorn restore (§5b) is operator-driven via the Longhorn UI.
+
+---
+
+## 7. Execution log — 2026-08-15 (attempted unattended run) → **BLOCKED, not executed**
+
+Attempted as an unattended run outside the assigned window
+(`sat-early:2026-09-12`). **No cluster mutation was performed.** Nothing was
+committed to `helmrelease.yaml`; the HelmRelease remains Ready on **25.1.1** and
+`mariadb-0` still runs the 12.2.2 image. Backups were taken (read-only side
+effect only). Findings below **materially change this plan** and it must be
+re-approved by the operator before any future window picks it up.
+
+### 7.1 The plan's central premise is factually wrong — there is NO user data
+
+§1 asserts *"There **is** real user data, not just system tables."* Verified live
+tonight — that is **false**:
+
+| schema | tables | data+index |
+|---|---|---|
+| `my_database` | **0** | — |
+| `test` | **0** | — |
+| `mysql` | 31 | 3.35 MB |
+| `sys` | 101 (views) | 0.03 MB |
+
+`my_database` and `test` are **empty**. All 30 `CREATE TABLE` statements in the
+logical dump belong to `mysql` (MariaDB's own system tables). This instance holds
+**no application data whatsoever** — it is an empty MariaDB behind a phpMyAdmin
+UI. The `risk: high` rating and the entire volume-restore rollback design exist
+to protect data that does not exist. **Re-rate before executing.**
+
+### 7.2 The urgent finding — the 12→13 migration is ALREADY ARMED and unguarded
+
+Neither chart version pins the image. `helm template` of **both** 25.1.1 and
+27.0.1 renders `registry-1.docker.io/bitnami/mariadb:latest`. Registry inspection:
+
+| reference | digest | image version | built |
+|---|---|---|---|
+| running `mariadb-0` | `sha256:7156c5d6…` | **12.2.2** | 2026-04-24 |
+| `bitnami/mariadb:latest` **today** | `sha256:47bdb03b…` | **13.0.1** | **2026-08-14** |
+
+`:latest` flipped to 13.0.1 **yesterday**. The pod is still on 12.2.2 only
+because it has not restarted in 12 days. Therefore **the one-way MariaDB 12→13
+datadir migration will fire on the next pod restart from ANY cause** — eviction,
+node drain, OOM, Longhorn maintenance, node reboot — with no operator present,
+onto a datadir whose `mysql_upgrade_info` marker still reads `10.11.5-MariaDB`.
+
+That is a strictly worse, uncontrolled version of the event this plan exists to
+manage. **Path B (pin `image.digest`) is now the urgent action and should be
+decided ahead of the chart bump.** Confirmed `image.digest` is a valid key in
+both chart versions. The current 12.2.2 digest `sha256:7156c5d6…` is the only
+reference that can hold the server at 12.2.2 (no free versioned tag exists).
+
+### 7.3 Risks the plan feared that are RETIRED by evidence
+
+- **StatefulSet selector immutability trap: does NOT apply.** Rendered
+  `spec.selector.matchLabels` is byte-identical in 25.1.1 and 27.0.1
+  (`instance/name/part-of/component`). Step 3d's `--cascade=orphan` workaround is
+  not needed.
+- **Values-key breakage: none.** Diff of `helm show values` 25.1.1 → 27.0.1 =
+  **0 removed keys**, 4 added (`metrics.auth.*`). Every key this HelmRelease sets
+  still exists in 27.0.1.
+- **Full rendered-manifest diff = 33 lines**, entirely cosmetic (NetworkPolicy
+  `podSelector` narrowed, a whitespace fix, `checksum/configuration`). Same 8
+  object kinds both versions.
+- **Multi-major skip is NOT unsupported.** Upstream: *"Skipping intermediate
+  major or LTS versions is fully supported and tested for standalone servers"* —
+  with the caveat that Incompatible Changes must be reviewed for every major in
+  between. §1's framing overstates this.
+
+### 7.4 Pre-existing manifest drift found (unrelated to the bump)
+
+- The HelmRelease's `ingress:` block (incl. the `gethomepage.dev/*` annotations)
+  is **inert**. The bitnami mariadb chart renders **no Ingress**, and there is no
+  `mariadb` Ingress in the cluster. `touches: ingress/mariadb` and verification
+  step §4.5 are wrong and would mislead an executor.
+- The top-level `service:` block is likewise ignored (the chart reads
+  `primary.service`). Neither is caused by this upgrade; both should be cleaned
+  up or moved to the correct keys separately.
+
+### 7.5 Why this was not executed unattended (gates that could not be cleared)
+
+1. **§2.6 is an explicit operator go/no-go between Paths A / B / C**, and
+   `auto_execute: false`. A generic "run unattended" authorisation does not
+   select a strategy — least of all now that 7.1 likely flips the choice.
+2. **The documented rollback is not machine-executable.** §5b/§6: *"the Longhorn
+   restore (§5b) is operator-driven via the Longhorn UI."* Performing a one-way
+   migration without the ability to execute its own rollback is not acceptable.
+3. **The success criterion is not machine-verifiable.** §4.4 names an interactive
+   phpMyAdmin browser login as *"the real success signal."*
+4. **The post-change health gate was unattributable.** Four other agents were
+   running concurrently in `monitoring` / `ai`; 4 Kustomizations, 1 HelmRelease
+   and 3 pods were not-Ready in those namespaces, so a "0 unhealthy cluster-wide"
+   gate could neither be met nor attributed. (`databases` itself was clean:
+   11/11 Kustomizations, 7/7 HelmReleases Ready.)
+5. **Off-window** — plan was `draft`, scheduled `sat-early:2026-09-12`.
+
+### 7.6 Backups taken (valid for a future window, subject to freshness)
+
+- **Logical dump:** `~/mariadb-backups/mariadb-pre27-20260815-0110.sql` —
+  2,490,223 B (2.4 MB), 30 tables, terminates with `-- Dump completed`. Covers
+  `--all-databases --single-transaction --routines --triggers --events`.
+  Kept **outside the repo** (public repo).
+- **Longhorn volume backup:** `mariadb-data-5g` `lastBackupAt`
+  `2026-08-14T23:07:39Z`, robustness `healthy`, state `attached` — taken by the
+  nightly `storage/backup-of-all-volumes` CronJob ~3 min before the dump. No job
+  was created by this run (the `storage` namespace was out of scope).
+
+### 7.7 Recommended next actions for the operator
+
+1. **Decide Path B first, soon** — pin `image.digest` to the running 12.2.2
+   image to disarm 7.2. Full (public) digest, for `values.image.digest`:
+   `sha256:7156c5d6865f5bcebeac4c7055898c916c445b9cba008a70ed7d608156f89d1f`. Low risk, pure GitOps, `git revert`-able. Note it does
+   force one StatefulSet roll, onto the identical image already running.
+2. Then re-rate this plan given 7.1 (no user data). With an empty user schema and
+   the selector/values risks retired, the realistic options become *"let it go to
+   13 deliberately, in-window"* or **Path C** (retire this instance entirely —
+   an empty MariaDB whose only consumer is its own admin UI is a candidate for
+   deletion rather than a 60-minute high-risk migration).
+3. Fix the inert `ingress:` / `service:` blocks (7.4) in a separate change.
