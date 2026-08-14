@@ -12,21 +12,22 @@
 |-----------|-----------|
 | ai | 9 |
 | home-automation | 20 |
-| databases | 10 |
-| monitoring | 11 |
+| databases | 11 |
+| monitoring | 12 |
 | office | 12 |
 | media | 5 |
 | download | 2 |
-| kube-system | 12 |
+| kube-system | 11 |
 | storage | 1 |
 | cert-manager | 1 |
-| network | 6 |
+| network | 7 |
 | default | 2 |
 | flux-system | 1 |
-| backup | 1 |
+| backup | 2 |
+| security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
-| **Total** | **~99** |
+| **Total** | **105** |
 
 ---
 

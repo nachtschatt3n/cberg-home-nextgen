@@ -54,7 +54,7 @@ or policy changes).
   - Keep file local-only with restrictive permissions (`0600`).
   - Do not reference or embed file contents in repository manifests or docs.
   - Rotate the tunnel credential immediately after suspected host compromise.
-  - Prefer SOPS-encrypted Kubernetes secret (`kubernetes/apps/network/external/cloudflared/app/secret.sops.yaml`)
+  - Prefer SOPS-encrypted Kubernetes secret (`kubernetes/apps/network/external/cloudflared/secret.sops.yaml`)
     for cluster-managed credential workflows.
 - Owner: Platform operations
 - Next review date: **2026-06-01**

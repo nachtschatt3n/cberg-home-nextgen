@@ -1,7 +1,7 @@
 # AI Usage Map
 
 > Comprehensive mapping of all AI/LLM integrations across the cluster and Home Assistant.
-> Last Updated: 2026-04-04
+> Last Updated: 2026-08-14
 
 ---
 

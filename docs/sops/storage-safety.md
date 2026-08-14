@@ -161,7 +161,11 @@ When introducing a new CIFS / SMB / NFS StorageClass:
 
 ### Recommended wrapper
 
-A safe wrapper script lives at `runbooks/kubectl-rm-pvc-safe.sh` (TODO — to be added). It runs the 3-step pre-flight automatically and refuses if `subdir == "/"` + `reclaim == Delete`. Use it in place of raw `kubectl delete pvc` for any CIFS/SMB/NFS class.
+There is deliberately NO wrapper script. A `runbooks/kubectl-rm-pvc-safe.sh` was
+advertised here as "TODO — to be added" from 2026-04-26 until 2026-08-14 and never
+existed, which is worse than nothing: it reads as a control that is in place. The
+REAL control is the pre-flight one-liner below — run it, read the output, and stop
+if `subdir` is `/`/empty and `reclaimPolicy` is `Delete`. It runs the 3-step pre-flight automatically and refuses if `subdir == "/"` + `reclaim == Delete`. Use it in place of raw `kubectl delete pvc` for any CIFS/SMB/NFS class.
 
 ## Examples
 

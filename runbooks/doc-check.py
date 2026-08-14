@@ -507,10 +507,29 @@ def s3_application_docs() -> tuple[str, Findings, str]:
         "opencode-PROJECT_NAME",
     }
 
+    # Datastore sub-components (`<parent>-db`, `<parent>-cache`, …) are separate
+    # HelmReleases only so Flux can order them; they are not apps in their own
+    # right and the parent's row covers them. Structural rather than a hardcoded
+    # pair, so the next app that splits its datastore doesn't re-trip this.
+    SUBCOMPONENT_SUFFIXES = ("-db", "-cache", "-redis", "-postgres", "-postgresql", "-valkey", "-mariadb")
+    all_app_names = {a for apps in cluster_apps.values() for a in apps}
+
+    def _is_documented_subcomponent(app: str) -> bool:
+        for suf in SUBCOMPONENT_SUFFIXES:
+            if app.endswith(suf):
+                parent = app[: -len(suf)]
+                # Only exempt when the PARENT is itself a real app AND documented —
+                # otherwise a genuinely undocumented datastore would hide too.
+                if parent in all_app_names and parent.lower() in content.lower():
+                    return True
+        return False
+
     undocumented = []
     for ns, apps in cluster_apps.items():
         for app in apps:
             if app in INFRA_SKIP:
+                continue
+            if _is_documented_subcomponent(app):
                 continue
             # Check if app name (or normalized form) appears in the doc
             app_lower = app.lower()
@@ -542,6 +561,59 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     lines.append(f"Undocumented apps: **{len(undocumented)}**\n")
     if undocumented:
         lines.append("Undocumented:\n" + "\n".join(f"- `{a}`" for a in undocumented[:20]) + "\n")
+
+    # --- Stated totals vs ground truth -------------------------------------
+    # README.md, docs/infrastructure.md and docs/applications.md each state an
+    # app/namespace total. Nothing checked them against reality, so they drifted
+    # apart and the disagreement was rediscovered by hand every sweep. Section 3
+    # already knows the truth, so assert it.
+    # Count with the SAME definition of "an app" the documentation check uses —
+    # infra-only entries and datastore sub-components are excluded from both, or
+    # the table would be required to count things we just exempted from needing
+    # a row.
+    # NOTE: INFRA_SKIP is deliberately NOT excluded here. It means "not REQUIRED
+    # to have its own row", not "should not be counted" — those apps are real and
+    # do appear in the doc's sections. Only datastore sub-components are dropped,
+    # matching the exemption above.
+    countable = {
+        ns: [a for a in apps if not _is_documented_subcomponent(a)]
+        for ns, apps in cluster_apps.items()
+    }
+    countable = {ns: apps for ns, apps in countable.items() if apps}
+    real_ns = len(cluster_apps)
+    real_apps = sum(len(a) for a in countable.values())
+    for doc_name, pat, actual, what in (
+        ("README.md", r"across\s+\*{0,2}(\d+)\*{0,2}\s+namespaces", real_ns, "namespaces"),
+        ("docs/infrastructure.md", r"across\s+\*{0,2}(\d+)\*{0,2}\s+namespaces", real_ns, "namespaces"),
+    ):
+        dp = REPO_ROOT / doc_name
+        if not dp.exists():
+            continue
+        m = re.search(pat, dp.read_text())
+        if not m:
+            continue
+        stated = int(m.group(1))
+        if stated != actual:
+            f.add(WARNING, f"`{doc_name}` says {stated} {what}, actual is {actual}")
+            cprint(C.YELLOW, f"  {WARNING} {doc_name}: states {stated} {what}, actual {actual}")
+
+    # Per-namespace rows in the applications.md Summary table.
+    mismatched_rows = []
+    for ns, apps in sorted(countable.items()):
+        m = re.search(rf"^\|\s*{re.escape(ns)}\s*\|\s*(\d+)\s*\|", content, re.M)
+        if not m:
+            mismatched_rows.append(f"{ns}: no Summary row (actual {len(apps)})")
+            continue
+        if int(m.group(1)) != len(apps):
+            mismatched_rows.append(f"{ns}: table says {m.group(1)}, actual {len(apps)}")
+    if mismatched_rows:
+        f.add(WARNING, "docs/applications.md Summary table disagrees with the cluster: "
+                       + "; ".join(mismatched_rows[:8]))
+        cprint(C.YELLOW, f"  {WARNING} applications.md Summary: {len(mismatched_rows)} row(s) wrong")
+        for r in mismatched_rows[:8]:
+            cprint(C.YELLOW, f"      - {r}")
+    else:
+        cprint(C.GREEN, f"  {OK} applications.md Summary table matches the cluster")
 
     # Check namespace sections exist in the doc
     expected_namespaces = [
@@ -1132,8 +1204,18 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
         else:
             has_py = (runbooks_dir / f"{stem}.py").exists()
             has_sh = (runbooks_dir / f"{stem}.sh").exists()
-            if has_py or has_sh:
-                script = f"{stem}.py" if has_py else f"{stem}.sh"
+            # Some runbooks keep their scripts in a same-named subdirectory
+            # (e.g. runbooks/alert-watcher/ holds alert-bridge.py + *.sh),
+            # not a flat runbooks/<stem>.py|.sh sibling.
+            subdir = runbooks_dir / stem
+            has_subdir_script = subdir.is_dir() and (
+                any(subdir.glob("*.py")) or any(subdir.glob("*.sh"))
+            )
+            if has_py or has_sh or has_subdir_script:
+                if has_py or has_sh:
+                    script = f"{stem}.py" if has_py else f"{stem}.sh"
+                else:
+                    script = f"{stem}/"
                 cprint(C.GREEN, f"  {OK} {runbook.name}: paired with {script}")
                 lines.append(f"- {OK} `{runbook.name}`: paired with `{script}`\n")
             else:

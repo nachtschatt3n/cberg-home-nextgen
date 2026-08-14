@@ -405,7 +405,10 @@ The [csi-driver-smb](kubernetes/apps/kube-system/csi-driver-smb) connects
 cluster pods to bulk shares on UNAS-CBERG (`192.168.55.240`). Media libraries
 (Plex / Jellyfin), JDownloader intake, Frigate recordings, Tube Archivist
 output, iCloud sync, Nextcloud data, and Paperless consume/export buckets all
-land on per-class StorageClasses defined in `kubernetes/apps/storage/csi-driver-smb`.
+land on per-class StorageClasses defined **per app** (each app's own
+`app/storageclass.yaml`); the CSI driver itself lives at
+`kubernetes/apps/kube-system/csi-driver-smb`. There is no central
+`kubernetes/apps/storage/csi-driver-smb` directory.
 
 > ⚠️ **Storage safety:** PVC delete on a CIFS class with `subdir: /` + reclaim
 > `Delete` will wipe the entire share. Always run the pre-flight one-liner from
@@ -451,7 +454,7 @@ quarterly.
 
 ## 📦 Applications
 
-~98 apps across 17 namespaces. Full inventory with per-app purpose, ingress
+~105 apps across 17 namespaces. Full inventory with per-app purpose, ingress
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md);
 this section is a category-level map.
 
@@ -645,11 +648,46 @@ Two more agents back the five above:
   (separate repo, anchored at `/Users/mu/code/unifictl`). Handles read-only
   network diagnostics + the `unpoller` scrape target.
 
-**Scheduling cadence:** sweeps fire via session-local cron (`CronCreate`, not
-Anthropic cloud schedules — the cluster is on a private VLAN with local
-SOPS-age decryption and local mise binaries, neither reachable from a cloud
-sandbox; see CLAUDE.md "Scheduled Sweeps — Session-Only"). Daily 8:17 local
-is the default tick; on-demand sweeps run any time.
+**Scheduling cadence:** an **in-cluster OpenClaw cron** ("Daily Operation Sweep
+Every 2 Days", every 48h anchored 04:00 Europe/Berlin) *triggers* the sweep by
+driving the Mac mini's `daily-operation` session. The sweep still **runs on the
+Mac** — the cluster is on a private VLAN, the SOPS age key is local, and the
+mise binaries are local, none of which a cloud sandbox can reach. The cluster
+cron is the trigger, not the execution environment. See CLAUDE.md "Scheduled
+Sweeps — run on the Mac, triggered by the cluster cron".
+
+> **Do not create session-local `/loop` sweeps.** The old 8:17am `/loop`
+> (`CronCreate de44f77b`) was retired and confirmed gone on 2026-06-28. A local
+> loop double-runs against the cluster-driven one. For an ad-hoc sweep send
+> `operation sweep` **once** — never on a `/loop` or `CronCreate` schedule.
+
+**Maintenance windows & auto-updates (the sweep does NOT apply changes).**
+Since 2026-07-31 the `daily-operation` sweep is **read-only** — it only
+*dry-runs* `runbooks/auto-update.py` to report what will land next window.
+Changes are applied by the maintenance-window pipeline:
+
+- **Safe updates** (patch/minor, not deny-listed, no breaking-change signal,
+  green flux-local CI) are applied at **Step 0 of EVERY window** by the
+  `maintenance-window-agent` — `auto-update.py --apply` plus `coverage.py` for
+  safe updates with no PR — then Flux-reconciled, health-gated, and
+  **auto-reverted** on regression. A window run is therefore never scoped to
+  "just the assigned plans".
+- **Held updates** (majors, data migrations, reboots) get a per-update plan
+  written by an `upgrade-planner-agent` under `runbooks/maintenance/plans/`,
+  which the `maintenance-window-agent` vets for interference, sequences, and
+  runs operator-approved during one of the 4 windows/week defined in
+  `runbooks/maintenance-windows.yaml`.
+- To hold something back, add a deny rule to `runbooks/auto-update-policy.yaml`
+  (git-tracked, code-reviewed) — not an ad-hoc skip.
+
+Full contracts: [`docs/sops/auto-update.md`](docs/sops/auto-update.md) and
+[`docs/sops/maintenance-windows.md`](docs/sops/maintenance-windows.md).
+
+**Other agents** beyond the sweep five: `maintenance-window-agent` and
+`upgrade-planner-agent` (above), `slo-agent` (error-budget/burn-rate against the
+`slo_definitions` table), `alert-triage-agent` (triages fired Alertmanager
+alerts, may create narrow short-TTL silences), and `sure-data-audit-agent`
+(weekly read-only finance-data audit).
 
 **Evidence-first / least-privilege:** each agent's prompt enforces a
 read-only default. Destructive operations (`kubectl delete`, `git push
