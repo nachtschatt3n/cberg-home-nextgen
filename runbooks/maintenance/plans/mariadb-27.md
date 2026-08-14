@@ -37,7 +37,14 @@ conflicts_with: []                  # nothing competes for the same resources; b
                                     # co-schedule a phpMyAdmin upgrade in the same window
                                     # (its only backend is this DB) — see Interference.
 status: draft
-window: "tue-early:2026-08-25"       # RESLOTTED 2026-08-14 — the tue-early:2026-08-11
+window: "sat-early:2026-09-12"       # MOVED 2026-08-15 off tue-early:2026-08-25 on CAPACITY,
+                                      # not preference: this plan is est 60m and absenty-rebuild
+                                      # is 45m, in a 60m window — a 105m overrun. absenty keeps
+                                      # the slot (51 fixable CRITICAL, externally exposed).
+                                      # Moved to a 90m sat-early rather than another 60m slot so a
+                                      # high-risk two-major data-engine bump has 30m of slack;
+                                      # 09-12 is the next free sat-early (08-22 kps, 08-29
+                                      # app-template, 09-05 longhorn).
                                       # window was MISSED (plan never executed, still draft).
                                     # migration); do NOT co-schedule phpMyAdmin.
 auto_execute: false                 # high + data + one-way migration → operator go/no-go always

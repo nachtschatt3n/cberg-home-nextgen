@@ -26,7 +26,10 @@ touches:
 depends_on: []                      # independent of the EG migration
 conflicts_with: [talos-v1.13.8]     # never in the same window as a Talos change
 status: scheduled
-window: "thu-early:2026-08-27"
+window: "sun-window:2026-09-06"      # MOVED 2026-08-15: this plan is est 90m and thu-early is a
+                                      # 60m window — it never fit. sun-window:2026-09-06 is a
+                                      # free 90m slot. (It does not need reboot, so a sun window
+                                      # is not required, but no 90m no-reboot slot was free.)
 auto_execute: false
 sops_refs:
   - docs/troubleshooting/ingress-migration-plan.md   # hostNetwork research recorded in §scope

@@ -22,7 +22,11 @@ depends_on: []
 conflicts_with: []                              # soft: do not co-schedule with ingress-nginx-1.15.6 / an Envoy-Gateway
                                                 # cutover (transiently drops the plex.${DOMAIN} web path) — see Interference
 status: draft
-window: "tue-early:2026-08-18"       # assigned 2026-08-14; low risk, no reboot, media ns
+window: "tue-early:2026-08-25"       # MOVED 2026-08-15: tue-early:2026-08-18 held 70m of work
+                                      # (librechat 30 + nextcloud-mcp 25 + plex 15) in a 60m
+                                      # window. plex is the smallest and has no depends_on, so
+                                      # moving it costs least; 08-25 then holds absenty 45 +
+                                      # plex 15 = exactly 60m.
                                       # only — no overlap with the other tue-early plans.
 auto_execute: false
 sops_refs:

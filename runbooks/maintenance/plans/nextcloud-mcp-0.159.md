@@ -4,7 +4,7 @@ component: nextcloud-mcp
 pr: null                            # no open Renovate PR for this bump — bump the image tag by hand
 kind: image
 current: "0.140.4"
-target: "0.173.0"                    # re-targeted 2026-08-14 (was 0.159.1; 14 minors of drift)
+target: "0.173.0"                    # verified head 2026-08-15 (0.174.0 is 404)
 update_type: minor                  # 0.140→0.159 is a 0.x minor bump by semver, but spans ~19 minors / 7 breaking releases
 risk: medium
 est_duration_min: 25

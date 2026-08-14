@@ -170,6 +170,23 @@ def reconcile(cfg, today):
         load = sum(RISK_WEIGHT.get(p.get("risk", "medium"), 2) for p in ps)
         if load > w.get("capacity_risk", 4):
             warnings.append(f"OVER-CAPACITY {slot}: risk-load {load} > {w['capacity_risk']}")
+        # TIME capacity — distinct from risk-load, and previously unchecked.
+        # risk-load is a coarse "how much can go wrong" budget; it says nothing
+        # about whether the work FITS. On 2026-08-15 four windows were silently
+        # over-committed on time, including envoy-gateway-phase2 alone at 120m in
+        # a 60m slot and the next morning's window at 120m in 90m. A plan that
+        # cannot fit either overruns into the day or gets abandoned half-done,
+        # which is worse than not starting it.
+        mins = sum(int(p.get("est_duration_min") or 0) for p in ps)
+        wmins = int(w.get("duration_min") or 0)
+        if wmins and mins > wmins:
+            warnings.append(
+                f"OVER-TIME {slot}: est {mins}m of work in a {wmins}m window "
+                f"(+{mins - wmins}m) — {', '.join(p.get('plan_id','?') for p in ps)}")
+        elif wmins and mins > wmins * 0.9:
+            warnings.append(
+                f"TIGHT {slot}: est {mins}m of {wmins}m used — no slack for a "
+                f"rollback if something goes wrong")
         if any(p.get("needs_reboot") for p in ps) and not w.get("allow_reboot"):
             warnings.append(f"REBOOT-IN-NONREBOOT {slot}: a needs_reboot plan is in a window with allow_reboot:false")
         # shallow interference flag (the window agent does the deep check)
