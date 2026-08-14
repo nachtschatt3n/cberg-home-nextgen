@@ -24,6 +24,24 @@ spec:
   uninstall:
     keepHistory: false
   values:
+    # CVE image pins (2026-08-14). The grafana chart 10.5.15 defaults ship
+    # grafana 12.3.1 (9 fixable CRITICAL), k8s-sidecar 2.5.0 (2) and
+    # curlimages/curl 8.9.1 (2) — 13 criticals, all rendered by THIS release.
+    #
+    # They are NOT cleared by the kube-prometheus-stack bump: that chart sets
+    # `grafana: enabled: false` (helmvalues.yaml:274), so grafana is entirely
+    # this standalone release's responsibility.
+    #
+    # Chart is held at 10.5.15 deliberately. The grafana chart repo has MIGRATED:
+    # grafana.github.io/helm-charts is frozen at 10.5.15/appVersion 12.3.1, while
+    # the live chart is at grafana-community.github.io at 12.10.4/appVersion
+    # 13.1.3. Following that is a repo swap AND a Grafana 12 -> 13 app major —
+    # a migration needing its own plan, not a CVE bump. Pinning the images keeps
+    # us on a known-good chart while clearing the criticals now.
+    image:
+      tag: "12.4.8"
+    downloadDashboardsImage:
+      tag: "8.21.0"
     deploymentStrategy:
       type: Recreate
     admin:
@@ -225,6 +243,12 @@ spec:
           url: https://raw.githubusercontent.com/teslamate-org/teslamate/master/grafana/dashboards/visited.json
           datasource: TeslaMate
     sidecar:
+      # CVE pin — see the image-pin note at the top of values. This must live in
+      # THIS sidecar block: a second top-level `sidecar:` key would be silently
+      # dropped by YAML duplicate-key resolution (last one wins), which is how
+      # the first attempt at this pin no-op'd.
+      image:
+        tag: "2.10.1"
       dashboards:
         enabled: true
         searchNamespace: ALL

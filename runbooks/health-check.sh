@@ -1668,17 +1668,33 @@ for c in rows(sys.stdin.read()):
         # Device reboots in last 24h (uptime regression)
         # CSV cols after keep(name,_time): ,_result,table,name,_time  (indices 3,4)
         echo "--- Device Reboots (last 24h, from InfluxDB) ---"
+        # A SCRAPE GAP is indistinguishable from a reboot in derivative(uptime):
+        # the series just restarts lower. Cross-check every candidate against the
+        # device's CURRENT uptime — if that already exceeds the 24h window, no
+        # reboot can have happened inside it and the dip was a collection
+        # artifact. (2026-08-14: two APs "rebooted" 10 ms apart during a UniFi
+        # controller flap; their real uptimes were 659h and 179h.)
+        LONG_UPTIME_NAMES=$(influx_query 'from(bucket:"default") |> range(start: -15m) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> last() |> filter(fn: (r) => r._value > 86400) |> keep(columns: ["name"])' \
+        | python3 -c "
+${PYPARSE}
+print(chr(10).join(c[3] for c in rows(sys.stdin.read()) if len(c) > 3))" 2>/dev/null || true)
+        export LONG_UPTIME_NAMES
         REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> derivative(unit: 30s, nonNegative: false) |> filter(fn: (r) => r._value < -1000) |> keep(columns: ["name","_time"])' \
         | python3 -c "
 ${PYPARSE}
-data = list(rows(sys.stdin.read()))
+import os
+stable = {n.strip() for n in os.environ.get('LONG_UPTIME_NAMES', '').splitlines() if n.strip()}
+raw = [c for c in rows(sys.stdin.read()) if len(c) >= 4]
+data = [c for c in raw if c[3] not in stable]
+dropped = len(raw) - len(data)
 if not data:
     print('None detected')
 else:
     for c in data:
-        if len(c) >= 4:
-            print(f'  {c[3]} rebooted around {c[4] if len(c) > 4 else \"?\"}')
+        print(f'  {c[3]} rebooted around {c[4] if len(c) > 4 else \"?\"}')
     print(f'Total reboots: {len(data)}')
+if dropped:
+    print(f'  ({dropped} uptime-dip candidate(s) ignored: device uptime already exceeds 24h -> scrape gap, not a reboot)')
 ")
         echo "$REBOOT_OUTPUT"
         REBOOT_COUNT=$(echo "$REBOOT_OUTPUT" | grep -c "rebooted" || true)
