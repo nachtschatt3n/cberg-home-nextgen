@@ -8,6 +8,19 @@ metadata:
     app: postgresql
 spec:
   replicas: 1
+  # Recreate (not the default RollingUpdate): this Deployment mounts the RWO
+  # Longhorn PVC `postgresql-data-5g`. With replicas: 1 the RollingUpdate
+  # defaults compute to maxSurge 1 (25% rounds UP) and maxUnavailable 0 (25%
+  # rounds DOWN), so a rollout surges a second pod that must attach a volume
+  # the old pod still holds, while the old pod is not allowed to terminate
+  # until the new one is Ready -> FailedAttachVolume / Multi-Attach circular
+  # wait. Recreate tears the old pod down FIRST.
+  #
+  # Trade-off: a brief outage on every postgresql rollout. That is inherent to
+  # a single-replica RWO database and is preferable to a nondeterministic
+  # multi-minute stall. See docs/sops/longhorn-rwo-multi-attach.md.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: postgresql

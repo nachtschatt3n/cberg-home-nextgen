@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.08.09`
-> Last Updated: `2026-08-09`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `Platform`
 
 ---
@@ -293,6 +293,28 @@ kubectl scale deployment {name} -n {namespace} --replicas=0
 # Re-attach by scaling back up
 kubectl scale deployment {name} -n {namespace} --replicas=1
 ```
+
+### RWO Multi-Attach on Rollout — see dedicated SOP
+
+A single-replica **Deployment** mounting a ReadWriteOnce volume will stall on
+`FailedAttachVolume` / `Multi-Attach error` when rolled under the default
+`RollingUpdate` strategy: at `replicas: 1`, `maxSurge: 25%` rounds **up** to 1
+(a second pod is created) while `maxUnavailable: 25%` rounds **down** to 0 (the
+old pod may not be released) — a circular wait on the volume.
+
+It clears **nondeterministically** (the retry has to land the new pod on the node
+already holding the attachment), so it looks different every time. The old pod
+keeps serving throughout, so it is a stuck rollout, not an outage.
+
+Durable fix is `spec.strategy.type: Recreate`. StatefulSets are immune to the
+deadlock (they terminate before recreating).
+
+**Do not** delete the old pod, scale to 0, or force-detach the volume to "unstick"
+it — the old pod is the one still serving, and forcing a detach on a live
+read-write volume risks data-path damage.
+
+Full procedure, per-chart values paths, diagnose flows and the cluster-wide sweep:
+**[`docs/sops/longhorn-rwo-multi-attach.md`](longhorn-rwo-multi-attach.md)**.
 
 ### Delete a Volume
 

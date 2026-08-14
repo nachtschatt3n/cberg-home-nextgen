@@ -153,6 +153,22 @@ spec:
         tag: "latest"
       persistence:
         size: 10Gi
+      # Recreate: same RWO Multi-Attach deadlock as the parent librechat
+      # Deployment above -- librechat-mongodb mounts the RWO Longhorn PVC
+      # `librechat-mongodb`, and the subchart default RollingUpdate surges a
+      # second pod (maxSurge 25% rounds UP to 1 at replicaCount 1) onto a
+      # volume the old pod still holds.
+      #
+      # Values path is `mongodb.updateStrategy` and it is NOT a StatefulSet
+      # key here: bitnami mongodb 16.5.45 templates/standalone/dep-sts.yaml
+      # branches on `useStatefulSet` (false -> Deployment) and renders
+      # `.Values.updateStrategy` into spec.strategy. Verified by helm template
+      # against chart 2.0.7 -> librechat-mongodb strategy {type: Recreate}.
+      #
+      # Trade-off: a brief DB gap on every librechat rollout, inherent to a
+      # single-replica RWO volume. See docs/sops/longhorn-rwo-multi-attach.md.
+      updateStrategy:
+        type: Recreate
 
     meilisearch:
       enabled: true
