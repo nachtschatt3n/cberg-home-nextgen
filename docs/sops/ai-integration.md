@@ -297,7 +297,7 @@ Chat interface with multi-provider support.
 | Default Model | `gemma4:26b` (fetch=true for dynamic model list) |
 | Config | Custom endpoint "Ollama" with OpenAI-compatible API |
 
-**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml` (custom endpoint at ~line 65)
+**Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml` (custom endpoint at ~line 94)
 
 ### Next AI Draw.io (`ai/next-ai-draw-io`)
 

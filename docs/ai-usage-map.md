@@ -25,7 +25,7 @@ Ports 11435 and 11436 are no longer in use.
 | AnythingLLM | ai | `nomic-embed-text:latest` (embeddings) | Native Ollama | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:87-88` |
 | OpenClaw | ai | `gemma4:26b` | OpenAI `/v1` | `kubernetes/apps/ai/openclaw/app/helmrelease.yaml:424-426` |
 | Next AI Draw.io | ai | `gemma4:26b` | Native Ollama `/api` | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
-| LibreChat | ai | `gemma4:26b` (default, fetch=true) | OpenAI `/v1` | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:64-70` |
+| LibreChat | ai | `gemma4:26b` (default, fetch=true) | OpenAI `/v1` | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:93-103` |
 | Open WebUI | ai | (all available models) | Native Ollama | `kubernetes/apps/ai/open-webui/app/helmrelease.yaml:84` |
 | Paperless-GPT | office | `gemma4:26b` (LLM + vision) | OpenAI `/v1` | `kubernetes/apps/office/paperless-gpt/app/helmrelease.yaml:48,55-56` |
 | Paperless-AI | office | `gemma4:26b` | OpenAI `/v1` | `kubernetes/apps/office/paperless-ai/app/helmrelease.yaml:52-53` |
