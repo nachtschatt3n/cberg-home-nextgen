@@ -19,8 +19,21 @@ spec:
   # Trade-off: a brief outage on every postgresql rollout. That is inherent to
   # a single-replica RWO database and is preferable to a nondeterministic
   # multi-minute stall. See docs/sops/longhorn-rwo-multi-attach.md.
+  #
+  # Expressed as maxSurge: 0 / maxUnavailable: 1 rather than `type: Recreate`
+  # (which is what open-webui/librechat use). Both give the same guarantee --
+  # scale the old pod down BEFORE creating the new one, so the RWO volume is
+  # released first -- but `type: Recreate` cannot be applied to this already-
+  # existing Deployment by Flux: its live `spec.strategy.rollingUpdate` block
+  # was defaulted by the API server and is owned by NO field manager, so
+  # server-side apply cannot remove it, and `type: Recreate` + `rollingUpdate`
+  # is rejected as invalid. Same pattern as databases/redisinsight,
+  # office/sure-web and office/sure-worker.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: postgresql

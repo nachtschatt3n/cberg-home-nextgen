@@ -136,6 +136,19 @@ spec:
     type: Recreate   # tears the old pod down FIRST, releasing the RWO volume
 ```
 
+Equivalently safe, and the **preferred form when converting a Deployment that is
+already running** (see §3.2 for why):
+
+```yaml
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0        # never exceed 1 pod -> old must go before new is made
+      maxUnavailable: 1  # old pod IS allowed to be taken down
+```
+
 **Trade-off, accepted deliberately:** `Recreate` means a brief outage on *every*
 future rollout of that app (single replica, no surge, so there is a gap between old
 pod termination and new pod Ready). That gap is inherent to a ReadWriteOnce volume —
@@ -162,6 +175,48 @@ Note the bitnami case: `templates/standalone/dep-sts.yaml` branches on
 cases. The values key name does not tell you the rendered key name.
 
 **Therefore: never trust the path. Verify by render (§6.1).**
+
+### 3.2 The server-side-apply trap on EXISTING Deployments
+
+`type: Recreate` and a `rollingUpdate` block are **mutually exclusive** — the API
+server rejects an object carrying both:
+
+```text
+Deployment.apps "postgresql" is invalid: spec.strategy.rollingUpdate:
+  Forbidden: may not be specified when strategy `type` is 'Recreate'
+```
+
+This bites when converting an **already-running** Deployment via Flux. The live
+object's `spec.strategy.rollingUpdate` was *defaulted by the API server*, so it is
+owned by **no field manager**:
+
+```bash
+kubectl -n <ns> get deploy <name> -o json   | python3 -c "import sys,json;print([m['manager'] for m in json.load(sys.stdin)['metadata']['managedFields'] if 'f:strategy' in m.get('fieldsV1',{}).get('f:spec',{})])"
+# -> []   (nobody owns it)
+```
+
+Flux's server-side apply can add `type: Recreate` but **cannot remove a field it
+never owned**, so the merged object carries both and the Kustomization fails its
+dry-run. The Kustomization goes `Ready=False` and **every Kustomization that
+`dependsOn` it stalls too** — this cascades.
+
+Helm-managed releases are not affected (Helm performs a full three-way merge and
+drops the field), which is why the same commit can succeed for a chart app and fail
+for a plain manifest.
+
+**Two valid remedies:**
+
+| Remedy | When | Cost |
+|---|---|---|
+| `maxSurge: 0` + `maxUnavailable: 1`, keeping `type: RollingUpdate` | **Preferred for existing Deployments.** Identical guarantee (scale down before up, volume released first); merges cleanly because it only changes values inside the struct that already exists | none — pure GitOps |
+| `type: Recreate` | New Deployments, or Helm-managed ones | on an existing plain manifest, needs a **one-time** operator-approved patch to drop the stale field (see §11) |
+
+House precedent for the first form: `databases/redisinsight`, `office/sure-web`,
+`office/sure-worker`, `databases/postgresql`.
+
+> **Detection:** always confirm the Kustomization actually went `Ready=True` after
+> pushing — a render-correct manifest can still be rejected at apply time. See
+> Test 4 (§6).
 
 ---
 
@@ -275,12 +330,20 @@ while an old pod is still `Running` = the Deployment deadlock.
 
 ### 5.3 Example C — `databases/postgresql` (plain in-repo manifest)
 
+This one is an **existing** Deployment, so it uses the SSA-safe form (§3.2). An
+initial attempt with `type: Recreate` was rejected at apply time and stalled three
+dependent Kustomizations (`nocodb`, `sweep-history`, `sweep-dashboard`) before being
+corrected — the exact failure Test 4 exists to catch.
+
 ```yaml
 # kubernetes/apps/databases/postgresql/app/deployment.yaml
 spec:
   replicas: 1
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
 ```
 
 ---
@@ -328,6 +391,22 @@ Expected:
 If failed:
 - Flux has not reconciled yet: `mise exec -- flux get helmreleases -n <ns>`.
 
+### Test 4: Prove the Kustomization actually applied (not just rendered)
+
+A manifest can render perfectly and still be rejected at apply time (§3.2).
+
+```bash
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+```
+
+Expected:
+- The touched app's Kustomization is `Ready=True`.
+
+If failed with `spec.strategy.rollingUpdate: Forbidden` — you hit the SSA trap in
+§3.2. Switch to `maxSurge: 0` / `maxUnavailable: 1`. **Check for stalled dependents
+too**: any Kustomization with `dependsOn` on the failed one will report
+`dependency '<ns>/<name>' is not ready`.
+
 ### Test 3: Prove nothing else regressed
 
 ```bash
@@ -348,6 +427,8 @@ Expected:
 | `Multi-Attach`, old pod still `Running`, minutes elapsed | The Deployment deadlock | **Wait** — it clears on retry. Then apply §3 in git. Never delete the old pod. |
 | `Multi-Attach` cleared in <30 s, preceded by `Killing` | Benign detach transient (StatefulSet or `Recreate`) | None. Expected behaviour. |
 | Fix committed but Deployment still shows `RollingUpdate` | Wrong values path — silently no-oped | Re-run Test 1; grep the chart for `.Values.*Strategy` |
+| Kustomization `Ready=False`: `spec.strategy.rollingUpdate: Forbidden` | SSA cannot drop the unowned defaulted field (§3.2) | Use `maxSurge: 0` / `maxUnavailable: 1` instead of `type: Recreate` |
+| Unrelated apps stall with `dependency '<ns>/<x>' is not ready` | Cascade from the failed Kustomization above | Fix the root Kustomization; dependents recover on their own |
 | `Multi-Attach` persists >15 min with no old pod running | Stale `VolumeAttachment` / Longhorn stuck detaching — a real storage fault, not this SOP | Check §8.2; escalate. Do not force-detach blindly. |
 | PVC `Pending`, no Multi-Attach at all | Missing Longhorn `Volume` CR for a `longhorn-static` PV | See `docs/sops/longhorn.md` — the `Volume` CR needs a manual apply |
 
@@ -492,6 +573,24 @@ mise exec -- kubectl -n <ns> get deploy <name> -o jsonpath='{.spec.strategy}{"\n
 Never `git reset --hard` or force-push (house rule). If a rollout is mid-flight and
 wedged, the correct action is still to **wait** (§4.4), not to intervene on the
 volume.
+
+### Migrating an existing Deployment to literal `type: Recreate`
+
+Only if `maxSurge: 0` is not acceptable. This is a **direct cluster mutation and
+needs explicit operator approval** (it bypasses GitOps for one step). It does *not*
+restart the pod — `spec.strategy` is outside the pod template.
+
+```bash
+# 1. converge the live object to the desired shape in one atomic patch
+mise exec -- kubectl -n <ns> patch deploy <name> --type=json -p '[
+  {"op":"replace","path":"/spec/strategy/type","value":"Recreate"},
+  {"op":"remove","path":"/spec/strategy/rollingUpdate"}]'
+# 2. THEN commit `strategy: {type: Recreate}` to git so Flux agrees
+# 3. confirm
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+```
+
+If step 1 is skipped, the Kustomization fails dry-run and stalls its dependents.
 
 ---
 
