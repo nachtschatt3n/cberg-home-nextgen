@@ -263,3 +263,5 @@ Then re-run 4b/4c against the two consumers. Clear the marker
 - **Not a reboot job** (`needs_reboot: false`), low blast, stateless — fits a short
   tue/thu-early no-reboot window. Operator-present preferred only to eyeball the two
   consumers post-bump, not because of scope.
+
+<!-- verified 2026-08-15: pre-commit snake_case false positive fixed -->
