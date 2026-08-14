@@ -861,6 +861,19 @@ _IMAGE_VARIANT_SUFFIXES = {
 }
 
 
+def _is_digest_pinned(image_ref: str) -> bool:
+    """True for `repo@sha256:...` with NO tag at all.
+
+    There is genuinely no tag to compare, so the newer-tag lookup can only
+    return "undetermined" — but that is a different situation from a registry
+    error, and it has a different remedy: compare the CHART/appVersion that
+    renders the image. Saying so turns a permanent vague critical into an
+    actionable one (spegel sat in that state, while actually being current).
+    """
+    ref = image_ref.split("@")[0]
+    return "@sha256:" in image_ref and ":" not in ref.rsplit("/", 1)[-1]
+
+
 def _is_floating_line_tag(tag: str) -> bool:
     return bool(tag) and bool(_FLOATING_LINE_TAG_RE.match(str(tag)))
 
@@ -1183,7 +1196,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 # "bump available" while v3.1.0 was already the latest release
                 # and the pinned postgres digest was unchanged upstream).
                 elif r["crit_fix"] > 0:
-                    if newer is None:
+                    if newer is None and _is_digest_pinned(img):
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — image is DIGEST-PINNED (no tag to compare); check the chart/appVersion that renders it, not the image tag — {fix_s}")
+                        cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (digest-pinned — compare via chart version) — {fix_s}")
+                    elif newer is None:
                         f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — could NOT determine whether a newer upstream tag exists (surfaced by fail-safe); verify upstream before planning a bump — {fix_s}")
                         cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (newer-tag lookup UNDETERMINED) — {fix_s}")
                     else:

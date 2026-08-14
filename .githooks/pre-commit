@@ -127,6 +127,16 @@ SCOPE_PHRASE = re.compile(r'^"?[a-z]+( [a-z]+)+"?$')
 # (e.g. "correct-horse-battery") would also be filtered. Cap at 30 chars
 # so longer high-entropy hyphenated tokens still get scanned.
 K8S_NAME = re.compile(r"^[a-z][a-z0-9-]{0,29}$")
+# Snake_case lowercase identifiers — the underscore analogue of K8S_NAME.
+# Config MODE/ENUM values live in Secrets alongside real credentials and are
+# referenced verbatim in manifests, plans and docs. Actually hit: the
+# nextcloud-mcp `MCP_DEPLOYMENT_MODE` value blocked a maintenance-plan commit
+# three times on 2026-08-14/15, because it is lowercase+underscores and so
+# slipped DICTIONARY_WORD (no underscores), K8S_NAME (hyphens only) and
+# SCOPE_PHRASE (spaces only). Same trade-off and same 30-char cap as K8S_NAME:
+# a weak all-lowercase snake_case passphrase would also be filtered, while
+# anything with digits, case or punctuation is still scanned.
+SNAKE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,29}$")
 # Pure IPv4/IPv6 literals — Secret values that are just an IP address are
 # config endpoints (NAS host, DB host, SMTP server, etc.), not credentials,
 # and routinely show up in StorageClass YAML, infra docs, network SOPs.
@@ -172,7 +182,7 @@ for s in data.get("items", []):
             continue
         if SCOPE_PHRASE.match(decoded):
             continue
-        if K8S_NAME.match(decoded):
+        if K8S_NAME.match(decoded) or SNAKE_NAME.match(decoded):
             continue
         if IPV4.match(decoded):
             continue
