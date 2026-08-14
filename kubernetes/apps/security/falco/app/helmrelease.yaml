@@ -47,6 +47,23 @@ spec:
         socket: /run/containerd/containerd.sock
       kubernetes:
         enabled: true
+    # k8s-metacollector is a SUBCHART of falco (Chart.yaml dependency, no alias,
+    # `condition: collectors.kubernetes.enabled` — which we enable above, so it
+    # renders). Its own values default `image.tag: ""`, which falls back to the
+    # SUBCHART appVersion (0.1.1 for k8s-metacollector-0.1.10), NOT to anything
+    # in the falco parent chart. That makes the image invisible to Renovate and
+    # to runbooks/check-all-versions.py, so it silently sat on 0.1.1 with 3
+    # fixable CRITICALs while the parent chart moved on.
+    #
+    # Override goes at the SUBCHART NAME as a top-level values key. Verified by
+    # `helm template` against falco 9.1.0 with these exact values:
+    #   without pin -> docker.io/falcosecurity/k8s-metacollector:0.1.1
+    #   with pin    -> docker.io/falcosecurity/k8s-metacollector:0.1.3
+    # A pin at the wrong path renders nothing and no-ops silently while the
+    # HelmRelease still reports Ready — always re-verify by render on bump.
+    k8s-metacollector:
+      image:
+        tag: "0.1.3"
     falco:
       json_output: true                # Wazuh `falco-json` decoder needs JSON
       json_include_output_property: true
