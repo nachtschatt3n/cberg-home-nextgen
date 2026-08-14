@@ -290,7 +290,7 @@ Confirmed occurrence during the 2.0.2 → 2.0.7 chart upgrade on 2026-08-14.
 |---|---|
 | `23:09:46Z` | New pod `librechat-librechat-79fd4c448-kd52d` scheduled to a node that does not hold the volume. `FailedAttachVolume`: `Multi-Attach error for volume "pvc-629c…" Volume is already used by pod(s) librechat-librechat-66f96695f8-7xrqp` |
 | `23:09Z–23:20Z` | New pod stuck `ContainerCreating`. **Old pod `…-7xrqp` stays `Running` and keeps serving LibreChat.** No user impact. |
-| `~23:20:03Z` | **Clears unaided (~10 min).** Helm upgrade remediation retried; the old pod was torn down and the replacement happened to be scheduled onto the node holding the attachment. `upgradeFailures=1`. |
+| `~23:20:03Z` | **Clears unaided (~10 min).** The upgrade hit its timeout, Flux's `upgrade.remediation` rolled the release back and retried; on the retry the old pod was torn down and the replacement happened to land on the node already holding the attachment. `upgradeFailures=1`. |
 | end state | HelmRelease `Ready=True / UpgradeSucceeded`, chart `librechat@2.0.7`. |
 
 Nobody fixed it. It won the lottery.
@@ -391,6 +391,17 @@ Expected:
 If failed:
 - Flux has not reconciled yet: `mise exec -- flux get helmreleases -n <ns>`.
 
+### Test 3: Prove nothing else regressed
+
+```bash
+mise exec -- kubectl -n <ns> get pods -l app=<name>
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+mise exec -- flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
+```
+
+Expected:
+- Target pods `Running` / Ready; the touched app's Flux resources `Ready=True`.
+
 ### Test 4: Prove the Kustomization actually applied (not just rendered)
 
 A manifest can render perfectly and still be rejected at apply time (§3.2).
@@ -406,17 +417,6 @@ If failed with `spec.strategy.rollingUpdate: Forbidden` — you hit the SSA trap
 §3.2. Switch to `maxSurge: 0` / `maxUnavailable: 1`. **Check for stalled dependents
 too**: any Kustomization with `dependsOn` on the failed one will report
 `dependency '<ns>/<name>' is not ready`.
-
-### Test 3: Prove nothing else regressed
-
-```bash
-mise exec -- kubectl -n <ns> get pods -l app=<name>
-mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
-mise exec -- flux get helmreleases -A   | awk 'NR==1 || $5 != "True"'
-```
-
-Expected:
-- Target pods `Running` / Ready; the touched app's Flux resources `Ready=True`.
 
 ---
 
