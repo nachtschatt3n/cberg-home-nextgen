@@ -203,3 +203,29 @@ data:
                   prometheus:
                     host: 0.0.0.0
                     port: 8888
+                    # Pin the Prometheus self-telemetry naming scheme.
+                    # Because this telemetry block is configured EXPLICITLY
+                    # (to set host), collector <=0.151.0 left these three at
+                    # false, so self-metrics carry `_total`, unit suffixes and
+                    # otel_scope_* labels. Collector 0.152.0 added
+                    # applyPrometheusDefaults(), which forces all three to TRUE
+                    # for explicitly-configured telemetry -- silently renaming
+                    # otelcol_exporter_sent_{log_records,metric_points}_total to
+                    # drop `_total`.
+                    #
+                    # kube-prometheus-stack/app/otel-collector-alerts.yaml lines
+                    # 137 and 154 (the ES metrics/logs INGESTION-STALL detectors)
+                    # match on the `_total` names. They are `rate(...) == 0`
+                    # alerts, so a renamed metric yields an empty vector and the
+                    # alert simply never fires -- we would lose exactly the
+                    # detectors that catch silent telemetry loss, without any
+                    # error to notice.
+                    #
+                    # Setting them false explicitly preserves today's names
+                    # across the upgrade, so no alert rules need to change (and
+                    # kube-prometheus-stack stays untouched in this window).
+                    # Validated by `otelcol validate` in a throwaway pod on BOTH
+                    # 0.147.0 and 0.158.0: accepted by both.
+                    without_type_suffix: false
+                    without_units: false
+                    without_scope_info: false
