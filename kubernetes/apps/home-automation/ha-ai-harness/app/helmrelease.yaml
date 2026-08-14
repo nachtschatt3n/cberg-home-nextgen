@@ -29,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/harness-home-server
-              tag: 0.5.1-alpha
+              tag: 0.5.3-alpha
             env:
               - name: TZ
                 value: "Europe/Berlin"
@@ -71,7 +71,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/harness-home-frontend
-              tag: 0.5.1-alpha
+              tag: 0.5.3-alpha
             env:
               - name: VITE_ALLOWED_HOSTS
                 value: "all"
