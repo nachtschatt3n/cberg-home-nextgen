@@ -246,7 +246,17 @@ def _sections_reporting_this_cycle(dsn: str, cycle_id: str) -> set:
                     "SELECT DISTINCT section FROM sweep_findings WHERE cycle_id = %s",
                     (cycle_id,),
                 )
-                return {r[0] for r in cur.fetchall() if r[0]}
+                found = {r[0] for r in cur.fetchall() if r[0]}
+                # slo-check records to slo_snapshots and emits NO sweep_findings
+                # row when every SLO passes, so findings-only inference would
+                # class a clean slo run as "did not run".
+                cur.execute(
+                    "SELECT 1 FROM slo_snapshots WHERE cycle_id = %s LIMIT 1",
+                    (cycle_id,),
+                )
+                if cur.fetchone():
+                    found.add("slo")
+                return found
     except Exception as e:  # noqa: BLE001
         # Fail CLOSED: on any error, report nothing as having run, so
         # auto-close does nothing rather than closing findings blindly.
@@ -393,6 +403,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Shared SWEEP_CYCLE_ID. Auto-generated if unset.",
     )
     parser.add_argument(
+        "--ran",
+        default=None,
+        help=(
+            "Comma-separated sections that actually ran (e.g. "
+            "doc,version,security,health,slo). Scopes auto-close. Without it the "
+            "scope is INFERRED from rows written this cycle, which cannot see a "
+            "section that ran clean and wrote nothing."
+        ),
+    )
+    parser.add_argument(
         "--reconcile-only",
         action="store_true",
         help=(
@@ -473,7 +493,19 @@ def main(argv: list[str] | None = None) -> int:
             #
             # Derive the set from what wrote findings under THIS cycle_id.
             RECONCILE_CANDIDATES = ["doc", "version", "security", "health", "slo", "media"]
-            reported = _sections_reporting_this_cycle(dsn, cycle_id)
+            if args.ran:
+                # Explicit declaration from the orchestrator. Authoritative: it is
+                # the only thing that can distinguish "ran and found nothing" from
+                # "never ran" — there is no per-section run record in the schema,
+                # and a section that ran clean may write no rows at all.
+                reported = {x.strip() for x in args.ran.split(",") if x.strip()}
+                print(f"==> auto-close scope declared by caller: {', '.join(sorted(reported))}")
+            else:
+                reported = _sections_reporting_this_cycle(dsn, cycle_id)
+                print(f"==> auto-close scope INFERRED from rows written this cycle: "
+                      f"{', '.join(sorted(reported)) or '(none)'} — pass --ran to declare it "
+                      f"explicitly; a section that ran clean can write no rows and would "
+                      f"otherwise look like it never ran")
             skipped = [x for x in RECONCILE_CANDIDATES if x not in reported]
             if skipped:
                 print(f"==> auto-close SKIPPED for section(s) that did not report "

@@ -680,6 +680,26 @@ data:
         <group>falco,homelab,suppress,</group>
       </rule>
 
+      <!-- Suppress Falco "Drop and execute new binary in container" for the
+           ESPHome firmware build. ESPHome downloads the ESP-IDF toolchain into
+           the container at RUNTIME (into /root/.cache/esphome/idf/tools/), so
+           every compiler binary is by definition not part of the base image and
+           trips rule 100404. Volume on 2026-08-14: 62 level-12 events in an
+           82-second burst on k8s-nuc14-01 — xtensa-esp-elf-/riscv32-esp-elf
+           --version x24 each, cmake x6, ninja x4, esp32ulp-elf-as x4 — all
+           `--version` capability probes at the start of one build, parent
+           `python`, cwd /config/.esphome/build/. No shell, no network tooling,
+           no persistence artifact, nothing touching credentials.
+           SCOPED DELIBERATELY to image AND exepath: suppressing by pod name or
+           namespace alone would blind a genuine drop-and-execute in the very
+           same pod, which is exactly the attack this rule exists to catch. -->
+      <rule id="100415" level="0">
+        <if_sid>100404</if_sid>
+        <field name="output" type="pcre2">container_image_repository=ghcr\.io/esphome/esphome.*proc_exepath=/root/\.cache/esphome/</field>
+        <description>Falco: ignore ESPHome ESP-IDF toolchain execution during firmware build (runtime-downloaded compilers, expected)</description>
+        <group>falco,homelab,suppress,</group>
+      </rule>
+
       <rule id="100401" level="3">
         <if_sid>100400</if_sid>
         <field name="priority" type="pcre2">^(Notice|Informational|Debug)$</field>
