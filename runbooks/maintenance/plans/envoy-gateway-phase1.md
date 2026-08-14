@@ -28,7 +28,14 @@ depends_on: [envoy-gateway-phase0]
 conflicts_with: []                  # never same window as authentik/cloudflared/
                                     # cert-manager plans (migration house rule)
 status: scheduled
-window: "sat-early:2026-08-15"      # AFTER phase0 in the same window (operator choice);
+window: null                          # 2026-08-15: the envoy chain is NO LONGER window work.
+                                      # phase2 alone is est 120m and the largest window is 90m,
+                                      # so it never fit; the 5 phases are strictly sequential,
+                                      # which shuffling cannot fix. Operator decision: run the
+                                      # migration as an ATTENDED PROJECT outside the window
+                                      # system — which is what a 5-phase ingress migration
+                                      # actually is. Do NOT schedule these into windows.
+                                      # (previous value kept in git history)
                                     # window-agent: run only if phase0 verified clean;
                                     # defer to sun-window:2026-08-16 on time overrun
 auto_execute: false

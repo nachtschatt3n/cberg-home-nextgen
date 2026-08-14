@@ -24,7 +24,14 @@ touches:
 depends_on: [envoy-gateway-phase1]  # GATED: phase1 pilots must be GO (operator review)
 conflicts_with: []                  # not with authentik/cloudflared/cert-manager plans
 status: scheduled
-window: "thu-early:2026-08-20"      # session 1 of 2; session 2 = tue-early:2026-08-25
+window: null                          # 2026-08-15: the envoy chain is NO LONGER window work.
+                                      # phase2 alone is est 120m and the largest window is 90m,
+                                      # so it never fit; the 5 phases are strictly sequential,
+                                      # which shuffling cannot fix. Operator decision: run the
+                                      # migration as an ATTENDED PROJECT outside the window
+                                      # system — which is what a 5-phase ingress migration
+                                      # actually is. Do NOT schedule these into windows.
+                                      # (previous value kept in git history)
                                     # (finish + hardening milestone). Batches that
                                     # miss simply carry to the next slot.
 auto_execute: false

@@ -22,7 +22,13 @@ touches:
 depends_on: [envoy-gateway-phase3]
 conflicts_with: []
 status: scheduled
-window: "tue-early:2026-09-01"
+window: null                          # 2026-08-15: the envoy chain is NO LONGER window work.
+                                      # phase2 alone is est 120m and the largest window is 90m,
+                                      # so it never fit; the 5 phases are strictly sequential,
+                                      # which shuffling cannot fix. Operator decision: run the
+                                      # migration as an ATTENDED PROJECT outside the window
+                                      # system — which is what a 5-phase ingress migration
+                                      # actually is. Do NOT schedule these into windows.
 auto_execute: false
 sops_refs:
   - docs/troubleshooting/ingress-migration-plan.md

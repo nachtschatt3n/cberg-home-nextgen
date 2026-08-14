@@ -21,7 +21,10 @@ touches:
 depends_on: []
 conflicts_with: []                    # but never with kube-prometheus-stack in one window
 status: draft
-window: null                          # NOT scheduled — needs operator go-ahead first
+window: null                          # APPROVED 2026-08-15 — operator chose "migrate now",
+                                      # accepting the repo swap + chart 10->12 + Grafana 12->13
+                                      # in one go. Runs as soon as the `monitoring` namespace is
+                                      # free (the cve-blindspot agent holds it tonight).
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

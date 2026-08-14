@@ -31,7 +31,14 @@ depends_on: []
 conflicts_with: []                  # do not co-schedule with cloudflared/cert-manager
                                     # plans as a general rule for this migration
 status: scheduled                   # operator-scheduled 2026-08-07
-window: "sat-early:2026-08-15"      # with app-template canary (cap-fit 6/6) + phase1 if time allows; window-agent sequences: P0 before P1, defer P1 to sun-08-16 on overrun
+window: null                          # 2026-08-15: the envoy chain is NO LONGER window work.
+                                      # phase2 alone is est 120m and the largest window is 90m,
+                                      # so it never fit; the 5 phases are strictly sequential,
+                                      # which shuffling cannot fix. Operator decision: run the
+                                      # migration as an ATTENDED PROJECT outside the window
+                                      # system — which is what a 5-phase ingress migration
+                                      # actually is. Do NOT schedule these into windows.
+                                      # (previous value kept in git history)
                                     # alongside light plans (risk weight 1)
 auto_execute: false                 # new infra component → operator go/no-go
 sops_refs:

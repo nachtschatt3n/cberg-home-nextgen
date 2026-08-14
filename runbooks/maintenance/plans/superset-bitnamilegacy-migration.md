@@ -4,7 +4,7 @@ component: superset
 pr: null                              # no upstream tag can fix this — see Summary
 kind: chart
 current: "bitnamilegacy/postgresql 14.17.0 + bitnamilegacy/redis 7.0.10 (Superset metadata DB + cache)"
-target: "off the bitnamilegacy registry entirely (CloudNativePG or official postgres; official redis/valkey)"
+target: "CloudNativePG for the metadata DB + official redis/valkey for cache"
 update_type: major                    # datastore replacement, not a version bump
 risk: high
 est_duration_min: 120
@@ -20,7 +20,9 @@ touches:
 depends_on: []
 conflicts_with: []
 status: draft
-window: null                          # needs an operator decision on target architecture
+window: null                          # DECIDED 2026-08-15 (target chosen); still needs a slot.
+                                      # Operator chose Option A: CloudNativePG. Blocked tonight
+                                      # only because mariadb-27 owns the `databases` namespace.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
@@ -76,9 +78,10 @@ kubectl exec -n databases deploy/superset-redis -- redis-cli INFO keyspace
 
 ## 3) Steps
 
-Decide the target first — this plan deliberately does not pick for you:
+**DECIDED 2026-08-15 — Option A, CloudNativePG.** The alternatives are kept below
+for context, but the target is settled; do not re-open it.
 
-- **Option A (recommended): CloudNativePG** for the metadata DB. The cluster
+- **Option A (CHOSEN): CloudNativePG** for the metadata DB. The cluster
   already runs CNPG patterns elsewhere; gives managed backups/failover and leaves
   the archived registry entirely.
 - **Option B: official `postgres:` image** via the chart's `externalDatabase`
