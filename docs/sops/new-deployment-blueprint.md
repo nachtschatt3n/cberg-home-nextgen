@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.08.09`
-> Last Updated: `2026-08-09`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `Platform`
 
 ---
@@ -649,6 +649,48 @@ annotations:
 ```
 
 This makes external-dns create a proxied CNAME pointing to `external.${SECRET_DOMAIN}` (the cloudflared tunnel entry point), consistent with all other internet-facing services in the cluster.
+
+### 12. Single-replica Deployment on an RWO volume — set the rollout strategy
+
+A `Deployment` with `replicas: 1` that mounts a **ReadWriteOnce** Longhorn PVC will
+stall on `FailedAttachVolume` / `Multi-Attach error` when it is next rolled, unless
+you set the rollout strategy. The default `RollingUpdate` at `replicas: 1` computes
+to `maxSurge: 1` (25% rounds **up**) and `maxUnavailable: 0` (25% rounds **down**),
+so it must bring a second pod to Ready before releasing the first — but the second
+pod cannot attach a volume the first still holds.
+
+It clears only when a retry happens to co-schedule the replacement onto the node
+already holding the attachment, so it presents as an intermittent, confusing stall
+rather than a clean failure.
+
+**Fix — ship one of these from day one on any new single-replica app with an RWO PVC:**
+
+```yaml
+# preferred for a NEW Deployment
+spec:
+  strategy:
+    type: Recreate
+```
+
+```yaml
+# equivalent; required when converting an EXISTING Deployment, because
+# server-side apply cannot drop the API-defaulted rollingUpdate block
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+```
+
+For chart-based apps this is a **values** change and the key differs per chart
+(`strategy` vs `updateStrategy` vs `<subchart>.updateStrategy`) — a wrong path
+silently no-ops, so verify with `helm template`, not by reading the values file.
+
+StatefulSets need nothing: they terminate before recreating. CIFS/SMB PVCs need
+nothing either (`smb.csi.k8s.io` has `attachRequired: false`).
+
+Full SOP: [`docs/sops/longhorn-rwo-multi-attach.md`](longhorn-rwo-multi-attach.md).
 
 ---
 

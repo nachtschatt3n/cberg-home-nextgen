@@ -30,8 +30,8 @@ problem.
   - **StatefulSets** — immune to the deadlock (see §2.3).
   - **CIFS/SMB PVCs** — the `smb.csi.k8s.io` driver has `attachRequired: false`, so
     no `VolumeAttachment` exists and Multi-Attach cannot occur. This is why
-    `office/nextcloud` and `office/nextcloud-notify-push` can share the RWO PVC
-    `nextcloud-data` concurrently today.
+    `office/nextcloud`, `office/nextcloud-notify-push` **and** the `nextcloud-cron`
+    Jobs can all mount the RWO PVC `nextcloud-data` concurrently today.
   - Multi-replica Deployments on RWO — a different (and always-broken) design.
 
 ---
@@ -211,8 +211,12 @@ for a plain manifest.
 | `maxSurge: 0` + `maxUnavailable: 1`, keeping `type: RollingUpdate` | **Preferred for existing Deployments.** Identical guarantee (scale down before up, volume released first); merges cleanly because it only changes values inside the struct that already exists | none — pure GitOps |
 | `type: Recreate` | New Deployments, or Helm-managed ones | on an existing plain manifest, needs a **one-time** operator-approved patch to drop the stale field (see §11) |
 
-House precedent for the first form: `databases/redisinsight`, `office/sure-web`,
-`office/sure-worker`, `databases/postgresql`.
+House precedent for the first form: `databases/redisinsight` and
+`databases/postgresql` declare it explicitly in-repo. `office/sure-web` and
+`office/sure-worker` also run with `maxSurge: 0 / maxUnavailable: 1`, but they
+**inherit it from the upstream `sure` chart default** — nothing under
+`kubernetes/apps/office/sure/` sets it, so do not grep for a declaration that is
+not there.
 
 > **Detection:** always confirm the Kustomization actually went `Ready=True` after
 > pushing — a render-correct manifest can still be rejected at apply time. See
@@ -596,11 +600,12 @@ If step 1 is skipped, the Kustomization fails dry-run and stalls its dependents.
 
 ## 12) References
 
-- `docs/sops/longhorn.md` — storage classes, static vs dynamic, speaking-name rule,
+- [`docs/sops/longhorn.md`](longhorn.md) — storage classes, static vs dynamic, speaking-name rule,
   volume lifecycle and detach/reattach procedures
-- `docs/sops/storage-safety.md` — destructive PVC operations (CIFS/SMB/NFS)
-- `docs/sops/new-deployment-blueprint.md` — default rollout SOP; new single-replica
-  apps on RWO must ship `strategy: Recreate` from day one
+- [`docs/sops/storage-safety.md`](storage-safety.md) — destructive PVC operations (CIFS/SMB/NFS)
+- [`docs/sops/new-deployment-blueprint.md`](new-deployment-blueprint.md) — default rollout SOP;
+  **Known Gotcha #12** carries this rule for new apps (single-replica + RWO must ship
+  a rollout strategy from day one)
 - `kubernetes/apps/ai/open-webui/app/helmrelease.yaml` — earliest in-repo instance of
   this pattern (pipelines block)
 - `kubernetes/apps/ai/librechat/app/helmrelease.yaml` — parent + bitnami subchart

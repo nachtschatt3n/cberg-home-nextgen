@@ -305,6 +305,7 @@ Pass criteria:
 ### 8.1 Blueprint Alignment
 - [ ] **Naming & Structure**: Verify new deployments follow `docs/sops/new-deployment-blueprint.md` (kebab-case, directory structure).
 - [ ] **Storage Classes**: Verify dynamic data uses `longhorn` and config/static data uses `longhorn-static` (see `docs/sops/longhorn.md`).
+- [ ] **RWO Rollout Strategy**: Any single-replica `Deployment` mounting a ReadWriteOnce Longhorn PVC must set `strategy.type: Recreate` (or `maxSurge: 0` / `maxUnavailable: 1`); the default `RollingUpdate` deadlocks on a Multi-Attach error. StatefulSets and CIFS-backed PVCs are exempt. Sweep in `docs/sops/longhorn-rwo-multi-attach.md` §9.
 - [ ] **Secrets**: Verify all secrets are in `*.sops.yaml` and encrypted in the repository path.
 
 ### 8.2 Inventory & Documentation
