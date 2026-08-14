@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: librechat
-      version: "2.0.2"
+      version: "2.0.7"
       sourceRef:
         kind: HelmRepository
         name: librechat
@@ -36,6 +36,14 @@ spec:
                 path: /metadata/labels/gethomepage.dev~1enabled
                 value: "true"
   values:
+    # Pin the app image explicitly. Chart 2.0.7 already defaults to appVersion
+    # v0.8.7 via `image.tag: ""` -> .Chart.AppVersion, so this is a no-op today
+    # (verified by `helm template`). It is kept as a guard: chart 2.0.8 ships
+    # appVersion v0.8.8-rc1, so a future chart bump without this pin would drag
+    # a release candidate into production.
+    image:
+      tag: "v0.8.7"
+
     global:
       librechat:
         existingSecretName: "librechat-credentials-env"
