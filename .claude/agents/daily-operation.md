@@ -246,12 +246,22 @@ needs their decision, and what got auto-fixed.
       ingest the `awaiting_go` plans + any `warnings`, then reconcile so cleared
       issues auto-close:
 
-          # one ingest per awaiting_go plan (key on plan_id), then reconcile the set
+          # one ingest per awaiting_go plan (key on plan_id), then reconcile the set.
+          # ALL maintenance plan-issues MUST use source:"maintenance" exactly — the
+          # reconcile keys on it, so any other source (e.g. "maintenance-window")
+          # strands the issue as an un-reconcilable stale reminder.
           kubectl -n ai exec deploy/openclaw -c app -- \
             /home/node/.openclaw/bin/home-operation ingest --json '<[{key:plan_id, kind:go_no_go, action:"approve,deny,defer", source:"maintenance", title, component, target, window, plan_path}, ...]>'
-          kubectl -n ai exec deploy/openclaw -c app -- \
-            /home/node/.openclaw/bin/home-operation reconcile --source maintenance \
-            --open '<open_issue_keys from maintenance-plan.py --json>'
+          # Reconcile BOTH sources (belt-and-suspenders against any stray emitter
+          # that used "maintenance-window"): the --open set is plan-file-derived
+          # (maintenance-plan.py open_issue_keys = plans whose file still exists and
+          # status not in executed/superseded), so executed+removed plans auto-close
+          # regardless of how they were executed (cron OR out-of-band interactive).
+          for src in maintenance maintenance-window; do
+            kubectl -n ai exec deploy/openclaw -c app -- \
+              /home/node/.openclaw/bin/home-operation reconcile --source "$src" \
+              --open '<open_issue_keys from maintenance-plan.py --json>'
+          done
 
       Optionally also ingest `warnings` as `kind:window_warning` awareness issues.
       If the openclaw pod is unreachable, fall back to a single
