@@ -10,6 +10,15 @@
 # Read-only on disk; only API calls. Soft-success: per-item failures log
 # at warn but the Job exits 0 — alerting belongs in a Prometheus rule on
 # the coverage metrics, not on this Job's exit code.
+#
+# REFRESH_SKIP_ART_ONLY=1 (2026-08-15): do NOT refresh items whose only
+# missing field is the backdrop/art image. Those are upstream-provider gaps
+# (TMDb `backdrop_path: None`, zero backdrops in any language) that a refresh
+# can never fill, so they were being re-refreshed every 6h forever — and each
+# Jellyfin FullRefresh rewrote `movie.nfo` on the share, endlessly recreating
+# the redundant sidecars that `media-cleanup-nfos` deletes weekly. The gap is
+# still measured + reported by `media-metadata-coverage` (backdrop_pct); this
+# only stops the futile retry loop. Set to "0" to restore the old behaviour.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -41,6 +50,8 @@ spec:
                   value: "http://jellyfin.media.svc.cluster.local:8096"
                 - name: MAX_REFRESH_PER_RUN
                   value: "200"
+                - name: REFRESH_SKIP_ART_ONLY
+                  value: "1"
                 - name: PLEX_TOKEN
                   valueFrom:
                     secretKeyRef:

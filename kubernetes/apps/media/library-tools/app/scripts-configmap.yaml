@@ -1014,6 +1014,27 @@ data:
     Tunables:
       MAX_REFRESH_PER_RUN  (default 200) — cap per-server to avoid storms
       DRY_RUN              ("1" to skip POSTs and only log what would fire)
+      REFRESH_SKIP_ART_ONLY ("1" default) — skip items whose ONLY missing
+                       field is the backdrop/art image. See below.
+
+    Why REFRESH_SKIP_ART_ONLY exists (2026-08-15):
+    A FullRefresh cannot create an image the upstream provider does not have.
+    A small tail of obscure items (documentaries, shorts) have `backdrop_path:
+    None` on TMDb with zero backdrops in any language — no amount of refreshing
+    will ever populate them. Left unfiltered, those items are re-detected as
+    "missing backdrop" on every run and re-refreshed every 6h forever. That
+    loop is not harmless: a Jellyfin FullRefresh rewrites `movie.nfo` next to
+    the media file, so it continuously regenerates the redundant `movie.nfo`
+    sidecars that `media-cleanup-nfos` then deletes weekly — the two CronJobs
+    fight each other indefinitely.
+
+    Items missing `overview`/`summary` or the primary/thumb poster are still
+    refreshed — those are genuinely fixable. Only the art-only case is skipped,
+    because it is the one that cannot be fixed by retrying. The gap stays
+    VISIBLE: `media-metadata-coverage` continues to measure and report
+    backdrop_pct, so this suppresses pointless write traffic, not the metric.
+    Per docs/sops/media-library-standards.md the repair-pass rule for art the
+    upstream simply lacks is to record it as "best available", not to retry.
     """
     import json
     import os
@@ -1025,6 +1046,18 @@ data:
     from common import log, log_event
 
     DEFAULT_CAP = 200
+
+    # Missing-field names that represent the backdrop/art image on each server.
+    # An item whose missing set is a SUBSET of these is an upstream-gap item:
+    # retrying cannot fix it. Keyed per-server because the field names differ.
+    ART_ONLY_FIELDS = {
+        "plex":     {"art"},
+        "jellyfin": {"backdrop"},
+    }
+
+    def _art_only(missing, server):
+        """True if the item is missing nothing except the backdrop/art image."""
+        return bool(missing) and set(missing) <= ART_ONLY_FIELDS[server]
 
     def _http(url, method="GET", headers=None, timeout=30):
         req = urllib.request.Request(url, headers=headers or {}, method=method)
@@ -1114,13 +1147,17 @@ data:
         jf_key     = os.environ.get("JELLYFIN_API_KEY", "")
         cap        = int(os.environ.get("MAX_REFRESH_PER_RUN", str(DEFAULT_CAP)))
         dry_run    = os.environ.get("DRY_RUN", "0") == "1"
+        skip_art   = os.environ.get("REFRESH_SKIP_ART_ONLY", "1") == "1"
 
-        plex_total = plex_fired = plex_failed = 0
+        plex_total = plex_fired = plex_failed = plex_skipped = 0
         if plex_token and plex_sids:
             for sid in plex_sids:
                 section_fired = 0
                 for rk, missing in plex_missing_in_section(plex_url, plex_token, sid):
                     plex_total += 1
+                    if skip_art and _art_only(missing, "plex"):
+                        plex_skipped += 1
+                        continue
                     if section_fired >= cap:
                         continue
                     if dry_run:
@@ -1139,15 +1176,19 @@ data:
                     time.sleep(0.05)
                 log_event("plex-refresh-section-done",
                           section=sid, fired=section_fired,
-                          missing=plex_total, dry_run=dry_run)
+                          missing=plex_total, skipped_art_only=plex_skipped,
+                          dry_run=dry_run)
         else:
             log_event("plex-refresh-skipped", severity="warn",
                       reason="missing-token-or-sections")
 
-        jf_total = jf_fired = jf_failed = 0
+        jf_total = jf_fired = jf_failed = jf_skipped = 0
         if jf_key:
             for iid, missing in jellyfin_missing(jf_url, jf_key):
                 jf_total += 1
+                if skip_art and _art_only(missing, "jellyfin"):
+                    jf_skipped += 1
+                    continue
                 if jf_fired >= cap:
                     continue
                 if dry_run:
@@ -1162,13 +1203,17 @@ data:
                 time.sleep(0.05)
             log_event("jellyfin-refresh-done",
                       missing=jf_total, fired=jf_fired,
-                      failed=jf_failed, dry_run=dry_run)
+                      failed=jf_failed, skipped_art_only=jf_skipped,
+                      dry_run=dry_run)
         else:
             log_event("jellyfin-refresh-skipped", severity="warn",
                       reason="missing-key")
 
-        log(f"Plex: fired refresh on {plex_fired}/{plex_total} (failed={plex_failed}); "
-            f"Jellyfin: fired {jf_fired}/{jf_total} (failed={jf_failed}); cap={cap} dry_run={dry_run}")
+        log(f"Plex: fired refresh on {plex_fired}/{plex_total} "
+            f"(failed={plex_failed}, skipped_art_only={plex_skipped}); "
+            f"Jellyfin: fired {jf_fired}/{jf_total} "
+            f"(failed={jf_failed}, skipped_art_only={jf_skipped}); "
+            f"cap={cap} dry_run={dry_run} skip_art_only={skip_art}")
         # Soft-success even if some refreshes failed — alerting belongs in
         # the coverage CronJob's Prometheus rule, not in this Job's exit code.
         sys.exit(0)
