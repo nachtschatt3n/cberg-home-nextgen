@@ -535,6 +535,26 @@ def main(argv: list[str] | None = None) -> int:
             prom_url = f"http://127.0.0.1:{port}"
 
         env = os.environ.copy()
+        # GHCR auth for trivy. Nine first-party ghcr.io/nachtschatt3n/* images are
+        # PRIVATE, so an unauthenticated trivy gets "UNAUTHORIZED: authentication
+        # required" and reports them UNKNOWN — four of them are on external
+        # ingresses, so that is a real blind spot, not noise. Trivy reads
+        # TRIVY_USERNAME/TRIVY_PASSWORD, so pass the gh token through when we have
+        # one. Harmless when the token lacks `read:packages`: trivy simply fails
+        # the same way it already does today (scan_ok=False → reported UNKNOWN,
+        # never silently "clean").
+        if not env.get("TRIVY_PASSWORD"):
+            _tok = env.get("GITHUB_TOKEN") or env.get("GH_TOKEN")
+            if not _tok:
+                try:
+                    _tok = subprocess.check_output(
+                        ["gh", "auth", "token"], text=True, timeout=10,
+                        stderr=subprocess.DEVNULL).strip()
+                except Exception:  # noqa: BLE001
+                    _tok = ""
+            if _tok:
+                env["TRIVY_USERNAME"] = env.get("TRIVY_USERNAME") or "nachtschatt3n"
+                env["TRIVY_PASSWORD"] = _tok
         env["SWEEP_CYCLE_ID"] = cycle_id
         env["SWEEP_TRIGGER"] = env.get("SWEEP_TRIGGER", "manual")
         if write_enabled and dsn:
