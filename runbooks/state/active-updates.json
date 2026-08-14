@@ -1,11 +1,3 @@
 {
-  "active": [
-    {
-      "app": "librechat",
-      "namespace": "ai",
-      "until": "2026-08-15T01:01:51Z",
-      "note": "librechat chart 2.0.2->2.0.7 / app v0.8.4->v0.8.7 (CVE)",
-      "started": "2026-08-14T23:01:51Z"
-    }
-  ]
+  "active": []
 }
