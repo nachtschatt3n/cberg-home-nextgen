@@ -1774,6 +1774,33 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
     f = Findings()
     lines = []
 
+    # SUSPENDED Flux objects — a suspension is INVISIBLE to every other check.
+    # `flux get` reports a suspended object as READY=True, so an app whose
+    # automation is paused looks perfectly healthy while silently receiving no
+    # updates, indefinitely. Found 2026-08-15: absenty's two ImageUpdateAutomations
+    # were suspended (correctly — its CI emits prod-pattern tags from dev-target PR
+    # builds), but nothing in the sweep would ever have surfaced that again.
+    # Same family as the other findings this month: absence of a signal read as
+    # health. This does not judge whether a suspension is right — only that a
+    # deliberate pause must stay VISIBLE rather than decaying into a forgotten one.
+    for kind in ("kustomization", "helmrelease", "imagerepository",
+                 "imagepolicy", "imageupdateautomation"):
+        out = kubectl(f"get {kind} -A -o json")
+        if not out:
+            continue
+        try:
+            items = json.loads(out).get("items", [])
+        except Exception:  # noqa: BLE001
+            continue
+        susp = [f"{i['metadata']['namespace']}/{i['metadata']['name']}"
+                for i in items if i.get("spec", {}).get("suspend")]
+        if susp:
+            f.add(WARNING,
+                  f"{len(susp)} suspended {kind}(s) — reported READY=True by Flux but "
+                  f"receiving no updates: {', '.join(susp[:6])}"
+                  + ("…" if len(susp) > 6 else ""))
+            cprint(C.YELLOW, f"  🟡 {len(susp)} suspended {kind}(s): {', '.join(susp[:6])}")
+
     checks = []
 
     # sops-age secret

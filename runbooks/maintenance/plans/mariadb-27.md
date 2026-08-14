@@ -10,7 +10,13 @@ kind: chart                         # Bitnami mariadb Helm chart (OCI)
 current: "25.1.1"                   # appVersion MariaDB 12.2.2
 target: "27.0.1"                    # appVersion MariaDB 13.0.1  (TWO chart majors)
 update_type: major
-risk: high                          # DATA. server-major 12→13 datadir migration is
+risk: low                             # RE-RATED 2026-08-15 (was high). Verified live: this
+                                      # instance holds NO user data — only `mysql` (31 tables)
+                                      # and `sys` (101 views). The high rating and the entire
+                                      # volume-restore rollback design protected data that does
+                                      # not exist. Selector-immutability and values-breakage
+                                      # risks were also retired by evidence (selectors are
+                                      # byte-identical; 0 removed keys).
                                     # ONE-WAY (no MariaDB downgrade); rollback = restore
                                     # the Longhorn volume from backup, not git revert.
 est_duration_min: 60
@@ -36,8 +42,17 @@ depends_on: []
 conflicts_with: []                  # nothing competes for the same resources; but do NOT
                                     # co-schedule a phpMyAdmin upgrade in the same window
                                     # (its only backend is this DB) — see Interference.
-status: blocked
-window: "sat-early:2026-09-12"       # MOVED 2026-08-15 off tue-early:2026-08-25 on CAPACITY,
+status: draft                         # UNBLOCKED 2026-08-15 by operator decision.
+window: "sat-early:2026-09-12"       # OPERATOR DECISION 2026-08-15: go to MariaDB 13
+                                      # DELIBERATELY, in-window — rather than pinning the digest
+                                      # or retiring the instance. Rationale: the chart renders
+                                      # `bitnami/mariadb:latest` (neither 25.1.1 nor 27.0.1 pins
+                                      # it), and that tag flipped 12.2.2 -> 13.0.1 on 2026-08-14.
+                                      # So the one-way 12->13 datadir migration is ALREADY ARMED
+                                      # and outside the chart's control: it fires on the next
+                                      # scheduling event onto a node with no cached 12.2.2
+                                      # (nuc14-03 has none). Better to take it on purpose, with
+                                      # the dump in hand, than by accident at 03:00.
                                       # not preference: this plan is est 60m and absenty-rebuild
                                       # is 45m, in a 60m window — a 105m overrun. absenty keeps
                                       # the slot (51 fixable CRITICAL, externally exposed).
