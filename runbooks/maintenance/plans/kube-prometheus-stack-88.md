@@ -46,18 +46,19 @@ status: draft                       # still DRAFT — must be finalized (vetted�
                                     # before it will execute; reslotted only (2026-08-10).
 window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
 
-cve_impact: |                         # added 2026-08-14 during CVE triage
-  This chart bump is the single highest-value CVE action open. It clears THREE
-  of the 25 open fixable-CRITICAL findings at once, all of them inside the
-  kube-prometheus-stack render:
-    - docker.io/grafana/grafana:12.3.1        9 fixable CRITICAL (-> 12.4.8 / 12.3.10)
-    - quay.io/kiwigrid/k8s-sidecar:2.5.0      2 fixable CRITICAL (-> 2.10.1)
-    - docker.io/curlimages/curl:8.9.1         2 fixable CRITICAL (-> 8.21.0)
-  = 13 criticals. The curl one is NOT the otel-ilm Job (that is already pinned
-  at 8.21.0 in git) — it is grafana's dashboard-download sidecar, which is why
-  it has no git pin of its own and only moves with this chart.
-  Target drift: plan says 88.1.2, upstream is now 88.3.0 — re-target before the
-  window. Verify the rendered grafana/sidecar/curl tags with `helm template`
+cve_impact: |                         # CORRECTED 2026-08-14 — the 2026-08-13 note was WRONG
+  A previous edit claimed this bump clears 13 CVE criticals (grafana 9,
+  k8s-sidecar 2, curl 2). IT DOES NOT. helmvalues.yaml:274 sets
+  `grafana: enabled: false` — Grafana is a SEPARATE HelmRelease
+  (monitoring/grafana, chart 10.5.15 from the grafana repo), and this plan's own
+  "Decoupled (NOT touched)" section already said so. The kps 87.17.0 -> 88.3.0
+  bump clears ZERO of those 13. The mistake came from matching images by what
+  the pod runs rather than by which release renders them.
+  Those 13 criticals belong to a SEPARATE grafana plan: pin, in the grafana
+  chart's values, image.tag 12.4.8 / sidecar.image.tag 2.10.1 /
+  downloadDashboardsImage.tag 8.21.0 (all three verified present upstream).
+  Target drift for THIS plan: it says 88.1.2, upstream head is 88.3.0 —
+  re-target before the window. Verify the rendered images with `helm template`
   before commit, and check the Deployment images afterwards (not just HR Ready).
                                     # not Sun. SOLO (alerting blind 2-5m) — 2026-08-15 sat
                                     # is taken by app-template-5.0 ⋂ envoy phase0/1, so this

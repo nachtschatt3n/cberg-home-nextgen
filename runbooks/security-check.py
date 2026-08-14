@@ -771,7 +771,12 @@ def s3_git_history() -> tuple[str, Findings, str]:
     #
     # The extra history pass only runs when there are surviving hits.
     _ident_rhs = re.compile(
-        r"(?:token|password|secret|api.?key)\s*[:=]\s*([A-Za-z_][A-Za-z0-9_]{2,})\s*[,}\)]?\s*$",
+        # Trailing delimiters: the real history line ends `{ botToken: jerryTok });`
+        # — brace, paren AND semicolon. The original `[,}\)]?` allowed at most ONE
+        # and no semicolon, so the identifier was never extracted, the declaration
+        # lookup never ran, and the false positive survived the "fix". Allow any
+        # run of closing punctuation.
+        r"(?:token|password|secret|api.?key)\s*[:=]\s*([A-Za-z_][A-Za-z0-9_]{2,})\s*[,;}\)\]]*\s*$",
         re.I,
     )
     _candidates = {m.group(1) for h in cred_hits if (m := _ident_rhs.search(h))}
@@ -845,6 +850,17 @@ _FLOATING_LINE_TAG_RE = re.compile(
 )
 
 
+# Build-variant suffixes: the part after the version that selects a build flavour
+# rather than a newer version. Kept explicit (not a catch-all "any suffix") so a
+# genuine pre-release like `0.5.1-alpha` or a patch like `1.2.3-r4` is never
+# mistaken for a variant and silently accepted.
+_IMAGE_VARIANT_SUFFIXES = {
+    "openvino", "cuda", "rocm", "armnn", "rknn",
+    "alpine", "slim", "bookworm", "bullseye", "trixie", "jammy", "noble", "focal",
+    "ubuntu", "debian", "distroless",
+}
+
+
 def _is_floating_line_tag(tag: str) -> bool:
     return bool(tag) and bool(_FLOATING_LINE_TAG_RE.match(str(tag)))
 
@@ -898,7 +914,20 @@ def _newer_upstream_tag_exists(image_ref: str):
         latest = vc.get_latest_image_tag(repo, tag)
         if not latest:
             return None  # can't determine → surface (security-safe)
-        return not vc.tags_are_equal(latest, tag)
+        if vc.tags_are_equal(latest, tag):
+            return False
+        # Variant-suffixed tags must be compared WITHIN their own variant line.
+        # `immich-machine-learning:v3.1.0-openvino` resolves latest -> `v3.1.0`,
+        # which is not string-equal, so this used to report "newer tag available"
+        # even though v3.1.0 IS the current release and no newer -openvino tag
+        # exists. (immich-server:v3.1.0 was classified correctly, which is what
+        # made the pair look inconsistent.) If the resolved latest equals our tag
+        # with its build-variant suffix stripped, we are already current for that
+        # variant; a fix needs an upstream rebuild, i.e. the AR-029 shape.
+        base, sep, variant = tag.partition("-")
+        if sep and variant.lower() in _IMAGE_VARIANT_SUFFIXES and vc.tags_are_equal(latest, base):
+            return False
+        return True
     except Exception:
         return None
 

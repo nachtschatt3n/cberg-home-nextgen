@@ -228,6 +228,33 @@ def _apply_ar_suppression(dsn: str) -> int:
         return 0
 
 
+def _sections_reporting_this_cycle(dsn: str, cycle_id: str) -> set:
+    """Sections that actually wrote at least one finding under this cycle.
+
+    Auto-close must only ever consider a section that demonstrably ran. A
+    section that reported nothing tells us nothing about its findings, so
+    closing them would be inventing a result.
+    """
+    try:
+        import psycopg
+    except ImportError:
+        return set()
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT section FROM sweep_findings WHERE cycle_id = %s",
+                    (cycle_id,),
+                )
+                return {r[0] for r in cur.fetchall() if r[0]}
+    except Exception as e:  # noqa: BLE001
+        # Fail CLOSED: on any error, report nothing as having run, so
+        # auto-close does nothing rather than closing findings blindly.
+        print(f"==> could not determine reporting sections ({type(e).__name__}: {e}) "
+              f"— auto-close disabled for this run")
+        return set()
+
+
 def _auto_close_stale_findings(
     dsn: str, cycle_id: str, sections: list[str]
 ) -> list[tuple[str, str, str]]:
@@ -431,13 +458,28 @@ def main(argv: list[str] | None = None) -> int:
             tagged = _apply_ar_suppression(dsn)
             if tagged:
                 print(f"==> AR-suppressed {tagged} finding(s) (matched accepted_risks descriptions)")
-            # Fan-out sections dispatched by daily-operation (health-check-agent,
-            # security-agent, version-check-agent, doc-agent, media-manager,
-            # slo-agent) — the set --reconcile-only is meant to cover, since it
-            # has no `completed` list of its own (no step scripts ran in THIS
-            # process; the specialists already ran as separate agents).
-            RECONCILE_SECTIONS = ["doc", "version", "security", "health", "slo", "media"]
-            closed = _auto_close_stale_findings(dsn, cycle_id, RECONCILE_SECTIONS)
+            # Auto-close scope MUST be "sections that actually reported this
+            # cycle", never a hardcoded list of sections we hope reported.
+            #
+            # 2026-08-14: this was hardcoded to all six including "media" — but
+            # sweep-run has NO media step (steps are doc/version/security/health/
+            # slo; media-manager is an agent that writes out-of-band). So every
+            # --reconcile-only run auto-closed EVERY open media finding for
+            # "not firing", including four that the media agent had just
+            # re-confirmed as still true. Absence of a report is not evidence of
+            # resolution — the same non-result-as-conclusion bug this codebase
+            # keeps hitting, here in its most damaging form because it silently
+            # marks real problems fixed.
+            #
+            # Derive the set from what wrote findings under THIS cycle_id.
+            RECONCILE_CANDIDATES = ["doc", "version", "security", "health", "slo", "media"]
+            reported = _sections_reporting_this_cycle(dsn, cycle_id)
+            skipped = [x for x in RECONCILE_CANDIDATES if x not in reported]
+            if skipped:
+                print(f"==> auto-close SKIPPED for section(s) that did not report "
+                      f"this cycle: {', '.join(skipped)} (their open findings are "
+                      f"left untouched — no report is not a resolution)")
+            closed = _auto_close_stale_findings(dsn, cycle_id, sorted(reported))
             if closed:
                 print(f"==> auto-closed {len(closed)} finding(s) that didn't fire this cycle:")
                 for fid, sec, title in closed[:20]:
