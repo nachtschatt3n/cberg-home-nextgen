@@ -491,17 +491,36 @@ Neither chart version pins the image. `helm template` of **both** 25.1.1 and
 | running `mariadb-0` | `sha256:7156c5d6…` | **12.2.2** | 2026-04-24 |
 | `bitnami/mariadb:latest` **today** | `sha256:47bdb03b…` | **13.0.1** | **2026-08-14** |
 
-`:latest` flipped to 13.0.1 **yesterday**. The pod is still on 12.2.2 only
-because it has not restarted in 12 days. Therefore **the one-way MariaDB 12→13
-datadir migration will fire on the next pod restart from ANY cause** — eviction,
-node drain, OOM, Longhorn maintenance, node reboot — with no operator present,
-onto a datadir whose `mysql_upgrade_info` marker still reads `10.11.5-MariaDB`.
+`:latest` flipped to 13.0.1 **yesterday**. `mariadb-0` has an unbroken uptime of
+12.3 days (`Uptime` 1063603s), so it has simply never re-pulled.
 
-That is a strictly worse, uncontrolled version of the event this plan exists to
-manage. **Path B (pin `image.digest`) is now the urgent action and should be
-decided ahead of the chart bump.** Confirmed `image.digest` is a valid key in
-both chart versions. The current 12.2.2 digest `sha256:7156c5d6…` is the only
-reference that can hold the server at 12.2.2 (no free versioned tag exists).
+**Correction (verified by version-check-agent — do not repeat the stronger
+claim):** this is *not* "one restart away". `imagePullPolicy: IfNotPresent` plus
+containerd's per-node tag→digest cache means an in-place restart on the current
+node keeps 12.2.2. Actual cache state (`talosctl images list`):
+
+| node | cached `bitnami/mariadb:latest` | version |
+|---|---|---|
+| **k8s-nuc14-02** (current host) | `sha256:7156c5d6…` | 12.2.2 |
+| k8s-nuc14-01 | `sha256:b02640bf…` (build 2026-02-16) | 12.2.2 |
+| **k8s-nuc14-03** | **nothing cached** | — would pull **13.0.1** |
+
+So the real triggers are a **reschedule onto nuc14-03**, containerd image GC on
+01/02, a node reimage, or any explicit re-pull. Still a live, uncontrolled
+one-way migration — **one scheduling event away**, not one restart away. Note
+also that nodes 01 and 02 hold *two different builds* of the same tag: direct
+evidence `:latest` has already rolled underneath this cluster more than once.
+
+> Caveat: `kubectl get nodes -o json` reports only 50 images per node and
+> silently truncates — it falsely shows no mariadb image cached on all three.
+> Use `talosctl images list` to check this.
+
+**Path B (pin `image.digest`) is the urgent decision and should be taken ahead
+of the chart bump.** Verified: chart 25.1.1 honours `image.digest` and drops the
+tag (`helm template --set image.digest=…` renders `…/mariadb@sha256:…`). The
+current 12.2.2 digest is the only reference that holds the server at 12.2.2 (no
+free versioned tag exists; `bitnamilegacy` tops out at 12.0.2, *below* 12.2.2,
+so legacy is not a lateral fallback either).
 
 ### 7.3 Risks the plan feared that are RETIRED by evidence
 
@@ -510,7 +529,7 @@ reference that can hold the server at 12.2.2 (no free versioned tag exists).
   (`instance/name/part-of/component`). Step 3d's `--cascade=orphan` workaround is
   not needed.
 - **Values-key breakage: none.** Diff of `helm show values` 25.1.1 → 27.0.1 =
-  **0 removed keys**, 4 added (`metrics.auth.*`). Every key this HelmRelease sets
+  **0 removed keys**, 3 added leaf keys (`metrics.auth.{existingSecret,password,username}`). Every key this HelmRelease sets
   still exists in 27.0.1.
 - **Full rendered-manifest diff = 33 lines**, entirely cosmetic (NetworkPolicy
   `podSelector` narrowed, a whitespace fix, `checksum/configuration`). Same 8
@@ -562,11 +581,31 @@ reference that can hold the server at 12.2.2 (no free versioned tag exists).
 
 1. **Decide Path B first, soon** — pin `image.digest` to the running 12.2.2
    image to disarm 7.2. Full (public) digest, for `values.image.digest`:
-   `sha256:7156c5d6865f5bcebeac4c7055898c916c445b9cba008a70ed7d608156f89d1f`. Low risk, pure GitOps, `git revert`-able. Note it does
+   `sha256:7156c5d6865f5bcebeac4c7055898c916c445b9cba008a70ed7d608156f89d1f`.
+   The pin is what preserves reversibility, and **only before a 13.0.1 ever
+   starts** — once 13.0.1 touches the datadir, removing the pin does not undo
+   the migration. Three caveats, the first of which should not be skipped:
+   - **Mirror the image in the same change.** That digest is referenced by no
+     named tag and survives only incidentally; Bitnami's free-tier posture is
+     explicitly not to retain versioned artifacts. If it is pruned, the pod
+     becomes unpullable on any node without a warm cache — converting a latent
+     upgrade risk into a hard outage. Mirror to a registry we control.
+   - The pin **freezes CVE patching** at a 2026-04-24 build → time-boxed
+     accepted risk with a review date, not an indefinite state.
+   - Renovate's `helm-values` manager will treat the digest as an update target.
+     It cannot land unattended (auto-update.py `SAFE_TYPES={patch,minor}` excludes
+     `digest`, and auto-update-policy.yaml's `*mariadb*` `max: patch` rule is
+     honoured by coverage.py too — two independent gates), but add an explicit
+     Renovate rule so the PRs do not accumulate as noise.
+2. **Recognise the structural problem.** With no versioned tags on the free tier,
+   `bitnami/mariadb` is **structurally unpinnable going forward**. Digest-pinning
+   buys a controlled window; it does not fix the posture. Durable options are the
+   official `mariadb` image under a different chart, or Bitnami Secure Images.
+   Treat the pin as step one, not the plan. Low risk, pure GitOps, `git revert`-able. Note it does
    force one StatefulSet roll, onto the identical image already running.
-2. Then re-rate this plan given 7.1 (no user data). With an empty user schema and
+3. Then re-rate this plan given 7.1 (no user data). With an empty user schema and
    the selector/values risks retired, the realistic options become *"let it go to
    13 deliberately, in-window"* or **Path C** (retire this instance entirely —
    an empty MariaDB whose only consumer is its own admin UI is a candidate for
    deletion rather than a 60-minute high-risk migration).
-3. Fix the inert `ingress:` / `service:` blocks (7.4) in a separate change.
+4. Fix the inert `ingress:` / `service:` blocks (7.4) in a separate change.
