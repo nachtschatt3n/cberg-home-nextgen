@@ -90,6 +90,7 @@
 | redisinsight | RedisInsight — Redis GUI | Internal | Databases |
 | memgraph | Memgraph — in-memory graph database (Cypher/Bolt) with Lab web UI | Internal | Databases |
 | superset | Apache Superset — data exploration and visualization (bundled PG + Redis) | Internal | Databases |
+| sweep-history | Postgres holding the operator-curated policy tables (`accepted_risks`, `slo_definitions`, `noise_suppressions`, `security_acceptances`) plus sweep findings/cycles. Edited via `runbooks/policy-cli.py`. | None | Databases |
 
 ---
 
@@ -108,6 +109,8 @@
 | otel-operator | OpenTelemetry Operator for collector management | None | — |
 | kibana | Kibana log analytics UI | Internal | Monitoring |
 | unpoller | UniFi metrics exporter for Prometheus | None | — |
+| prometheus-pushgateway | Push endpoint for metrics from short-lived jobs (CronJobs/scripts) that cannot be scraped. | None | Monitoring |
+| sweep-dashboard | Web UI over the sweep_history DB — browse operator policy (`/policies/`) and sweep findings. JSON API at `/api/policies/{accepted-risks,slos,noise,security}`. | External | Monitoring |
 
 ---
 
@@ -178,6 +181,7 @@
 | node-feature-discovery | Hardware feature detection and labeling | None | — |
 | reloader | Automatic pod restart on ConfigMap/Secret changes | None | — |
 | spegel | Distributed container image caching (P2P mirror) | None | — |
+| crash-ghost-reaper | CronJob (every 15m) clearing 'ghost' pods left behind by node-loss events, so stale objects do not mask real failures. See `docs/sops/crash-ghost-reaper.md`. | None | None |
 
 ---
 

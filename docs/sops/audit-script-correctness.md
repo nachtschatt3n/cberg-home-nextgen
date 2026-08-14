@@ -1,0 +1,235 @@
+# SOP: Audit-script correctness — never score a non-result as a result
+
+> Description: Rules for writing and reviewing the sweep's audit scripts
+> (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
+> `sweep-run.py`, the media `audit.py`), so a check that could not measure
+> something never reports it as passing — or as confirmed.
+> Version: `2026.08.14`
+> Last Updated: `2026-08-14`
+> Owner: `operator + daily-operation agents`
+
+---
+
+## 1) Description
+
+Between 2026-07-30 and 2026-08-14, **nine** defects across five audit scripts
+shared one root cause: an unmeasured, failed or absent probe was reported as a
+definite outcome. Two of them were introduced *while fixing the other seven*.
+
+The failure is not a coding slip — it is a modelling error. Audit code naturally
+has three outcomes (pass / fail / could-not-measure) but is usually written with
+two, so the third silently collapses into whichever branch the code falls through
+to. When it collapses into *pass*, real problems are hidden. When it collapses
+into *fail*, operators chase things that do not exist and stop trusting the sweep.
+
+This SOP exists because that rule lived only in commit messages.
+
+## 2) Overview
+
+**The rule: every audit function returns a tri-state. Never two.**
+
+```
+pass            — measured, and the property holds
+fail            — measured, and the property does not hold
+not-measured    — could not measure (error, timeout, missing source, empty input,
+                  auth failure, unparsable output, subset enumeration)
+```
+
+`not-measured` is **never** rendered with the wording of `pass` or `fail`. It
+gets its own wording and, for security checks, surfaces (fail-safe) — but says
+plainly that it is undetermined.
+
+### The nine instances (each one a test case for new code)
+
+| Script | What went wrong | Collapsed into |
+|---|---|---|
+| `security-check.py` | trivy scan failure treated as "clean" (`1bf8c4fe`) | pass |
+| `doc-check.py` | fuzzy match: any word >4 chars counted as documented | pass |
+| `doc-check.py` | denominator enumerated only HelmRelease apps, so raw-manifest apps could never be flagged | pass |
+| media `audit.py` | two documented thresholds never computed at all | pass |
+| media `audit.py` | `layout_pct` = nested/total, not the compliance flag | pass |
+| `health-check.sh` | `grep -c … \|\| echo "0"` → `"0\n0"`, aborting the `-gt` test | pass (guard never ran) |
+| `security-check.py` | image dedup on raw string, same image counted twice | double-fail |
+| `security-check.py` | `None` (undeterminable) newer-tag lookup worded as "newer upstream tag available" | fail |
+| `sweep-run.py` | auto-close resolved findings for sections that never ran | pass (false resolution) |
+
+## 3) Blueprints
+
+```python
+# Tri-state, explicit. None means "could not measure" — never False.
+def check_thing() -> bool | None:
+    try:
+        data = probe()
+    except Exception:
+        return None            # NOT False
+    if not data:
+        return None            # empty input is not a pass
+    return property_holds(data)
+
+verdict = check_thing()
+if verdict is None:
+    f.add(WARNING, "thing: could NOT determine (probe failed) — verify manually")
+elif verdict:
+    f.add(OK, "thing: holds")
+else:
+    f.add(CRITICAL, "thing: does not hold")
+```
+
+```bash
+# Shell: grep -c already prints 0 and exits 1 on no match.
+# WRONG — appends a second zero, breaking every later numeric test:
+COUNT=$(... | grep -c PATTERN || echo "0")
+# RIGHT:
+COUNT=$(... | grep -c PATTERN || true)
+COUNT=$(printf '%s' "${COUNT:-0}" | tr -d '\n')
+```
+
+## 4) Operational Instructions
+
+When writing or reviewing an audit check:
+
+1. **Name the denominator.** Write down the set being checked. If the enumeration
+   covers a subset (only HelmReleases, only tagged images, only the first 25
+   rows), the check may not report "0 problems" — it must report "0 problems
+   *among N of M*", and the gap must be visible.
+2. **Make `not-measured` reachable and distinct.** Every probe that can fail
+   (network, registry auth, kubectl, jq/parse, empty file) needs its own branch.
+3. **Never let a fallback fabricate data.** `|| echo 0`, `or vector(0)`,
+   `.get(x, 0)`, `2>/dev/null` without a status check — each converts "no answer"
+   into an answer.
+4. **Compute the metric the threshold names.** If the SOP says "episode NFO
+   coverage ≥80%", the code must compute episode NFO coverage — not season layout,
+   not a proxy.
+5. **Canonicalise before dedup/compare.** Registry prefixes
+   (`docker.io/library/`), variant suffixes (`-openvino`, `-alpine`), and tag
+   shapes must be normalised, or the same object is counted twice or compared
+   across lines.
+6. **Absence is not resolution.** Auto-close / auto-resolve may only act on
+   sections that demonstrably ran. Prefer an explicit declaration from the caller
+   over inferring it from written rows — a section that ran clean may write
+   nothing.
+7. **Fail-safe direction is security-dependent.** Security checks surface on
+   `not-measured`; cosmetic checks may stay quiet — but both must say which it is.
+
+## 5) Examples
+
+### Example A: registry lookup cannot resolve a tag
+
+```python
+latest = get_latest_image_tag(repo, tag)
+if not latest:
+    return None    # undeterminable → caller surfaces with "could NOT determine"
+```
+Wording matters: `"could NOT determine whether a newer upstream tag exists;
+verify upstream before planning a bump"` — not `"newer upstream tag available"`.
+
+### Example B: a check that enumerates a subset
+
+```python
+apps = find_apps()              # HelmRelease + raw-manifest (ks.yaml)
+print(f"Total apps found (HelmRelease + raw-manifest): {len(apps)}")
+```
+The label states the denominator, so "0 undocumented" cannot be misread as
+"0 undocumented apps in the cluster".
+
+## 6) Verification Tests
+
+### Test 1: the check can actually fail
+Run the new check against a known-bad fixture and confirm it reports `fail`.
+**A check that has never failed once is unverified.** This is mandatory before a
+new check ships.
+```bash
+# e.g. temporarily point the check at a bad value / empty dir / wrong tag
+# and confirm a finding is emitted
+```
+
+### Test 2: the check reports `not-measured` when the probe dies
+```bash
+# break the probe deliberately (unset creds, bad host, empty input)
+# expect: "could NOT determine" wording — NOT a pass, NOT a silent 0
+```
+
+### Test 3: zero is handled
+```bash
+X=$(echo "no match" | grep -c PATTERN || true); X=$(printf '%s' "${X:-0}" | tr -d '\n')
+[ "${X:-0}" -gt 10 ] && echo "gt" || echo "guard evaluated"   # must NOT abort
+```
+
+### Test 4: real-inventory false-positive sweep
+For any classifier that can *suppress* a finding, run it over the full live
+inventory and eyeball every match.
+```bash
+# example: the floating-tag classifier over all running images
+# 183 images scanned, 7 matched, all genuinely floating, 0 pinned tags caught
+```
+
+## 7) Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Section reports "0 problems" but you can see one | denominator excludes it (rule 1) |
+| `integer expression expected` in a shell guard | `grep -c … \|\| echo 0` (rule 3) |
+| Same item appears as two findings | missing canonicalisation (rule 5) |
+| Finding auto-resolves and reappears next cycle | auto-close acting on a section that did not run (rule 6) |
+| Operators stop believing a section | `not-measured` worded as `fail` (rule 7) |
+
+```bash
+# Quick debugging commands
+python3 -c "import ast;ast.parse(open('runbooks/security-check.py').read())"
+bash -n runbooks/health-check.sh
+python3 runbooks/doc-check.py 2>/dev/null | grep -E '🔴|🟡'
+```
+
+## 8) Diagnose Examples
+
+Embedded scripts parse individually but break at the import boundary — how the
+media audit broke on 2026-08-14 (`EPISODE_NAME_RE` added to `common.py`, never
+added to `audit.py`'s explicit import list):
+
+```bash
+# assert every capitalised name a script uses from common is actually imported
+python3 - <<'EOF'
+import yaml, re
+d=yaml.safe_load(open('kubernetes/apps/media/library-tools/app/scripts-configmap.yaml'))
+a,c = d['data']['audit.py'], d['data']['common.py']
+imported=set(re.search(r'from common import \(([^)]*)\)', a, re.S).group(1).replace(',',' ').split())
+defined={m.group(1) for m in re.finditer(r'^([A-Z_][A-Z0-9_]*)\s*=', c, re.M)}
+used=set(re.findall(r'\b([A-Z_][A-Z0-9_]{2,})\b', a))
+print("used from common but not imported:", sorted((used & defined) - imported))
+EOF
+```
+
+## 9) Health Check
+
+```bash
+# every audit script still parses, and doc-check's own assertions pass
+python3 -c "import ast;[ast.parse(open(f).read()) for f in ['runbooks/security-check.py','runbooks/sweep-run.py','runbooks/doc-check.py','runbooks/slo-check.py']]"
+bash -n runbooks/health-check.sh
+python3 runbooks/doc-check.py 2>/dev/null | tail -20
+```
+
+## 10) Security Check
+
+- A suppression/acceptance rule must **narrow on the specific evidence**, never on
+  a container name or namespace alone — that blinds the whole workload (see the
+  Falco 100415 ESPHome rule, scoped on image AND exepath).
+- Accepted-risk descriptions are substring-matched against finding text by
+  `Findings.suppress_accepted()`. Descriptions must be **short matchers**, not
+  prose, or the AR silently suppresses nothing (AR-057, 2026-08-14). Put the
+  reasoning in `justification`.
+- Do not AR-suppress a false positive. Fix the audit logic; the AR register is
+  for risks that are real and accepted.
+
+## 11) Rollback Plan
+
+Audit scripts are read-only, so a bad change costs signal quality, not cluster
+state. Revert the commit and re-run the section:
+
+```bash
+git revert --no-edit <sha> && git push
+python3 runbooks/sweep-run.py <section> --no-write     # smoke test, no DB write
+```
+
+If a bad classifier already auto-closed findings, reopen them (set
+`resolved_at = NULL, status = 'open'`) — findings are data, and a wrong
+resolution is a data error, not just a display bug.
