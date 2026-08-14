@@ -25,7 +25,8 @@ touches:
 depends_on: []
 conflicts_with: []
 status: draft
-window: null                          # operator-present preferred; externally exposed
+window: "tue-early:2026-08-18"       # assigned 2026-08-14; operator-present (externally
+                                      # exposed + MongoDB behind it). Small, fits a 60m slot.
 auto_execute: false                   # data store (MongoDB) + external exposure
 sops_refs:
   - docs/sops/application-update.md

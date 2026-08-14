@@ -37,7 +37,8 @@ conflicts_with: []                  # nothing competes for the same resources; b
                                     # co-schedule a phpMyAdmin upgrade in the same window
                                     # (its only backend is this DB) — see Interference.
 status: draft
-window: "tue-early:2026-08-11"      # no-reboot ⇒ weekday. SOLO (data/one-way
+window: "tue-early:2026-08-25"       # RESLOTTED 2026-08-14 — the tue-early:2026-08-11
+                                      # window was MISSED (plan never executed, still draft).
                                     # migration); do NOT co-schedule phpMyAdmin.
 auto_execute: false                 # high + data + one-way migration → operator go/no-go always
 sops_refs:

@@ -42,7 +42,13 @@ conflicts_with:
   - authentik-2026.5.6             # auth is on the ingress/SSO path many of these apps use
   - reloader-v2                     # cluster-wide controller change; keep high-risk plans serialized
 status: draft
-window: "sat-early:2026-08-15"      # CANARY tier. needs_reboot:false ⇒ run tiers 2×/
+window: "sat-early:2026-08-29"       # MOVED 2026-08-14 off sat-early:2026-08-15 to resolve a
+                                      # three-way interference: it shares `network` with
+                                      # envoy-gateway-phase0 and `default`+`network` with
+                                      # phase1, which also overlap each other. The EG phases
+                                      # have their own documented ordering (P0 then P1); this
+                                      # plan touches ~47 HelmReleases and deserves a clean
+                                      # solo window rather than competing for one.
                                     # week across Sat+Sun (both operator-present, no
                                     # reboot competes): canary Sat 08-15 → tier1 Sun
                                     # 08-16 → tier2 Sat 08-22 → tier3 Sun 08-23 →
