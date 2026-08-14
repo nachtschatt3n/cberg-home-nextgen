@@ -75,8 +75,8 @@ cat kubernetes/apps/my-software-development/absenty/app/image-automation.yaml
    With 51 criticals, expect the base to be the dominant contributor — check that
    first rather than chasing individual dependencies.
 2. Rebuild and push. **Verify the published image's build date changed** — a
-   merged PR does not rebuild a semver-tagged image (the recurring trap; same as
-   `harness-home-rebuild`).
+   merged PR does not rebuild a semver-tagged image (the recurring trap; see
+   `docs/sops/self-built-image-rebuild.md`).
 3. Roll **development first**, verify (§4), then production. They are separate
    HelmReleases in separate namespaces, so they can and should be staged.
 4. If Flux image-automation picks the tag up on its own, confirm it actually did
