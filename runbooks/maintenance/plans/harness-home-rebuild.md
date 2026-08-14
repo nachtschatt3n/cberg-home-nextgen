@@ -3,7 +3,7 @@ plan_id: harness-home-rebuild
 component: ha-ai-harness
 pr: null                              # self-owned image; nothing upstream to bump to
 kind: image
-current: "ghcr.io/nachtschatt3n/harness-home-{server,frontend}:0.5.1-alpha"
+current: "harness-home-server 3 crit + harness-home-frontend 5 crit (both 0.5.1-alpha)"
 target: "same version, REBUILT on a current base (or a new tagged release)"
 update_type: patch
 risk: low
@@ -30,8 +30,10 @@ generated: "2026-08-15"
 
 ## 1) Summary & why held
 
-`ghcr.io/nachtschatt3n/harness-home-server:0.5.1-alpha` carries **3 fixable
-CRITICAL** CVEs. Unlike every other CVE in the register there is **no upstream to
+`harness-home-server:0.5.1-alpha` carries **3 fixable CRITICAL** and
+`harness-home-frontend:0.5.1-alpha` carries **5** — measured 2026-08-15, once the
+GHCR read:packages token made these private images scannable at all. Both figures
+were UNKNOWN when this plan was first written. Unlike every other CVE in the register there is **no upstream to
 bump to** — we build this image. The fix is a rebuild on a current base, in
 `/Users/mu/code/ha-ai-harrnes` (note the repo directory's spelling), then a tag
 or digest move here.
