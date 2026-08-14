@@ -44,6 +44,28 @@ spec:
     image:
       tag: "v0.8.7"
 
+    # Recreate (not RollingUpdate): librechat-librechat mounts the RWO PVC
+    # `librechat-librechat-images`, so the chart default RollingUpdate
+    # (maxSurge 25% with replicaCount 1 -> surges a 2nd pod) deadlocks on a
+    # Multi-Attach error — the new pod waits for a volume the old pod holds,
+    # and the old pod won't terminate until the new one is Ready. Observed on
+    # the 2.0.2 -> 2.0.7 upgrade (2026-08-15): the rollout hung ~10m and only
+    # recovered because upgrade.remediation retried after the old pod was
+    # finally torn down. Recreate tears the old pod down FIRST, making the
+    # rollout deterministic instead of timeout-dependent.
+    #
+    # Same class of bug as the open-webui pipelines block, but NOTE the values
+    # path differs: this chart exposes `updateStrategy` (templates/deployment.yaml
+    # renders `.Values.updateStrategy` into spec.strategy), NOT `strategy` as
+    # bjw-s/open-webui does. Verified by `helm template` against chart 2.0.7 —
+    # `strategy.type` here would silently no-op.
+    #
+    # Trade-off: Recreate means a brief gap (single replica, no surge) on every
+    # librechat rollout. That is inherent to a RWO volume and is preferable to a
+    # 15m deadlock.
+    updateStrategy:
+      type: Recreate
+
     global:
       librechat:
         existingSecretName: "librechat-credentials-env"
