@@ -21,7 +21,10 @@ touches:
 depends_on: []
 conflicts_with: []                    # but do NOT co-schedule with any data-store plan
 status: draft
-window: "sat-early:2026-08-22"        # co-scheduled with kube-prometheus-stack-88 (different
+window: "sat-early:2026-09-05"       # MOVED 2026-08-14: sat-early:2026-08-22 collided with
+                                      # kube-prometheus-stack-88 on `storage` (kps moves its
+                                      # Prometheus PVCs). Longhorn carries EVERY stateful app,
+                                      # so it gets a solo window rather than a "should be fine".
                                       # namespace, no shared resource); 90m slot, cap 6
 auto_execute: false                   # storage engine upgrade — never unattended
 sops_refs:

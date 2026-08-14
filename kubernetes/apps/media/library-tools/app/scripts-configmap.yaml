@@ -341,7 +341,7 @@ data:
     from xml.etree import ElementTree as ET
     sys.path.insert(0, "/app")
     from common import (
-        SECTIONS, MEDIA_ROOT, EP_RE, YEAR_RE, YT_ID_RE,
+        SECTIONS, MEDIA_ROOT, EP_RE, YEAR_RE, YT_ID_RE, EPISODE_NAME_RE,
         log, log_event, anon_path, image_dims,
     )
 
