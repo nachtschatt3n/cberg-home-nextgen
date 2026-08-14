@@ -140,10 +140,16 @@ A rebuild would have been discarded the same way: a fresh sha has ~0.2%
 chance of sorting above `ffa072a`. **Fixing the Dockerfile alone would have
 achieved nothing.**
 
-Armed, it was also a live hazard: PR builds push a plain `sha-<merge-sha>`
-tag matching the prod pattern `^sha-[0-9a-f]+$`, so any PR whose merge sha
-sorted high would have deployed a **dev-target** image (Rails in development
-mode, host authorization disabled) into externally-exposed production.
+Armed, it was also a live hazard: the older of the two active workflows tags
+dev-target PR builds with the same tag shape the production policy accepts,
+so an unreviewed PR build could be selected for production. Verified impact
+(corrected 2026-08-15): the HelmRelease sets `RAILS_ENV`/`RACK_ENV` in the
+pod spec, so such an image would NOT have run in development mode - an
+earlier note in this plan and in commit 224ec52f overstated that. The real
+exposure is unreviewed branch code on an externally-exposed ingress, with
+dev/test gems present and the production boot sequence skipped (the
+dev-target image's CMD omits `db:prepare` + puma). Requires push/PR rights
+on the private repo, so insider/compromised-account, not anonymous.
 
 ### Done
 
