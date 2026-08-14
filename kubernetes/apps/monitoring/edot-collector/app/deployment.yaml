@@ -23,7 +23,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: edot-collector
-          image: otel/opentelemetry-collector-contrib:0.147.0
+          image: otel/opentelemetry-collector-contrib:0.158.0
           args:
             - --config=/config/otel.yml
           ports:
