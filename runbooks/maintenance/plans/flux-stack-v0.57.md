@@ -52,18 +52,26 @@ conflicts_with:
                                     # reboot is unacceptable. (talos-v1.13.7 is targeted
                                     # sun-window:2026-08-02 — put this in a DIFFERENT
                                     # sun window, or run it first + fully verified.)
-status: scheduled                 # operator APPROVED 2026-08-10 ("go"). Was awaiting-go
-                                    # after the 2026-08-09 sun-window deferred it (unattended
-                                    # cron, high-risk). Reslotted to sun-window 2026-08-23 —
-                                    # the next operator-present sun-window; 2026-08-16 is
-                                    # skipped because it holds talos-v1.13.8 (node reboot) and
-                                    # this conflicts_with a reboot (no control-plane upgrade
-                                    # alongside a node reboot).
-window: "sun-window:2026-08-23"
-                                    # operator-present, reboot-capable slot (sun-window)
-                                    # ONLY — never the unattended tue/thu 05:00 slots.
-                                    # This plan must run FIRST + Ready-verified before
-                                    # any other plan shares its window (see §6).
+status: executed                    # ALREADY EXECUTED 2026-08-11 — corrected during the
+                                    # 2026-08-15 vetting pass, which found this plan still
+                                    # holding a future window for work that had already landed.
+                                    # Evidence (verified live 2026-08-15):
+                                    #   commit 7ec7ad0c "feat(flux): upgrade operator
+                                    #     0.14.0->0.57.0 + distribution v2.5.0->v2.9.3"
+                                    #   commit 75ec407b "restore self-rollback guard
+                                    #     (retries:3) post-upgrade [plan 3e]"  ← this plan's §3e
+                                    #   kubectl -n flux-system get hr flux-operator/flux-instance
+                                    #     -> chart 0.57.0, Ready=True (both)
+                                    #   kubectl -n flux-system get fluxinstance
+                                    #     -> spec.distribution.version v2.9.3, status v2.9.3
+                                    # i.e. current/target of this plan are now IDENTICAL.
+                                    # Leaving it `scheduled` would have re-run a high-risk
+                                    # no-op against the live control plane on 2026-08-23.
+                                    # Per the transient-plan convention this file should be
+                                    # DELETED; not deleted here because a vetting pass does not
+                                    # retire plans — operator to confirm, then remove.
+window: null                        # cleared — the 2026-08-23 sun-window is now free.
+                                    # (Was "sun-window:2026-08-23".)
 auto_execute: false                 # risk:high → always operator go/no-go
 sops_refs:
   - docs/sops/application-update.md

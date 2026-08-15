@@ -38,10 +38,19 @@ touches:
 depends_on: []
 conflicts_with:
   - flux-stack-v0.57                # helm-controller bump changes the Helm SDK that RENDERS these charts — never in the same window as a mass chart migration
-  - talos-v1.13.7                   # reboot window; do not stack a 59-workload churn on top of node drains
+  - talos-v1.13.8                   # reboot window; do not stack a mass workload churn on top of node drains.
+                                    # 2026-08-15 vetting: was `talos-v1.13.7`, a plan_id that no longer
+                                    # exists (that upgrade executed; its file was retired). A conflicts_with
+                                    # pointing at a non-existent plan is silently UNENFORCED, so this guard
+                                    # was dead. Repointed at the live successor plan.
+  # DEAD REFS (2026-08-15 vetting) — no such plan files exist, so these two guards
+  # are unenforced. Left in place rather than deleted because they record real
+  # interference surfaces; re-point or drop them in the rewrite (see STALENESS note):
   - authentik-2026.5.6             # auth is on the ingress/SSO path many of these apps use
   - reloader-v2                     # cluster-wide controller change; keep high-risk plans serialized
-status: draft
+status: draft                       # STAYS DRAFT — 2026-08-15 vetting: inventory has DRIFTED out
+                                    # from under the batch table. NEEDS A SUBSTANTIVE REWRITE, not
+                                    # a note. See the "2026-08-15 vetting" block below §Scope.
 window: "sat-early:2026-08-29"       # MOVED 2026-08-14 off sat-early:2026-08-15 to resolve a
                                       # three-way interference: it shares `network` with
                                       # envoy-gateway-phase0 and `default`+`network` with
@@ -78,6 +87,58 @@ version bump.
 **In scope:** the 59 wrappers pinned at `version: 3.7.3` (full batch table in
 §3). **Out of scope:** `home-automation/iobroker` is on `2.4.0` (an even older
 major) and is NOT tracked to 5.0.0 here — leave it, plan it separately.
+
+> ### ⚠️ STALENESS — 2026-08-15 vetting pass: DO NOT EXECUTE THIS PLAN AS WRITTEN
+>
+> This plan was authored 2026-08-02 against a **59-wrapper** inventory. Live
+> inventory on 2026-08-15 is **62 HelmReleases at `app-template` 3.7.3** across
+> the same 11 namespaces (60 distinct names; `absenty` and `andreamosteller`
+> each appear in two namespaces). The batch table in §3 is therefore incomplete,
+> and a tier-by-tier execution would silently leave wrappers behind at 3.7.3.
+>
+> Reproduce:
+> ```bash
+> kubectl get helmrelease -A -o json | python3 -c "import sys,json; d=json.load(sys.stdin); \
+>   print(sum(1 for i in d['items'] if i['spec'].get('chart',{}).get('spec',{}).get('chart')=='app-template' \
+>   and i['spec']['chart']['spec']['version']=='3.7.3'))"
+> ```
+>
+> **Named nowhere in this plan (must be added to a tier before it runs):**
+>
+> | wrapper | ns | why it is missing |
+> |---|---|---|
+> | `immich-server` | media | deployed 2026-08-08, after this plan was written |
+> | `immich-machine-learning` | media | same |
+> | `immich-postgres` | media | same — **stateful, belongs in tier 3**, not tier 1 |
+> | `immich-redis` | media | same |
+> | `icloud-docker-andrea` | backup | tier 1 names only `icloud-docker-mu`; both exist |
+>
+> **Also wrong in the table:** tier 2 names **`scrypted-nvr`**; the live
+> HelmRelease is **`scrypted`** (`home-automation`). A copy-paste execution
+> targets a non-existent release.
+>
+> **Also gone:** the `langfuse` stack was removed in `8714dbd1`, so the 59→62
+> delta is +4 immich, +1 (already-present but unnamed) icloud-docker-andrea,
+> −1 langfuse, against a base that was itself approximate.
+>
+> **New interference not known at authoring time — `absenty` image automation.**
+> `absenty` (tier 1, ×2 namespaces) had its Flux `ImageUpdateAutomation`
+> **unsuspended** on 2026-08-15 and its ImagePolicy pattern changed to
+> `<branch>-<ts14>` + `numerical`. Both automations are live and currently
+> writing a new tag roughly every 20–30 minutes:
+> ```
+> my-software-development/absenty-image-updates  suspend=false
+> my-software-production/absenty-image-updates   suspend=false
+> ```
+> They commit into the **same `helmrelease.yaml` files** this plan edits, so a
+> tier-1 batch races the automation for the working tree and can land a
+> half-applied chart bump or a push conflict mid-window. **Suspend both
+> automations for the duration of the tier that touches `absenty`, and unsuspend
+> them in the same window** — that step does not exist in §3 today.
+>
+> Rewrite required: regenerate the §3 batch table from live inventory, fix
+> `scrypted`, tier the immich group (with `immich-postgres` treated as stateful),
+> and add the absenty automation suspend/unsuspend step. A note cannot carry this.
 
 ### The breaking changes (upstream `common-4.0.0` + `common-5.0.0` changelogs)
 

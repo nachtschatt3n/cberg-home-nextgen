@@ -42,8 +42,21 @@ touches:
 depends_on: []
 conflicts_with: []                  # no hard resource conflict, but see Interference notes:
                                     # run FIRST/solo — its rollout briefly blinds cluster-wide alerting
-status: draft                       # still DRAFT — must be finalized (vetted→scheduled)
-                                    # before it will execute; reslotted only (2026-08-10).
+status: draft                       # STAYS DRAFT — 2026-08-15 vetting pass.
+                                    # NOT VETTABLE: `target:` above says 88.3.0, but the ENTIRE
+                                    # body below — §1 title, the pre-check, the manifest edit
+                                    # (`version: 88.0.1`), the commit message, the update-marker,
+                                    # the Alertmanager silence comment and every verification
+                                    # assertion — still says 88.0.1. An executor copy-pasting §3
+                                    # lands 88.0.1 while the frontmatter, the reconciler and the
+                                    # go/no-go card all say 88.3.0. Those are different upgrades.
+                                    # The 88.0.1 → 88.3.0 delta (three minor releases of
+                                    # prometheus-operator, incl. CRD schema changes) is ALSO
+                                    # entirely unanalysed — the §1 breaking-change table covers
+                                    # only 88.0.0/88.0.1.
+                                    # This needs a SUBSTANTIVE REWRITE (re-do the analysis at the
+                                    # chosen target, then make body and frontmatter agree), not a
+                                    # note. Deliberately not half-rewritten here.
 window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
 
 cve_impact: |                         # CORRECTED 2026-08-14 — the 2026-08-13 note was WRONG

@@ -17,7 +17,26 @@ touches:
   shared: []                           # writes NOTHING to the media share in this stage
 depends_on: []
 conflicts_with: []
-status: draft
+status: vetted                        # VETTED 2026-08-15. Premises re-verified live against the
+                                      # library-tools ConfigMap and a fresh audit run:
+                                      #  - `episode_sidecar.py` does NOT exist; ConfigMap keys are
+                                      #    common/audit/rescan/cleanup/organize/sidecar/
+                                      #    metadata_coverage/cleanup_nfos/per_item_refresh/
+                                      #    plex_fs_classifier .py — confirmed.
+                                      #  - No equivalent writer exists: zero occurrences of
+                                      #    `episodedetails` or any per-season TMDb call in the
+                                      #    ConfigMap. Existing `sidecar.py` writes exactly one file
+                                      #    (tvshow.nfo for shows) — the "writes zero episode NFOs"
+                                      #    premise HOLDS.
+                                      #  - The cited unlink trap in sidecar.py is REAL. Line drift
+                                      #    only: plan cites :805, it is now :803-806
+                                      #    (kubernetes/apps/media/library-tools/app/scripts-configmap.yaml).
+                                      #    Two accuracy nuances for the implementer: the unlink is
+                                      #    `item_path.iterdir()` i.e. NON-recursive (it cannot reach
+                                      #    episode NFOs inside `Season XX/`, only the show root), and
+                                      #    it is followed by a tvshow.nfo rewrite — so the
+                                      #    destructive outcome materialises on a failed/wrong TMDb
+                                      #    match that exits before the write.
 window: null                          # DELIBERATE — see §6. This is attended development work,
                                       # not a maintenance-window operation. It must LAND before
                                       # media-episode-canary's window (tue-early:2026-09-15).
