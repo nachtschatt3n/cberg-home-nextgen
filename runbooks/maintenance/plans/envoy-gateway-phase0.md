@@ -89,6 +89,28 @@ watching HTTPRoute (per-app DNS flips automatically)". That assumption is false
 at the versions we run, and it fails in the worst possible direction: not
 "HTTPRoutes are invisible to DNS" but "all internal DNS stops".
 
+### The failure is LATENT — this is the dangerous part
+
+The CRDs went in at 14:33Z and internal DNS kept working perfectly until
+14:46Z. It only broke when the k8s-gateway **pod restarted** (my ecosystem-prep
+change happened to restart it). The running pod had established its informers
+*before* the CRDs existed, so it never tried the v1alpha2 types; a pod that
+*starts* with the CRDs present fails immediately and permanently.
+
+Measured: at 14:45Z, with all 16 Gateway API/EG CRDs installed and both
+gateways programmed, every internal host still resolved correctly.
+
+**Consequence: phase 0 exactly as written would have passed every verification
+test in this plan and left a cluster-wide internal-DNS time bomb** armed to go
+off at the next k8s-gateway pod restart — a node reboot, an eviction, a
+descheduler move, a chart bump, anything, quite possibly days later and with no
+apparent connection to the gateway work. The only reason it surfaced during
+execution is that step 3 (`watchedResources`) restarted the pod while I was
+still watching.
+
+Any re-attempt must therefore **explicitly restart k8s-gateway and re-verify
+DNS** as a gate, rather than trusting that DNS still works after the CRDs land.
+
 ### Operator decision needed before re-attempting
 
 Pick the internal split-horizon DNS story first, then redo phase 0:

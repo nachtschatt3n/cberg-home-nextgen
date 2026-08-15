@@ -141,6 +141,15 @@ EG-specific problem: a Traefik *Gateway API* fallback would hit it too, while
 Traefik in *Ingress* mode would not. Resolve internal DNS first; options are
 listed in the plan file.
 
+**The failure is latent.** The CRDs were installed at 14:33Z and DNS kept
+working until 14:46Z, because the running k8s-gateway pod had established its
+informers before the CRDs existed. It broke only when that pod restarted. So
+phase 0 as written would have **passed all its verification tests** and left a
+cluster-wide DNS time bomb armed for the next k8s-gateway restart — node
+reboot, eviction, chart bump — likely days later with no obvious link to the
+gateway work. Any re-attempt must restart k8s-gateway and re-verify DNS as an
+explicit gate.
+
 ### Everything else verified fine, and still applies on re-attempt
 
 - **CRDs are VENDORED, not Helm-installed.** `gateway-crds-helm` carries both
