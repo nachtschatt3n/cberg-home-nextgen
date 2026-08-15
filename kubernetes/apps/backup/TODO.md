@@ -1,28 +1,32 @@
 # Apple account backup — coverage index
 
-Status of every iCloud data type, and where the open work lives.
-Decisions recorded 2026-08-08. Update this table when anything ships.
+Status of every iCloud data type. **Scope is FINAL (operator decision
+2026-08-15): Drive + Photos only, both Apple IDs.** Nothing else will be
+built — do not resurface the closed rows as open work. The mechanism notes
+are kept so the research doesn't have to be redone if the decision is ever
+revisited.
 
 `icloud-docker` supports exactly three config sections — `app`, `drive`,
-`photos`. Everything below the first two rows therefore needs a *different*
-mechanism, not more config. The `icloudpy` 0.9.0 library underneath does ship
-working `contacts`/`calendar`/`reminders` services, but they return raw JSON
-(not vCard/iCal) and icloud-docker never calls them — not a viable shortcut.
+`photos`. Everything below the first two rows would therefore have needed a
+*different* mechanism, not more config. The `icloudpy` 0.9.0 library
+underneath does ship working `contacts`/`calendar`/`reminders` services, but
+they return raw JSON (not vCard/iCal) and icloud-docker never calls them —
+not a viable shortcut.
 
-| Data | Status | Mechanism | Where |
-|---|---|---|---|
-| iCloud Drive | ✅ live | `icloud-docker-*` `drive:` | `icloud-docker-mu/`, `icloud-docker-andrea/` |
-| Photos | ✅ live | `icloud-docker-*` `photos:` | same |
-| Health | ✅ live — **excluded from further work** | Health Auto Export (iOS) → iCloud Drive → picked up by `drive:` | see below |
-| Contacts | 📋 todo | CardDAV + vdirsyncer | [`icloud-dav-backup/TODO.md`](icloud-dav-backup/TODO.md) |
-| Calendars | 📋 todo | CalDAV + vdirsyncer | same |
-| Mail | 📋 todo | IMAP + app-specific password | [`icloud-mail-backup/TODO.md`](icloud-mail-backup/TODO.md) |
-| Messages | 🔬 research | local macOS `chat.db` on the Mac mini | [`mac-mini-local-backup/TODO.md`](mac-mini-local-backup/TODO.md) |
-| Voice Memos | 🔬 research | local macOS container on the Mac mini | same |
-| Reminders | ⏸️ deferred | CalDAV VTODO — Apple's tasklist support is quirky, upstream warns | — |
-| Notes | ⏸️ deferred | `pyicloud` ≥2.6 CloudKit `NotesService` — young code, no field reports | — |
-| Keychain (stored logins) | ❌ not needed | **we use Bitwarden** | — |
-| Safari bookmarks / history | ❌ not needed | — | — |
+| Data | Status | Mechanism (kept for reference) |
+|---|---|---|
+| iCloud Drive | ✅ live | `icloud-docker-{mu,andrea}` `drive:` |
+| Photos | ✅ live | `icloud-docker-{mu,andrea}` `photos:` |
+| Health | ✅ live (mu, device-side — see below) | Health Auto Export (iOS) → iCloud Drive → picked up by `drive:` |
+| Contacts | ❌ closed 2026-08-15 | would be CardDAV `contacts.icloud.com` + vdirsyncer, app-specific password, mirror + dated snapshots (mirror alone propagates deletions); survives ADP |
+| Calendars | ❌ closed 2026-08-15 | would be CalDAV `caldav.icloud.com` + vdirsyncer, same shape as Contacts |
+| Mail | ❌ closed 2026-08-15 | would be IMAP `imap.mail.me.com:993` + app-specific password + `mbsync` Maildir; open question was whether the accounts even have an `@icloud.com` mailbox (both Apple IDs are third-party addresses) and overlap with Nextcloud Mail |
+| Messages | ❌ closed 2026-08-15 | no server-side path (E2EE); only route is local `chat.db` on a signed-in Mac |
+| Voice Memos | ❌ closed 2026-08-15 | no server-side path; local macOS group container on a signed-in Mac |
+| Reminders | ❌ closed 2026-08-15 | CalDAV VTODO — Apple's tasklist support is quirky, upstream warns |
+| Notes | ❌ closed 2026-08-15 | `pyicloud` ≥2.6 CloudKit `NotesService` — young code, no field reports |
+| Keychain (stored logins) | ❌ not needed | **we use Bitwarden** |
+| Safari bookmarks / history | ❌ not needed | — |
 
 ## Health — why it's excluded
 
@@ -64,8 +68,9 @@ since 2023, will not be fixed).
   E2EE for interoperability with the global mail/contacts/calendar systems.
 - **Impossible either way:** Health, Keychain, Messages.
 
-So the CardDAV/CalDAV/IMAP work below is the ADP-proof part of the backup
-surface. Check ADP state before adding any account to `icloud-docker`.
+With the 2026-08-15 scope decision, the entire live backup surface
+(Drive/Photos) depends on ADP staying off. Check ADP state before adding any
+account to `icloud-docker`.
 
 ## References
 
