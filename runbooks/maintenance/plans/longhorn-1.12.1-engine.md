@@ -145,7 +145,7 @@ per `docs/sops/backup.md`. This is why pre-check (c) is mandatory.
 
 - **`shared: [storage]` is load-bearing.** Every stateful app in the cluster
   rides Longhorn. Do not co-schedule with ANY plan that touches a data store
-  (mariadb-27, kube-prometheus-stack's Prometheus PVCs during a chart move, or
+  (kube-prometheus-stack's Prometheus PVCs during a chart move, or
   a Talos reboot window). The sat-early:2026-08-22 slot pairs it with
   kube-prometheus-stack-88, which is a different namespace — acceptable only if
   the kps plan does not move its PVCs; the window agent must confirm that before

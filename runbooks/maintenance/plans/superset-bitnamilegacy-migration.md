@@ -15,7 +15,7 @@ touches:
     - "see the individual stage plans — this file executes nothing"
   shared: []
 depends_on: []
-conflicts_with: [mariadb-27, longhorn-1.12.1-engine]
+conflicts_with: [longhorn-1.12.1-engine]
 status: superseded                    # INDEX ONLY — split into 4 stage plans on 2026-08-15
 window: null                          # never schedule this file; schedule the stages
 auto_execute: false

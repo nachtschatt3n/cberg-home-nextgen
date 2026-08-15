@@ -20,7 +20,7 @@ touches:
     - deployment/superset-celerybeat   # Celery broker moves — restarts
   shared: []                           # Superset's OWN cache; the shared databases/redis is untouched
 depends_on: []
-conflicts_with: [mariadb-27]
+conflicts_with: []
 status: draft
 window: "thu-early:2026-08-20"
 auto_execute: false
@@ -260,9 +260,6 @@ If Helm wedges `pending-upgrade`, clear it per `docs/sops/application-update.md`
   `superset-pg-decommission` (stage 4) verifies that **no** `bitnamilegacy` image
   remains in the namespace. Running the Postgres stages first is fine; running
   stage 4 before this one just means that assertion fails.
-- **`conflicts_with: mariadb-27`** — that plan (`sat-early:2026-09-19`) also works
-  in `databases`. Not a technical conflict (different app, different datastore) but
-  co-scheduling makes a namespace-level problem un-attributable.
 - **Do not co-schedule with a Superset chart bump.** The chart is held (AR-050
   class) and per `project_superset_chart_020_redis_auth` its immutable Deployment
   selectors require a delete-recreate on any chart up/down bump. This stage keeps

@@ -18,7 +18,7 @@ touches:
     - "longhorn:volume/superset-postgresql-data"   # kept + final backup
   shared: []
 depends_on: [superset-pg-cutover]
-conflicts_with: [mariadb-27]
+conflicts_with: []
 status: draft
 window: "tue-early:2026-09-22"
 auto_execute: false
@@ -233,7 +233,6 @@ share-wipe failure mode does not apply, but the data is still gone.
   the window agent must treat `depends_on` as hard.
 - **This stage removes the cheap rollback for the cutover.** That is its cost and the
   reason for the 10-day gap. Do not compress it into the cutover window.
-- **`conflicts_with: mariadb-27`** — same namespace; keep failures attributable.
 - The `databases` namespace still hosts other `bitnamilegacy` users
   (`nextcloud-mariadb`, `paperless-ngx-mariadb`, and two unpinned
   `bitnamilegacy/{redis,mariadb}:latest` floating tags under `office/`). They are

@@ -17,7 +17,7 @@ touches:
     - "read-only: superset-postgresql (pg_dump source)"
   shared: [storage]                    # creates a new Longhorn static volume (2 replicas)
 depends_on: []
-conflicts_with: [mariadb-27, longhorn-1.12.1-engine]
+conflicts_with: [longhorn-1.12.1-engine]
 status: draft
 window: "thu-early:2026-09-03"
 auto_execute: false
@@ -265,7 +265,6 @@ Confirmed back = only the original superset pods, `/health` 200, old PVC untouch
   creates a new Longhorn volume and depends on healthy replica scheduling. Do not run
   storage-engine work and new-volume creation in the same window. The assigned window
   (2026-09-03) is deliberately *before* it, fully settled.
-- **`conflicts_with: mariadb-27`** — same `databases` namespace; keep failures attributable.
 - `shared: [storage]` is set because this stage allocates a 2-replica Longhorn volume.
   It perturbs no other app's storage, but the window agent should not pair it with
   another storage-touching plan.

@@ -20,7 +20,7 @@ touches:
     - "superset-postgresql (old, left RUNNING — it is the rollback)"
   shared: []
 depends_on: [superset-pg-standup]
-conflicts_with: [mariadb-27, longhorn-1.12.1-engine]
+conflicts_with: [longhorn-1.12.1-engine]
 status: draft
 window: "sat-early:2026-09-12"
 auto_execute: false
@@ -248,8 +248,8 @@ independent copy of the same data.
 - **Real outage:** Superset is scaled to 0 for the consistent dump (~10–20 min).
   Alerts/reports (`ALERT_REPORTS: True`) do not fire during it. Do not schedule
   alongside anything that queries Superset.
-- **`conflicts_with: mariadb-27`, `longhorn-1.12.1-engine`** — same namespace / storage
-  layer respectively; a DB cutover must not run under storage-engine work.
+- **`conflicts_with: longhorn-1.12.1-engine`** — shared storage layer; a DB
+  cutover must not run under storage-engine work.
 - Superset's chart stays at 0.22.4 throughout. Per
   `project_superset_chart_020_redis_auth`, a chart up/down bump requires deleting the
   immutable-selector Deployments — never combine that with a data cutover.
