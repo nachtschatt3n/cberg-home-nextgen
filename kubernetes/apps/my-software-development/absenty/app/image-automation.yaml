@@ -40,13 +40,13 @@ metadata:
   name: absenty-image-updates
   namespace: my-software-development
 spec:
-  # SUSPENDED 2026-08-15: the ImagePolicy below sorts 7-char hex shas
-  # alphabetically, so it has been pinned to the highest hex tag (sha-ff*)
-  # since 2025-10 and silently ignored every newer build. Left armed, it
-  # would also deploy an arbitrary PR build whose sha happens to sort high.
-  # Re-enable together with the ImagePolicy fix (see runbooks/maintenance/
-  # plans/absenty-rebuild.md) once the image backlog decision is made.
-  suspend: true
+  # UNSUSPENDED 2026-08-15, after both reasons it was suspended were removed:
+  #   1. the ImagePolicy above now selects by build time, not by hex-sha sort;
+  #   2. the upstream ci.yml is now the only publisher, it branch-prefixes
+  #      every tag, and it does not publish from pull_request events at all --
+  #      so a PR build can no longer wear a tag this policy would select.
+  # NOTE: a SUSPENDED ImageUpdateAutomation still reports READY=True. Check
+  # `.spec.suspend` directly; do not infer state from the Ready condition.
   interval: 30m
   sourceRef:
     kind: GitRepository
