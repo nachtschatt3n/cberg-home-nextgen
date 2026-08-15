@@ -1,16 +1,16 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
 > Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
-> Version: `2026.07.05`
-> Last Updated: `2026-07-05`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `media-manager`
 
 | Field | Value |
 |---|---|
-| **Version** | 2026.07.05 |
-| **Last Updated** | 2026-07-05 |
+| **Version** | 2026.08.15 |
+| **Last Updated** | 2026-08-15 |
 | **Owner** | media-manager |
-| **Applies to** | All content under `//${NAS_HOSTNAME}/media/data/` consumed by Plex (`media/plex`) and Jellyfin (`media/jellyfin`); JDownloader intake at `//${NAS_HOSTNAME}/media/downloads/jdownloader`; Tube Archivist content at `//${NAS_HOSTNAME}/media/downloads/tube-archivist` (bridged into the Plex view). |
+| **Applies to** | All content under `//${NAS_HOSTNAME}/media/data/` consumed by Plex (`media/plex`) and Jellyfin (`media/jellyfin`); JDownloader intake at `//${NAS_HOSTNAME}/media/downloads/jdownloader`; Tube Archivist content at `//${NAS_HOSTNAME}/media/downloads/tube-archivist` (surfaced in Jellyfin only — Plex is intentionally not configured for YouTube). |
 
 ---
 
@@ -22,7 +22,7 @@ The standard is **nested**: every movie, show, and season has its own folder. Si
 
 This SOP is the source of truth for the `media-manager` sub-agent (`.claude/agents/media-manager.md`) and the `library-tools` GitOps app (`kubernetes/apps/media/library-tools/`).
 
-- Scope: layout, naming, sidecar conventions, dedup decisions, audit thresholds, intake-from-jdownloader flow, Tube Archivist→Plex bridge.
+- Scope: layout, naming, sidecar conventions, dedup decisions, audit thresholds, intake-from-jdownloader flow, Tube Archivist surfacing (Jellyfin-only).
 - Prerequisites: read `docs/sops/storage-safety.md` first — every operation in this SOP touches a CIFS share whose blast radius is the whole share.
 - Out of scope: Plex/Jellyfin server-side configuration, transcoder tuning, library-section creation in the Plex/Jellyfin UI.
 
@@ -357,7 +357,8 @@ If failed:
 | Jellyfin keeps re-downloading metadata | `.nfo` malformed or `Nfo` reader disabled | `xmllint` the nfo; enable `Nfo` in metadata downloaders |
 | Episode shows up under "Specials" | Filename missing `S\d{2}E\d{2}` pattern | Rename to `Show - S01E01.mkv` or correct the malformed pattern |
 | Two identical movies showing in library | Item exists at both flat path and nested path | Run audit, identify drift, remove the flat duplicate after `size > 0` verification |
-| Tube Archivist videos missing in Plex | Bridge CronJob did not run / channel not yet processed by TA's metadata-sync | Check TA `:00`/`:30` jobs first, then run the `:45` bridge manually |
+| Tube Archivist videos missing in Jellyfin | TA sidecar sync has not run yet for that channel, or the Jellyfin `TubeArchivist` library has not rescanned | Check the `:00` `tube-archivist-nfo-sync` and `:30` `tube-archivist-image-sync` jobs, then refresh the Jellyfin library. There is no Plex bridge — Plex is intentionally not configured for YouTube |
+| Quarantined `_duplicates/` folder still indexed | `.plexignore` stops Plex only; Jellyfin uses a different mechanism | Jellyfin skips any directory containing an empty file named `.ignore` — the `.plexignore` at the section root does **not** apply to it. Both files are needed to hide a quarantine folder from both servers |
 | `mv` fails with "Permission denied" on CIFS | UID/GID mismatch with mount options | Mount uses `uid=1000,gid=1000,noperm` — Job must run as 1000:1000 |
 
 ```bash
@@ -504,5 +505,6 @@ For the GitOps pieces (library-tools app): `git revert <commit>` on the introduc
 
 ## Version History
 
+- `2026.08.15`: Removed the stale Tube Archivist→Plex bridge references (scope line, applies-to, troubleshooting row) — TA content is Jellyfin-only and no bridge CronJob exists. Documented that Jellyfin's scan-exclusion mechanism is an empty `.ignore` file inside the folder, not the `.plexignore` at the section root.
 - `2026.07.05`: Documented that `_duplicates/`/`_archive/` prefixes are naming-only and require a `.plexignore` file per section root to actually stop Plex from scanning them (found via daily sweep: a quarantined duplicate was still indexed under `Movies/_duplicates/`). Confirmed Plex's built-in keyword exclusion doesn't cover custom prefixes.
 - `2026.04.27`: Initial standard. Nested layout. Migration workflow from prior flat layout. Tube Archivist→Plex bridge. Audit thresholds.
