@@ -44,7 +44,11 @@ spec:
       - --ingress-class=external
       - --metrics-address=0.0.0.0:7979
     policy: sync
-    sources: ["crd", "ingress"]
+    # gateway-httproute added for the Envoy Gateway migration. `ingress` is
+    # retained deliberately: during the parallel run both kinds coexist,
+    # and policy: sync would delete records for anything not covered by a
+    # listed source. Drop `ingress` only at Phase 4.
+    sources: ["crd", "ingress", "gateway-httproute"]
     txtPrefix: k8s.
     txtOwnerId: default
     domainFilters: ["${SECRET_DOMAIN}"]

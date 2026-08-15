@@ -37,7 +37,10 @@ spec:
       annotations:
         lbipam.cilium.io/ips: "192.168.55.101"
       externalTrafficPolicy: Cluster
-    watchedResources: ["Ingress", "Service"]
+    # HTTPRoute added for the Envoy Gateway migration: as each app moves
+    # from Ingress to HTTPRoute (Phases 1-3) its internal DNS answer
+    # follows automatically. Ingress stays until Phase 4 decommissions it.
+    watchedResources: ["Ingress", "Service", "HTTPRoute"]
     resources:
       requests:
         cpu: 50m
