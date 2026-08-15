@@ -1,0 +1,72 @@
+---
+# Suspended CronJob — invoked on-demand to write per-EPISODE .nfo sidecars for
+# ONE show. DRY-RUN by default: an accidental `create job` writes nothing.
+#
+#   kubectl -n media create job --from=cronjob/media-episode-sidecar \
+#     media-episode-sidecar-<id>
+# (SHOW_PATH is required and must be patched in per invocation; DRY_RUN=0 and
+#  OVERWRITE=1 are opt-in. TMDB_ID / TMDB_QUERY are overrides for the two
+#  shows whose folder names trip the documented TMDb ladder traps.)
+#
+# This is NOT media-sidecar. sidecar.py unlinks every .nfo in its target folder
+# before writing one file; episode_sidecar.py never deletes anything.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: media-episode-sidecar
+  namespace: media
+spec:
+  schedule: "0 0 31 2 *"   # never
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: episode-sidecar
+              image: python:3.11-slim
+              command: ["python", "/app/episode_sidecar.py"]
+              env:
+                - name: MEDIA_ROOT
+                  value: "/data/data"
+                # Dry-run is the default posture. Only an explicit "0" writes.
+                - name: DRY_RUN
+                  value: "1"
+                # Never replace an existing (possibly hand-curated) episode nfo.
+                - name: OVERWRITE
+                  value: "0"
+                - name: TMDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: media-manager-tokens
+                      key: TMDB_API_KEY
+                      optional: true
+                # Overridden per-invocation:
+                # SHOW_PATH (required), TMDB_ID, TMDB_QUERY
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+                - name: media
+                  mountPath: /data
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: library-tools-scripts
+            - name: media
+              persistentVolumeClaim:
+                claimName: plex-media-smb

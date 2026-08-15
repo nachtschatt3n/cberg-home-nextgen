@@ -815,6 +815,258 @@ data:
         main()
 
   # =========================================================================
+  # episode_sidecar.py — per-EPISODE .nfo writer for ONE show (dry-run default)
+  # =========================================================================
+  # NOT a mode of sidecar.py, deliberately. sidecar.py unlinks every .nfo in
+  # its target folder before writing one file, so pointing it at a show wipes
+  # the series sidecar and writes zero episode NFOs. This script never
+  # deletes, never touches series-level artefacts, and writes nothing at all
+  # unless DRY_RUN=0 is passed explicitly.
+  # =========================================================================
+  episode_sidecar.py: |
+    """Write one `.nfo` beside each episode file of ONE TV show, from TMDb.
+
+    DRY-RUN BY DEFAULT — set DRY_RUN=0 to actually write.
+
+    Why this is a separate script and not a mode of `sidecar.py`: `sidecar.py`
+    unlinks EVERY `.nfo` in its target folder before writing its single
+    `<folder>.nfo` / `tvshow.nfo`. Pointed at a show it would destroy the
+    series-level sidecar (series compliance is currently 100%) and write zero
+    episode NFOs. `sidecar.py` must never be used for episode work. This script
+    therefore never deletes anything and never touches series-level files.
+
+    Required env:
+      SHOW_PATH        absolute path of ONE show folder, a direct child of
+                       `<MEDIA_ROOT>/TV Shows`
+      TMDB_API_KEY     **v3 key** (32-char hex). The v4 Bearer JWT returns 401
+                       when passed as `?api_key=`.
+
+    Optional env:
+      DRY_RUN          "1" (default) — log only, write nothing. "0" — write.
+      OVERWRITE        "0" (default) — never replace an existing episode .nfo.
+      TMDB_ID          skip series resolution, use this TMDb tv id directly
+      TMDB_QUERY       explicit series title. Hand-format it (periods, spaces,
+                       umlauts) — TMDb's TV index is brittle and the umlaut
+                       ladder only runs on the tmdb_smart() path. Unset falls
+                       back to common.tmdb_smart() on the folder name.
+
+    Invariants (these are the review criteria — do not relax them):
+      * never deletes, truncates, renames or moves anything
+      * only ever creates `<episode basename>.nfo` beside its own media file
+      * never touches tvshow.nfo / poster.jpg / fanart.jpg / banner.jpg
+      * one show per invocation, so the batch boundary is the rollback boundary
+      * never guesses a season/episode number — unparsable files are counted
+    """
+    import json
+    import os
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, "/app")
+    from common import (
+        EP_RE, SECTIONS, anon_path, assert_safe_target, http_get, log_event,
+        tmdb_best_match, tmdb_search, tmdb_smart,
+    )
+
+    VIDEO_EXT = {".mkv", ".mp4", ".avi", ".m4v"}
+    # Series-level artefacts this script must never write, whatever the input.
+    PROTECTED_NAMES = {"tvshow.nfo", "poster.jpg", "fanart.jpg", "banner.jpg",
+                       "movie.nfo", "artist.nfo", "folder.jpg", "backdrop.jpg"}
+
+
+    def esc(s) -> str:
+        """Minimal XML escaping. `&` MUST be replaced first."""
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+    def env_true(name: str, default: str) -> bool:
+        return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+    def _season_call(tv_id: int, season_no: int, key: str, lang: str | None) -> dict:
+        """One `/tv/{id}/season/{n}` call. Returns {episode_number: record}."""
+        url = f"https://api.themoviedb.org/3/tv/{tv_id}/season/{season_no}?api_key={key}"
+        if lang:
+            url += f"&language={lang}"
+        body = http_get(url)
+        if not body:
+            return {}
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        out = {}
+        for e in data.get("episodes") or []:
+            n = e.get("episode_number")
+            if n is None:
+                continue
+            try:
+                out[int(n)] = e
+            except (TypeError, ValueError):
+                continue
+        return out
+
+
+    def fetch_season(tv_id: int, season_no: int, key: str) -> dict:
+        """German-first season fetch, English filling any gap left by de-DE.
+
+        TMDb returns the season with empty `name`/`overview` strings when a
+        German translation is missing, so a de-DE-only fetch silently produces
+        title-less episodes. Merge per field instead.
+        """
+        merged: dict = {}
+        for lang in ("de-DE", None):
+            for n, e in _season_call(tv_id, season_no, key, lang).items():
+                cur = merged.setdefault(n, {})
+                for field in ("name", "air_date", "overview", "id"):
+                    if not cur.get(field) and e.get(field):
+                        cur[field] = e[field]
+        return merged
+
+
+    def build_nfo(season: int, episode: int, ep: dict) -> str:
+        lines = [
+            "<episodedetails>",
+            f"  <title>{esc(ep.get('name'))}</title>",
+            f"  <season>{season}</season>",
+            f"  <episode>{episode}</episode>",
+            f"  <aired>{esc((ep.get('air_date') or ''))}</aired>",
+        ]
+        if ep.get("overview"):
+            lines.append(f"  <plot>{esc(ep.get('overview'))}</plot>")
+        if ep.get("id"):
+            lines.append(f'  <uniqueid type="tmdb">{esc(str(ep.get("id")))}</uniqueid>')
+        lines.append("</episodedetails>")
+        return "\n".join(lines) + "\n"
+
+
+    def write_episode_nfo(target: Path, show_path: Path, season: int, episode: int,
+                          ep: dict, dry_run: bool) -> str:
+        """Return "wrote" | "would" | "refused". Creates nothing in dry-run."""
+        # Guards re-evaluated on every single write. Cheap; the share is
+        # catastrophic-class (docs/sops/storage-safety.md).
+        if target.suffix.lower() != ".nfo":
+            log_event("refused-not-nfo", severity="error", path=anon_path(target))
+            return "refused"
+        if target.name.lower() in PROTECTED_NAMES:
+            log_event("refused-protected-name", severity="error", path=anon_path(target))
+            return "refused"
+        try:
+            target.resolve().relative_to(show_path.resolve())
+        except ValueError:
+            log_event("refused-outside-show", severity="error", path=anon_path(target))
+            return "refused"
+
+        body = build_nfo(season, episode, ep)
+        if dry_run:
+            log_event("would-write-nfo", path=anon_path(target), season=season,
+                      episode=episode, bytes=len(body.encode("utf-8")))
+            return "would"
+        target.write_text(body, encoding="utf-8")
+        log_event("nfo-written", path=anon_path(target), season=season, episode=episode)
+        return "wrote"
+
+
+    def main():
+        show_path = Path(os.environ.get("SHOW_PATH", ""))
+        key = os.environ.get("TMDB_API_KEY", "")
+        if not os.environ.get("SHOW_PATH") or not key:
+            sys.exit("REFUSED: missing SHOW_PATH or TMDB_API_KEY")
+        # Default-on: anything other than an explicit falsey value keeps dry-run.
+        dry_run = os.environ.get("DRY_RUN", "1").strip().lower() not in {"0", "false", "no", "off"}
+        overwrite = env_true("OVERWRITE", "0")
+
+        assert_safe_target(show_path)
+        tv_root = SECTIONS["tv"].resolve()
+        resolved = show_path.resolve()
+        if resolved.parent != tv_root:
+            sys.exit("REFUSED: SHOW_PATH must be a single show folder directly under the TV section")
+        if not show_path.is_dir():
+            sys.exit("REFUSED: SHOW_PATH does not exist or is not a directory")
+
+        log_event("episode-sidecar-start", dry_run=dry_run, overwrite=overwrite,
+                  path=anon_path(show_path))
+
+        # ---- resolve the series once -------------------------------------
+        tmdb_id_env = os.environ.get("TMDB_ID", "").strip()
+        query = os.environ.get("TMDB_QUERY", "").strip()
+        if tmdb_id_env.isdigit():
+            tv_id = int(tmdb_id_env)
+            log_event("series-resolved", source="env-id")
+        else:
+            if query:
+                results = (tmdb_search("tv", query, None, "de-DE", key)
+                           or tmdb_search("tv", query, None, None, key))
+                item = tmdb_best_match(query, results)
+            else:
+                item = tmdb_smart("tv", show_path.name, key)
+            if not item or not item.get("id"):
+                # Soft outcome — the audit surfaces the missing sidecars. A Job
+                # failure per TMDb miss is pager noise.
+                log_event("tmdb-no-match", severity="warn", scope="series")
+                log_event("episode-sidecar-summary", dry_run=dry_run, media_files=0,
+                          written=0, would_write=0, skipped_existing=0, unparsed=0,
+                          no_match=0, errors=0)
+                return
+            tv_id = int(item["id"])
+            log_event("series-resolved", source="query" if query else "folder-name")
+
+        # ---- collect episodes on disk ------------------------------------
+        media = sorted(f for f in show_path.rglob("*")
+                       if f.is_file() and f.suffix.lower() in VIDEO_EXT)
+        parsed, unparsed = [], 0
+        for f in media:
+            m = EP_RE.search(f.stem)
+            if not m:
+                unparsed += 1
+                log_event("episode-unparsed", severity="warn", path=anon_path(f))
+                continue
+            parsed.append((int(m.group(1)), int(m.group(2)), f))
+
+        season_cache: dict = {}
+        written = would_write = skipped_existing = no_match = errors = 0
+        for season, episode, f in parsed:
+            # `with_suffix(".nfo")` is exactly what audit.py checks for.
+            target = f.with_suffix(".nfo")
+            if target.exists() and not overwrite:
+                skipped_existing += 1
+                continue
+            if season not in season_cache:
+                season_cache[season] = fetch_season(tv_id, season, key)
+                log_event("season-fetched", season=season,
+                          episodes=len(season_cache[season]))
+            ep = season_cache[season].get(episode)
+            if not ep or not (ep.get("name") or "").strip():
+                no_match += 1
+                log_event("episode-no-match", severity="warn", season=season,
+                          episode=episode)
+                continue
+            try:
+                outcome = write_episode_nfo(target, show_path, season, episode, ep, dry_run)
+            except OSError as e:
+                errors += 1
+                log_event("nfo-write-error", severity="error",
+                          error=type(e).__name__, path=anon_path(target))
+                continue
+            if outcome == "wrote":
+                written += 1
+            elif outcome == "would":
+                would_write += 1
+            else:
+                errors += 1
+
+        log_event("episode-sidecar-summary", dry_run=dry_run, media_files=len(media),
+                  written=written, would_write=would_write,
+                  skipped_existing=skipped_existing, unparsed=unparsed,
+                  no_match=no_match, errors=errors)
+        # Always exit 0 on soft outcomes (no TMDb match, unparsable filenames) —
+        # same convention as sidecar.py / audit.py.
+        sys.exit(0)
+
+
+    if __name__ == "__main__":
+        main()
+
+  # =========================================================================
   # cleanup_nfos.py — delete redundant `movie.nfo` next to `<folder>.nfo`
   # =========================================================================
   # Plex/Jellyfin auto-write `movie.nfo` during library scans alongside any

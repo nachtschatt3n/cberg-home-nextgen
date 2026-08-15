@@ -9,6 +9,7 @@ resources:
   - ./audit-cronjob.yaml
   - ./organize-cronjob.yaml
   - ./sidecar-cronjob.yaml
+  - ./episode-sidecar-cronjob.yaml
   - ./cleanup-cronjob.yaml
   - ./cleanup-nfos-cronjob.yaml
   - ./coverage-cronjob.yaml
