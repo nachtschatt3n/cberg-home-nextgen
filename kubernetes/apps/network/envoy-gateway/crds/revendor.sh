@@ -2,14 +2,14 @@
 # Re-vendor the Gateway API (standard channel) + Envoy Gateway CRDs.
 #
 # Run from the repo root after bumping the envoy-gateway HelmRelease:
-#   mise exec -- bash kubernetes/apps/network/envoy-gateway/crds/revendor.sh 1.8.3
+#   mise exec -- bash kubernetes/apps/network/envoy-gateway/crds/revendor.sh 1.9.0
 #
 # The CRDs are vendored instead of installed from the gateway-crds-helm chart
 # because Helm stores the entire chart (~4.5 MB, both channels) inside its
 # release Secret, which exceeds the 1 MiB Secret limit. Flux server-side
 # applies these directly, so no release Secret is involved.
 set -euo pipefail
-VERSION="${1:?usage: revendor.sh <chart-version, e.g. 1.8.3>}"
+VERSION="${1:?usage: revendor.sh <chart-version, e.g. 1.9.0>}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHART="oci://docker.io/envoyproxy/gateway-crds-helm"
 TMP="$(mktemp -d)"

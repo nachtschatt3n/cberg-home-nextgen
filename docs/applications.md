@@ -212,7 +212,7 @@
 | k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101). Chart 3.7.2 / app 1.8.0 — upstream moved orgs (ori-edge → k8s-gateway); the old repo is frozen at chart 2.4.0 / app 0.4.0, which fails closed when Gateway API CRDs are present. Image tag is pinned in the HR because the chart default lags. See `docs/sops/k8s-gateway-dns.md`. | None |
 | cloudflared | `network/external/` | Cloudflare Tunnel client | None |
 | external-dns | `network/external/` | Automated Cloudflare DNS record management | None |
-| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.8.3) — Gateway API control plane for the ingress-nginx replacement. Phase 0 only: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx with no app traffic yet. Gateway API + EG CRDs are vendored under `crds/` (standard channel), not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
+| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — Gateway API control plane for the ingress-nginx replacement. Phase 0 + 0.5: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx with no app traffic yet. Gateway API + EG CRDs are vendored under `crds/` (standard channel) — gateway-api v1.6.1, 10 standard-channel CRDs — not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
 
 ---
 

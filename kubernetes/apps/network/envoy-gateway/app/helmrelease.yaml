@@ -37,8 +37,11 @@ spec:
   uninstall:
     keepHistory: false
   values:
-    # CRDs are owned by the envoy-gateway-crds HelmRelease (standard channel).
+    # CRDs are owned by the envoy-gateway-crds Flux Kustomization (see ks.yaml),
+    # which applies the vendored standard-channel bundle under crds/.
     # The bundle inside this chart is the EXPERIMENTAL channel — keep it off.
+    # (install/upgrade crds: CreateReplace above is inert: this chart has no
+    # chart-native crds/ dir, only this values-gated subchart.)
     crds:
       enabled: false
     config:
@@ -55,11 +58,15 @@ spec:
         logging:
           level:
             default: info
-    # The topology injector is a MutatingWebhookConfiguration on pods/binding
-    # with NO namespace/object selector — it would intercept every pod binding
-    # in the cluster. It only exists to inject zone/topology labels into
-    # data-plane Envoy pods, which buys nothing at replicas: 1 on a 3-node
-    # cluster. Off, so Phase 0 adds zero cluster-wide admission surface.
+    # The topology injector is a MutatingWebhookConfiguration on pods/binding.
+    # It only injects zone/topology labels into data-plane Envoy pods, which
+    # buys nothing at replicas: 1 on a 3-node cluster. Disabling it also drops
+    # a cluster-wide pods + pods/binding get/list/patch/update/watch grant from
+    # the control-plane ClusterRole — that RBAC reduction is the real reason.
+    # (Corrected 2026-08-16: the webhook DOES carry a namespaceSelector scoped
+    # to the network namespace with failurePolicy: Ignore in both 1.8.3 and
+    # 1.9.0 — the earlier "no selector, intercepts every pod binding" claim
+    # here was wrong. The decision stands on the RBAC argument.)
     topologyInjector:
       enabled: false
     deployment:

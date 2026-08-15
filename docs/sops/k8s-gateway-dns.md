@@ -1,8 +1,8 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
 > Owner: `cberg-agent / operator`
 
 ---
@@ -23,8 +23,9 @@ Gateway API CRD — from any vendor, before any Gateway/HTTPRoute exists —
 armed a latent, total internal-DNS outage.** RESOLVED 2026-08-15 by upgrading
 to chart 3.7.2 / app 1.8.0 (new upstream org, built against gateway-api
 v1.5.1) and re-verified with the §8 restart gate after the Envoy Gateway
-CRDs landed. §8 stays as the incident record and as the mandatory
-restart-and-verify gate for future CRD/chart changes.
+CRDs landed. Re-verified AGAIN 2026-08-16 at gateway-api **v1.6.1**
+(EG 1.9.0 / "phase 0.5"). §8 stays as the incident record and as the
+mandatory restart-and-verify gate for future CRD/chart changes.
 
 ---
 
@@ -136,7 +137,10 @@ family at `v1alpha2` **as soon as any `gateway.networking.k8s.io` CRD exists
 in the cluster** — no Gateway or HTTPRoute needed. Gateway API v1.5.1 serves
 GRPCRoute only at `v1` and TLSRoute's `v1alpha2` is `served: false`, so the
 informers never sync and the plugin fails closed for EVERY name it serves,
-including all Ingress-backed hosts.
+including all Ingress-backed hosts. The v1.6.1 bundle (current) keeps that
+exact shape and **adds two more instances of it**: TCPRoute and UDPRoute
+also ship `v1alpha2` with `served: false`. The trap surface got wider, not
+narrower.
 
 **Ruled out during the incident — do not re-litigate:**
 - NOT `watchedResources`: a fresh pod with `["Ingress","Service"]` failed identically.
@@ -146,7 +150,9 @@ including all Ingress-backed hosts.
   moved to the k8s-gateway org; chart 3.7.2 / app 1.8.0 is built against
   gateway-api v1.5.1, checks CRD presence at startup, and only informs on the
   resource kinds actually configured. Upgraded + gated 2026-08-15 (3003c050,
-  69daf59c): fresh 1.8.0 pods sync cleanly with all 8 Gateway API CRDs present.
+  69daf59c): fresh 1.8.0 pods sync cleanly with all 8 Gateway API CRDs
+  (gateway-api v1.5.1) present — and again 2026-08-16 with all 10
+  (gateway-api v1.6.1), see the validated-bundle note below.
 
 **The failure is LATENT.** A pod already running when the CRDs land keeps
 resolving (its informers predate them). Only a pod that STARTS with the CRDs
@@ -154,7 +160,19 @@ present fails. So "DNS still works" after installing CRDs proves nothing —
 the outage fires at the next restart (node reboot, eviction, chart bump),
 possibly days later. **Verification gate for anything that installs Gateway
 API CRDs: `kubectl rollout restart deploy/k8s-gateway -n network`, wait for
-rollout, then re-run §6.**
+rollout, then re-run §6.** Run it TWICE — one clean restart can be luck.
+
+**v1.6.1 validated (2026-08-16, EG 1.9.0 / phase 0.5).** The gate was run
+twice against the new bundle: k8s-gateway chart 3.7.2 / app 1.8.0 starts
+cleanly with all 10 v1.6.1 standard-channel CRDs present (fresh pods, 0
+sync errors, all sampled Ingress hosts resolving). App 1.8.0 logs
+`updating resources with: [Ingress Service]` and starts NO route informers
+at all — that is *why* the added `served: false` v1alpha2 TCPRoute/UDPRoute
+shapes are inert here. **This does not retire the gate.** The tolerance is
+a property of app 1.8.0's configured-kinds behaviour, so it must be
+re-proven on any k8s-gateway version change, on any future CRD channel
+bump, and the moment `watchedResources` gains `HTTPRoute` in phase 1 —
+phase 1 is exactly where the plugin *does* start route informers.
 
 **Sources that can introduce the CRDs:** Envoy Gateway, Traefik (Gateway API
 mode), Istio, Cilium `gatewayAPI.enabled`, or any chart bundling them
@@ -162,7 +180,21 @@ transitively — including via a Renovate bump. The auto-update policy denies
 `*gateway-helm*`/`*gateway-crds-helm*`/`*envoy-gateway*` for this reason.
 
 **Recovery:** remove all `gateway.networking.k8s.io` CRDs (GitOps revert →
-Flux prunes). Expect the `gatewayclasses` CRD to deadlock if an orphaned
+Flux prunes).
+
+> **Rollback trap (verified 2026-08-16): the v1.6.1 bundle blocks its own
+> rollback.** The bundle ships a `ValidatingAdmissionPolicy`
+> `safe-upgrades.gateway.networking.k8s.io` (binding
+> `validationActions: [Deny]`, `failurePolicy: Fail`) whose CEL rejects any
+> CRD annotated with a `bundle-version` matching `v1.[0-5].\d+`. The v1.5.1
+> set you would revert TO matches that pattern, and the live v1.6.1 policy is
+> still in force while the revert is applied. Its deny message is also stale
+> — it claims "before v1.5.0" while the regex blocks through v1.5.x — so an
+> operator mid-rollback gets a message that looks inapplicable.
+> **Before reverting a CRD bundle, delete the binding first:**
+> `kubectl delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io`
+> (the binding alone is enough; the policy is inert without it). The revert
+> commit restores the older policy pair, so no re-apply is needed. Expect the `gatewayclasses` CRD to deadlock if an orphaned
 GatewayClass still carries `gateway-exists-finalizer.gateway.networking.k8s.io`
 after its controller is gone — clear the CR's finalizer
 (`kubectl patch gatewayclass <name> --type=merge -p '{"metadata":{"finalizers":[]}}'`),
@@ -180,8 +212,8 @@ Ingress-only mode).
 ## 9) Diagnose Examples
 
 ```bash
-# Gateway API CRDs present (8 standard-channel CRDs expected since phase 0 of
-# the EG migration landed 2026-08-15; app 1.8.0 tolerates them)
+# Gateway API CRDs present (10 standard-channel CRDs expected since phase 0.5
+# landed 2026-08-16 at gateway-api v1.6.1; app 1.8.0 tolerates them)
 mise exec -- kubectl get crd | grep -c gateway.networking.k8s.io
 
 # Informer errors, current pod
