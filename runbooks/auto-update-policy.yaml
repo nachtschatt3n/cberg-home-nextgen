@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.08.03"
+version: "2026.08.15"
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
@@ -30,6 +30,12 @@ deny:
     reason: "affine chart/image bumps carry breaking env→config.json changes even on patch tags (0.27.3) — hold for manual review."
   - match: "*cilium*"
     reason: "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA streaming before upgrading; never an unattended bump."
+  - match: "*gateway-helm*"
+    reason: "Envoy Gateway control plane — v1.7.0 shipped an ext-auth regression (envoyproxy/gateway#8202) that broke redirect auth. It fronts authentik forward-auth from migration Phase 1 on; reviewed bumps only, and the CRD chart must move in lockstep."
+  - match: "*gateway-crds-helm*"
+    reason: "Gateway API + Envoy Gateway CRDs — must move in lockstep with gateway-helm, and a channel/bundle change is never an unattended merge."
+  - match: "*envoy-gateway*"
+    reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
   - match: "*mariadb*"
     reason: "MariaDB chart major (25→26) + bitnami-legacy posture; a DB-engine bump is never unattended-safe."
     max: patch

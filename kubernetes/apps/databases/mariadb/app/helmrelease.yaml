@@ -21,11 +21,7 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      # Temporarily 0 for the 12 -> 13 datadir migration: an auto-rollback fired
-      # mid-migration is worse than a stalled upgrade. Restored to 3 immediately
-      # after verification.
-      retries: 0
-      remediateLastFailure: false
+      retries: 3
   valuesFrom:
     - kind: Secret
       name: mariadb
@@ -48,8 +44,16 @@ spec:
     # only a floating `latest` plus sha256-* digest tags. An unpinned `latest`
     # silently changed the server major underneath this release, so the image is
     # pinned BY DIGEST. This digest is MariaDB 13.0.1 (built 2026-08-14).
-    # Trade-off: the pin also freezes patching at that build — review on the date
-    # tracked with the accepted risk, and re-pin to a newer digest deliberately.
+    # Trade-off: the pin also freezes patching at that build. Re-pin to a newer
+    # digest deliberately (check the target's version label first) rather than
+    # ever letting the tag float again.
+    # GOTCHA when re-pinning across a SERVER MAJOR: the Bitnami entrypoint logged
+    # "This installation is already upgraded" and skipped mariadb-upgrade on the
+    # 12 -> 13 roll, leaving 12-format system tables under a 13 binary. Always
+    # check /bitnami/mariadb/data/mariadb_upgrade_info matches SELECT VERSION()
+    # afterwards, and if not run mariadb-upgrade --force by hand. Use
+    # --protocol=socket --skip-ssl: over TLS/TCP the client connection resets
+    # mid-run and leaves the upgrade half-applied.
     image:
       registry: registry-1.docker.io
       repository: bitnami/mariadb
