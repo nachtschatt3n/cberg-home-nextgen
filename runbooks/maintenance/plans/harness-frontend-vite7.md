@@ -17,8 +17,10 @@ touches:
   shared: []
 depends_on: []
 conflicts_with: []
-status: draft
-window: null
+status: scheduled
+window: "sun-window:2026-08-30"
+# Scheduled 2026-08-15. 60m in a 90m slot. Not a tue/thu 60m slot: 60-of-60
+# leaves zero rollback time.
 auto_execute: false                   # toolchain major bump on the serving process
 sops_refs:
   - docs/sops/application-update.md

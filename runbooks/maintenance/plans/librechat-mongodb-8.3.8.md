@@ -41,8 +41,12 @@ conflicts_with: []                  # Do not co-schedule with any other plan tha
                                     # `ai` namespace (openclaw / ollama-facing apps) purely to
                                     # keep the post-roll signal unambiguous -- not a hard
                                     # technical conflict.
-status: planned
-window: null                        # unscheduled; window-agent assigns. No-reboot + medium
+status: draft
+window: "sat-early:2026-09-12"
+# Paired with librechat-mongodb-auth, sequenced AFTER it. That plan wipes the
+# datadir, so this stops being a 8.2->8.3 migration at all and becomes a fresh
+# 8.3.8 install -- the one-way featureCompatibilityVersion risk disappears.
+# Do NOT run this one first, and do NOT run it in a window without the other.
                                     # (risk-weight 2) => fits tue/thu/sat-early. Not urgent:
                                     # there is no CVE driver (see §1) and the digest pin has
                                     # already removed the time pressure.

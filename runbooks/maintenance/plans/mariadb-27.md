@@ -43,7 +43,11 @@ conflicts_with: []                  # nothing competes for the same resources; b
                                     # co-schedule a phpMyAdmin upgrade in the same window
                                     # (its only backend is this DB) — see Interference.
 status: draft                         # UNBLOCKED 2026-08-15 by operator decision.
-window: "sat-early:2026-09-12"       # OPERATOR DECISION 2026-08-15: go to MariaDB 13
+window: "sat-early:2026-09-19"
+# Moved off 2026-09-12 (2026-08-15): that window was exactly 90m of work in a
+# 90m slot -- no slack for a rollback, which the capacity check flags as TIGHT.
+# Nothing here interferes; it just needed its own room.
+                                      # OPERATOR DECISION 2026-08-15: go to MariaDB 13
                                       # DELIBERATELY, in-window — rather than pinning the digest
                                       # or retiring the instance. Rationale: the chart renders
                                       # `bitnami/mariadb:latest` (neither 25.1.1 nor 27.0.1 pins

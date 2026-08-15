@@ -19,7 +19,14 @@ touches:
 depends_on: []
 conflicts_with: []
 status: blocked                       # P1 wontfix · P2 blocked on missing tool · P3 deferred
-window: null                          # operator-paced; not a single-window job
+window: null                          # CANNOT BE SCHEDULED AS WRITTEN (found 2026-08-15).
+                                      # est_duration_min is 120m but the LONGEST window in
+                                      # runbooks/maintenance-windows.yaml is 90m (sat/sun;
+                                      # tue/thu are 60m). This plan does not fit any slot, so
+                                      # leaving it window:null is not an oversight — it must be
+                                      # SPLIT into stages that each fit inside a window with
+                                      # rollback slack, or run as an attended out-of-window
+                                      # operation with explicit operator go/no-go.
 auto_execute: false                   # NEVER unattended — see Interference
 sops_refs:
   - docs/sops/media-library-standards.md
