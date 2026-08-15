@@ -6,10 +6,10 @@ kind: deploy                        # new component (Phase 0 of the ingress migr
 current: "none"
 target: "envoy-gateway v1.8.3+ (chart oci://docker.io/envoyproxy/gateway-helm)"
 update_type: install
-risk: low                           # PARALLEL-RUN: no existing traffic touched;
-                                    # ingress-nginx keeps serving everything.
-                                    # New Gateways sit on fresh LB IPs (.103/.104)
-                                    # that nothing references yet.
+risk: high                          # was "low" (parallel-run rationale) — DISPROVEN
+                                    # 2026-08-15: measured blast radius was ALL
+                                    # internal DNS, latent until the next
+                                    # k8s-gateway pod restart. See §0.
 est_duration_min: 60
 needs_reboot: false
 touches:
@@ -20,7 +20,7 @@ touches:
     - "gatewayclass/envoy + envoyproxy params (NEW)"
     - "gateway/envoy-internal (.103) + gateway/envoy-external (.104) (NEW)"
     - "clienttrafficpolicy + backendtrafficpolicy + https-redirect route (NEW)"
-    - helmrelease/k8s-gateway            # watchedResources += HTTPRoute
+    - helmrelease/k8s-gateway            # (WITHDRAWN — see §0 blocker)
     - helmrelease/external-dns           # sources += gateway-httproute
     - helmrelease/homepage               # kubernetes.gateway: true + RBAC
     - "certificate (wildcard duplicate into network ns)"
@@ -43,7 +43,6 @@ window: null                          # 2026-08-15: the envoy chain is NO LONGER
                                       # system — which is what a 5-phase ingress migration
                                       # actually is. Do NOT schedule these into windows.
                                       # (previous value kept in git history)
-                                    # alongside light plans (risk weight 1)
 auto_execute: false                 # new infra component → operator go/no-go
 sops_refs:
   - docs/troubleshooting/ingress-migration-plan.md
@@ -187,13 +186,28 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    (reason: ext-auth regressions — v1.7.0 broke redirect auth; reviewed
    bumps only).
 3. Ecosystem prep (additive, keep Ingress sources):
-   - k8s-gateway: `watchedResources: ["Ingress","Service","HTTPRoute"]`
+   - ~~k8s-gateway: `watchedResources: ["Ingress","Service","HTTPRoute"]`~~
+     **DO NOT** — this is the step that killed internal DNS (see §0); the
+     HelmRelease now carries a guard comment. Internal DNS for HTTPRoutes
+     needs the §0 operator decision first.
    - external-dns: sources += `gateway-httproute` (keep `ingress`)
    - homepage: `kubernetes.gateway: true` + ClusterRole read on
      `gateway.networking.k8s.io` (httproutes, gateways)
 4. Commit, push, reconcile.
 
 ## 4. Verification
+
+**MANDATORY extra gate (lesson of §0): after the CRDs land, restart
+k8s-gateway and re-verify internal DNS.** A pod that was running before the
+CRDs existed keeps resolving; only a freshly started pod hits the informer
+failure. DNS working after CRD install proves nothing.
+
+```bash
+# the restart-and-verify gate
+mise exec -- kubectl rollout restart deploy/k8s-gateway -n network
+mise exec -- kubectl rollout status deploy/k8s-gateway -n network --timeout=120s
+mise exec -- dig +short @192.168.55.101 <any-ingress-host> A   # MUST answer
+```
 
 ```bash
 # EG control plane up; both Gateways Programmed=True with their IPs

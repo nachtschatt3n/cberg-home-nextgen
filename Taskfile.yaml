@@ -60,10 +60,6 @@ tasks:
       Replaces the raw `kubeconform -summary kubernetes/apps/` invocation
       that was showing 2 invalid + 383 "errors" (all false positives from
       missing CRD schemas and non-manifest YAMLs).
-      network/envoy-gateway/crds/ is skipped for the same reason: kubeconform's
-      schema store has no CustomResourceDefinition schema, and those files are
-      machine-generated (crds/revendor.sh) and validated by the API server on
-      apply, which is stricter than kubeconform would be.
     vars:
       CATALOG: '{{`https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json`}}'
       TARGET: '{{.CLI_ARGS | default "kubernetes/apps/"}}'
@@ -74,7 +70,6 @@ tasks:
         -ignore-filename-pattern '(^|/)(kustomization|kustomizeconfig|helm-values|authentik-blueprint)\.yaml$' \
         -ignore-filename-pattern 'network/external/cloudflared/configs/' \
         -ignore-filename-pattern '(^|/)patch-[^/]+\.yaml$' \
-        -ignore-filename-pattern 'network/envoy-gateway/crds/' \
         {{.TARGET}}
     preconditions:
       - which kubeconform

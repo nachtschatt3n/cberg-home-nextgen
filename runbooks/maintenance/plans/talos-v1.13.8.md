@@ -94,6 +94,7 @@ leave the cluster mixed (supported) until diagnosed.
 - Serialize strictly; never two nodes in flight (etcd quorum = 3).
 - Expect the known post-reboot noise (update-marker + alert-triage handle);
   set `runbooks/update-marker.sh add talos '*' 3 "v1.13.8 rolling reboot"`.
-- If sat-08-15's envoy-gateway-phase1 deferred into this window, it runs
-  ONLY after the Talos roll fully verifies (or moves to thu-08-20 — operator
-  call at the window).
+- ~~If sat-08-15's envoy-gateway-phase1 deferred into this window~~ OBSOLETE
+  (2026-08-15): the envoy chain is BLOCKED — phase 0 was rolled back after the
+  Gateway API CRDs took internal DNS down (see envoy-gateway-phase0.md §0).
+  Do NOT pick up any envoy-gateway-phase* plan in this window.
