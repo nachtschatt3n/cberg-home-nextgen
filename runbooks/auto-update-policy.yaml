@@ -31,9 +31,19 @@ deny:
   - match: "*cilium*"
     reason: "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA streaming before upgrading; never an unattended bump."
   - match: "*gateway-helm*"
-    reason: "NOT DEPLOYED — Envoy Gateway phase 0 rolled back 2026-08-15 (installing any Gateway API CRD breaks k8s-gateway → full internal-DNS outage, latent until pod restart). Rule kept so a re-introduction or stray Renovate PR can never auto-merge unattended; re-evaluate versions when the migration is unblocked."
+    reason: "DEPLOYED and parallel-running since 69daf59c — phase 0 was re-applied after
+      k8s-gateway moved to 3.7.2/1.8.0 (built against gateway-api v1.5.1). The DNS-outage
+      trigger is RESOLVED, not live. Hold stays for a different reason: a chart bump drags
+      the Gateway API CRD channel with it, and k8s-gateway tolerating a NEW CRD channel is
+      unproven — same shape as the outage. Any bump must run the restart gate in
+      docs/sops/k8s-gateway-dns.md. Note the pin is already off-matrix: EG 1.8 supports
+      k8s 1.32-1.35 and this cluster runs 1.36, so a deliberate 1.9.x move is planned
+      while EG still carries zero traffic."
   - match: "*gateway-crds-helm*"
-    reason: "NOT DEPLOYED — same hold as gateway-helm; the CRDs are the actual DNS-outage trigger, so this must never land unattended."
+    reason: "DEPLOYED — same hold as gateway-helm. The CRDs remain the actual outage trigger:
+      k8s_gateway starts informers for the Gateway API route family and fails CLOSED for
+      EVERY name if a version it expects is not served. Latent — it only fires when a
+      k8s-gateway pod restarts. Never unattended."
   - match: "*envoy-gateway*"
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
   - match: "*mariadb*"
