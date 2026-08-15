@@ -37,17 +37,26 @@ touches:
     # NOT touched: cert-manager, cilium/cni, coredns, longhorn (no PVC deletes; no volumeClaimTemplates in scope)
 depends_on: []
 conflicts_with:
-  - flux-stack-v0.57                # helm-controller bump changes the Helm SDK that RENDERS these charts — never in the same window as a mass chart migration
   - talos-v1.13.8                   # reboot window; do not stack a mass workload churn on top of node drains.
                                     # 2026-08-15 vetting: was `talos-v1.13.7`, a plan_id that no longer
                                     # exists (that upgrade executed; its file was retired). A conflicts_with
                                     # pointing at a non-existent plan is silently UNENFORCED, so this guard
                                     # was dead. Repointed at the live successor plan.
-  # DEAD REFS (2026-08-15 vetting) — no such plan files exist, so these two guards
-  # are unenforced. Left in place rather than deleted because they record real
-  # interference surfaces; re-point or drop them in the rewrite (see STALENESS note):
-  - authentik-2026.5.6             # auth is on the ingress/SSO path many of these apps use
-  - reloader-v2                     # cluster-wide controller change; keep high-risk plans serialized
+  #
+  # RESOLVED, NOT LOST (2026-08-15 vetting). Three guards were dropped here because the
+  # work they protected against has already SHIPPED — you cannot contend for a window
+  # with an upgrade that is done. Each verified executed before removal:
+  #   flux-stack-v0.57   — executed 2026-08-11 (7ec7ad0c, 75ec407b); HelmReleases live on
+  #                        chart 0.57.0, FluxInstance on v2.9.3. The concern was that a
+  #                        helm-controller bump changes the Helm SDK that RENDERS these
+  #                        charts. It has landed, so this plan now renders against the NEW
+  #                        SDK regardless — a reason to RE-TEST the rendering assumptions
+  #                        in the rewrite, not to serialize windows.
+  #   authentik-2026.5.6 — retired in 9a497c19 as executed.
+  #   reloader-v2        — retired in 46c8f770 as executed (chart 2.2.14).
+  # Keeping them would not have been the conservative choice: maintenance-plan.py now
+  # reports DEAD-REF for unresolvable ids, so they would have produced a standing warning
+  # that trains the reader to ignore the check.
 status: draft                       # STAYS DRAFT — 2026-08-15 vetting: inventory has DRIFTED out
                                     # from under the batch table. NEEDS A SUBSTANTIVE REWRITE, not
                                     # a note. See the "2026-08-15 vetting" block below §Scope.
