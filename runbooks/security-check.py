@@ -123,8 +123,12 @@ def load_accepted_risks() -> dict[str, str]:
     using the original regex. This bridges the Phase 1↔2 gap; the file
     (and this fallback) are removed in Phase 2.
 
-    Empty result on every failure path — the audit proceeds without
-    accepted-risk filtering rather than blocking on policy loader errors.
+    Failure is NOT the same as "no accepted risks". If the policy store is
+    the source of truth (SWEEP_PG_DSN set) but unreachable, this sets
+    _POLICY_LOAD_FAILED so the caller can abort: continuing would silently
+    unsuppress EVERY accepted risk and report the lot as fresh criticals.
+    See docs/sops/audit-script-correctness.md — absence of a signal must not
+    be scored as a result.
     """
     dsn = os.environ.get("SWEEP_PG_DSN")
     if dsn:
@@ -133,10 +137,12 @@ def load_accepted_risks() -> dict[str, str]:
 
 
 def _load_accepted_risks_from_db(dsn: str) -> dict[str, str]:
+    global _POLICY_LOAD_FAILED
     try:
         import psycopg  # lazy: degrade if psycopg isn't available
     except ImportError:
-        cprint(C.YELLOW, "  ⚠ psycopg not installed — skipping accepted-risk load")
+        _POLICY_LOAD_FAILED = "psycopg not installed"
+        cprint(C.YELLOW, "  ⚠ psycopg not installed — cannot load accepted risks")
         return {}
     try:
         with psycopg.connect(dsn) as conn, conn.cursor() as cur:
@@ -147,12 +153,20 @@ def _load_accepted_risks_from_db(dsn: str) -> dict[str, str]:
             )
             return {row[0]: row[1] for row in cur.fetchall()}
     except Exception as e:
+        _POLICY_LOAD_FAILED = str(e)
         cprint(C.YELLOW, f"  ⚠ could not load accepted_risks from DB: {e}")
         return {}
 
 
 def _load_accepted_risks_from_markdown() -> dict[str, str]:
+    global _POLICY_LOAD_FAILED
     if not ACCEPTED_RISKS_DOC.exists():
+        # Phase 2 removed this file; accepted risks are DB-only now. So "no DSN"
+        # is not a valid way to run the audit — it yields zero suppression, which
+        # is indistinguishable from "nothing is accepted" and floods the report
+        # with false criticals. Same failure as an unreachable DB, different door.
+        _POLICY_LOAD_FAILED = ("SWEEP_PG_DSN unset and legacy "
+                               f"{ACCEPTED_RISKS_DOC.name} is gone (removed in Phase 2)")
         cprint(C.YELLOW, f"  ⚠ accepted-risks doc not found: {ACCEPTED_RISKS_DOC}")
         return {}
     try:
@@ -175,6 +189,9 @@ def _load_accepted_risks_from_markdown() -> dict[str, str]:
 
 
 _ACCEPTED_RISKS: dict[str, str] = {}
+# Set by the loader when the policy store was expected but unreachable.
+# Distinguishes "zero accepted risks" from "could not read them".
+_POLICY_LOAD_FAILED: str | None = None
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2589,6 +2606,16 @@ def main(argv: list[str] | None = None) -> int:
 
     global _ACCEPTED_RISKS
     _ACCEPTED_RISKS = load_accepted_risks()
+    if _POLICY_LOAD_FAILED and not os.environ.get("SWEEP_ALLOW_NO_POLICY"):
+        cprint(C.RED, "  ✖ ABORT: accepted-risk policy store unreachable "
+                      f"({_POLICY_LOAD_FAILED})")
+        cprint(C.RED, "    Continuing would unsuppress EVERY accepted risk and "
+                      "report them as fresh criticals —")
+        cprint(C.RED, "    a false-alarm flood that looks exactly like a real "
+                      "security regression.")
+        cprint(C.RED, "    Fix the policy store, or set SWEEP_ALLOW_NO_POLICY=1 "
+                      "to run unsuppressed deliberately.")
+        return 2
     if _ACCEPTED_RISKS:
         cprint(C.CYAN, f"Accepted risks loaded — {len(_ACCEPTED_RISKS)} entries: "
                        f"{', '.join(sorted(_ACCEPTED_RISKS.keys()))}")
