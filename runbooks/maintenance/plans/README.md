@@ -10,6 +10,36 @@ Plans are transient: once `status: executed` (and the change is in `main`),
 delete the file in the same commit that lands the upgrade — don't accumulate
 history here (git has it).
 
+## A plan can outlive its own work — check before every window
+
+`python3 runbooks/maintenance-plan.py --verify` flags plans whose target version
+already appears in that component's manifests. Treat a hit as "go and look", not
+as proof.
+
+This exists because `flux-stack-v0.57` sat `scheduled`, holding an
+operator-present *reboot-capable* window, for an upgrade that had executed eight
+days earlier. Its file was simply never retired. Nothing surfaced it — it was
+found by accident during a manual vetting pass, and left alone it would have
+spent a scarce window re-running a high-risk no-op against the live control
+plane.
+
+Two things this check taught, both worth keeping:
+
+- **Scope the search to the component, not the repo.** A repo-wide grep matched
+  `8.10.0` from an unrelated redis and `17.11` from a different postgres — 8
+  suspects, nearly all noise. A check that cries wolf gets ignored, which is
+  worse than no check.
+- **Resolve components by path substring, not by `kubernetes/apps/*/<name>/`.**
+  The narrow form looked correct and was *inert*: `flux-stack` has no app
+  directory, so the one real case this check exists for did not fire. That was
+  caught only by re-injecting the retired plan as a ground-truth test — which is
+  the standard this repo now holds audit code to (`docs/sops/audit-script-correctness.md`).
+
+**Staged plans are exempt, deliberately.** A stage's `current:` describes its
+PREDECESSOR's end state, not today: `grafana-chart-12` legitimately says
+"chart 11.6.1" while 10.5.15 is live. Verifying those against the cluster
+manufactures a false stale signal, so plans with unmet `depends_on` are skipped.
+
 ## What counts as an "open plan" — three tiers
 
 `python3 runbooks/maintenance-plan.py --open` is the canonical answer. A flat

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import pathlib
 import subprocess
 import sys
@@ -290,6 +291,73 @@ def human(r, cfg):
 
 
 
+
+_VER_RE = re.compile(r'\bv?\d+\.\d+(?:\.\d+)?\b')
+
+
+def already_done_suspects(cfg) -> list:
+    """Plans whose TARGET version already appears pinned in the manifests.
+
+    A plan can outlive its own work. flux-stack-v0.57 sat `scheduled` holding an
+    operator-present, reboot-capable window for an upgrade that had executed
+    eight days earlier — its file was simply never retired. Nothing surfaced it;
+    it was found by accident during a manual vetting pass.
+
+    This is a HEURISTIC, deliberately worded as "verify", not "stale": it greps
+    the repo for the plan's target version. False positives are expected (a
+    version string can appear in a comment). The point is to make the question
+    get asked every run instead of never.
+
+    STAGE-AWARENESS matters and is why this skips plans with unmet depends_on.
+    A staged plan's `current:` describes its PREDECESSOR's end state, not today
+    — grafana-chart-12 legitimately says "chart 11.6.1" while 10.5.15 is live.
+    Comparing those against the cluster manufactures a false stale signal, which
+    would be worse than no check at all.
+    """
+    plans = load_plans(cfg)
+    done = {p.get("plan_id") for p in plans if p.get("status") == "executed"}
+    out = []
+    for pl in plans:
+        if pl.get("status") in ("executed", "superseded"):
+            continue
+        deps = pl.get("depends_on") or []
+        if isinstance(deps, str):
+            deps = [deps]
+        if any(d and d not in done for d in deps):
+            continue  # staged: its `current` describes a future state
+        tgt = str(pl.get("target") or "")
+        vers = _VER_RE.findall(tgt)
+        if not vers:
+            continue
+        # Scope the search to THIS component's own manifests. Searching the whole
+        # repo matched `8.10.0` from an unrelated redis and `17.11` from another
+        # postgres — 8 suspects, nearly all noise. A check that cries wolf gets
+        # ignored, which is worse than no check.
+        comp = str(pl.get("component") or "")
+        if not comp:
+            continue
+        # Resolve the component to files by PATH SUBSTRING anywhere under
+        # kubernetes/, not just kubernetes/apps/*/<component>/. That narrower
+        # form looked right and was inert: `flux-stack` has no app directory
+        # (flux lives in kubernetes/flux/ and apps/flux-system/), so the one
+        # real already-done case this check exists for did not fire. Caught only
+        # by re-injecting that plan as a ground-truth test.
+        stem = comp.replace("-stack", "").replace("-", "")
+        dirs = {f for f in pathlib.Path("kubernetes").rglob("*.yaml")
+                if comp in str(f) or (len(stem) > 3 and stem in str(f).replace("-", ""))}
+        if not dirs:
+            continue
+        blob = ""
+        for f in dirs:
+            try:
+                blob += f.read_text()
+            except Exception:
+                pass
+        hit = [v for v in vers if v in blob]
+        if hit and len(hit) == len(vers):
+            out.append((pl.get("plan_id"), tgt[:56], hit[:3]))
+    return out
+
 def open_queue(cfg) -> str:
     """The canonical answer to "what plans are open?".
 
@@ -347,12 +415,23 @@ def _has_stages(parent, plans) -> bool:
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--verify", action="store_true",
+                    help="plans whose target version already appears pinned — verify whether the work is done")
     ap.add_argument("--open", action="store_true",
                     help="canonical open-plan queue, split executable/programme/reference")
     args = ap.parse_args(argv)
     cfg = load_windows()
     today = datetime.now().date()
     r = reconcile(cfg, today)
+    if args.verify:
+        sus = already_done_suspects(cfg)
+        if not sus:
+            print("no plans look already-done")
+        else:
+            print("VERIFY — target version already present in manifests:")
+            for pid, tgt, hit in sus:
+                print(f"  {pid:<34} target={tgt}  matched={hit}")
+        return 0
     if args.open:
         print(open_queue(cfg))
         return 0

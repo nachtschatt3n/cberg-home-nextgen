@@ -60,7 +60,23 @@ conflicts_with:
 status: draft                       # STAYS DRAFT — 2026-08-15 vetting: inventory has DRIFTED out
                                     # from under the batch table. NEEDS A SUBSTANTIVE REWRITE, not
                                     # a note. See the "2026-08-15 vetting" block below §Scope.
-window: "sat-early:2026-08-29"       # MOVED 2026-08-14 off sat-early:2026-08-15 to resolve a
+window: null                          # UNSCHEDULED 2026-08-16. It was sat-early:2026-08-29, where
+                                      # its 90m filled a 90m slot exactly — the reconciler flags that
+                                      # TIGHT, and rightly: the first thing sacrificed in an overrun is
+                                      # the rollback. Holding a whole window for a plan that already
+                                      # needs a substantive rewrite also blocks work that is ready.
+                                      #
+                                      # This must be SPLIT before it is rescheduled, like grafana,
+                                      # superset and media were. It touches ~63 app-template
+                                      # HelmReleases (not the 51 the batch table claims — the exact-
+                                      # filename glob was missing 12, fixed in 90bf96c7), so the
+                                      # natural cut is per-namespace batches that each fit a window
+                                      # with rollback slack.
+                                      #
+                                      # First step of the rewrite is NOT the version bump: repoint
+                                      # oci://ghcr.io/bjw-s/helm (frozen at 3.7.3, 2025-03-14) to
+                                      # bjw-s-labs, where 5.0.1 actually lives. Until then there is no
+                                      # source to pull 5.x from.
                                       # three-way interference: it shares `network` with
                                       # envoy-gateway-phase0 and `default`+`network` with
                                       # phase1, which also overlap each other. The EG phases
