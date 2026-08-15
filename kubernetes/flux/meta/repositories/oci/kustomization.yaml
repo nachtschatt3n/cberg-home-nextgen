@@ -7,9 +7,7 @@ resources:
   - ./controlplaneio.yaml
   - ./n8n.yaml
   - ./bitnami.yaml
-  - ./weave-gitops.yaml
   - ./coredns.yaml
   - ./spegel.yaml
   - ./stakater.yaml
-  - ./rybbit.yaml
   - ./librechat.yaml

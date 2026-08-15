@@ -99,6 +99,16 @@ major) and is NOT tracked to 5.0.0 here — leave it, plan it separately.
 
 > ### ⚠️ STALENESS — 2026-08-15 vetting pass: DO NOT EXECUTE THIS PLAN AS WRITTEN
 >
+> **2026-08-15 repo-freshness sweep — the rewrite must ALSO repoint the chart repo.**
+> `oci://ghcr.io/bjw-s/helm` is FROZEN (newest app-template 3.7.3, 2025-03-14); the
+> project moved to `oci://ghcr.io/bjw-s-labs/helm`, which is at 5.0.1 (2026-05-14).
+> Renovate sees nothing because it diffs against the frozen repo — same moved-upstream
+> blind spot as grafana and k8s-gateway. The rewrite must swap
+> `kubernetes/flux/meta/repositories/oci/bjw-s.yaml` to the new coordinates as its
+> first step, or the whole migration has no source to pull 5.x from. Note also
+> `home-automation/iobroker` is on app-template 2.4.0 — two majors further back than
+> the rest of the fleet, needs its own line in the batch table.
+>
 > This plan was authored 2026-08-02 against a **59-wrapper** inventory. Live
 > inventory on 2026-08-15 is **62 HelmReleases at `app-template` 3.7.3** across
 > the same 11 namespaces (60 distinct names; `absenty` and `andreamosteller`
