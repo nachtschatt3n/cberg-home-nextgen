@@ -224,13 +224,10 @@ spec:
           app.kubernetes.io/name: librechat-librechat
 
       # Pinned by DIGEST, not tag. `bitnami/mongodb` no longer publishes semver
-      # tags (502 tags, all `sha256-*` plus `latest`; `8.2.6` 404s and
-      # `bitnamilegacy/mongodb` has zero matches), so a digest is the ONLY
-      # available pin. `tag: "latest"` was live-drifting: the digest below is
-      # MongoDB 8.2.6 (image built 2026-03-23) and was what the pod was
-      # actually running, while `latest` moved to 8.3.8 (built 2026-08-14) --
-      # i.e. an uncontrolled MINOR version jump on the chat database was armed
-      # to fire on the next reschedule onto a node with no cached copy.
+      # tags (502 tags, all `sha256-*` plus `latest`), so a digest is the ONLY
+      # available pin. `8.2.6` / `8.3.8` both 404 as tags, and the subchart's
+      # OWN default tag (`8.0.13-debian-12-r0`) 404s too -- so dropping this
+      # override is NOT a fallback, it produces an unpullable image.
       #
       # `tag` is deliberately left in place but is INERT: bitnami common
       # `common.images.image` switches the separator to "@" and replaces the
@@ -238,13 +235,23 @@ spec:
       # rendered image is `docker.io/bitnami/mongodb@sha256:...` and the tag is
       # never consulted. Do NOT delete `digest` and expect `tag` to be safe.
       #
-      # The 8.2.6 -> 8.3.8 bump is tracked as a SEPARATE planned change:
-      # runbooks/maintenance/plans/librechat-mongodb-8.3.8.md
+      # The digest below is MongoDB 8.3.8 (image built 2026-08-14), moved from
+      # 8.2.6 (sha256:3cb21cf1...) in window sat-early:2026-08-15 per
+      # runbooks/maintenance/plans/librechat-mongodb-8.3.8.md. It was applied
+      # immediately AFTER the auth change above wiped the datadir, so this was
+      # a fresh 8.3.8 initialisation rather than an 8.2 -> 8.3 migration.
+      #
+      # STRATEGIC CAVEAT: 8.0 is the LTS line; 8.1/8.2/8.3 are rapid releases,
+      # each supported only until the next supersedes it. Because Bitnami
+      # publishes only `latest` publicly, we cannot pick LTS here -- we get
+      # whatever `latest` is on the day. The durable fix is migrating to the
+      # official `mongo` image (real semver tags, incl. LTS) or an operator;
+      # that is a larger change and needs its own plan.
       image:
         registry: docker.io
         repository: bitnami/mongodb
         tag: "latest"
-        digest: "sha256:3cb21cf1de351e133da3bdf574fc61da9dc371a05d13aff91ed15a9b50becb8a"
+        digest: "sha256:0c57d0efdf2f08958e5cd1392b20664c92597c7c6da2fbd0e972bcfb96d0dc92"
       persistence:
         size: 10Gi
       # Recreate: same RWO Multi-Attach deadlock as the parent librechat
