@@ -1,135 +1,101 @@
 ---
 plan_id: superset-bitnamilegacy-migration
 component: superset
-pr: null                              # no upstream tag can fix this — see Summary
+pr: null
 kind: chart
 current: "bitnamilegacy/postgresql 14.17.0 + bitnamilegacy/redis 7.0.10 (Superset metadata DB + cache)"
-target: "CloudNativePG for the metadata DB + official redis/valkey for cache"
-update_type: major                    # datastore replacement, not a version bump
+target: "official redis 8.10.0-alpine + postgres 17.11-alpine — delivered in 4 stages"
+update_type: major
 risk: high
-est_duration_min: 120
+est_duration_min: 170                 # sum of the four stages (45+45+50+30), for reference only
 needs_reboot: false
 touches:
   namespaces: [databases]
   resources:
-    - helmrelease/superset
-    - "superset metadata Postgres (dashboards, charts, users, saved queries)"
-    - "superset Redis (cache/celery broker)"
-    - pvc/superset-postgresql
-  shared: []                          # Superset's OWN bundled datastores, not the shared ones
+    - "see the individual stage plans — this file executes nothing"
+  shared: []
 depends_on: []
-conflicts_with: []
-status: draft
-window: null                          # CANNOT BE SCHEDULED AS WRITTEN (found 2026-08-15).
-                                      # est_duration_min is 120m but the LONGEST window in
-                                      # runbooks/maintenance-windows.yaml is 90m (sat/sun;
-                                      # tue/thu are 60m). This plan does not fit any slot, so
-                                      # leaving it window:null is not an oversight — it must be
-                                      # SPLIT into stages that each fit inside a window with
-                                      # rollback slack, or run as an attended out-of-window
-                                      # operation with explicit operator go/no-go.
-                                      # Operator chose Option A: CloudNativePG. Blocked tonight
-                                      # only because mariadb-27 owns the `databases` namespace.
+conflicts_with: [mariadb-27, longhorn-1.12.1-engine]
+status: superseded                    # INDEX ONLY — split into 4 stage plans on 2026-08-15
+window: null                          # never schedule this file; schedule the stages
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
+  - docs/sops/storage-safety.md
 generated: "2026-08-15"
+superseded_by:
+  - superset-redis-official
+  - superset-pg-standup
+  - superset-pg-cutover
+  - superset-pg-decommission
 ---
 
-# Superset: get off the archived `bitnamilegacy` registry
+# Superset: off the archived `bitnamilegacy` registry — INDEX (split into 4 stages, 2026-08-15)
 
-## 1) Summary & why held
+**This file is an index. It executes nothing.** The original plan was 120 minutes
+against a 90-minute maximum window, so it could not be scheduled at all. It is now
+four stages, each of which leaves Superset in a consistent, working, independently
+revertible state.
 
-`bitnamilegacy/postgresql:14.17.0` (**5 fixable CRITICAL**) and
-`bitnamilegacy/redis:7.0.10` (**14 fixable CRITICAL**) — 19 criticals, the
-largest remaining cluster in the CVE list.
+| # | plan | what moves | risk | est | window |
+|---|---|---|---|---|---|
+| 1 | [`superset-redis-official`](superset-redis-official.md) | bundled `bitnamilegacy/redis` → official `redis:8.10.0-alpine` (cache only) | medium | 45 m | `thu-early:2026-08-20` |
+| 2 | [`superset-pg-standup`](superset-pg-standup.md) | stand up `postgres:17.11-alpine` **alongside** + restore a dump; **no cutover** | medium | 45 m | `thu-early:2026-09-03` |
+| 3 | [`superset-pg-cutover`](superset-pg-cutover.md) | fresh dump + repoint `DB_HOST`; old DB **left running** as the rollback | high | 50 m | `sat-early:2026-09-12` |
+| 4 | [`superset-pg-decommission`](superset-pg-decommission.md) | `postgresql.enabled:false` — the archived image finally leaves the namespace | medium | 30 m | `tue-early:2026-09-22` |
 
-**No bump can fix these.** `bitnamilegacy` is Bitnami's *archived* catalog: it
-receives no further security updates, ever. The "newer tag available" the scanner
-reports is misleading in two ways — the newest tags are major-version jumps
-(PG 14→17, Redis 7→8) that the Superset chart does not support, and even
-`bitnamilegacy/redis:latest` carries 7 unpatchable criticals of its own (AR-029).
+Redis first because it is cache-only and clears **14 of the 19 criticals** with no
+data risk. Postgres is then split standup → cutover → decommission so that the DB
+replacement never shares a window with the moment its rollback disappears.
 
-So the only real remediation is **replacing the datastores**, which is why this is
-a plan and not an image bump.
+## ⚠️ The decision that must be re-confirmed before stage 2
 
-**Also blocked on:** the Superset chart itself is held (AR-050 / app-template
-class), and per `project_superset_chart_020_redis_auth` the chart's immutable
-Deployment selectors require a delete-recreate on any chart up/down bump. Doing
-the datastore migration and the chart move in one window is how you lose the
-metadata DB.
+The superseded plan recorded *"DECIDED 2026-08-15 — Option A, CloudNativePG… the
+cluster already runs CNPG patterns elsewhere"*. **That justification is false.**
+CloudNativePG is not installed here: the only mention in the entire repo is
+`kubernetes/apps/office/sure/app/helmrelease.yaml`, which *disables* it
+(`cnpg.enabled: false`, `cloudnative-pg.enabled: false`) with the comment *"keeps
+the cluster free of CloudNativePG + OT-Redis-Operator just for one app."*
 
-**Same registry, other users** (separate hygiene, not this plan):
-`nextcloud-mariadb`, `paperless-ngx-mariadb`, and two unpinned
-`bitnamilegacy/{redis,mariadb}:latest` floating tags in `office/`. Those should at
-minimum be pinned.
+Option A therefore requires **installing a cluster-wide operator first** — its own
+plan, its own risk, and a reversal of a documented house decision. The stage plans
+implement **Option B**: the house pattern already used twice in `databases/` — a
+plain Deployment on an official image with a real semver stream. Same outcome (off
+`bitnamilegacy`, back under Renovate coverage), no new operator. If the operator
+still prefers CNPG, stage 2 must not run as written.
 
-## 2) Pre-checks
+## Facts carried forward from the original plan
 
-```bash
-# what is actually running, and what holds the real data
-kubectl get pods -n databases | grep superset
-kubectl get pvc -n databases | grep superset
+- **No bump can fix this, and the reason is in the chart itself.** Superset chart
+  0.22.4's own `values.yaml` pins `bitnamilegacy/postgresql:14.17.0-debian-12-r3`
+  and `bitnamilegacy/redis:7.0.10-debian-11-r4` (verified 2026-08-15). Upgrading the
+  chart does not move off the archived registry.
+- **`bitnamilegacy` is archived**: newest push on Docker Hub is **2025-08-28** and
+  there will be no further security updates. Its semver tags do still exist (unlike
+  `docker.io/bitnami/*`, which now publishes only `latest` + `sha256-*`), so *pinning*
+  is possible — and pointless.
+- **19 fixable criticals**: 5 on postgresql, 14 on redis — the largest remaining
+  cluster in the CVE list.
+- **The cutover is one Secret key.** `superset-secrets` already carries `DB_HOST`,
+  `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`,
+  `REDIS_PASSWORD`, and the chart mounts it through `envFromSecrets` **after** its own
+  generated env Secret, so it wins. `SQLALCHEMY_DATABASE_URI` is built at runtime from
+  those env vars (`_helpers.tpl`).
+- **Do not fold in the chart bump.** The Superset chart is held (AR-050 class) and per
+  `project_superset_chart_020_redis_auth` its immutable Deployment selectors require a
+  delete-recreate on any chart up/down bump. The chart stays at 0.22.4 for all four
+  stages.
+- **New datastores are deliberately NOT app-template**, so Superset does not enlarge
+  the blast radius of the pending `app-template-5.0` migration.
+- **Same registry, other users** (separate hygiene item, not this plan set):
+  `nextcloud-mariadb`, `paperless-ngx-mariadb`, and two unpinned
+  `bitnamilegacy/{redis,mariadb}:latest` floating tags under `office/`.
 
-# METADATA DB IS THE WHOLE RISK: dashboards, charts, saved queries, users.
-# Take a logical dump IN ADDITION to the Longhorn backup — a volume snapshot of a
-# running Postgres is not a substitute for pg_dump.
-kubectl exec -n databases superset-postgresql-0 -- \
-  pg_dump -U superset superset > /tmp/superset-metadata-$(date +%F).sql
-wc -c /tmp/superset-metadata-*.sql     # sanity: not zero
+## For the window agent
 
-# Redis holds cache + celery broker state only — confirm nothing durable lives there
-kubectl exec -n databases deploy/superset-redis -- redis-cli INFO keyspace
-```
-
-## 3) Steps
-
-**DECIDED 2026-08-15 — Option A, CloudNativePG.** The alternatives are kept below
-for context, but the target is settled; do not re-open it.
-
-- **Option A (CHOSEN): CloudNativePG** for the metadata DB. The cluster
-  already runs CNPG patterns elsewhere; gives managed backups/failover and leaves
-  the archived registry entirely.
-- **Option B: official `postgres:` image** via the chart's `externalDatabase`
-  values. Smaller change, still off bitnamilegacy, but you own backups.
-- For the cache: official `redis:` (already used cluster-wide at 8.x) or
-  `valkey/valkey` (already used by penpot).
-
-Then, in order, **one datastore per window**:
-1. Stand the new Postgres up alongside the old one; restore the dump into it.
-2. Point Superset at it (`externalDatabase` / connection secret), reconcile,
-   verify (§4), and only then decommission the old one.
-3. Repeat separately for Redis — it is cache-only, so it can be cut over with a
-   restart rather than a migration.
-
-**Do not** combine with the held Superset chart bump. Datastore first, chart
-later, verified in between.
-
-## 4) Verification
-
-```bash
-kubectl get pods -n databases | grep superset     # all Ready
-# Operator smoke test — this is the real verification, not pod status:
-#   log in; open a dashboard that uses a saved chart; run a saved query;
-#   confirm users/roles survived. A restored-but-wrong metadata DB looks
-#   perfectly healthy at the pod level and is empty in the UI.
-trivy image <new-postgres-image> --severity CRITICAL --ignore-unfixed
-trivy image <new-redis-image>    --severity CRITICAL --ignore-unfixed
-```
-
-## 5) Rollback
-
-Keep the old datastore running until §4 passes — that IS the rollback: point
-Superset back at the old connection secret and reconcile. Once the old Postgres
-is deleted, rollback becomes restore-from-dump, so do not delete it in the same
-window. Retain the pg_dump regardless.
-
-## 6) Interference notes
-
-- Superset's Postgres/Redis are its own; the cluster-shared `databases/postgresql`
-  and `databases/redis` are untouched.
-- Never co-schedule with the Superset chart bump (AR-050) or with
-  `longhorn-1.12.1-engine` (storage-layer work under a live DB migration).
-- `window: null` on purpose: the architecture choice (A vs B) is an operator
-  decision, and the plan should be re-targeted once that is made.
+Schedule the **stages**, never this file. `depends_on` is a hard chain for
+2 → 3 → 4; stage 1 (Redis) is independent and may run at any point before stage 4,
+whose verification asserts that no `bitnamilegacy` image remains. Stage 4 out of
+order is the one genuinely destructive mis-sequencing in this set: it deletes the
+database Superset is using.
