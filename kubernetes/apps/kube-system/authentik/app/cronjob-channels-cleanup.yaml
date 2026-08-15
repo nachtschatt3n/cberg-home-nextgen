@@ -22,7 +22,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: cleanup
-              image: postgres:17.10-bookworm
+              image: postgres:17.11-bookworm
               command:
                 - /bin/bash
                 - -c
