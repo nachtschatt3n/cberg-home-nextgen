@@ -18,11 +18,21 @@ metadata:
 spec:
   imageRepositoryRef:
     name: absenty
-  policy:
-    alphabetical:
-      order: asc
   filterTags:
-    pattern: '^sha-[0-9a-f]+$'
+    # ci.yml in the Absenty repo is the only publisher, and it emits
+    # `production-<YYYYMMDDHHMMSS>` ONLY from a push to the `production` branch.
+    # Every tag it publishes is branch-prefixed, so a build for the other
+    # environment -- or a pull-request build, which no longer publishes at
+    # all -- cannot be selected here.
+    pattern: '^production-(?P<ts>\d{14})$'
+    extract: '$ts'
+  policy:
+    # The timestamp is a fixed-width, monotonically increasing counter, so
+    # this selects the NEWEST BUILD. The previous config sorted bare 7-char
+    # hex git shas alphabetically, which is not a time order at all: it had
+    # been pinned since 2025-10 to whichever sha happened to start with `ff`.
+    numerical:
+      order: asc
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
