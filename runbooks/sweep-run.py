@@ -250,12 +250,27 @@ def _sections_reporting_this_cycle(dsn: str, cycle_id: str) -> set:
                 # slo-check records to slo_snapshots and emits NO sweep_findings
                 # row when every SLO passes, so findings-only inference would
                 # class a clean slo run as "did not run".
+                #
+                # slo_snapshots has NO cycle_id column — it is keyed by taken_at.
+                # An earlier version queried cycle_id here; the resulting
+                # UndefinedColumn hit the fail-closed handler below and silently
+                # disabled auto-close for EVERY cycle. A guard that always fails
+                # closed is indistinguishable from a guard that works, which is
+                # why this correlates on the cycle's own time window instead.
                 cur.execute(
-                    "SELECT 1 FROM slo_snapshots WHERE cycle_id = %s LIMIT 1",
+                    "SELECT started_at, COALESCE(finished_at, now()) "
+                    "FROM sweep_cycles WHERE cycle_id = %s",
                     (cycle_id,),
                 )
-                if cur.fetchone():
-                    found.add("slo")
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        "SELECT 1 FROM slo_snapshots "
+                        "WHERE taken_at >= %s AND taken_at <= %s LIMIT 1",
+                        (row[0], row[1]),
+                    )
+                    if cur.fetchone():
+                        found.add("slo")
                 return found
     except Exception as e:  # noqa: BLE001
         # Fail CLOSED: on any error, report nothing as having run, so

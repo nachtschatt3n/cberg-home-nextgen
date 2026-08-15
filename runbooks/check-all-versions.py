@@ -151,14 +151,24 @@ class VersionChecker:
         self.external_infra_results: List[Dict] = []
 
     def find_helmreleases(self) -> List[Path]:
-        """Find all HelmRelease YAML files."""
-        helmreleases = []
+        """Find all HelmRelease YAML files.
+
+        Matches `*helmrelease.yaml` and `*helm-release.yaml`, not the bare
+        filename. The exact-name glob silently skipped 12 of 111 HelmReleases —
+        and not a random 12: every sidecar datastore in the repo is named for
+        its role (`postgres-helmrelease.yaml`, `redis-helmrelease.yaml`,
+        `elasticsearch-helmrelease.yaml`), so the blind spot was precisely the
+        databases and caches behind immich, sure, affine, teslamate, traccar and
+        tube-archivist — the components most likely to carry CVEs. `iobroker`
+        (`helm-release.yaml`) sat two app-template majors behind, wholly
+        unreported. Verified: this pattern finds all 111 with zero
+        false-positives.
+        """
         apps_dir = self.kubernetes_dir / "apps"
-        
-        for yaml_file in apps_dir.rglob("helmrelease.yaml"):
-            helmreleases.append(yaml_file)
-        
-        return helmreleases
+        found = set()
+        for pattern in ("*helmrelease.yaml", "*helm-release.yaml"):
+            found.update(apps_dir.rglob(pattern))
+        return sorted(found)
     
     def load_helmrepositories(self):
         """Load all HelmRepository definitions."""
