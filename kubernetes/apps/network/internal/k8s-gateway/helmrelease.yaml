@@ -37,10 +37,21 @@ spec:
       annotations:
         lbipam.cilium.io/ips: "192.168.55.101"
       externalTrafficPolicy: Cluster
-    # HTTPRoute added for the Envoy Gateway migration: as each app moves
-    # from Ingress to HTTPRoute (Phases 1-3) its internal DNS answer
-    # follows automatically. Ingress stays until Phase 4 decommissions it.
-    watchedResources: ["Ingress", "Service", "HTTPRoute"]
+    # DO NOT add "HTTPRoute" here on k8s-gateway 2.4.0 — it takes internal DNS
+    # down completely. Adding it makes the plugin start informers for the whole
+    # route family at v1alpha2, including TLSRoute and GRPCRoute, which no
+    # longer exist in Gateway API v1.5.1 (both graduated to v1). The informers
+    # fail to sync, and the plugin then answers EVERY query — Ingress-backed
+    # ones included — with "Could not sync required resources", i.e. SERVFAIL
+    # for the whole domain. Verified live 2026-08-15 during envoy-gateway
+    # phase 0 and reverted within minutes. Not an RBAC problem: the chart
+    # already grants gateway.networking.k8s.io/*.
+    #
+    # Phase 1 blocker: internal DNS for HTTPRoute-backed apps needs either a
+    # k8s-gateway release built against Gateway API >= v1.1 (v1 routes), or a
+    # different mechanism (per-app DNSEndpoint, or point the split-horizon
+    # record at the gateway VIP directly).
+    watchedResources: ["Ingress", "Service"]
     resources:
       requests:
         cpu: 50m
