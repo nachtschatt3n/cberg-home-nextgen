@@ -14,7 +14,7 @@ risk: medium                        # Not from blast radius -- from the datadir 
 est_duration_min: 30
 needs_reboot: false
 window: "sat-early:2026-08-15"
-status: scheduled
+status: executed
 touches:
   namespaces: [ai]
   resources:
