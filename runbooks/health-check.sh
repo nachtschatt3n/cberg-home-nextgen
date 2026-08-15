@@ -1833,8 +1833,20 @@ log_section "Section 20: GitOps Status"
     echo ""
 
     # Check Flux controllers health
-    FLUX_CONTROLLERS=$(safe_count "kubectl get pods -n flux-system --no-headers 2>/dev/null | wc -l")
+    # Denominator excludes Succeeded pods. flux-system accumulates one-off
+    # throwaway pods (chart fetches, debug shells) that complete and linger;
+    # counting them as controllers made FLUX_RUNNING < FLUX_CONTROLLERS and
+    # manufactured a CRITICAL out of a pod that had done its job and exited.
+    # Seen 2026-08-15 with `lc-chart-fetch2`. Failed/Pending are deliberately
+    # STILL counted -- a controller that crashed is exactly what this check is
+    # for. Note we cannot filter on the `part-of=flux` label instead: the
+    # flux-operator pod does not carry it and is a real controller.
+    FLUX_CONTROLLERS=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null | wc -l")
     FLUX_RUNNING=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l")
+    FLUX_LEFTOVER=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l")
+    if [ "${FLUX_LEFTOVER:-0}" -gt 0 ]; then
+        echo "Note: $FLUX_LEFTOVER completed one-off pod(s) left in flux-system (not controllers; safe to delete)"
+    fi
     echo "Flux controllers: $FLUX_RUNNING/$FLUX_CONTROLLERS running"
     echo ""
 

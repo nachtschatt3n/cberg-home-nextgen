@@ -910,7 +910,11 @@ class VersionChecker:
         # Common chart to GitHub repo mappings
         chart_repo_map = {
             'cert-manager': ('cert-manager', 'cert-manager'),
-            'grafana': ('grafana', 'helm-charts'),
+            # Charts moved to the grafana-community org (repo swap landed
+            # 2026-08-15, commit 0f8baf00). The old mapping still resolved, so
+            # release-note lookup silently read a FROZEN repo -- breaking-change
+            # detection would have been degraded for grafana chart stages 2-4.
+            'grafana': ('grafana-community', 'helm-charts'),
             'prometheus': ('prometheus-community', 'helm-charts'),
             'kube-prometheus-stack': ('prometheus-community', 'helm-charts'),
             'longhorn': ('longhorn', 'longhorn'),
