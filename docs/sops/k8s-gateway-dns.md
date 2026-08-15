@@ -191,10 +191,27 @@ Flux prunes).
 > still in force while the revert is applied. Its deny message is also stale
 > — it claims "before v1.5.0" while the regex blocks through v1.5.x — so an
 > operator mid-rollback gets a message that looks inapplicable.
-> **Before reverting a CRD bundle, delete the binding first:**
-> `kubectl delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io`
-> (the binding alone is enough; the policy is inert without it). The revert
-> commit restores the older policy pair, so no re-apply is needed. Expect the `gatewayclasses` CRD to deadlock if an orphaned
+> **The VAP and its binding are Flux-managed** (they live inside
+> `crds/gateway-api-standard.yaml`, labelled
+> `kustomize.toolkit.fluxcd.io/name=envoy-gateway-crds`), so a bare
+> `kubectl delete` is re-applied on the next reconcile — it only buys a
+> window. A working rollback therefore has to bring the older, permissive
+> policy pair back **in the same commit** as the CRD downgrade, which a plain
+> `git revert` of the re-vendor commit does. If the apply is still denied
+> (kustomize applies CRDs before the cluster-scoped VAP, and the API server's
+> policy cache lags), delete the binding and re-reconcile:
+>
+> ```bash
+> kubectl delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io
+> flux reconcile kustomization envoy-gateway-crds -n network
+> ```
+>
+> **Standing pre-flight before any bundle downgrade** — proves the deny in
+> seconds without changing anything:
+>
+> ```bash
+> kubectl apply --dry-run=server -f <old httproutes CRD>   # expect Denied if trapped
+> ``` Expect the `gatewayclasses` CRD to deadlock if an orphaned
 GatewayClass still carries `gateway-exists-finalizer.gateway.networking.k8s.io`
 after its controller is gone — clear the CR's finalizer
 (`kubectl patch gatewayclass <name> --type=merge -p '{"metadata":{"finalizers":[]}}'`),
