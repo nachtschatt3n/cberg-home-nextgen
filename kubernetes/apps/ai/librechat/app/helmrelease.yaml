@@ -113,6 +113,28 @@ spec:
       className: external
       annotations:
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+        # Strip client-supplied X-Tenant-Id at the edge. LibreChat v0.8.5+ trusts
+        # this header on four UNAUTHENTICATED routes, and this ingress is
+        # internet-facing, so an anonymous caller can vary the header to pollute
+        # per-tenant cache keys against a 1Gi pod. No data leak (our documents
+        # carry no tenantId), but it is a free unauthenticated memory-pressure
+        # lever -- so the header must never reach the app from outside.
+        #
+        # Setting a proxy_set_header to the empty string makes nginx OMIT the
+        # header from the upstream request entirely (it does not forward an
+        # empty value). Header names are matched case-insensitively, so this
+        # also covers `x-tenant-id` / `X-TENANT-ID`.
+        #
+        # This ACCUMULATES with the controller's built-in proxy_set_header
+        # directives rather than replacing them: nginx only falls back to
+        # inherited headers when a level defines NONE, and the snippet is
+        # injected into the same `location` block that already sets Host /
+        # X-Forwarded-For / X-Real-IP. Verified against the rendered nginx.conf.
+        #
+        # Deliberately NOT TENANT_ISOLATION_STRICT=true -- that setting takes
+        # LibreChat down in this deployment.
+        nginx.ingress.kubernetes.io/configuration-snippet: |
+          proxy_set_header X-Tenant-Id "";
         nginx.ingress.kubernetes.io/enable-websocket: "true"
         nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
         nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
