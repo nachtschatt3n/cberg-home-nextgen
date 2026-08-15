@@ -31,7 +31,7 @@ deny:
   - match: "*cilium*"
     reason: "CNI datapath — 1.20.0 carries Gateway-API/mutual-auth caveats that can affect streaming protocols (Music Assistant / Home Assistant). Plan + verify MA/HA streaming before upgrading; never an unattended bump."
   - match: "*gateway-helm*"
-    reason: "Envoy Gateway control plane — v1.7.0 shipped an ext-auth regression (envoyproxy/gateway#8202) that broke redirect auth. It fronts authentik forward-auth from migration Phase 1 on; reviewed bumps only, and the CRD chart must move in lockstep."
+    reason: "Envoy Gateway control plane, pinned 1.8.3. Fronts authentik forward-auth from migration Phase 1 on, so bumps are reviewed-only and the vendored CRDs must move in lockstep (crds/revendor.sh). NOT a permanent hold: EG 1.8 goes EOL 2026-11-08 and does not list k8s 1.36 (we run 1.36) on its support matrix — re-evaluate 1.9.x before Phase 2 once it has 3-4 weeks of soak. That bump also drags Gateway API v1.5.1 -> v1.6.1."
   - match: "*gateway-crds-helm*"
     reason: "Gateway API + Envoy Gateway CRDs — must move in lockstep with gateway-helm, and a channel/bundle change is never an unattended merge."
   - match: "*envoy-gateway*"
