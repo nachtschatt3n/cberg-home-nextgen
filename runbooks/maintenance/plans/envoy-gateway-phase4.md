@@ -21,7 +21,17 @@ touches:
   shared: []
 depends_on: [envoy-gateway-phase3]
 conflicts_with: []
-status: scheduled
+status: blocked                     # 2026-08-15: foundation blocked. phase0 was attempted,
+                                    # took ALL internal DNS down (k8s-gateway v1alpha2
+                                    # informers vs Gateway API v1.5.1 CRDs), and was rolled
+                                    # back. No phase can run until the DNS story is fixed.
+                                    # LIKELY UNBLOCK (found 2026-08-15, after the rollback):
+                                    # k8s_gateway upstream MOVED ORGS (ori-edge -> k8s-gateway);
+                                    # new chart 3.7.2 / app 1.8.0 (2026-07-06) is built against
+                                    # gateway-api v1.5.1 — the exact CRD set EG installs. The
+                                    # "no upgrade exists" premise was an artifact of watching
+                                    # the frozen old repo. Path: upgrade k8s-gateway first,
+                                    # prove DNS healthy, THEN re-run phase0. Operator go/no-go.
 window: null                          # 2026-08-15: the envoy chain is NO LONGER window work.
                                       # phase2 alone is est 120m and the largest window is 90m,
                                       # so it never fit; the 5 phases are strictly sequential,
