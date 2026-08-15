@@ -492,8 +492,13 @@ def s1_sops_coverage() -> tuple[str, Findings, str]:
     lines = []
 
     # Unencrypted kind:Secret files
+    # Anchor on a column-0 `kind: Secret` so this matches an actual Secret
+    # *manifest* (top-level document field) and not a nested reference such as
+    # a Gateway `certificateRefs: - kind: Secret` or a HelmRelease
+    # `valuesFrom: - kind: Secret` — those name a Secret, they do not contain one.
     unenc = run_lines(
-        "grep -rl 'kind: Secret' kubernetes/ --include='*.yaml' | grep -v '\\.sops\\.yaml$'"
+        "grep -rlE '^kind: Secret[[:space:]]*$' kubernetes/ --include='*.yaml' "
+        "| grep -v '\\.sops\\.yaml$'"
     )
     # Filter known false-positives (SecretKeyRef refs, SA tokens, kustomization refs,
     # _template/ scaffolding directories, and *.example.yaml placeholder files which are
@@ -1803,23 +1808,34 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
     # Same family as the other findings this month: absence of a signal read as
     # health. This does not judge whether a suspension is right — only that a
     # deliberate pause must stay VISIBLE rather than decaying into a forgotten one.
+    # Emit an explicit clean line: a check that prints nothing when clean is
+    # itself indistinguishable from a check that never ran — the same
+    # absence-of-signal failure mode this block exists to catch.
+    susp_total = 0
+    susp_kinds_scanned = 0
     for kind in ("kustomization", "helmrelease", "imagerepository",
                  "imagepolicy", "imageupdateautomation"):
         out = kubectl(f"get {kind} -A -o json")
         if not out:
             continue
+        susp_kinds_scanned += 1
         try:
             items = json.loads(out).get("items", [])
         except Exception:  # noqa: BLE001
             continue
         susp = [f"{i['metadata']['namespace']}/{i['metadata']['name']}"
                 for i in items if i.get("spec", {}).get("suspend")]
+        susp_total += len(susp)
         if susp:
             f.add(WARNING,
                   f"{len(susp)} suspended {kind}(s) — reported READY=True by Flux but "
                   f"receiving no updates: {', '.join(susp[:6])}"
                   + ("…" if len(susp) > 6 else ""))
             cprint(C.YELLOW, f"  🟡 {len(susp)} suspended {kind}(s): {', '.join(susp[:6])}")
+
+    if susp_kinds_scanned and not susp_total:
+        cprint(C.GREEN,
+               f"  🟢 No suspended Flux objects ({susp_kinds_scanned} kinds scanned)")
 
     checks = []
 
