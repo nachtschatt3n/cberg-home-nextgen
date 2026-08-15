@@ -7,4 +7,6 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  url: https://grafana.github.io/helm-charts
+  # grafana.github.io is frozen at chart 10.5.15 (appVersion 12.3.1, 2026-01-30);
+  # the live chart moved to the grafana-community org. Same 10.5.15 tarball digest.
+  url: https://grafana-community.github.io/helm-charts
