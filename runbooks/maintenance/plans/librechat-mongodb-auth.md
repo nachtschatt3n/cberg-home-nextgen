@@ -13,8 +13,8 @@ risk: medium                        # Not from blast radius -- from the datadir 
                                     # is therefore mandatory, not incidental.
 est_duration_min: 30
 needs_reboot: false
-window: "sat-early:2026-09-12"
-status: draft
+window: "sat-early:2026-08-15"
+status: scheduled
 touches:
   namespaces: [ai]
   resources:

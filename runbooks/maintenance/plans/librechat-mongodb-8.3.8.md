@@ -41,8 +41,8 @@ conflicts_with: []                  # Do not co-schedule with any other plan tha
                                     # `ai` namespace (openclaw / ollama-facing apps) purely to
                                     # keep the post-roll signal unambiguous -- not a hard
                                     # technical conflict.
-status: draft
-window: "sat-early:2026-09-12"
+status: scheduled
+window: "sat-early:2026-08-15"
 # Paired with librechat-mongodb-auth, sequenced AFTER it. That plan wipes the
 # datadir, so this stops being a 8.2->8.3 migration at all and becomes a fresh
 # 8.3.8 install -- the one-way featureCompatibilityVersion risk disappears.
