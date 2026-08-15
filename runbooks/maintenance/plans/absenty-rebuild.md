@@ -1,197 +1,170 @@
 ---
 plan_id: absenty-rebuild
 component: absenty
-pr: null                              # self-owned image; nothing upstream to bump to
+pr: nachtschatt3n/Absenty#57          # merged 2026-08-15
 kind: image
-current: "ghcr.io/nachtschatt3n/absenty — 51 fixable CRITICAL (dev + prod)"
-target: "rebuilt on a current base, 51 -> as close to 0 as the base allows"
+current: "ghcr.io/nachtschatt3n/absenty — image-automation managed, both namespaces"
+target: "rebuilt on a current base; tag selection moved to the branch-prefixed timestamp tag"
 update_type: patch                    # a rebuild, not a version change
-risk: medium                          # externally exposed, and prod + dev both move
+risk: medium                          # prod + dev both move
 est_duration_min: 45
 needs_reboot: false
+security_ref: F-c58dd98e
 touches:
   namespaces: [my-software-production, my-software-development]
   resources:
     - helmrelease/absenty              # both namespaces
+    - imagepolicy/absenty              # both namespaces
+    - imageupdateautomation/absenty-image-updates
     - "ghcr.io/nachtschatt3n/absenty (image-automation managed)"
-    - ingress/absenty                  # class "external" in BOTH namespaces
+    - ingress/absenty                  # both namespaces
   shared: []
 depends_on: []
 conflicts_with: []
-status: blocked
-window: "tue-early:2026-08-25"        # earliest sensible slot; highest open CVE count
-auto_execute: false                   # requires a build in another repo first
+status: in-progress
+window: null                           # released on operator GO, 2026-08-15
+auto_execute: false                    # requires a build in another repo first
 sops_refs:
   - docs/sops/application-update.md
+  - docs/sops/vulnerability-disclosure.md
 generated: "2026-08-15"
-executed: "2026-08-15"          # partial - see Execution Log
+executed: "2026-08-15"
 ---
 
-# absenty: rebuild — 51 fixable CRITICAL, externally exposed
+# absenty: rebuild on a current base + fix image-tag provenance
 
-## 1) Summary & why this is now the top CVE item
+> **Security driver — detail withheld from this public repo.**
+> Tracked as **F-c58dd98e** (`plan` / severity `deferred`).
+> Full detail (CVE IDs, counts, exposure, exploitability) lives on the
+> finding record — it is deliberately not reproduced here.
+>
+> - Dashboard: `https://sweep.<DOMAIN>/findings/F-c58dd98e`
+> - CLI: `runbooks/policy-cli.py finding show F-c58dd98e`
+> - Plans: absenty-rebuild
+>
+> See `docs/sops/vulnerability-disclosure.md` before adding any
+> vulnerability detail to a committed file.
 
-**51 fixable CRITICAL** on `ghcr.io/nachtschatt3n/absenty`, deployed in **both**
-`my-software-production` and `my-software-development`, and **both on `external`
-ingresses**. That is more than double the next-largest cluster (superset's 19)
-and roughly seven times any single upstream image.
+## 1) Summary
 
-**It was invisible until 2026-08-15.** absenty is a private GHCR package, so trivy
-ran unauthenticated and reported it UNKNOWN — not clean, but not measured either.
-Granting the local `gh` token `read:packages` (and forwarding it to trivy via
-`TRIVY_USERNAME`/`TRIVY_PASSWORD` in `sweep-run.py`) made all 17 first-party
-images scannable for the first time; absenty is what that uncovered.
+absenty is a **self-built** image, so there is nothing upstream to bump to —
+the remedy is a rebuild on a current base in the application repo, then letting
+Flux image-automation pick the new tag up.
 
-**No bump can fix it** — we build this image. The remedy is a rebuild on a current
-base in the absenty source repo, then letting Flux image-automation pick up the
-new tag.
+It is a private GHCR package, so trivy previously ran unauthenticated against
+it and reported UNKNOWN — not clean, but not measured either. Granting the
+local `gh` token `read:packages` and forwarding it via
+`TRIVY_USERNAME`/`TRIVY_PASSWORD` in `sweep-run.py` made all first-party images
+scannable, which is what surfaced this.
 
-**Note the source is not on this Mac.** `/Users/mu/code/` has no `absenty`
-checkout, so the build happens in GitHub Actions from a repo that must be cloned
-or triggered separately. Confirm where it builds before the window.
+**The source is not on this Mac.** `/Users/mu/code/` has no `absenty` checkout;
+the build happens in GitHub Actions in `nachtschatt3n/Absenty` (default branch
+`production`, integration branch `development`).
 
-## 2) Pre-checks
+## 2) The three defects, in the order they had to be fixed
 
-```bash
-# both deployments, both tags
-kubectl get pods -A -o jsonpath='{range .items[*].spec.containers[*]}{.image}{"\n"}{end}' | grep absenty | sort -u
+A rebuild alone would have achieved nothing. Three independent problems:
 
-# the number, and WHEN the image was built (a rebuild is only real if this moves)
-export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"
-trivy image ghcr.io/nachtschatt3n/absenty:<tag> --severity CRITICAL --ignore-unfixed -f json \
-  | python3 -c "import sys,json;d=json.load(sys.stdin);print('built:',d['Metadata']['ImageConfig']['created'])"
+**(a) Stale base + cache-frozen apt layer.** The Dockerfile pinned a
+2025-01 snapshot of `ruby:3.3.x-slim-bookworm`, and its `RUN apt-get` line had
+not changed since, so buildkit replayed a cached October-2025 package layer on
+every build. Moving `FROM` invalidates the cache; `apt-get upgrade` stops it
+re-freezing.
 
-# what is it built FROM? 51 criticals in one image usually means a stale base
-# (an old node/python/debian tag), not 51 distinct app dependencies.
-#   -> inspect the Dockerfile in the absenty repo before rebuilding blindly
+**(b) The ImagePolicy could not select a new image.** Both policies filtered on
+a bare 7-char hex git-sha tag and ordered with `policy.alphabetical` — which is
+not a time order. Selection had been pinned since 2025-10 to whichever sha
+happened to sort highest, so **0 of the 338 tags** in the repository could ever
+have been chosen. A fresh sha had roughly a 0.2% chance of sorting above the
+incumbent, so a rebuild would have been silently discarded.
 
-# how does the tag reach the cluster?
-cat kubernetes/apps/my-software-development/absenty/app/image-automation.yaml
-```
+**(c) Tag provenance: pull requests published release-shaped tags.** Two
+workflows both published to the same package. The older one (`ci-cd.yml`) built
+on *every* event including `pull_request`, where `github.ref` is
+`refs/pull/N/merge` — so it took a "fallback" path that built the **dev** stage
+of unreviewed branch code and published it under a bare `sha-<hex>` tag, the
+same shape the production ImagePolicy selected on. The last three tags
+published to the package before this work (`pr-54`, `pr-55`, `pr-56`) are that
+build.
+
+Its own "chronological" tag was inert as well:
+`docker/metadata-action` does not expand Go date layouts inside `type=raw`, so
+`sha-{{date '20060102150405'}}-{{sha}}` published that string literally.
+
+> Ordering matters: **(c) must be fixed before automation is unsuspended.**
+> Unsuspending first re-arms exactly the path it closes.
+
+### Correction to an earlier draft of this plan
+
+An earlier revision claimed a mis-selected image would run "Rails in
+development mode with host authorization disabled". **That is false** — both
+HelmReleases set `RAILS_ENV`/`RACK_ENV` explicitly in the pod spec, which
+overrides the image ENV. The accurate characterisation is narrower: unreviewed
+branch code, dev/test gems present, and the production boot sequence skipped
+(the dev stage's `CMD` omits `db:prepare` + puma).
 
 ## 3) Steps
 
-1. In the absenty repo: identify the base image and move it to a current tag.
-   With 51 criticals, expect the base to be the dominant contributor — check that
-   first rather than chasing individual dependencies.
-2. Rebuild and push. **Verify the published image's build date changed** — a
-   merged PR does not rebuild a semver-tagged image (the recurring trap; see
-   `docs/sops/self-built-image-rebuild.md`).
-3. Roll **development first**, verify (§4), then production. They are separate
-   HelmReleases in separate namespaces, so they can and should be staged.
-4. If Flux image-automation picks the tag up on its own, confirm it actually did
-   rather than assuming — check the Deployment image, not the automation object.
+1. **Application repo — fix tag provenance first.** Make one workflow the sole
+   publisher; branch-prefix every published tag; never push from a
+   `pull_request` event.
+2. **Application repo — rebuild on a current base**, and unblock the red test
+   that gates `build_and_push`.
+3. **Cluster repo — fix both ImagePolicies** to select the branch-prefixed
+   timestamp tag numerically. Safe to land while automation is suspended: it
+   changes only which tag the policy *resolves to*, so resolution can be
+   verified before anything is armed.
+4. **Roll development first**, verify (§4), then production. Separate
+   HelmReleases in separate namespaces — they can and should be staged.
+5. **Only then unsuspend** both `ImageUpdateAutomation`s.
 
 ## 4) Verification
 
 ```bash
 export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"
-trivy image ghcr.io/nachtschatt3n/absenty:<new-tag> --severity CRITICAL --ignore-unfixed
-#   expect a large drop; if it is still ~51 the base did not actually change
+
+# A rebuild is only real if the build date moved. A merged PR does not imply a
+# rebuilt image — see docs/sops/self-built-image-rebuild.md.
+trivy image ghcr.io/nachtschatt3n/absenty:<new-tag> --severity CRITICAL --ignore-unfixed -f json \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print('built:',d['Metadata']['ImageConfig']['created'])"
+
+# Prove the policy resolves to a real production tag, not just that it is Ready.
+kubectl get imagepolicy absenty -n my-software-production -o jsonpath='{.status.latestRef.tag}'
+kubectl get imagepolicy absenty -n my-software-development -o jsonpath='{.status.latestRef.tag}'
+
+# A SUSPENDED ImageUpdateAutomation still reports READY=True. Check the field.
+kubectl get imageupdateautomation absenty-image-updates -n my-software-production \
+  -o jsonpath='{.spec.suspend}{"\n"}'
+
+# Check the DEPLOYMENT image, not the automation object.
+kubectl get deploy -n my-software-development -l app.kubernetes.io/name=absenty \
+  -o jsonpath='{.items[*].spec.template.spec.containers[*].image}{"\n"}'
 
 kubectl get pods -n my-software-development | grep absenty   # Ready, 0 restarts
 kubectl get pods -n my-software-production  | grep absenty
-curl -s -o /dev/null -w '%{http_code}\n' https://<absenty-host>/   # 200, both envs
 # App smoke test in DEV before prod: log in and exercise one core flow.
 ```
 
 ## 5) Rollback
 
-Both namespaces are separate HelmReleases, so roll back independently by pinning
-the previous tag and reconciling — the old image remains in GHCR. Staging dev
-before prod is the real safety net: if dev regresses, prod never moves.
+Both namespaces are separate HelmReleases, so roll back independently by
+pinning the previous tag and reconciling — the old image remains in GHCR.
+Staging dev before prod is the real safety net: if dev regresses, prod never
+moves. If automation has been unsuspended, re-suspend it first, otherwise it
+will re-apply the new tag over the rollback.
 
 ## 6) Interference notes
 
-- Two namespaces, but no shared datastore and no shared ingress controller
+- Two namespaces, but no shared datastore and no shared ingress-controller
   behaviour beyond a backend swap.
-- **Externally exposed in both**, so prefer a low-traffic slot and do not stack it
-  with the Envoy Gateway phases, which also touch external routing.
-- Cross-repo: the build is not a cluster change and can happen any time before the
-  window; only the tag move needs the slot.
-
-## 7) Execution Log — 2026-08-15 (unattended run, PARTIAL / BLOCKED)
-
-### Root cause found — it was NOT just a stale base
-
-Two independent causes, plus a third that would have silently discarded the fix.
-
-**(a) Stale base.** `ruby:3.3.6-slim-bookworm` is a 2025-01 snapshot of
-debian 12.9. Scanned alone it carries 11 fixable CRITICALs.
-`ruby:3.3.12-slim-bookworm` (debian 12.15, built 2026-08-05) carries **0**.
-
-**(b) Cache-frozen apt layer.** The other ~34 OS CVEs (imagemagick x20,
-mariadb-client x10, libnss3, glib) come from packages the Dockerfile
-apt-installs. The `RUN apt-get` line never changed, so buildkit replayed a
-cached October-2025 layer on every build. Changing `FROM` invalidates it;
-`apt-get upgrade` stops it re-freezing.
-
-**(c) The image automation is broken — this is the real finding.** The
-ImagePolicy sorts 7-char hex git shas with `policy.alphabetical`, so it
-selects the highest *hex string*, not the newest build. Both namespaces have
-been pinned since 2025-10 to whatever tag happened to start with `ff`:
-
-| ns | deployed tag | built | newest build that exists |
-|---|---|---|---|
-| my-software-production | `sha-ffa072a` | 2025-10-05 | `production-20251011222540` |
-| my-software-development | `sha-ff3910e-dev` | 2025-10-05 | `development-20251102231017` |
-
-A rebuild would have been discarded the same way: a fresh sha has ~0.2%
-chance of sorting above `ffa072a`. **Fixing the Dockerfile alone would have
-achieved nothing.**
-
-Armed, it was also a live hazard: the older of the two active workflows tags
-dev-target PR builds with the same tag shape the production policy accepts,
-so an unreviewed PR build could be selected for production. Verified impact
-(corrected 2026-08-15): the HelmRelease sets `RAILS_ENV`/`RACK_ENV` in the
-pod spec, so such an image would NOT have run in development mode - an
-earlier note in this plan and in commit 224ec52f overstated that. The real
-exposure is unreviewed branch code on an externally-exposed ingress, with
-dev/test gems present and the production boot sequence skipped (the
-dev-target image's CMD omits `db:prepare` + puma). Requires push/PR rights
-on the private repo, so insider/compromised-account, not anonymous.
-
-### Done
-
-- `fix(absenty): suspend broken image automation in both namespaces`
-  (cberg-home-nextgen `224ec52f`) — `suspend: true` on both
-  ImageUpdateAutomations. Changes no running image; removes the hazard above.
-- nachtschatt3n/Absenty PR #57 `chore/base-image-cve-rebuild` — base
-  3.3.6 -> 3.3.12, `apt-get upgrade`, node 20 -> 22, gems rails 8.0.3 ->
-  8.0.5.1 / concurrent-ruby -> 1.3.8 / net-imap -> 0.6.6 / rack-session ->
-  2.1.2. **Not merged.**
-
-### Blocked — two operator decisions required
-
-1. **CI is red on an unrelated pre-existing test.**
-   `UserTest#test_age_should_calculate_correct_age` fails (expected 30, got
-   29). `User#age` is `((Date.current - birthday)/365.25).floor`, off-by-one
-   on exact anniversaries; it broke through calendar drift, last green
-   2025-11-24. Not fixed here: `age` is HR business logic that can drive
-   holiday entitlement. The test gate blocks `build_and_push`, so **no image
-   could be built and the CVE drop could not be verified on a real image.**
-
-2. **Any rollout releases a 135-file application backlog.** The running
-   production image is 51 commits / +35,238 / -12,650 behind the production
-   branch tip, including a mobile holiday-request feature and host-
-   authorization changes. Rebuilding necessarily ships all of it. That is a
-   release, not the "rebuild, not a version change" this plan scoped, and it
-   cannot be smoke-tested unattended.
-
-### Not done (deliberately)
-
-- Neither namespace was rolled. Cluster baseline preserved.
-- The ImagePolicy fix (switch to the chronological `production-<timestamp>` /
-  `development-<timestamp>` tag the CI already emits, via
-  `filterTags.extract`) is **prepared but not applied** — applying it also
-  releases the backlog in (2).
-
-### Next window
-
-1. Operator decides on `User#age` and on releasing the backlog.
-2. Fix `age`, merge PR #57, confirm a green build.
-3. Flip both ImagePolicies to the timestamp pattern, unsuspend automation.
-4. Verify the published image's build date moved and trivy CRITICAL count
-   dropped from 51 to ~0-1 (npm's bundled `tar` may survive; the real fix is
-   not shipping node/npm in the production stage at all — follow-up).
-5. Roll development, health-gate, then production.
+- Both are on the `external` ingress class, so prefer a low-traffic slot and do
+  not stack this with the Envoy Gateway phases, which also touch external
+  routing.
+- Cross-repo: the build is not a cluster change and can happen any time before
+  the window; only the tag move needs the slot.
+- **Any rollout releases a large application backlog.** The running production
+  image was many commits behind the production branch tip, including a mobile
+  holiday-request feature and host-authorization changes. Rebuilding
+  necessarily ships all of it. That is a release, not a pure rebuild, and it
+  cannot be smoke-tested unattended — it needed an explicit operator GO, which
+  was given on 2026-08-15.
