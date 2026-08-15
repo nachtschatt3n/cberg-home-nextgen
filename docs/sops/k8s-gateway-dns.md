@@ -1,7 +1,7 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.15.3`
+> Version: `2026.08.15`
 > Last Updated: `2026-08-15`
 > Owner: `cberg-agent / operator`
 
@@ -101,6 +101,23 @@ mise exec -- dig +short @192.168.55.101 <any-ingress-host> A   # must answer
 An empty `dig` answer for a host that has an Ingress = outage, even if the
 pod is Running/Ready (the plugin fails closed while CoreDNS itself stays up —
 readiness does NOT cover informer sync).
+
+That sentence is now **machine-enforced** — it is the whole rationale for
+`validate_answer_rrs` in the blackbox DNS modules:
+
+```bash
+# Automated equivalent since 2026-08-15 (N-15): answer-validating blackbox DNS probes
+mise exec -- kubectl get probe -n monitoring dns-k8s-gateway-primary dns-k8s-gateway-secondary
+# probe_success{probe_class="dns"} must be 1 for both. Alerts:
+#   InternalDnsResolutionFailing (2m, critical)  — one name not resolving
+#   InternalDnsResolverDown      (2m, critical)  — ALL DNS probes down = whole-zone shape
+#   BlackboxProbesAbsent        (10m, critical)  — the SLI went SILENT (reads 100% otherwise)
+```
+
+The 2026-08-15 outage produced **zero** SLO signal: `probe_success` did not
+exist, so every pod/controller-derived SLI read 100%. Closed by
+`kubernetes/apps/monitoring/prometheus-blackbox-exporter/` (N-15) and SLO
+`internal-dns-resolution` (99.9% / 7d).
 
 ---
 

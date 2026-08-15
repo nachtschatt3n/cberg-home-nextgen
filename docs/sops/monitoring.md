@@ -31,6 +31,7 @@ alerts, dashboards, and log pipeline health.
 | Headlamp | Kubernetes web UI | monitoring |
 | Unpoller | UniFi metrics exporter | monitoring |
 | ECK Operator | Elastic Cloud on Kubernetes | monitoring |
+| prometheus-blackbox-exporter | Synthetic DNS + HTTPS probes (`probe_success`) — the DNS/ingress SLI | monitoring |
 
 ---
 
@@ -200,7 +201,8 @@ longhorn_volume_state
 The edot-collector can look perfectly healthy (Ready, 0 restarts, ingestion
 volume normal) while Elasticsearch **rejects** part of what it sends — the
 docs/points are silently lost and only the collector's own logs show it.
-`runbooks/health-check.sh` asserts on this hourly rate since 2026-08-07.
+`runbooks/health-check.sh` asserts on this hourly rate since 2026-08-07; since
+2026-08-15 the metrics class counts dropped **points**, not log lines (see below).
 
 Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector`):
 
@@ -230,6 +232,33 @@ Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector
      series ES can never store; the `filter/drop-es-invalid-metrics`
      processor (`type == METRIC_DATA_TYPE_NONE`) drops them pre-export
      (they remain in Prometheus).
+
+   > **Count POINTS, not LINES.** The exporter batches every rejected point of a
+   > flush into ONE `validation errors` line (~18 reasons per line), so the line
+   > count barely moves no matter how much telemetry is lost. On 2026-08-15
+   > Envoy Gateway phase 0 added 6720 dropped points/h (34 histogram families
+   > across `envoy-internal`, `envoy-external` and the `envoy-gateway` control
+   > plane) while the line counter sat flat at ~362/h and the check reported
+   > healthy. `health-check.sh` now counts drop reasons and trips at **100/h** —
+   > one un-converted family on a single 30s-scraped target is ~120 points/h, so
+   > the next regression of this class surfaces on the first family instead of
+   > hiding in a flat line. It also names the offending families in the finding.
+   >
+   > Health-check output line:
+   > `edot-collector ES rejections last 1h: parse=<n> validation_lines=<n> dropped_points=<n>`
+   > `validation_lines` is retained for continuity but is NOT the signal —
+   > assert on `dropped_points`.
+
+   Manual triage:
+   ```bash
+   # dropped POINTS in the last hour (the real loss figure)
+   kubectl logs -n monitoring deploy/edot-collector --since=1h \
+     | grep -oE "dropping [a-z]+ [a-z]+|invalid number data point" | wc -l
+
+   # which histogram families — add each to cumulativetodelta/es-histograms
+   kubectl logs -n monitoring deploy/edot-collector --since=1h \
+     | grep -oE 'histogram \\"[a-zA-Z0-9_]+' | sed 's/^histogram \\"//' | sort -u
+   ```
 
 Always validate an edot config change before rolling (throwaway pod:
 `otel/opentelemetry-collector-contrib:<ver> validate --config=...`, dummy
@@ -495,6 +524,47 @@ kubectl -n monitoring rollout restart deploy/uptime-kuma
 ```
 Observed 2026-06-07 after the VLAN-55 reorg: UNAS/DreamMachine monitors were re-pointed
 `.31.230`→`.55.240` / `.31.1`→`.30.1`, but the old DOWN series persisted until this restart.
+
+---
+
+## Blackbox Exporter (synthetic DNS + ingress probes)
+
+Deployed 2026-08-15 (N-15) after internal DNS went down twice and produced
+**zero** SLO signal — `probe_success` did not exist. Manifests:
+`kubernetes/apps/monitoring/prometheus-blackbox-exporter/`.
+
+Three things here are NOT derivable from the manifests:
+
+1. **`Probe` CRs and `serviceMonitor.targets` are mutually exclusive.**
+   Prometheus selects all Probes cluster-wide (`probeSelector={}`), so the
+   Probe CRs work on their own. The chart's `serviceMonitor.enabled` generates
+   per-target ServiceMonitors from `serviceMonitor.targets` — the *alternative*
+   mechanism. Turning both on double-scrapes every target.
+   `serviceMonitor.selfMonitor` is a different key (the exporter's own
+   `/metrics`) and is intentionally on.
+
+2. **The DNS modules assert on the ANSWER, not reachability.**
+   `valid_rcodes: [NOERROR]` **plus** `validate_answer_rrs` requiring a real A
+   record. Rcode alone is not enough: a resolver answering NOERROR with an
+   EMPTY answer section would otherwise score healthy — verified against a
+   public resolver, which returns exactly that shape for an internal name and
+   correctly scores `probe_success=0`. One Probe per queried name, because the
+   name lives in the blackbox module, not in the Probe target.
+
+3. **`config.modules` is a Helm MAP MERGE.** The chart's default `http_2xx`
+   module survives your `config:` block unless explicitly nulled
+   (`http_2xx: null`). That default has no `fail_if_not_ssl`, no
+   `valid_status_codes` and follows redirects — an unauthenticated in-cluster
+   blind-SSRF / port-reachability oracle on `/probe`. Verify the live module
+   list after any values change:
+   ```bash
+   kubectl get cm prometheus-blackbox-exporter -n monitoring -o yaml | grep -A1 "^    [a-z_]*:$"
+   ```
+
+> **Validation gotcha:** `kubeconform` SKIPS all 8 resources in this app
+> (HelmRelease/Probe/PrometheusRule are CRDs), so it validates nothing here.
+> That skip hid a wrong `serviceMonitor` values shape that rendered no
+> ServiceMonitor at all. Always `helm template` against the pulled chart.
 
 ---
 

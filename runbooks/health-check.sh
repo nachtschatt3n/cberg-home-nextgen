@@ -1031,6 +1031,41 @@ except: pass
     else
         log_success "All Prometheus scrape targets healthy"
     fi
+
+    # Blackbox synthetic probes (added 2026-08-15, N-15). The DNS/ingress SLI.
+    # Deliberately asserts on the PROBE RESULT, not on the exporter's pod state:
+    # on 2026-08-15 internal DNS SERVFAILed every name twice while Flux was green
+    # and every pod was Running, so anything derived from pod/controller health
+    # still read 100%. The Alertmanager rules page on this, but without an
+    # assertion here a probe that fails BETWEEN sweeps leaves no trace in
+    # health-check-current.md.
+    PROBE_DOWN=$(prom_query 'probe_success == 0')
+    PROBE_ANY=$(prom_query 'probe_success')
+    PROBE_DOWN_SUMMARY=$(echo "$PROBE_DOWN" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    if r:
+        print(', '.join(f\"{x['metric'].get('probe_component','?')}({x['metric'].get('probe_class','?')})\" for x in r))
+except: pass
+" 2>/dev/null)
+    PROBE_COUNT=$(echo "$PROBE_ANY" | python3 -c "
+import sys, json
+try: print(len(json.load(sys.stdin)['data']['result']))
+except: print(0)
+" 2>/dev/null)
+    PROBE_COUNT=${PROBE_COUNT:-0}
+    if [ -n "$PROBE_DOWN_SUMMARY" ]; then
+        log_critical "Blackbox probe(s) FAILING: $PROBE_DOWN_SUMMARY — internal DNS or ingress is not serving valid answers"
+        add_critical_issue "Blackbox probe failure: $PROBE_DOWN_SUMMARY (SOP: k8s-gateway-dns.md / monitoring.md 'Blackbox Exporter')"
+    elif [ "$PROBE_COUNT" -eq 0 ]; then
+        # absent(probe_success) — the SLI is SILENT, which reads as 100% in the
+        # SLO calculator. This is the exact blind spot N-15 was opened for.
+        log_warning "Blackbox probe results ABSENT — the DNS/ingress SLI is blind (SLOs will read 100%)"
+        add_minor_issue "Blackbox probe_success absent — DNS/ingress SLI blind (SOP: monitoring.md 'Blackbox Exporter')"
+    else
+        log_success "Blackbox probes healthy ($PROBE_COUNT probe(s) returning valid answers)"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 9: Alertmanager Alerts"

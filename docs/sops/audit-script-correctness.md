@@ -4,8 +4,8 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.14`
-> Last Updated: `2026-08-14`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `operator + daily-operation agents`
 
 ---
@@ -39,7 +39,24 @@ not-measured    — could not measure (error, timeout, missing source, empty inp
 gets its own wording and, for security checks, surfaces (fail-safe) — but says
 plainly that it is undetermined.
 
-### The nine instances (each one a test case for new code)
+**Second rule (added 2026-08-15): the counter you assert on must be
+PROPORTIONAL TO THE HARM.**
+
+This is a distinct failure family from the tri-state one — the check *did*
+measure something real, it just measured the wrong quantity. If the source
+**batches** N events into one record, counting records measures flush
+frequency, not loss. `health-check.sh` counted `validation errors` log lines
+from the edot collector; the exporter packs ~18 drop reasons into each line, so
+when Envoy Gateway phase 0 added 6720 dropped metric points/h the line counter
+did not move (~362/h, as before) and the check reported healthy.
+
+Before setting a threshold, derive the **expected per-unit rate** and set the
+threshold from it — here: one un-converted histogram family on one 30s-scraped
+target = ~120 dropped points/h, so the threshold is 100/h and the first new
+family trips it. A counter that cannot move when the harm grows is not a
+signal.
+
+### The instances (each one a test case for new code)
 
 | Script | What went wrong | Collapsed into |
 |---|---|---|
@@ -52,6 +69,7 @@ plainly that it is undetermined.
 | `security-check.py` | image dedup on raw string, same image counted twice | double-fail |
 | `security-check.py` | `None` (undeterminable) newer-tag lookup worded as "newer upstream tag available" | fail |
 | `sweep-run.py` | auto-close resolved findings for sections that never ran | pass (false resolution) |
+| `health-check.sh` | counted batched `validation errors` LINES; ~18 drops per line, so the counter sat flat at ~362/h while loss grew 8x to 6720 points/h (`1482de6a`) | pass |
 
 ## 3) Blueprints
 

@@ -275,9 +275,31 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
 11. Run local validation commands:
 
 ```bash
-task template:configure -- --strict
-kubeconform -summary -fail-on error kubernetes/apps/{namespace}/{app}
+# Repo-wide manifest validation (the `task template:configure` target referenced
+# by older docs no longer exists in this Taskfile).
+task kubeconform
+kubeconform -summary -exit-on-error -ignore-missing-schemas kubernetes/apps/{namespace}/{app}
 ```
+
+> **kubeconform SKIPS every CRD kind — it can validate nothing and still exit 0.**
+> `HelmRelease`, `Probe`, `PrometheusRule`, `Gateway`, `Kustomization` etc. have
+> no schema locally, so an app built entirely from CRDs reports
+> `Valid: 0 … Skipped: 8` and passes. Observed 2026-08-15 on
+> `prometheus-blackbox-exporter`, where the skip hid a wrong `serviceMonitor`
+> values shape that rendered **no ServiceMonitor at all**.
+>
+> For any HelmRelease whose `values` shape is non-trivial, validate by rendering
+> against the pulled chart — this is the only step that actually checks your
+> values keys exist:
+>
+> ```bash
+> # extract spec.values, then render the real chart with them
+> helm template {app} <chart-ref> --version <ver> -n {namespace} -f /tmp/values.yaml
+> ```
+>
+> Check the rendered kinds are the ones you expect, and remember Helm coalesces
+> nested maps: chart-default entries survive your block unless explicitly
+> nulled (`somekey: null`).
 
 12. Commit and push changes to trigger Flux webhook flow:
 

@@ -1,8 +1,8 @@
 # SOP: SLI Catalog (sweep-history Track C / Phase 0)
 
 > Description: Inventory of SLI candidates per integration, with explicit signal sources (Prometheus / Elasticsearch / hactl / kubectl / none) and pilot-ready ratings. Drives the `slo_definitions` table in sweep_history Postgres (the runtime SLO catalog).
-> Version: `2026.05.19`
-> Last Updated: `2026-05-19`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `homelab-operator`
 
 ---
@@ -60,6 +60,8 @@ Sorted by readiness. Source citations included so a follow-up can re-confirm wit
 | 1 | **mosquitto** broker | `up{job="mosquitto"}` over window | total scrapes in window | `sapcc/mosquitto-exporter:0.8.0` sidecar — already in `kubernetes/apps/home-automation/mosquitto/app/helmrelease.yaml` | Cleanest pilot. Numerator + denominator both trivial PromQL. |
 | 2 | **longhorn** storage | `count(longhorn_volume_robustness{robustness="healthy"})` | `count(longhorn_volume_robustness)` | Native Longhorn metrics, ServiceMonitor in `monitoring/kube-prometheus-stack/app/` | Existing PrometheusRule `longhorn-alerts.yaml` defines thresholds — SLO is a generalisation. |
 | 3 | **unifi** device availability (via Unpoller) | `sum(unifipoller_device_uptime_seconds > 0)` | `count(unifipoller_device_uptime_seconds)` | `kubernetes/apps/monitoring/unpoller/app/` | 9 PrometheusRule rules already alert on derived signals — SLO complements with budget-tracking. |
+| 9 | **internal DNS** (k8s-gateway split-horizon) | `(count(probe_success{probe_class="dns"} == 1) or on() (count(probe_success{probe_class="dns"}) * 0))` | `(count(probe_success{probe_class="dns"}) or on() vector(0))` | `prometheus-blackbox-exporter` (chart 11.17.2 / blackbox v0.28.0) + 2 `Probe` CRs in `kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/probes.yaml` | Live as SLO `internal-dns-resolution` — 99.9% / 7d (10.1 min budget), tags `network,dns,pilot`. **Answer-validating, not reachability**: `valid_rcodes=[NOERROR]` AND `validate_answer_rrs` (a real A record in `192.168.0.0/16`), so SERVFAIL, NXDOMAIN and NOERROR-with-empty-answer all count as failures — the 2026-08-15 shape, where every pod was Running and Flux was green. Numerator present-gated (longhorn pattern) so scrape gaps do not NaN-poison the window. `BlackboxProbesAbsent` alerts if the SLI goes silent. |
+| 10 | **internal ingress** (both ingress classes) | `(count(probe_success{probe_class="http"} == 1) or on() (count(probe_success{probe_class="http"}) * 0))` | `(count(probe_success{probe_class="http"}) or on() vector(0))` | same exporter; 2 HTTPS `Probe` CRs, one representative host per ingress class | Live as SLO `internal-ingress-availability` — 99.5% / 7d (50.4 min budget), tags `network,ingress,pilot`. End-to-end user path (CoreDNS → k8s-gateway → ingress → TLS → backend); TLS verification left ON so cert expiry counts as the user-visible failure it is. Deliberately looser than #9 because single-replica backend rollouts land in this number; if backend churn dominates the budget the fix is a dedicated always-on probe endpoint per class, **not** a looser target. |
 
 ### Partial (signal exists but needs wiring)
 
@@ -92,6 +94,10 @@ curl -s 'http://localhost:9090/api/v1/query?query=count(longhorn_volume_robustne
 
 # UniFi (Unpoller)
 curl -s 'http://localhost:9090/api/v1/query?query=count(unifipoller_device_uptime_seconds)' | jq
+
+# Blackbox DNS + ingress probes (must return 4 samples, all value 1)
+curl -s 'http://localhost:9090/api/v1/query?query=probe_success' \
+  | python3 -c "import sys,json;[print(r['metric']['probe_class'], r['metric']['probe_component'], r['value'][1]) for r in json.load(sys.stdin)['data']['result']]"
 ```
 
 Each query must return a single sample (not an empty result). If empty, the signal isn't actually live and the entry must move from `pilot-ready` to `partial`.
@@ -157,6 +163,8 @@ Reverting this SOP is a no-op (it's documentation). To roll back an SLO that tur
 - `noise_suppressions` table in sweep_history Postgres — informal thresholds being formalised as SLOs; browse at `sweep.<DOMAIN>/policies/noise`
 - [unifi-controller-rate-limit.md](unifi-controller-rate-limit.md) — implicit UniFi SLO target (30s polling → 99% device-up)
 - [docs/troubleshooting/ha-upstream-integration-issues.md](../troubleshooting/ha-upstream-integration-issues.md) — Miele accepted-risk posture
+- [k8s-gateway-dns.md](k8s-gateway-dns.md) — the 2026-08-15 internal-DNS outage that motivated entries #9/#10
+- `kubernetes/apps/monitoring/prometheus-blackbox-exporter/` — exporter + Probe CRs backing both entries
 
 ---
 
@@ -165,3 +173,4 @@ Reverting this SOP is a no-op (it's documentation). To roll back an SLO that tur
 | Date | Version | Change |
 |---|---|---|
 | 2026-05-19 | 2026.05.19 | Initial catalog — 8 entries, 3 pilot-ready, 3 partial, 2 deferred |
+| 2026-08-15 | 2026.08.15 | +2 pilot-ready blackbox entries (#9 internal DNS, #10 internal ingress) after the 2026-08-15 zero-signal DNS outage (N-15). Catalog now 10 entries: 5 pilot-ready, 3 partial, 2 deferred. |

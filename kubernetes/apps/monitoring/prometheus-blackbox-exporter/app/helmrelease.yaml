@@ -43,8 +43,23 @@ spec:
         memory: 32Mi
       limits:
         memory: 128Mi
+    # The namespace is PSA `privileged` (prometheus-node-exporter needs
+    # hostNetwork/hostPath), so admission does NOT supply the restricted
+    # baseline for this pod — set the seccomp profile explicitly rather than
+    # relying on it. Container-level hardening (runAsNonRoot, runAsUser 1000,
+    # readOnlyRootFilesystem, drop ALL caps) comes from chart defaults.
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
     config:
+      # NOTE: Helm coalesces `config.modules` as a MAP MERGE, so the chart's own
+      # default `http_2xx` module SURVIVES this block unless explicitly nulled.
+      # That default is strictly more permissive than ours — follow_redirects
+      # with no fail_if_not_ssl, no valid_status_codes and IP-protocol fallback —
+      # i.e. an unauthenticated in-cluster blind-SSRF / port-reachability oracle
+      # on /probe. We ship our own hardened http_2xx_ingress, so drop it.
       modules:
+        http_2xx: null
         # ------------------------------------------------------------------
         # DNS — the whole point of N-15. On 2026-08-15 internal DNS returned
         # SERVFAIL for every name twice while Flux was green and every pod was
