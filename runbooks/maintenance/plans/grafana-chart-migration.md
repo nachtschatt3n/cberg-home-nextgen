@@ -73,13 +73,14 @@ is not a rollback there. Isolating it is the point of the split.
   newest grafana chart is 10.5.15 / appVersion 12.3.1 (2026-01-30).
   `check-all-versions.py` reports grafana as "latest ✅" because it asks a repo that
   stopped answering.
-- **No CVE urgency.** The 13 fixable criticals (grafana 12.3.1, k8s-sidecar 2.5.0,
-  curl 8.9.1) were cleared on 2026-08-14 by pinning image tags on the existing chart.
-  This migration is about leaving a dead repo.
+- **No security urgency.** The criticals that drove the image pins were cleared on
+  2026-08-14 by pinning tags on the existing chart (tracked as **F-040292f0** —
+  `runbooks/policy-cli.py finding show F-040292f0`). This migration is about
+  leaving a dead repo, not about vulnerabilities.
 - **The pins must survive stages 2 and 3.** Chart 11.6.1 defaults are *older* than the
   pins (sidecar 2.6.0, curl 8.19.0); only at chart 12.10.4 do the defaults equal them
-  (2.10.1 / 8.21.0). Dropping them early re-opens the criticals.
-- **The duplicate-`sidecar:`-key trap.** The first attempt at the CVE pin no-op'd
+  (2.10.1 / 8.21.0). Dropping them early re-opens F-040292f0.
+- **The duplicate-`sidecar:`-key trap.** The first attempt at the security pin no-op'd
   because a second top-level `sidecar:` key was silently dropped by YAML
   last-one-wins while the HelmRelease still reported Ready. Every stage that pins
   anything verifies the **rendered Deployment**, not the HR status.

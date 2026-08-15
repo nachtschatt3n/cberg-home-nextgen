@@ -39,9 +39,11 @@ been verified — instead of a dump, a restore, a cutover and a verification all
 racing one 90-minute window.
 
 **The driver.** The bundled metadata DB runs `bitnamilegacy/postgresql:14.17.0-debian-12-r3`
-(pinned by the Superset chart itself, not by us) — **5 fixable CRITICALs on an
-archived registry that will never publish another fix** (last push to
-`bitnamilegacy` was 2025-08-28). `docker.io/bitnami/postgresql` no longer
+(pinned by the Superset chart itself, not by us) — an **archived registry that
+will never publish another fix** (last push to `bitnamilegacy` was 2025-08-28).
+Security driver tracked as **F-937701ef** (`policy-cli.py finding show F-937701ef`);
+detail is deliberately not reproduced here — see
+`docs/sops/vulnerability-disclosure.md`. `docker.io/bitnami/postgresql` no longer
 publishes semver tags either. No chart bump can fix this: chart 0.22.4's own
 `values.yaml` carries that exact `bitnamilegacy` pin. Only replacing the datastore
 resolves it.

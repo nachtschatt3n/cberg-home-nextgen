@@ -6,13 +6,15 @@
 ## Why
 
 `kubernetes/ingress-nginx` reached EOL 2026-03-24 (repo archived at
-controller-v1.15.1 — exactly what we run on both classes). 3 unfixable critical
-CVEs on the image; no fixes will ever ship. InGate (successor) failed/retired;
+controller-v1.15.1 — exactly what we run on both classes). The image carries
+criticals for which no fix will ever ship (driver: **F-35f34061**; detail is
+DB-only per `docs/sops/vulnerability-disclosure.md`). InGate (successor)
+failed/retired;
 Kubernetes' endorsed direction is Gateway API. The Chainguard-fork stopgap
 (`runbooks/maintenance/plans/ingress-nginx-1.15.6.md`) needs a paid
 subscription → **superseded**, kept as break-glass only.
 
-Interim risk: **AR-055** (sweep policy DB) accepts the 3 CVEs, time-boxed —
+Interim risk: **AR-055** (sweep policy DB) accepts F-35f34061, time-boxed —
 hard review **2026-09-18**; escalates to the Chainguard contingency if the
 external cutover hasn't happened by then.
 
@@ -95,7 +97,7 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
 - **P2 — Internal bulk** (~76 objects, 2–3 sessions), batch-per-namespace,
   one commit each. Hardening milestone when last snippet consumer converts:
   `allow-snippet-annotations: false` on both nginx HRs (neutralizes the
-  injection-CVE class before migration ends). No snippet consumer needs an
+  injection-vulnerability class before migration ends). No snippet consumer needs an
   app-side workaround any more (langfuse, the only one, is gone).
 - **P3 — External + tunnel** (~26 objects, 1–2 sessions): HTTPRoutes on
   envoy-external; per-hostname cloudflared canaries (incl. authentik itself

@@ -84,25 +84,24 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
 1. **Base drift is usually the whole finding.** Self-built images pin a *floating*
    base (`node:22-alpine`, `python:3.12-slim`, `debian:13`). The image is only as
    fresh as its last build — both ha-ai-harness images were built 2026-04-12 and had
-   accumulated `CVE-2026-31789` (openssl) purely from sitting still. **Check the base
-   first**, before chasing individual dependencies. absenty's 51 criticals were the
-   same shape.
+   accumulated an openssl critical purely from sitting still. **Check the base
+   first**, before chasing individual dependencies. The single largest first-party
+   finding to date (F-c58dd98e) was the same shape.
 2. **A merged PR does NOT rebuild a semver-tagged image.** The recurring trap. After
    the rebuild, verify the *published build date* moved, not just that the tag exists.
-3. **`npm ci` does not touch the base image's GLOBAL npm.** `CVE-2026-59873`
-   (tar 7.5.11, bundled inside npm itself) survived `npm ci` on the harness frontend.
-   The fix is an explicit `npm install -g npm@<fixed>` **after** `npm ci` in the
-   Dockerfile.
+3. **`npm ci` does not touch the base image's GLOBAL npm.** A `tar` critical
+   bundled inside npm itself survived `npm ci` on the harness frontend. The fix is
+   an explicit `npm install -g npm@<fixed>` **after** `npm ci` in the Dockerfile.
 4. **A source-repo tag may never have published an image.** ha-ai-harness `v0.5.2-alpha`
    exists as a git tag but its build failed in the test job, so no image was pushed.
    Always confirm the tag resolves in GHCR before bumping the HelmRelease — a bump to
    a non-existent tag is an `ImagePullBackOff`, not a CVE fix.
-5. **A rebuild cannot fix a toolchain-pinned transitive binary.** `CVE-2025-68121`
-   (Go stdlib compiled into the esbuild binary) cannot be cleared under vite 6, which
-   pins `esbuild ^0.25.0`. When a survivor needs a framework major, **stop** — split it
-   into its own maintenance-window plan rather than stretching the rebuild's risk
-   envelope (`runbooks/maintenance/plans/harness-frontend-vite7.md` is the worked
-   example).
+5. **A rebuild cannot fix a toolchain-pinned transitive binary.** A Go-stdlib
+   critical compiled into the esbuild binary cannot be cleared under vite 6, which
+   pins `esbuild ^0.25.0` (tracked as F-9f752afd). When a survivor needs a framework
+   major, **stop** — split it into its own maintenance-window plan rather than
+   stretching the rebuild's risk envelope
+   (`runbooks/maintenance/plans/harness-frontend-vite7.md` is the worked example).
 
 ### Steps
 
@@ -159,16 +158,19 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
 export TRIVY_USERNAME=nachtschatt3n TRIVY_PASSWORD="$(gh auth token)"
 mise exec -- trivy image ghcr.io/nachtschatt3n/harness-home-server:0.5.1-alpha \
   --severity CRITICAL --ignore-unfixed
-# Image created: 2026-04-12  -> 3 fixable CRITICAL, debian 13.4
+# Image created: 2026-04-12  -> N fixable CRITICAL, debian 13.4  (record N on the finding)
 
 # after rebuild in nachtschatt3n/ha-ai-harrnes (debian 13.4 -> 13.6,
 # alpine 3.23.3 -> 3.24.1, npm -> 11.19.0 after npm ci, vitest 3.2.4 -> 3.2.7)
 mise exec -- trivy image ghcr.io/nachtschatt3n/harness-home-server:0.5.3-alpha \
   --severity CRITICAL --ignore-unfixed
-# Image created: 2026-08-14  -> 0 fixable CRITICAL
+# Image created: 2026-08-14  -> 0 fixable CRITICAL   (a ZERO is safe to state)
 ```
 
-Outcome: server 3 → 0, frontend 5 → 1. The survivor was trap 5 and became its own plan.
+Outcome: both images dropped to a residual the rebuild could not reach; the
+survivor was trap 5 and became its own plan (F-9f752afd). **Record the actual
+before/after counts on the finding record, not in this SOP** — see
+`docs/sops/vulnerability-disclosure.md`.
 
 ### Example B: the tag exists but the image does not (trap 4)
 
@@ -330,6 +332,7 @@ reconcile — never patch the Deployment directly (GitOps rule).
 - `docs/sops/application-update.md` — third-party version bumps
 - `docs/sops/maintenance-windows.md` — the REBUILD lane and the transient-plan convention
 - `docs/sops/audit-script-correctness.md` — do not score an auth failure as "clean"
+- `docs/sops/vulnerability-disclosure.md` — **read before writing any CVE detail into a committed file**
 - `runbooks/coverage.py` — `SELF_BUILT` inventory and lane assignment
 - `runbooks/maintenance/plans/harness-frontend-vite7.md` — worked example of trap 5
 - Commits: `fb821821` (harness rebuild), `10adb8d6` (absenty plan),

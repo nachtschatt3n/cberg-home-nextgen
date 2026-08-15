@@ -45,8 +45,8 @@ revertible state.
 | 3 | [`superset-pg-cutover`](superset-pg-cutover.md) | fresh dump + repoint `DB_HOST`; old DB **left running** as the rollback | high | 50 m | `sat-early:2026-09-12` |
 | 4 | [`superset-pg-decommission`](superset-pg-decommission.md) | `postgresql.enabled:false` — the archived image finally leaves the namespace | medium | 30 m | `tue-early:2026-09-22` |
 
-Redis first because it is cache-only and clears **14 of the 19 criticals** with no
-data risk. Postgres is then split standup → cutover → decommission so that the DB
+Redis first because it is cache-only and clears **the larger share of the driver**
+(F-9d114719) with no data risk. Postgres is then split standup → cutover → decommission so that the DB
 replacement never shares a window with the moment its rollback disappears.
 
 ## ⚠️ The decision that must be re-confirmed before stage 2
@@ -75,8 +75,17 @@ still prefers CNPG, stage 2 must not run as written.
   there will be no further security updates. Its semver tags do still exist (unlike
   `docker.io/bitnami/*`, which now publishes only `latest` + `sha256-*`), so *pinning*
   is possible — and pointless.
-- **19 fixable criticals**: 5 on postgresql, 14 on redis — the largest remaining
-  cluster in the CVE list.
+- **This is the largest remaining security cluster in the fleet.** The per-image
+  breakdown is deliberately not reproduced here:
+
+> **Security driver — detail withheld from this public repo.**
+> Tracked as **F-937701ef** (postgresql) and **F-9d114719** (redis).
+> Counts, advisory references and exposure live on the finding records.
+>
+> - Dashboard: `https://sweep.<DOMAIN>/findings/F-937701ef`
+> - CLI: `runbooks/policy-cli.py finding show F-937701ef`
+>
+> Convention: `docs/sops/vulnerability-disclosure.md`.
 - **The cutover is one Secret key.** `superset-secrets` already carries `DB_HOST`,
   `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`, `REDIS_HOST`, `REDIS_PORT`,
   `REDIS_PASSWORD`, and the chart mounts it through `envFromSecrets` **after** its own

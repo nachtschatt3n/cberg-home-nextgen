@@ -5,8 +5,9 @@ pr: null                            # NO Renovate PR exists. Upstream kubernetes
                                     # ARCHIVED (read-only since 2026-03-24); final release is chart
                                     # 4.15.1 / controller v1.15.1 — exactly what we run. Renovate
                                     # reports "4.15.1 ✅ up-to-date". This plan was dispatched off a
-                                    # Trivy CVE finding, not a held Renovate version PR.
-kind: image                         # CVE remediation via controller image override; chart wiring
+                                    # Trivy security finding (F-35f34061), not a held Renovate PR.
+security_ref: F-35f34061            # security driver; detail is DB-only (see SOP below)
+kind: image                         # security remediation via controller image override; chart wiring
                                     # (4.15.1) is unchanged in the recommended path.
 current: "v1.15.1"                  # registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:594ceea…
 target: "v1.15.6-chainguard-fork"   # controller-v1.15.6 from chainguard-forks/ingress-nginx
@@ -40,7 +41,7 @@ conflicts_with: []                  # no hard resource conflict, but DO NOT co-s
                                     # that (a) touches cloudflared / cert-manager / a public ingress,
                                     # or (b) verifies via an ingressed endpoint — its check will read
                                     # false during the ingress blip. See Interference notes.
-status: superseded                  # 2026-08-07: superseded by the Envoy Gateway migration decision (docs/troubleshooting/ingress-migration-plan.md). BREAK-GLASS contingency only: revive if the migration slips past ~8 weeks OR an actively-exploited critical lands on v1.15.1 mid-migration.
+status: superseded                  # 2026-08-07: superseded by the Envoy Gateway migration decision (docs/troubleshooting/ingress-migration-plan.md). BREAK-GLASS contingency only: revive if the migration slips past ~8 weeks OR the security posture on v1.15.1 worsens mid-migration (see F-35f34061).
 window: null                        # HELD until cgr.dev creds exist; then an attended weekend slot (sat/sun), NOT with cloudflared/cert-manager
                                     # slot (e.g. sat-early). NOT auto/unattended — supply-chain source
                                     # change + public-ingress blast radius + an operator go/no-go on
@@ -57,17 +58,24 @@ generated: "2026-08-06"
 
 ## 1) Summary & why held
 
-**What triggered this.** A fresh Trivy scan (2026-08-06) of the running
-controller image `registry.k8s.io/ingress-nginx/controller:v1.15.1`
-(`@sha256:594ceea76b01c592858f803f9ff4d2cb40542cae2060410b2c95f75907d659e1`,
-identical on **both** the `internal` and `external` releases) flags **3 fixable
-CRITICAL CVEs**. Candidate IDs from public advisories in this window:
-`CVE-2026-9256` (nginx rewrite heap overflow, fixed in controller v1.15.6),
-plus the ingress-nginx configuration-injection class (`CVE-2026-3288` /
-`CVE-2026-24512` / `CVE-2026-4342`). **The executor MUST open the actual Trivy
-report and read the exact 3 CVE IDs and each one's `FixedVersion` field before
-running** — that determines whether the v1.15.6 fork image clears *all three*
-(version-attribution rule: do not act on an unverified "X→Y").
+**What triggered this.** A Trivy scan (2026-08-06) of the running controller
+image `registry.k8s.io/ingress-nginx/controller:v1.15.1` — identical digest on
+**both** the `internal` and `external` releases.
+
+> **Security driver — detail withheld from this public repo.**
+> Tracked as **F-35f34061**. Advisory IDs, counts, exposure and the
+> fixed-version mapping live on the finding record, not here.
+>
+> - Dashboard: `https://sweep.<DOMAIN>/findings/F-35f34061`
+> - CLI: `runbooks/policy-cli.py finding show F-35f34061`
+> - Register: AR-055 (`policy-cli.py risk show AR-055`)
+>
+> Convention: `docs/sops/vulnerability-disclosure.md`.
+
+**The executor MUST open the live Trivy report and read each finding's
+`FixedVersion` before running** — that determines whether the v1.15.6 fork image
+clears *all* of them (version-attribution rule: do not act on an unverified
+"X→Y"). Do not paste that report into this file.
 
 **Why this is not a normal held update (the real blocker).** There is **no
 Renovate PR and no upstream fix path**:
@@ -136,10 +144,12 @@ decision in the window log.
 
 ```bash
 # --- confirm the exact CVEs + their fixed versions (do NOT act on hearsay) ---
-# Re-scan the running digest and read the 3 CRITICALs + FixedVersion column:
+# Re-scan the running digest and read the CRITICALs + FixedVersion column
+# (compare against F-35f34061; keep the output OUT of this file):
 trivy image --severity CRITICAL --ignore-unfixed \
   registry.k8s.io/ingress-nginx/controller:v1.15.1@sha256:594ceea76b01c592858f803f9ff4d2cb40542cae2060410b2c95f75907d659e1
-# → note each CVE-ID and its FixedVersion; confirm v1.15.6 satisfies all three.
+# → note each CVE-ID and its FixedVersion; confirm v1.15.6 satisfies all of them.
+# → record the result on F-35f34061 (policy-cli.py finding detail), NOT here.
 
 # --- baseline: both releases Ready, chart 4.15.1, single replica each ---
 kubectl -n network get helmrelease internal-ingress-nginx external-ingress-nginx \
@@ -289,7 +299,8 @@ kubectl get events -A --field-selector type=Warning --sort-by=.lastTimestamp | g
 
 # --- CVE actually gone: re-scan the now-running image ---
 trivy image --severity CRITICAL --ignore-unfixed cgr.dev/<ORG>/ingress-nginx-controller:v1.15.6@sha256:<pinned>
-#   → the 3 previously-fixable CRITICALs no longer present.
+#   → the previously-fixable CRITICALs recorded on F-35f34061 no longer present.
+#     Record the delta on the finding, not in this file.
 ```
 
 Success = both HRs Ready @ chart 4.15.1; both controllers on
@@ -297,7 +308,7 @@ Success = both HRs Ready @ chart 4.15.1; both controllers on
 after settle; config reloads clean (brotli/real-IP/snippet/CF-Connecting-IP all
 loaded); internal **and** external return the same HTTP codes as the pre-check;
 TLS served by the cert-manager default cert; admission webhooks healthy; Trivy
-re-scan shows the 3 criticals cleared.
+re-scan shows the criticals recorded on F-35f34061 cleared.
 
 ## 5) Rollback
 
@@ -356,8 +367,8 @@ needed, the finding stays open and routes to Alternative B/C/D.
 - **kube-webhook-certgen image untouched.** The chart's
   `admissionWebhooks.patch.image` (`registry.k8s.io/ingress-nginx/kube-webhook-certgen`)
   is a separate image and is **not** changed here. If Trivy also flags it,
-  file/track that separately — it is not one of the 3 controller criticals this
-  plan addresses.
+  file/track that separately — it is out of scope for F-35f34061, which is what
+  this plan addresses.
 - `needs_reboot: false` — no node reboot. `risk: high` + public blast radius +
   supply-chain source change route this to an operator-present slot despite the
   small semver delta.

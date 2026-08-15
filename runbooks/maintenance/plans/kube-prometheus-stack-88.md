@@ -52,9 +52,9 @@ cve_impact: |                         # CORRECTED 2026-08-14 — the 2026-08-13 
   `grafana: enabled: false` — Grafana is a SEPARATE HelmRelease
   (monitoring/grafana, chart 10.5.15 from the grafana repo), and this plan's own
   "Decoupled (NOT touched)" section already said so. The kps 87.17.0 -> 88.3.0
-  bump clears ZERO of those 13. The mistake came from matching images by what
+  bump clears ZERO of them. The mistake came from matching images by what
   the pod runs rather than by which release renders them.
-  Those 13 criticals belong to a SEPARATE grafana plan: pin, in the grafana
+  They belong to a SEPARATE grafana plan (driver F-040292f0): pin, in the grafana
   chart's values, image.tag 12.4.8 / sidecar.image.tag 2.10.1 /
   downloadDashboardsImage.tag 8.21.0 (all three verified present upstream).
   Target drift for THIS plan: it says 88.1.2, upstream head is 88.3.0 —

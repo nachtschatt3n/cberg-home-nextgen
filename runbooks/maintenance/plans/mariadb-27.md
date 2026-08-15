@@ -59,7 +59,7 @@ window: "sat-early:2026-09-19"
                                       # the dump in hand, than by accident at 03:00.
                                       # not preference: this plan is est 60m and absenty-rebuild
                                       # is 45m, in a 60m window — a 105m overrun. absenty keeps
-                                      # the slot (51 fixable CRITICAL, externally exposed).
+                                      # the slot (higher-severity security driver; see F-c58dd98e).
                                       # Moved to a 90m sat-early rather than another 60m slot so a
                                       # high-risk two-major data-engine bump has 30m of slack;
                                       # 09-12 is the next free sat-early (08-22 kps, 08-29

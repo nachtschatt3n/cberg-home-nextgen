@@ -37,8 +37,8 @@ generated: "2026-08-15"
 Final stage. Superset has been running on `postgres:17.11-alpine` since
 `superset-pg-cutover` (`sat-early:2026-09-12`); the old bundled Postgres has been
 sitting idle as the rollback. This stage turns it off, which is what actually
-clears the **5 fixable CRITICALs** from the namespace — the CVE finding does not
-close until the image stops running.
+clears **F-937701ef** from the namespace — the finding does not close until the
+image stops running.
 
 **Scheduled 10 days after the cutover, deliberately.** The soak is the point: any
 metadata problem that survived verification (a missing saved query, a lost role, a
@@ -116,7 +116,7 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    `postgresql:` values block with:
    ```yaml
        # Bundled Bitnami postgres retired 2026-09-22. bitnamilegacy is an ARCHIVED
-       # registry (last push 2025-08-28; 5 fixable CRITICALs; chart 0.22.4 pins
+       # registry (last push 2025-08-28; security driver F-937701ef; chart 0.22.4 pins
        # bitnamilegacy/postgresql:14.17.0-debian-12-r3 itself, so no chart bump can
        # fix it). The metadata DB is now postgres:17.11-alpine — pg-deployment.yaml
        # in this folder — reached via DB_HOST in superset-secrets.

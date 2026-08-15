@@ -38,19 +38,27 @@ generated: "2026-08-14"
 
 ## 1) Summary & why held
 
-Two fixable CRITICAL CVEs sit on `longhornio/longhorn-engine:v1.11.2`, plus
-~240 fixable HIGH across `longhorn-engine/instance-manager/manager/share-manager/ui`
-and the three `longhornio/csi-*` sidecars.
+This plan has a security driver on `longhornio/longhorn-engine:v1.11.2` and the
+`longhornio/csi-*` sidecars.
 
-**The important part: bumping the chart alone will NOT clear them.** The chart is
+> **Security driver — detail withheld from this public repo.**
+> Tracked as **F-49f172b9** (engine v1.11.2) and **F-6bedee0b** (v1.12.0).
+> Counts, advisory references and exposure live on the finding records.
+>
+> - Dashboard: `https://sweep.<DOMAIN>/findings/F-49f172b9`
+> - CLI: `runbooks/policy-cli.py finding show F-49f172b9`
+>
+> Convention: `docs/sops/vulnerability-disclosure.md`.
+
+**The important part: bumping the chart alone will NOT clear it.** The chart is
 already at 1.12.0, but **74 of 80 volumes still run engine `v1.11.2`** — only 6
 moved. `EngineImage ei-c9fa6d45` (v1.11.2) has refCount 302 and its DaemonSet is
 still deployed, which is what Trivy keeps scanning. Cause:
 `concurrent-automatic-engine-upgrade-per-node-limit = 0` (automatic engine
 upgrade disabled, and not set in git), so the engine never followed the manager.
 
-So the CVE is cleared by **completing the live engine upgrade**, after which the
-stale image GCs and the DaemonSet retires. The 1.12.0 → 1.12.1 chart bump is
+So the finding is cleared by **completing the live engine upgrade**, after which
+the stale image GCs and the DaemonSet retires. The 1.12.0 → 1.12.1 chart bump is
 worth doing in the same window but is not, by itself, the fix.
 
 **Do NOT "fix" this by pinning engine v1.11.3.** That is an older minor line than
@@ -119,6 +127,7 @@ kubectl get ds -n storage | grep engine-image
 kubectl get volumes -n storage -o custom-columns=N:.metadata.name,S:.status.state,R:.status.robustness --no-headers | awk '$3!="healthy"'
 # CVE gone
 trivy image longhornio/longhorn-engine:v1.12.1 --severity CRITICAL --ignore-unfixed
+# Record the result on F-49f172b9 — not in this file.
 # app-level smoke: one stateful app per class still reads/writes (e.g. a database
 # pod and a CIFS-backed media pod), plus `flux get kustomizations -A`.
 ```

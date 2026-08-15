@@ -3,8 +3,8 @@ plan_id: harness-frontend-vite7
 component: ha-ai-harness
 pr: null                              # self-owned image; no upstream PR
 kind: image
-current: "harness-home-frontend 0.5.3-alpha — 1 fixable CRITICAL (esbuild Go stdlib)"
-target: "vite 7 toolchain, esbuild >= 0.27 — 0 fixable CRITICAL"
+current: "harness-home-frontend 0.5.3-alpha (vite 6 toolchain)"
+target: "vite 7 toolchain (esbuild >= 0.27)"
 update_type: major
 risk: medium
 est_duration_min: 60
@@ -22,35 +22,36 @@ window: "sun-window:2026-08-30"
 # Scheduled 2026-08-15. 60m in a 90m slot. Not a tue/thu 60m slot: 60-of-60
 # leaves zero rollback time.
 auto_execute: false                   # toolchain major bump on the serving process
+security_ref: F-9f752afd              # security driver; detail is DB-only
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-08-15"
 ---
 
-# harness-home-frontend: vite 6 -> 7 to clear the esbuild Go-stdlib CRITICAL
+# harness-home-frontend: vite 6 -> 7 to clear a residual build-toolchain CVE
 
 ## 1) Summary & why held
 
-The `harness-home-rebuild` plan (executed 2026-08-15, commit fb821821) took the
-frontend from **5 fixable CRITICAL to 1**. The survivor is:
+The `harness-home-rebuild` plan (executed 2026-08-15, commit fb821821) cleared
+most of the frontend's fixable criticals. One survivor needs a framework major.
 
-```
-CVE-2025-68121  stdlib v1.23.12 -> 1.24.13, 1.25.7, 1.26.0-rc.3
-                app/node_modules/@esbuild/linux-x64/bin/esbuild
-```
+> **Security driver — detail withheld from this public repo.**
+> Tracked as **F-9f752afd**. The advisory ID, the affected binary, the
+> before/after counts and the exploitability assessment live on the finding
+> record, not here.
+>
+> - Dashboard: `https://sweep.<DOMAIN>/findings/F-9f752afd`
+> - CLI: `runbooks/policy-cli.py finding show F-9f752afd`
+>
+> Convention: `docs/sops/vulnerability-disclosure.md`.
 
-This is the **Go standard library compiled into the esbuild binary**, so the fix
-is an esbuild version, not a patch we can apply:
-
-| esbuild | Go stdlib | verdict |
-|---|---|---|
-| 0.25.12 | go1.23.12 | vulnerable — and the newest of the 0.25 line |
-| 0.27.3  | go1.25.7  | fixed |
-| 0.28.2  | go1.26.5  | fixed |
-
-`vite@6` declares `esbuild: ^0.25.0`, so npm cannot resolve anything ≥0.27 while
-we stay on vite 6 — 0.25.12 is a dead end. `vite@7` declares
-`esbuild: ^0.27.0 || ^0.28.0`.
+**Why a vite major is the only path** (this part is a plain dependency-resolution
+fact and is safe to state): the vulnerable component is a Go binary vendored into
+esbuild, so the fix is an esbuild version, not a patch. `vite@6` declares
+`esbuild: ^0.25.0`, so npm cannot resolve anything ≥0.27 while we stay on vite 6
+— the newest 0.25 release is a dead end. `vite@7` declares
+`esbuild: ^0.27.0 || ^0.28.0`. The exact fixed esbuild version to target is on
+the finding record.
 
 **Why this is a major, not a bump:** the container's `CMD` is
 `npm run dev` — the **vite dev server is the serving process**, not a build-time
@@ -65,9 +66,9 @@ Note also `vite.config.ts` carries a Vite-6-specific fix (commit 68a74d9,
 under vite 7, it is the setting that lets the ingress hostname reach the dev
 server at all.
 
-Severity context for scheduling: this is a build-tool binary reached only via
-vite's dep pre-bundling, not a network-facing surface — real-world exploitability
-is low. It is worth doing properly rather than rushing.
+Severity context for scheduling is recorded on **F-9f752afd** — read it there
+before picking a window. Short version for sequencing only: this is not an
+emergency, so do it properly rather than rushing.
 
 ## 2) Pre-checks
 

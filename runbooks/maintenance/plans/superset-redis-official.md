@@ -36,7 +36,8 @@ generated: "2026-08-15"
 
 Stage 1 of 4, split out of the former `superset-bitnamilegacy-migration` (120 min,
 un-schedulable — the longest window is 90 min). **This stage is the cheap half of
-that plan: it clears 14 of the 19 criticals and it touches no durable data.**
+that plan: it clears the larger share of F-9d114719/F-937701ef and it touches
+no durable data.**
 
 **Why no version bump can fix this.** The Superset chart itself pins the archived
 mirror. From chart 0.22.4's own `values.yaml` (verified 2026-08-15):
@@ -142,9 +143,10 @@ mise exec -- kubectl logs -n databases deploy/superset-worker --tail=20
    `redis:` values block with
    ```yaml
        # Bundled Bitnami redis retired 2026-XX-XX: bitnamilegacy is an ARCHIVED
-       # registry (last push 2025-08-28, 14 fixable CRITICALs, no future fixes) and
-       # docker.io/bitnami/redis publishes no semver tags. Superset now uses the
-       # official redis image deployed by redis-deployment.yaml in this folder.
+       # registry (last push 2025-08-28, no future security fixes) and
+       # docker.io/bitnami/redis publishes no semver tags. Security driver
+       # tracked as F-9d114719. Superset now uses the official redis image
+       # deployed by redis-deployment.yaml in this folder.
        redis:
          enabled: false
    ```
