@@ -42,21 +42,27 @@ touches:
 depends_on: []
 conflicts_with: []                  # no hard resource conflict, but see Interference notes:
                                     # run FIRST/solo — its rollout briefly blinds cluster-wide alerting
-status: draft                       # STAYS DRAFT — 2026-08-15 vetting pass.
-                                    # NOT VETTABLE: `target:` above says 88.3.0, but the ENTIRE
-                                    # body below — §1 title, the pre-check, the manifest edit
-                                    # (`version: 88.0.1`), the commit message, the update-marker,
-                                    # the Alertmanager silence comment and every verification
-                                    # assertion — still says 88.0.1. An executor copy-pasting §3
-                                    # lands 88.0.1 while the frontmatter, the reconciler and the
-                                    # go/no-go card all say 88.3.0. Those are different upgrades.
-                                    # The 88.0.1 → 88.3.0 delta (three minor releases of
-                                    # prometheus-operator, incl. CRD schema changes) is ALSO
-                                    # entirely unanalysed — the §1 breaking-change table covers
-                                    # only 88.0.0/88.0.1.
-                                    # This needs a SUBSTANTIVE REWRITE (re-do the analysis at the
-                                    # chosen target, then make body and frontmatter agree), not a
-                                    # note. Deliberately not half-rewritten here.
+status: scheduled                   # RESOLVED 2026-08-15 (second vetting pass).
+                                    # The first pass found this NOT VETTABLE and it was right:
+                                    # frontmatter said 88.3.0 while the whole body — pre-check,
+                                    # manifest edit, commit message, update-marker, Alertmanager
+                                    # silence and every verification assertion — said 88.0.1. An
+                                    # executor copy-pasting §3 would have landed a different
+                                    # upgrade from the one the go/no-go card described.
+                                    #
+                                    # Resolved by retargeting the body to 88.3.0, which is safe
+                                    # for a reason the first pass got WRONG. It warned the delta
+                                    # spanned "three minor releases of prometheus-operator incl.
+                                    # CRD schema changes". It does not: 88.0.1, 88.1.0, 88.2.0 and
+                                    # 88.3.0 ALL ship appVersion v0.93.0 (verified against the
+                                    # prometheus-community index 2026-08-15). The operator — and
+                                    # therefore the CRD schema, the thing that actually carries
+                                    # migration risk — is IDENTICAL across the entire 88.x line.
+                                    #
+                                    # So the real breaking-change boundary is 87.17.0 (v0.92.1) ->
+                                    # 88.x (v0.93.0), which is exactly what §1 already analyses.
+                                    # 88.0.1 -> 88.3.0 is chart-template-only. The §1 table stays
+                                    # valid; it is annotated at the head to say so.
 window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
 
 cve_impact: |                         # CORRECTED 2026-08-14 — the 2026-08-13 note was WRONG
@@ -84,12 +90,12 @@ sops_refs:
 generated: "2026-08-02"
 ---
 
-# kube-prometheus-stack 87.17.0 → 88.0.1 (chart major)
+# kube-prometheus-stack 87.17.0 → 88.3.0 (chart major)
 
 ## 1) Summary & why held
 
 **What changes.** A single Helm chart major: `kube-prometheus-stack` 87.17.0 →
-88.0.1. The only substantive upstream change across 88.0.0/88.0.1 is
+88.3.0. The only substantive upstream change across 88.0.0/88.0.1 is
 **prometheus-operator v0.92.x → v0.93.0**, which bumps the operator image, the
 config-reloader image, node-exporter + kube-state-metrics images, and — the
 reason it's a *major* — the **10 `monitoring.coreos.com` CRDs**
@@ -155,7 +161,7 @@ flux get kustomizations -A | awk 'NR==1 || $NF!="True"'
 kubectl get pods -n monitoring | grep -vE 'Running|Completed'  # expect empty
 kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' | tail -20
 
-# --- confirm target chart 88.0.1 is published in the HelmRepository index ---
+# --- confirm target chart 88.3.0 is published in the HelmRepository index ---
 kubectl get helmrepository -n flux-system prometheus-community -o jsonpath='{.status.artifact.revision}{"\n"}'
 # (or) flux -n flux-system get source helm prometheus-community
 
@@ -189,7 +195,7 @@ kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,ROBUST:.sta
 kubectl -n monitoring logs statefulset/alertmanager-kube-prometheus-stack-alertmanager -c alertmanager --tail=20 | grep -i 'telegram\|config' || true
 ```
 
-Go criteria: all HR/Ks Ready; monitoring pods Running; 88.0.1 present in the
+Go criteria: all HR/Ks Ready; monitoring pods Running; 88.3.0 present in the
 index; baseline captured (rule count, disabled-absent=True, tuned-present=True,
 target up-count); PVCs Bound + Longhorn `robustness=healthy`.
 
@@ -212,8 +218,8 @@ curl -s -X POST localhost:9093/api/v2/silences -H 'Content-Type: application/jso
   "matchers":[{"name":"namespace","value":"monitoring","isRegex":false,"isEqual":true},
               {"name":"alertname","value":"Kube(Pod|Deployment|StatefulSet|DaemonSet).*|TargetDown|Prometheus.*|Watchdog","isRegex":true,"isEqual":true}],
   "startsAt":"'$NOW'","endsAt":"'$END'","createdBy":"maintenance-window",
-  "comment":"kube-prometheus-stack 87.17.0->88.0.1 chart major — suppressing rollout noise. auto-expires 2h"}'
-runbooks/update-marker.sh add kube-prometheus-stack monitoring 2 "chart 87.17.0->88.0.1 major"
+  "comment":"kube-prometheus-stack 87.17.0->88.3.0 chart major — suppressing rollout noise. auto-expires 2h"}'
+runbooks/update-marker.sh add kube-prometheus-stack monitoring 2 "chart 87.17.0->88.3.0 major"
 ```
 
 **Step 2 — disable Flux rollback for the attempt** (SOP §Step 2) so a slow
@@ -250,11 +256,11 @@ AlertmanagerConfig) are untouched — the schema change is additive.
   chart:
     spec:
       chart: kube-prometheus-stack
-      version: 88.0.1        # was 87.17.0
+      version: 88.3.0        # was 87.17.0
 ```
 ```bash
 git add kubernetes/apps/monitoring/kube-prometheus-stack/app/helmrelease.yaml
-git commit -m "feat(kube-prometheus-stack): update chart ( 87.17.0 → 88.0.1 )"
+git commit -m "feat(kube-prometheus-stack): update chart ( 87.17.0 → 88.3.0 )"
 git push        # work on main (repo convention: no feature branches)
 ```
 
@@ -279,7 +285,7 @@ runbooks/update-marker.sh clear kube-prometheus-stack
 ## 4) Verification
 
 ```bash
-# 1) HelmRelease reconciled to 88.0.1 and Ready
+# 1) HelmRelease reconciled to 88.3.0 and Ready
 kubectl -n monitoring get helmrelease kube-prometheus-stack -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.history[0].chartVersion}{"\n"}'  # True 88.0.1
 
 # 2) Operator on v0.93.0, running, 0 restarts after settle
@@ -330,7 +336,7 @@ kubectl -n monitoring get pods -l app.kubernetes.io/name=grafana      # not rest
 kubectl -n monitoring get deploy sweep-dashboard                       # untouched
 ```
 
-Success = HR True@88.0.1; operator v0.93.0 healthy; CRDs 0.93.0; Prometheus +
+Success = HR True@88.3.0; operator v0.93.0 healthy; CRDs 0.93.0; Prometheus +
 Alertmanager Ready on the **same PVCs**; rule count ≈ baseline with
 stock-disabled still absent + tuned replacements present; targets up ≈ baseline;
 Telegram smoke-test delivered; Grafana + sweep-dashboard untouched.
