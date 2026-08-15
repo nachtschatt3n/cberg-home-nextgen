@@ -317,3 +317,10 @@ else (harmless under dry-run, alarming to read).
 The HelmRelease is the only artifact: `git revert` the offending commit and
 push. If the incident is CRD-induced, rollback of k8s-gateway itself does
 NOT help — remove the CRDs (§8 Recovery).
+
+## Related
+
+- **`docs/sops/envoy-gateway-upgrade.md`** — the coupled chart + Gateway API
+  CRD-channel ritual, including the DNS gate below and the fact that from
+  v1.6.1 the bundle's own admission policy blocks rolling back to the
+  previous channel.

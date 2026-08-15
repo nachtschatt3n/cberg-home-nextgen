@@ -103,13 +103,29 @@ Phase 0 is executed and live; this plan starts from **exactly** this:
 
 | Fact | Value |
 |---|---|
-| Envoy Gateway | chart `gateway-helm` 1.8.3, `envoy-gateway` pod Running, 0 restarts |
+| Envoy Gateway | chart `gateway-helm` **1.9.0** (`envoy-gateway:v1.9.0`, data plane distroless-v1.39.0), pod Running, 0 restarts |
 | Gateways | `envoy-internal` 192.168.55.103 · `envoy-external` 192.168.55.104 — both `PROGRAMMED=True`, 6h+, 0 restarts |
 | Real traffic on EG | **none** — exactly 1 HTTPRoute cluster-wide (`network/https-redirect`), and it carries **no hostname** |
 | ingress-nginx | still serves **all 102** Ingresses (76 `internal`, 26 `external`) |
 | k8s-gateway | chart 3.7.2 / app **1.8.0**, `watchedResources: ["Ingress","Service"]` |
-| Gateway API CRDs | 8 standard-channel CRDs present (gateway-api **v1.5.1**) |
+| Gateway API CRDs | **10** standard-channel CRDs present (gateway-api **v1.6.1**) — was 8/v1.5.1 before phase 0.5; `tcproutes` + `udproutes` are the two new ones |
 | external-dns | `sources: [crd, ingress, gateway-httproute]`, scoped `--gateway-name=envoy-external --gateway-namespace=network` (live in the pod args) |
+
+**Phase 0.5 (executed 2026-08-16) changed two things this plan must account for.**
+EG is on 1.9.0 and the Gateway API bundle is v1.6.1 — done deliberately at zero
+traffic because EG 1.8 supports only Kubernetes 1.32-1.35 while this cluster runs
+1.36.0, and because a coupled chart+CRD bump is far cheaper before 102 routes are
+attached than after.
+
+> **The v1.6.1 bundle BLOCKS ITS OWN ROLLBACK.** It ships a
+> `ValidatingAdmissionPolicy` (`failurePolicy: Fail`) whose version floor advanced
+> to `v1.[0-5]`, so v1.5.1 now matches the deny pattern — verified by
+> `kubectl apply --dry-run=server`, which rejects **9** of the old CRDs. A plain
+> `git revert` of the CRD commit will be refused at admission, and the policy
+> objects are Flux-managed so a bare `kubectl delete` is re-applied on reconcile.
+> Removal procedure: `docs/sops/k8s-gateway-dns.md` §8. The floor advances with
+> EVERY bundle, so this recurs on the next channel bump — do not assume "revert"
+> is available as a rollback for anything CRD-coupled.
 
 Two consequences that were NOT true when this plan was first written:
 
