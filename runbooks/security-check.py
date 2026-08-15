@@ -900,6 +900,60 @@ def _is_floating_line_tag(tag: str) -> bool:
     return bool(tag) and bool(_FLOATING_LINE_TAG_RE.match(str(tag)))
 
 
+# Tag names upstream re-publishes in place. Content behind these can change with
+# no manifest edit, so what Trivy scanned today is not necessarily what runs
+# tomorrow.
+_MUTABLE_TAG_NAMES = frozenset({
+    "latest", "stable", "dev", "edge", "main", "master", "nightly", "rolling",
+})
+
+
+def _is_mutable_tag_ref(image_ref: str) -> bool:
+    """True when upstream can swap this ref's content without a manifest edit.
+
+    DELIBERATELY NOT check-all-versions' `is_rolling_tag()`. That regex answers
+    "can I semver-compare this tag?", so it groups immutable git-sha tags
+    (`sha-3b0ddc2`) and digest-suffixed refs (`latest@sha256:...`) together with
+    `latest` — for its question both are equally "no". The question HERE is the
+    opposite one: "can the bytes change under us?", for which a git-sha tag and a
+    digest pin are the *most* immutable things in the inventory. Reusing
+    is_rolling_tag() verbatim raised 5 false findings against genuinely-pinned
+    images (the ghcr.io/nachtschatt3n/* `sha-*` CI builds, plus digest-pinned
+    icloud-drive and music-assistant-skill). Keep the two notions separate.
+    """
+    if "@sha256:" in image_ref:
+        return False  # digest-pinned → immutable whatever the tag says
+    tag = image_ref.rpartition(":")[2]
+    if not tag or "/" in tag:
+        return False  # no tag at all (bare repo, or a registry:port host)
+    if tag.lower() in _MUTABLE_TAG_NAMES:
+        return True
+    # Head-of-line tags (postgres:18, postgres:17-alpine, node:lts-alpine,
+    # pgvector:pg16) are rebuilt in place by upstream — mutable by the same test.
+    return _is_floating_line_tag(tag)
+
+
+# "Already on the newest upstream tag" describes the remediation ROUTE (there is
+# no tag to bump to), NOT the level of risk. For a handful of fixable CVEs,
+# "wait for upstream's next rebuild" is a credible plan and AR-029 fairly covers
+# it. Past some magnitude that stops being credible: the image is materially
+# vulnerable right now, and the real options are a variant/base switch, a
+# replacement, or a compensating control — a decision that belongs with a human
+# rather than being absorbed into a warning-severity accepted risk.
+# The value is operator policy, not a law of nature. It was calibrated against
+# the live already-newest population so that it isolates genuine outliers
+# without a false-positive wave; the per-image numbers behind that calibration
+# are vulnerability detail and live on the sweep_findings records, not here
+# (docs/sops/vulnerability-disclosure.md). Re-calibrate from a sweep, not from
+# memory, and tighten it deliberately rather than drifting it.
+_UNBUMPABLE_CRIT_ESCALATE = 50
+
+# Our own applications' registry namespace. Images here are built and published
+# by the operator's own app repos; the cluster sweep holds no pull credentials
+# for them by deliberate policy, so trivy cannot scan them from here.
+_PRIVATE_REGISTRY_PREFIX = "ghcr.io/nachtschatt3n/"
+
+
 def _newer_upstream_tag_exists(image_ref: str):
     """Is there a newer upstream image TAG than the one we run?
 
@@ -1194,6 +1248,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # blunt "HIGH CVEs" substring — masking FIXABLE criticals (2026-07-30 fix).
     if findings_per_image:
         n_actionable = n_latest = n_accepted = 0
+        n_floating = n_stale = 0
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
             fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
@@ -1206,9 +1261,38 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             if r["crit_fix"] > 0 or r["high_fix"] > 5:
                 newer = _newer_upstream_tag_exists(img)
                 if newer is False:
-                    f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)")
-                    cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
-                    n_latest += 1
+                    # "No newer tag exists" is a statement about the remediation
+                    # ROUTE, not a risk acceptance. Two independent rules apply
+                    # before anything may be absorbed into AR-029.
+                    floating = _is_mutable_tag_ref(img)
+                    if r["crit_fix"] >= _UNBUMPABLE_CRIT_ESCALATE:
+                        # MAGNITUDE rule — deliberately independent of whether
+                        # the tag floats. No bump can fix this, so the remaining
+                        # options are a variant/base switch, a replacement, or a
+                        # compensating control. That is a human decision, not
+                        # something a warning-severity AR should absorb.
+                        qual = ("and the tag FLOATS, so even this count is only a snapshot"
+                                if floating else "and this is already the newest upstream tag")
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) — no bump can fix this {qual}; upstream ships a materially vulnerable image. Decide: variant/base switch, replacement, or a compensating control — {fix_s}")
+                        cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable, unbumpable — too large to absorb, needs a decision")
+                        n_stale += 1
+                    elif floating:
+                        # FLOATING rule. Severity is WARNING regardless of
+                        # today's counts, and that is the point: the finding is
+                        # that the posture is UNKNOWABLE, not that it is
+                        # currently bad. Upstream re-publishes this tag, so
+                        # "we are on the newest" is trivially and permanently
+                        # true — the old accept could never expire — and what
+                        # Trivy measured today can change on the next pull with
+                        # no manifest edit and no sweep diff. The remedy is to
+                        # pin, after which the normal bump logic applies.
+                        f.add(WARNING, f"`{tag}`: floating tag — upstream re-publishes it in place, so the CVE posture is unknowable and can change with no manifest edit (a snapshot today: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable); pin an immutable version or @sha256 digest — {fix_s}")
+                        cprint(C.YELLOW, f"  🟡 {tag}: FLOATING tag ({r['crit_fix']}C/{r['high_fix']}H fixable snapshot) — posture unknowable, pin it")
+                        n_floating += 1
+                    else:
+                        f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)")
+                        cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
+                        n_latest += 1
                 # newer is True (a newer tag really exists) or None (lookup
                 # undeterminable). Both surface — that fail-safe is correct — but
                 # they must NOT read the same. Saying "newer upstream tag
@@ -1242,7 +1326,9 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_nofix']} CRITICAL + {r['high_nofix']} HIGH CVE(s) with no upstream fix (accepted — unpatchable until upstream ships)")
                 n_accepted += 1
         cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs — "
-                       f"{n_actionable} actionable (newer tag → bump), {n_latest} fixable-but-already-latest (accepted), "
+                       f"{n_actionable} actionable (newer tag → bump), {n_floating} on FLOATING tags (posture unknowable), "
+                       f"{n_stale} unbumpable-but-severe (needs a decision), "
+                       f"{n_latest} fixable-but-already-latest (accepted), "
                        f"{n_accepted} no-upstream-fix (accepted)")
     else:
         cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL/HIGH CVEs in {len(distinct_images)} running images")
@@ -1254,9 +1340,30 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # Stable title (no varying count/list) keeps the finding fingerprint steady.
     scan_failed = [i for i in scan_failed if i in distinct_images]
     if scan_failed:
-        f.add(WARNING, "Trivy scan coverage gap: one or more running images unscannable after retry — CVE status UNKNOWN (may hide fixable criticals); investigate trivy timeouts/registry access")
-        cprint(C.YELLOW, f"  🟡 {len(scan_failed)} running image(s) unscannable after retry: "
-                          + ", ".join(sorted(i.split('@')[0] for i in scan_failed)[:8]))
+        # Split by CAUSE. The two halves have different owners and different
+        # remedies, and — decisively — a single blended finding cannot be
+        # risk-accepted for one half without blinding us to the other. Our own
+        # private images fail on registry AUTH (the cluster sweep deliberately
+        # holds no pull credentials; scanning them belongs in each application
+        # repo's own CI). Anything else is a genuine trivy timeout/error and
+        # must stay visible. Blending them meant accepting the private-image
+        # blindness would also have silently swallowed, e.g., a public image
+        # timing out — a different problem with a different fix.
+        private = sorted(i for i in scan_failed if i.startswith(_PRIVATE_REGISTRY_PREFIX))
+        other = sorted(i for i in scan_failed if not i.startswith(_PRIVATE_REGISTRY_PREFIX))
+        if private:
+            # Stable, drift-free wording (no counts, no versions) so both the
+            # finding fingerprint and any accepted-risk substring survive the
+            # inventory changing underneath it.
+            f.add(WARNING, f"Trivy scan coverage gap: private {_PRIVATE_REGISTRY_PREFIX.rstrip('/')} images unscannable by the cluster sweep (no registry credentials) — CVE status UNKNOWN for our own applications; scanning belongs in each app repo's own CI")
+            cprint(C.YELLOW, f"  🟡 {len(private)} private image(s) unscannable (no registry creds): "
+                              + ", ".join(i.split('@')[0].split('/')[-1] for i in private[:8]))
+        if other:
+            # Message kept byte-identical to the pre-split wording so the
+            # existing finding fingerprint stays stable across this refactor.
+            f.add(WARNING, "Trivy scan coverage gap: one or more running images unscannable after retry — CVE status UNKNOWN (may hide fixable criticals); investigate trivy timeouts/registry access")
+            cprint(C.YELLOW, f"  🟡 {len(other)} running image(s) unscannable after retry: "
+                              + ", ".join(sorted(i.split('@')[0] for i in other)[:8]))
 
     # AR-029 ("HIGH CVEs") is now applied PRECISELY above by fix-availability
     # (no-upstream-fix → accepted, fixable → surfaced regardless of severity),
