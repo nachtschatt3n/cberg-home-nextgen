@@ -312,6 +312,95 @@ class VersionChecker:
         
         return images
     
+    # ------------------------------------------------------------------
+    # Upstream chart freshness (per-CHART, never per-repo)
+    #
+    # Closes the moved/frozen-upstream blind spot that bit three times in one
+    # week (grafana, k8s-gateway, bjw-s): a HelmRepository pointing at a frozen
+    # index makes Renovate and this script report ✅ while the component
+    # silently ages. Crucially the grafana case froze only a SUBSET of charts
+    # inside an otherwise-active repo, so repo-level freshness detects nothing —
+    # the unit of measurement must be the (repo, chart) pair.
+    #
+    # Three states, deliberately distinct (docs/sops/audit-script-correctness.md
+    # — absence of a signal must never be scored as a result):
+    #   fresh        newest entry for the chart is recent
+    #   stale        newest entry is old — even if WE RUN IT. Being current
+    #                against a frozen index is false currency.
+    #   unverifiable index unreachable / no created dates (OCI) — reported as
+    #                such, never silently counted as fresh.
+    FRESH_WARN_MONTHS = 9
+    FRESH_NOTE_MONTHS = 4
+
+    def _chart_index_entries(self, repo_url: str) -> Optional[dict]:
+        """Fetch + cache a Helm repo's index.yaml entries ({chart: [entries]}).
+
+        Returns None when the index cannot be fetched/parsed — the caller must
+        treat that as UNVERIFIABLE, not as fresh.
+        """
+        if not hasattr(self, '_index_cache'):
+            self._index_cache = {}
+        if repo_url in self._index_cache:
+            return self._index_cache[repo_url]
+        entries = None
+        if repo_url.startswith('http'):
+            try:
+                import urllib.request
+                url = repo_url.rstrip('/') + '/index.yaml'
+                # A real User-Agent is required: Cloudflare-fronted repos
+                # (charts.jetstack.io) and some GitHub Pages 403 the default
+                # python-urllib UA while serving curl fine.
+                req = urllib.request.Request(
+                    url, headers={'User-Agent': 'cberg-version-check/1.0'})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    entries = (yaml.safe_load(r.read()) or {}).get('entries')
+            except Exception:
+                entries = None
+        # oci:// indexes carry no per-version created dates — unverifiable here.
+        self._index_cache[repo_url] = entries
+        return entries
+
+    def check_chart_freshness(self, repo_name: str, chart_name: str) -> dict:
+        """Freshness verdict for one (repo, chart) pair actually deployed."""
+        import datetime
+        out = {'state': 'unverifiable', 'newest': None, 'created': None,
+               'months': None, 'pin_in_index': None, 'repo_url': None}
+        repo = self.helm_repositories.get(repo_name)
+        if not repo:
+            return out
+        out['repo_url'] = repo.get('url', '')
+        if repo.get('type') == 'oci' or out['repo_url'].startswith('oci://'):
+            return out  # honest: cannot date OCI entries from the tag list
+        charts = self._chart_index_entries(out['repo_url'])
+        if not charts:
+            return out
+        versions = charts.get(chart_name)
+        if not versions:
+            out['state'] = 'stale'
+            out['pin_in_index'] = False  # chart vanished from its own index
+            return out
+        newest_dt, newest_v = None, None
+        for e in versions:
+            c = e.get('created')
+            if not c:
+                continue
+            try:
+                dt = datetime.datetime.fromisoformat(str(c).replace('Z', '+00:00'))
+            except ValueError:
+                continue
+            if newest_dt is None or dt > newest_dt:
+                newest_dt, newest_v = dt, e.get('version')
+        if newest_dt is None:
+            return out
+        now = datetime.datetime.now(datetime.timezone.utc)
+        months = (now - newest_dt).days / 30.44
+        out.update(newest=newest_v, created=newest_dt.date().isoformat(),
+                   months=round(months, 1))
+        out['state'] = ('stale' if months > self.FRESH_WARN_MONTHS
+                        else 'aging' if months > self.FRESH_NOTE_MONTHS
+                        else 'fresh')
+        return out
+
     def get_latest_chart_version(self, repo_name: str, chart_name: str) -> Optional[str]:
         """Get latest chart version from Helm repository."""
         if repo_name not in self.helm_repositories:
@@ -1673,6 +1762,8 @@ class VersionChecker:
             
             # Check chart version
             if hr['chart_name'] and hr['repository_name']:
+                result['chart']['freshness'] = self.check_chart_freshness(
+                    hr['repository_name'], hr['chart_name'])
                 latest_chart = self.get_latest_chart_version(hr['repository_name'], hr['chart_name'])
                 # Fallback for bjw-s charts (app-template, etc.) which live in an
                 # OCI HelmRepository not loaded into self.helm_repositories.
@@ -2151,6 +2242,54 @@ class VersionChecker:
             lines.append("|-----|-------|-----|")
             for row in sorted(floating_tag_rows, key=lambda r: (r['namespace'], r['app'], r['image'])):
                 lines.append(f"| `{row['app']}` | `{row['image']}` | `{row['tag']}` |")
+            lines.append("")
+
+        # Upstream chart freshness — per-(repo,chart), including FALSE CURRENCY:
+        # "we run the newest available" is not health when the newest is ancient.
+        stale_rows, unver_rows = [], []
+        for result in self.results:
+            fr = result.get('chart', {}).get('freshness')
+            if not fr:
+                continue
+            row = (result['name'], result['chart']['name'], fr)
+            if fr['state'] == 'stale':
+                stale_rows.append(row)
+            elif fr['state'] == 'unverifiable' and fr.get('repo_url'):
+                unver_rows.append(row)
+        if stale_rows:
+            lines.append("### ⚠️ Frozen / stale upstream charts")
+            lines.append("")
+            lines.append("> The newest entry the index offers for this chart is old — regardless of")
+            lines.append("> what we run. Being current against a frozen index is FALSE CURRENCY:")
+            lines.append("> Renovate sees nothing and the component silently ages. Before concluding")
+            lines.append("> a project died, check whether it MOVED (new org, OCI, renamed chart) —")
+            lines.append("> grafana, k8s-gateway and bjw-s all moved. See runbooks/version-check.md.")
+            lines.append("")
+            lines.append("| App | Chart | Newest in index | Published | Months | We run |")
+            lines.append("|-----|-------|-----------------|-----------|--------|--------|")
+            seen = set()
+            for name, chart, fr in sorted(stale_rows, key=lambda r: -(r[2]['months'] or 999)):
+                key = (chart, fr.get('repo_url'))
+                if key in seen:
+                    continue
+                seen.add(key)
+                cur = next((x['chart']['current_version'] for x in self.results
+                            if x['chart']['name'] == chart), '?')
+                if fr.get('pin_in_index') is False:
+                    lines.append(f"| `{name}` | `{chart}` | **ABSENT from index** | — | — | `{cur}` |")
+                else:
+                    lines.append(f"| `{name}` | `{chart}` | `{fr['newest']}` | {fr['created']} "
+                                 f"| **{fr['months']}** | `{cur}` |")
+            lines.append("")
+        if unver_rows:
+            lines.append("### Upstream freshness unverifiable (OCI — no dates in index)")
+            lines.append("")
+            seen = set()
+            for name, chart, fr in sorted(unver_rows):
+                if chart in seen:
+                    continue
+                seen.add(chart)
+                lines.append(f"- `{chart}` ({fr['repo_url']})")
             lines.append("")
 
         lines.append("---")

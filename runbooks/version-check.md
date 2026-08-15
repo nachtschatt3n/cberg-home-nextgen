@@ -550,3 +550,37 @@ The version check can be integrated into CI/CD pipelines:
 - [Flux HelmRelease Documentation](https://fluxcd.io/docs/components/helm/helmreleases/)
 - [Helm Chart Versioning](https://helm.sh/docs/topics/charts/#charts-and-versioning)
 - [Container Image Tagging Best Practices](https://docs.docker.com/engine/reference/commandline/tag/)
+
+## Upstream chart freshness (added 2026-08-15)
+
+`check-all-versions.py` now checks, for every `(repo, chart)` pair actually
+deployed, when the **newest entry the index offers for that chart** was
+published — regardless of whether we run it. Thresholds: stale > 9 months,
+aging > 4 months. Results land in `version-check-current.md` under
+"Frozen / stale upstream charts".
+
+Why per-chart and not per-repo: grafana froze a five-chart *subset* of an
+otherwise-active repo on one day in January 2026. Repo-level freshness saw a
+repo publishing daily and reported nothing while the `grafana` chart itself
+was seven months dead.
+
+Why "we run the newest" is not a pass: being current against a frozen index is
+**false currency** — Renovate diffs against the same dead index and stays
+silent, so the component ages invisibly. Three incidents in one week
+(grafana → grafana-community, ori-edge/k8s_gateway → k8s-gateway org,
+bjw-s → bjw-s-labs) all had this exact shape.
+
+What to do with a hit, in order:
+1. **Check whether the project MOVED** before concluding it died — new GitHub
+   org, HTTP→OCI migration, renamed chart. All three incidents above were
+   moves, not deaths. GitHub redirects and ArtifactHub listings answer this
+   quickly.
+2. If moved: repoint the HelmRepository and plan the version catch-up (often
+   several majors — that is a held update, not a safe one).
+3. If genuinely dead: operator decision — adopt/vendor the chart, switch to a
+   maintained community chart, or convert to app-template.
+
+OCI repositories carry no publish dates in their tag lists, so they are
+reported as "freshness unverifiable" rather than silently counted as fresh —
+an unverifiable check must never be scored as a result
+(`docs/sops/audit-script-correctness.md`).
