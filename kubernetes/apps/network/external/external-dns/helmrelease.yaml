@@ -42,6 +42,20 @@ spec:
       - --events
       - --ignore-ingress-tls-spec
       - --ingress-class=external
+      # --ingress-class filters INGRESS objects only; it has no effect on the
+      # gateway-httproute source. Without the two flags below, ANY HTTPRoute
+      # with a hostname -- including one attached to the INTERNAL gateway --
+      # would be published to public Cloudflare DNS. Name+namespace form a
+      # default-deny allowlist of exactly one Gateway: a route whose parents
+      # are not in that set yields no endpoints, so a typo, a rename or a
+      # newly added gateway all fail CLOSED (not published) rather than open.
+      # Preferred over --gateway-label-filter because it needs no label on the
+      # Gateway objects (owned by the Envoy migration workstream) and cannot be
+      # widened by accidentally applying a label. NOTE: --gateway-name takes a
+      # single name; if a second externally-facing Gateway is ever added,
+      # switch to --gateway-label-filter and label that gateway explicitly.
+      - --gateway-name=envoy-external
+      - --gateway-namespace=network
       - --metrics-address=0.0.0.0:7979
     policy: sync
     # gateway-httproute added for the Envoy Gateway migration. `ingress` is
