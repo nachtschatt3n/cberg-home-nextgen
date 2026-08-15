@@ -151,9 +151,9 @@ Reverting this SOP is a no-op (it's documentation). To roll back an SLO that tur
 ## 12) References
 
 - [SOP-TEMPLATE.md](SOP-TEMPLATE.md) — section structure this SOP follows
-- [sli-slo-framework.md](sli-slo-framework.md) — *(will exist after C4)* — the operator-facing SOP for adding new SLOs
+- [policy-cli.md](policy-cli.md) — the operator-facing SOP for adding/disabling SLOs (`policy-cli.py slo add|disable`)
 - `slo_definitions` table in sweep_history Postgres — runtime SLO catalog; browse at `sweep.<DOMAIN>/policies/slos`
-- [runbooks/slo-check.py](../../runbooks/slo-check.py) — *(will exist after C1)* — multi-backend calculator
+- [runbooks/slo-check.py](../../runbooks/slo-check.py) — multi-backend calculator
 - `noise_suppressions` table in sweep_history Postgres — informal thresholds being formalised as SLOs; browse at `sweep.<DOMAIN>/policies/noise`
 - [unifi-controller-rate-limit.md](unifi-controller-rate-limit.md) — implicit UniFi SLO target (30s polling → 99% device-up)
 - [docs/troubleshooting/ha-upstream-integration-issues.md](../troubleshooting/ha-upstream-integration-issues.md) — Miele accepted-risk posture

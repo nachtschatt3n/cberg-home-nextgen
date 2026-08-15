@@ -20,14 +20,14 @@
 | kube-system | 11 |
 | storage | 1 |
 | cert-manager | 1 |
-| network | 7 |
+| network | 8 |
 | default | 2 |
 | flux-system | 1 |
 | backup | 2 |
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
-| **Total** | **105** |
+| **Total** | **106** |
 
 ---
 
@@ -81,7 +81,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | postgresql | PostgreSQL database (shared cluster DB) | None | Databases |
-| mariadb | MariaDB database (shared cluster DB) | None | Databases |
+| mariadb | MariaDB database (shared cluster DB). Server 13.0.1 on chart 27.0.1. The image is pinned **by digest** (Bitnami's free tier publishes no versioned tags) — the `image.tag` field is inert, so never read a version off it; see `docs/sops/mariadb-major-upgrade.md` before any major bump. | None | Databases |
 | redis | Redis in-memory cache/queue | None | Databases |
 | influxdb | InfluxDB time-series database | None | Databases |
 | nocodb | NocoDB — open-source Airtable alternative | Internal | Databases |
@@ -151,7 +151,7 @@
 | jellyfin | Open-source media server | Internal | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
-| library-tools | Audit + organize + sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
+| library-tools | Audit + organize + sidecar + episode-sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. All are suspended and invoked on demand. `media-episode-sidecar` (`episode_sidecar.py`, added 2026-08-15) writes per-EPISODE `.nfo` for one show, dry-run by default and never deletes — it is **not** `media-sidecar`, which unlinks every `.nfo` in its target folder first. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
 | media-dashboard | Internal status dashboard with live intake queue + recent jobs + trigger buttons (audit, rescan, TA bridge). Part of `library-tools`. | Internal | Media |
 
 ---
@@ -208,9 +208,10 @@
 | ingress-nginx (internal) | `network/internal/` | Internal reverse proxy | — (is the ingress) |
 | ingress-nginx (external) | `network/external/` | External reverse proxy | — (is the ingress) |
 | adguard-home | `network/internal/` | DNS + ad blocking (IP: 192.168.55.5) | Internal |
-| k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101) | None |
+| k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101). Chart 3.7.2 / app 1.8.0 — upstream moved orgs (ori-edge → k8s-gateway); the old repo is frozen at chart 2.4.0 / app 0.4.0, which fails closed when Gateway API CRDs are present. Image tag is pinned in the HR because the chart default lags. See `docs/sops/k8s-gateway-dns.md`. | None |
 | cloudflared | `network/external/` | Cloudflare Tunnel client | None |
 | external-dns | `network/external/` | Automated Cloudflare DNS record management | None |
+| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.8.3) — Gateway API control plane for the ingress-nginx replacement. Phase 0 only: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx with no app traffic yet. Gateway API + EG CRDs are vendored under `crds/` (standard channel), not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
 
 ---
 

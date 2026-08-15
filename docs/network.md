@@ -95,8 +95,10 @@ Nodes connect on VLAN 55 (k8s-network, 192.168.55.0/24).
 |---------|----|------|---------|
 | AdGuard Home | 192.168.55.5 | 53 / 853 / 443 | DNS + ad blocking |
 | k8s-gateway | 192.168.55.101 | 53 | Internal service DNS |
-| External Ingress | 192.168.55.x | 80 / 443 | External-facing services |
-| Internal Ingress | 192.168.55.x | 80 / 443 | Internal-only services |
+| External Ingress | 192.168.55.102 | 80 / 443 | External-facing services (ingress-nginx) |
+| Internal Ingress | 192.168.55.100 | 80 / 443 | Internal-only services (ingress-nginx) |
+| envoy-internal | 192.168.55.103 | 80 / 443 | Envoy Gateway internal-class Gateway (EG migration, phase 0) |
+| envoy-external | 192.168.55.104 | 80 / 443 | Envoy Gateway external-class Gateway (EG migration, phase 0) |
 
 **Inter-VLAN Access:**
 - NAS (192.168.55.240) is on VLAN 55 itself → node↔NAS storage is L2-switched, not routed (avoids the UDM-Pro ~1 Gbit inter-VLAN routing cap)

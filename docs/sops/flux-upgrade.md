@@ -236,7 +236,7 @@ Self-rollback is disabled during the attempt (`retries:0`), so the operator owns
 
 - `kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml` (distribution source of truth)
 - `docs/sops/disaster-recovery.md` · `docs/sops/talos-upgrade.md` · `docs/sops/application-update.md`
-- `runbooks/maintenance/plans/flux-stack-v0.57.md` (the executed plan this SOP generalizes)
+- `runbooks/maintenance/plans/flux-stack-v0.57.md` — the executed plan this SOP generalizes; **file retired** (`d3b081f9`), recoverable via `git show d3b081f9^:runbooks/maintenance/plans/flux-stack-v0.57.md`
 - Upstream: [Flux 2.7 GA notes](https://fluxcd.io/blog/2025/09/flux-v2.7.0/) (image-API v1 GA) · [flux-operator releases](https://github.com/controlplaneio-fluxcd/flux-operator/releases)
 - User memory: `feedback_flux_postbuild_escape` (now enforced hard by strict mode)
 

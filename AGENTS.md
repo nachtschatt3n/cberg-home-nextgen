@@ -652,6 +652,20 @@ Quick agent rules (anything more, read the SOP):
   kubectl get pv,pvc -A | grep <app>         # bindings
   ```
 
+- **A single-replica Deployment mounting an RWO Longhorn PVC MUST NOT use
+  the default `RollingUpdate`.** `maxSurge` rounds UP to 1 at
+  `replicas: 1`, so the replacement pod is scheduled before the old one
+  releases the volume; if it lands on another node it blocks forever on
+  `Multi-Attach`. It clears only when a retry happens to co-schedule
+  onto the attachment node — a scheduling lottery, so it looks
+  intermittent and different every time. Use `strategy: Recreate` (or
+  `maxSurge: 0`). **The values key is chart-specific** — `strategy`,
+  `updateStrategy`, `mongodb.updateStrategy` — so verify the RENDERED
+  Deployment, never the HelmRelease's Ready status. StatefulSets are
+  immune. CIFS/SMB PVCs are unaffected (`smb.csi.k8s.io` sets
+  `attachRequired: false`). Full SOP:
+  [`docs/sops/longhorn-rwo-multi-attach.md`](docs/sops/longhorn-rwo-multi-attach.md).
+
 For destructive operations on CIFS/SMB/NFS PVCs see "Storage Safety"
 above and the full procedure in
 [`docs/sops/storage-safety.md`](docs/sops/storage-safety.md).

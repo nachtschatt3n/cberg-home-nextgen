@@ -1,6 +1,6 @@
 # Ingress migration: ingress-nginx (EOL) → Envoy Gateway
 
-**Decision date:** 2026-08-07 · **Status:** BLOCKED at Phase 0 (2026-08-15) — internal-DNS prerequisite unresolved, see §Phase 0 execution notes
+**Decision date:** 2026-08-07 · **Status:** Phase 0 LIVE (re-applied 2026-08-15, `69daf59c`). The internal-DNS prerequisite is resolved — k8s-gateway moved to chart 3.7.2 / app 1.8.0 (`3003c050`), which tolerates the Gateway API CRDs. §Phase 0 execution notes below is kept as the incident record and as the mandatory restart-and-verify gate; Phases 1–4 are `scheduled`.
 **Delete when:** migration complete (Phase 4 done, nginx decommissioned)
 
 ## Why
@@ -50,11 +50,15 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
 - ~60 apps are bjw-s app-template → `ingress:` → `route:` values swap
   (mechanical; route syntax survives the separate 3.7.3→5.x chart plan).
 - ~~k8s-gateway supports watching HTTPRoute (per-app DNS flips automatically)~~
-  **FALSE — measured 2026-08-15:** k8s_gateway v0.4.0 fails closed for ALL names
-  once any Gateway API CRD exists (see §Phase 0 execution notes). The per-app
-  DNS flip is unsolved and is the blocking prerequisite for the migration;
-  external-dns has a `gateway-httproute` source (template uses it);
-  cert-manager wildcard secret plugs into Gateway listeners directly.
+  **Was FALSE on app 0.4.0, TRUE again since 2026-08-15:** k8s_gateway v0.4.0
+  failed closed for ALL names once any Gateway API CRD existed (see §Phase 0
+  execution notes). Chart 3.7.2 / app 1.8.0 (new upstream org, built against
+  gateway-api v1.5.1) fixes this and restores HTTPRoute watching, so the
+  per-app DNS flip is available again — adding `HTTPRoute` to
+  `watchedResources` is phase-1 work behind the restart-and-verify gate in
+  `docs/sops/k8s-gateway-dns.md` §8. external-dns has a `gateway-httproute`
+  source (template uses it); cert-manager wildcard secret plugs into Gateway
+  listeners directly.
 - cloudflared's ordered per-hostname rules = free per-app canary for the
   external cutover; wildcard flip is one revertible commit.
 - Brotli/OCSP/real-IP live in controller values, not per-ingress — converts
@@ -119,9 +123,12 @@ cert-manager / authentik plans.
 
 ## Phase 0 execution notes (2026-08-15)
 
-**Phase 0 was attempted, verified working, and then ROLLED BACK.** The migration
-is blocked on internal DNS — see the blocker below and
-`runbooks/maintenance/plans/envoy-gateway-phase0.md` (status: blocked).
+**Phase 0 was attempted, verified working, ROLLED BACK, and then re-applied the
+same day.** The rollback (`769bf6dc`) was forced by the internal-DNS blocker
+below. It was resolved by upgrading k8s-gateway to chart 3.7.2 / app 1.8.0
+(`3003c050`), after which phase 0 was re-applied (`69daf59c`) and is now live.
+The phase 0 plan file has been retired; the surviving record is this section
+plus `docs/sops/k8s-gateway-dns.md` §8.
 
 ### BLOCKER: Gateway API CRDs kill k8s-gateway (internal DNS)
 

@@ -1,7 +1,7 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
-> Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the cluster-critical incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.15`
+> Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
+> Version: `2026.08.15.2`
 > Last Updated: `2026-08-15`
 > Owner: `cberg-agent / operator`
 
@@ -18,9 +18,13 @@ forwards the domain to it.
 - Prerequisites: kubectl via mise, repo checkout
 - Out of scope: AdGuard itself, external DNS (external-dns/Cloudflare)
 
-**This SOP exists mainly for one hazard: installing ANY Gateway API CRD —
-from any vendor, before any Gateway/HTTPRoute exists — arms a latent, total
-internal-DNS outage.** See §8.
+**This SOP originally existed for one hazard: on app 0.4.0, installing ANY
+Gateway API CRD — from any vendor, before any Gateway/HTTPRoute exists —
+armed a latent, total internal-DNS outage.** RESOLVED 2026-08-15 by upgrading
+to chart 3.7.2 / app 1.8.0 (new upstream org, built against gateway-api
+v1.5.1) and re-verified with the §8 restart gate after the Envoy Gateway
+CRDs landed. §8 stays as the incident record and as the mandatory
+restart-and-verify gate for future CRD/chart changes.
 
 ---
 
@@ -30,9 +34,9 @@ internal-DNS outage.** See §8.
 |---------|-------|
 | Namespace | `network` |
 | Source of truth | `kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml` |
-| Chart / app | `k8s-gateway` 2.4.0 / k8s_gateway plugin 0.4.0 (**newest published — no upgrade exists**) |
+| Chart / app | `k8s-gateway` 3.7.2 / k8s_gateway plugin 1.8.0 (upstream moved orgs: ori-edge → k8s-gateway; image `ghcr.io/k8s-gateway/k8s_gateway`, tag pinned in HR because the chart default lags) |
 | LB IP | 192.168.55.101 (lbipam, UDP 53) |
-| Watched resources | `["Ingress", "Service"]` — **HTTPRoute must NOT be added, see §8** |
+| Watched resources | `["Ingress", "Service"]` — adding `HTTPRoute` is deliberate phase-1 work of the EG migration, behind the §8 restart-and-verify gate |
 | TTL | 60 (matches SOA negative TTL; do not lower — see comment in HR) |
 | Expected answers | internal-class hosts → 192.168.55.100, external-class → 192.168.55.102 |
 | Critical dependency | none in-cluster; AdGuard forwards to it |
@@ -120,7 +124,12 @@ including all Ingress-backed hosts.
 **Ruled out during the incident — do not re-litigate:**
 - NOT `watchedResources`: a fresh pod with `["Ingress","Service"]` failed identically.
 - NOT RBAC: the chart grants `gateway.networking.k8s.io/*` list/watch.
-- NOT fixable by upgrade: chart 2.4.0 / app 0.4.0 is the newest published.
+- ~~NOT fixable by upgrade~~ — WRONG, and it was the actual fix: the "newest
+  published" premise came from watching the frozen ori-edge repo. The upstream
+  moved to the k8s-gateway org; chart 3.7.2 / app 1.8.0 is built against
+  gateway-api v1.5.1, checks CRD presence at startup, and only informs on the
+  resource kinds actually configured. Upgraded + gated 2026-08-15 (3003c050,
+  69daf59c): fresh 1.8.0 pods sync cleanly with all 8 Gateway API CRDs present.
 
 **The failure is LATENT.** A pod already running when the CRDs land keeps
 resolving (its informers predate them). Only a pod that STARTS with the CRDs
@@ -154,7 +163,8 @@ Ingress-only mode).
 ## 9) Diagnose Examples
 
 ```bash
-# Are any Gateway API CRDs present? (should be 0 while this SOP's constraint holds)
+# Gateway API CRDs present (8 standard-channel CRDs expected since phase 0 of
+# the EG migration landed 2026-08-15; app 1.8.0 tolerates them)
 mise exec -- kubectl get crd | grep -c gateway.networking.k8s.io
 
 # Informer errors, current pod

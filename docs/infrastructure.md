@@ -52,6 +52,8 @@ All three nodes connect to Basement-SW-24-PoE.
 | internal-ingress-nginx | 192.168.55.100 | Internal Ingress LB IP (cluster-private services) |
 | k8s-gateway | 192.168.55.101 | Split-DNS (`*.${SECRET_DOMAIN}` → cluster) |
 | external-ingress-nginx | 192.168.55.102 | External Ingress LB IP (public via Cloudflared) |
+| envoy-internal (Gateway) | 192.168.55.103 | Envoy Gateway internal-class Gateway (EG migration phase 0) |
+| envoy-external (Gateway) | 192.168.55.104 | Envoy Gateway external-class Gateway (EG migration phase 0) |
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 
@@ -83,6 +85,8 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 | `network/internal-ingress-nginx-controller` | `.100` |
 | `network/k8s-gateway` | `.101` |
 | `network/external-ingress-nginx-controller` | `.102` |
+| `network/envoy-internal` (Gateway, EG) | `.103` |
+| `network/envoy-external` (Gateway, EG) | `.104` |
 
 **Mac Mini M4 Pro:**
 - Single Ollama instance with Metal Performance Shaders (MPS) acceleration

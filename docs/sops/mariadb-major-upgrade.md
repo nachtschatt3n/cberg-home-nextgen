@@ -1,7 +1,9 @@
 # SOP: MariaDB Major Upgrade (Bitnami chart)
 
-**Version:** 2026.08.15
-**Last Updated:** 2026-08-15
+> Description: Taking a Bitnami-chart MariaDB across a server major (12 → 13 and onward) without leaving old-format system tables under a new binary, including the digest-pinning rule the free-tier catalog forces on us.
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
+> Owner: `cberg-agent / operator`
 
 ## Description
 
