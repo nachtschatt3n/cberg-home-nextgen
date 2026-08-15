@@ -121,9 +121,22 @@ spec:
         # user is a plain USER unless this mapping fires. The `groups` claim is
         # carried by Authentik's managed scope-profile mapping, which the
         # blueprint binds. All three variables are required together
-        # (openidStrategy.js guards on `adminRole && path && kind`); if the
-        # claim is ever missing the branch is a no-op and login still succeeds
-        # as USER, so this cannot lock anyone out.
+        # (openidStrategy.js guards on `adminRole && path && kind`).
+        #
+        # The mapping is re-evaluated on EVERY login and is BIDIRECTIONAL:
+        # openidStrategy.js grants ADMIN on a match and, in the else branch,
+        # DEMOTES an existing ADMIN back to USER when the claim does not match
+        # ("demoted from admin - role no longer present in token"). So a
+        # missing, renamed or unbound `groups` claim does not block login — but
+        # it does silently strip every LibreChat admin on their next login, and
+        # with ALLOW_REGISTRATION=false there is no in-app route back to ADMIN
+        # (recovery would be a direct Mongo write). Two consequences:
+        #   - Authorization is bound to a MUTABLE display name. Renaming the
+        #     "authentik Admins" group in Authentik demotes every admin here
+        #     and surfaces no error anywhere.
+        #   - Removing a user from that group correctly revokes their LibreChat
+        #     ADMIN on next login. That is the desired behaviour and the reason
+        #     this is preferred over hand-setting a role in the database.
         OPENID_ADMIN_ROLE: "authentik Admins"
         OPENID_ADMIN_ROLE_PARAMETER_PATH: "groups"
         OPENID_ADMIN_ROLE_TOKEN_KIND: "userinfo"
