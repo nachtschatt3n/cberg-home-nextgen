@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: k8s-gateway
-      version: 2.4.0
+      version: 3.7.2
       sourceRef:
         kind: HelmRepository
         name: k8s-gateway
@@ -23,6 +23,12 @@ spec:
       retries: 3
   values:
     fullnameOverride: k8s-gateway
+    # Chart 3.7.2's default image tag lags at 1.7.0 despite appVersion 1.8.0.
+    # Pin 1.8.0 explicitly: it is built against sigs.k8s.io/gateway-api v1.5.1
+    # (verified in the tag's go.mod) — the exact CRD set Envoy Gateway installs,
+    # which is the whole point of this upgrade (see docs/sops/k8s-gateway-dns.md §8).
+    image:
+      tag: "1.8.0"
     domain: "${SECRET_DOMAIN}"
     # TTL 1 was pathologically low: the UniFi gateway's dnsmasq couldn't
     # keep the positive A-record cached (expired every 1s) while latching
@@ -37,20 +43,14 @@ spec:
       annotations:
         lbipam.cilium.io/ips: "192.168.55.101"
       externalTrafficPolicy: Cluster
-    # DO NOT add "HTTPRoute" here on k8s-gateway 2.4.0 — it takes internal DNS
-    # down completely. Adding it makes the plugin start informers for the whole
-    # route family at v1alpha2, including TLSRoute and GRPCRoute, which no
-    # longer exist in Gateway API v1.5.1 (both graduated to v1). The informers
-    # fail to sync, and the plugin then answers EVERY query — Ingress-backed
-    # ones included — with "Could not sync required resources", i.e. SERVFAIL
-    # for the whole domain. Verified live 2026-08-15 during envoy-gateway
-    # phase 0 and reverted within minutes. Not an RBAC problem: the chart
-    # already grants gateway.networking.k8s.io/*.
+    # History (2026-08-15): on chart 2.4.0 / app 0.4.0 the mere PRESENCE of any
+    # Gateway API CRD made the plugin's v1alpha2 route informers fail to sync and
+    # the plugin failed closed for EVERY name — a full internal-DNS outage, latent
+    # until the next pod restart. Chart 3.7.2 / app 1.8.0 (gateway-api v1.5.1) is
+    # the fix. Full analysis: docs/sops/k8s-gateway-dns.md §8.
     #
-    # Phase 1 blocker: internal DNS for HTTPRoute-backed apps needs either a
-    # k8s-gateway release built against Gateway API >= v1.1 (v1 routes), or a
-    # different mechanism (per-app DNSEndpoint, or point the split-horizon
-    # record at the gateway VIP directly).
+    # Adding "HTTPRoute" here is deliberate phase-1 work of the Envoy Gateway
+    # migration (with the restart-and-verify DNS gate), not a casual edit.
     watchedResources: ["Ingress", "Service"]
     resources:
       requests:

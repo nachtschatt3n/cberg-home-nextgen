@@ -7,4 +7,6 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  url: https://ori-edge.github.io/k8s_gateway
+  # Upstream moved orgs: ori-edge (frozen at chart 2.4.0 / app 0.4.0, March 2024)
+  # -> k8s-gateway org, which ships releases built against current Gateway API.
+  url: https://k8s-gateway.github.io/k8s_gateway
