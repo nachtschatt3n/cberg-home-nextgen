@@ -9,11 +9,18 @@ spec:
   chart:
     spec:
       chart: gateway-helm
-      # PINNED + HELD at 1.8.3 — see runbooks/auto-update-policy.yaml.
-      # v1.7.0 shipped an ext-auth regression (envoyproxy/gateway#8202) that
-      # broke redirect auth; this stack fronts authentik forward-auth from
-      # Phase 1 on, so EG bumps are reviewed-only, never auto-merged.
-      version: 1.8.3
+      # PINNED + HELD — see runbooks/auto-update-policy.yaml. EG bumps are
+      # reviewed-only, never auto-merged: v1.7.0 shipped an ext-auth
+      # regression (envoyproxy/gateway#8202) that broke redirect auth, and
+      # this stack fronts authentik forward-auth from Phase 1 on.
+      # 1.8.3 -> 1.9.0 (2026-08-16, "phase 0.5"): 1.8.x supports k8s
+      # 1.32-1.35 only and this cluster is on 1.36 (already off-matrix);
+      # 1.8.3 is EOL 2026-11-08 and there is no 1.8.4. 1.9 covers 1.33-1.36.
+      # Done NOW deliberately, while Envoy carries zero real traffic (one
+      # hostname-less HTTPRoute) and ingress-nginx still serves all
+      # ingresses — the coupled Gateway-API-CRD channel bump
+      # (v1.5.1 -> v1.6.1) is cheapest to revert at this point.
+      version: 1.9.0
       sourceRef:
         kind: HelmRepository
         name: envoyproxy
