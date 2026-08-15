@@ -9,7 +9,6 @@ resources:
   - ./csi-driver-smb.yaml
   - ./democratic-csi.yaml
   - ./external-dns.yaml
-  - ./envoyproxy.yaml
   - ./external-secrets.yaml
   - ./gabe565.yaml
   - ./grafana.yaml

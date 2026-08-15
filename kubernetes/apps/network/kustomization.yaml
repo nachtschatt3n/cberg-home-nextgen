@@ -6,6 +6,5 @@ namespace: network
 components:
   - ../../flux/components/common
 resources:
-  - ./envoy-gateway/ks.yaml
   - ./external/ks.yaml
   - ./internal/ks.yaml

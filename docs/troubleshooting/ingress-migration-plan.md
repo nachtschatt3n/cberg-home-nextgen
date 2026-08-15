@@ -116,8 +116,32 @@ cert-manager / authentik plans.
 
 ## Phase 0 execution notes (2026-08-15)
 
-Phase 0 is done and running in parallel; nothing routes through it yet.
-Findings that change how Phases 1-4 should be executed:
+**Phase 0 was attempted, verified working, and then ROLLED BACK.** The migration
+is blocked on internal DNS — see the blocker below and
+`runbooks/maintenance/plans/envoy-gateway-phase0.md` (status: blocked).
+
+### BLOCKER: Gateway API CRDs kill k8s-gateway (internal DNS)
+
+Installing the Gateway API CRDs — by itself, before any Gateway or HTTPRoute
+exists — takes **all** internal DNS down. `k8s-gateway` (CoreDNS `k8s_gateway`
+plugin v0.4.0, chart 2.4.0, the newest published) starts route informers at
+`v1alpha2` as soon as any Gateway API CRD is present. In Gateway API v1.5.1
+`GRPCRoute` serves only `v1` and `TLSRoute`'s `v1alpha2` is `served: false`, so
+the informers never sync and the plugin fails closed for **every** name it
+serves, including all 102 Ingress-backed hosts:
+
+    [ERROR] plugin/errors: 2 <host>. A: plugin/k8s_gateway: Could not sync required resources
+
+Not the `watchedResources` value (reverting it did not help) and not RBAC (the
+chart grants `gateway.networking.k8s.io/*`). This invalidates the assumption
+above that "k8s-gateway supports watching HTTPRoute (per-app DNS flips
+automatically)" — and it fails toward total DNS loss, not toward invisibility.
+**Any** gateway that ships Gateway API CRDs hits this, so it is not an
+EG-specific problem: a Traefik *Gateway API* fallback would hit it too, while
+Traefik in *Ingress* mode would not. Resolve internal DNS first; options are
+listed in the plan file.
+
+### Everything else verified fine, and still applies on re-attempt
 
 - **CRDs are VENDORED, not Helm-installed.** `gateway-crds-helm` carries both
   channels (~4.5 MB) and Helm stores the whole chart in its release Secret, so

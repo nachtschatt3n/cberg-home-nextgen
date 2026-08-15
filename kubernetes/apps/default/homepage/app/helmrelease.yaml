@@ -29,19 +29,13 @@ spec:
     # Enable RBAC. RBAC is necessary to use Kubernetes integration
     enableRbac: true
 
-    # Gateway API read access for `kubernetes.gateway: true` below. The chart's
-    # built-in ClusterRole only covers Ingress; without this, gateway discovery
-    # logs RBAC errors on every refresh.
-    extraClusterRoles:
-      - apiGroups:
-          - gateway.networking.k8s.io
-        resources:
-          - httproutes
-          - gateways
-        verbs:
-          - get
-          - list
-          - watch
+    #extraClusterRoles:
+      # - apiGroups:
+      #   - some-group
+      #   resources:
+      #   - some-resource
+      #   verbs:
+      #   - get
 
     serviceAccount:
       # Specify a different service account name. When blank it will default to the release
@@ -199,10 +193,7 @@ spec:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
         ingress: true
-        # Enabled during the Envoy Gateway migration so HTTPRoute-backed apps
-        # keep their dashboard entry as they move off Ingress. Both are on
-        # during the parallel run.
-        gateway: true
+        gateway: false
         services: true
         pods: true
         nodes: true
