@@ -94,6 +94,56 @@ data:
             - go_gc_pauses_seconds
             - go_gc_heap_allocs_by_size_bytes
             - go_gc_heap_frees_by_size_bytes
+            # --- Envoy Gateway (phase 0, 2026-08) ---------------------------
+            # The three EG pods annotated prometheus.io/scrape are scraped by
+            # otel-operator-daemon (30s) and forwarded here; ES otel-mode rejects
+            # every cumulative histogram they emit. Measured 2026-08-15 over 60m:
+            # 6720 drop-events/h across 34 families = 100% of ALL drops on this
+            # exporter. This was INVISIBLE because the collector batches ~18 drops
+            # into one "validation errors" warn line, and health-check.sh counted
+            # LINES (flat at ~362/h) rather than events — fixed in the same commit.
+            #
+            # envoy-{internal,external} proxies (/stats/prometheus, 2 pods =>
+            # 240 events/h each; the http2_* four only bind on one proxy => 120/h):
+            - envoy_cluster_external_upstream_rq_time
+            - envoy_cluster_http2_cookie_count
+            - envoy_cluster_http2_cookie_size
+            - envoy_cluster_http2_header_count
+            - envoy_cluster_http2_header_list_size
+            - envoy_cluster_manager_cds_update_duration
+            - envoy_cluster_update_duration
+            - envoy_cluster_upstream_cx_connect_ms
+            - envoy_cluster_upstream_cx_length_ms
+            - envoy_cluster_upstream_rq_per_cx
+            - envoy_cluster_upstream_rq_time
+            - envoy_http2_cookie_count
+            - envoy_http2_cookie_size
+            - envoy_http2_header_count
+            - envoy_http2_header_list_size
+            - envoy_http_downstream_cx_length_ms
+            - envoy_http_downstream_rq_time
+            - envoy_http_rds_update_duration
+            - envoy_listener_admin_connections_accepted_per_socket_event
+            - envoy_listener_admin_downstream_cx_length_ms
+            - envoy_listener_connections_accepted_per_socket_event
+            - envoy_listener_downstream_cx_length_ms
+            - envoy_listener_manager_lds_update_duration
+            - envoy_overload_refresh_interval_delay
+            - envoy_sds_update_duration
+            - envoy_server_initialization_time_ms
+            # envoy-gateway CONTROL PLANE (/metrics, 1 pod => 120 events/h each).
+            # Unprefixed, so a naive `envoy_*` sweep misses them, but they are the
+            # same regression: 4 EG-native + 4 client-go histograms off the same
+            # binary. Verified absent from every other scraped pod (the flux
+            # controllers expose no rest_client_* histograms).
+            - resource_apply_duration_seconds
+            - resource_delete_duration_seconds
+            - status_update_duration_seconds
+            - watchable_subscribe_duration_seconds
+            - rest_client_rate_limiter_duration_seconds
+            - rest_client_request_duration_seconds
+            - rest_client_request_size_bytes
+            - rest_client_response_size_bytes
       # ES rejects data points with Empty value type ("invalid number data
       # point ... wrong ValueType Empty" — flux_resource_info, node_network_*,
       # node_arp_entries; ~470/24h). They're untyped/info-style series that ES

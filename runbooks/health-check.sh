@@ -3599,14 +3599,32 @@ except:
     EDOT_VALIDATION=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
         grep -c "validation errors" || true)
     EDOT_VALIDATION=$(printf '%s' "${EDOT_VALIDATION:-0}" | tr -d '\n')
-    echo "edot-collector ES rejections last 1h: parse=${EDOT_REJECTS} validation=${EDOT_VALIDATION}"
+    # Count dropped POINTS, not warn LINES. The exporter batches every rejected
+    # point of a flush into ONE "validation errors" line (~18 reasons per line),
+    # so the LINE count barely moves no matter how much telemetry is lost.
+    # That is exactly how Envoy Gateway phase 0 silently added 6720 dropped
+    # points/h (34 histogram families across envoy-{internal,external} and the
+    # envoy-gateway control plane) on 2026-08-15 while EDOT_VALIDATION stayed
+    # flat at ~362/h and this check reported healthy. Count the reasons.
+    EDOT_DROPPED_POINTS=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
+        grep -oE "dropping [a-z]+ [a-z]+|invalid number data point" | wc -l | tr -d ' \n')
+    EDOT_DROPPED_POINTS=${EDOT_DROPPED_POINTS:-0}
+    # Distinct metric families behind the drops — naming them makes the fix
+    # obvious: add each to cumulativetodelta/es-histograms in
+    # kubernetes/apps/monitoring/edot-collector/app/configmap.yaml
+    EDOT_DROPPED_NAMES=$(kubectl logs -n monitoring deploy/edot-collector --since=1h 2>/dev/null | \
+        grep -oE 'histogram \\"[a-zA-Z0-9_]+' | sed 's/^histogram \\"//' | sort -u | head -8 | tr '\n' ' ')
+    echo "edot-collector ES rejections last 1h: parse=${EDOT_REJECTS} validation_lines=${EDOT_VALIDATION} dropped_points=${EDOT_DROPPED_POINTS}"
     if [ "${EDOT_REJECTS:-0}" -gt 10 ]; then
         log_warning "edot-collector: ES rejecting documents (${EDOT_REJECTS}/h document_parsing) — telemetry silently lost"
         add_minor_issue "edot ES document rejections: ${EDOT_REJECTS}/h (SOP: monitoring.md 'ES rejected documents')"
     fi
-    if [ "${EDOT_VALIDATION:-0}" -gt 50 ]; then
-        log_warning "edot-collector: ES exporter validation errors (${EDOT_VALIDATION}/h) — metric points silently dropped"
-        add_minor_issue "edot ES validation errors: ${EDOT_VALIDATION}/h (SOP: monitoring.md 'ES rejected documents')"
+    # 100/h threshold: one un-converted histogram family on a single 30s-scraped
+    # target produces ~120 dropped points/h, so this trips on the FIRST new
+    # rejected family rather than waiting for a component to add dozens.
+    if [ "${EDOT_DROPPED_POINTS:-0}" -gt 100 ]; then
+        log_warning "edot-collector: ${EDOT_DROPPED_POINTS} metric points/h silently dropped by ES (families: ${EDOT_DROPPED_NAMES:-unknown})"
+        add_minor_issue "edot ES dropped metric points: ${EDOT_DROPPED_POINTS}/h across families [${EDOT_DROPPED_NAMES:-unknown}] (SOP: monitoring.md 'ES rejected documents')"
     fi
 
     # otel-operator DaemonSet (daemon collectors per node)
