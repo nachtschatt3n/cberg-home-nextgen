@@ -128,6 +128,12 @@ Post-update: pod Ready + 0 restarts after settle; app health endpoint OK; the
 silence expired or deleted; `flux get hr -A | grep <app>` READY=True; git ==
 cluster version.
 
+> `READY=True` does not prove the object is doing anything: **Flux reports a
+> SUSPENDED object as READY=True**. If the app is delivered by automation,
+> also check `.spec.suspend` directly (`kubectl get <kind> <name> -n <ns> -o
+> jsonpath='{.spec.suspend}'`), and confirm the DEPLOYED container image
+> rather than the automation object's condition.
+
 ## 10) Security Check
 
 - Never put a plaintext secret in values to satisfy an upgrade — wire via the

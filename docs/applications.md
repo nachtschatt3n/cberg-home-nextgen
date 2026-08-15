@@ -262,7 +262,7 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 | App | Purpose | Ingress |
 |-----|---------|---------|
-| absenty | Absence/time tracking app (dev) | Internal |
+| absenty | Absence/time tracking app (dev). **Internet-facing, and unauthenticated** — unlike every other app in this namespace it uses `className: external` with no Authentik forward-auth, so the development environment is reachable from the internet exactly like production. Flux image automation is armed here, so a push to the `development` branch auto-deploys to that public endpoint. | External |
 | andreamosteller | Portfolio site (dev) | Internal |
 | opencode-andreamosteller | OpenCode instance for Andrea's project | Internal |
 

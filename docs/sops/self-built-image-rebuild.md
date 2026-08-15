@@ -77,7 +77,7 @@ containers:
 
 ## 4) Operational Instructions
 
-### Rule 0 — the five traps
+### Rule 0 — the six traps
 
 These are the mistakes this SOP exists to prevent. Read them before starting.
 
@@ -102,6 +102,53 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
    major, **stop** — split it into its own maintenance-window plan rather than
    stretching the rebuild's risk envelope
    (`runbooks/maintenance/plans/harness-frontend-vite7.md` is the worked example).
+
+6. **The ImagePolicy may be unable to select your rebuild.** Rebuilding is only
+   half the job when the image is delivered by Flux image automation: if the
+   policy cannot *see* the new tag, a perfect rebuild is discarded silently and
+   nothing anywhere reports a problem. Three distinct mistakes, all found
+   together on absenty (F-c58dd98e), all of which survived for ten months:
+
+   a. **`policy.alphabetical` over bare git shas is not a time order.** Sorting
+      `sha-<7 hex>` alphabetically selects the highest *hex string*, so
+      selection pins itself to whichever sha happened to start with `ff` and
+      never moves again — 0 of 338 tags were selectable, and a fresh sha had
+      roughly a 0.2% chance of ever displacing the incumbent. Publish a
+      **branch-prefixed, fixed-width timestamp** (`production-<YYYYMMDDHHMMSS>`)
+      and select it with `filterTags.extract` + `policy.numerical`.
+
+   b. **Anchor `filterTags.pattern` with `^...$` — this is load-bearing, not
+      style.** Flux matches the pattern unanchored. absenty's package contains
+      18 tags shaped `sha-20060102150405-<sha>` (a `docker/metadata-action`
+      bug: it does not expand Go date layouts inside `type=raw`, so the layout
+      string was published literally). Unanchored, those contain a 14-digit run
+      that `(?P<ts>\d{14})` happily extracts. Anchoring is the only thing that
+      excludes them.
+
+   c. **Fix tag provenance BEFORE unsuspending automation.** Check what the
+      source repo publishes on a `pull_request` event. `github.ref` is
+      `refs/pull/N/merge` there, so a workflow branching on `github.ref` falls
+      through to its default path — absenty's published the **dev** stage of
+      unreviewed branch code under a bare `sha-<hex>` tag, the exact shape the
+      *production* policy selected on. With automation armed, a pull request
+      could have deployed unreviewed code to an externally-exposed ingress.
+      Require that image publishing is gated on `github.event_name == 'push'`
+      **and** an explicit release-branch ref check, and that every published
+      tag is branch-prefixed so the two environments cannot collide.
+
+   Verify selection with `.status.latestRef.tag`, never with a Ready condition:
+
+   ```bash
+   kubectl get imagepolicy <app> -n <ns> -o jsonpath='{.status.latestRef.tag}'
+   ```
+
+   And note that **a suspended Flux object still reports `READY=True`** — `flux
+   get` will not tell you that automation is off. Check `.spec.suspend`
+   directly:
+
+   ```bash
+   kubectl get imageupdateautomation <name> -n <ns> -o jsonpath='{.spec.suspend}'
+   ```
 
 ### Steps
 

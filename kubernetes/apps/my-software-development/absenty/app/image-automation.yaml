@@ -24,6 +24,11 @@ spec:
     # Every tag it publishes is branch-prefixed, so a build for the other
     # environment -- or a pull-request build, which no longer publishes at
     # all -- cannot be selected here.
+    # The ^...$ anchors are SECURITY-LOAD-BEARING, not style: Flux matches
+    # filterTags unanchored, and 18 legacy tags are shaped
+    # `sha-20060102150405-<sha>` (docker/metadata-action does not expand Go
+    # date layouts in type=raw, so it published the layout literally). Those
+    # contain a 14-digit run that (?P<ts>\d{14}) would otherwise extract.
     pattern: '^development-(?P<ts>\d{14})$'
     extract: '$ts'
   policy:

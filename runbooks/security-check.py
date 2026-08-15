@@ -1795,8 +1795,11 @@ def s10_flux_posture() -> tuple[str, Findings, str]:
     # `flux get` reports a suspended object as READY=True, so an app whose
     # automation is paused looks perfectly healthy while silently receiving no
     # updates, indefinitely. Found 2026-08-15: absenty's two ImageUpdateAutomations
-    # were suspended (correctly — its CI emits prod-pattern tags from dev-target PR
-    # builds), but nothing in the sweep would ever have surfaced that again.
+    # had been suspended earlier that day (correctly at the time — its CI then
+    # emitted prod-pattern tags from dev-target PR builds), and nothing in the
+    # sweep would ever have surfaced that again. Both were remediated and
+    # unsuspended the same day (210e19d7); the example is kept because the blind
+    # spot it illustrates is generic, not because absenty is still suspended.
     # Same family as the other findings this month: absence of a signal read as
     # health. This does not judge whether a suspension is right — only that a
     # deliberate pause must stay VISIBLE rather than decaying into a forgotten one.
