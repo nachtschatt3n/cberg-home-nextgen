@@ -198,6 +198,30 @@ def reconcile(cfg, today):
                 if sa or sh:
                     warnings.append(f"INTERFERENCE {slot}: {a.get('plan_id')} ⋂ {b.get('plan_id')} share {sorted(sa|sh)}")
 
+    # DEAD CROSS-REFERENCES. A depends_on/conflicts_with naming a plan_id that does
+    # not exist is silently UNENFORCED — the sequencer finds nothing to order against
+    # and proceeds as if the constraint were satisfied. It reads as a guard while
+    # being no guard at all, and it appears NATURALLY: retiring an executed plan (as
+    # the transient-plan convention requires) orphans every reference to it.
+    # Found 2026-08-15: app-template-5.0 still guarded against `talos-v1.13.7`, long
+    # since executed and deleted — so the rule stopping a mass workload churn from
+    # landing on top of node drains had quietly stopped applying.
+    # Same shape as the rest of this month's audit fixes: an unresolvable reference
+    # scored as a satisfied one. See docs/sops/audit-script-correctness.md.
+    known_ids = {p.get("plan_id") for p in plans if p.get("plan_id")}
+    for p in plans:
+        for key in ("depends_on", "conflicts_with"):
+            refs = p.get(key) or []
+            if isinstance(refs, str):
+                refs = [refs]
+            for r in refs:
+                if not isinstance(r, str) or not r.strip():
+                    continue
+                if r.strip() not in known_ids:
+                    warnings.append(
+                        f"DEAD-REF {p.get('plan_id')}: {key} -> '{r.strip()}' names no "
+                        f"existing plan — this guard is NOT enforced")
+
     # plans stuck waiting for an operator go/no-go — routed to OpenClaw home-operation
     # (keyed on plan_id), which owns the reminder cadence until answered.
     awaiting_go = [{"plan_id": p.get("plan_id"), "plan": p["_path"],
