@@ -1,0 +1,151 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: blackbox-exporter-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ------------------------------------------------------------------------
+    # The probe signal itself. This is the gap N-15 closed: on 2026-08-15
+    # internal DNS returned SERVFAIL for every name twice while Flux was green
+    # and every pod was Running. probe_success asserts on the ANSWER, so it is
+    # the only signal here that would have fired.
+    # ------------------------------------------------------------------------
+    - name: blackbox.probes
+      interval: 30s
+      rules:
+        # 2m (4 consecutive 30s probes) — short enough that a multi-minute
+        # resolver outage pages, long enough to ride out a single-replica
+        # k8s-gateway pod reschedule (~15-45s).
+        - alert: InternalDnsResolutionFailing
+          annotations:
+            summary: Internal DNS resolution failing via {{ $labels.instance }}
+            description: >-
+              Blackbox DNS probe {{ $labels.job }} against {{ $labels.instance }}
+              has failed for 2+ minutes — the resolver is not returning a valid A
+              record (SERVFAIL, NXDOMAIN, or an empty answer). Every internal
+              service name is affected. Check:
+              kubectl -n network logs deploy/k8s-gateway --tail=50
+          expr: |
+            probe_success{probe_class="dns"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            category: network
+            component: k8s-gateway
+        # Both DNS probes down at once = the resolver itself, not one record.
+        - alert: InternalDnsResolverDown
+          annotations:
+            summary: Internal DNS resolver returning no valid answers at all
+            description: >-
+              Every blackbox DNS probe against the internal resolver is failing.
+              This is the whole-zone outage shape. Check the k8s-gateway
+              Deployment (single replica) and its Cilium LoadBalancer IP.
+          expr: |
+            count(probe_success{probe_class="dns"} == 0) == count(probe_success{probe_class="dns"})
+          for: 2m
+          labels:
+            severity: critical
+            category: network
+            component: k8s-gateway
+        - alert: IngressProbeFailing
+          annotations:
+            summary: Ingress probe failing for {{ $labels.probe_component }}
+            description: >-
+              Blackbox HTTP probe to {{ $labels.instance }} has failed for 5+
+              minutes (DNS, ingress, TLS or backend). Probe class
+              {{ $labels.probe_component }}.
+          expr: |
+            probe_success{probe_class="http"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: network
+            component: ingress
+        # Cert expiry is a user-visible outage that arrives on a schedule —
+        # 14d gives cert-manager (renews at 30d) two weeks of failed-renewal
+        # headroom before anyone notices in a browser.
+        - alert: IngressCertificateExpiringSoon
+          annotations:
+            summary: TLS certificate for {{ $labels.instance }} expires in under 14 days
+            description: >-
+              probe_ssl_earliest_cert_expiry for {{ $labels.instance }} is under
+              14 days away. cert-manager normally renews at 30 days remaining, so
+              this means renewal is failing. Check:
+              kubectl get certificate -A | grep -v True
+          expr: |
+            (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+          for: 30m
+          labels:
+            severity: warning
+            category: network
+            component: ingress
+        # If the exporter stops being scraped the probes go SILENT rather than
+        # red — absent() is what keeps this from becoming another blind spot.
+        - alert: BlackboxProbesAbsent
+          annotations:
+            summary: Blackbox probe results are absent from Prometheus
+            description: >-
+              No probe_success series for 10 minutes. The DNS/ingress SLOs are
+              blind while this is firing. Check the blackbox-exporter pod and the
+              Probe CRs in kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/.
+          expr: |
+            absent(probe_success)
+          for: 10m
+          labels:
+            severity: critical
+            category: monitoring
+            component: blackbox-exporter
+    # ------------------------------------------------------------------------
+    # Standard per-app pod health triple (house rule).
+    # ------------------------------------------------------------------------
+    - name: blackbox-exporter.pod
+      interval: 30s
+      rules:
+        - alert: BlackboxExporterPodNotReady
+          annotations:
+            summary: Blackbox exporter pod {{ $labels.pod }} is not ready
+            description: >-
+              Blackbox exporter pod {{ $labels.pod }} has been not ready for more
+              than 5 minutes. DNS and ingress SLO signal is unavailable.
+          expr: |
+            sum by (namespace, pod) (
+              kube_pod_status_ready{namespace="monitoring", pod=~"prometheus-blackbox-exporter-.*", condition="true"}
+              unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+            ) == 0
+          for: 5m
+          labels:
+            severity: critical
+            category: monitoring
+            component: blackbox-exporter
+        - alert: BlackboxExporterPodCrashLooping
+          annotations:
+            summary: Blackbox exporter pod {{ $labels.pod }} is crash looping
+            description: >-
+              Blackbox exporter pod {{ $labels.pod }} has restarted
+              {{ $value | printf "%.0f" }} times in the last 15 minutes.
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"prometheus-blackbox-exporter-.*"}[15m]) * 900 > 2
+          for: 5m
+          labels:
+            severity: critical
+            category: monitoring
+            component: blackbox-exporter
+        - alert: BlackboxExporterPodRestarted
+          annotations:
+            summary: Blackbox exporter pod {{ $labels.pod }} restarted
+            description: >-
+              Blackbox exporter pod {{ $labels.pod }} has restarted at least once
+              in the last 15 minutes. Monitor for repeated restarts.
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="monitoring", pod=~"prometheus-blackbox-exporter-.*"}[15m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+            category: monitoring
+            component: blackbox-exporter

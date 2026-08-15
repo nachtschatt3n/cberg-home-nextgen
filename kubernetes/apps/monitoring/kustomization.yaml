@@ -17,6 +17,7 @@ resources:
   - ./otel-operator/ks.yaml
   - ./prometheus-pushgateway/ks.yaml
   - ./sweep-dashboard/ks.yaml
+  - ./prometheus-blackbox-exporter/ks.yaml
 patches:
   # PSA override: privileged required for prometheus-node-exporter
   # DaemonSet (hostNetwork + hostPath /proc /sys).

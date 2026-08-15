@@ -1,0 +1,97 @@
+---
+# Internal split-horizon DNS (k8s-gateway @ 192.168.55.101).
+# The DNS SERVER is the probe TARGET; the name being resolved lives in the
+# blackbox module (see helmrelease.yaml), which is why there is one Probe per
+# queried name.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: dns-k8s-gateway-primary
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: dns_k8s_gateway_primary
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - 192.168.55.101
+      labels:
+        probe_class: dns
+        probe_component: k8s-gateway
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: dns-k8s-gateway-secondary
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 10s
+  module: dns_k8s_gateway_secondary
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - 192.168.55.101
+      labels:
+        probe_class: dns
+        probe_component: k8s-gateway
+---
+# End-to-end ingress reachability: one representative host per ingress class.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: http-ingress-internal
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 15s
+  module: http_2xx_ingress
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://sweep.${SECRET_DOMAIN}
+      labels:
+        probe_class: http
+        probe_component: ingress-internal
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: http-ingress-external
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  interval: 30s
+  scrapeTimeout: 15s
+  module: http_2xx_ingress
+  prober:
+    url: prometheus-blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://echo-server.${SECRET_DOMAIN}
+      labels:
+        probe_class: http
+        probe_component: ingress-external

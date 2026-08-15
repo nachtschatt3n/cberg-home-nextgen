@@ -42,3 +42,4 @@ resources:
   - ./wazuh-alerts.yaml
   - ./arag-web-alerts.yaml
   - ./uptime-kuma-alerts.yaml
+  - ./blackbox-exporter-alerts.yaml

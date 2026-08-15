@@ -1,0 +1,110 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-blackbox-exporter
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: prometheus-blackbox-exporter
+      version: 11.17.2
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    fullnameOverride: prometheus-blackbox-exporter
+    replicas: 1
+    automountServiceAccountToken: false
+    # selfMonitor scrapes the EXPORTER's own /metrics (build info, probe
+    # durations it served). The probe RESULTS come from the Probe CRs in
+    # probes.yaml instead. Note `serviceMonitor.enabled` is deliberately left
+    # false: in this chart it generates per-target ServiceMonitors from
+    # `serviceMonitor.targets`, which is the alternative to Probe CRs — turning
+    # both on would scrape every target twice.
+    serviceMonitor:
+      selfMonitor:
+        enabled: true
+        labels:
+          release: kube-prometheus-stack
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+    config:
+      modules:
+        # ------------------------------------------------------------------
+        # DNS — the whole point of N-15. On 2026-08-15 internal DNS returned
+        # SERVFAIL for every name twice while Flux was green and every pod was
+        # Running, so nothing derived from pod/controller health noticed.
+        # These modules assert on the ANSWER, not on reachability:
+        #   valid_rcodes            -> SERVFAIL/REFUSED/NXDOMAIN all fail
+        #   validate_answer_rrs     -> a NOERROR reply with an EMPTY answer
+        #                              section also fails (must carry a real
+        #                              A record in the private range)
+        # Without the second assertion a resolver that answers NOERROR/0
+        # records would score as healthy, which is the exact failure shape we
+        # are trying to catch.
+        # ------------------------------------------------------------------
+        dns_k8s_gateway_primary:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: sweep.${SECRET_DOMAIN}
+            query_type: A
+            valid_rcodes:
+              - NOERROR
+            validate_answer_rrs:
+              fail_if_not_matches_regexp:
+                - '.*\s+IN\s+A\s+192\.168\.\d+\.\d+'
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+        dns_k8s_gateway_secondary:
+          prober: dns
+          timeout: 5s
+          dns:
+            query_name: echo-server.${SECRET_DOMAIN}
+            query_type: A
+            valid_rcodes:
+              - NOERROR
+            validate_answer_rrs:
+              fail_if_not_matches_regexp:
+                - '.*\s+IN\s+A\s+192\.168\.\d+\.\d+'
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
+        # ------------------------------------------------------------------
+        # HTTP — end-to-end user path. In-cluster resolution of
+        # *.${SECRET_DOMAIN} is forwarded by CoreDNS to k8s-gateway
+        # (192.168.55.101), so these probes traverse the real resolver too:
+        # DNS -> ingress -> TLS -> backend. TLS verification is deliberately
+        # left ON so certificate expiry counts as the user-visible failure it
+        # actually is.
+        # ------------------------------------------------------------------
+        http_2xx_ingress:
+          prober: http
+          timeout: 10s
+          http:
+            method: GET
+            valid_status_codes:
+              - 200
+            valid_http_versions:
+              - HTTP/1.1
+              - HTTP/2.0
+            follow_redirects: true
+            fail_if_not_ssl: true
+            preferred_ip_protocol: ip4
+            ip_protocol_fallback: false
