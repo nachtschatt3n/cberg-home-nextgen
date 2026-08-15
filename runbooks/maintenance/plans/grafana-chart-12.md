@@ -21,7 +21,9 @@ touches:
 depends_on: [grafana-chart-11]
 conflicts_with: [kube-prometheus-stack-88]
 status: draft
-window: "tue-early:2026-09-01"
+window: "thu-early:2026-08-27"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

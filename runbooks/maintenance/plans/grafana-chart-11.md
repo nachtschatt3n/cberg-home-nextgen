@@ -23,7 +23,9 @@ depends_on: []                        # stage 1 (grafana-repo-swap) LANDED 2026-
                                       # Pre-check (a) below re-asserts the live source URL anyway.
 conflicts_with: [kube-prometheus-stack-88]
 status: draft
-window: "thu-early:2026-08-27"
+window: "fri-early:2026-08-21"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

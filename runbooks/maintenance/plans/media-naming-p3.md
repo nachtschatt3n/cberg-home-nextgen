@@ -18,7 +18,9 @@ touches:
 depends_on: [media-episode-backfill-bulk]
 conflicts_with: []
 status: draft
-window: "sat-early:2026-10-10"
+window: "sat-early:2026-09-05"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false                   # NEVER unattended — operator-approved rename table required
 sops_refs:
   - docs/sops/media-library-standards.md

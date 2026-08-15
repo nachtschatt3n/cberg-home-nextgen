@@ -24,7 +24,9 @@ depends_on: []                        # media-episode-sidecar-tool EXECUTED 5736
                                       # satisfied — it is no guard at all).
 conflicts_with: []
 status: draft
-window: "tue-early:2026-09-15"
+window: "tue-early:2026-08-25"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false                   # NEVER unattended — writes to the share
 sops_refs:
   - docs/sops/media-library-standards.md

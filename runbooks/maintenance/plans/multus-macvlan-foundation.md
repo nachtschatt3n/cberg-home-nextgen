@@ -26,7 +26,18 @@ touches:
 depends_on: []                      # independent of the EG migration
 conflicts_with: [talos-v1.13.8]     # never in the same window as a Talos change
 status: scheduled
-window: "sun-window:2026-09-06"      # MOVED 2026-08-15: this plan is est 90m and thu-early is a
+window: null                          # UNSCHEDULED 2026-08-16. 90m of work against a 90m maximum
+                                      # window — zero rollback slack, the same TIGHT condition that
+                                      # app-template-5.0 was pulled for. Treated consistently rather
+                                      # than granted an exception, because the first thing sacrificed
+                                      # in an overrun is the rollback, and this one reconfigures the
+                                      # CNI layer.
+                                      #
+                                      # Natural split: (1) install Multus + define the VLAN-30 macvlan
+                                      # NetworkAttachmentDefinition — additive, nothing moves onto it;
+                                      # (2) migrate esphome off hostNetwork onto the NAD. Stage 1 is
+                                      # inert and fits comfortably; stage 2 is the risky half and
+                                      # deserves its own window with room to roll back.
                                       # 60m window — it never fit. sun-window:2026-09-06 is a
                                       # free 90m slot. (It does not need reboot, so a sun window
                                       # is not required, but no 90m no-reboot slot was free.)

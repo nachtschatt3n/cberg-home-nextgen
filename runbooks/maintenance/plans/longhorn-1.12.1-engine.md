@@ -21,7 +21,9 @@ touches:
 depends_on: []
 conflicts_with: []                    # but do NOT co-schedule with any data-store plan
 status: draft
-window: "sat-early:2026-09-05"       # MOVED 2026-08-14: sat-early:2026-08-22 collided with
+window: "sat-early:2026-08-22"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
                                       # kube-prometheus-stack-88 on `storage` (kps moves its
                                       # Prometheus PVCs). Longhorn carries EVERY stateful app,
                                       # so it gets a solo window rather than a "should be fine".

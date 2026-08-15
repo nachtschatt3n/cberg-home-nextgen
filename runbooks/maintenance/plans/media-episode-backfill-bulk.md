@@ -19,7 +19,9 @@ touches:
 depends_on: [media-episode-canary]
 conflicts_with: []
 status: draft
-window: "sat-early:2026-10-03"
+window: "sun-window:2026-08-30"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false                   # NEVER unattended
 sops_refs:
   - docs/sops/media-library-standards.md

@@ -25,7 +25,9 @@ depends_on: []
 conflicts_with: [paperless-ngx-3.0.5, bitnamilegacy-exit-paperless-db]
 security_ref: F-d62ac46a                        # see also F-46597825 (same image, fixable class)
 status: draft
-window: "tue-early:2026-08-25"
+window: "wed-early:2026-08-19"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

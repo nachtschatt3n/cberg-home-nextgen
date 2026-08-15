@@ -42,7 +42,9 @@ conflicts_with: [superset-redis-official, bitnamilegacy-exit-paperless-redis, bi
                                        # Homepage tile). Explained in §6.
 security_ref: F-6639e79c
 status: draft
-window: "sat-early:2026-08-22"         # 90m no-reboot slot, capacity_risk 6. Co-tenant is
+window: "wed-early:2026-08-19"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
                                        # kube-prometheus-stack-88 (high/3, 45m) -> 4/6 risk,
                                        # 65/90 min. Different namespaces, no shared resource.
                                        # Ordering + the alternative slot are in §6.

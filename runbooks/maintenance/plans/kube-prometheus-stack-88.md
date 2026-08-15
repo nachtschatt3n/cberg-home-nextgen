@@ -63,7 +63,9 @@ status: scheduled                   # RESOLVED 2026-08-15 (second vetting pass).
                                     # 88.x (v0.93.0), which is exactly what §1 already analyses.
                                     # 88.0.1 -> 88.3.0 is chart-template-only. The §1 table stays
                                     # valid; it is annotated at the head to say so.
-window: "sat-early:2026-08-22"      # RESLOTTED from missed 2026-08-08. no-reboot ⇒ Sat,
+window: "mon-early:2026-08-17"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 
 cve_impact: |                         # CORRECTED 2026-08-14 — the 2026-08-13 note was WRONG
   A previous edit claimed this bump clears 13 CVE criticals (grafana 9,

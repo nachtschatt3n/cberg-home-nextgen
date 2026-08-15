@@ -7,7 +7,17 @@
 # maintenance-window-agent vets those plans for interference + side effects and
 # runs the approved sequence during one of these windows.
 #
-# 4 windows/week (aggressive-drain cadence, 2026-08-02). Times are low-traffic;
+# 7 windows/week — DAILY (2026-08-16). Was 4/week, which stretched the current
+# 23-plan queue to late October. An IDLE window costs nothing: nothing runs
+# unless a plan is slotted, so the extra weekday slots are pure optionality.
+#
+# What daily does NOT buy: chains with a deliberate soak. superset-pg-decommission
+# sits 10 days after the cutover ON PURPOSE — the old database IS the rollback,
+# and removing it early trades a real safety net for calendar speed. Same shape
+# anywhere a plan says "soak"/"observe". Daily windows compress the INDEPENDENT
+# work; they must not be used to collapse a soak.
+#
+# (previous note, still the governing rule) 4 windows/week (aggressive-drain cadence, 2026-08-02). Times are low-traffic;
 # Tue/Thu align with the Renovate scan cadence + the every-48h sweep, Sat/Sun are
 # longer weekend slots for higher-risk / operator-present work. An IDLE window
 # costs nothing (nothing runs unless a plan is slotted into it) — the extra
@@ -18,10 +28,16 @@
 # window (Talos), so reserve it for reboot + app-template churn and push every
 # needs_reboot:false plan (kube-prom-stack, mariadb, nextcloud*) to Tue/Thu/Sat.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.08.02"
+version: "2026.08.16"
 timezone: Europe/Berlin
 
 windows:
+  - id: mon-early
+    day: monday
+    start: "05:00"
+    duration_min: 60
+    capacity_risk: 6
+    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
   - id: tue-early
     day: tuesday
     start: "05:00"
@@ -37,6 +53,18 @@ windows:
     duration_min: 60
     capacity_risk: 6        # raised 4→6 (2026-08-02), see tue-early
     allow_reboot: false
+  - id: wed-early
+    day: wednesday
+    start: "05:00"
+    duration_min: 60
+    capacity_risk: 6
+    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
+  - id: fri-early
+    day: friday
+    start: "05:00"
+    duration_min: 60
+    capacity_risk: 6
+    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
   - id: sat-early
     day: saturday
     start: "09:00"

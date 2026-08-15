@@ -49,7 +49,9 @@ conflicts_with:
   #   ordering relationship. Fill in the real plan_id once it exists.
 security_ref: F-2898fafa
 status: draft
-window: "sat-early:2026-09-19"        # 90m no-reboot slot, first FREE sat-early after the
+window: "sun-window:2026-08-23"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
                                       # booked run (08-22 kps, 08-29 app-template, 09-05
                                       # longhorn, 09-12 superset-pg-cutover, 09-26 grafana-13).
                                       # Tue/Thu are 60m slots — too short for this plan.

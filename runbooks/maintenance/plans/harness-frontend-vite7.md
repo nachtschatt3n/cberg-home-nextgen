@@ -18,7 +18,9 @@ touches:
 depends_on: []
 conflicts_with: []
 status: scheduled
-window: "sun-window:2026-08-30"
+window: "sat-early:2026-08-29"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 # Scheduled 2026-08-15. 60m in a 90m slot. Not a tue/thu 60m slot: 60-of-60
 # leaves zero rollback time.
 auto_execute: false                   # toolchain major bump on the serving process

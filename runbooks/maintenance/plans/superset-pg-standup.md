@@ -19,7 +19,9 @@ touches:
 depends_on: []
 conflicts_with: [longhorn-1.12.1-engine]
 status: draft
-window: "thu-early:2026-09-03"
+window: "mon-early:2026-08-24"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

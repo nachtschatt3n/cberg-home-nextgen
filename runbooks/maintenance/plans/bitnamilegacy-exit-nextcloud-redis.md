@@ -23,7 +23,14 @@ depends_on: []
 conflicts_with: [bitnamilegacy-exit-nextcloud-db]
 security_ref: F-d62ac46a                        # see also F-46597825 (same image, fixable class)
 status: draft
-window: "tue-early:2026-09-08"
+window: "fri-early:2026-08-28"        # MOVED off sat-early:2026-08-22 (2026-08-16): that slot held
+                                      # longhorn-1.12.1-engine (60m) + this (30m) = exactly 90m of a
+                                      # 90m window. The reconciler flags that TIGHT and it is right —
+                                      # a storage-engine upgrade is the last place to have no rollback
+                                      # time. This is the cheaper of the two to move, and an empty
+                                      # weekday slot six days later costs nothing.
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false                             # *nextcloud* is on the auto-update deny-list
 sops_refs:
   - docs/sops/application-update.md

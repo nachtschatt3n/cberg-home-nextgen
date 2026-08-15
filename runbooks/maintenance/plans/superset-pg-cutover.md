@@ -22,7 +22,9 @@ touches:
 depends_on: [superset-pg-standup]
 conflicts_with: [longhorn-1.12.1-engine]
 status: draft
-window: "sat-early:2026-09-12"
+window: "wed-early:2026-08-26"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

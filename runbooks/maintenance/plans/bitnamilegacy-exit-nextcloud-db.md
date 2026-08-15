@@ -25,7 +25,9 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
 conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis]
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
 status: draft
-window: "sat-early:2026-10-24"                  # first FREE 90-min no-reboot slot; see §6 for
+window: "sat-early:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
                                                 # how to pull this forward — 2 months on an
                                                 # archived registry is the cost of waiting
 auto_execute: false                             # *mariadb* AND *nextcloud* are both deny-listed

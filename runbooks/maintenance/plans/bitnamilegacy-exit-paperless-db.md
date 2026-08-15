@@ -25,7 +25,9 @@ depends_on: [bitnamilegacy-exit-paperless-redis, paperless-ngx-3.0.5]
 conflicts_with: [longhorn-1.12.1-engine, paperless-ngx-3.0.5, bitnamilegacy-exit-nextcloud-db, bitnamilegacy-exit-paperless-redis]
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
 status: draft
-window: "sat-early:2026-10-17"          # 09-19 is claimed by paperless-ngx-3.0.5,
+window: "sun-window:2026-09-06"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+                                      # (7 windows/week, was 4). Deliberate soaks are
+                                      # preserved, not compressed — see the windows YAML.
                                                 # which requires a SOLO window. 09-26/10-03/10-10
                                                 # have <70m free. See §6 — this date is the weakest
                                                 # part of the plan and the operator should challenge it.
