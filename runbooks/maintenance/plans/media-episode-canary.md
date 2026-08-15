@@ -3,7 +3,7 @@ plan_id: media-episode-canary
 component: media-library
 pr: null
 kind: data
-current: "episode NFO 2.5% (20/807) · episode_sidecar.py proven in DRY-RUN only"
+current: "episode NFO 2.5% (20/807) · episode_sidecar.py LIVE in the ConfigMap, proven in DRY-RUN only (18/18 episodes across 2 seasons, written=0, tree unchanged)"
 target: "one clean canary show fully sidecar'd (live write), with no other metric moved"
 update_type: n/a
 risk: medium                          # first live write onto a catastrophic-class CIFS share
@@ -16,7 +16,12 @@ touches:
     - "job/media-episode-sidecar (from the suspended CronJob)"
     - "Plex + Jellyfin TV libraries (rescan of the canary show)"
   shared: [media]
-depends_on: [media-episode-sidecar-tool]
+depends_on: []                        # media-episode-sidecar-tool EXECUTED 573632a0 (2026-08-15);
+                                      # plan file retired per the transient-plan
+                                      # convention, so the ref is dropped rather
+                                      # than left dangling (maintenance-plan.py
+                                      # scores an unresolvable depends_on as
+                                      # satisfied — it is no guard at all).
 conflicts_with: []
 status: draft
 window: "tue-early:2026-09-15"
@@ -204,10 +209,21 @@ ever touched by this plan; if any step proposes deleting a media file, stop.**
 
 ## 6) Interference notes
 
-- **Out of order:** this stage cannot run without `media-episode-sidecar-tool`. If the
-  tool is not in the live ConfigMap, **skip the window** — do not fall back to
+- **Out of order:** this stage cannot run without the `episode_sidecar.py` tool, which
+  landed 2026-08-15 (commit `573632a0`) and is verified present in the live ConfigMap
+  with `cronjob/media-episode-sidecar` shipped `suspend: true`. Re-confirm both before
+  the window:
+  ```bash
+  mise exec -- kubectl get configmap -n media library-tools-scripts \
+    -o jsonpath='{.data.episode_sidecar\.py}' | head -5
+  mise exec -- kubectl get cronjob -n media media-episode-sidecar \
+    -o jsonpath='{.spec.suspend}{"\n"}'
+  ```
+  If the tool is not in the live ConfigMap, **skip the window** — do not fall back to
   `sidecar.py`, which unlinks every `.nfo` in the folder and would take
   `series_compliance_pct` off 100.0 while writing zero episode NFOs.
+- **What this stage must actually change:** unsuspending is NOT part of stage 1. The
+  tool ships suspended and dry-run-by-default; this window is the first `DRY_RUN=0`.
 - **`shared: [media]`** — Plex, Jellyfin and Tube Archivist read the same share, and this
   window triggers a rescan. Do not co-schedule with anything else touching `media`, and
   avoid running while someone is watching.

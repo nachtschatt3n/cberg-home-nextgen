@@ -39,7 +39,7 @@ work at all**, and the last one is the only step in the family that can lose a f
 
 | # | plan | what it does | risk | est | window |
 |---|---|---|---|---|---|
-| 1 | [`media-episode-sidecar-tool`](media-episode-sidecar-tool.md) | write + review `episode_sidecar.py` (dry-run default, never deletes) | low | 90 m | **none — attended, out-of-window** |
+| 1 | `media-episode-sidecar-tool` — **EXECUTED 573632a0 (2026-08-15), plan retired** | wrote + reviewed `episode_sidecar.py` (dry-run default, never deletes) | low | 90 m | **none — attended, out-of-window** |
 | 2 | [`media-episode-canary`](media-episode-canary.md) | first live write: one clean show, verify nothing else moved | medium | 40 m | `tue-early:2026-09-15` |
 | 3 | [`media-episode-backfill-bulk`](media-episode-backfill-bulk.md) | remaining ~15 shows, one show per batch, to ≥80% | medium | 60 m | `sat-early:2026-10-03` |
 | 4 | [`media-naming-p3`](media-naming-p3.md) | rename the 99 release-scene filenames in 4 shows | high | 60 m | `sat-early:2026-10-10` |
