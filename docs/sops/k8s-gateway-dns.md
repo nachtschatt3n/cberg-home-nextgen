@@ -1,7 +1,7 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.15.2`
+> Version: `2026.08.15.3`
 > Last Updated: `2026-08-15`
 > Owner: `cberg-agent / operator`
 
@@ -182,6 +182,65 @@ mise exec -- kubectl get cm -n network k8s-gateway -o jsonpath='{.data.Corefile}
   — chart default, read-only, acceptable; it is what makes the §8 trigger
   permanently armed, not a privilege problem.
 - No secrets involved; service is LAN-only (VLAN reachability per network docs).
+
+### The other half of split-horizon: keep INTERNAL hostnames out of PUBLIC DNS
+
+k8s-gateway answers the internal side. external-dns
+(`kubernetes/apps/network/external/external-dns/helmrelease.yaml`) answers the
+public Cloudflare side, and it must never publish an internal-only hostname.
+
+Two scoping flags do that, one per source — **both are load-bearing**:
+
+| external-dns source | scoping flag | keeps out |
+|---|---|---|
+| `ingress` | `--ingress-class=external` | every `className: internal` Ingress |
+| `gateway-httproute` | `--gateway-name=envoy-external` + `--gateway-namespace=network` | every HTTPRoute parented to `envoy-internal` |
+
+**`--ingress-class` filters Ingress objects ONLY — it has no effect whatsoever
+on HTTPRoutes.** Before the gateway flags were added (2026-08-15, `bca46f0e`),
+the `gateway-httproute` source was completely unscoped: any HTTPRoute with a
+hostname would have been published to the public zone regardless of which
+Gateway it attached to. Latent while no route carried a hostname; it arms the
+moment the Envoy migration starts moving hosts onto the gateways.
+
+Why name+namespace and not `--gateway-label-filter`: it is a default-deny
+allowlist of exactly one Gateway that needs no label on the Gateway objects,
+and a typo, a rename, or a newly added gateway all fail CLOSED (not published).
+`--label-filter` is NOT an option — it applies to the `ingress` and `crd`
+sources too, so under `policy: sync` it would prune the existing external
+records. `--gateway-name` takes a single name; if a second externally-facing
+Gateway is ever added, switch to `--gateway-label-filter` and label it.
+
+Verify after ANY change to external-dns sources/flags, or when routes move
+between gateways (do not trust `Ready=True` — assert the negative outcome):
+
+```bash
+# 1. the filter is actually live in the process, not just in git
+kubectl -n network logs deploy/external-dns | grep -o 'GatewayName:[^ ]* GatewayNamespace:[^ ]*'
+
+# 2. NEGATIVE TEST: a hostname on the INTERNAL gateway must NOT reach public DNS.
+#    Create a throwaway HTTPRoute on envoy-internal with a test hostname, then:
+kubectl -n network logs deploy/external-dns | grep -i '<testhost>'   # expect: nothing
+dig +short <testhost>.${SECRET_DOMAIN} @1.1.1.1                      # expect: empty
+#    Also check the TXT registry record (an A record whose k8s.a- TXT is missing
+#    is treated as unowned and is left behind FOREVER by policy: sync):
+dig +short TXT k8s.a-<testhost>.${SECRET_DOMAIN} @1.1.1.1            # expect: empty
+#    Then delete the throwaway route.
+
+# 3. policy: sync can DELETE — confirm the existing external record set is intact
+#    (external_dns_registry_endpoints_total must be unchanged, and every loop
+#    should log "All records are already up to date")
+kubectl -n network logs deploy/external-dns --tail=20 | grep -E 'All records|Changing record'
+```
+
+A/B control that proves the filter (not something else) is what suppressed the
+route: run a throwaway `--dry-run --once` external-dns pod on the same image
+with and without the two flags. With them you get
+`Gateway network/envoy-internal does not match envoy-external ...` followed by
+`No endpoints could be generated from HTTPRoute ...`. `--dry-run` writes
+nothing; give the pod ONLY the sources you are testing and remember that a
+partial `sources:` list under `policy: sync` will log DELETEs for everything
+else (harmless under dry-run, alarming to read).
 
 ---
 
