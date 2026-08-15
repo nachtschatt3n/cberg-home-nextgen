@@ -46,6 +46,16 @@ Usage examples:
   policy-cli sec disable <id>
   policy-cli sec delete <id>
 
+  # Findings (vulnerability detail — DB-only, never committed; see
+  # docs/sops/vulnerability-disclosure.md)
+  policy-cli finding list --section security --grep ingress-nginx
+  policy-cli finding show F-35f34061          # incl. the private security_detail
+  policy-cli finding ref  F-35f34061          # publish-safe block for a plan file
+  policy-cli finding detail F-35f34061 --plan ingress-nginx-1.15.6 \\
+                                       --detail-file /tmp/detail.md
+  policy-cli finding add --title 'absenty: image rebuild required' \\
+                         --plan absenty-rebuild --detail-file /tmp/detail.md
+
   # Cross-table
   policy-cli stats                          # row counts per table
   policy-cli export [--out path/]           # snapshot DB → flat-files for backup
@@ -458,6 +468,211 @@ def cmd_sec_delete(args, dsn):
         print(f"deleted sec #{args.id}")
 
 
+# ---- finding (sweep_findings: vulnerability detail lives HERE, not in git) ----
+#
+# Public-repo rule (docs/sops/vulnerability-disclosure.md): CVE IDs, per-image
+# vulnerability counts, exploitability notes and exposure detail must NOT be
+# committed to this repo. They belong on the sweep_findings row, which is
+# private (cluster-internal Postgres + authenticated dashboard). A maintenance
+# plan cites the finding_id; `finding ref` prints the block to paste.
+#
+# Severity note: use `deferred` (or `monitor`) for hand-authored plan drivers.
+# `critical`/`warning` feed sweep-run.py's verdict reconciliation and a
+# hand-written row in a section the sweep never re-runs would pin the cycle
+# verdict red forever (it is also never auto-closed — auto-close only touches
+# sections that reported in the cycle).
+
+_PLAN_SECTION = "plan"
+
+
+def _finding_fingerprint(section: str, subsection: str | None, title: str) -> tuple[str, str]:
+    """(fingerprint, finding_id) using the same contract as lib/findings_writer."""
+    sys.path.insert(0, str(SCRIPT_DIR / "lib"))
+    import findings_writer as fw  # noqa: PLC0415
+    fp = fw.fingerprint(section, subsection, title)
+    return fp, fw.finding_id_from_fp(fp)
+
+
+def _finding_row(cur, finding_id: str):
+    cur.execute(
+        "SELECT * FROM sweep_findings WHERE finding_id = %s "
+        "ORDER BY resolved_at IS NULL DESC, last_seen DESC LIMIT 1",
+        (finding_id,),
+    )
+    return cur.fetchone()
+
+
+def _ref_block(row: dict) -> str:
+    """The canonical, publish-safe reference to paste into a plan file."""
+    plans = (row.get("metadata") or {}).get("plans") or []
+    return (
+        f"> **Security driver — detail withheld from this public repo.**\n"
+        f"> Tracked as **{row['finding_id']}** "
+        f"(`{row['section']}` / severity `{row['severity']}`).\n"
+        f"> Full detail (CVE IDs, counts, exposure, exploitability) lives on the\n"
+        f"> finding record — it is deliberately not reproduced here.\n"
+        f">\n"
+        f"> - Dashboard: `https://sweep.<DOMAIN>/findings/{row['finding_id']}`\n"
+        f"> - CLI: `runbooks/policy-cli.py finding show {row['finding_id']}`\n"
+        + (f"> - Plans: {', '.join(plans)}\n" if plans else "")
+        + f">\n"
+        f"> See `docs/sops/vulnerability-disclosure.md` before adding any\n"
+        f"> vulnerability detail to a committed file."
+    )
+
+
+def cmd_finding_list(args, dsn):
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        where, params = ["1=1"], []
+        if not args.all:
+            where.append("resolved_at IS NULL")
+        if args.section:
+            where.append("section = %s"); params.append(args.section)
+        if args.severity:
+            where.append("severity = %s"); params.append(args.severity)
+        if args.grep:
+            where.append("title ILIKE %s"); params.append(f"%{args.grep}%")
+        params.append(args.limit)
+        cur.execute(
+            "SELECT finding_id, section, severity, status, last_seen, title "
+            f"FROM sweep_findings WHERE {' AND '.join(where)} "
+            "ORDER BY last_seen DESC LIMIT %s", params
+        )
+        _print_table(cur.fetchall(), [
+            ("finding_id", "Finding", 10),
+            ("section", "Section", 9),
+            ("severity", "Severity", 9),
+            ("status", "Status", 9),
+            ("last_seen", "Last seen", 10),
+            ("title", "Title", 90),
+        ])
+
+
+def cmd_finding_show(args, dsn):
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        row = _finding_row(cur, args.finding_id)
+        if not row:
+            print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+        meta = row.get("metadata") or {}
+        for k, v in row.items():
+            if k == "metadata":
+                continue
+            print(f"  {k:16s}  {v}")
+        detail = meta.pop("security_detail", None)
+        if meta:
+            print(f"  {'metadata':16s}  {json.dumps(meta, ensure_ascii=False)}")
+        if detail:
+            print("\n  --- security_detail (DO NOT COPY INTO A COMMITTED FILE) ---")
+            for line in str(detail).splitlines():
+                print(f"  {line}")
+
+
+def cmd_finding_ref(args, dsn):
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        row = _finding_row(cur, args.finding_id)
+        if not row:
+            print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+        print(_ref_block(row))
+
+
+def _read_detail(args) -> str | None:
+    if args.detail_file:
+        return Path(args.detail_file).read_text()
+    return args.detail
+
+
+def _policy_cli_cycle(cur) -> str:
+    """Find-or-create the single sentinel sweep_cycles row that hand-authored
+    findings hang off. sweep_findings.cycle_id has an FK to sweep_cycles, and a
+    real sweep cycle would be a lie about provenance; one reused sentinel keeps
+    the cycle list uncluttered."""
+    cur.execute(
+        "SELECT cycle_id FROM sweep_cycles WHERE trigger = 'policy-cli' "
+        "ORDER BY started_at LIMIT 1"
+    )
+    row = cur.fetchone()
+    if row:
+        return str(row["cycle_id"])
+    cur.execute(
+        "INSERT INTO sweep_cycles (cycle_id, started_at, finished_at, trigger, notes) "
+        "VALUES (gen_random_uuid(), now(), now(), 'policy-cli', %s) RETURNING cycle_id",
+        ("Sentinel cycle for hand-authored findings created via policy-cli "
+         "finding add. Not a real sweep run.",),
+    )
+    return str(cur.fetchone()["cycle_id"])
+
+
+def cmd_finding_add(args, dsn):
+    """Create a hand-authored finding for a security driver the sweep does not
+    (yet) emit — e.g. an image the scanner could not reach, or a residual CVE
+    after a partial remediation. Idempotent on the title fingerprint."""
+    fp, fid = _finding_fingerprint(args.section, args.subsection, args.title)
+    detail = _read_detail(args)
+    meta = {"authored_by": "policy-cli", "subsection": args.subsection or "plan_driver"}
+    if detail:
+        meta["security_detail"] = detail
+        meta["detail_updated_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    if args.plan:
+        meta["plans"] = args.plan
+    if args.component:
+        meta["component"] = args.component
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT finding_id FROM sweep_findings "
+            "WHERE fingerprint = %s AND resolved_at IS NULL LIMIT 1", (fp,)
+        )
+        if cur.fetchone():
+            print(f"{fid} already open — use `finding detail {fid}` to update it")
+            return 1
+        cycle = _policy_cli_cycle(cur)
+        cur.execute(
+            """
+            INSERT INTO sweep_findings (
+                finding_id, fingerprint, section, severity, title, status,
+                action, evidence_path, first_seen, last_seen, cycle_id, metadata
+            ) VALUES (%s, %s, %s, %s, %s, 'new', %s, NULL,
+                      now(), now(), %s, %s::jsonb)
+            """,
+            (fid, fp, args.section, args.severity, args.title,
+             args.action, cycle, json.dumps(meta)),
+        )
+        conn.commit()
+        row = _finding_row(cur, fid)
+    print(f"added {fid}\n")
+    print(_ref_block(row))
+
+
+def cmd_finding_detail(args, dsn):
+    """Attach/replace the private vulnerability detail and plan linkage on an
+    EXISTING finding (typically one the CVE check already emits)."""
+    detail = _read_detail(args)
+    if detail is None and not args.plan and not args.action:
+        print("nothing to do: pass --detail/--detail-file, --plan, or --action",
+              file=sys.stderr)
+        return 1
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        row = _finding_row(cur, args.finding_id)
+        if not row:
+            print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+        meta = dict(row.get("metadata") or {})
+        if detail is not None:
+            meta["security_detail"] = detail
+            meta["detail_updated_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        if args.plan:
+            meta["plans"] = sorted(set(meta.get("plans") or []) | set(args.plan))
+        if args.component:
+            meta["component"] = args.component
+        cur.execute(
+            "UPDATE sweep_findings SET metadata = %s::jsonb, "
+            "action = COALESCE(%s, action) WHERE id = %s",
+            (json.dumps(meta, ensure_ascii=False), args.action, row["id"]),
+        )
+        conn.commit()
+        row = _finding_row(cur, args.finding_id)
+    print(f"updated {args.finding_id}\n")
+    print(_ref_block(row))
+
+
 # ---- cross-table ----
 
 def cmd_stats(args, dsn):
@@ -569,6 +784,47 @@ def build_parser() -> argparse.ArgumentParser:
     seca.set_defaults(handler=cmd_sec_add)
     secd = sec.add_parser("disable"); secd.add_argument("id", type=int); secd.set_defaults(handler=cmd_sec_disable)
     secD = sec.add_parser("delete"); secD.add_argument("id", type=int); secD.set_defaults(handler=cmd_sec_delete)
+
+    # finding (sweep_findings) — vulnerability detail lives in the DB, not git
+    fnd = sub.add_parser(
+        "finding",
+        help="sweep_findings table — the private home for vulnerability detail",
+    ).add_subparsers(dest="op", required=True)
+    fl = fnd.add_parser("list")
+    fl.add_argument("--section")
+    fl.add_argument("--severity")
+    fl.add_argument("--grep", help="ILIKE match on title")
+    fl.add_argument("--all", action="store_true", help="include resolved rows")
+    fl.add_argument("--limit", type=int, default=40)
+    fl.set_defaults(handler=cmd_finding_list)
+    fs = fnd.add_parser("show"); fs.add_argument("finding_id")
+    fs.set_defaults(handler=cmd_finding_show)
+    fr = fnd.add_parser("ref", help="print the publish-safe block to paste into a plan")
+    fr.add_argument("finding_id"); fr.set_defaults(handler=cmd_finding_ref)
+    fa = fnd.add_parser("add", help="hand-author a driver the sweep does not emit")
+    fa.add_argument("--title", required=True,
+                    help="PUBLISH-SAFE one-liner (it shows on the dashboard list)")
+    fa.add_argument("--section", default=_PLAN_SECTION,
+                    help="default 'plan' — a section the sweep never re-runs, so "
+                         "the row is never auto-closed")
+    fa.add_argument("--subsection")
+    fa.add_argument("--severity", default="deferred",
+                    choices=["deferred", "monitor", "accepted"],
+                    help="NOT critical/warning — those pin the sweep verdict")
+    fa.add_argument("--action")
+    fa.add_argument("--detail", help="private vulnerability detail (never committed)")
+    fa.add_argument("--detail-file")
+    fa.add_argument("--plan", action="append", help="plan_id this drives; repeatable")
+    fa.add_argument("--component")
+    fa.set_defaults(handler=cmd_finding_add)
+    fd = fnd.add_parser("detail", help="attach private detail / plan linkage to a finding")
+    fd.add_argument("finding_id")
+    fd.add_argument("--detail")
+    fd.add_argument("--detail-file")
+    fd.add_argument("--action")
+    fd.add_argument("--plan", action="append")
+    fd.add_argument("--component")
+    fd.set_defaults(handler=cmd_finding_detail)
 
     # cross-table
     sub.add_parser("stats").set_defaults(handler=cmd_stats)

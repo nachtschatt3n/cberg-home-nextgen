@@ -170,6 +170,15 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
 - This repository is public, so never commit secret domains, URLs, or other sensitive information
 - All secrets and sensitive data must be encrypted using SOPS before committing
 - Ensure no credentials, API keys, or configuration details are exposed in the repository
+- **Vulnerability detail is sensitive information too.** CVE IDs, per-image
+  vulnerability counts, exploitability notes, and exposure detail for issues that
+  are **not yet fixed** must NOT be committed — not in `runbooks/maintenance/plans/*.md`,
+  not in docs, not in commit messages. They belong on the `sweep_findings` record
+  in sweep_history Postgres; committed files carry a `security_ref: F-xxxxxxxx`
+  reference instead. The test: *does this say what is currently unfixed, on a
+  specific service we run?* Both → DB only. Full boundary, tooling, and the
+  publishable/not-publishable table: **`docs/sops/vulnerability-disclosure.md`**.
+  Edit with `runbooks/policy-cli.py finding {list,show,ref,add,detail}`.
 
 ## Operator-Curated Policy lives in sweep_history Postgres
 
