@@ -116,7 +116,11 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
   findings gone + disable AR-055; update docs (network, applications,
   new-deployment-blueprint → HTTPRoute pattern, homepage SOP).
 
-**Effort:** ~6–8 attended sessions ≈ 3–6 weeks at 4 windows/week.
+**Effort:** ~6–8 attended sessions. **NOT window work** (operator decision,
+2026-08-15): phase 2 alone is est. 120m against a 90m maximum window and the
+phases are strictly sequential, so the chain runs as an attended project
+outside the maintenance-window system — `maintenance-plan.py --open` lists all
+four phases under REFERENCE / UNWINDOWED. Do not schedule them into windows.
 **Highest-risk moments:** P1 auth pilot, wildcard flip — each individually
 revertible. (langfuse OAuth was the third; removed with the app 2026-08-13.) Never co-schedule with cloudflared /
 cert-manager / authentik plans.
@@ -191,10 +195,17 @@ explicit gate.
 - **The #8202 ext-auth regression that justified the pin is long fixed** (it was
   an Envoy 1.37.0 bug, fixed in EG v1.7.1; 1.8.3 ships Envoy 1.38.3). It no
   longer argues 1.8.3 over 1.9.0. What *does*: 1.9.0 was one day old at Phase 0.
-- **The pin is time-boxed.** EG 1.8 is EOL **2026-11-08** and its support matrix
-  covers k8s 1.32-1.35 while we run **1.36** (untested, not known-broken).
-  Re-evaluate 1.9.x before Phase 2; it needs Gateway API v1.6.1 CRDs, so chart
-  and vendored CRDs move together.
+- ~~**The pin is time-boxed.** EG 1.8 is EOL **2026-11-08** and its support
+  matrix covers k8s 1.32-1.35 while we run **1.36**. Re-evaluate 1.9.x before
+  Phase 2; it needs Gateway API v1.6.1 CRDs, so chart and vendored CRDs move
+  together.~~ **DONE — phase 0.5, 2026-08-16** (`d4b5750b` + `22f38e36`): chart
+  `gateway-helm` **1.9.0** and the vendored bundle **gateway-api v1.5.1 →
+  v1.6.1** (8 → 10 standard-channel CRDs) moved together at zero Envoy traffic,
+  putting the cluster back on the support matrix (EG 1.9 covers k8s 1.33-1.36).
+  Every "1.8.3" figure elsewhere on this page is therefore historical. The
+  v1.6.1 bundle's ValidatingAdmissionPolicy **blocks rolling back** to an older
+  bundle-version — see `docs/sops/envoy-gateway-upgrade.md` and
+  `docs/sops/k8s-gateway-dns.md` §8.
 - Gateway API **v1.5.1 standard** does include `ListenerSet`, which EG 1.8
   informs on unconditionally — the widely-repeated claim that EG 1.8 forces the
   experimental channel is wrong at this bundle version.
