@@ -37,7 +37,10 @@ deny:
   - match: "*envoy-gateway*"
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
   - match: "*mariadb*"
-    reason: "MariaDB chart major (25→26) + bitnami-legacy posture; a DB-engine bump is never unattended-safe."
+    reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint can SKIP
+      mariadb-upgrade on a server-major roll while reporting Ready and the right
+      SELECT VERSION() — leaving old-format system tables under the new binary.
+      See docs/sops/mariadb-major-upgrade.md."
     max: patch
   - match: "*mcpo*"
     reason: "python init base image major (3.11→3.14) rides these tags."
