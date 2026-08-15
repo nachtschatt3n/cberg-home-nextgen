@@ -165,10 +165,64 @@ spec:
 
     mongodb:
       enabled: true
+
+      # Authentication. Previously `enabled: false`, i.e. any pod that could
+      # reach the Service had unauthenticated full read/write on the chat DB.
+      #
+      # NOTE the values PATH. The old block carried a TOP-LEVEL
+      # `mongodb.databases: [LibreChat]`, but subchart 16.5.45 has no
+      # top-level `databases` key at all -- only `auth.databases`. That value
+      # was therefore INERT and silently did nothing. Verified against
+      # charts/mongodb/values.yaml. Same class of trap as the
+      # `updateStrategy` vs `strategy` note above.
+      #
+      # `existingSecret` replaces the chart-generated secret wholesale
+      # (see mongodb.secretName in _helpers.tpl), so the key names below are
+      # NOT ours to choose -- templates/secrets.yaml fixes them as
+      # `mongodb-root-password` and `mongodb-passwords`. The latter is a
+      # COMMA-SEPARATED list positionally matched against `auth.usernames`.
+      # Source: kubernetes/apps/ai/librechat/app/mongodb-secret.sops.yaml
+      #
+      # The bitnami entrypoint creates users ONLY on an EMPTY datadir. Turning
+      # auth on over a populated volume yields a mongod that starts happily and
+      # rejects every login. Enabling this therefore REQUIRED wiping the PVC
+      # (done 2026-08-15 in window sat-early; the store held only seed data).
       auth:
-        enabled: false
-      databases:
-        - LibreChat
+        enabled: true
+        existingSecret: librechat-mongodb-auth
+        usernames:
+          - librechat
+        databases:
+          - LibreChat
+
+      # The chart-generated NetworkPolicy previously granted nothing. With the
+      # subchart default `allowExternal: true`, templates/networkpolicy.yaml
+      # emits an ingress rule with ports but NO `from:` selector -- which
+      # matches EVERY source in EVERY namespace. The policy existed, so it read
+      # as protection while admitting the whole cluster.
+      #
+      # `allowExternal: false` is the switch that makes the template render the
+      # `from:` block at all. `ingressPodMatchLabels` then adds the one selector
+      # we actually want.
+      #
+      # The label is `app.kubernetes.io/name: librechat-librechat`, NOT
+      # `librechat` -- the parent chart suffixes its own name. Verified against
+      # the live pod labels. Getting this wrong renders a perfectly valid
+      # NetworkPolicy that locks LibreChat out of its own database.
+      #
+      # A NetworkPolicy podSelector with no namespaceSelector is scoped to this
+      # namespace (ai), which is what we want -- nothing outside `ai` should
+      # reach this database.
+      #
+      # `addExternalClientAccess: false` drops the subchart's extra
+      # opt-in selector (any pod labelled `librechat-mongodb-client: "true"`);
+      # nothing uses it and a narrower policy is the point of this change.
+      networkPolicy:
+        allowExternal: false
+        addExternalClientAccess: false
+        ingressPodMatchLabels:
+          app.kubernetes.io/name: librechat-librechat
+
       # Pinned by DIGEST, not tag. `bitnami/mongodb` no longer publishes semver
       # tags (502 tags, all `sha256-*` plus `latest`; `8.2.6` 404s and
       # `bitnamilegacy/mongodb` has zero matches), so a digest is the ONLY
