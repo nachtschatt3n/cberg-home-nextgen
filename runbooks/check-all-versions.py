@@ -17,6 +17,7 @@ import argparse
 import os
 import re
 import json
+import pathlib
 import yaml
 import subprocess
 import requests
@@ -202,7 +203,7 @@ class VersionChecker:
             
             return {
                 'name': metadata.get('name', ''),
-                'namespace': metadata.get('namespace', 'default'),
+                'namespace': self._resolve_namespace(file_path, metadata),
                 'file_path': str(file_path.relative_to(self.repo_root)),
                 'chart_name': chart_name,
                 'chart_version': chart_version,
@@ -213,6 +214,54 @@ class VersionChecker:
             print(f"{Colors.RED}Error parsing {file_path}: {e}{Colors.RESET}")
             return None
     
+
+    @staticmethod
+    def _resolve_namespace(file_path, metadata) -> str:
+        """Real namespace for a HelmRelease in this repo's Flux layout.
+
+        `metadata.namespace` is almost never set on HelmReleases here — Flux
+        applies the namespace from the owning Kustomization's `targetNamespace`
+        in the sibling ks.yaml. The old code fell back to the literal string
+        'default', which is not a missing-value marker: it is a real namespace
+        name, so every consumer downstream treated it as fact. 51 of the rows
+        in version-check-current.md claimed `default`, and on 2026-08-15 that
+        mis-routed an anythingllm bump during a maintenance window (the plan
+        said `default`, the app lives in `ai`).
+
+        Resolution order, first hit wins:
+          1. explicit metadata.namespace
+          2. targetNamespace / metadata.namespace from the nearest ks.yaml
+          3. the kubernetes/apps/<namespace>/<app>/ path segment
+          4. 'unknown' — never 'default', so a failure to resolve is visible
+        """
+        ns = (metadata or {}).get('namespace')
+        if ns:
+            return ns
+        try:
+            import yaml as _yaml
+            d = pathlib.Path(file_path).resolve().parent
+            for _ in range(4):  # app/ -> <app>/ -> <namespace>/ ...
+                ks = d / 'ks.yaml'
+                if ks.exists():
+                    for doc in _yaml.safe_load_all(ks.read_text()) or []:
+                        if not isinstance(doc, dict):
+                            continue
+                        tns = (doc.get('spec') or {}).get('targetNamespace')
+                        if tns:
+                            return tns
+                        mns = (doc.get('metadata') or {}).get('namespace')
+                        if mns:
+                            return mns
+                d = d.parent
+        except Exception:
+            pass
+        parts = pathlib.Path(file_path).resolve().parts
+        if 'apps' in parts:
+            i = parts.index('apps')
+            if i + 1 < len(parts):
+                return parts[i + 1]
+        return 'unknown'
+
     def extract_images(self, values: Dict, path: str = '') -> List[Dict]:
         """Recursively extract image information from values."""
         images = []
