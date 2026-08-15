@@ -36,7 +36,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | open-webui | Chat interface for AI models (LLM frontend) | Internal | AI |
-| librechat | Multi-provider AI chat interface (Ollama via Mac Mini) | External | AI |
+| librechat | Multi-provider AI chat interface (Ollama via Mac Mini). Authentik OIDC SSO — local registration stays disabled; users are auto-provisioned on first OIDC login | External | AI |
 | openclaw | AI agent platform | Internal | AI |
 | anythingllm | Private RAG workspace with local AI | Internal | AI |
 | mcpo | Model Control Plane Orchestrator | Internal | AI |
@@ -286,6 +286,6 @@ When deploying a new application:
 - [ ] Add `kustomization.yaml` for Flux
 - [ ] Create `secret.sops.yaml` for any credentials (SOPS-encrypted)
 - [ ] Add Homepage annotations to ingress (see `docs/sops/homepage-integration.md`)
-- [ ] Add Authentik forward auth if externally exposed (see `docs/sops/authentik.md`)
+- [ ] Add Authentik integration if externally exposed — forward-auth, or OIDC/SAML if the app has its own user model (see `docs/sops/authentik.md`)
 - [ ] Update this file (`docs/applications.md`) with the new app
 - [ ] Run `python3 runbooks/doc-check.py` to verify documentation is complete

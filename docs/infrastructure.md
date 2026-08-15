@@ -125,7 +125,7 @@ manages all subsequent deployments including upgrades to these components.
 | Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
-| Identity Provider | Authentik (forward auth for all ingress) |
+| Identity Provider | Authentik (forward-auth for apps with no user model; app-native OIDC or SAML for those that have one) |
 | Image Updates | Renovate (weekly) + Flux Image Automation |
 
 > **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.57.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`.

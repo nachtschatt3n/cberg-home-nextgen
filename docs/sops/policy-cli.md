@@ -30,6 +30,12 @@ The four tables and their CLI namespaces:
 
 Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`).
 
+A fifth namespace, `policy-cli finding …`, reads/writes the **`sweep_findings`**
+table. It is not a policy table — it is where **vulnerability detail lives instead
+of in this public repo** (`list` / `show` / `ref` / `add` / `detail`). See
+[vulnerability-disclosure.md](vulnerability-disclosure.md) for the boundary and
+the workflow; do not paste CVE detail into a committed file.
+
 `enabled = false` is soft-disable — preferred over hard delete when you want an audit trail. Loaders treat disabled rows as absent.
 
 ---
@@ -218,6 +224,7 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 - `runbooks/sweep-run.py` — shares the same port-forward + DSN mechanic
 - `kubernetes/apps/databases/sweep-history/app/schema-configmap.yaml` — the four table schemas
 - `containers/sweep-dashboard/app/main.py` — read-only `/policies/*` and `/api/policies/*` route handlers
+- [vulnerability-disclosure.md](vulnerability-disclosure.md) — the `finding` namespace and the public-repo boundary
 
 ---
 

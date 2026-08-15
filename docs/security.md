@@ -144,7 +144,10 @@ rm /tmp/secret.yaml
 
 ## Authentik — Identity Provider
 
-Authentik provides SSO and forward-auth proxy for all externally and internally exposed services.
+Authentik is the identity provider for externally and internally exposed services. Three
+integration patterns are in use — forward-auth proxy (the default, for apps with no user
+model of their own), app-native **OIDC**, and **SAML**. The checklist below covers the
+forward-auth pattern only; OIDC and SAML integrations follow `docs/sops/authentik.md`.
 
 **Deployment:** `kubernetes/apps/kube-system/authentik/`
 
@@ -163,7 +166,11 @@ Authentik provides SSO and forward-auth proxy for all externally and internally 
 | default-provider-invalidation-flow | `b8a97e00-f02f-48d9-b854-b26bf837779c` |
 | Local Kubernetes Cluster service connection | `162f6c4f-053d-4a1a-9aa6-d8e590c49d70` |
 
-### New App Integration Checklist
+### New App Integration Checklist (forward-auth pattern)
+
+> For an app that has its own user model and speaks OIDC or SAML, do **not** use this
+> checklist — there is no proxyprovider and no outpost. See the OIDC / SAML provider
+> patterns in `docs/sops/authentik.md`.
 
 - [ ] Create `kubernetes/apps/{ns}/{app}/app/authentik-blueprint.yaml` (source of truth)
 - [ ] Decrypt `configmap.sops.yaml`, add blueprint entry, re-encrypt

@@ -2,9 +2,9 @@
 
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
-> Description: Managing Authentik forward-auth integrations through GitOps blueprints.
-> Version: `2026.05.04`
-> Last Updated: `2026-05-04`
+> Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `Platform`
 
 ---
@@ -221,14 +221,16 @@ The `wazuh-blueprint.yaml` entry in the configmap shows this migration end-to-en
 ## OIDC / OAuth2 Provider Pattern
 
 Use OIDC (not forward-auth, not SAML) when the app **has its own user model** and
-speaks OpenID Connect — e.g. Grafana, pgAdmin, Superset, Sure, **Immich**. The app
+speaks OpenID Connect — e.g. Grafana, pgAdmin, Superset, Sure, **Immich**, **LibreChat**. The app
 redirects to Authentik, gets an ID token, and provisions/logs in its own user.
 
 ### Blueprint shape
 
 An OIDC integration is two entries in a single `*-oauth2-blueprint.yaml` data key:
 an `oauth2provider` and an `application` that references it. Modeled on the
-existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
+existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml` /
+`librechat-oauth2-blueprint.yaml` (the last two were authored blueprint-only with
+`grant_types` set from the start, so they are the cleanest references to copy):
 
 ```yaml
 - id: <app>-oauth2-provider
@@ -277,7 +279,9 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
   `authorize.py`: `grant_type not in provider.grant_types`). This bites
   **blueprint-only** providers — the existing grafana/pgadmin/superset entries dodged
   it because they were UI-created first (the UI seeds the default grant-type set),
-  then imported by `identifiers.name`. Set `[authorization_code, refresh_token]`
+  then imported by `identifiers.name`. `immich` and `librechat` are the providers that
+  were born blueprint-only and therefore carry the field explicitly — copy one of them.
+  Set `[authorization_code, refresh_token]`
   (add `implicit`/`hybrid` only if the app needs them). Symptom is identical to a
   redirect-uri problem but the redirect_uri is fine — confirm with
   `ak shell -c "from authentik.providers.oauth2.models import OAuth2Provider; print(OAuth2Provider.objects.get(name='<app>').grant_types)"`.
@@ -295,6 +299,23 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml`:
 - **Auto-provisioning is app-side**, not Authentik-side. The blueprint only makes
   Authentik willing to issue tokens; the app decides whether to create a local
   user (e.g. Immich's "Auto Register" toggle, Grafana's `allow_sign_up`).
+- **The `groups` claim rides on the managed `profile` scope mapping** — there is no
+  separate "groups" scope to add to `property_mappings`. The managed
+  `goauthentik.io/providers/oauth2/scope-profile` expression already returns
+  `"groups": [group.name for group in request.user.groups.all()]`, so binding the
+  usual openid/email/profile trio is enough for an app to do group→role mapping off
+  the userinfo response. LibreChat uses this to promote members of the
+  `authentik Admins` group (`OPENID_ADMIN_ROLE` + `OPENID_ADMIN_ROLE_PARAMETER_PATH:
+  groups` + `OPENID_ADMIN_ROLE_TOKEN_KIND: userinfo`). Verify what a provider will
+  actually emit with
+  `ak shell -c "from authentik.providers.oauth2.models import ScopeMapping; print(ScopeMapping.objects.get(managed='goauthentik.io/providers/oauth2/scope-profile').expression)"`.
+- **The app must be running when the provider is created, or restarted after.** An app
+  that discovers OIDC once at boot (LibreChat's `setupOpenId()`, for one) caches the
+  failure if the provider did not exist yet — Flux applies the blueprint and the app
+  pod in whatever order it likes. Symptom: the app's own config endpoint still
+  advertises SSO as enabled (it only checks that env vars are non-empty) while the
+  login route 500s. Check the app log for a discovery error at startup and restart the
+  pod after the blueprint reports `successful`.
 - **Reuse the flow UUIDs** in `## Key UUIDs` above and the shared self-signed
   signing key via `!Find` — do not create per-app flows or keys.
 - Adding the data key is enough — the init container `cp /blueprints-source/*.yaml`
