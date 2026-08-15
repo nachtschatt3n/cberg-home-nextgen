@@ -64,9 +64,15 @@ generated: "2026-08-15"
 `redis/redisinsight` is pinned at `2.70.1` in a **plain Deployment** (no
 HelmRelease) at
 `kubernetes/apps/databases/redisinsight/app/deployment.yaml`. Upstream moved to a
-3.x line on 2026-01-07 (`3.0.1`) and is now at **`3.8.0`** (pushed 2026-07-21;
-Docker Hub's `latest` resolves to it). We are a full major behind and have been
-for roughly seven months.
+3.x line on 2026-01-07 (`3.0.1`; there is no `3.0.0` Docker tag) and is now at
+**`3.8.0`** (pushed 2026-07-21; Docker Hub's `latest` resolves to it). We are a
+full major behind and have been for roughly seven months.
+
+A supply-chain fact that matters more than the version gap itself: **the `2.70.1`
+tag has not been rebuilt since 2025-07-11** — thirteen-plus months during which
+its `node:20.14-alpine` base has received no refresh. Staying on 2.x is not
+"holding a stable version"; it is holding a frozen image on a line upstream no
+longer publishes to.
 
 > **Security driver — detail withheld from this public repo.**
 > Tracked as **F-6639e79c** (`security` / severity `accepted`).
@@ -122,13 +128,25 @@ each tag (linux/amd64), and both are unchanged:**
 | Image config field | `2.70.1` | `3.8.0` | Impact here |
 |---|---|---|---|
 | `ExposedPorts` | `5540/tcp` | `5540/tcp` | **No change.** Service, Ingress backend port, and both probes stay on 5540. Do not touch them. |
-| `RI_APP_FOLDER_ABSOLUTE_PATH` | `/data` | `/data` | **No change.** Same mountPath, same PVC, same volume layout. |
+| `RI_APP_FOLDER_ABSOLUTE_PATH` | `/data` | `/data` | **No change.** Same mountPath, same PVC, same volume layout, same sqlite filename. |
 | `User` | `node` (uid 1000) | `node` (uid 1000) | **No change.** The `chmod -R 777 /data` initContainer stays valid; no UID/permission rework. |
-| `Entrypoint` | `./docker-entry.sh node redisinsight/api/dist/src/main` | identical | **No change.** |
+| `Entrypoint` | `./docker-entry.sh node redisinsight/api/dist/src/main` | identical | **No change.** `docker-entry.sh` is byte-identical between the two tags. |
 | `RI_BUILD_TYPE` / `RI_SERVE_STATICS` | `DOCKER_ON_PREMISE` / `true` | identical | **No change.** |
 | `Env` delta | — | `+ RI_APP_BUILD_COMMIT_SHA` | Cosmetic build metadata only. |
 
-Reproduce this yourself in pre-check (b) — do not take the table on trust.
+Confirmed independently against the upstream source at both tags: `default.ts`
+still reads `port: parseInt(process.env.RI_APP_PORT, 10) || 5540`, the Dockerfile
+still carries `EXPOSE 5540` (with the comment *"since RI is hard-code to port
+5540"*), `production.ts` is **byte-identical** between the two tags, and the
+health controller still serves `/api/health` under the `api` global prefix — so
+**both probes keep working unchanged**. Upstream's own Kubernetes install page
+still documents `livenessProbe: httpGet: path: /api/health port: 5540`.
+
+The one real substitution under the hood is the **base image: `node:20.14-alpine`
+→ `node:24.16.0-alpine`** (uid 1000 in both). See §1.4 for the only practical
+consequence — memory headroom.
+
+Reproduce the table yourself in pre-check (b) — do not take it on trust.
 
 **So this bump is a one-line tag edit.** No Service change, no Ingress change, no
 probe change, no manifest restructuring. That is the single most important fact
@@ -144,35 +162,87 @@ instance reports `encryptionStrategies: ["PLAIN"]` — no `RI_ENCRYPTION_KEY` is
 set, so there is **no key-mismatch failure mode** on upgrade.
 
 Because the data directory and the db filename are unchanged, 3.8.0 opens the
-**same** file and runs its own schema migrations against it on first boot.
+**same** file and runs its own migrations against it on first boot (TypeORM
+`migrationsRun` defaults to true). The migration chain is **continuous and
+additive**: 2.70.1 ships 56 migration files, 3.8.0 ships the same 56 plus 7
+appended. Inspected individually, the 7 new ones only `ADD COLUMN`
+(`providerDetails`, `environment`, `connectionFamily`), `CREATE TABLE`
+(`query_library`), or `UPDATE` provider labels — **none drops or rewrites a table
+or column that existed in 2.70.1**.
+
 Expected outcome: **the 6 profiles carry over automatically; nothing is re-added
 by hand.** Verify it in §4 — do not assume it.
 
-The asymmetry is the rollback: an app-run schema migration is **forward-only**.
-Once 3.8.0 has started and migrated the file, `2.70.1` may refuse to open it or
-may start against a schema it does not understand. **`git revert` alone is
-therefore not a guaranteed rollback** — the revert must be paired with restoring
-the pre-upgrade `redisinsight.db`. That file is 300 KB, so pre-check (c) copies
-it out in about a second. This is cheap insurance and is not optional.
+The asymmetry is the rollback. An app-run migration is **forward-only** — TypeORM
+reverts only on an explicit `migration:revert`, never on startup, so the `down()`
+bodies never run when you roll the image back. In *this* deployment the added
+columns are all nullable or `NOT NULL DEFAULT`, so 2.70.1 would still function;
+the one genuinely lossy step is a **data mutation** — 3.x rewrites
+`database_instance.provider` values (`RE_CLOUD`→`REDIS_CLOUD`,
+`RE_CLUSTER`→`REDIS_SOFTWARE`, `REDIS_ENTERPRISE`→`OTHER_REDIS_MANAGED`) to
+labels 2.70.1's enum does not know. That only affects entries discovered via
+Redis Cloud/Software/Enterprise; our 6 are hand-added self-hosted cluster
+services, which carry `UNKNOWN`/`REDIS_STACK` and are untouched. So a downgrade
+is *probably* clean here — **"probably" is not a rollback plan.**
 
-### 1.4 Items to confirm at execution time rather than assume
+**`git revert` alone is therefore not a guaranteed rollback** — pair it with
+restoring the pre-upgrade `redisinsight.db`. That file is 300 KB, so pre-check
+(c) copies it out in about a second. Cheap insurance, not optional.
 
-These could not be pinned from the image config alone. Each is written as a
-concrete check rather than an assumption:
+> **Known upstream risk worth carrying into the window:** RedisInsight issue
+> [#5810](https://github.com/redis/RedisInsight/issues/5810), *"Upgrade from
+> 3.2.0 to 3.4.1 loses (some of?) the databases"* — opened 2026-04-21, a second
+> reporter 2026-05-12, **still open with no maintainer resolution**. The reports
+> are desktop/macOS (not Docker) and it is unconfirmed as a database-level fault,
+> but it is a live report of *saved connections going missing across an in-3.x
+> upgrade*. It is the single best reason not to skip pre-check (c), and the
+> reason §4 (d) diffs the profile list rather than eyeballing it.
 
-- **`RITRUSTEDORIGINS`** — set by our manifest (not baked into either image).
-  Upstream has been migrating env vars to an `RI_`-prefixed scheme. If 3.8.0
-  ignores the old spelling, the symptom is a CORS/origin rejection in the
-  **browser** while `/api/health` still returns `up`. Pre-check (d) records the
-  current behaviour; §4 step (e) is what catches it; §6 says what to do.
-- **`/api/health`** — both probes use it. If 3.8.0 moved it, the pod fails
-  readiness and never becomes Ready, which is a loud, self-limiting failure that
-  the rollout watch in Step 6 catches immediately.
-- **A new login/auth screen.** The Ingress carries **no Authentik forward-auth
-  annotations** — access control today is the `internal` ingressClass alone. If
-  3.x introduces a first-run auth prompt, that is a UX change to note (and
-  arguably an improvement), not a failure. It does not break any automation:
-  nothing in this repo calls the RedisInsight API.
+### 1.4 Cleared worries, and the two things that actually deserve attention
+
+Checked against upstream source at both tags and the 3.x release notes, and
+**cleared**:
+
+- **`RITRUSTEDORIGINS` is inert — in 3.8.0 *and already in 2.70.1*.** A full-tree
+  grep of the 3.8.0 source for `RITRUSTEDORIGINS|RIPORT|RIHOST|RITELEMETRY` and
+  case-insensitive `trustedorigin` returns **zero hits**; the name survives only
+  in upstream's legacy reverse-proxy doc samples. The 3.x CORS knobs are
+  `RI_CORS_ORIGIN` (default `*`) and `RI_CORS_CREDENTIALS`, and `enableCors()` is
+  called unconditionally. So the env var in our manifest does nothing today and
+  will do nothing after the bump — **there is no CORS regression to fear, and no
+  rename to chase.** Leave the line alone for this run (minimal diff); removing
+  dead config is a separate trivial cleanup, noted in §6.
+- **`/api/health` is unchanged** and still served under the `api` global prefix.
+  Both probes are safe as written.
+- **No new mandatory login, no new encryption requirement.** The Docker build has
+  no app-level auth in either version (the auth module is Electron-gated), and
+  `RI_ENCRYPTION_KEY` remains optional — consistent with the running instance
+  reporting `encryptionStrategies: ["PLAIN"]`. The new OAuth work in 3.x is for
+  *connecting to* Azure-managed Redis, not for signing in to Insight. Access
+  control here stays what it is today: the `internal` ingressClass, with **no
+  Authentik forward-auth annotations** on the Ingress.
+- **Telemetry defaults are unchanged** — the `analytics` config block is identical
+  between the two tags.
+
+Two things genuinely worth attention:
+
+1. **Memory headroom.** The container limit is `512Mi` (request `256Mi`), and the
+   base image jumps `node:20.14-alpine` → `node:24.16.0-alpine` alongside a full
+   UI rewrite. Neither is a documented memory-footprint change, but a newer V8
+   plus a heavier frontend is exactly how a tight limit turns into an
+   `OOMKilled`/`CrashLoopBackOff` an hour after a "successful" window. **§4 (b)
+   checks restart count and §4 (h) checks actual usage against the limit.** If it
+   runs hot, raising the limit is a one-line follow-up commit — do **not**
+   pre-emptively raise it in the same commit as the bump, or you lose the signal.
+2. **UX changes the operator should not mistake for breakage.** 3.0.0 is a UI and
+   navigation overhaul (*"New top-level navigation that replaces the left
+   sidebar"*). 3.6.0 carries the **only item upstream labels breaking in the whole
+   3.x line**: custom Workbench tutorials are deprecated and *"the 'MY TUTORIALS'
+   section is now hidden by default"*, restorable with
+   `RI_CUSTOM_TUTORIALS_ENABLED=true`. Our `/data/tutorials` holds the bundled
+   set, not custom ones, so this should be cosmetic — but if the operator relies
+   on a custom tutorial, that flag is the fix. 3.6.0/3.8.0 also rename "Redis
+   Query Engine" to "Redis Search" in the UI.
 
 ## 2) Pre-checks
 
@@ -209,11 +279,15 @@ print('  user :', c.get('User'))
 print('  datadir:', [e for e in c.get('Env',[]) if e.startswith('RI_APP_FOLDER')])"
 done
 
-# c) THE BACKUP — this is the rollback (§1.3). 300 KB, takes a second. Not optional.
+# c) THE BACKUP — this is the rollback (§1.3). ~300 KB, takes a second. Not optional.
+#    Copy the sqlite WAL sidecars too if present, or you restore a torn database.
 POD=$(mise exec -- kubectl get pod -n databases -l app=redisinsight -o jsonpath='{.items[0].metadata.name}')
 mkdir -p /tmp/ri-backup
-mise exec -- kubectl cp "databases/$POD:/data/redisinsight.db" /tmp/ri-backup/redisinsight.db.pre-3.8.0
-ls -l /tmp/ri-backup/redisinsight.db.pre-3.8.0        # expect ~300 KB, non-zero
+mise exec -- kubectl exec -n databases "$POD" -- sh -c 'ls -l /data/redisinsight.db*'
+for f in redisinsight.db redisinsight.db-wal redisinsight.db-shm; do
+  mise exec -- kubectl cp "databases/$POD:/data/$f" "/tmp/ri-backup/$f.pre-3.8.0" 2>/dev/null || echo "  (no $f — fine)"
+done
+ls -l /tmp/ri-backup/                                 # redisinsight.db.pre-3.8.0 ~300 KB, non-zero
 
 #    plus the Longhorn floor (nightly CronJob storage/backup-of-all-volumes, 03:00).
 #    The sat-early window is 09:00, so that morning's backup should be ~6h old.
@@ -269,9 +343,12 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
      dry-run, and every Kustomization that `dependsOn` it stalls;
    - the `busybox` `fix-permissions` initContainer — still required (uid 1000
      unchanged, `/data` root owned by 1001);
-   - `RITRUSTEDORIGINS` — keep the existing spelling for this run. If §4 (e)
-     shows a browser-side origin rejection, fix it as a follow-up commit (§6),
-     not pre-emptively.
+   - `RITRUSTEDORIGINS` — leave it exactly as it is. It is **provably inert in
+     both versions** (§1.4), so removing it would be a no-op cleanup that only
+     widens the diff and muddies the revert. Clean it up separately (§6);
+   - the `resources` block — do **not** pre-emptively raise the `512Mi` limit for
+     the node:24 base. §4 (h) measures it; changing it in the same commit
+     destroys the signal.
 
 3. **Validate and push** (on `main`, stage only this file — the worktree is
    shared, per `feedback_stage_specific_hunks`):
@@ -347,12 +424,13 @@ pkill -f "port-forward -n databases svc/redisinsight" || true
 # e) THE load-bearing check is human. A healthy pod proves nothing about the UI.
 #    Open https://redisinsight.${SECRET_DOMAIN} in a browser and confirm:
 #      * the page loads over TLS with no cert error (Ingress/cert unchanged, so it should);
-#      * NO CORS / "origin not allowed" error in the browser console — that is the
-#        RITRUSTEDORIGINS rename symptom from §1.4, and /api/health will look fine while
-#        it happens;
+#      * no CORS / "origin not allowed" error in the browser console. Not expected —
+#        RI_CORS_ORIGIN defaults to `*` (§1.4) — but it is the one failure mode that
+#        leaves /api/health reporting "up" while the UI is dead, so look;
 #      * all 6 saved connections are listed, and at least TWO of them actually CONNECT
 #        and browse keys (pick one in `databases` and one in another namespace);
-#      * note whether 3.x presents a new login/auth prompt (expected-change, not a failure).
+#      * the UI looks REARRANGED — 3.0's new top-level nav replaced the left sidebar,
+#        and "Redis Query Engine" is now "Redis Search". Expected, not breakage.
 
 # f) Homepage tile still discovered (annotations untouched, so this should be a no-op)
 mise exec -- kubectl get ingress -n databases redisinsight \
@@ -362,12 +440,24 @@ mise exec -- kubectl get ingress -n databases redisinsight \
 # g) storage did not get disturbed
 mise exec -- kubectl get volume -n storage pvc-a545f6e7-2134-4b43-98b5-f0e8a3c1fe69 \
   -o custom-columns=STATE:.status.state,ROBUST:.status.robustness    # attached / healthy
+
+# h) MEMORY — the node:20 -> node:24 base + UI rewrite against a 512Mi limit (§1.4).
+#    Check right after the roll AND again before closing the window.
+mise exec -- kubectl top pod -n databases -l app=redisinsight
+mise exec -- kubectl get pods -n databases -l app=redisinsight \
+  -o jsonpath='{range .items[*].status.containerStatuses[*]}{.name}={.restartCount} lastState={.lastState}{"\n"}{end}'
+#    Anything above ~400Mi steady, or any `OOMKilled` in lastState, means the limit needs
+#    raising — do that as a SEPARATE follow-up commit, not by editing this one.
 ```
 
-Success = Kustomization Ready, live pod on `3.8.0` with 0 restarts, `/api/info`
-reporting `3.8.0`, **all 6 connection profiles present and at least two of them
-connecting from the browser**, no console CORS error, Homepage tile present, and
-the Longhorn volume attached+healthy.
+Success = Kustomization Ready, live pod on `3.8.0` with 0 restarts and no
+`OOMKilled`, `/api/info` reporting `3.8.0`, **all 6 connection profiles present
+and at least two of them connecting from the browser**, no console CORS error,
+Homepage tile present, and the Longhorn volume attached+healthy.
+
+**Do not close the window on a green rollout alone.** The realistic failure modes
+here are both delayed: an OOM under the new base image, and a profile that is
+listed but no longer connects. Give it a few minutes and re-run (d) and (h).
 
 ## 5) Rollback
 
@@ -401,6 +491,8 @@ mise exec -- kubectl wait --for=delete pod -n databases -l app=redisinsight --ti
 mise exec -- kubectl scale deploy/redisinsight -n databases --replicas=1
 mise exec -- kubectl rollout status deploy/redisinsight -n databases --timeout=300s
 POD=$(mise exec -- kubectl get pod -n databases -l app=redisinsight -o jsonpath='{.items[0].metadata.name}')
+# clear any 3.x-era WAL sidecars first, or sqlite replays them over the restored file
+mise exec -- kubectl exec -n databases "$POD" -- sh -c 'rm -f /data/redisinsight.db-wal /data/redisinsight.db-shm'
 mise exec -- kubectl cp /tmp/ri-backup/redisinsight.db.pre-3.8.0 "databases/$POD:/data/redisinsight.db"
 mise exec -- kubectl delete pod -n databases "$POD"          # single pod, no PDB — safe restart
 mise exec -- kubectl rollout status deploy/redisinsight -n databases --timeout=300s
@@ -496,7 +588,16 @@ hand in the UI in a couple of minutes. Nothing else in the cluster is affected.
   database. It gets a go/no-go. The `risk: low` rating is about **blast radius**,
   not about skipping the operator.
 
-- **Do not fold in the audit-script fix.** §1.1's `_pick_latest_semver_tag` bug
-  is a Python change plus a re-audit plus an AR/finding re-file. It belongs in
-  its own change, reviewed on its own merits — not in a maintenance window whose
-  job is to move one image tag.
+- **Watch it after the window closes, not just during it.** The two realistic
+  failure modes are delayed, not immediate: an `OOMKilled` under the node:24 base
+  against the `512Mi` limit (§1.4), and saved profiles that list but no longer
+  connect (upstream #5810, §1.3). Neither shows up in `rollout status`. If the
+  limit needs raising, that is a separate one-line commit — keeping it out of the
+  bump commit is what makes the §5 revert clean.
+
+- **Two follow-up cleanups this plan deliberately leaves undone**, so the window
+  diff stays one line: (1) drop the inert `RITRUSTEDORIGINS` env var, which is
+  dead config in both versions; (2) fix `_pick_latest_semver_tag` per §1.1 and
+  re-file AR-029 / F-6639e79c. The second is a Python change plus a re-audit plus
+  a policy edit — it belongs in its own reviewed change, not in a maintenance
+  window whose job is to move one image tag.
