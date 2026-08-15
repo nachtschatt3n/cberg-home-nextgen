@@ -1,7 +1,9 @@
 # SOP: Envoy Gateway upgrade (chart + Gateway API CRD channel)
 
-**Version:** 2026.08.16
-**Last Updated:** 2026-08-16
+> Description: Upgrading Envoy Gateway in this cluster — the `gateway-helm` chart, the Gateway API CRD channel it drags with it, and the k8s-gateway restart gate that must pass twice before the bump is considered done.
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
+> Owner: `cberg-agent / operator`
 
 ## Description
 

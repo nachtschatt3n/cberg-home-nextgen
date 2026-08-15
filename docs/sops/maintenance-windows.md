@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.02`
-> Last Updated: `2026-08-02`
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
 
 ## 1) Description
 
@@ -21,7 +21,7 @@ sweep (rule 4d) → upgrade-planner-agent  ── writes one executable plan per
 maintenance-window-agent  ── vets plans for INTERFERENCE + SIDE EFFECTS,
       │                       sequences them, operator go/no-go, executes
       ▼
-3 scheduled windows/week (runbooks/maintenance-windows.yaml)
+7 scheduled windows/week — DAILY (runbooks/maintenance-windows.yaml)
 ```
 
 Three roles, deliberately separated: the **sweep** plans + schedules + reports
@@ -34,18 +34,21 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
 
 ## 2) Overview
 
-- **Schedule:** `runbooks/maintenance-windows.yaml` — 4 windows/week
-  (Tue 05:00 + Thu 05:00 weekday 1h no-reboot slots; Sat 09:00 90m no-reboot
-  slot; Sun 09:00 90m reboot-capable operator-present slot). Sat was added
-  2026-08-02 as an aggressive-drain lever — an idle window costs nothing, so it
-  gives app-template's tiers a 2nd weekend slot (Sat+Sun) and the no-reboot
-  heavies more capacity during a backlog; drop it once drained. **Slot by
-  reboot-need, not risk:** Sun is the only reboot-capable window, so reserve it
-  for Talos + app-template churn and push every `needs_reboot: false` plan to
-  Tue/Thu/Sat. Each window has a `capacity_risk` (risk-weight budget,
-  low1/med2/high3; weekdays raised 4→6 on 2026-08-02) and an `allow_reboot`
-  flag. Times/capacities are editable
-  (git-tracked; bump `version`).
+- **Schedule:** `runbooks/maintenance-windows.yaml` — **7 windows/week
+  (DAILY since 2026-08-16)**: Mon/Tue/Wed/Thu/Fri 05:00 60m no-reboot slots;
+  Sat 09:00 90m no-reboot slot; Sun 09:00 90m reboot-capable operator-present
+  slot. Every window carries `capacity_risk: 6`. Daily replaced the 4/week
+  aggressive-drain cadence (Tue/Thu/Sat/Sun), which stretched the then-23-plan
+  queue to late October; an IDLE window costs nothing — nothing runs unless a
+  plan is slotted — so the extra weekday slots are pure optionality. **Daily
+  compresses INDEPENDENT work only: it must never be used to collapse a
+  deliberate soak** (e.g. `superset-pg-decommission` sits 10 days after the
+  cutover on purpose — the old database IS the rollback). **Slot by
+  reboot-need, not risk:** Sun is still the only reboot-capable window, so
+  reserve it for Talos + app-template churn and push every
+  `needs_reboot: false` plan to a weekday or Sat. Each window has a
+  `capacity_risk` (risk-weight budget, low1/med2/high3) and an `allow_reboot`
+  flag. Times/capacities are editable (git-tracked; bump `version`).
 - **Plans:** `runbooks/maintenance/plans/<component>-<target>.md` — frontmatter
   (component, PR, current→target, risk, duration, `needs_reboot`, precise
   `touches`, `depends_on`, `conflicts_with`, status, window) + six body sections
@@ -281,3 +284,4 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 |---|---|---|
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |
+| 2026.08.16 | 2026-08-16 | Cadence 4 windows/week -> **7 (daily)**: added Mon/Wed/Fri 05:00 60m no-reboot slots, all windows at `capacity_risk: 6`. Drains the plan queue to 2026-09-13 instead of late October. Soaks are NOT compressible by the extra slots. |

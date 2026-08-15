@@ -675,7 +675,7 @@ Changes are applied by the maintenance-window pipeline:
 - **Held updates** (majors, data migrations, reboots) get a per-update plan
   written by an `upgrade-planner-agent` under `runbooks/maintenance/plans/`,
   which the `maintenance-window-agent` vets for interference, sequences, and
-  runs operator-approved during one of the 4 windows/week defined in
+  runs operator-approved during one of the 7 windows/week (daily) defined in
   `runbooks/maintenance-windows.yaml`.
 - To hold something back, add a deny rule to `runbooks/auto-update-policy.yaml`
   (git-tracked, code-reviewed) — not an ad-hoc skip.
