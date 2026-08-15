@@ -81,6 +81,56 @@ spec:
         ALLOW_REGISTRATION: "false"
         SEARCH: "true"
 
+        # --- Authentik OIDC (SSO) ---------------------------------------
+        # Authentik is the identity source. ALLOW_REGISTRATION stays "false":
+        # that flag gates the LOCAL email/password signup form only. The OIDC
+        # path is separate and auto-provisions on first login —
+        # api/strategies/openidStrategy.js:processOpenIDAuth() calls
+        # createUser() when no local user matches, and its `existingUsersOnly`
+        # argument is undefined for the login strategy (createOpenIDCallback()
+        # is invoked with no args), so it is falsy. No local account and no
+        # open registration are needed. Verified against the running v0.8.7
+        # image, not the docs.
+        #
+        # ALLOW_SOCIAL_LOGIN is load-bearing: api/server/index.js only calls
+        # configureSocialLogins(app) — which is what runs setupOpenId() and
+        # registers the 'openid' passport strategy — inside
+        # `if (isEnabled(ALLOW_SOCIAL_LOGIN))`. Without it the /oauth/openid
+        # route 500s even though every OPENID_* value below is correct.
+        # ALLOW_SOCIAL_REGISTRATION is deliberately NOT set: it gates
+        # strategies/socialLogin.js (Google/GitHub/Discord/Apple), which the
+        # openid strategy does not go through.
+        ALLOW_SOCIAL_LOGIN: "true"
+
+        # openid-client v6 `client.discovery()` appends
+        # /.well-known/openid-configuration to this URL, and validates the
+        # discovered `issuer` claim against it — so the trailing slash must
+        # stay (Authentik issues the slug URL WITH it).
+        OPENID_ISSUER: "https://auth.${SECRET_DOMAIN}/application/o/librechat/"
+        # The strategy builds its callback as DOMAIN_SERVER + this path, and
+        # the oauth router is mounted at /oauth (api/server/index.js), so this
+        # is the only value that can match the blueprint's redirect_uri.
+        OPENID_CALLBACK_URL: "/oauth/openid/callback"
+        OPENID_SCOPE: "openid profile email"
+        OPENID_BUTTON_LABEL: "Sign in with Authentik"
+
+        # Promote Authentik admins to LibreChat ADMIN. Needed because nothing
+        # else does: the first-user-becomes-admin logic lives in
+        # AuthService.registerUser (the LOCAL registration path), and
+        # createUser() defaults role to SystemRoles.USER — so an OIDC-created
+        # user is a plain USER unless this mapping fires. The `groups` claim is
+        # carried by Authentik's managed scope-profile mapping, which the
+        # blueprint binds. All three variables are required together
+        # (openidStrategy.js guards on `adminRole && path && kind`); if the
+        # claim is ever missing the branch is a no-op and login still succeeds
+        # as USER, so this cannot lock anyone out.
+        OPENID_ADMIN_ROLE: "authentik Admins"
+        OPENID_ADMIN_ROLE_PARAMETER_PATH: "groups"
+        OPENID_ADMIN_ROLE_TOKEN_KIND: "userinfo"
+        # OPENID_CLIENT_ID / OPENID_CLIENT_SECRET / OPENID_SESSION_SECRET come
+        # from the SOPS secret `librechat-credentials-env` (envFrom secretRef,
+        # applied AFTER this ConfigMap so secret values win on any collision).
+
       configYamlContent: |
         version: 1.2.1
         endpoints:
