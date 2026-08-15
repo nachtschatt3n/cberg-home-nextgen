@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.08.07`
-> Last Updated: `2026-08-07`
+> Version: `2026.08.15`
+> Last Updated: `2026-08-15`
 > Owner: `Platform`
 
 ---
@@ -425,8 +425,23 @@ kubectl port-forward -n monitoring svc/kibana-kb-http 5601:5601 &
 1. Open Kibana → Discover
 2. Select index pattern `logs-generic-default`
 3. Set time range (e.g., last 1 hour)
-4. Filter by `kubernetes.namespace.name: {namespace}`
-5. Search for errors: `log: error OR log: Error OR log: ERROR`
+4. Filter by `resource.attributes.k8s.namespace.name: {namespace}`
+   (and `resource.attributes.k8s.container.name: {container}` to narrow further)
+5. Search for errors with a **wildcard**: `body.text: *rror*`
+
+> **These field names matter, and the old ones failed silently.** Until
+> 2026-08-15 this workflow said to filter on `kubernetes.namespace.name` and
+> search `log: error`. Neither `kubernetes.*` nor `log` exists in the current
+> mapping, and `body.text` is mapped as a **`keyword`** (`ignore_above: 1024`),
+> not analysed text — so `match` / `query_string` full-text searches return
+> **zero hits rather than an error**. Following the old steps during an
+> incident produced a confident "no errors in the logs" for a pod that was
+> visibly failing. Use `wildcard` / `regexp` / `term` on `body.text`, never a
+> full-text match.
+>
+> **Always prove the query path before trusting a zero.** Search a term you
+> know is present (e.g. `body.text: *readiness*`) first; if the control also
+> returns 0, the query is wrong, not the cluster.
 
 ### edot-collector
 
