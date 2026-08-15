@@ -186,9 +186,11 @@ Flux prunes).
 > rollback.** The bundle ships a `ValidatingAdmissionPolicy`
 > `safe-upgrades.gateway.networking.k8s.io` (binding
 > `validationActions: [Deny]`, `failurePolicy: Fail`) whose CEL rejects any
-> CRD annotated with a `bundle-version` matching `v1.[0-5].\d+`. The v1.5.1
-> set you would revert TO matches that pattern, and the live v1.6.1 policy is
-> still in force while the revert is applied. Its deny message is also stale
+> CRD annotated with a `bundle-version` below a floor. **The floor advances
+> with every bundle** — v1.5.1 denied `v1.[0-4].\d+`, v1.6.1 denies
+> `v1.[0-5].\d+` — so each bundle blocks the one you would roll back to.
+> This generalises: expect it on every future channel bump, not just this
+> one. The live v1.6.1 policy is still in force while the revert is applied. Its deny message is also stale
 > — it claims "before v1.5.0" while the regex blocks through v1.5.x — so an
 > operator mid-rollback gets a message that looks inapplicable.
 > **The VAP and its binding are Flux-managed** (they live inside
