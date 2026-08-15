@@ -32,7 +32,7 @@ spec:
           bundle-install:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: development-20260815091422 # {"$imagepolicy": "my-software-development:absenty:tag"}
+              tag: development-20260815093942 # {"$imagepolicy": "my-software-development:absenty:tag"}
             command:
               - bash
               - -lc
@@ -41,7 +41,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: development-20260815091422 # {"$imagepolicy": "my-software-development:absenty:tag"}
+              tag: development-20260815093942 # {"$imagepolicy": "my-software-development:absenty:tag"}
               pullPolicy: Always
             command:
               - bash
@@ -64,6 +64,14 @@ spec:
                 value: "1"
               - name: RAILS_ALLOW_ALL_HOSTS
                 value: "true"
+              # The image is read-only for the app user, so Rails' development
+              # schema dump makes db:prepare exit 1 AFTER applying migrations:
+              # the pod restarts, finds them applied, and comes up clean. Opting
+              # out removes that restart and its spurious alert. Local developer
+              # workflow is unaffected -- the app only skips the dump when this
+              # is set, and it is set nowhere else.
+              - name: RAILS_SKIP_SCHEMA_DUMP
+                value: "1"
               - name: DATABASE_URL
                 value: "sqlite3:///data/absenty-development.sqlite3"
             envFrom:
