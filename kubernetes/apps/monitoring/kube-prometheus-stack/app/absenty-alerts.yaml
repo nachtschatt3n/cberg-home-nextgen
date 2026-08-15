@@ -1,0 +1,66 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: absenty-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: absenty.pods.health
+    rules:
+    - alert: AbsentyPodNotReady
+      annotations:
+        description: Absenty pod {{ $labels.pod }} in {{ $labels.namespace }} has
+          been not ready for more than 5 minutes. The employee portal is likely
+          unreachable on its ingress.
+        summary: Absenty pod {{ $labels.pod }} is not ready ({{ $labels.namespace }})
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace=~"my-software-(production|development)", pod=~"absenty-.*", condition="true"}
+        ) == 0
+      for: 5m
+      labels:
+        category: my-software
+        component: absenty
+        severity: critical
+    - alert: AbsentyPodCrashLooping
+      annotations:
+        description: Absenty pod {{ $labels.pod }} in {{ $labels.namespace }} has
+          restarted {{ $value | printf "%.0f" }} times in the last 15 minutes.
+          Image automation is armed for this app, so first suspect a bad image
+          rolled in automatically -- check the deployed tag against the previous
+          one and re-pin if needed.
+        summary: Absenty pod {{ $labels.pod }} is crash looping ({{ $labels.namespace }})
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace=~"my-software-(production|development)", pod=~"absenty-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: my-software
+        component: absenty
+        severity: critical
+    # A single restart in my-software-development is EXPECTED whenever a
+    # migration batch lands: db:prepare applies the migrations, Rails then tries
+    # to dump db/schema.rb onto the read-only image and exits 1, and the retry
+    # starts clean. Warning-only, and the crash-loop rule above is what escalates
+    # if it does not settle. Production does not do this --
+    # config/environments/production.rb sets dump_schema_after_migration = false.
+    - alert: AbsentyPodRestarted
+      annotations:
+        description: Absenty pod {{ $labels.pod }} in {{ $labels.namespace }} has
+          restarted at least once in the last 15 minutes. A single restart in
+          my-software-development right after a deploy is the known schema-dump
+          exit and settles by itself; anything else, or any restart in
+          my-software-production, is worth a look.
+        summary: Absenty pod {{ $labels.pod }} restarted ({{ $labels.namespace }})
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace=~"my-software-(production|development)", pod=~"absenty-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: my-software
+        component: absenty
+        severity: warning
