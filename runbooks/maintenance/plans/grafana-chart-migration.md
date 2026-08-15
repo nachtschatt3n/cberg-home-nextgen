@@ -3,7 +3,7 @@ plan_id: grafana-chart-migration
 component: grafana
 pr: null
 kind: chart
-current: "chart 10.5.15 (grafana.github.io, frozen) / Grafana app 12.4.8 (image-pinned)"
+current: "chart 10.5.15 (grafana-community — stage 1 landed 0f8baf00) / Grafana app 12.4.8 (image-pinned)"
 target: "chart 12.10.4 (grafana-community.github.io) / Grafana app 13.1.3 — delivered in 4 stages"
 update_type: major
 risk: high
@@ -25,7 +25,7 @@ sops_refs:
   - docs/sops/backup.md
 generated: "2026-08-14"
 superseded_by:
-  - grafana-repo-swap
+  - grafana-repo-swap                  # EXECUTED 2026-08-15 (0f8baf00); plan file deleted
   - grafana-chart-11
   - grafana-chart-12
   - grafana-13-app
@@ -41,7 +41,7 @@ revertible state.
 
 | # | plan | what moves | risk | est | window |
 |---|---|---|---|---|---|
-| 1 | [`grafana-repo-swap`](grafana-repo-swap.md) | HelmRepository URL → `grafana-community`; **chart stays 10.5.15** | low | 30 m | `tue-early:2026-08-18` |
+| 1 | `grafana-repo-swap` — **EXECUTED 2026-08-15, commit `0f8baf00`** (plan file deleted per README) | HelmRepository URL → `grafana-community`; **chart stays 10.5.15** | low | 30 m | ~~`tue-early:2026-08-18`~~ ran early |
 | 2 | [`grafana-chart-11`](grafana-chart-11.md) | chart 10.5.15 → **11.6.1**; app stays 12.4.8 | medium | 45 m | `thu-early:2026-08-27` |
 | 3 | [`grafana-chart-12`](grafana-chart-12.md) | chart 11.6.1 → **12.10.4**; app *still* 12.4.8 | medium | 45 m | `tue-early:2026-09-01` |
 | 4 | [`grafana-13-app`](grafana-13-app.md) | drop the image pin → **Grafana 13.1.3** | high | 60 m | `sat-early:2026-09-26` |
@@ -68,7 +68,8 @@ is not a rollback there. Isolating it is the point of the split.
 
 ## Facts carried forward from the original plan
 
-- **The pinned repo is frozen**, not merely behind: `grafana.github.io/helm-charts`
+- **The formerly pinned repo is frozen** (stage 1 has since repointed us at
+  `grafana-community`), not merely behind: `grafana.github.io/helm-charts`
   newest grafana chart is 10.5.15 / appVersion 12.3.1 (2026-01-30).
   `check-all-versions.py` reports grafana as "latest ✅" because it asks a repo that
   stopped answering.

@@ -3,7 +3,7 @@ plan_id: grafana-chart-11
 component: grafana
 pr: null
 kind: chart
-current: "chart 10.5.15 (grafana-community) / Grafana app 12.4.8 (image-pinned)"
+current: "chart 10.5.15 (grafana-community, source swapped in 0f8baf00) / Grafana app 12.4.8 (image-pinned)"
 target: "chart 11.6.1 (grafana-community) / Grafana app 12.4.8 (image pin RETAINED)"
 update_type: major                    # chart major 10 → 11; the application does NOT move
 risk: medium
@@ -18,7 +18,9 @@ touches:
     - "datasource provisioning: Prometheus, Unpoller InfluxDB, InfluxDB, TeslaMate, Pellets, Elasticsearch"
     - pvc/grafana-config               # grafana.db (SQLite) — NOT migrated by this stage
   shared: [monitoring]
-depends_on: [grafana-repo-swap]
+depends_on: []                        # stage 1 (grafana-repo-swap) LANDED 2026-08-15 as 0f8baf00;
+                                      # plan file deleted per the plans README convention.
+                                      # Pre-check (a) below re-asserts the live source URL anyway.
 conflicts_with: [kube-prometheus-stack-88]
 status: draft
 window: "thu-early:2026-08-27"
