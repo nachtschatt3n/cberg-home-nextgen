@@ -10,6 +10,29 @@ Plans are transient: once `status: executed` (and the change is in `main`),
 delete the file in the same commit that lands the upgrade — don't accumulate
 history here (git has it).
 
+## What counts as an "open plan" — three tiers
+
+`python3 runbooks/maintenance-plan.py --open` is the canonical answer. A flat
+file count is misleading, because three different things live in this directory:
+
+| Tier | What it is | How to spot it |
+|---|---|---|
+| **EXECUTABLE** | A unit of work someone can run in a window. This is what "open plans" should mean. | has a `window:` |
+| **PROGRAMME** | A parent/index doc for work split into stages. Carries the goal and the total duration; the *stages* are the executable units. | `status: superseded` + `target:` says "delivered in N stages" |
+| **REFERENCE** | Deliberately unwindowed — break-glass contingencies, or attended projects that do not belong in the window system at all. | no `window:`, and that is intentional |
+
+Counting all three together turns 24 real pieces of work into "33 plans", which
+is how a queue starts looking unmanageable when it isn't.
+
+Two reference cases worth knowing, because both look like neglect and are not:
+
+- **`ingress-nginx-1.15.6`** — superseded by the Envoy migration, kept as a
+  break-glass contingency. Revive it if the migration slips badly or an
+  actively-exploited critical lands on the pinned version mid-migration.
+- **`envoy-gateway-phase1..4`** — an attended project. Phase 2 alone is 120 min
+  against a 90 min maximum window, and the phases are strictly sequential, so
+  shuffling cannot make them fit. They run attended, outside the window system.
+
 ## Required frontmatter
 
 ```yaml

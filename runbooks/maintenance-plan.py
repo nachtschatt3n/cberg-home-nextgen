@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
@@ -288,13 +289,73 @@ def human(r, cfg):
     return "\n".join(L)
 
 
+
+def open_queue(cfg) -> str:
+    """The canonical answer to "what plans are open?".
+
+    Separates three things a flat file count conflates:
+      EXECUTABLE  a unit of work someone can actually run in a window
+      PROGRAMME   a parent/index doc whose stages are the executable units;
+                  status:superseded, carries the goal and total duration
+      REFERENCE   deliberately unwindowed — break-glass contingencies, or
+                  attended projects that do not belong in the window system
+    Counting all three together is how "33 plans" becomes a misleading answer.
+    """
+    plans = load_plans(cfg)
+    ex, prog, ref = [], [], []
+    for pl in plans:
+        st, w = pl.get("status"), pl.get("window")
+        if st in ("executed",):
+            continue
+        if st == "superseded":
+            (ref if not _has_stages(pl, plans) else prog).append(pl)
+        elif w:
+            ex.append(pl)
+        else:
+            ref.append(pl)
+    out = ["== open plans ==", ""]
+    out.append(f"EXECUTABLE ({len(ex)}) — scheduled into a window")
+    for pl in sorted(ex, key=lambda x: (str(x.get("window")), x.get("plan_id") or "")):
+        out.append(f"  {str(pl.get('window')):<22} {pl.get('plan_id'):<36} "
+                   f"{str(pl.get('status')):<10} {str(pl.get('risk')):<7} "
+                   f"{pl.get('est_duration_min')}min")
+    out += ["", f"PROGRAMME ({len(prog)}) — index docs; their stages are above"]
+    for pl in sorted(prog, key=lambda x: x.get("plan_id") or ""):
+        out.append(f"  {pl.get('plan_id'):<36} total {pl.get('est_duration_min')}min")
+    out += ["", f"REFERENCE / UNWINDOWED ({len(ref)}) — deliberately not in a window"]
+    for pl in sorted(ref, key=lambda x: x.get("plan_id") or ""):
+        out.append(f"  {pl.get('plan_id'):<36} {str(pl.get('status')):<11} "
+                   f"{pl.get('est_duration_min')}min")
+    out += ["", f"total files {len(plans)}  |  executable {len(ex)}  "
+                f"programme {len(prog)}  reference {len(ref)}"]
+    return "\n".join(out)
+
+
+def _has_stages(parent, plans) -> bool:
+    """True if this plan is a PARENT INDEX whose work was split into stages.
+
+    Keyed on the authoring convention: a parent's `target` says "delivered in
+    N stages". Deliberately NOT "some other plan mentions this id" — that also
+    matches a superseded plan referenced by whatever replaced it, which is a
+    different thing entirely. ingress-nginx-1.15.6 is the case in point: it is
+    superseded by the Envoy migration and kept as a BREAK-GLASS contingency,
+    not split into stages of itself, so it belongs under reference.
+    """
+    return "delivered in" in str(parent.get("target") or "").lower()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--open", action="store_true",
+                    help="canonical open-plan queue, split executable/programme/reference")
     args = ap.parse_args(argv)
     cfg = load_windows()
     today = datetime.now().date()
     r = reconcile(cfg, today)
+    if args.open:
+        print(open_queue(cfg))
+        return 0
     if args.json:
         print(json.dumps(r, indent=2))
     else:
