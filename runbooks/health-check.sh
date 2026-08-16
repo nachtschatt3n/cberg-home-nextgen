@@ -813,7 +813,11 @@ log_section "Section 5: Helm Deployments"
 
     TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
     # Count kustomizations where READY column (col 5) is not True — resilient to mid-reconciliation message changes
-    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | awk '\$5 != \"True\"' | wc -l")
+    # Count DISTINCT not-Ready kustomizations from the API, not table lines: a
+    # single failing kustomization wraps its multi-line MESSAGE (e.g. a SOPS
+    # decryption stack trace) across ~12 table rows, and `awk '$5 != "True"'`
+    # counted each wrapped row as a separate "not reconciled" entry (false 12).
+    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'")
 
     echo ""
     echo "Kustomizations: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
@@ -1894,7 +1898,11 @@ log_section "Section 20: GitOps Status"
     echo ""
 
     # Count kustomizations where READY column (col 5) is not True — resilient to mid-reconciliation message changes
-    NOT_RECONCILED=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | awk '\$5 != \"True\"' | wc -l")
+    # Count DISTINCT not-Ready kustomizations from the API, not table lines: a
+    # single failing kustomization wraps its multi-line MESSAGE (e.g. a SOPS
+    # decryption stack trace) across ~12 table rows, and `awk '$5 != "True"'`
+    # counted each wrapped row as a separate "not reconciled" entry (false 12).
+    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'")
     TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
     echo "Kustomization status: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 
