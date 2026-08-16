@@ -7,4 +7,5 @@ components:
   - ../../flux/components/common
 resources:
   - ./zuhause-betreut/ks.yaml
+  - ./kfa-medienarchiv/ks.yaml
   - ./mangold-smarthomeadvisor/ks.yaml
