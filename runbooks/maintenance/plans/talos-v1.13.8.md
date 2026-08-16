@@ -23,8 +23,8 @@ depends_on: []
 conflicts_with: []                  # SOLO window — never alongside app plans;
                                     # multiple reboots must serialize with full
                                     # node-Ready + Longhorn reconvergence between
-status: scheduled
-window: "sun-window:2026-08-16"     # operator-scheduled 2026-08-07 (reboot-capable slot)
+status: partial            # 1/3 nodes on v1.13.8 (sun-window:2026-08-16)
+window: "sun-window:2026-08-23"     # RESUME nodes 02+03 (next reboot-capable slot)
 auto_execute: false                 # node reboots → always operator-present go/no-go
 sops_refs:
   - docs/sops/talos-upgrade.md      # THE procedure — this plan defers to it
@@ -98,3 +98,64 @@ leave the cluster mixed (supported) until diagnosed.
   (2026-08-15): the envoy chain is BLOCKED — phase 0 was rolled back after the
   Gateway API CRDs took internal DNS down (see envoy-gateway-phase0.md §0).
   Do NOT pick up any envoy-gateway-phase* plan in this window.
+
+
+## 7. Execution record — sun-window:2026-08-16 (PARTIAL, 1/3 nodes)
+
+**Result: node 01 upgraded to v1.13.8. Nodes 02 + 03 remain on v1.13.7.**
+Mixed patch versions across nodes is a supported Talos state; cluster left
+fully healthy (80/80 Longhorn volumes healthy, Flux 0 not-ready, DNS + both
+ingress VIPs verified serving).
+
+### What happened
+- **node 01 (192.168.55.11) — SUCCESS.** `task talos:upgrade-node IP=192.168.55.11`,
+  6m28s. Ephemeral partition is wiped by this upgrade path, so 49/65 replicas
+  rebuilt; full Longhorn reconvergence to 0 degraded took a further ~6 min.
+- **node 02 (192.168.55.12) — ABORTED, not upgraded.** The drain hit the
+  documented Longhorn `instance-manager` PDB block and timed out after ~5 min:
+  `error when waiting for pod "instance-manager-…" in namespace "storage" to
+  terminate: context deadline exceeded`. The task exited before the upgrade ran;
+  the node was left **cordoned but still v1.13.7**.
+- **Knock-on incident.** With node 02 cordoned, its evicted workloads all landed
+  on node 01, and 34 RWO volumes wedged in `attaching` with 37 pods `Pending`
+  (`AttachVolume.Attach failed … DeadlineExceeded`). Node 01 was NOT resource
+  constrained (67% cpu / 66% mem) — this was Longhorn attach-concurrency, not
+  scheduling pressure.
+- **Recovery.** Uncordon node 02 (restores its instance-manager, which the cordon
+  was itself blocking), then delete the 37 `Pending` pods so the scheduler
+  redistributes them across all three nodes. Full recovery in ~8 min:
+  0 pending, 80/80 volumes healthy.
+
+### Why the roll was stopped at one node
+Not a time-only decision. The drain path is currently broken on this cluster, and
+the plumbed workaround (`EXTRA_FLAGS='--drain=false'`) is **untested here** and
+plausibly worse — it skips graceful eviction, so it could reproduce the same
+mass-reschedule pile-up less gracefully. Retrying into a known-bad path with
+~35 min left, after an incident that took ~18 min to recover, risked ending the
+window mid-roll on a degraded cluster.
+
+### Before resuming nodes 02 + 03 — do this first
+1. **Investigate the `instance-manager` PDB drain block.** It is described in
+   `.taskfiles/talos/Taskfile.yaml` as "the node-03 footgun"; it fired on
+   **node 02** this time, so it is not node-specific. Establish whether
+   `--drain=false` is actually safe here, or whether Longhorn needs its
+   `instance-manager` PDB / `node-drain-policy` setting adjusted before a drain.
+2. **Expect the ephemeral wipe.** Each node loses its replicas and rebuilds
+   (~6 min at 80 volumes). Budget ~13-15 min per node end-to-end, and never
+   start the next node before `degraded == 0`.
+3. **Watch for the attach pile-up.** If a drain aborts again, uncordon the node
+   first (the cordon blocks instance-manager recovery), then delete `Pending`
+   pods to spread attach load. Do not wait it out — it did not self-resolve.
+
+### Verified good after the window (evidence, not Ready=True)
+- k8s-gateway restarted twice unplanned (node 01 → 02 → 01) with the new
+  Gateway API CRDs and logged `Synced all required resources`, **0** `could not
+  sync` / `failed to list`. The latent CRD failure did **not** fire.
+- DNS via 192.168.55.101 returns the correct VIPs by hand-check: internal hosts
+  → 192.168.55.100, external hosts → 192.168.55.102 (not merely "some 192.168.x.x").
+  Live HTTPS through both VIPs returns 302 (auth redirect).
+- MariaDB digest-pinned image **pulled successfully on a cold node** (7.6s from
+  registry) — the `IfNotPresent`/`latest`-digest ImagePullBackOff risk did not
+  materialise.
+- LibreChat logged `Connected to MongoDB` after its pod moved; NetworkPolicy OK.
+- ingress-nginx serving all 102 ingresses; Envoy untouched (still 1 HTTPRoute).
