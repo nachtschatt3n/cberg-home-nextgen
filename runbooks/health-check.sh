@@ -3964,17 +3964,19 @@ except:
             echo ""
         fi
 
-        # Critical pattern check -- FATAL severity_text + OOMKilled in body
+          # Critical pattern check -- fatal/OOM log TEXT via body.text wildcard.
+          # severity_text is dead (see §34); `match` on the `body` object matched 0.
+          # AUTHORITATIVE OOM count is OOM_COUNT above (events reason=OOMKilled);
+          # OOMKilled is a pod-status reason, not a log line. This catches fatal text only.
         echo "Checking for critical error patterns..."
         FATAL_COUNT=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
           "query": {
             "bool": {
               "should": [
-                {"terms": {"severity_text": ["FATAL", "fatal"]}},
-                {"match": {"body": "OOMKilled"}},
-                {"match": {"body": "out of memory"}}
-              ],
+                  {"wildcard": {"body.text": {"value": "*fatal*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*out of memory*", "case_insensitive": true}}}
+                ],
               "minimum_should_match": 1,
               "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
