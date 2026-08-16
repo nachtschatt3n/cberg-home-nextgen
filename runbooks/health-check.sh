@@ -3771,6 +3771,12 @@ except: print('0')
     echo "=== Elasticsearch Cluster Health ==="
     ES_PW_EARLY=$(kubectl get secret -n monitoring elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' 2>/dev/null | base64 -d || echo "")
     if [ -n "$ES_PW_EARLY" ]; then
+        # Free the port first: leaked port-forwards from prior/crashed runs (or a
+        # concurrent sweep sibling) leave 9201 bound, so a fresh `kubectl
+        # port-forward 9201:9200` fails with "address already in use" and the
+        # health probe reports "unknown" forever. Same preflight the 9202
+        # enrichment block already uses. (Guard below still degrades safely.)
+        lsof -ti:9201 2>/dev/null | xargs kill 2>/dev/null || true
         kubectl port-forward -n monitoring svc/elasticsearch-es-http 9201:9200 > /dev/null 2>&1 &
         ES_PF_PID=$!
 
