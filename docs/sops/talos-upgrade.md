@@ -454,12 +454,39 @@ a *different, unrelated* volume than the one you are trying to attach — do not
 chase the volume in the pod's error, chase the one named in the `config file
 ... invalid` line.
 
-**Fix.** Remove only the unparseable record(s) under `/var/lib/iscsi/nodes/` on
-that node (short-lived privileged pod pinned with `nodeName`, hostPath mount of
-`/var/lib/iscsi`). These are client-side connection records; Longhorn recreates
-them on the next attach, so removal is safe and needs no GitOps change. Then
-delete the stuck pod to retrigger the attach. Verify by re-running the
-attached-per-node count above and confirming the node now holds a volume.
+**Why only one node.** Records under `nodes/` are (re)written when a volume
+attaches. On 2026-08-16 the counts were exactly `39 / 40 / 1` records against
+`39 / 40 / 1` attached volumes — nodes 01 and 02 each re-attached ~40 volumes
+after their reboots, which rewrote every record in the current format. Node 03
+came back holding records for volumes that had since moved elsewhere, so nothing
+ever rewrote them and they stayed in the old format. **Any node that reboots
+while holding records for volumes it no longer owns is exposed.** A node whose
+record count far exceeds its attached-volume count is the tell. (5 of node 03's
+6 records were poisoned, not just one — check them all, don't stop at the first.)
+
+**Inspect (read-only, no workload needed) — the easy way:**
+
+```bash
+talosctl -n <node-ip> list /var/lib/iscsi/nodes
+talosctl -n <node-ip> read /var/lib/iscsi/nodes/<target>/<portal>/default | grep conn_reopen
+```
+
+**Fix.** Remove only the unparseable records under `/var/lib/iscsi/nodes/`.
+These are client-side connection records; Longhorn recreates them on the next
+attach, so removal is safe and needs no GitOps change.
+
+> **Do not reach for a plain `hostPath: /var/lib/iscsi` pod — it does not work
+> here.** Although `talosctl` shows `/var/lib/iscsi` as a normal directory on the
+> host root, the kubelet's hostPath admission check fails it
+> (`hostPath type check failed: /var/lib/iscsi is not a directory`), because the
+> directory is owned by the `ext-iscsid` extension's mount namespace. Use a pod
+> with `hostPID: true` reaching it via `/proc/<iscsid-pid>/root/var/lib/iscsi`
+> (verified working), or stay read-only with `talosctl read` above.
+
+Pre-flight before deleting any record: confirm the volumes those records name are
+attached on *other* nodes (or gone), and that `iscsiadm -m session` reports no
+active session for them. Then verify by re-running the attached-per-node count
+above and confirming the node now holds a volume.
 
 **Do not** reboot, cordon, drain, or reset the node for this, and do not delete
 any PV/PVC/Longhorn Volume or Replica — it is a host-state file problem only.
