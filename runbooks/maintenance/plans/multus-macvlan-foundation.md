@@ -24,7 +24,17 @@ touches:
     - "esphome: hostNetwork=false -> plain pod network + ping status + use_address (easy win, needs NO macvlan)"
   shared: [cni-adjacent]            # do NOT co-schedule with any Cilium/Talos plan
 depends_on: []                      # independent of the EG migration
-conflicts_with: [talos-v1.13.8]     # never in the same window as a Talos change
+conflicts_with: []                    # RESOLVED 2026-08-16: was [talos-v1.13.8], dropped
+                                      # because that work SHIPPED (all 3 nodes on v1.13.8, plan
+                                      # retired). An unresolvable conflicts_with is silently
+                                      # UNENFORCED — it reads as a guard while being none.
+                                      #
+                                      # The interference SURFACE survives the id: never
+                                      # co-schedule this with a Talos node-reboot roll. A rolling
+                                      # drain wipes the ephemeral partition and rebuilds ~50 of 65
+                                      # Longhorn replicas per node; stacking CNI-layer changes on
+                                      # that is how 2026-08-16 produced a 34-volume / 37-pod attach
+                                      # pile-up. Re-point at the next talos-* plan when written.
 status: scheduled
 window: null                          # UNSCHEDULED 2026-08-16. 90m of work against a 90m maximum
                                       # window — zero rollback slack, the same TIGHT condition that

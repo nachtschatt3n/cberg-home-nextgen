@@ -36,8 +36,20 @@ touches:
     - cloudflared                   # the external tunnel is ITSELF an app-template wrapper — its delete+recreate blips ALL externally-exposed apps; do it LAST, own tier
     # NOT touched: cert-manager, cilium/cni, coredns, longhorn (no PVC deletes; no volumeClaimTemplates in scope)
 depends_on: []
-conflicts_with:
-  - talos-v1.13.8                   # reboot window; do not stack a mass workload churn on top of node drains.
+conflicts_with: []                    # see below
+  #
+  # RESOLVED 2026-08-16: the `talos-v1.13.8` guard is dropped because that work
+  # SHIPPED — all three nodes are on v1.13.8 and the plan was retired. You cannot
+  # contend for a window with a completed upgrade, and leaving the id here produced
+  # a standing DEAD-REF warning (an unresolvable conflicts_with is silently
+  # UNENFORCED, so it reads as a guard while being none).
+  #
+  # The interference SURFACE is real and survives the id: do not co-schedule this
+  # plan with a Talos node-reboot roll. A rolling drain wipes the ephemeral
+  # partition and rebuilds ~50 of 65 Longhorn replicas per node; stacking mass
+  # workload churn on top of that is what produced the 34-volume / 37-pod attach
+  # pile-up on 2026-08-16. Re-point this at the next talos-* plan when one is
+  # written.
                                     # 2026-08-15 vetting: was `talos-v1.13.7`, a plan_id that no longer
                                     # exists (that upgrade executed; its file was retired). A conflicts_with
                                     # pointing at a non-existent plan is silently UNENFORCED, so this guard
