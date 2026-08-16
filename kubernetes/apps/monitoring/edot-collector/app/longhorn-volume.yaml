@@ -1,0 +1,20 @@
+---
+# NOTE: this Volume CR is deliberately NOT in kustomization.yaml.
+# The edot-collector Flux Kustomization sets targetNamespace: monitoring, which
+# would silently override `namespace: storage` here and create a duplicate the
+# Longhorn manager ignores — leaving the PVC Pending forever.
+# Apply by hand, once:
+#   kubectl apply -f kubernetes/apps/monitoring/edot-collector/app/longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: edot-collector-queue
+  namespace: storage
+spec:
+  size: "10737418240"  # 10Gi in bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

@@ -18,9 +18,9 @@ spec:
         # Uses send_failed metrics which increment on every rejected bulk flush.
         - alert: EdotCollectorESAuthError
           expr: |
-            increase(otelcol_exporter_send_failed_log_records{exporter=~"elasticsearch/.*"}[5m]) > 0
+            increase(otelcol_exporter_send_failed_log_records_total{exporter=~"elasticsearch/.*"}[5m]) > 0
             or
-            increase(otelcol_exporter_send_failed_metric_points{exporter=~"elasticsearch/.*"}[5m]) > 0
+            increase(otelcol_exporter_send_failed_metric_points_total{exporter=~"elasticsearch/.*"}[5m]) > 0
           for: 3m
           labels:
             severity: critical
@@ -38,8 +38,11 @@ spec:
 
         # General export failures (non-auth: network, ES overload, etc.)
         - alert: OtelCollectorExportFailed
-          expr: increase(otelcol_exporter_send_failed_log_records{exporter=~"elasticsearch/.*"}[5m]) > 500
-          for: 10m
+          expr: increase(otelcol_exporter_send_failed_log_records_total{exporter=~"elasticsearch/.*"}[5m]) > 500
+          # for: 10m would NOT have fired on the 2026-08-16 loss event: the
+          # corrected expression held true for only 7.5m (10:13:30-10:21:00).
+          # 5m is satisfied by that observed event with margin.
+          for: 5m
           labels:
             severity: warning
             category: logging
@@ -52,19 +55,42 @@ spec:
               connectivity or authentication issues. Check edot-collector logs and ES
               cluster health.
 
-        - alert: OtelCollectorDroppedLogs
-          expr: increase(otelcol_processor_dropped_log_records_total[5m]) > 0
+        # 2026-08-16: replaced OtelCollectorDroppedLogs, which keyed off
+        # `otelcol_processor_dropped_log_records_total` — a name this collector
+        # emits under NO condition (absent from the /metrics name list and from
+        # 7d of Prometheus history; it was removed upstream when per-processor
+        # accepted/refused/incoming/outgoing counters replaced the aggregate
+        # "dropped" family). The rule therefore evaluated to an empty vector and
+        # sat `inactive, health=ok` forever: green because it matched nothing.
+        #
+        # Its INTENT — "telemetry was permanently lost inside the collector" —
+        # splits across two real loss paths:
+        #   1. rejected downstream after enqueue -> otelcol_exporter_send_failed_*
+        #      (covered by EdotCollectorESAuthError / OtelCollectorExportFailed above)
+        #   2. refused at INTAKE, when memory_limiter applies backpressure and the
+        #      receiver returns an error to the sender -> the records never enter a
+        #      queue and are lost at the source. That is this rule.
+        # Deliberately NOT using otelcol_exporter_enqueue_failed_* — that family is
+        # also an empty vector here, so it would have reproduced the same defect.
+        - alert: OtelCollectorRecordsRefused
+          expr: |
+            increase(otelcol_receiver_refused_log_records_total[5m]) > 0
+            or
+            increase(otelcol_receiver_refused_metric_points_total[5m]) > 0
           for: 1m
           labels:
             severity: critical
             category: logging
             component: otel-collector
           annotations:
-            summary: "OTel collector dropping log records on {{ $labels.instance }}"
+            summary: "OTel collector refusing telemetry at intake on {{ $labels.instance }} ({{ $labels.receiver }})"
             description: >-
-              OTel collector on {{ $labels.instance }} dropped {{ $value }} log records
-              in the last 5 minutes due to memory limiter or queue overflow.
-              Logs are being permanently lost. Check memory usage and ES write health.
+              Receiver {{ $labels.receiver }} on {{ $labels.instance }} refused
+              {{ $value }} records in the last 5 minutes — memory_limiter backpressure
+              or a full pipeline. Refused records are rejected before they ever reach
+              an export queue, so they are permanently lost at the sender.
+              Check collector memory against the memory_limiter limit_mib and the
+              ES export queue depth.
 
         - alert: OtelCollectorQueueFull
           expr: otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.8
@@ -120,10 +146,15 @@ spec:
       rules:
         # Closes the 2026-07-17 blind spot: ES metric ingestion stalled for ~32h
         # (RED corrupt shard + a stalled TSDB rollover -> timestamp_error) with NO
-        # alert firing. The failure-based alerts above key off send_failed_* series
-        # that this collector build does not export. The sent-rate alerts below
-        # catch the case where the collector stops sending entirely (dead/ES
-        # unreachable -> sent rate truly 0).
+        # alert firing. NOTE (corrected 2026-08-16): the claim previously recorded
+        # here — "the failure-based alerts above key off send_failed_* series that
+        # this collector build does not export" — was WRONG, and this wrong note is
+        # why the defect survived three incidents. The build DOES export them; the
+        # rules simply omitted the `_total` suffix, so they matched an empty vector.
+        # Proof: on 2026-08-16 10:13-10:21 the real series recorded 486,876 metric
+        # points and 222,614 log records failed-to-send, while all three rules sat
+        # `inactive`. The sent-rate alerts below remain useful for a different case:
+        # the collector stops sending entirely (dead/ES unreachable -> rate 0).
         #
         # 2026-08-05 correction: sent-rate is NOT sufficient on its own. During a
         # 3h ES-metrics outage (corrupt write-index shard, cluster RED) the

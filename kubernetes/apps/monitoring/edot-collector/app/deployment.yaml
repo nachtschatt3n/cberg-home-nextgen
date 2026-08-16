@@ -10,17 +10,31 @@ metadata:
     app: edot-collector
 spec:
   replicas: 1
+  # MANDATORY once this pod mounts an RWO Longhorn PVC (edot-collector-queue):
+  # at replicas: 1 the default RollingUpdate rounds maxSurge UP to 1, so the new
+  # pod is scheduled before the old one detaches the volume; if it lands on
+  # another node it blocks forever on Multi-Attach.
+  # See docs/sops/longhorn-rwo-multi-attach.md.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: edot-collector
   template:
     metadata:
       annotations:
-        cberg.dev/rollout-revision: "2026-03-19.1"
+        cberg.dev/rollout-revision: "2026-08-16.1"
       labels:
         app: edot-collector
     spec:
       automountServiceAccountToken: false
+      # The collector image runs as 10001:10001. Stated explicitly so fsGroup can
+      # chown the Longhorn ext4 volume — without it the bbolt queue file cannot be
+      # created and the collector crashloops on start.
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
       containers:
         - name: edot-collector
           image: otel/opentelemetry-collector-contrib:0.158.0
@@ -58,6 +72,8 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
+            - name: queue
+              mountPath: /var/lib/otelcol/sending-queue
           readinessProbe:
             httpGet:
               path: /
@@ -76,3 +92,6 @@ spec:
         - name: config
           configMap:
             name: edot-collector-config
+        - name: queue
+          persistentVolumeClaim:
+            claimName: edot-collector-queue

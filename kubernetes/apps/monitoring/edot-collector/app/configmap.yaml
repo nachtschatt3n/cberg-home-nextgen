@@ -9,6 +9,32 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      # Persistent sending-queue backing store (2026-08-16).
+      # Before this, all three ES exporters used the DEFAULT in-memory queue:
+      # otelcol_exporter_queue_capacity == 10 requests. When Elasticsearch went
+      # away on 2026-08-16 10:13-10:21 that queue filled in seconds and the
+      # exporter then DISCARDED everything for the rest of the outage —
+      # 486,876 metric points and 222,614 log records counted by
+      # otelcol_exporter_send_failed_* and gone for good. An in-memory queue also
+      # evaporates entirely on pod restart. Backing the queue with bbolt on a
+      # Longhorn PVC means a downstream outage BUFFERS to disk and drains when ES
+      # returns, and survives a collector restart.
+      file_storage/queue:
+        directory: /var/lib/otelcol/sending-queue
+        # The PVC mounts exactly at this path so it always exists; create_directory
+        # is a guard so the collector cannot hard-fail at startup (taking ALL
+        # observability down) if the mount path ever changes.
+        create_directory: true
+        timeout: 10s
+        compaction:
+          # bbolt does not return freed pages to the filesystem on its own; without
+          # compaction the file only ever grows to its high-water mark. on_rebound
+          # compacts once the queue drains after a spike.
+          on_start: true
+          on_rebound: true
+          directory: /var/lib/otelcol/sending-queue
+          rebound_needed_threshold_mib: 100
+          rebound_trigger_threshold_mib: 10
 
     receivers:
       otlp:
@@ -176,6 +202,32 @@ data:
         tls:
           insecure_skip_verify: true
         logs_index: logs-generic-default
+        # Persistent queue: buffer to disk instead of discarding (see
+        # file_storage/queue above). block_on_overflow is deliberate — when the
+        # disk budget IS exhausted we want backpressure to the OTLP receiver
+        # (which increments otelcol_receiver_refused_*, a series that exists and
+        # is alerted on by OtelCollectorRecordsRefused) rather than a silent drop
+        # into otelcol_exporter_enqueue_failed_*, which has no series today and
+        # would therefore be undetectable by exactly the kind of rule we just
+        # finished repairing.
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: 2147483648
+          num_consumers: 4
+          block_on_overflow: true
+        # NB: the elasticsearch exporter does NOT use exporterhelper's
+        # `retry_on_failure` — it has its own `retry` block with different keys
+        # (validator rejects retry_on_failure outright).
+        retry:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 60s
+          # 0 = retry indefinitely. The default retry budget is what turned an ES
+          # outage into permanent loss: retries were exhausted and the records
+          # dropped. The queue's byte budget is the real bound now.
+          max_retries: 0
         mapping:
           mode: otel
       elasticsearch/metrics:
@@ -186,6 +238,32 @@ data:
         tls:
           insecure_skip_verify: true
         metrics_index: metrics-generic.otel-default
+        # Persistent queue: buffer to disk instead of discarding (see
+        # file_storage/queue above). block_on_overflow is deliberate — when the
+        # disk budget IS exhausted we want backpressure to the OTLP receiver
+        # (which increments otelcol_receiver_refused_*, a series that exists and
+        # is alerted on by OtelCollectorRecordsRefused) rather than a silent drop
+        # into otelcol_exporter_enqueue_failed_*, which has no series today and
+        # would therefore be undetectable by exactly the kind of rule we just
+        # finished repairing.
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: 4294967296
+          num_consumers: 4
+          block_on_overflow: true
+        # NB: the elasticsearch exporter does NOT use exporterhelper's
+        # `retry_on_failure` — it has its own `retry` block with different keys
+        # (validator rejects retry_on_failure outright).
+        retry:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 60s
+          # 0 = retry indefinitely. The default retry budget is what turned an ES
+          # outage into permanent loss: retries were exhausted and the records
+          # dropped. The queue's byte budget is the real bound now.
+          max_retries: 0
         mapping:
           mode: otel
       elasticsearch/traces:
@@ -196,6 +274,32 @@ data:
         tls:
           insecure_skip_verify: true
         traces_index: traces-generic-default
+        # Persistent queue: buffer to disk instead of discarding (see
+        # file_storage/queue above). block_on_overflow is deliberate — when the
+        # disk budget IS exhausted we want backpressure to the OTLP receiver
+        # (which increments otelcol_receiver_refused_*, a series that exists and
+        # is alerted on by OtelCollectorRecordsRefused) rather than a silent drop
+        # into otelcol_exporter_enqueue_failed_*, which has no series today and
+        # would therefore be undetectable by exactly the kind of rule we just
+        # finished repairing.
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: 268435456
+          num_consumers: 2
+          block_on_overflow: true
+        # NB: the elasticsearch exporter does NOT use exporterhelper's
+        # `retry_on_failure` — it has its own `retry` block with different keys
+        # (validator rejects retry_on_failure outright).
+        retry:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 60s
+          # 0 = retry indefinitely. The default retry budget is what turned an ES
+          # outage into permanent loss: retries were exhausted and the records
+          # dropped. The queue's byte budget is the real bound now.
+          max_retries: 0
         mapping:
           mode: otel
       # Tier 2d: expose the kmsg hardware-error count to Prometheus (scraped via
@@ -230,7 +334,7 @@ data:
               - key: net.peer.ip
 
     service:
-      extensions: [health_check]
+      extensions: [health_check, file_storage/queue]
       pipelines:
         logs:
           receivers: [otlp]
