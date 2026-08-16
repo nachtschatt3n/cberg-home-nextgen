@@ -151,6 +151,14 @@ def reconcile(cfg, today):
     # 2) window occupancy + warnings
     occ = upcoming_windows(cfg, today)
     win_by_slot = {w["slot"]: w for w in occ}
+    # Capacity/over-time/interference are properties of the window ID (its
+    # duration + risk budget), NOT of a specific dated occurrence. Keying those
+    # checks on `occ` — which only spans horizon_days (14) — silently skipped
+    # EVERY plan scheduled further out: media-naming-p3 at 240m in a 90m window
+    # on a date 20 days away tripped nothing. A validation that quietly does not
+    # run for two-thirds of the queue is the same silent-skip class as the ES
+    # field bugs. Resolve the window def by id so the checks cover all plans.
+    win_by_id = {w["id"]: w for w in cfg["windows"]}
     scheduled = {}
     for p in plans:
         slot = p.get("window")
@@ -159,7 +167,7 @@ def reconcile(cfg, today):
 
     warnings = []
     for slot, ps in scheduled.items():
-        w = win_by_slot.get(slot)
+        w = win_by_slot.get(slot) or win_by_id.get(slot.split(":", 1)[0])
         # missed window (date in the past, not executed)
         try:
             wdate = date.fromisoformat(slot.split(":", 1)[1])

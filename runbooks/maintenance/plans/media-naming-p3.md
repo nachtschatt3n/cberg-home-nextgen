@@ -20,7 +20,19 @@ touches:
 depends_on: [media-episode-backfill-bulk]
 conflicts_with: []
 status: draft
-window: "sat-early:2026-09-05"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+window: null                          # UNSCHEDULED 2026-08-16. Re-rated to 240m after the audit
+                                      # regex was corrected (N-22): the real non-compliant surface is
+                                      # 404 files across 12 shows, not 99 across 4 — the premise this
+                                      # plan was sized against. 240m cannot fit any window (max 90m),
+                                      # and it was silently sharing sat-early:2026-09-05 with
+                                      # superset-pg-decommission (270m of 90m) — invisible until the
+                                      # reconciler's 14-day horizon blind spot was fixed the same day.
+                                      #
+                                      # SPLIT before rescheduling, one-show-per-batch like the other
+                                      # oversized plans. Each batch is independently verifiable
+                                      # (series_compliance stays measurable) and revertible. Do NOT
+                                      # co-schedule with superset-pg-decommission (that slot is the
+                                      # soak-gated 09-05 window; leave it to the DB work).
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
 auto_execute: false                   # NEVER unattended — operator-approved rename table required
