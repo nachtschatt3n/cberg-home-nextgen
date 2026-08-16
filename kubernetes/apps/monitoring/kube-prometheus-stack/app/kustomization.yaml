@@ -45,3 +45,4 @@ resources:
   - ./uptime-kuma-alerts.yaml
   - ./blackbox-exporter-alerts.yaml
   - ./zuhause-betreut-alerts.yaml
+  - ./mangold-smarthomeadvisor-alerts.yaml
