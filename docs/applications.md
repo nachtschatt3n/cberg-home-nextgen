@@ -282,7 +282,7 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 | App | Purpose | Ingress |
 |-----|---------|---------|
-| zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app served on port 3000 with `/health/{liveness,readiness,startup}` probes. Image `ghcr.io/ibdigital/zuhause-betreut-caretakermanager`; Flux image automation armed (auto-deploys the `production-*` tag). 5Gi Longhorn RWO data PVC (`strategy: Recreate`). Homepage group "Software Portfolio". | Internal |
+| zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app on port 3000 with `/health/{liveness,readiness,startup}` probes. Image `ghcr.io/ibdigital/zuhause-betreut-caretakermanager`; Flux image automation configured (auto-deploys the `production-*` tag). 5Gi Longhorn RWO data PVC (`strategy: Recreate`). Homepage group "Software Portfolio". **NOT YET RUNNING** (2026-08-16): `app/ghcr-secret.sops.yaml` is a hand-written placeholder, never SOPS-encrypted — Flux Kustomization fails decryption, namespace is empty. Operator must re-encrypt a real GHCR dockerconfigjson (see `docs/troubleshooting/zuhause-betreut-deployment-plan.md`). | Internal |
 
 ---
 

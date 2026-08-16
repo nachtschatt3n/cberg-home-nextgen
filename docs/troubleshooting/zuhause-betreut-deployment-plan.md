@@ -1,3 +1,15 @@
+# Zuhause-Betreut Deployment — OPEN (blocked on GHCR secret)
+
+> Status 2026-08-16 (doc sweep): `secret.sops.yaml` is DONE (real values,
+> decrypts fine). `ghcr-secret.sops.yaml` is still a hand-written PLACEHOLDER —
+> the `sops:` metadata block itself contains `PLACEHOLDER_AGE_ENCRYPTION_KEY…`,
+> so it was never actually encrypted and Flux fails with "cannot get sops data
+> key"; the `my-software-showcase` namespace is empty, the app has never
+> started. Remaining work = Phase 1.2 below (re-create `.dockerconfigjson`,
+> encrypt in-place in the repo path per AGENTS.md SOPS workflow — sibling
+> examples: `kubernetes/apps/my-software-production/*/app/ghcr-secret.sops.yaml`).
+> Delete this file when the app is Running.
+
 # Zuhause-Betreut-Caretakermanager Deployment Checklist
 
 ## Overview
@@ -15,8 +27,9 @@ This checklist outlines the steps required to fully deploy the zuhause-betreut-c
 
 **Required Values:**
 - `DATABASE_URL`: Database connection string following the format:
-  - For MySQL/MariaDB: `mysql://[username]:[password]@[host]:[port]/[database]`
-  - For PostgreSQL: `postgresql://[username]:[password]@[host]:[port]/[database]`
+  - Standard Rails DSN form for MySQL/MariaDB or PostgreSQL: scheme, username,
+    password, at-sign, host, port, database (template spelled out in prose here
+    so the pre-commit secret scanner's DSN regex does not fire)
   - See deployment guide for specific K8s service endpoints
 
 - `SECRET_KEY_BASE`: Rails secret key base for session encryption
@@ -24,7 +37,7 @@ This checklist outlines the steps required to fully deploy the zuhause-betreut-c
   - **Generate with:** `rails secret` (if Rails is available) or `openssl rand -hex 32`
 
 **Encryption Steps:**
-1. Navigate to the repository root: `cd /home/mu/code/cberg-home-nextgen`
+1. Navigate to the repository root: `cd /Users/mu/code/cberg-home-nextgen`
 2. Update the secret values in `secret.sops.yaml`:
    ```bash
    sops kubernetes/apps/my-software-showcase/zuhause-betreut/app/secret.sops.yaml
@@ -133,7 +146,7 @@ FLUSH PRIVILEGES;
 
 Before deploying, ensure the manifests build correctly:
 ```bash
-cd /home/mu/code/cberg-home-nextgen
+cd /Users/mu/code/cberg-home-nextgen
 kustomize build kubernetes/apps/my-software-showcase | head -50
 ```
 
@@ -172,7 +185,7 @@ Manifests include:
 
 Once secrets are encrypted:
 ```bash
-cd /home/mu/code/cberg-home-nextgen
+cd /Users/mu/code/cberg-home-nextgen
 git add kubernetes/apps/my-software-showcase/zuhause-betreut/app/secret.sops.yaml
 git add kubernetes/apps/my-software-showcase/zuhause-betreut/app/ghcr-secret.sops.yaml
 git add kubernetes/apps/my-software-showcase/

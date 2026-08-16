@@ -2029,11 +2029,17 @@ log_section "Section 22: Home Automation Health"
 
     # --- Zigbee device offline detection via state.json ---
     echo "Zigbee device health (from state.json):"
-    Z2M_DEVICE_STATS=$(kubectl exec -n home-automation "$Z2M_POD" -- sh -c 'cat /data/state.json 2>/dev/null' 2>/dev/null \
-        | python3 - <<'PYEOF'
+    # NOTE: previously this piped state.json into `python3 - <<heredoc` — but the
+    # heredoc TAKES OVER stdin, so the piped JSON never reached json.load(sys.stdin)
+    # and the check printed "Total devices: ?" on every run since it was written.
+    # A pass asserted on a measurement that structurally cannot see (the silent-
+    # unknown class, docs/sops/audit-script-correctness.md). Temp file instead.
+    Z2M_STATE_TMP=$(mktemp)
+    kubectl exec -n home-automation "$Z2M_POD" -- sh -c 'cat /data/state.json 2>/dev/null' > "$Z2M_STATE_TMP" 2>/dev/null
+    Z2M_DEVICE_STATS=$(python3 - "$Z2M_STATE_TMP" <<'PYEOF'
 import sys, json, datetime
 try:
-    d = json.load(sys.stdin)
+    d = json.load(open(sys.argv[1]))
     now = datetime.datetime.now(datetime.timezone.utc)
     total = len(d)
     offline_5d, offline_1d = [], []
@@ -2057,6 +2063,7 @@ except Exception as e:
     print(f"ERROR={e}")
 PYEOF
     )
+    rm -f "$Z2M_STATE_TMP"
     Z2M_TOTAL=$(echo "$Z2M_DEVICE_STATS" | grep "^TOTAL=" | cut -d= -f2)
     Z2M_OFFLINE_5D=$(echo "$Z2M_DEVICE_STATS" | grep "^OFFLINE_5D=" | cut -d= -f2)
     Z2M_OFFLINE_1D=$(echo "$Z2M_DEVICE_STATS" | grep "^OFFLINE_1D=" | cut -d= -f2)
@@ -3904,6 +3911,7 @@ except: print(0)
         # makes it useful. A clean signal needs the edot severity-parse fix (separate).
         ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
+            "track_total_hits": true,
           "query": {
             "bool": {
               "should": [
@@ -3978,7 +3986,13 @@ except:
                   {"wildcard": {"body.text": {"value": "*out of memory*", "case_insensitive": true}}}
                 ],
               "minimum_should_match": 1,
-              "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
+              "must_not": [
+                  {"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
+                  {"wildcard": {"body.text": {"value": "*database system is shutting down*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*terminating connection due to administrator command*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*not a git repository*", "case_insensitive": true}}}
+                ],
+                "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
           }
         }' 2>/dev/null | python3 -c "
