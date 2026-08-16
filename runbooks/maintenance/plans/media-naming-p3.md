@@ -3,11 +3,13 @@ plan_id: media-naming-p3
 component: media-library
 pr: null
 kind: data
-current: "episode naming 87.7% (708/807) — 99 release-scene filenames, all inside 4 shows"
+current: "episode naming 49.9% (403/807) — 404 non-SOP filenames across 12 shows (was mis-reported as 87.7%/99 by a lax audit regex, corrected 2026-08-16)"
 target: "episode naming >= 99% (SOP floor) — `Show Name - S01E01 - Episode Title.ext`"
 update_type: n/a
 risk: high                            # a rename is the only step in this family that can LOSE a file
-est_duration_min: 60
+est_duration_min: 240                 # was 60 (sized against the mis-reported 99). True surface is
+                                      # 404 files / 12 shows → spans multiple weekend windows,
+                                      # one show per batch. See §1.
 needs_reboot: false
 touches:
   namespaces: [media]
@@ -28,13 +30,27 @@ sops_refs:
 generated: "2026-08-15"
 ---
 
-# Media stage 4/4 — rename the 99 release-scene episode filenames (attended)
+# Media stage 4/4 — rename the 404 non-SOP episode filenames (attended)
 
 ## 1) Summary & why held
 
-Final stage. 99 of 807 episodes still carry release-scene filenames instead of the
-SOP form `Show Name - S01E01 - Episode Title.ext`; `episode_naming_pct` is **87.7%**
-against a ≥99% floor. **All 99 live in 4 shows**, which is what makes this tractable.
+Final stage. 404 of 807 episodes do not match the SOP form
+`Show Name - S01E01 - Episode Title.ext`; `episode_naming_pct` is **49.9%**
+against a ≥99% floor.
+
+**Scope correction (2026-08-16, sweep N-22):** this stage was originally sized
+against "99 filenames in 4 shows / 87.7%". That figure came from a lax audit
+regex (` - SxxEyy\b`, case-insensitive, no prefix/title constraint) that measured
+a *weaker* rule than the SOP mandates and under-counted the surface ~4x. The audit
+now measures the real SOP rule — case-sensitive `SxxExx` token, filename prefix
+equal to the show folder name, and a non-empty episode title — so the true surface
+is **404 files across 12 shows** (10 of which are fully non-compliant; the largest
+single show holds 173). Nothing on disk changed; only the measurement was corrected.
+
+**This is materially bigger than the family assumed and no longer fits one window.**
+At one-show-per-batch with per-show go/no-go it spans **multiple weekend windows**.
+`est_duration_min` was raised 60 → 240 to reflect that; the maintenance-window
+agent will split it across windows rather than force it into one.
 
 **This is the only stage in the family that can lose data.** Every other stage writes
 additive sidecars whose rollback is "delete what was added". A rename mutates the file
@@ -67,11 +83,11 @@ cd /Users/mu/code/cberg-home-nextgen
 # b) baseline + confirm stage 3 held
 mise exec -- kubectl create job -n media audit-pre-$(date +%s) --from=cronjob/media-library-audit
 mise exec -- kubectl logs -n media job/audit-pre-<id> | grep -E '"section": "(tv|movies)"'
-# record: episode_naming_pct (87.7 pre-stage), episode_nfo_pct (>=80 after stage 3),
+# record: episode_naming_pct (49.9 pre-stage, corrected metric), episode_nfo_pct (>=80 after stage 3),
 # season_layout_pct 100.0, series_compliance_pct 100.0.
 
 # c) THE deliverable — produce the rename table and have it APPROVED before any move.
-#    For each of the 4 shows, list: current filename -> proposed filename, plus the
+#    For each of the 12 affected shows, list: current filename -> proposed filename, plus the
 #    matching .nfo and -thumb.jpg. Keep it OUTSIDE the repo (public repo: no titles).
 #    Validate the table mechanically before showing it to the operator:
 #      * every target matches the SOP regex `<Show> - S\d\dE\d\d( - .+)?\.(mkv|mp4|avi|m4v)`
@@ -94,7 +110,7 @@ Operator go/no-go **per show**, against the approved table. One show per batch.
 
 1. **Marker**:
    ```bash
-   runbooks/update-marker.sh add media-library media 2 "episode filename normalisation — 4 shows, approved rename table"
+   runbooks/update-marker.sh add media-library media 2 "episode filename normalisation — 12 shows, approved rename table"
    ```
 2. **Dry-run the rename job for one show** and diff its output against the approved
    table — the job must propose exactly the approved moves, no more:

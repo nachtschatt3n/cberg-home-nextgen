@@ -154,7 +154,7 @@ mise exec -- kubectl logs -n media job/audit-post-<id> | grep -E '"section": "(t
 | `episode_nfo_pct` | **≥ 80.0** if all shows ran; otherwise up by the share of the shows that did |
 | `series_compliance_pct` | **still 100.0** (the unlink trap fires here if `sidecar.py` was used) |
 | `season_layout_pct` | still 100.0 |
-| `episode_naming_pct` | **unchanged at 87.7** — renames are stage 4, not this stage |
+| `episode_naming_pct` | **unchanged at 49.9** (corrected metric) — renames are stage 4, not this stage |
 | movies `nfo_pct` / `poster_pct` / `fanart_pct` | unchanged (100.0 / 99.0 / 99.2) |
 | `movie_nfo_orphan` | unchanged (4) |
 

@@ -3,7 +3,7 @@ plan_id: media-episode-backfill
 component: media-library
 pr: null
 kind: data
-current: "episode NFO 2.5% (20/807) · episode naming 87.7% (708/807) · 4 movies without fanart (WONTFIX)"
+current: "episode NFO 2.5% (20/807) · episode naming 49.9% (403/807, corrected 2026-08-16 — was mis-reported 87.7% by a lax audit regex) · 4 movies without fanart (WONTFIX)"
 target: "episode NFO >= 80% · naming >= 99% · fanart gap CLOSED AS WONTFIX — delivered in 4 stages"
 update_type: n/a
 risk: medium
@@ -42,7 +42,7 @@ work at all**, and the last one is the only step in the family that can lose a f
 | 1 | `media-episode-sidecar-tool` — **EXECUTED 573632a0 (2026-08-15), plan retired** | wrote + reviewed `episode_sidecar.py` (dry-run default, never deletes) | low | 90 m | **none — attended, out-of-window** |
 | 2 | [`media-episode-canary`](media-episode-canary.md) | first live write: one clean show, verify nothing else moved | medium | 40 m | `tue-early:2026-09-15` |
 | 3 | [`media-episode-backfill-bulk`](media-episode-backfill-bulk.md) | remaining ~15 shows, one show per batch, to ≥80% | medium | 60 m | `sat-early:2026-10-03` |
-| 4 | [`media-naming-p3`](media-naming-p3.md) | rename the 99 release-scene filenames in 4 shows | high | 60 m | `sat-early:2026-10-10` |
+| 4 | [`media-naming-p3`](media-naming-p3.md) | rename the 404 non-SOP filenames in 12 shows | high | 240 m | `sat-early:2026-09-05` |
 
 **Stage 1 deliberately has no window.** Authoring and reviewing a script that writes
 onto a catastrophic-class CIFS share is open-ended human work with no cluster-risk
@@ -108,7 +108,7 @@ the introducing commit — no file writes, so there is nothing on the share to u
 
 - movies: 508 items · `layout_pct` 99.6 · `nfo_pct` 100.0 · `poster_pct` 99.0 ·
   `fanart_pct` 99.2 · `movie_nfo_orphan` 4
-- tv: 20 shows · 807 episodes · `episode_nfo_pct` 2.5 · `episode_naming_pct` 87.7 ·
+- tv: 20 shows · 807 episodes · `episode_nfo_pct` 2.5 · `episode_naming_pct` 49.9 (corrected) ·
   `season_layout_pct` 100.0 · `series_compliance_pct` 100.0
 - Plex: `unmatched=0` in all 3 sections, summary/thumb/art 100%
 - Jellyfin: 550 items · overview 100% · primary 100% · backdrop 546/550 (99.3%)
