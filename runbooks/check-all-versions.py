@@ -496,8 +496,15 @@ class VersionChecker:
     _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
                       r'focal|jammy|noble')
     _VARIANT_RE = re.compile(rf'-({_VARIANT_NAMES})$', re.IGNORECASE)
+    # NOTE the optional third component. Two-part tags are a real and common
+    # upstream versioning scheme (postgres 18.6 / 17.11, and every image that
+    # ships `<major>.<minor>` only). Requiring three parts made EVERY tag of
+    # such a repo invisible to the picker, which then returned None -> the
+    # security sweep rendered that as "newer-tag lookup UNDETERMINED" and
+    # surfaced a CRITICAL, implying the registry was unreachable when it had
+    # answered perfectly (2026-08-16: postgres 18.6 / 17.10-bookworm).
     _SEMVER_TAG_RE = re.compile(
-        rf'^v?\d+\.\d+\.\d+(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_NAMES}))?$',
+        rf'^v?\d+\.\d+(\.\d+)?(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_NAMES}))?$',
         re.IGNORECASE,
     )
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
@@ -587,87 +594,204 @@ class VersionChecker:
             registry = parsed.netloc or repository.split('/')[0]
             image_path = '/'.join(repository.split('/')[1:]) if '/' in repository else repository
             
-            # Handle different registries
-            if 'ghcr.io' in repository or 'docker.io' in repository or 'quay.io' in repository:
-                return self.get_registry_image_tag(repository, current_tag)
-            elif 'gcr.io' in repository or 'k8s.gcr.io' in repository:
-                return self.get_gcr_image_tag(repository)
-            else:
-                # Try generic Docker Hub API. current_tag MUST be threaded through
-                # or the variant/clean-tag filtering in _pick_latest_semver_tag
-                # can't apply (bare Docker Hub images like redis/traccar/node-red
-                # would get cross-variant proposals — 2026-08-03 regression).
-                return self.get_dockerhub_image_tag(repository, current_tag)
+            # Single registry-agnostic entry point. The old per-host if/elif
+            # chain sent gcr.io/k8s.gcr.io into a stub that ALWAYS returned
+            # None, and funnelled every unrecognised host into the Docker Hub
+            # branch (which then rejected it for having a dot in the name).
+            # Both paths produced "UNDETERMINED" for registries that answer
+            # anonymously — see get_registry_image_tag / _oci_v2_tags.
+            # current_tag MUST stay threaded through or the variant/clean-tag
+            # filtering in _pick_latest_semver_tag can't apply (bare Docker Hub
+            # images like redis/traccar/node-red would get cross-variant
+            # proposals — 2026-08-03 regression).
+            return self.get_registry_image_tag(repository, current_tag)
         except Exception as e:
             print(f"{Colors.YELLOW}Warning: Could not check image tag for {repository}: {e}{Colors.RESET}")
             return None
     
-    def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
-        """Get latest tag from GHCR, Docker Hub, or Quay."""
+    # Hosts that ARE Docker Hub under a different name.
+    _DOCKERHUB_HOSTS = ('docker.io', 'index.docker.io', 'registry-1.docker.io')
+
+    @staticmethod
+    def _parse_www_authenticate(header: str) -> dict:
+        """Parse a `WWW-Authenticate: Bearer realm="...",service="...",scope="..."`
+        challenge into a dict. This is what makes the resolver registry-agnostic:
+        the registry itself tells us where to get a token, so we never have to
+        hard-code an auth endpoint per host."""
+        return dict(re.findall(r'(\w+)="([^"]*)"', header or ''))
+
+    def _oci_v2_tags(self, host: str, image_path: str,
+                     max_pages: int = 500, page_size: int = 100,
+                     budget_s: float = 25.0) -> Optional[List[str]]:
+        """List ALL tags from any OCI-compliant Registry v2, following the
+        standard anonymous bearer-token dance and `Link: rel="next"` pagination.
+
+        Replaces the previous hard-coded `if 'ghcr.io' in repository` branch and
+        the blanket `return None` for every other dotted host. That combination
+        was the real cause of the sweep's "newer-tag lookup UNDETERMINED"
+        CRITICALs: registries that answer anonymously and correctly
+        (registry.k8s.io, registry.librechat.ai, and any vendor mirror) were
+        never queried at all, so the tri-state "undeterminable" was reporting a
+        gap in THIS tool as if it were a registry outage.
+
+        Returns the COMPLETE tag list on success, or None if pagination could
+        not be completed (error, auth wall, page-cap, or wall-clock budget).
+
+        Complete-or-None is deliberate. GHCR (and others) paginate
+        OLDEST-FIRST: home-assistant's 2026.* tags do not appear until page ~38
+        of 45. A partial list is therefore not merely "less complete" — it is
+        systematically missing the NEWEST releases, so `_pick_latest_semver_tag`
+        on a truncated list returns an OLDER tag and the caller reports a
+        phantom DOWNGRADE as an update (the exact class this file already
+        fights elsewhere). None routes to the security-safe "undeterminable"
+        instead, which is honest and never invents a wrong version. The default
+        max_pages is high enough that any real repo paginates fully in a few
+        seconds (home-assistant, the largest repo in the inventory: 4416 tags in
+        ~7s); the 25s budget only trips on a genuinely slow/broken registry
+        (docker.elastic.co needs credentials for anonymous tag listing, so it
+        correctly resolves to None instead of a fabricated version).
+        """
+        import time as _time
+        tags: List[str] = []
+        token: Optional[str] = None
+        url: Optional[str] = f"https://{host}/v2/{image_path}/tags/list?n={page_size}"
+        pages = 0
+        deadline = _time.monotonic() + budget_s
         try:
-            # For GHCR, query the OCI registry tags API directly (reflects actual published
-            # images). The GitHub Releases API must NOT be used here because a GitHub release
-            # can be created before the container image is pushed, causing false positives.
-            if 'ghcr.io' in repository:
-                image_path = repository.replace('ghcr.io/', '')
-                # Obtain an anonymous pull token
-                token_resp = requests.get(
-                    f"https://ghcr.io/token?scope=repository:{image_path}:pull",
-                    timeout=10
-                )
-                if token_resp.status_code != 200:
-                    return None
-                token = token_resp.json().get('token', '')
-                headers = {'Authorization': f'Bearer {token}'}
-
-                # Paginate through ALL tags (GHCR returns ~50 per page); the
-                # robust semver picker below handles v-prefix / 4-part / -<hash>.
-                all_tags: List[str] = []
-                next_url: Optional[str] = f"https://ghcr.io/v2/{image_path}/tags/list"
-                while next_url:
-                    resp = requests.get(next_url, headers=headers, timeout=10)
+            with requests.Session() as sess:
+                while url:
+                    if pages >= max_pages or _time.monotonic() > deadline:
+                        return None  # incomplete -> undeterminable, never partial
+                    headers = {'Authorization': f'Bearer {token}'} if token else {}
+                    resp = sess.get(url, headers=headers, timeout=15)
+                    if resp.status_code == 401 and token is None:
+                        chal = self._parse_www_authenticate(
+                            resp.headers.get('WWW-Authenticate', ''))
+                        realm = chal.get('realm')
+                        if not realm:
+                            return None
+                        params = {'scope': chal.get('scope') or f'repository:{image_path}:pull'}
+                        if chal.get('service'):
+                            params['service'] = chal['service']
+                        tok_resp = sess.get(realm, params=params, timeout=15)
+                        if tok_resp.status_code != 200:
+                            return None
+                        body = tok_resp.json()
+                        token = body.get('token') or body.get('access_token')
+                        if not token:
+                            return None
+                        continue  # retry the SAME url, now authenticated
                     if resp.status_code != 200:
-                        break
-                    all_tags.extend(resp.json().get('tags', []))
-                    # Follow Link header for next page (path-only, so prepend host)
-                    link = resp.headers.get('Link', '')
-                    m = re.search(r'<(/[^>]+)>;\s*rel="next"', link)
-                    next_url = f"https://ghcr.io{m.group(1)}" if m else None
+                        return None  # e.g. 404/403 -> can't determine, don't guess
+                    tags.extend(resp.json().get('tags') or [])
+                    pages += 1
+                    m = re.search(r'<([^>]+)>;\s*rel="next"',
+                                  resp.headers.get('Link', ''))
+                    if not m:
+                        break  # natural end of pagination -> list is COMPLETE
+                    nxt = m.group(1)
+                    url = f"https://{host}{nxt}" if nxt.startswith('/') else nxt
+        except Exception:
+            return None  # partial oldest-first list would fabricate a downgrade
+        return tags
 
-                return self._pick_latest_semver_tag(all_tags, current_tag)
-            
+    def _dockerhub_tags(self, image_name: str, current_tag: str = '',
+                        max_pages: int = 5) -> List[str]:
+        """List Docker Hub tags for `library/postgres`-style names.
+
+        Two defects fixed here:
+          1. `page_size=200` was silently CAPPED at 100 by Docker Hub and the
+             single page was never followed — so only the 100 most recently
+             PUSHED tags were ever considered.
+          2. That default ordering is by push time, not version. For a repo
+             whose CI pushes per-commit tags (apache/superset: 166k tags, page
+             one is entirely git-sha / GHA-* builds) NO version-shaped tag
+             appeared in the window, and the picker returned None -> another
+             bogus "UNDETERMINED".
+
+        Remedy: page through a bounded window AND, when we know the tag we run,
+        issue a `name=<major>.` server-side filter so the current release line
+        is always represented regardless of how much CI noise sits on top.
+        """
+        tags: List[str] = []
+        base = f"https://hub.docker.com/v2/repositories/{image_name}/tags"
+        try:
+            with requests.Session() as sess:
+                # Targeted query first: the current major line. Cheap and it is
+                # the line a CVE bump will almost always land on.
+                major = re.match(r'v?(\d+)\.', str(current_tag or ''))
+                if major:
+                    r = sess.get(f"{base}?page_size=100&name={major.group(1)}.",
+                                 timeout=15)
+                    if r.status_code == 200:
+                        tags.extend(t.get('name', '')
+                                    for t in r.json().get('results', []))
+                # Then a bounded sweep of the most-recent window, which is what
+                # surfaces a NEWER major line than the one we run.
+                url: Optional[str] = f"{base}?page_size=100"
+                pages = 0
+                while url and pages < max_pages:
+                    r = sess.get(url, timeout=15)
+                    if r.status_code != 200:
+                        break
+                    body = r.json()
+                    tags.extend(t.get('name', '') for t in body.get('results', []))
+                    pages += 1
+                    url = body.get('next')
+        except Exception:
+            pass
+        return tags
+
+    def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
+        """Get the latest tag for `repository` from whatever registry hosts it.
+
+        Registry-agnostic by design: Docker Hub and Quay keep their richer
+        first-party APIs, and EVERY other host goes through the standard OCI
+        Registry v2 path rather than being rejected.
+        """
+        try:
+            repo = repository.split('://')[-1].rstrip('/')
+
             # Quay.io — list active tags and pick the highest SEMVER. The API's
             # default ordering is by push time, not version, so the old limit=1
             # could return a non-highest (e.g. a rebuilt older) tag.
-            elif 'quay.io' in repository:
-                image_name = repository.replace('quay.io/', '')
-                api_url = f"https://quay.io/api/v1/repository/{image_name}/tag?limit=100&onlyActiveTags=true"
-                response = requests.get(api_url, timeout=10)
+            if repo.startswith('quay.io/'):
+                image_name = repo[len('quay.io/'):].split(':')[0]
+                api_url = (f"https://quay.io/api/v1/repository/{image_name}"
+                           f"/tag?limit=100&onlyActiveTags=true")
+                response = requests.get(api_url, timeout=15)
                 if response.status_code == 200:
                     tags = [t.get('name', '') for t in response.json().get('tags', [])]
                     return self._pick_latest_semver_tag(tags, current_tag)
+                return None
 
-            # Docker Hub (default registry): handles explicit `docker.io/...`,
-            # bare official images (`redis` → `library/redis`), and namespaced
-            # images (`apache/superset`). Foreign registries with their own
-            # host (public.ecr.aws, gcr.io) are rejected rather than misrouted.
-            else:
-                image_name = repository.split('://')[-1].replace('docker.io/', '').split(':')[0]
-                first = image_name.split('/')[0]
-                if '.' in first or ':' in first:
-                    return None  # not Docker Hub (e.g. public.ecr.aws/..., gcr.io/...)
+            host = repo.split('/')[0]
+            # Docker Hub: bare official images (`redis` -> `library/redis`),
+            # namespaced images (`apache/superset`), and the explicit aliases.
+            if ('.' not in host and ':' not in host) or host in self._DOCKERHUB_HOSTS:
+                image_name = repo
+                for pfx in self._DOCKERHUB_HOSTS:
+                    if image_name.startswith(pfx + '/'):
+                        image_name = image_name[len(pfx) + 1:]
+                        break
+                image_name = image_name.split(':')[0]
                 if '/' not in image_name:
-                    image_name = f"library/{image_name}"  # Docker Hub official images
-                api_url = f"https://hub.docker.com/v2/repositories/{image_name}/tags?page_size=200"
-                response = requests.get(api_url, timeout=10)
-                if response.status_code == 200:
-                    tags = [t.get('name', '') for t in response.json().get('results', [])]
-                    return self._pick_latest_semver_tag(tags, current_tag)
+                    image_name = f"library/{image_name}"
+                tags = self._dockerhub_tags(image_name, current_tag)
+                return self._pick_latest_semver_tag(tags, current_tag) if tags else None
+
+            # Everything else (ghcr.io, registry.k8s.io, registry.librechat.ai,
+            # vendor mirrors, self-hosted) speaks OCI Registry v2.
+            if '/' not in repo:
+                return None  # a bare host with no image path
+            image_path = repo.split('/', 1)[1].split(':')[0]
+            tags = self._oci_v2_tags(host, image_path)
+            return self._pick_latest_semver_tag(tags, current_tag) if tags else None
         except Exception:
             pass
-        
+
         return None
-    
+
     def get_dockerhub_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
         """Get latest tag from Docker Hub."""
         return self.get_registry_image_tag(repository, current_tag)
@@ -694,6 +818,40 @@ class VersionChecker:
         if current == latest:
             return True
         return self.normalize_tag(current) == self.normalize_tag(latest)
+
+    def is_reportable_update(self, current: str, latest: str) -> bool:
+        """True ONLY when `latest` is a genuine, strictly-newer upgrade over
+        `current`. This is the single semver gate every "update available"
+        rendering must pass.
+
+        A resolver can legitimately hand back an OLDER tag: e.g. GHCR tag
+        pagination that never reaches the newest major line, so immich's
+        running v3.1.0 "resolves" to an older v1.x that happens to sort highest
+        among the pages that were read. Rendering that as an update is a
+        DOWNGRADE dressed as an upgrade — it manufactures a phantom
+        maintenance-window plan (coverage.py PLAN lane) and would eventually
+        drive someone to "upgrade" a component backwards.
+
+        Rules:
+        - Equal after normalisation → not an update.
+        - Both sides parse as semver → require `latest` strictly greater.
+          A lower or equal parsed version is NEVER reportable.
+        - Either side unparseable (date tags, opaque build strings) → fall back
+          to the normalised-inequality signal, so genuinely-different non-semver
+          tags still surface. We only ever SUPPRESS a *provable* downgrade,
+          never a real update — a fix that silences everything is not a fix.
+        """
+        if not latest or not current:
+            return False
+        if self.tags_are_equal(current, latest):
+            return False
+        cur = self.parse_version(current)
+        lat = self.parse_version(latest)
+        if cur is not None and lat is not None:
+            return lat > cur
+        # Non-semver on at least one side: keep prior behaviour (surface the
+        # difference) so date-tagged / opaque real updates aren't hidden.
+        return True
 
     def parse_version(self, version_str: str) -> Optional[Tuple[int, int, int]]:
         """Parse version string into (major, minor, patch) tuple.
@@ -1786,7 +1944,18 @@ class VersionChecker:
                 if hr['repository_name'] in self.helm_repositories:
                     repo_url = self.helm_repositories[hr['repository_name']].get('url', '')
                 
-                if latest_chart and not self.tags_are_equal(latest_chart, hr['chart_version']):
+                if (latest_chart and not self.tags_are_equal(latest_chart, hr['chart_version'])
+                        and not self.is_reportable_update(hr['chart_version'], latest_chart)):
+                    # Resolver returned an OLDER chart than the running one —
+                    # a provable downgrade. Fail loudly, collapse to current.
+                    print(f"  {Colors.RED}⚠ DOWNGRADE SUPPRESSED: chart "
+                          f"{hr['chart_name']} running {hr['chart_version']} but "
+                          f"index returned OLDER {latest_chart} — treating as "
+                          f"up-to-date{Colors.RESET}", file=sys.stderr)
+                    latest_chart = hr['chart_version']
+                    result['chart']['latest_version'] = latest_chart
+
+                if latest_chart and self.is_reportable_update(hr['chart_version'], latest_chart):
                     # Assess update complexity
                     assessment = self.assess_update_complexity(hr['chart_version'], latest_chart)
                     result['chart']['update_assessment'] = assessment
@@ -1846,6 +2015,23 @@ class VersionChecker:
                         continue
 
                     latest_tag = self.get_latest_image_tag(img['repository'], img['tag'])
+
+                    # FAIL LOUDLY on a provable downgrade. If the resolver
+                    # returned a tag that is OLDER than the running one (e.g.
+                    # truncated GHCR pagination that never reached the newest
+                    # major, or a wrong/non-existent source), that is a suspect
+                    # answer — never dress it up as an "update available".
+                    # Surface it, drop the bogus latest, and treat as current.
+                    if (latest_tag and img['tag'] != 'latest'
+                            and not self.tags_are_equal(latest_tag, img['tag'])
+                            and not self.is_reportable_update(img['tag'], latest_tag)):
+                        print(f"  {Colors.RED}⚠ DOWNGRADE SUPPRESSED: {img['repository']} "
+                              f"running {img['tag']} but resolver returned OLDER "
+                              f"{latest_tag} — treating as up-to-date "
+                              f"(suspect registry/repo lookup){Colors.RESET}",
+                              file=sys.stderr)
+                        latest_tag = img['tag']  # collapse to "current" for all downstream renderers
+
                     img_result = {
                         'repository': img['repository'],
                         'current_tag': img['tag'],
@@ -1853,7 +2039,7 @@ class VersionChecker:
                         'path': img['path']
                     }
 
-                    if latest_tag and not self.tags_are_equal(latest_tag, img['tag']) and img['tag'] != 'latest':
+                    if latest_tag and self.is_reportable_update(img['tag'], latest_tag) and img['tag'] != 'latest':
                         # Assess update complexity
                         assessment = self.assess_update_complexity(img['tag'], latest_tag)
                         img_result['update_assessment'] = assessment
@@ -2165,7 +2351,7 @@ class VersionChecker:
             chart = result['chart']
             chart_update = False
             chart_complexity = "-"
-            if chart['latest_version'] and chart['current_version'] != chart['latest_version']:
+            if chart['latest_version'] and self.is_reportable_update(chart['current_version'], chart['latest_version']):
                 chart_version = f"{chart['current_version']} → {chart['latest_version']}"
                 chart_update = True
                 if 'update_assessment' in chart:
@@ -2200,7 +2386,7 @@ class VersionChecker:
                 # App version is typically the image tag (for applications)
                 app_version = str(main_image['current_tag']) if main_image['current_tag'] and main_image['current_tag'] not in ['latest', 'edge'] else "-"
                 
-                if main_image['latest_tag'] and main_image['current_tag'] != main_image['latest_tag'] and main_image['current_tag'] != 'latest':
+                if main_image['latest_tag'] and self.is_reportable_update(main_image['current_tag'], main_image['latest_tag']) and main_image['current_tag'] != 'latest':
                     image_version = f"{main_image['current_tag']} → {main_image['latest_tag']}"
                     image_update = True
                     if 'update_assessment' in main_image:
@@ -2330,7 +2516,7 @@ class VersionChecker:
                 lines.append(f"- **Repository:** `{chart['repository']}`")
                 lines.append(f"- **Current Version:** `{chart['current_version']}`")
                 if chart['latest_version']:
-                    if chart['current_version'] != chart['latest_version']:
+                    if self.is_reportable_update(chart['current_version'], chart['latest_version']):
                         lines.append(f"- **Latest Version:** `{chart['latest_version']}` ⚠️ **UPDATE AVAILABLE**")
                         
                         # Add update assessment
@@ -2409,7 +2595,7 @@ class VersionChecker:
                         lines.append(f"  - **Path:** `{img['path']}`")
                         lines.append(f"  - **Current Tag:** `{img['current_tag']}`")
                         if img['latest_tag']:
-                            if img['current_tag'] != img['latest_tag'] and img['current_tag'] != 'latest':
+                            if self.is_reportable_update(img['current_tag'], img['latest_tag']) and img['current_tag'] != 'latest':
                                 lines.append(f"  - **Latest Tag:** `{img['latest_tag']}` ⚠️ **UPDATE AVAILABLE**")
                                 
                                 # Add update assessment

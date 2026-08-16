@@ -116,6 +116,23 @@ def _semver_type(cur: str, tgt: str) -> str:
     return "unknown"
 
 
+def _is_strictly_newer(cur: str, tgt: str) -> bool:
+    """True only when `tgt` parses to a strictly-higher semver than `cur`.
+    Defence-in-depth against a DOWNGRADE arrow leaking in from a stale/hand-
+    edited version-check-current.md: `v3.1.0 → v1.116.0` is a downgrade, not
+    an actionable update, and must never manufacture a PLAN-lane item. When
+    either side is unparseable we keep the arrow (can't prove a downgrade, so
+    don't silently drop a possibly-real update)."""
+    def parse(v):
+        v = v.lstrip("vV").split("-")[0].split("+")[0].split("@")[0]
+        return [int(x) for x in re.findall(r"\d+", v)[:3]]
+    a, b = parse(cur), parse(tgt)
+    if not a or not b:
+        return True  # unparseable → don't suppress
+    a += [0] * (3 - len(a)); b += [0] * (3 - len(b))
+    return b > a
+
+
 def parse_actionable():
     """Every actionable update from version-check-current.md's overview table:
     a dict per (component, kind) with a chart or image bump available."""
@@ -141,7 +158,7 @@ def parse_actionable():
                         else "patch" if "patch" in cx_l else "unknown")
             for kind, cell in (("chart", chart), ("image", image)):
                 am = _ARROW.search(cell)
-                if am and "✅" not in cell:
+                if am and "✅" not in cell and _is_strictly_newer(am.group(1), am.group(2)):
                     # per-ITEM type from its own version diff — the row's
                     # complexity column reflects the (app-template) CHART major
                     # and would mislabel a patch image bump on the same row.
