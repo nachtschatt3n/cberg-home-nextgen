@@ -3893,20 +3893,28 @@ except: print(0)
         echo "Querying OTel log data stream: $LOG_DS (last 24h)"
         echo ""
 
-        # Query using OTel severity_text (structured) with body fallback
+        # Query error-level logs by body.text WILDCARD (case-insensitive) minus NOERROR.
+        # Do NOT use severity_text/severity_number: BOTH are dead in this pipeline —
+        # 28 of 3.49M docs, all INFO (verified 2026-08-16); the OTel receiver is not
+        # parsing levels into structured severity. Two prior attempts failed SILENTLY:
+        # `body` is an object (matched nothing); `match` on the body.text KEYWORD is
+        # exact-equality (matched only literal "error", ~0). That false 0 hid two DNS
+        # outages this week. The count is noisy (benign substrings + the Frigate camera,
+        # a tracked finding) and is display-only — the per-namespace breakdown is what
+        # makes it useful. A clean signal needs the edot severity-parse fix (separate).
         ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
           "query": {
             "bool": {
               "should": [
-                {"terms": {"severity_text": ["ERROR", "FATAL", "CRITICAL", "error", "fatal", "critical"]}},
-                {"match": {"body.text": "error"}},
-                {"match": {"body.text": "ERROR"}},
-                {"match": {"body.text": "fatal"}},
-                {"match": {"body": "FATAL"}}
-              ],
-              "minimum_should_match": 1,
-              "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
+                  {"wildcard": {"body.text": {"value": "*error*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*fatal*", "case_insensitive": true}}}
+                ],
+                "minimum_should_match": 1,
+                "must_not": [
+                  {"wildcard": {"body.text": {"value": "*noerror*", "case_insensitive": true}}}
+                ],
+                "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
           },
           "aggs": {
