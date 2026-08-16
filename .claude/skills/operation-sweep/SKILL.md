@@ -1,0 +1,84 @@
+---
+name: operation-sweep
+description: Run the full agentic operation sweep — six specialists in parallel writing to ONE shared cycle, reconcile findings/AR suppression, refresh the SLO/SLI snapshots, ingest open issues to OpenClaw, then render the operator's board DETERMINISTICALLY via runbooks/render-board.py. Use for "run a sweep", "operation sweep", the 48h cron, or any post-change verification pass.
+---
+
+# Operation Sweep
+
+You orchestrate the sweep. You do **not** audit the cluster yourself, and —
+critically — you do **not** write the final board yourself. The board is the
+output contract and it is rendered by a script, because on 2026-08-16 the
+prose-synthesis step sat blocked on a planner child while every finding was
+already in Postgres, and the operator had to ask where his board was. A
+deterministic renderer answers immediately and shows explicit GAPs for
+sections that did not report.
+
+## Ground rules (non-negotiable)
+
+- **READ-ONLY against the cluster.** Dry-run `auto-update.py` only. Safe
+  updates apply at Step 0 of maintenance windows, never in the sweep.
+- **One shared cycle id.** Mint it FIRST and put it in every specialist's
+  environment; six sections land in ONE `sweep_cycles` row:
+  `SWEEP_CYCLE_ID=$(uuidgen | tr 'A-Z' 'a-z')`
+- **Probe behaviour, not Flux status.** Flux has been fully green during two
+  total internal-DNS outages. `Ready=True` is not proof.
+- **ES field traps** (all verified): `log.level` is unmapped;
+  `severity_text`/`severity_number` are dead (28 of 3.49M docs); the only
+  signal is a case-insensitive `wildcard` on `body.text` **minus**
+  `*noerror*` (CoreDNS logs successful answers as NOERROR). A zero without a
+  live-ingestion control query is a broken query, not a clean cluster.
+- **A silent zero is never a pass.** Every "0 errors / 0 alarms / clean"
+  claim needs a control proving the measurement can see. This class of bug
+  has been found eleven times in this repo; see
+  `docs/sops/audit-script-correctness.md`.
+- **Verify sub-agent findings before promoting them.** Specialists have
+  fabricated results, misread node AGE as uptime, and reported stale
+  mid-roll snapshots. Cross-check anything surprising against the live
+  cluster before it reaches the operator.
+- **Do not block the board on planners.** If coverage reports `needs_plan`,
+  dispatch upgrade-planner-agents in the BACKGROUND and note it on the
+  board; never make the operator wait on them.
+
+## Flow
+
+1. **Mint the cycle id** (above). Export `SWEEP_PG_DSN` via
+   `runbooks/sweep-run.py`'s port-forward setup or run specialists through it.
+
+2. **Dispatch the six specialists in parallel**, each with
+   `SWEEP_CYCLE_ID` exported: health-check-agent, security-agent,
+   version-check-agent, doc-agent, media-manager, slo-agent. The security
+   section scores contextual tiers automatically (`risk_model.py`);
+   paging is dry unless `SWEEP_NOTIFY_BY_TIER` is set.
+
+3. **Update the lists** (this is the "updates" half of the skill):
+   - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and
+     `--ran <sections-that-actually-ran>` — AR suppression + auto-close.
+     Auto-close only touches sections that demonstrably ran.
+   - SLO/SLI snapshots land via slo-agent (`slo-check.py`); confirm rows
+     exist in the cycle's time window — a clean SLO run writes snapshots
+     but no findings, which is NOT a gap.
+   - Ingest open issues / go-no-gos to OpenClaw `home-operation` so
+     decisions reach the operator's phone (fallback: `runbooks/lib/notify.py`).
+
+4. **Render the board — never hand-write it:**
+   `python3 runbooks/render-board.py` (add `--cycle <id>` for this run).
+   The board IS the deliverable, in the operator's defined order:
+   tier board → genuine criticals → HIGH reading list → sections+gaps →
+   SLO/SLI table → maintenance windows.
+
+5. **Append below the rendered board, briefly:** anything you verified that
+   contradicts a specialist, anything you could NOT verify (stated as
+   such), and auto-fixes committed during the sweep (root-cause fixes to
+   audit tooling are in-scope; cluster changes are not).
+
+## Severity semantics (the operator's definition)
+
+- **critical** — external-unauth + exploited-in-the-wild (CISA KEV) + real
+  vuln. The ONLY tier that pages. Normally zero.
+- **high** — external + real vuln not exploited, or internal + exploited.
+  Briefing material.
+- **medium** — internal open issue. Maintenance-window queue.
+- **low** — policy/hygiene (floating tags, drift, stale charts). Weekly.
+
+Known-open items live in the plans queue and the ops DB — do not
+re-litigate them each sweep; report only state CHANGES.
