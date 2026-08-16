@@ -4,17 +4,17 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
 > Owner: `operator + daily-operation agents`
 
 ---
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-14, **nine** defects across five audit scripts
+Between 2026-07-30 and 2026-08-16, **twelve** defects across five audit scripts
 shared one root cause: an unmeasured, failed or absent probe was reported as a
-definite outcome. Two of them were introduced *while fixing the other seven*.
+definite outcome. Four of them were introduced *while fixing the others*.
 
 The failure is not a coding slip — it is a modelling error. Audit code naturally
 has three outcomes (pass / fail / could-not-measure) but is usually written with
@@ -70,6 +70,8 @@ signal.
 | `security-check.py` | `None` (undeterminable) newer-tag lookup worded as "newer upstream tag available" | fail |
 | `sweep-run.py` | auto-close resolved findings for sections that never ran | pass (false resolution) |
 | `health-check.sh` | counted batched `validation errors` LINES; ~18 drops per line, so the counter sat flat at ~362/h while loss grew 8x to 6720 points/h (`1482de6a`) | pass |
+| `health-check.sh` | §34 + fatal/OOM ES queries: `match` on the `body.text` KEYWORD is exact-equality, so "error logs 24h: 0" while `wildcard *error*` found 63,559 — hid two DNS outages; `severity_text` clause was dead too (`a54e88d8`) | pass |
+| `health-check.sh` | the fix commit for the row above claimed BOTH queries repaired; the fatal/OOM edit hit an anchor mismatch and silently never landed on disk — verify disk state after editing, never trust the commit message (`e1777211`) | pass (phantom fix) |
 
 ## 3) Blueprints
 
