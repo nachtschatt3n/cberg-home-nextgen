@@ -210,6 +210,19 @@ class FindingsWriter:
         self._cycle_id = (
             cycle_id or os.environ.get("SWEEP_CYCLE_ID") or str(uuid.uuid4())
         )
+        # Cycle-row metadata is stashed for the LAZY insert (see _ensure_cycle_row).
+        self._trigger = trigger
+        self._git_head = git_head
+        self._notes = notes
+        # The sweep_cycles row is created on the FIRST emit(), never on
+        # construction. A writer that is built and then closed WITHOUT emitting
+        # anything (a clean section that joins someone else's shared cycle, or a
+        # stray writer that mints a fresh uuid because SWEEP_CYCLE_ID wasn't
+        # exported) must leave NO row behind — eagerly inserting here is what
+        # produced the "5 empty sweep_cycles rows per run" create-then-abandon
+        # orphans (N-20). Deferring makes the write path self-cleaning: no
+        # finding → no cycle row.
+        self._cycle_ensured = False
         self._enabled = bool(self.dsn)
 
         if not self._enabled:
@@ -219,19 +232,28 @@ class FindingsWriter:
         # findings. If the DB is genuinely down this still raises — callers
         # that want to fail BEFORE doing the work should call preflight().
         self._conn = _connect_with_retry(self.dsn, autocommit=False)
-        with self._conn.cursor() as cur:
-            # Idempotent: if the cycle row already exists (caller passed an
-            # existing cycle_id) we leave it alone. New cycle_id → fresh row.
-            cur.execute(
-                """
-                INSERT INTO sweep_cycles
-                    (cycle_id, started_at, trigger, git_head, notes)
-                VALUES (%s, now(), %s, %s, %s)
-                ON CONFLICT (cycle_id) DO NOTHING
-                """,
-                (self._cycle_id, trigger, git_head, notes),
-            )
-        self._conn.commit()
+
+    def _ensure_cycle_row(self, cur) -> None:
+        """Create the shared sweep_cycles row on demand (first emit).
+
+        Idempotent per-instance (guarded by `_cycle_ensured`) and idempotent
+        cross-process (`ON CONFLICT (cycle_id) DO NOTHING`) — so the first
+        specialist to actually emit a finding creates the one shared row, and
+        every other specialist that joins the same SWEEP_CYCLE_ID no-ops. A
+        writer that never emits never calls this, so it creates no orphan.
+        """
+        if self._cycle_ensured or self._conn is None:
+            return
+        cur.execute(
+            """
+            INSERT INTO sweep_cycles
+                (cycle_id, started_at, trigger, git_head, notes)
+            VALUES (%s, now(), %s, %s, %s)
+            ON CONFLICT (cycle_id) DO NOTHING
+            """,
+            (self._cycle_id, self._trigger, self._git_head, self._notes),
+        )
+        self._cycle_ensured = True
 
     @staticmethod
     def preflight(dsn: str | None, *, attempts: int = _CONNECT_ATTEMPTS) -> bool:
@@ -301,6 +323,8 @@ class FindingsWriter:
             meta.setdefault("subsection", subsection)
 
         with self._conn.cursor() as cur:
+            # Create the shared cycle row lazily, on the first finding only.
+            self._ensure_cycle_row(cur)
             # Look up the currently-open row (resolved_at IS NULL) by fingerprint.
             cur.execute(
                 """

@@ -44,7 +44,7 @@ _activate_mise()
 sys.path.insert(0, str(SCRIPT_DIR))
 from lib.slo.catalog import load as load_catalog, SloDef  # noqa: E402
 from lib.slo.clients import PromClient                    # noqa: E402
-from lib.slo.calc    import compute                       # noqa: E402
+from lib.slo.calc    import compute, defects              # noqa: E402
 from lib.slo.writer  import SloWriter                     # noqa: E402
 from lib.findings_writer import FindingsWriter            # noqa: E402
 
@@ -174,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         br6 = f"{snap.burn_rate_6h:.2f}" if snap.burn_rate_6h is not None else "—"
         print(f"  · {slo.name:36s}  compliance={c:>10s}  target={snap.target_pct:.2f}%  "
               f"budget={b:>7s}  burn1h={br1:>5s}  burn6h={br6:>5s}")
+        for d in defects(snap):
+            print(f"    ‼ DEFECT [{slo.name}]: {d}", file=sys.stderr)
 
     if write:
         with SloWriter(dsn=args.postgres_dsn) as w:
@@ -189,7 +191,12 @@ def main(argv: list[str] | None = None) -> int:
             s for s in snaps
             if s.budget_remaining_pct is not None and s.budget_remaining_pct <= 0
         ]
-        if exhausted:
+        # Snapshots whose math is impossible (compliance >100% or a negative
+        # burn rate) — a broken SLO DEFINITION, not a service outage. These must
+        # surface as findings instead of being published silently (F-1fb11f2e:
+        # a sum-over-replicas numerator read burn -11.67, masking the real ~10).
+        defective = [(s, ds) for s in snaps if (ds := defects(s))]
+        if exhausted or defective:
             fw = FindingsWriter(dsn=args.postgres_dsn, section="slo")
             try:
                 for s in exhausted:
@@ -212,6 +219,31 @@ def main(argv: list[str] | None = None) -> int:
                         },
                     )
                     print(f"  ⚠ finding {fid}: budget exhausted for {s.slo_name}")
+                for s, ds in defective:
+                    fid = fw.emit(
+                        "warning",
+                        # Backticked name → stable fingerprint across cycles.
+                        f"SLO definition defect: `{s.slo_name}` produced an "
+                        f"impossible value",
+                        action=(
+                            f"Fix the SLO query for {s.slo_name}: "
+                            + "; ".join(ds)
+                            + ". Bound the numerator (e.g. max(...) not "
+                            "sum(...) across replicas) so compliance stays in "
+                            "[0,1]. Edit via runbooks/policy-cli.py slo update."
+                        ),
+                        subsection=s.slo_name,
+                        metadata={
+                            "defects": ds,
+                            "compliance_pct": s.compliance_pct,
+                            "burn_rate_1h": s.burn_rate_1h,
+                            "burn_rate_6h": s.burn_rate_6h,
+                            "raw_numerator": s.raw_numerator,
+                            "raw_denominator": s.raw_denominator,
+                            "window": s.window_size,
+                        },
+                    )
+                    print(f"  ‼ finding {fid}: definition defect for {s.slo_name}")
             finally:
                 fw.close()
     elif args.no_write:

@@ -341,6 +341,46 @@ def cmd_slo_add(args, dsn):
         print(f"added {args.name}")
 
 
+def cmd_slo_update(args, dsn):
+    """Patch an existing SLO in place, preserving every field not passed.
+
+    Editing the query (numerator/denominator) is the common case — e.g. fixing
+    a `sum`-over-replicas numerator that can exceed 1.0 during a rollout to a
+    bounded `max(...)` form — without losing the row's description, tags,
+    burn-rate windows or created_at (which a delete+add would reset).
+    """
+    sets, params = [], []
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT query_json FROM slo_definitions WHERE name = %s", (args.name,))
+        row = cur.fetchone()
+        if not row:
+            print(f"SLO {args.name} not found", file=sys.stderr); return 1
+        if args.numerator is not None or args.denominator is not None:
+            q = dict(row["query_json"] or {})
+            if args.numerator is not None:
+                q["numerator"] = args.numerator
+            if args.denominator is not None:
+                q["denominator"] = args.denominator
+            sets.append("query_json = %s::jsonb"); params.append(json.dumps(q))
+        if args.target is not None:
+            sets.append("target = %s"); params.append(args.target)
+        if args.window is not None:
+            sets.append("window_size = %s"); params.append(args.window)
+        if args.description is not None:
+            sets.append("description = %s"); params.append(args.description)
+        if not sets:
+            print("nothing to update — pass --numerator/--denominator/--target/"
+                  "--window/--description", file=sys.stderr)
+            return 1
+        sets.append("updated_at = now()")
+        params.append(args.name)
+        cur.execute(
+            f"UPDATE slo_definitions SET {', '.join(sets)} WHERE name = %s", params,
+        )
+        conn.commit()
+        print(f"updated {args.name}: {', '.join(s.split(' = ')[0] for s in sets)}")
+
+
 def cmd_slo_disable(args, dsn):
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
@@ -755,6 +795,14 @@ def build_parser() -> argparse.ArgumentParser:
     sa.add_argument("--description")
     sa.add_argument("--tag", action="append")
     sa.set_defaults(handler=cmd_slo_add)
+    su = slo.add_parser("update", help="patch an existing SLO in place")
+    su.add_argument("name")
+    su.add_argument("--numerator")
+    su.add_argument("--denominator")
+    su.add_argument("--target", type=float)
+    su.add_argument("--window")
+    su.add_argument("--description")
+    su.set_defaults(handler=cmd_slo_update)
     sd = slo.add_parser("disable"); sd.add_argument("name"); sd.set_defaults(handler=cmd_slo_disable)
     sD = slo.add_parser("delete"); sD.add_argument("name"); sD.set_defaults(handler=cmd_slo_delete)
 

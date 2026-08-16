@@ -85,6 +85,41 @@ def budget_remaining(compliance: float | None, target: float) -> float | None:
     return max(pct, -100_000.0)
 
 
+# Tolerance for float noise when checking the [0,1] compliance invariant.
+_EPS = 1e-6
+
+
+def defects(snap: "SloSnapshot") -> list[str]:
+    """Impossible values that mean the SLO's own math is broken, not the service.
+
+    A compliance ratio > 1.0 or a NEGATIVE burn rate is arithmetically
+    impossible for a well-formed good/total SLI: it only happens when the
+    numerator over-counts the denominator — classically a `sum(up{...})` that
+    adds the `up` gauge across N replicas (so a 2-pod rollout yields 2/1 = 200%
+    compliance and a burn of (1-2)/(1-target) < 0). A negative burn does not
+    just look wrong, it MASKS the real burn (a true ~10.0 renders as -11.67),
+    so it must surface as a defect instead of being published silently.
+
+    Returns a list of human-readable defect strings (empty when the snapshot
+    is sane). Pure — no I/O — so it is unit-testable and reusable.
+    """
+    out: list[str] = []
+    c = snap.compliance_pct
+    if c is not None and c > 100.0 + _EPS:
+        out.append(
+            f"compliance {c:.3f}% exceeds 100% — numerator over-counts the "
+            f"denominator (a sum-over-replicas SLI reads >1.0 during rollouts)"
+        )
+    for label, br in (("burn_rate_1h", snap.burn_rate_1h),
+                      ("burn_rate_6h", snap.burn_rate_6h)):
+        if br is not None and br < -_EPS:
+            out.append(
+                f"{label}={br:.2f} is negative — arithmetically impossible; it "
+                f"masks the real burn and points to a compliance ratio >1.0"
+            )
+    return out
+
+
 def compute(
     *,
     slo_name: str,

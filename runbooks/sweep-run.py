@@ -374,6 +374,48 @@ def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
         return None
 
 
+def _git_head() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short=40", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        ).decode().strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _ensure_cycle_row(dsn: str, cycle_id: str, trigger: str) -> None:
+    """Create the canonical sweep_cycles row for this run, up-front.
+
+    FindingsWriter now creates the cycle row LAZILY (on the first finding) so a
+    clean specialist leaves no orphan row. That change means a sweep that emits
+    ZERO findings would otherwise produce NO cycle row at all — the dashboard's
+    /api/cycles/latest and the reconcile verdict both need one. So the
+    orchestrator (this script — the one place that owns the shared cycle id)
+    guarantees the row exists. `ON CONFLICT DO NOTHING` keeps it idempotent and
+    preserves "first writer wins the trigger": if a specialist already created
+    the row this is a no-op.
+    """
+    try:
+        import psycopg  # lazy — --no-write paths don't reach here
+    except ImportError:
+        return
+    try:
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sweep_cycles (cycle_id, started_at, trigger, git_head)
+                    VALUES (%s, now(), %s, %s)
+                    ON CONFLICT (cycle_id) DO NOTHING
+                    """,
+                    (cycle_id, trigger, _git_head()),
+                )
+            conn.commit()
+    except Exception as e:  # noqa: BLE001
+        print(f"==> ensure cycle row failed: {type(e).__name__}: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -483,6 +525,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(
                     "--reconcile-only needs the DB (do not combine with --no-write)."
                 )
+            # The fan-out finalizes here. Guarantee the shared cycle row exists
+            # even if every specialist ran clean (lazy-create means no finding →
+            # no row), so the verdict lands somewhere and /api/cycles/latest has
+            # a row to resolve to.
+            _ensure_cycle_row(dsn, cycle_id, os.environ.get("SWEEP_TRIGGER", "manual"))
             # Reconcile-only skipped these two steps until 2026-07-06 — the
             # daily-operation fan-out had to apply them manually mid-sweep to
             # get an accurate verdict (findings sat at raw severity=critical
@@ -574,6 +621,12 @@ def main(argv: list[str] | None = None) -> int:
         env["SWEEP_TRIGGER"] = env.get("SWEEP_TRIGGER", "manual")
         if write_enabled and dsn:
             env["SWEEP_PG_DSN"] = dsn
+            # Create the one canonical cycle row up-front. Specialists now
+            # create their cycle row lazily (first finding only), so without
+            # this a zero-finding sweep would leave no row for the verdict /
+            # dashboard to attach to. ON CONFLICT keeps a specialist's own
+            # first-write authoritative for the trigger.
+            _ensure_cycle_row(dsn, cycle_id, env["SWEEP_TRIGGER"])
         if prom_url:
             env["SLO_PROM_URL"] = prom_url
 
