@@ -32,7 +32,7 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 
 ### Core Components
 
-- **Operating System**: [Talos Linux v1.13.8](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.39, Clang/ThinLTO build)
+- **Operating System**: [Talos Linux v1.13.8](https://www.talos.dev/) provides immutable infrastructure and secure-by-default configuration (kernel 6.18.42, Clang/ThinLTO build)
 - **Container Runtime**: [Containerd 2.2.6](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
 - **Networking**: [Cilium v1.19.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn v1.11.2](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
@@ -556,9 +556,9 @@ This repository uses [mise](https://mise.jdx.dev/) for unified development tool 
 - **Python 3.12** + **uv** - Automation scripts and fast package install
 - **kubectl 1.36.0** - Kubernetes CLI
 - **flux 2.9.0** - GitOps toolkit CLI (cluster distribution is `flux-v2.9.3`)
-- **talosctl 1.13.0** + **talhelper 3.1.9** - Talos Linux management
+- **talosctl 1.13.4** + **talhelper 3.1.11** - Talos Linux management
 - **sops 3.13.0** + **age 1.3.1** - Secrets encryption
-- **helm 3.20.0** - Kubernetes package manager
+- **helm 3.21.0** - Kubernetes package manager
 - **kustomize 5.6.0** - Kubernetes manifest customization
 - **helmfile 0.171.0**, **task 3.46.4**, **cloudflared 2026.3.0**, **gum 0.17.0**
 - **Additional utilities**: jq 1.7.1, yq 4.50.1, kubeconform

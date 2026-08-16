@@ -94,7 +94,7 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
   https-redirect route; k8s-gateway watchedResources += HTTPRoute;
   external-dns sources += gateway-httproute; homepage
   `kubernetes.gateway: true` + gateway RBAC. Plan:
-  `runbooks/maintenance/plans/envoy-gateway-phase0.md`.
+  `runbooks/maintenance/plans/envoy-gateway-phase0.md` (retired after execution 2026-08-15; recoverable via `git show 15fac5c8^:runbooks/maintenance/plans/envoy-gateway-phase0.md`).
 - **P1 — Pilots = go/no-go gate** (1 session): echo (plain), headlamp
   (forward-auth: HTTPRoute + outpost HTTPRoute w/ cross-ns backendRef +
   ReferenceGrant + SecurityPolicy extAuth → `/outpost.goauthentik.io/auth/envoy`;

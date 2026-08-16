@@ -222,7 +222,7 @@ retry and succeed); restart the pod anyway to get a clean baseline.
 
 **Before any future gateway migration:** the internal split-horizon story
 must be settled FIRST. Options analysed in
-`runbooks/maintenance/plans/envoy-gateway-phase0.md` §0 (replace k8s-gateway;
+`runbooks/maintenance/plans/envoy-gateway-phase0.md` §0 (plan retired after phase-0 execution 2026-08-15; recoverable via `git show 15fac5c8^:runbooks/maintenance/plans/envoy-gateway-phase0.md`) — replace k8s-gateway;
 AdGuard wildcard rewrites; fork the plugin to v1 routes; gateway in
 Ingress-only mode).
 
