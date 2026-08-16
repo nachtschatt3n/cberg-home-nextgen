@@ -1,11 +1,11 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
-> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.7 + Kubernetes v1.36.0 (kernel 6.18.39-talos, Clang/ThinLTO) — rolled 2026-08-02.**
-> Version: `2026.08.02`
-> Last Updated: `2026-08-02`
+> Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.8 + Kubernetes v1.36.0 (kernel 6.18.42-talos, Clang/ThinLTO) — rolled 2026-08-16.**
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
 > Owner: `homelab-ops`
 
-> **Cluster state (2026-08-02):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.7` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
+> **Cluster state (2026-08-16):** All three nodes (`k8s-nuc14-01/02/03`) are running Talos `v1.13.8` + Kubernetes `v1.36.0`. Performance sweep (BBR, conntrack, kubelet reservations, RPS mask, hugepages), intelgpu/udev patches, and Longhorn v2 OS prerequisites are all wired in. See §13 for the full two-stage traversal record and lessons learned.
 
 ---
 
@@ -339,6 +339,130 @@ mise exec -- task talos:upgrade-node IP=192.168.55.13
 # 9.4 Upgrade Kubernetes (after all nodes on new Talos)
 mise exec -- task talos:upgrade-k8s
 ```
+
+#### The Longhorn `instance-manager` PDB drain block — what it actually is
+
+`talosctl upgrade` installs the new image FIRST, then cordons + drains, then
+reboots. During the drain the task will sit for a while on:
+
+```
+k8s-nuc14-0N: evicting pod storage/instance-manager-<hash>
+```
+
+repeated many times, while all three `instance-manager-*` PDBs report
+**ALLOWED DISRUPTIONS = 0**. **That is normal and is not a fault.** Do not
+delete the PDBs, and do not reach for `EXTRA_FLAGS='--drain=false'`.
+
+**Why `0` is the steady state.** Each instance-manager PDB's selector pins
+`longhorn.io/node`, so it matches exactly one pod. With `expectedPods: 1`,
+`currentHealthy: 1` and `minAvailable: 1`, `disruptionsAllowed` is
+arithmetically always `0` — on every node, at all times, including nodes that
+upgrade without any incident, and including a PDB that is weeks old. Reading
+`ALLOWED DISRUPTIONS = 0` as "stale / orphaned PDB" is a misdiagnosis. Likewise,
+a *recently created* instance-manager PDB is not evidence of a leak: the PDB is
+recreated whenever its instance-manager pod is recreated (i.e. after any node
+reboot or cordon/uncordon), so its age tracks the last disruption, not a fault.
+Before concluding anything about these PDBs, check they each still have a live
+pod behind them:
+
+```bash
+kubectl -n storage get pdb | grep instance-manager
+kubectl -n storage get pods -l longhorn.io/component=instance-manager -o wide
+```
+
+**What actually gates the drain** is Longhorn's own removal logic. With
+`node-drain-policy: always-allow`, longhorn-manager deletes a node's
+instance-manager PDB as soon as that node is unschedulable **AND** has **zero
+attached engines**. Until then it logs, once per reconcile:
+
+```
+Node instance-manager-<hash> is marked unschedulable but removing <node> PDB
+is blocked: some volumes are still attached InstanceEngines count N ...
+```
+
+So the drain is waiting for volumes to **detach**, not for a stuck PDB. Watch
+the engine count fall to zero (substitute the node under upgrade):
+
+```bash
+kubectl -n storage get engines.longhorn.io -o json | python3 -c "
+import sys,json
+print(len([e for e in json.load(sys.stdin)['items']
+           if e['spec'].get('nodeID')=='k8s-nuc14-02']))"
+```
+
+When it reaches `0`, Longhorn logs `Removing ... PDB since Node ... is marked
+unschedulable`, the PDB disappears, the instance-manager is evicted, and the
+drain completes within seconds. Confirmed on 2026-08-16 for both node 02 and
+node 03: engines went 8 -> 0 in ~75s, the PDB self-deleted, and the drain
+succeeded with **no manual intervention**.
+
+**The real failure mode is a race, not a stale object.** The instance-manager
+pod is bound with an explicit `spec.nodeName`, so it bypasses the scheduler
+entirely and a cordon cannot stop Longhorn recreating it. Once the evicted
+instance-manager finally terminates, Longhorn recreates it under the *same
+name* ~1s later, which recreates its PDB. If the drain still has other pods to
+clear at that moment, its next re-list finds the new instance-manager behind a
+fresh `disruptionsAllowed: 0` PDB and can never converge, failing with:
+
+```
+error when waiting for pod "instance-manager-<hash>" in namespace "storage"
+to terminate: context deadline exceeded
+```
+
+Whether this bites is **load-dependent** — it turns on how many engines and
+pods the node still holds when the instance-manager is evicted — which is why
+it has hit different nodes on different runs and looks non-deterministic. It is
+not node-specific.
+
+**If a drain does time out this way:** uncordon the node first (the cordon
+itself is what blocks its instance-manager from settling), then delete the
+`Pending` pods so the scheduler spreads the attach load across all nodes. Do
+not wait it out — it does not self-resolve. Only if that fails should
+`--drain=false` even be discussed, and never unattended.
+
+#### Post-upgrade check: node cannot attach ANY Longhorn volume (stale iSCSI record)
+
+**Seen on 2026-08-16 after the v1.13.8 roll, on node 03 only.** The node came
+back `Ready` and Longhorn reported every volume healthy, but the node could not
+attach a single Longhorn volume. It is easy to miss, because the scheduler
+simply places volume-backed pods on the other two nodes and the cluster *looks*
+green — the only visible symptom was one pod stuck in `ContainerCreating` with
+its volume cycling `attaching` -> engine dies -> `Detached` -> retry.
+
+**Detection — always run this after the last node:**
+
+```bash
+# Volumes attached per node. A node showing 0 (while others show dozens)
+# and holding no volume-backed pods is the smoking gun.
+kubectl get volumes -n storage -o custom-columns=NODE:.status.currentNodeID \
+  --no-headers | sort | uniq -c
+```
+
+The instance-manager on the affected node logs, repeatedly:
+
+```
+Failed to startup frontend ... iscsiadm -m node -T iqn.2019-10.io.longhorn:<vol> -p <ip> -o show
+iSCSI ERROR: Unknown parameter name node.session.conn_reopen_log_freq
+iSCSI ERROR: config file /var/lib/iscsi/nodes/iqn.2019-10.io.longhorn:<OTHER-volume>/<ip>,3260,1/default invalid.  exit status 7
+```
+
+**Cause.** `iscsiadm` parses *every* record under `/var/lib/iscsi/nodes/` before
+acting on any target. One record containing a key the node's current
+libopeniscsiusr does not recognise (`node.session.conn_reopen_log_freq`) makes
+iscsiadm exit 7 for **all** targets on that node. Note the failing record names
+a *different, unrelated* volume than the one you are trying to attach — do not
+chase the volume in the pod's error, chase the one named in the `config file
+... invalid` line.
+
+**Fix.** Remove only the unparseable record(s) under `/var/lib/iscsi/nodes/` on
+that node (short-lived privileged pod pinned with `nodeName`, hostPath mount of
+`/var/lib/iscsi`). These are client-side connection records; Longhorn recreates
+them on the next attach, so removal is safe and needs no GitOps change. Then
+delete the stuck pod to retrigger the attach. Verify by re-running the
+attached-per-node count above and confirming the node now holds a volume.
+
+**Do not** reboot, cordon, drain, or reset the node for this, and do not delete
+any PV/PVC/Longhorn Volume or Replica — it is a host-state file problem only.
 
 ### Step 10 — Re-enable OTBR
 
