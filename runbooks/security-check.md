@@ -23,9 +23,30 @@ If this audit reveals a reusable mitigation/workaround with no SOP:
 
 ## Severity Model
 
+Two layers since 2026-08-16 (`d5a868f8`):
+
+**Intrinsic severity** (what the check itself measures, retained on every finding):
+
 - 🔴 **Critical** — act immediately (exposed secret, active attack indicator, unexpected public exposure)
 - 🟡 **Warning** — remediate within a week (misconfiguration, policy gap, elevated risk)
 - 🟢 **OK** — compliant, no action needed
+
+**Contextual tier** (authoritative for the operator board and notification
+routing): every finding is additionally scored by
+**exposure × exploited × nature** via `runbooks/lib/risk_model.py`
+(exposure classifier reuses the AR-059 outpost posture logic; KEV lookup
+fails soft to UNKNOWN, never silent-safe). Tiers:
+
+- **CRITICAL** — external exposure + KEV-exploited + real vulnerability. The
+  ONLY tier that pages (urgent push). Normally zero.
+- **HIGH** — non-urgent briefing (reading list).
+- **MEDIUM / LOW** — recorded, no notification.
+
+CVE IDs are attached to `metadata.cve_ids` in the DB only — never the finding
+title or the committed report (`docs/sops/vulnerability-disclosure.md`).
+Tier-routed paging is DRY unless `SWEEP_NOTIFY_BY_TIER` is set. Rendering the
+tier board: `python3 runbooks/render-board.py` (see
+`.claude/skills/operation-sweep/SKILL.md`).
 
 ## Output
 
