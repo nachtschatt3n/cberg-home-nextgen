@@ -713,7 +713,9 @@ killall kubectl
 kubectl run test-dns --rm -it --image=busybox --restart=Never -- nslookup kubernetes.default.svc.cluster.local
 
 # Test NAS connectivity from a cluster pod
-kubectl run test-net --rm -it --image=busybox --restart=Never -- ping -c 3 192.168.31.230
+# (NAS moved to VLAN 55 on 2026-06-07 — was 192.168.31.230 on the retired
+#  Servers VLAN 10. This command pinged a dead address until 2026-08-16.)
+kubectl run test-net --rm -it --image=busybox --restart=Never -- ping -c 3 192.168.55.240
 
 # Check external-dns logs for sync failures
 kubectl logs -n network deployment/external-dns --tail=50 | grep -iE "error|failed"
