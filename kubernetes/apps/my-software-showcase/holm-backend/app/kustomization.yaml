@@ -21,5 +21,5 @@ replicas:
     count: 1
 
 images:
-  - name: ghcr.io/ibdigital/my-software-showcase-holm
+  - name: ghcr.io/nachtschatt3n/holm-backend
     newTag: latest

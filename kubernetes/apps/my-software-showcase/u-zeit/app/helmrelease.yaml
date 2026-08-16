@@ -32,7 +32,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/ibdigital/u-zeit
+              repository: ghcr.io/nachtschatt3n/u-zeit
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:u-zeit:tag"}
               pullPolicy: IfNotPresent
             env:

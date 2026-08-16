@@ -16,7 +16,7 @@ spec:
   values:
     replicaCount: 1
     image:
-      repository: ghcr.io/ibdigital/my-software-showcase-holm
+      repository: ghcr.io/nachtschatt3n/holm-backend
       tag: latest
       pullPolicy: Always
     service:

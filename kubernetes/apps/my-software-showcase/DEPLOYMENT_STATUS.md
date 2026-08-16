@@ -27,7 +27,7 @@ This document tracks the deployment status of all 15 legacy applications being c
 - **Total Apps**: 15
 - **Kubernetes Namespace**: `my-software-showcase`
 - **Flux GitOps Repository**: https://github.com/ibdigital/my-software-showcase-k8s.git
-- **Container Registry**: ghcr.io/ibdigital/my-software-showcase-*
+- **Container Registry**: ghcr.io/nachtschatt3n/*
 - **Status**: 10 apps with manifests staged, 5 apps awaiting K8s generation
 
 ## Manifest Staging Status
@@ -299,7 +299,7 @@ stringData:
 
 ## Container Images
 
-All apps push to: `ghcr.io/ibdigital/my-software-showcase-<app-id>:latest`
+All apps push to: `ghcr.io/nachtschatt3n/<app-id>:latest`
 
 Flux `ImagePolicy` and `ImageUpdateAutomation` resources automatically update Deployment manifests when new images are pushed.
 

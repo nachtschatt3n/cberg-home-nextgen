@@ -22,5 +22,5 @@ resources:
 
 # Image configuration for Flux
 images:
-  - name: ghcr.io/ibdigital/uzeit-de
+  - name: ghcr.io/nachtschatt3n/uzeit-de
     newTag: latest

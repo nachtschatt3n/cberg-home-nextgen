@@ -114,7 +114,7 @@ To run database migrations on deployment:
 ```bash
 # Before first deployment, ensure database is created
 kubectl -n my-software-showcase run haarfabrik-migrate \
-  --image=ghcr.io/ibdigital/haarfabrik-extranet:latest \
+  --image=ghcr.io/nachtschatt3n/haarfabrik-extranet:latest \
   --restart=Never \
   -- bundle exec rake db:create db:migrate db:seed
 ```
@@ -123,7 +123,7 @@ Or add an init container to the deployment to run migrations automatically.
 
 ## Flux Image Automation
 
-The deployment uses `ghcr.io/ibdigital/haarfabrik-extranet:latest` which can be automated with Flux:
+The deployment uses `ghcr.io/nachtschatt3n/haarfabrik-extranet:latest` which can be automated with Flux:
 
 ```yaml
 apiVersion: image.toolkit.fluxcd.io/v1beta2
@@ -197,6 +197,6 @@ kubectl apply -f k8s/deployment.yaml
 ## Links
 
 - **GitHub Repo**: https://github.com/ibdigital/haarfabrik-extranet
-- **Container Registry**: ghcr.io/ibdigital/haarfabrik-extranet
+- **Container Registry**: ghcr.io/nachtschatt3n/haarfabrik-extranet
 - **Cluster**: my-software-showcase namespace
 - **Flux Repo**: git@github.com:ibdigital/my-software-showcase-k8s.git

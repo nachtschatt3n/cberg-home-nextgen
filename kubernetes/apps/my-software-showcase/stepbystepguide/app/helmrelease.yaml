@@ -32,7 +32,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/ibdigital/stepbystepguide
+              repository: ghcr.io/nachtschatt3n/stepbystepguide
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:stepbystepguide:tag"}
               pullPolicy: IfNotPresent
             env:

@@ -8,7 +8,7 @@ metadata:
   name: stepbystepguide
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/stepbystepguide
+  image: ghcr.io/nachtschatt3n/stepbystepguide
   interval: 10m
   secretRef:
     name: ghcr-secret

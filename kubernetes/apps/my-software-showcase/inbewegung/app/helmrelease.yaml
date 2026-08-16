@@ -32,7 +32,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/ibdigital/inbewegung-familymanager
+              repository: ghcr.io/nachtschatt3n/inbewegung-familymanager
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:inbewegung:tag"}
               pullPolicy: IfNotPresent
             env:

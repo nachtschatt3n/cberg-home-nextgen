@@ -4,7 +4,7 @@ metadata:
   name: holm
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/my-software-showcase-holm
+  image: ghcr.io/nachtschatt3n/holm-backend
   interval: 5m
   secretRef:
     name: holm-image-pull

@@ -8,7 +8,7 @@ metadata:
   name: inbewegung
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/inbewegung-familymanager
+  image: ghcr.io/nachtschatt3n/inbewegung-familymanager
   interval: 10m
   secretRef:
     name: ghcr-secret

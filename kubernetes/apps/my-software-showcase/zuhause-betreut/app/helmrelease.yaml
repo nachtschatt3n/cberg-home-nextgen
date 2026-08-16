@@ -31,7 +31,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/ibdigital/zuhause-betreut-caretakermanager
+              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:zuhause-betreut:tag"}
               pullPolicy: IfNotPresent
             env:

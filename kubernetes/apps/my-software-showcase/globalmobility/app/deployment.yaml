@@ -33,7 +33,7 @@ spec:
         fsGroup: 33
       containers:
       - name: app
-        image: ghcr.io/ibdigital/my-software-showcase-globalmobility-group-gmbh-globaldispo:latest
+        image: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo:latest
         imagePullPolicy: Always
         ports:
         - name: php-fpm

@@ -8,7 +8,7 @@ metadata:
   name: ordiga
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/ordiga
+  image: ghcr.io/nachtschatt3n/ordiga
   interval: 10m
   secretRef:
     name: ghcr-secret

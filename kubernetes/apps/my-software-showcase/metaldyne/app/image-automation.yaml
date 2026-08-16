@@ -8,7 +8,7 @@ metadata:
   name: metaldyne
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/metaldyne
+  image: ghcr.io/nachtschatt3n/metaldyne-mini-erp
   interval: 10m
   secretRef:
     name: ghcr-secret

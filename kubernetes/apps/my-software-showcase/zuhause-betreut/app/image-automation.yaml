@@ -8,7 +8,7 @@ metadata:
   name: zuhause-betreut
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/zuhause-betreut-caretakermanager
+  image: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
   interval: 10m
   secretRef:
     name: ghcr-secret

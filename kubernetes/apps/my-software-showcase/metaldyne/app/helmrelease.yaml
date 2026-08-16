@@ -32,7 +32,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/ibdigital/metaldyne-mini-erp
+              repository: ghcr.io/nachtschatt3n/metaldyne-mini-erp
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:metaldyne:tag"}
               pullPolicy: IfNotPresent
             env:

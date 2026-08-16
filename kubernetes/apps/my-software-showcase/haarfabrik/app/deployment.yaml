@@ -32,7 +32,7 @@ spec:
 
       containers:
       - name: haarfabrik
-        image: ghcr.io/ibdigital/haarfabrik-extranet:latest
+        image: ghcr.io/nachtschatt3n/haarfabrik-extranet:latest
         imagePullPolicy: Always
 
         ports:

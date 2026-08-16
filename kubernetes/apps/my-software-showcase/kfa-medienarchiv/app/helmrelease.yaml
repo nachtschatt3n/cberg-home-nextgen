@@ -31,7 +31,7 @@ spec:
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/kfa-medienarchiv
+              repository: ghcr.io/nachtschatt3n/kfa_medienarchiv
               tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:kfa-medienarchiv:tag"}
               pullPolicy: IfNotPresent
             env:

@@ -481,7 +481,7 @@ flux get sources git -n flux-system
 
 - Verify image exists in GHCR:
   ```bash
-  docker pull ghcr.io/ibdigital/zuhause-betreut-caretakermanager:production-20260816000000
+  docker pull ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager:production-20260816000000
   ```
 
 ### Database Connection Errors

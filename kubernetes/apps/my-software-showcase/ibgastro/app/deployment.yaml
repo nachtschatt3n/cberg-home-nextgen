@@ -21,7 +21,7 @@ spec:
       serviceAccountName: default
       containers:
       - name: ibgastro
-        image: ghcr.io/ibdigital/my-software-showcase-ibgastro:latest
+        image: ghcr.io/nachtschatt3n/ibgastro:latest
         imagePullPolicy: Always
         ports:
         - name: http

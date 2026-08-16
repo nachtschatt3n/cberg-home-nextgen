@@ -81,7 +81,7 @@ spec:
 
       containers:
         - name: app
-          image: ghcr.io/ibdigital/uzeit-de:latest
+          image: ghcr.io/nachtschatt3n/uzeit-de:latest
           imagePullPolicy: Always
           ports:
             - name: http

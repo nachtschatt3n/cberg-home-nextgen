@@ -8,7 +8,7 @@ metadata:
   name: kfa-medienarchiv
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/nachtschatt3n/kfa-medienarchiv
+  image: ghcr.io/nachtschatt3n/kfa_medienarchiv
   interval: 10m
   secretRef:
     name: ghcr-secret

@@ -8,7 +8,7 @@ metadata:
   name: u-zeit
   namespace: my-software-showcase
 spec:
-  image: ghcr.io/ibdigital/u-zeit
+  image: ghcr.io/nachtschatt3n/u-zeit
   interval: 10m
   secretRef:
     name: ghcr-secret
