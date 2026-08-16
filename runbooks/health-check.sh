@@ -3765,9 +3765,19 @@ except: print('0')
     if [ -n "$ES_PW_EARLY" ]; then
         kubectl port-forward -n monitoring svc/elasticsearch-es-http 9201:9200 > /dev/null 2>&1 &
         ES_PF_PID=$!
-        sleep 3
 
-        ES_STATUS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
+        # Poll for port-forward + ES readiness instead of a fixed sleep. A fixed
+        # `sleep 3` races the port-forward: when ES/PF isn't ready in time the
+        # health probe returns empty ("unknown") AND every subsequent _count
+        # falls through to `|| echo 0`, emitting FALSE "0 documents / ingestion
+        # stalled" majors while ingestion is actually live. Retry the health
+        # probe up to ~20s; only trust the ingestion checks once ES answered.
+        ES_STATUS="unknown"
+        for _es_try in $(seq 1 20); do
+            ES_STATUS=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/_cluster/health" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown'))" 2>/dev/null || echo "unknown")
+            case "$ES_STATUS" in green|yellow|red) break ;; esac
+            sleep 1
+        done
         echo "Elasticsearch cluster status: $ES_STATUS"
         if [ "$ES_STATUS" = "red" ]; then
             log_critical "Elasticsearch cluster status is RED - data loss or unavailability"
@@ -3785,6 +3795,9 @@ except: print('0')
         echo ""
         echo "=== OTel Data Stream Ingestion Check ==="
 
+        if [ "$ES_STATUS" = "unknown" ]; then
+            log_warning "ES health probe did not respond within timeout - skipping OTel ingestion measurement (measurement error, not a confirmed outage)"
+        else
         LOGS_COUNT=$(curl -k -s -u "elastic:$ES_PW_EARLY" "https://localhost:9201/logs-generic-default/_count" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null || echo "0")
         echo "logs-generic-default document count: $LOGS_COUNT"
         LOGS_COUNT_INT=$(echo "$LOGS_COUNT" | tr -cd '0-9' || echo "0")
@@ -3842,6 +3855,7 @@ except: print(0)
         elif [ "$RECENT_LOGS_INT" -gt 0 ]; then
             log_success "OTel logs flowing: $RECENT_LOGS_INT documents in last 5 minutes"
         fi
+        fi  # end ES_STATUS != unknown guard
 
         kill $ES_PF_PID 2>/dev/null || true
         wait $ES_PF_PID 2>/dev/null || true
