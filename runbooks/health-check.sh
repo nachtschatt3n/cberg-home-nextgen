@@ -1292,6 +1292,10 @@ log_section "Section 11: Container Logs Analysis"
       "query": {"bool": {
         "should": [
           {"wildcard": {"body.text": "*ERROR*"}},
+          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
+          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
+          # 224 real, not 24,223). A success counted as a failure is the same
+          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
           {"wildcard": {"body.text": "*FATAL*"}}
         ],
         "minimum_should_match": 1,
@@ -2265,6 +2269,10 @@ PYEOF
       "query": {"bool": {
         "should": [
           {"wildcard": {"body.text": "*ERROR*"}},
+          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
+          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
+          # 224 real, not 24,223). A success counted as a failure is the same
+          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
           {"wildcard": {"body.text": "*FATAL*"}}
         ],
         "minimum_should_match": 1,
@@ -3864,9 +3872,9 @@ except: print(0)
             "bool": {
               "should": [
                 {"terms": {"severity_text": ["ERROR", "FATAL", "CRITICAL", "error", "fatal", "critical"]}},
-                {"match": {"body": "error"}},
-                {"match": {"body": "ERROR"}},
-                {"match": {"body": "fatal"}},
+                {"match": {"body.text": "error"}},
+                {"match": {"body.text": "ERROR"}},
+                {"match": {"body.text": "fatal"}},
                 {"match": {"body": "FATAL"}}
               ],
               "minimum_should_match": 1,
@@ -4248,6 +4256,10 @@ log_section "ES Log Insights (7-day analysis)"
           "query": {"bool": {
             "should": [
               {"wildcard": {"body.text": "*ERROR*"}},
+          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
+          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
+          # 224 real, not 24,223). A success counted as a failure is the same
+          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
               {"wildcard": {"body.text": "*FATAL*"}}
             ],
             "minimum_should_match": 1,

@@ -296,7 +296,7 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  {WARNING} Could not check K8s version")
 
     # Check Talos version (prefer server/cluster version)
-    talos_server_out = run("talosctl version 2>/dev/null | grep -A1 'Server:' | grep 'Tag:'", timeout=15)
+    talos_server_out = run("talosctl version 2>/dev/null | grep -A2 'Server:' | grep 'Tag:' | head -1", timeout=15)  # -A2, not -A1: a NODE: line sits between "Server:" and "Tag:", so -A1 can NEVER match.
     if talos_server_out:
         talos_ver = talos_server_out.replace("Tag:", "").strip()
         if talos_ver and talos_ver not in content:
@@ -919,7 +919,7 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
             pass
 
     # Check Talos badge against server version (if reachable)
-    talos_server_out = run("talosctl version 2>/dev/null | grep -A1 'Server:' | grep 'Tag:'", timeout=15)
+    talos_server_out = run("talosctl version 2>/dev/null | grep -A2 'Server:' | grep 'Tag:' | head -1", timeout=15)  # -A2, not -A1: a NODE: line sits between "Server:" and "Tag:", so -A1 can NEVER match.
     if talos_server_out and readme_talos_m:
         talos_ver = talos_server_out.replace("Tag:", "").strip().lstrip("v")
         badge_ver = readme_talos_m.group(1)

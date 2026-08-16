@@ -32,7 +32,7 @@ policy YAML (git-tracked, code-reviewed) and bump its version.
 
 **NON-safe (held) updates flow to scheduled maintenance windows.** Everything
 the auto-updater holds is planned + executed via the maintenance-window pipeline
-(`docs/sops/maintenance-windows.md`): 4 windows/week
+(`docs/sops/maintenance-windows.md`): 7 windows/week — DAILY since 2026-08-16
 (`runbooks/maintenance-windows.yaml`); the sweep (rule 4d) dispatches an
 `upgrade-planner-agent` per held update to write an executable plan under
 `runbooks/maintenance/plans/`; the `maintenance-window-agent` vets those plans
