@@ -1,7 +1,7 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.8 + Kubernetes v1.36.0 (kernel 6.18.42-talos, Clang/ThinLTO) — rolled 2026-08-16.**
-> Version: `2026.08.16b`
+> Version: `2026.08.16`
 > Last Updated: `2026-08-16`
 > Owner: `homelab-ops`
 

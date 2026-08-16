@@ -27,7 +27,8 @@
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
-| **Total** | **107** |
+| my-software-showcase | 1 |
+| **Total** | **108** |
 
 ---
 
@@ -276,6 +277,12 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 | andreamosteller | Portfolio site (production) | External |
 | gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Geocoding via komoot Photon (requires `PHOTON_USER_AGENT` env at boot). Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). Currently using the public Tankerkönig demo key (fixed example payloads, not real prices) wired via SOPS-encrypted Secret — rotate by editing `kubernetes/apps/my-software-production/gas-price-monitor/app/secret.sops.yaml` in place. Public exposure approved by owner on 2026-05-12 (recorded override of source-repo Architecture Decision #3); no auth, no rate-limiting — accepted risks tracked in the source repo's `CLAUDE.md`. | External |
 | rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal |
+
+### `my-software-showcase`
+
+| App | Purpose | Ingress |
+|-----|---------|---------|
+| zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app served on port 3000 with `/health/{liveness,readiness,startup}` probes. Image `ghcr.io/ibdigital/zuhause-betreut-caretakermanager`; Flux image automation armed (auto-deploys the `production-*` tag). 5Gi Longhorn RWO data PVC (`strategy: Recreate`). Homepage group "Software Portfolio". | Internal |
 
 ---
 
