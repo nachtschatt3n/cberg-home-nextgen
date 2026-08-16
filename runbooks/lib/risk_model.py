@@ -136,7 +136,22 @@ _PUBLIC_REPO_SECTIONS = {"s2_sensitive_exposure", "s3_git_history"}
 # unauthenticated external attacker is gated exactly like an Authentik outpost
 # fronts the others. Sourced verbatim from the AR-004 accepted risk; kept
 # narrow and explicit so the assumption is visible on the board.
+#
+# THIS SET IS THE ALLOWLIST MECHANISM. To bless another app's own login as a
+# verified security boundary (dropping it from external-unauth→HIGH to
+# external-auth→MEDIUM), the operator adds its token HERE — a code change that
+# is reviewed, exactly like an AR entry. It is deliberately NOT auto-populated:
+# assuming an app's login is a real boundary, unverified, is the error class we
+# refuse to make.
 SELF_AUTH_APPS = {"open-webui", "n8n", "iobroker", "home-assistant"}
+
+# CANDIDATES for the allowlist above — apps we OBSERVE on external ingress that
+# ship their own login screen and would be plausible additions to SELF_AUTH_APPS,
+# but which the operator has NOT blessed. They stay external-unauth (→ HIGH); the
+# model will NOT silently downgrade them. Their only effect is a rationale note
+# and a report call-out so the blessing decision is surfaced, never assumed.
+SELF_AUTH_CANDIDATES = {"immich", "nextcloud", "paperless", "paperless-ngx",
+                        "jellyfin", "traccar"}
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +193,19 @@ class Finding:
         md = row.get("metadata") or {}
         title = row.get("title") or ""
         detail = str(md.get("security_detail") or "")
-        cves = sorted(set(cls._CVE_RE.findall(title + " " + detail)))
+        cve_set = set(cls._CVE_RE.findall(title + " " + detail))
+        # Machine-readable CVE list attached at write time by s4_cve_check
+        # (metadata.cve_ids — DB-only, per the disclosure policy). Merged here so
+        # KEV can assess a finding whose TITLE carries no CVE ID (the Phase-1 gap:
+        # 122/199 scored exploited=UNKNOWN purely because the IDs lived only in a
+        # transient Trivy report, never on the finding). Kept out of the title on
+        # purpose — the title is what lands in committed files.
+        extra = md.get("cve_ids")
+        if isinstance(extra, (list, tuple)):
+            for c in extra:
+                if isinstance(c, str) and cls._CVE_RE.fullmatch(c):
+                    cve_set.add(c)
+        cves = sorted(cve_set)
 
         # Only the CVE section names container images in its first backtick.
         # Other sections put code snippets / resource names there (e.g. an
@@ -285,6 +312,13 @@ class ExposureIndex:
                     # its own login is effectively gated (AR-004).
                     if tier == EXTERNAL_UNAUTH and t in SELF_AUTH_APPS:
                         return EXTERNAL_AUTH, f"'{t}': external + own auth layer (AR-004)"
+                    # CANDIDATE: ships its own login but NOT operator-blessed —
+                    # stays external-unauth (no downgrade), just flagged so the
+                    # blessing decision is visible on the board.
+                    if tier == EXTERNAL_UNAUTH and t in SELF_AUTH_CANDIDATES:
+                        return EXTERNAL_UNAUTH, (
+                            f"'{t}': external-unauth — ships own login but NOT "
+                            f"operator-blessed (self-auth CANDIDATE, not AR-004)")
                     return tier, f"'{t}' matched {tier} ingress"
         if toks:
             return INTERNAL, f"no external ingress for {toks!r} → internal (ClusterIP/internal)"
@@ -545,6 +579,37 @@ def tier_for(exposure: str, exploited: Optional[bool], nature: str) -> str:
     return HIGH if exploited is True else MEDIUM
 
 
+def matched_self_auth_candidate(finding: Finding) -> Optional[str]:
+    """The candidate token this finding maps to, or None.
+
+    Matches exact OR image-longer (`immich-server` → candidate `immich`), the
+    same prefix shape the exposure classifier uses, so an app whose image name
+    carries a `-server`/`-ngx` suffix still surfaces under its base name.
+    Blessed apps (SELF_AUTH_APPS) are excluded — they are already external-auth.
+    """
+    toks = finding.app_tokens()
+    if any(t in SELF_AUTH_APPS for t in toks):
+        return None
+    # exact match first (canonical), then prefix.
+    for t in toks:
+        if t in SELF_AUTH_CANDIDATES:
+            return t
+    for t in toks:
+        for c in SELF_AUTH_CANDIDATES:
+            if t.startswith(c + "-"):
+                return c
+    return None
+
+
+def is_self_auth_candidate(finding: Finding) -> bool:
+    """True when the finding's app is an un-blessed self-auth CANDIDATE.
+
+    Used by the report to LIST (never downgrade) apps the operator could move
+    into SELF_AUTH_APPS.
+    """
+    return matched_self_auth_candidate(finding) is not None
+
+
 @dataclass
 class ScoreResult:
     tier: str
@@ -555,6 +620,7 @@ class ScoreResult:
     nature: str
     unknown_exploited: bool
     finding: Finding
+    exposure_note: str = ""
 
 
 def _exploited_word(state: Optional[bool]) -> str:
@@ -597,4 +663,5 @@ def score(finding: Finding, *,
         nature=nature,
         unknown_exploited=unknown,
         finding=finding,
+        exposure_note=enote,
     )

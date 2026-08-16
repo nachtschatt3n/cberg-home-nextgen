@@ -165,6 +165,72 @@ def ingest_or_notify(payload, *, fallback_text: str, urgent: bool = False) -> st
     return "notify-fallback"
 
 
+# ── Tier-based routing (Phase 2 of the contextual-risk redesign) ─────────────
+# The operator's rule, stated verbatim: bother them as little as possible —
+# only an external-unauth + exploited-in-the-wild finding (a CONTEXTUAL
+# CRITICAL) should ever interrupt. Every other tier is surfaced WITHOUT a page.
+#
+#   CRITICAL → urgent=True   audible push. The ONLY tier that interrupts.
+#   HIGH     → urgent=False  briefing (surfaced, not paged).
+#   MEDIUM   → no notification (maintenance-window queue / dashboard).
+#   LOW      → no notification (dashboard / weekly batch).
+from dataclasses import dataclass
+
+# tier → (channel, urgent, will_send). `will_send` is whether the tier notifies
+# at ALL; `urgent` is the audible-push flag passed to notify()/ingest_or_notify().
+_TIER_ROUTES: dict[str, tuple[str, bool, bool]] = {
+    "critical": ("notify-urgent",     True,  True),
+    "high":     ("briefing",          False, True),
+    "medium":   ("maintenance-queue", False, False),
+    "low":      ("dashboard",         False, False),
+}
+# Unknown/unscored tier: surface non-urgently rather than drop it, but never
+# page. (Should not happen — every scored finding carries one of the four.)
+_TIER_ROUTE_DEFAULT = ("dashboard", False, False)
+
+
+@dataclass
+class RouteDecision:
+    """What routing WOULD do (and did, unless dry_run) for one scored finding."""
+    tier: str
+    channel: str
+    urgent: bool          # the flag that WOULD be passed to notify() — True only for critical
+    will_send: bool       # does this tier notify at all?
+    sent: bool            # was a send actually attempted? (False on dry_run or a no-send tier)
+    transport: str        # 'ingest_or_notify' | 'notify' | 'none' | 'dry-run'
+
+
+def route_finding(tier: str, *, text: str, payload=None, dry_run: bool = False) -> RouteDecision:
+    """Route ONE scored finding by its contextual tier.
+
+    Pure decision + optional side-effect. Returns a RouteDecision describing the
+    routing regardless of dry_run, so callers can prove the decision without
+    paging. Only tier=='critical' ever sets urgent=True; medium/low never send.
+
+    `payload` (the home-operation issue dict) routes via ingest_or_notify so
+    OpenClaw owns the reminder/decision lifecycle; without one we fall back to a
+    raw notify(text). A no-send tier ignores both.
+    """
+    channel, urgent, will_send = _TIER_ROUTES.get(
+        (tier or "").lower(), _TIER_ROUTE_DEFAULT)
+
+    if not will_send:
+        return RouteDecision(tier=tier, channel=channel, urgent=urgent,
+                             will_send=False, sent=False, transport="none")
+    if dry_run:
+        return RouteDecision(tier=tier, channel=channel, urgent=urgent,
+                             will_send=True, sent=False, transport="dry-run")
+
+    if payload is not None:
+        ingest_or_notify(payload, fallback_text=text, urgent=urgent)
+        transport = "ingest_or_notify"
+    else:
+        notify(text, urgent=urgent)
+        transport = "notify"
+    return RouteDecision(tier=tier, channel=channel, urgent=urgent,
+                         will_send=True, sent=True, transport=transport)
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     urgent = False

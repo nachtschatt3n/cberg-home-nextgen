@@ -103,7 +103,10 @@ ACCEPTED_RISKS_DOC = REPO_ROOT / "docs" / "security-accepted-risks.md"
 sys.path.insert(0, str(SCRIPT_DIR))
 from lib.findings_writer import (  # noqa: E402
     FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+    SEVERITY_MAP,
 )
+from lib import risk_model as rm  # noqa: E402  — contextual tier scorer (Phase 2)
+from lib import notify as _notify  # noqa: E402  — tier-based routing (Phase 2)
 
 
 # ---------------------------------------------------------------------------
@@ -304,24 +307,30 @@ def redact(text: str) -> str:
 
 class Findings:
     def __init__(self):
-        self._items: list[tuple[str, str]] = []   # (severity, message)
+        # (severity, message, meta). `meta` is per-finding structured data that
+        # is persisted to sweep_findings.metadata (DB-only) — e.g. the
+        # machine-readable `cve_ids` list attached by s4_cve_check. It NEVER
+        # reaches the committed markdown report (that renders severity+message
+        # only), which is what keeps CVE IDs out of committed files while still
+        # letting KEV assess them off the DB record.
+        self._items: list[tuple[str, str, dict]] = []
 
-    def add(self, severity: str, msg: str) -> None:
-        self._items.append((severity, redact(msg)))
+    def add(self, severity: str, msg: str, *, meta: dict | None = None) -> None:
+        self._items.append((severity, redact(msg), dict(meta or {})))
 
     def worst(self) -> str:
         for sev in (CRITICAL, WARNING):
-            if any(s == sev for s, _ in self._items):
+            if any(s == sev for s, _, _ in self._items):
                 return sev
         return OK
 
     def markdown(self) -> str:
         if not self._items:
             return f"{OK} No findings\n"
-        return "\n".join(f"- {s} {m}" for s, m in self._items) + "\n"
+        return "\n".join(f"- {s} {m}" for s, m, _ in self._items) + "\n"
 
     def count(self, severity: str) -> int:
-        return sum(1 for s, _ in self._items if s == severity)
+        return sum(1 for s, _, _ in self._items if s == severity)
 
     def summary_cell(self) -> str:
         c = self.count(CRITICAL)
@@ -338,8 +347,8 @@ class Findings:
         """
         if not accepted_risks:
             return
-        new_items: list[tuple[str, str]] = []
-        for sev, msg in self._items:
+        new_items: list[tuple[str, str, dict]] = []
+        for sev, msg, meta in self._items:
             matched_id: str | None = None
             haystack = msg.lower()
             for ar_id, desc in accepted_risks.items():
@@ -348,9 +357,9 @@ class Findings:
                     matched_id = ar_id
                     break
             if matched_id:
-                new_items.append((ACCEPTED, f"[{matched_id}] {msg}"))
+                new_items.append((ACCEPTED, f"[{matched_id}] {msg}", meta))
             else:
-                new_items.append((sev, msg))
+                new_items.append((sev, msg, meta))
         self._items = new_items
 
 
@@ -1086,10 +1095,11 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, "  🟡 trivy not on PATH — skipping running-image CVE scan")
         return f.worst(), f, f.markdown()
 
-    # -v2: cache schema changed to split fixable vs no-upstream-fix counts
-    # (2026-07-30). A v1 cache has no crit_fix/crit_nofix keys, so use a new
-    # file rather than crash the new emission on stale entries.
-    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v3.json"
+    # -v4: cache schema now also carries the FULL per-image CVE-ID lists
+    # (fix_ids / nofix_ids) that feed metadata.cve_ids + KEV scoring. A v3 cache
+    # lacks those keys, so use a new file rather than serve id-less entries that
+    # would keep findings at exploited=UNKNOWN until the 24h TTL expired.
+    trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v4.json"
     cache_age_sec = 86400  # 24h
 
     cached: dict | None = None
@@ -1173,8 +1183,8 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             # cannot be patched until upstream ships — that's the AR-029 accepted
             # class. Severity does NOT decide acceptance; fix-availability does.
             cf = cn = hf = hn = 0  # crit-fixable, crit-nofix, high-fixable, high-nofix
-            fix_ids: list[str] = []
-            nofix_ids: list[str] = []
+            fix_ids: list[str] = []    # ALL fixable CRITICAL/HIGH CVE IDs (deduped)
+            nofix_ids: list[str] = []  # ALL no-upstream-fix CRITICAL/HIGH CVE IDs
             for tgt in report.get("Results", []) or []:
                 for v in tgt.get("Vulnerabilities", []) or []:
                     sev = v.get("Severity", "")
@@ -1186,15 +1196,20 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
                     else:
                         continue
+                    # Capture the FULL CVE-ID list (deduped), not just a 5-id
+                    # sample. These ride on sweep_findings.metadata.cve_ids
+                    # (DB-only, per disclosure policy) so KEV can assess every
+                    # CVE finding — the Phase-1 gap where 122/199 scored
+                    # exploited=UNKNOWN was purely missing IDs, not missing risk.
                     if vid:
-                        if fixable and len(fix_ids) < 5:
-                            fix_ids.append(vid)
-                        elif not fixable and len(nofix_ids) < 5:
-                            nofix_ids.append(vid)
+                        bucket = fix_ids if fixable else nofix_ids
+                        if vid not in bucket:
+                            bucket.append(vid)
             if cf or cn or hf or hn:
                 return img, {"crit_fix": cf, "crit_nofix": cn,
                              "high_fix": hf, "high_nofix": hn,
-                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5]}, True
+                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5],
+                             "fix_ids": fix_ids, "nofix_ids": nofix_ids}, True
             return img, None, True
 
         # 6 parallel scans is enough to overlap registry latency without
@@ -1252,6 +1267,11 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
             fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
+            # Machine-readable CVE-ID lists for the DB record ONLY (never the
+            # title). fixable findings carry the fixable IDs, no-upstream-fix
+            # findings the nofix IDs — so KEV assesses each against the right set.
+            _fix_meta = {"cve_ids": list(r.get("fix_ids", []))}
+            _nofix_meta = {"cve_ids": list(r.get("nofix_ids", []))}
             # FIXABLE CVEs are actionable ONLY if a newer upstream TAG exists to
             # bump to — we consume upstream images and never rebuild, so a fix
             # that lives only in a base-repo the vendor hasn't re-published is
@@ -1273,7 +1293,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         # something a warning-severity AR should absorb.
                         qual = ("and the tag FLOATS, so even this count is only a snapshot"
                                 if floating else "and this is already the newest upstream tag")
-                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) — no bump can fix this {qual}; upstream ships a materially vulnerable image. Decide: variant/base switch, replacement, or a compensating control — {fix_s}")
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) — no bump can fix this {qual}; upstream ships a materially vulnerable image. Decide: variant/base switch, replacement, or a compensating control — {fix_s}", meta=_fix_meta)
                         cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable, unbumpable — too large to absorb, needs a decision")
                         n_stale += 1
                     elif floating:
@@ -1286,11 +1306,11 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         # Trivy measured today can change on the next pull with
                         # no manifest edit and no sweep diff. The remedy is to
                         # pin, after which the normal bump logic applies.
-                        f.add(WARNING, f"`{tag}`: floating tag — upstream re-publishes it in place, so the CVE posture is unknowable and can change with no manifest edit (a snapshot today: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable); pin an immutable version or @sha256 digest — {fix_s}")
+                        f.add(WARNING, f"`{tag}`: floating tag — upstream re-publishes it in place, so the CVE posture is unknowable and can change with no manifest edit (a snapshot today: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable); pin an immutable version or @sha256 digest — {fix_s}", meta=_fix_meta)
                         cprint(C.YELLOW, f"  🟡 {tag}: FLOATING tag ({r['crit_fix']}C/{r['high_fix']}H fixable snapshot) — posture unknowable, pin it")
                         n_floating += 1
                     else:
-                        f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)")
+                        f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_fix']} CRITICAL + {r['high_fix']} HIGH fixable CVE(s) but already on the newest upstream tag — needs an upstream rebuild we don't do (accepted)", meta=_fix_meta)
                         cprint(C.CYAN, f"  ⓘ {tag}: {r['crit_fix']}C/{r['high_fix']}H fixable but already-latest — accepted")
                         n_latest += 1
                 # newer is True (a newer tag really exists) or None (lookup
@@ -1303,27 +1323,27 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 # and the pinned postgres digest was unchanged upstream).
                 elif r["crit_fix"] > 0:
                     if newer is None and _is_digest_pinned(img):
-                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — image is DIGEST-PINNED (no tag to compare); check the chart/appVersion that renders it, not the image tag — {fix_s}")
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — image is DIGEST-PINNED (no tag to compare); check the chart/appVersion that renders it, not the image tag — {fix_s}", meta=_fix_meta)
                         cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (digest-pinned — compare via chart version) — {fix_s}")
                     elif newer is None:
-                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — could NOT determine whether a newer upstream tag exists (surfaced by fail-safe); verify upstream before planning a bump — {fix_s}")
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — could NOT determine whether a newer upstream tag exists (surfaced by fail-safe); verify upstream before planning a bump — {fix_s}", meta=_fix_meta)
                         cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (newer-tag lookup UNDETERMINED) — {fix_s}")
                     else:
-                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — newer upstream tag available, bump the image — {fix_s}")
+                        f.add(CRITICAL, f"`{tag}`: {r['crit_fix']} fixable CRITICAL CVE(s) — newer upstream tag available, bump the image — {fix_s}", meta=_fix_meta)
                         cprint(C.RED, f"  🔴 {tag}: {r['crit_fix']} fixable CRITICAL (bump available) — {fix_s}")
                     n_actionable += 1
                 else:
                     if newer is None:
-                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer-tag lookup undetermined; verify upstream — {fix_s}")
+                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer-tag lookup undetermined; verify upstream — {fix_s}", meta=_fix_meta)
                         cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (newer-tag lookup UNDETERMINED) — {fix_s}")
                     else:
-                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}")
+                        f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}", meta=_fix_meta)
                         cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (bump available) — {fix_s}")
                     n_actionable += 1
             # NO UPSTREAM FIX at all — nothing to patch until upstream ships;
             # accepted per AR-029. Tagged ACCEPTED directly (precise).
             if r["crit_nofix"] > 0 or r["high_nofix"] > 0:
-                f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_nofix']} CRITICAL + {r['high_nofix']} HIGH CVE(s) with no upstream fix (accepted — unpatchable until upstream ships)")
+                f.add(ACCEPTED, f"[AR-029] `{tag}`: {r['crit_nofix']} CRITICAL + {r['high_nofix']} HIGH CVE(s) with no upstream fix (accepted — unpatchable until upstream ships)", meta=_nofix_meta)
                 n_accepted += 1
         cprint(C.CYAN, f"  Trivy: {len(findings_per_image)} of {len(distinct_images)} images with CVEs — "
                        f"{n_actionable} actionable (newer tag → bump), {n_floating} on FLOATING tags (posture unknowable), "
@@ -2603,9 +2623,70 @@ SECTION_NAMES = [
 ]
 
 
+_TIER_ROUTE_LABEL = {
+    rm.CRITICAL: "urgent page (audible)",
+    rm.HIGH:     "briefing (non-urgent)",
+    rm.MEDIUM:   "maintenance-window queue",
+    rm.LOW:      "weekly batch / dashboard",
+}
+
+
+def _render_tier_block(scored: list) -> list[str]:
+    """Markdown for the contextual-tier grouping. CVE-ID-free: identifies
+    findings by image/component/section only, never by the raw title (which the
+    committed report renders elsewhere but must not gain NEW CVE detail here)."""
+    from collections import Counter
+    tier_ct: Counter = Counter()
+    intrinsic_ct: Counter = Counter()
+    crits: list = []
+    candidates: dict[str, str] = {}   # app token → tier
+    for section in scored:
+        for sev_emoji, _msg, _im, res in section:
+            tier_ct[res.tier] += 1
+            intrinsic_ct[SEVERITY_MAP.get(sev_emoji, sev_emoji)] += 1
+            ident = res.finding.image or res.finding.component or res.finding.subsection
+            if res.tier == rm.CRITICAL:
+                crits.append((ident, res))
+            if res.exposure == rm.EXTERNAL_UNAUTH:
+                c = rm.matched_self_auth_candidate(res.finding)
+                if c:
+                    candidates[c] = res.tier
+
+    doc: list[str] = ["\n## Contextual Risk Tiers\n\n"]
+    doc.append("> Additive lens (exposure × exploited-in-KEV × nature). Intrinsic "
+               "severity is retained on every finding; tier is the primary "
+               "routing signal.\n\n")
+    doc.append("| Tier | Count | Routes to |\n|------|-------|-----------|\n")
+    for tier in (rm.CRITICAL, rm.HIGH, rm.MEDIUM, rm.LOW):
+        doc.append(f"| {tier} | {tier_ct.get(tier, 0)} | {_TIER_ROUTE_LABEL[tier]} |\n")
+    intr = ", ".join(f"{intrinsic_ct[k]} {k}" for k in
+                     ("critical", "warning", "accepted", "clean", "monitor", "deferred")
+                     if intrinsic_ct.get(k))
+    doc.append(f"\n_Intrinsic severity (retained): {intr or 'none'}._\n")
+
+    doc.append("\n### 🔴 Contextual CRITICALs (external-unauth + exploited-in-KEV + real vuln)\n\n")
+    if not crits:
+        doc.append("None — no finding is externally-exposed AND exploited-in-the-wild "
+                   "AND a real vuln. On this homelab that is the expected state.\n")
+    else:
+        for ident, res in crits:
+            doc.append(f"- `{ident}` — {res.rationale}\n")
+
+    if candidates:
+        doc.append("\n### Self-auth allowlist CANDIDATES (surfaced, NOT downgraded)\n\n")
+        doc.append("These external apps ship their own login but are NOT operator-blessed "
+                   "in `SELF_AUTH_APPS`, so they score external-unauth (→ HIGH). To treat "
+                   "an app's own auth as a verified boundary (→ MEDIUM), add its token to "
+                   "`SELF_AUTH_APPS` in `runbooks/lib/risk_model.py` (reviewed, like an AR):\n\n")
+        for tok in sorted(candidates):
+            doc.append(f"- `{tok}` — currently scored {candidates[tok].upper()} (external-unauth)\n")
+    return doc
+
+
 def write_report(
     timestamp: str,
     results: list[tuple[str, Findings, str]],
+    scored: list | None = None,
 ) -> None:
     doc = [
         f"# Security Audit — {timestamp}\n\n",
@@ -2627,6 +2708,10 @@ def write_report(
         name = SECTION_NAMES[i - 1]
         doc.append(f"| {i}. {name} | {status} | {findings.summary_cell()} |\n")
 
+    # Contextual tier grouping (Phase 2). Rendered from the scored findings.
+    if scored is not None:
+        doc.extend(_render_tier_block(scored))
+
     # Priority actions
     criticals = [(SECTION_NAMES[i], f) for i, (s, f, _) in enumerate(results) if s == CRITICAL]
     warnings  = [(SECTION_NAMES[i], f) for i, (s, f, _) in enumerate(results) if s == WARNING]
@@ -2636,13 +2721,13 @@ def write_report(
         if criticals:
             doc.append("### 🔴 Critical\n\n")
             for name, f in criticals:
-                for sev, msg in f._items:
+                for sev, msg, _ in f._items:
                     if sev == CRITICAL:
                         doc.append(f"- **{name}**: {msg}\n")
         if warnings:
             doc.append("\n### 🟡 Warning\n\n")
             for name, f in warnings:
-                for sev, msg in f._items:
+                for sev, msg, _ in f._items:
                     if sev == WARNING:
                         doc.append(f"- **{name}**: {msg}\n")
 
@@ -2670,30 +2755,104 @@ _SECTION_SLUGS = [
 ]
 
 
-def _emit_findings(writer: FindingsWriter, results: list) -> None:
-    """Persist each (section, Findings, body) tuple to sweep-history.
+def _build_indexes() -> tuple["rm.ExposureIndex | None", "rm.KevIndex"]:
+    """Build the exposure + KEV indexes ONCE per run (threaded into scoring).
 
-    No-op when the writer is disabled (no DSN).
+    Exposure fails soft to None (model then defaults every finding to internal —
+    conservative, not dismissive). KEV fails soft to an UNKNOWN feed (never a
+    silent 'not exploited') — that behaviour lives inside KevIndex.load().
+    """
+    try:
+        idx = rm.load_exposure_index()
+    except Exception as e:  # noqa: BLE001
+        cprint(C.YELLOW, f"  · exposure index unavailable ({e}) — findings default to internal")
+        idx = None
+    kev = rm.KevIndex.load()
+    kw = C.GREEN if kev.loaded else C.RED
+    cprint(kw, f"  · KEV feed: {kev.source}"
+               + (f" (catalog {kev.catalog_version}, {len(kev.cve_ids)} CVEs)"
+                  if kev.loaded else " — every exploited-axis is UNKNOWN (visible, not scored safe)"))
+    if idx is not None:
+        cprint(C.CYAN, f"  · exposure index: {len(idx.external_unauth)} external-unauth, "
+                       f"{len(idx.external_auth)} external-auth, {len(idx.internal_apps)} internal")
+    return idx, kev
+
+
+def _score_all(results: list, *, exposure_index, kev_index) -> list:
+    """Score every finding once. Returns a list parallel to `results`; each
+    entry is a list of (sev_emoji, msg, item_meta, ScoreResult) aligned to that
+    section's Findings._items. Faithful to the harness: builds each Finding via
+    rm.Finding.from_db_row (same image/CVE/AR parsing as reading the DB row)."""
+    scored: list = []
+    for idx, (_status, findings, _body) in enumerate(results):
+        subsection = _SECTION_SLUGS[idx] if idx < len(_SECTION_SLUGS) else f"s{idx}"
+        section_scored = []
+        for sev_emoji, msg, item_meta in findings._items:
+            intrinsic = SEVERITY_MAP.get(sev_emoji, sev_emoji)
+            fin = rm.Finding.from_db_row({
+                "finding_id": None,
+                "severity": intrinsic,
+                "title": msg,
+                "metadata": {**(item_meta or {}), "subsection": subsection},
+            })
+            res = rm.score(fin, exposure_index=exposure_index, kev_index=kev_index)
+            section_scored.append((sev_emoji, msg, item_meta, res))
+        scored.append(section_scored)
+    return scored
+
+
+def _route_text(section_title: str, msg: str, res) -> str:
+    return (f"[{res.tier.upper()}] {section_title}: {msg}\n"
+            f"({res.rationale})")
+
+
+def _emit_findings(writer: FindingsWriter, results: list, scored: list) -> None:
+    """Persist each finding to sweep-history WITH its contextual tier, and route
+    it by tier.
+
+    ADDITIVE: intrinsic severity is still written (writer.emit(severity=...));
+    the contextual tier is stored ALONGSIDE it in metadata (risk_tier + axes),
+    never replacing it — the change is fully reversible.
+
+    Routing (Phase 2): CRITICAL pages (urgent), HIGH surfaces as a non-urgent
+    briefing, MEDIUM/LOW never notify. Live sending is GATED behind
+    SWEEP_NOTIFY_BY_TIER (default DRY) so an unattended run records the decision
+    without paging until the operator opts in; the decision is always persisted.
     """
     if not writer.enabled:
         return
+    route_live = os.environ.get("SWEEP_NOTIFY_BY_TIER", "").strip().lower() in (
+        "1", "true", "live", "yes", "on")
+    evidence = (str(OUTPUT.relative_to(REPO_ROOT))
+                if str(OUTPUT).startswith(str(REPO_ROOT)) else str(OUTPUT))
     for idx, (_status, findings, _body) in enumerate(results):
         subsection = _SECTION_SLUGS[idx] if idx < len(_SECTION_SLUGS) else f"s{idx}"
         section_title = SECTION_NAMES[idx] if idx < len(SECTION_NAMES) else subsection
-        for sev_emoji, msg in findings._items:
-            writer.emit(
-                severity=sev_emoji,
-                title=msg,
-                subsection=subsection,
-                # OUTPUT may be outside REPO_ROOT when SWEEP_SNAPSHOTS_DIR is
-                # set (e.g. /tmp/snapshots in the in-cluster collector).
-                evidence_path=(
-                    str(OUTPUT.relative_to(REPO_ROOT))
-                    if str(OUTPUT).startswith(str(REPO_ROOT))
-                    else str(OUTPUT)
-                ),
-                metadata={"section_title": section_title},
-            )
+        for (sev_emoji, msg, item_meta), (_s, _m, _im, res) in zip(
+                findings._items, scored[idx]):
+            meta: dict = {"section_title": section_title}
+            meta.update(item_meta or {})
+            # Contextual tier + axes — additive, never overwrites `severity`.
+            meta["risk_tier"] = res.tier
+            meta["risk_exposure"] = res.exposure
+            meta["risk_exploited"] = res.exploited          # True | False | None
+            meta["risk_exploited_reason"] = res.exploited_reason
+            meta["risk_nature"] = res.nature
+            meta["risk_unknown_exploited"] = res.unknown_exploited
+            meta["risk_rationale"] = res.rationale          # CVE-ID-free by construction
+            if res.exposure == rm.EXTERNAL_UNAUTH and rm.is_self_auth_candidate(res.finding):
+                meta["self_auth_candidate"] = True
+
+            # Route by tier (dry unless opted in). Decision recorded either way.
+            dec = _notify.route_finding(
+                res.tier, text=_route_text(section_title, msg, res),
+                dry_run=not route_live)
+            meta["route_channel"] = dec.channel
+            meta["route_urgent"] = dec.urgent
+            meta["route_sent"] = dec.sent
+
+            writer.emit(severity=sev_emoji, title=msg, subsection=subsection,
+                        evidence_path=evidence, metadata=meta)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -2787,9 +2946,14 @@ def main(argv: list[str] | None = None) -> int:
     with WazuhPortForward() as wz:
         results.append(s13_wazuh_siem(wz))
 
+    # Contextual risk scoring — build indexes ONCE, score every finding.
+    cprint(C.CYAN, "\nContextual risk scoring (exposure × exploited × nature)...")
+    exposure_index, kev_index = _build_indexes()
+    scored = _score_all(results, exposure_index=exposure_index, kev_index=kev_index)
+
     # Write report
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    write_report(timestamp, results)
+    write_report(timestamp, results, scored)
 
     # Final summary
     total_crit = sum(1 for s, _, _ in results if s == CRITICAL)
@@ -2805,8 +2969,16 @@ def main(argv: list[str] | None = None) -> int:
         trigger=trigger_from_env(),
         git_head=git_head(),
     ) as writer:
-        _emit_findings(writer, results)
+        _emit_findings(writer, results, scored)
         writer.close(verdict=verdict)
+
+    # Contextual-tier summary to the terminal (intrinsic count secondary).
+    from collections import Counter as _Counter
+    tier_ct = _Counter(res.tier for section in scored for (_se, _m, _im, res) in section)
+    cprint(C.BOLD, f" Tiers: {tier_ct.get(rm.CRITICAL,0)} critical  "
+                   f"{tier_ct.get(rm.HIGH,0)} high  {tier_ct.get(rm.MEDIUM,0)} medium  "
+                   f"{tier_ct.get(rm.LOW,0)} low  "
+                   f"(intrinsic: {total_crit} critical / {total_warn} warning)")
 
     print()
     cprint(C.BOLD + C.BLUE, "=" * 60)
