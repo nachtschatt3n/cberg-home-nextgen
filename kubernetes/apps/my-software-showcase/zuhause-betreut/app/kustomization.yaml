@@ -1,0 +1,17 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+# Kustomization for zuhause-betreut-caretakermanager
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # HelmRelease: Main application deployment
+  - helmrelease.yaml
+  # Secret: App-specific secrets (database credentials, SECRET_KEY_BASE, etc.)
+  # Generated from secret.sops.yaml and decrypted by Flux
+  - secret.sops.yaml
+  # GHCR Secret: Credentials for pulling images from GitHub Container Registry
+  # Shared across apps in my-software-showcase namespace
+  - ghcr-secret.sops.yaml
+  # Image Automation: Flux ImageRepository, ImagePolicy, and ImageUpdateAutomation
+  # Handles automatic image updates when new tags are pushed to GHCR
+  - image-automation.yaml

@@ -1,0 +1,101 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: zuhause-betreut-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: zuhause-betreut.rules
+    rules:
+    # Pod Health Alerts
+    - alert: ZuhauseBetreuttPodNotReady
+      annotations:
+        description: Zuhause Betreut caretaker manager pod {{ $labels.pod }} has been
+          not ready for more than 5 minutes. The caregiving management service may
+          be unavailable.
+        summary: Zuhause Betreut pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{pod=~"zuhause-betreut-.*", condition="false"}
+        ) > 0
+      for: 5m
+      labels:
+        app: zuhause-betreut
+        component: caretakermanager
+        severity: critical
+    - alert: ZuhauseBetreutPodCrashLooping
+      annotations:
+        description: Zuhause Betreut pod {{ $labels.pod }} has restarted {{ $value
+          | printf "%.0f" }} times in the last 15 minutes. Check logs for startup
+          errors or dependency failures.
+        summary: Zuhause Betreut pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{pod=~"zuhause-betreut-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        app: zuhause-betreut
+        component: caretakermanager
+        severity: critical
+    - alert: ZuhauseBetreutPodRestarted
+      annotations:
+        description: Zuhause Betreut pod {{ $labels.pod }} has restarted at least
+          once in the last 15 minutes. Monitor for repeated restarts or OOMKills.
+        summary: Zuhause Betreut pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{pod=~"zuhause-betreut-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        app: zuhause-betreut
+        component: caretakermanager
+        severity: warning
+
+    # Resource Utilization Alerts (optional — uncomment when metrics are available)
+    # - alert: ZuhauseBetreutHighMemoryUsage
+    #   annotations:
+    #     description: Zuhause Betreut pod {{ $labels.pod }} is using {{ $value | humanizePercentage }}
+    #       of its memory limit. Consider increasing memory request/limit or optimizing
+    #       database queries.
+    #     summary: Zuhause Betreut pod {{ $labels.pod }} high memory usage
+    #   expr: |
+    #     (sum(container_memory_usage_bytes{pod=~"zuhause-betreut-.*"}) by (pod) /
+    #      sum(container_spec_memory_limit_bytes{pod=~"zuhause-betreut-.*"}) by (pod)) > 0.85
+    #   for: 5m
+    #   labels:
+    #     app: zuhause-betreut
+    #     component: caretakermanager
+    #     severity: warning
+
+    # - alert: ZuhauseBetreutHighCPUUsage
+    #   annotations:
+    #     description: Zuhause Betreut pod {{ $labels.pod }} is using {{ $value | humanizePercentage }}
+    #       of its CPU limit. Monitor for performance degradation or increase CPU requests.
+    #     summary: Zuhause Betreut pod {{ $labels.pod }} high CPU usage
+    #   expr: |
+    #     (sum(rate(container_cpu_usage_seconds_total{pod=~"zuhause-betreut-.*"}[5m])) by (pod) /
+    #      sum(container_spec_cpu_quota{pod=~"zuhause-betreut-.*"}) by (pod)) > 0.8
+    #   for: 10m
+    #   labels:
+    #     app: zuhause-betreut
+    #     component: caretakermanager
+    #     severity: warning
+
+    # Application Error Rate Alert (optional — requires app to export metrics)
+    # - alert: ZuhauseBetreutHighErrorRate
+    #   annotations:
+    #     description: Zuhause Betreut application error rate is {{ $value | humanizePercentage }}
+    #       over the last minute. Check application logs for errors or request failures.
+    #     summary: Zuhause Betreut application high error rate
+    #   expr: |
+    #     (sum(rate(http_requests_total{pod=~"zuhause-betreut-.*", status=~"5.."}[1m])) /
+    #      sum(rate(http_requests_total{pod=~"zuhause-betreut-.*"}[1m]))) > 0.05
+    #   for: 1m
+    #   labels:
+    #     app: zuhause-betreut
+    #     component: caretakermanager
+    #     severity: warning
