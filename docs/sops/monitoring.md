@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.16`
+> Last Updated: `2026-08-16`
 > Owner: `Platform`
 
 ---
@@ -471,6 +471,27 @@ kubectl port-forward -n monitoring svc/kibana-kb-http 5601:5601 &
 > **Always prove the query path before trusting a zero.** Search a term you
 > know is present (e.g. `body.text: *readiness*`) first; if the control also
 > returns 0, the query is wrong, not the cluster.
+
+> **`severity_text` is a dead field — do not filter on it.** In this data
+> stream it is populated on roughly **28 documents out of ~3.49 million**.
+> The same silent-zero failure class as the `kubernetes.*`/`log` trap above:
+> `{"terms": {"severity_text": ["ERROR", "FATAL"]}}` returns near-zero hits
+> and reads as "no errors", when the field is simply unpopulated on the log
+> stream. The only reliable way to find error-level logs is the `body.text`
+> wildcard from step 5 (e.g. `body.text: *error*`).
+>
+> **Companion trap: a bare `*ERROR*`/`*error*` wildcard also matches
+> CoreDNS's `NOERROR` rcode** — the string it logs for a *successful* DNS
+> answer — which inflates error counts with healthy DNS traffic. Fixed in
+> `runbooks/health-check.sh` (commit `3af29366`) by adding a sibling clause
+> that excludes `*NOERROR*`:
+> ```json
+> {"wildcard": {"body.text": "*ERROR*"}},
+> {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},
+> {"wildcard": {"body.text": "*FATAL*"}}
+> ```
+> Treat `runbooks/health-check.sh` as the working reference implementation
+> rather than re-deriving the exclusion by hand.
 
 ### edot-collector
 

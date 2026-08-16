@@ -1422,15 +1422,21 @@ curl -k -u "elastic:$ES_PASSWORD" "https://localhost:9200/logs-generic-default/_
   -d '{"query":{"range":{"@timestamp":{"gte":"now-5m"}}}}' | python3 -c "import sys,json; print('Logs last 5min:', json.load(sys.stdin)['count'])"
 
 # 6. Error pattern query using OTel fields (last 24h)
-# NOTE: EDOT in this cluster does NOT populate severity_text — it is N/A on all documents.
-# Use wildcard on body.text instead. The k8s-gateway DNS "NOERROR" lines are false positives
-# (grep for ERROR in NOERROR strings) — filter them out by excluding dns/k8s-gateway.
+# NOTE: severity_text is effectively a DEAD field in this cluster's log data stream —
+# populated on ~28 of ~3.49 MILLION documents. Same silent-zero failure class as the
+# retired kubernetes.*/log field trap: filtering on severity_text reads as "no errors"
+# when the field is simply unpopulated. Use wildcard on body.text instead.
+# The k8s-gateway DNS "NOERROR" lines are a companion trap: *ERROR* wildcard-matches the
+# rcode string CoreDNS logs for a SUCCESSFUL answer. Excluded below both by container name
+# and by a *NOERROR* must_not clause (the technique landed in commit 3af29366, see
+# runbooks/health-check.sh for the working reference implementation).
 curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{
   "size": 0,
   "query": {
     "bool": {
       "should": [
         {"wildcard": {"body.text": "*ERROR*"}},
+        {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},
         {"wildcard": {"body.text": "*FATAL*"}}
       ],
       "minimum_should_match": 1,
@@ -1495,14 +1501,14 @@ wait $PF_PID 2>/dev/null || true
 | Old Fluent-bit field | OTel field | Notes |
 |---|---|---|
 | `log` | `body.text` | Use `wildcard` query on `body.text`, not `match` on `body` |
-| `severity` / text match | `severity_text` | **NOT populated by EDOT in this cluster** — always N/A. Use `body.text` wildcard instead. |
+| `severity` / text match | `severity_text` | **Effectively dead — populated on ~28 of ~3.49M docs.** Same silent-zero class as the retired `kubernetes.*`/`log` fields. Use `body.text` wildcard instead. |
 | `k8s_namespace_name` | `resource.attributes.k8s.namespace.name` | |
 | `k8s_pod_name` | `resource.attributes.k8s.pod.name` | |
 | `k8s_container_name` | `resource.attributes.k8s.container.name` | |
 | `fluent-bit-YYYY.MM.DD` index | `logs-generic-default` data stream | |
 | (metrics) | `metrics-generic.otel-default` data stream | |
 
-> **k8s-gateway false positives:** DNS responses include the RCODE string `NOERROR`, which matches wildcard `*ERROR*`. Always exclude the `k8s-gateway` container from error queries (see query #6 above).
+> **k8s-gateway / CoreDNS false positives:** DNS responses include the RCODE string `NOERROR`, which matches wildcard `*ERROR*` and is logged for a *successful* answer, not a failure. Always exclude the `k8s-gateway` container **and** add a `must_not` clause on `*NOERROR*` for error queries (see query #6 above; technique landed in `runbooks/health-check.sh` commit `3af29366`).
 
 **ILM Retention** (managed by `elasticsearch-otel-ilm-bootstrap` Job + `otel-ilm-configmap`):
 | Data stream | Policy | Retention |
@@ -1527,7 +1533,7 @@ for i in json.load(sys.stdin):
 - Verify edot-collector deployment is 1/1 ready and DaemonSet covers all 3 nodes
 - Confirm both OTel data streams have documents and recent ingestion is active (>0 in last 5 min)
 - Aggregate error counts by namespace and pod using OTel field names
-- Flag any FATAL severity_text or OOMKilled body matches for immediate investigation
+- Flag any FATAL/OOMKilled `body.text` wildcard matches for immediate investigation (not `severity_text` — see the OTel Field Reference above)
 - `external-dns` FATAL log entries (Cloudflare sync failures) are a **known false positive** — classify as MINOR; it auto-recovers
 
 **Error Rate Thresholds:**
