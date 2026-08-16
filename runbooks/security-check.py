@@ -2746,6 +2746,20 @@ def main(argv: list[str] | None = None) -> int:
         cprint(C.CYAN, f"Accepted risks loaded — {len(_ACCEPTED_RISKS)} entries: "
                        f"{', '.join(sorted(_ACCEPTED_RISKS.keys()))}")
 
+    # Write preflight: prove the findings DB is reachable BEFORE spending
+    # minutes on 13 sections + three port-forwards. The writer is only opened
+    # at the very end, so without this a DB outage discards a fully completed
+    # run (all sections ran, then the end-of-run connect threw). Markdown-only
+    # runs (no DSN) preflight to a no-op and proceed.
+    try:
+        FindingsWriter.preflight(args.postgres_dsn)
+    except Exception as e:
+        cprint(C.RED, f"Findings DB preflight FAILED: {e}")
+        cprint(C.RED, "  Refusing to run the audit — its findings would be written at the")
+        cprint(C.RED, "  end and lost. Fix SWEEP_PG_DSN / the database, or unset the DSN to")
+        cprint(C.RED, "  run in markdown-only mode.")
+        return 2
+
     results: list[tuple[str, Findings, str]] = []
 
     # Sections 1-4: no Elasticsearch needed

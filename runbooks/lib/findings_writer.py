@@ -36,9 +36,38 @@ import hashlib
 import json
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+# Transient-connection retry policy, shared by the write preflight and the
+# constructor. A daily-operation run spends many minutes in Elasticsearch and
+# Wazuh port-forwards before it ever writes, so a momentary DB blip must not
+# throw away a completed run's findings.
+_CONNECT_ATTEMPTS = 3
+_CONNECT_BACKOFF_S = 2.0
+
+
+def _connect_with_retry(dsn: str, *, autocommit: bool = False,
+                        attempts: int = _CONNECT_ATTEMPTS,
+                        backoff_s: float = _CONNECT_BACKOFF_S):
+    """psycopg.connect with a small bounded retry on transient failures.
+
+    Raises the last exception if every attempt fails, so callers can decide
+    between fail-fast (preflight) and degrade-to-no-op.
+    """
+    import psycopg  # type: ignore
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return psycopg.connect(dsn, autocommit=autocommit, connect_timeout=10)
+        except Exception as e:  # noqa: BLE001 — surface after final attempt
+            last = e
+            if i < attempts - 1:
+                time.sleep(backoff_s * (i + 1))
+    assert last is not None
+    raise last
 
 # Severity emoji → DB string mapping. Matches the emoji constants used
 # in the audit scripts (CRITICAL/WARNING/OK/ACCEPTED).
@@ -71,6 +100,42 @@ _RE_MAC       = re.compile(r"\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", re.I)
 _RE_SHA       = re.compile(r"\b[0-9a-f]{7,40}\b")
 _RE_WS        = re.compile(r"\s+")
 
+# A finding's stable IDENTITY is the code-identifier(s) it names, not the prose
+# around them. Audit messages put those identifiers in `backticks` (an image
+# ref like `postgres:17.10-bookworm`, a resource name, an alertname) and carry
+# any accepted-risk `[AR-0NN]` tags that qualify which finding-of-that-object
+# this is. Everything else in the line is human prose that gets reworded.
+_RE_BACKTICK  = re.compile(r"`([^`]+)`")
+_RE_ARTAG     = re.compile(r"\[AR-\d+\]", re.I)
+
+
+def _stable_anchor(title: str) -> str | None:
+    """A prose-independent identity for `title`, or None if it has no anchor.
+
+    Built from the backtick-quoted identifiers plus the sorted set of
+    `[AR-0NN]` tags. Returns None when the title contains no backticked span,
+    so ordinary sentence-shaped findings fall back to the normalized-title
+    fingerprint (unchanged behaviour).
+
+    Why this exists: the previous fingerprint hashed the whole normalized
+    PROSE, so rewording a message forked a brand-new finding row for an
+    unchanged problem (2026-08: a single title reword split 20 image findings
+    into 39 rows). Backtick content is kept VERBATIM (digits included) — the
+    image *version* is part of the identity: `postgres:17.10-bookworm` and
+    `postgres:17.11-bookworm` are genuinely different findings, and this is
+    the "hash on image@section, not on rendered prose" fix. The AR-tag set is
+    what keeps two DISTINCT findings about the SAME object apart — e.g. an
+    image's fixable-CRITICAL line (often untagged, or `[AR-052]`) vs its
+    no-upstream-fix accepted line (always `[AR-029]`) — which a bare image key
+    would wrongly collapse into one row.
+    """
+    spans = _RE_BACKTICK.findall(title)
+    if not spans:
+        return None
+    ids = "``".join(_RE_WS.sub(" ", s.strip().lower()) for s in spans)
+    ar = ",".join(sorted({m.upper() for m in _RE_ARTAG.findall(title)}))
+    return f"{ids}|{ar}"
+
 
 def _normalize(title: str) -> str:
     """Strip volatile substrings so the fingerprint is stable across cycles.
@@ -92,9 +157,14 @@ def _normalize(title: str) -> str:
 def fingerprint(section: str, subsection: str | None, title: str) -> str:
     """Stable identifier for a finding across cycles.
 
-    sha256 hex digest. Truncated to 64 chars (full digest fits — no overflow).
+    Keys on the title's stable ANCHOR (backticked identifiers + AR-tag set)
+    when it has one, else the normalized prose. This is what makes the id
+    survive a message reword instead of forking a new row. sha256 hex digest.
     """
-    parts = (section, subsection or "", _normalize(title))
+    basis = _stable_anchor(title)
+    if basis is None:
+        basis = _normalize(title)
+    parts = (section, subsection or "", basis)
     blob = "|".join(parts).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
@@ -145,10 +215,10 @@ class FindingsWriter:
         if not self._enabled:
             return
 
-        # Defer the import so absence of psycopg doesn't break no-DSN runs.
-        import psycopg  # type: ignore
-
-        self._conn = psycopg.connect(self.dsn, autocommit=False)
+        # Retry a transient blip rather than losing a whole completed run's
+        # findings. If the DB is genuinely down this still raises — callers
+        # that want to fail BEFORE doing the work should call preflight().
+        self._conn = _connect_with_retry(self.dsn, autocommit=False)
         with self._conn.cursor() as cur:
             # Idempotent: if the cycle row already exists (caller passed an
             # existing cycle_id) we leave it alone. New cycle_id → fresh row.
@@ -162,6 +232,33 @@ class FindingsWriter:
                 (self._cycle_id, trigger, git_head, notes),
             )
         self._conn.commit()
+
+    @staticmethod
+    def preflight(dsn: str | None, *, attempts: int = _CONNECT_ATTEMPTS) -> bool:
+        """Verify the findings DB is writable BEFORE a run does its work.
+
+        Returns True when `dsn` is empty/None (markdown-only mode is a valid,
+        supported way to run the audit — nothing to preflight). Otherwise it
+        opens a connection (with the shared retry) and runs `SELECT 1`,
+        returning True on success and RAISING on failure.
+
+        Call this at the very start of an audit. Findings are only persisted at
+        the END, after minutes of section work and several port-forwards, so a
+        DB that is unreachable at write time silently discards a fully
+        completed run (observed: all 13/13 security sections ran, then the
+        end-of-run connect threw and every finding was lost). Failing fast here
+        converts that into an obvious up-front error the operator can fix.
+        """
+        if not dsn:
+            return True
+        conn = _connect_with_retry(dsn, autocommit=True, attempts=attempts)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        finally:
+            conn.close()
+        return True
 
     @property
     def cycle_id(self) -> str:
