@@ -117,6 +117,34 @@ spec:
               set_dsl "logs-generic-default"
               set_dsl "metrics-generic.otel-default"
 
+              # Enable the data-stream FAILURE STORE on the OTel streams.
+              # Default is disabled — a document-parsing rejection (e.g. the
+              # managedFields "." key, a date-parse failure on @timestamp) is
+              # then SILENTLY DROPPED. The obs-recovery / document_parsing_exception
+              # runbook in docs/sops/monitoring.md assumes the failure store is on
+              # (it reads the rejection reason from <stream>::failures), so it must
+              # be enabled here, not toggled by hand at incident time.
+              # Idempotent PUT; only set if the stream exists (like DSL above).
+              set_failure_store() {
+                local stream="$1"
+                local status
+                status=$(curl -s -o /dev/null -w '%{http_code}' $CACERT $AUTH \
+                  "$${ES_URL}/_data_stream/$${stream}")
+                if [ "$${status}" = "200" ]; then
+                  echo "Enabling failure store: $${stream} ..."
+                  curl -sSf $CACERT $AUTH \
+                    -H 'Content-Type: application/json' \
+                    -X PUT "$${ES_URL}/_data_stream/$${stream}/_options" \
+                    -d '{"failure_store":{"enabled":true}}'
+                  echo ""
+                else
+                  echo "Skipping failure store for $${stream} (not yet created, status=$${status})"
+                fi
+              }
+
+              set_failure_store "logs-generic-default"
+              set_failure_store "metrics-generic.otel-default"
+
               # Override Elastic-managed @custom component templates so rolled-over
               # backing indices inherit auto_expand_replicas=0-1 automatically.
               # Elastic's templates (metrics-otel@template priority=120, logs@template,
