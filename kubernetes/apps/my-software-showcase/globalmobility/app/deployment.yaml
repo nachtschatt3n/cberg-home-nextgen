@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: globalmobility-group-gmbh-globaldispo
+  namespace: my-software-showcase
+  labels:
+    app: globalmobility-group-gmbh-globaldispo
+    version: "4.2.4"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: globalmobility-group-gmbh-globaldispo
+  template:
+    metadata:
+      labels:
+        app: globalmobility-group-gmbh-globaldispo
+        version: "4.2.4"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: globalmobility-group-gmbh-globaldispo
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        fsGroup: 33
+      containers:
+      - name: app
+        image: ghcr.io/ibdigital/my-software-showcase-globalmobility-group-gmbh-globaldispo:latest
+        imagePullPolicy: Always
+        ports:
+        - name: php-fpm
+          containerPort: 9000
+          protocol: TCP
+        env:
+        - name: DB_HOST
+          value: "mysql.my-software-showcase.svc.cluster.local"
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: globalmobility-group-gmbh-globaldispo-config
+              key: db_name
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: globalmobility-group-gmbh-globaldispo-secrets
+              key: db_user
+        - name: DB_PASS
+          valueFrom:
+            secretKeyRef:
+              name: globalmobility-group-gmbh-globaldispo-secrets
+              key: db_pass
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: globalmobility-group-gmbh-globaldispo-secrets
+              key: encryption_key
+        - name: INSTALL_TOOL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: globalmobility-group-gmbh-globaldispo-secrets
+              key: install_tool_password
+        - name: TYPO3_SITENAME
+          value: "globalDISPO 2.0 Kubernetes"
+        livenessProbe:
+          httpGet:
+            path: /health.php
+            port: php-fpm
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health.php
+            port: php-fpm
+            scheme: HTTP
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 2
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: fileadmin
+          mountPath: /app/fileadmin
+        - name: uploads
+          mountPath: /app/uploads
+        - name: typo3temp
+          mountPath: /app/typo3temp
+      volumes:
+      - name: fileadmin
+        persistentVolumeClaim:
+          claimName: globalmobility-group-gmbh-globaldispo-fileadmin
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: globalmobility-group-gmbh-globaldispo-uploads
+      - name: typo3temp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - globalmobility-group-gmbh-globaldispo
+              topologyKey: kubernetes.io/hostname

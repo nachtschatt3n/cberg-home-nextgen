@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ibgastro-config
+  namespace: my-software-showcase
+data:
+  db.host: "mysql"
+  db.name: "showcase_ibgastro_dev"
+  cakephp.debug: "0"
+  app.timezone: "Europe/Berlin"
+  app.env: "production"

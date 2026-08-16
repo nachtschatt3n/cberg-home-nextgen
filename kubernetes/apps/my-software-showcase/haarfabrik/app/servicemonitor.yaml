@@ -1,0 +1,120 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: haarfabrik
+  namespace: my-software-showcase
+  labels:
+    app: haarfabrik
+    prometheus: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: haarfabrik
+  endpoints:
+  - port: http
+    interval: 30s
+    scrapeTimeout: 10s
+    path: /metrics
+    # Note: This requires a /metrics endpoint in the Rails app
+    # If not available, you can skip metrics collection or use kube-state-metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: haarfabrik
+  namespace: my-software-showcase
+  labels:
+    app: haarfabrik
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: haarfabrik.rules
+    interval: 30s
+    rules:
+
+    # Alert: Pod is restarting frequently
+    - alert: HaarfabrikPodRestartingFrequently
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="my-software-showcase",pod=~"haarfabrik-.*"}[15m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik pod is restarting frequently"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value | humanize }} times in the last 15 minutes"
+
+    # Alert: Pod memory usage is high
+    - alert: HaarfabrikHighMemoryUsage
+      expr: |
+        (sum(container_memory_working_set_bytes{namespace="my-software-showcase",pod=~"haarfabrik-.*"})
+         / sum(kube_pod_container_resource_limits{namespace="my-software-showcase",pod=~"haarfabrik-.*",resource="memory"}))
+        > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik pod memory usage is high"
+        description: "Memory usage is {{ $value | humanizePercentage }} of the limit"
+
+    # Alert: Pod CPU usage is high
+    - alert: HaarfabrikHighCPUUsage
+      expr: |
+        (sum(rate(container_cpu_usage_seconds_total{namespace="my-software-showcase",pod=~"haarfabrik-.*"}[5m]))
+         / sum(kube_pod_container_resource_limits{namespace="my-software-showcase",pod=~"haarfabrik-.*",resource="cpu"}))
+        > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik pod CPU usage is high"
+        description: "CPU usage is {{ $value | humanizePercentage }} of the limit"
+
+    # Alert: Pod readiness check is failing
+    - alert: HaarfabrikPodNotReady
+      expr: |
+        kube_pod_status_ready{namespace="my-software-showcase",pod=~"haarfabrik-.*",condition="true"} == 0
+      for: 3m
+      labels:
+        severity: critical
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik pod is not ready"
+        description: "Pod {{ $labels.pod }} has not been ready for 3 minutes"
+
+    # Alert: Pod is in CrashLoopBackOff state
+    - alert: HaarfabrikPodCrashLoopBackOff
+      expr: |
+        kube_pod_container_status_waiting_reason{namespace="my-software-showcase",pod=~"haarfabrik-.*",reason="CrashLoopBackOff"} > 0
+      for: 2m
+      labels:
+        severity: critical
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik pod is in CrashLoopBackOff"
+        description: "Pod {{ $labels.pod }} is in CrashLoopBackOff state. Check logs with: kubectl logs -n my-software-showcase {{ $labels.pod }}"
+
+    # Alert: Pod does not exist (deployment scaled to 0 or deleted)
+    - alert: HaarfabrikDeploymentHasNoReplicas
+      expr: |
+        kube_deployment_status_replicas{namespace="my-software-showcase",deployment="haarfabrik"} == 0
+      for: 5m
+      labels:
+        severity: warning
+        app: haarfabrik
+      annotations:
+        summary: "Haarfabrik deployment has no replicas"
+        description: "The haarfabrik deployment has been scaled to 0 replicas or has no running pods"
+
+    # Recording rule: Request rate
+    - record: haarfabrik:request_rate:5m
+      expr: |
+        rate(http_requests_total{namespace="my-software-showcase",pod=~"haarfabrik-.*"}[5m])
+
+    # Recording rule: Error rate
+    - record: haarfabrik:error_rate:5m
+      expr: |
+        rate(http_requests_total{namespace="my-software-showcase",pod=~"haarfabrik-.*",status=~"5.."}[5m])

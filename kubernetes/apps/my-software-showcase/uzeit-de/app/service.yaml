@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+  labels:
+    app: uzeit-de
+spec:
+  type: ClusterIP
+  selector:
+    app: uzeit-de
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: my-software-showcase
+  labels:
+    app: mysql
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+      protocol: TCP

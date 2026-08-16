@@ -6,6 +6,19 @@ namespace: my-software-showcase
 components:
   - ../../flux/components/common
 resources:
+  # Core Portfolio Apps (all 15 containerized legacy applications)
   - ./zuhause-betreut/ks.yaml
+  - ./inbewegung/ks.yaml
   - ./kfa-medienarchiv/ks.yaml
   - ./mangold-smarthomeadvisor/ks.yaml
+  - ./metaldyne/ks.yaml
+  - ./u-zeit/ks.yaml
+  - ./stepbystepguide/ks.yaml
+  - ./holm-backend/ks.yaml
+  - ./see-edv-ibspm/ks.yaml
+  - ./ordiga/ks.yaml
+  - ./haarfabrik/ks.yaml
+  - ./max-jung/ks.yaml
+  - ./ibgastro/ks.yaml
+  - ./globalmobility/ks.yaml
+  - ./uzeit-de/ks.yaml

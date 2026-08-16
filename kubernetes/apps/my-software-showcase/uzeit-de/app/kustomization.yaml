@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: my-software-showcase
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - rbac.yaml
+  - ingress.yaml
+  - prometheus-rule.yaml
+
+# Uncomment when secrets are encrypted with SOPS
+# secretGenerator:
+# - name: uzeit-de-secrets
+#   files:
+#   - secrets.yaml.enc
+#   behavior: merge
+
+# Image configuration for Flux
+images:
+  - name: ghcr.io/ibdigital/uzeit-de
+    newTag: latest

@@ -1,0 +1,66 @@
+apiVersion: helm.fluxcd.io/v1
+kind: HelmRelease
+metadata:
+  name: max-jung
+  namespace: my-software-showcase
+  labels:
+    app: max-jung
+spec:
+  releaseName: max-jung
+  chart:
+    repository: https://charts.bitnami.com/bitnami
+    name: rails
+    version: 1.0.0  # Adjust to actual chart version
+  values:
+    image:
+      registry: ghcr.io
+      repository: nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
+      tag: latest
+      pullPolicy: Always
+
+    replicaCount: 1
+
+    service:
+      type: ClusterIP
+      port: 80
+      targetPort: 3000
+
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+
+    env:
+      - name: RAILS_ENV
+        value: "production"
+      - name: RACK_ENV
+        value: "production"
+      - name: RAILS_LOG_TO_STDOUT
+        value: "1"
+      - name: RAILS_SERVE_STATIC_FILES
+        value: "1"
+      - name: EXECJS_RUNTIME
+        value: "Node"
+
+    secrets:
+      - name: max-jung-secrets
+
+    probes:
+      liveness:
+        enabled: true
+        path: /health/liveness
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        enabled: true
+        path: /health/readiness
+        initialDelaySeconds: 10
+        periodSeconds: 5
+      startup:
+        enabled: true
+        path: /health/startup
+        initialDelaySeconds: 0
+        periodSeconds: 5

@@ -1,0 +1,49 @@
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: holm
+  namespace: my-software-showcase
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: ./
+      sourceRef:
+        kind: GitRepository
+        name: my-software-showcase-k8s
+        namespace: flux-system
+      interval: 1m
+  values:
+    replicaCount: 1
+    image:
+      repository: ghcr.io/ibdigital/my-software-showcase-holm
+      tag: latest
+      pullPolicy: Always
+    service:
+      type: ClusterIP
+      port: 80
+      targetPort: 3000
+    ingress:
+      enabled: false
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    healthChecks:
+      liveness:
+        enabled: true
+        path: /health/liveness
+        initialDelaySeconds: 30
+        periodSeconds: 10
+      readiness:
+        enabled: true
+        path: /health/readiness
+        initialDelaySeconds: 10
+        periodSeconds: 5
+      startup:
+        enabled: true
+        path: /health/startup
+        failureThreshold: 30

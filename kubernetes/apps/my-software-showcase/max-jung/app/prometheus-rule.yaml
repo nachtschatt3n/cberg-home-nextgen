@@ -1,0 +1,91 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: max-jung
+  namespace: my-software-showcase
+  labels:
+    app: max-jung
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: max-jung.rules
+    interval: 30s
+    rules:
+    # Alert if pod restarts more than 3 times in 15 minutes
+    - alert: MaxJungPodRestarts
+      expr: rate(kube_pod_container_status_restarts_total{pod=~"max-jung-.*"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod is restarting frequently"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last 15 minutes"
+
+    # Alert if pod is not ready
+    - alert: MaxJungPodNotReady
+      expr: kube_pod_status_ready{pod=~"max-jung-.*",condition="false"} == 1
+      for: 5m
+      labels:
+        severity: critical
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod is not ready"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is not ready"
+
+    # Alert if pod memory usage exceeds 85% of limit
+    - alert: MaxJungHighMemoryUsage
+      expr: |
+        (container_memory_usage_bytes{pod=~"max-jung-.*"} / container_spec_memory_limit_bytes{pod=~"max-jung-.*"}) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod memory usage is high"
+        description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }} of its limit"
+
+    # Alert if pod CPU usage exceeds 80% of limit
+    - alert: MaxJungHighCPUUsage
+      expr: |
+        (rate(container_cpu_usage_seconds_total{pod=~"max-jung-.*"}[5m]) / container_spec_cpu_quota{pod=~"max-jung-.*"} * container_spec_cpu_period{pod=~"max-jung-.*"}) > 0.80
+      for: 5m
+      labels:
+        severity: warning
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod CPU usage is high"
+        description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }} of its limit"
+
+    # Alert if pod is in CrashLoopBackOff
+    - alert: MaxJungCrashLoopBackOff
+      expr: kube_pod_container_status_waiting_reason{pod=~"max-jung-.*",reason="CrashLoopBackOff"} == 1
+      for: 1m
+      labels:
+        severity: critical
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod is in CrashLoopBackOff"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crashing and restarting"
+
+    # Alert if pod has been pending for more than 10 minutes
+    - alert: MaxJungPodPending
+      expr: kube_pod_status_phase{pod=~"max-jung-.*",phase="Pending"} == 1
+      for: 10m
+      labels:
+        severity: warning
+        app: max-jung
+      annotations:
+        summary: "Max Jung pod is pending"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been pending for more than 10 minutes"
+
+    # Alert if no instances are running
+    - alert: MaxJungNoInstancesRunning
+      expr: count(kube_pod_labels{pod=~"max-jung-.*"}) == 0
+      for: 5m
+      labels:
+        severity: critical
+        app: max-jung
+      annotations:
+        summary: "No Max Jung instances are running"
+        description: "No Max Jung pods found in namespace {{ $labels.namespace }}"

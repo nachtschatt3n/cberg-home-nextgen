@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: haarfabrik-config
+  namespace: my-software-showcase
+  labels:
+    app: haarfabrik
+data:
+  db.host: "mysql"
+  db.port: "3306"
+  db.database: "showcase_haarfabrik_prod"
+  db.pool: "20"
+  db.timeout: "5000"
+  rails.log.level: "info"
+  app.host: "haarfabrik.example.com"

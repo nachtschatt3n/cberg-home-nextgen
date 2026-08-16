@@ -1,0 +1,68 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: globalmobility-group-gmbh-globaldispo
+  namespace: my-software-showcase
+  labels:
+    app: globalmobility-group-gmbh-globaldispo
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: globalmobility-group-gmbh-globaldispo.rules
+    interval: 30s
+    rules:
+    - alert: GlobaldispoHighRestartRate
+      expr: |
+        rate(kube_pod_container_status_restarts_total{pod=~"globalmobility-group-gmbh-globaldispo-.*"}[15m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        app: globalmobility-group-gmbh-globaldispo
+      annotations:
+        summary: "High restart rate detected for globalDISPO"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times per minute over the last 15 minutes"
+
+    - alert: GlobaldispoHighMemoryUsage
+      expr: |
+        (container_memory_usage_bytes{pod=~"globalmobility-group-gmbh-globaldispo-.*"} /
+         container_spec_memory_limit_bytes{pod=~"globalmobility-group-gmbh-globaldispo-.*"}) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        app: globalmobility-group-gmbh-globaldispo
+      annotations:
+        summary: "High memory usage in globalDISPO pod"
+        description: "Pod {{ $labels.pod }} memory usage is above 80% (current: {{ $value | humanizePercentage }})"
+
+    - alert: GlobaldispoHighCPUUsage
+      expr: |
+        (rate(container_cpu_usage_seconds_total{pod=~"globalmobility-group-gmbh-globaldispo-.*"}[5m]) * 100) > 80
+      for: 5m
+      labels:
+        severity: warning
+        app: globalmobility-group-gmbh-globaldispo
+      annotations:
+        summary: "High CPU usage in globalDISPO pod"
+        description: "Pod {{ $labels.pod }} CPU usage is above 80% (current: {{ $value | humanizePercentage }})"
+
+    - alert: GlobaldispoReadinessProbeFailure
+      expr: |
+        kube_pod_container_status_ready{pod=~"globalmobility-group-gmbh-globaldispo-.*"} == 0
+      for: 3m
+      labels:
+        severity: critical
+        app: globalmobility-group-gmbh-globaldispo
+      annotations:
+        summary: "Readiness probe failing for globalDISPO"
+        description: "Pod {{ $labels.pod }} readiness probe has been failing for 3 minutes"
+
+    - alert: GlobaldispoLivenessProbeFailure
+      expr: |
+        kube_pod_container_status_last_state_reason{pod=~"globalmobility-group-gmbh-globaldispo-.*", reason="CrashLoopBackOff"} == 1
+      for: 5m
+      labels:
+        severity: critical
+        app: globalmobility-group-gmbh-globaldispo
+      annotations:
+        summary: "Liveness probe failing for globalDISPO - CrashLoopBackOff"
+        description: "Pod {{ $labels.pod }} is in CrashLoopBackOff state"

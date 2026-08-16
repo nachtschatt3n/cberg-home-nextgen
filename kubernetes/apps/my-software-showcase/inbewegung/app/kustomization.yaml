@@ -1,0 +1,6 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Minimal kustomization - waiting for K8s manifests from source repo
+# All resources are managed by parent Kustomization

@@ -1,0 +1,48 @@
+apiVersion: image.fluxcd.io/v1beta1
+kind: ImageRepository
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+spec:
+  image: ghcr.io/ibdigital/uzeit-de
+  interval: 5m0s
+  secretRef:
+    name: ghcr-secret
+---
+apiVersion: image.fluxcd.io/v1beta1
+kind: ImagePolicy
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+spec:
+  imageRepositoryRef:
+    name: uzeit-de
+  policy:
+    semver:
+      range: '>=0.0.0'
+---
+apiVersion: image.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: uzeit-de
+  namespace: my-software-showcase
+spec:
+  interval: 1m0s
+  sourceRef:
+    kind: GitRepository
+    name: my-software-showcase
+    namespace: flux-system
+  git:
+    commit:
+      author:
+        email: flux@showcase.local
+        name: Flux Image Automation
+      messageTemplate: |
+        Automated image update
+
+        Image: {{ .RepositoryName }}:{{ .NewTag }}
+  push:
+    branch: main
+  update:
+    path: ./images
+    strategy: Setters

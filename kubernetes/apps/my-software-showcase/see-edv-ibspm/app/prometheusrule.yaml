@@ -1,0 +1,84 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: see-edv-ibspm
+  namespace: my-software-showcase
+  labels:
+    app: see-edv-ibspm
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: see-edv-ibspm.rules
+    interval: 30s
+    rules:
+    # Alert: Pod is restarting frequently
+    - alert: SeeEdvIbspmPodRestartingFrequently
+      expr: |
+        rate(kube_pod_container_status_restarts_total{pod=~"see-edv-ibspm-.*"}[15m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} is restarting frequently"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes"
+
+    # Alert: Pod is not ready
+    - alert: SeeEdvIbspmPodNotReady
+      expr: |
+        kube_pod_status_ready{pod=~"see-edv-ibspm-.*", condition="false"} == 1
+      for: 10m
+      labels:
+        severity: critical
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} is not ready"
+        description: "Pod {{ $labels.pod }} has not been ready for 10 minutes"
+
+    # Alert: High memory usage
+    - alert: SeeEdvIbspmHighMemoryUsage
+      expr: |
+        (container_memory_usage_bytes{pod=~"see-edv-ibspm-.*"} / container_spec_memory_limit_bytes{pod=~"see-edv-ibspm-.*"}) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} is using high memory"
+        description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }} of limit"
+
+    # Alert: High CPU usage
+    - alert: SeeEdvIbspmHighCPUUsage
+      expr: |
+        rate(container_cpu_usage_seconds_total{pod=~"see-edv-ibspm-.*"}[5m]) > 0.4
+      for: 5m
+      labels:
+        severity: warning
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} is using high CPU"
+        description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanize }} cores"
+
+    # Alert: Readiness check failing
+    - alert: SeeEdvIbspmReadinessCheckFailing
+      expr: |
+        kube_pod_status_ready{pod=~"see-edv-ibspm-.*", condition="false"} == 1
+      for: 5m
+      labels:
+        severity: warning
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} readiness check is failing"
+        description: "Pod {{ $labels.pod }} has failed readiness checks for 5 minutes"
+
+    # Alert: Liveness check failing
+    - alert: SeeEdvIbspmLivenessCheckFailing
+      expr: |
+        increase(kube_pod_container_status_last_terminated_reason{pod=~"see-edv-ibspm-.*", reason="Error"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        app: see-edv-ibspm
+      annotations:
+        summary: "Pod {{ $labels.pod }} liveness check is failing"
+        description: "Pod {{ $labels.pod }} is being restarted due to liveness probe failure"

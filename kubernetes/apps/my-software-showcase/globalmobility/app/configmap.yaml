@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: globalmobility-group-gmbh-globaldispo-config
+  namespace: my-software-showcase
+  labels:
+    app: globalmobility-group-gmbh-globaldispo
+data:
+  db_name: "showcase_globalmobility_dev"
+  app_name: "globalDISPO 2.0"
+  typo3_version: "4.2.4"
