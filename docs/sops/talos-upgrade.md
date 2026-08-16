@@ -1,7 +1,7 @@
 # SOP: Talos Linux Upgrade with Performance Tuning
 
 > Description: Rolling Talos Linux upgrade procedure for this homelab cluster (3-node hyper-converged). Sections 1–12 are the reusable single-minor-version reference. Section 13 documents the completed two-stage `v1.11.0 → v1.13.0` upgrade (executed 2026-04-30) with 13 lessons learned. **Current cluster state: Talos v1.13.8 + Kubernetes v1.36.0 (kernel 6.18.42-talos, Clang/ThinLTO) — rolled 2026-08-16.**
-> Version: `2026.08.16`
+> Version: `2026.08.16b`
 > Last Updated: `2026-08-16`
 > Owner: `homelab-ops`
 
@@ -490,6 +490,109 @@ above and confirming the node now holds a volume.
 
 **Do not** reboot, cordon, drain, or reset the node for this, and do not delete
 any PV/PVC/Longhorn Volume or Replica — it is a host-state file problem only.
+
+#### Host-state issue 2 — leaked kubelet pod directory, endless unmount retry
+
+**Symptom.** One node's kubelet retries an unmount every ~2m2s, forever, for a
+pod UID that no longer exists, failing with `directory not empty`:
+
+```
+UnmountVolume.TearDown failed for volume "..." pod "<uid>" :
+  ... failed to remove mount point /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~csi/<vol>/mount:
+  directory not empty
+```
+
+Seen 2026-08-16 on `k8s-nuc14-01` for a retired Nextcloud pod whose SMB PV
+pointed at `192.168.31.230` — the NAS address on **Servers VLAN 10, retired
+2026-06-07**. Pre-existing, not caused by the Talos roll. It is log noise, not
+data risk — but see the trap below before "just deleting the directory".
+
+**Enumerate every volume in the loop before acting — there is usually more than
+one.** The brief that opened this said "an SMB PV"; the pod UID was actually
+retrying **two** volumes on an alternating cycle, and the second was a **live,
+healthy, attached Longhorn RWX volume** (`nextcloud-config`). Grep the whole
+loop, not the first message:
+
+```bash
+mise exec -- talosctl -n <node-ip> logs kubelet --tail 400 \
+  | grep '<pod-uid>' | grep -o 'volumeName:[^ ]*' | sort -u
+```
+
+**Pre-flight (all read-only, no workload needed):**
+
+```bash
+UID=<pod-uid>; N=<node-ip>
+kubectl get pods -A -o json | jq -r ".items[]|select(.metadata.uid==\"$UID\")"   # must be empty
+mise exec -- talosctl -n $N read /proc/mounts | grep -c "$UID"                     # must be 0
+mise exec -- talosctl -n $N read /proc/$(pgrep-kubelet)/mounts | grep -c "$UID"    # kubelet ns, must be 0
+mise exec -- talosctl -n $N list -lr /var/lib/kubelet/pods/$UID/volumes
+```
+
+Two checks decide whether it is genuinely orphaned:
+
+1. **Nothing mounted underneath** — check the **host** namespace *and* the
+   **kubelet's own** (`/proc/<kubelet-pid>/mounts`; find the pid with
+   `talosctl ps | grep -w kubelet`). Sanity-check the grep by confirming the
+   kubelet ns *does* show a mount you know is live, so a zero is a real zero and
+   not a broken query.
+2. **Stub vs. real data** — an orphaned mountpoint stub is root:root, 6-byte
+   (empty) subdirs with a frozen mtime. The live volume's staging mount is
+   app-owned (e.g. `0:33`), 4096-byte dirs, has `lost+found`, and an mtime that
+   advances while you watch. Compare them side by side with `talosctl list -l`
+   before believing either.
+
+For any **live** volume caught in the loop, confirm it has **no live consumer on
+that node** (`kubectl get pods --field-selector spec.nodeName=<node> -o json`,
+match `spec.volumes[].persistentVolumeClaim.claimName`). RWX Longhorn volumes
+routinely show `currentNodeID` = the node running their **share-manager**, which
+is *not* the same as having a consumer there — do not read `currentNodeID` as
+"in use here".
+
+> **Trap — do NOT `rm -rf` the pod directory.** Deleting it removes the
+> `vol_data.json` files, which is what the CSI unmounter loads *first*. The
+> retry then fails earlier, in `UnmountVolume.NewUnmounter`, **before** the
+> operation is registered with `nestedpendingoperations` — so it never gets a
+> backoff. Measured on 2026-08-16: the loop went from ~2 messages per 2 minutes
+> to **~230 messages per minute**, a ~230x amplification, and kubelet's
+> in-memory actual-state entry can then never be cleared because the teardown
+> can never complete. Removing the directory makes this strictly worse.
+
+**Fix — let kubelet finish its own teardown.** The blocker is only that
+`mount/` is a non-empty stub, so kubelet's final `rmdir` fails. Recreate the
+volume dir with its `vol_data.json` and an **empty** `mount/`:
+
+```yaml
+# hostPID pod pinned with nodeName: <node>, privileged, image with GNU coreutils
+B=/proc/1/root/var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~csi
+mkdir -p "$B/<vol>/mount"                 # EMPTY - this is the whole fix
+cat > "$B/<vol>/vol_data.json" <<'J'
+{"attachmentID":"...","driverName":"...","nodeName":"...","specVolID":"...","volumeHandle":"...","volumeLifecycleMode":"Persistent"}
+J
+```
+
+Capture `vol_data.json` verbatim with `talosctl read` **before** touching
+anything — it is the only copy, and you cannot reconstruct `attachmentID` from
+the API. Confirm both CSI node plugins are `Running` on that node first, or the
+teardown RPCs have nobody to answer them.
+
+Kubelet then completes `NodeUnpublish` + `NodeUnstage`, removes the directory
+itself, and drops the actual-state entry. Success looks like this — kubelet, not
+you, logging the cleanup:
+
+```
+{"caller":"kubelet/kubelet_volumes.go:161","msg":"Cleaned up orphaned pod volumes dir","podUID":"<uid>"}
+```
+
+Verify by re-grepping the UID and confirming the **newest** occurrence predates
+that line, waiting out **at least two** 2m2s intervals. Count occurrences
+per-minute rather than totals — the kubelet ring buffer keeps the historical
+burst and a raw `grep -c` will look unchanged long after the loop has stopped.
+
+Expect the node's now-unreferenced staging mount to be unstaged as part of the
+teardown; that is correct, and consumers on other nodes are unaffected (they
+hold their own staging mounts). **Do not** reboot, drain, or restart kubelet for
+this, and do not touch the live `globalmount` path or anything under
+`/var/lib/longhorn`.
 
 ### Step 10 — Re-enable OTBR
 
@@ -1139,6 +1242,7 @@ In practice, if Stage B fails: stop at `v1.12.7`, file the issue, plan Stage B r
 
 ## Version History
 
+- `2026.08.16b`: Added §9 "Host-state issue 2 — leaked kubelet pod directory, endless unmount retry". Documents the 2026-08-16 `k8s-nuc14-01` orphan (retired VLAN-10 NAS `192.168.31.230`) and three traps: (a) the loop covered **two** volumes, the second a *live* Longhorn RWX volume, so enumerate every volumeName before acting; (b) `rm -rf` of the pod dir is an anti-fix — losing `vol_data.json` moves the failure earlier than `nestedpendingoperations`, removing the backoff and amplifying the loop ~230x (2/2min → 230/min) while permanently wedging kubelet's actual-state; the fix is to restore `vol_data.json` with an **empty** `mount/` and let kubelet finish its own teardown; (c) verify by per-minute counts, not `grep -c`, since the ring buffer retains the historical burst. Also records the stub-vs-real-data tell (root:root 6-byte dirs vs app-owned 4096-byte dirs with `lost+found`) and that RWX `currentNodeID` means share-manager placement, not local consumption.
 - `2026.05.03`: Updated to reflect completed state — cluster is on Talos v1.13.0 + K8s v1.36.0. Rewrote header description and §2 Overview table from "Current → Target" planning format to "current cluster state" reference. Reader's note updated to cluster-state note.
 - `2026.04.30`: Documented the actual Stage A → Stage B path (`v1.11.0 → v1.12.7 → v1.13.0`, K8s `v1.34 → v1.35.4 → v1.36.0`) executed in this cluster. Added 13 lessons learned: powercycle-stuck on node 03 (cross-link to `docs/troubleshooting/talos-powercycle-stuck.md`), KSPP filtering of `install.extraKernelArgs` in v1.12+, `grubUseUKICmdline` default flip, JSON6902 PSA patch breaking, `talhelper` `$patch`/`$i` escaping, `talosctl` client `n±1` compatibility window, drain rate-limiter workaround, Longhorn `Retain` PV cascade-delete on backup-restore, intel-device-plugin operator `--devices` flag format, NPU NFD rule requirement, OTBR `replicas: 0` hardcode, etcd churn from concurrent `apply-config`, hugepages cmdline loss recovery. Section 2–6 perf sweep reframed as "applied during Stage A 2026-04-30". Longhorn v2 OS prereqs (hugepages=1024, `vfio_pci`, `uio_pci_generic`) recorded as wired in during Stage A via `machine-intelgpu.yaml`.
 - `2026.04.12`: Initial SOP — Talos v1.11.0 → v1.12.6 upgrade path combined with performance tuning sweep. Unblocks OTBR via `CONFIG_IPV6_MROUTE=y`. Keeps `powersave` governor.
