@@ -19,6 +19,10 @@ spec:
         kind: HelmRepository
         name: apache-superset
         namespace: flux-system
+  # 15m: the Recreate transition (webserver + worker + beat serially releasing
+  # and re-acquiring) exceeds the 5m default — attempt-vs-rollback thrash on the
+  # 2026-08-17 redis cutover, where every rollback resurrected the bundled redis.
+  timeout: 15m
   install:
     createNamespace: false
     remediation:
