@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: koush/scrypted
-              tag: latest
+              tag: v0.143.0-noble-full
             env:
               - name: SCRYPTED_DEBUG
                 value: "true"

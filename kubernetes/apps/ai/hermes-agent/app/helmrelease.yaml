@@ -59,7 +59,8 @@ spec:
           gateway:
             image:
               repository: nousresearch/hermes-agent
-              tag: latest
+              # No release tag matches this build (inter-release latest); digest-pinned.
+              tag: latest@sha256:c09a0f421b8c93216520cecd3a8bab45651cc223c9126ac26fcbdd38aaae0375
               pullPolicy: Always
             args:
               - gateway
@@ -133,7 +134,8 @@ spec:
           dashboard:
             image:
               repository: nousresearch/hermes-agent
-              tag: latest
+              # No release tag matches this build (inter-release latest); digest-pinned.
+              tag: latest@sha256:c09a0f421b8c93216520cecd3a8bab45651cc223c9126ac26fcbdd38aaae0375
               pullPolicy: Always
             args:
               - dashboard

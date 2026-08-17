@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: whiteboard-server
-        image: ghcr.io/nextcloud-releases/whiteboard:stable
+        image: ghcr.io/nextcloud-releases/whiteboard:v1.5.0
         ports:
         - containerPort: 3002
           name: websocket

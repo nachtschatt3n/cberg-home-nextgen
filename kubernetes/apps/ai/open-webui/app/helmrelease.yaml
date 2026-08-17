@@ -59,6 +59,12 @@ spec:
     pipelines:
       # -- Automatically install Pipelines chart to extend Open WebUI functionality using Pipelines: https://github.com/open-webui/pipelines
       enabled: true
+      # Chart default is ghcr.io/open-webui/pipelines:main (floating; upstream
+      # publishes no version tags at all). Digest-pinned to the build that was
+      # live on 2026-08-17.
+      image:
+        repository: ghcr.io/open-webui/pipelines
+        tag: main@sha256:b48e9bc338ce2be0acfbeff01810db72408a12f07739f9e3879c1f2b00952d6e
       # Recreate (not RollingUpdate): the pipelines PVC is RWO, so a rolling
       # update deadlocks — the new pod can't attach the volume the old pod holds
       # (Multi-Attach error). Recreate tears the old pod down first.

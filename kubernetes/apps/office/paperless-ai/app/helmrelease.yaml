@@ -31,7 +31,7 @@ spec:
           main:
             image:
               repository: clusterzx/paperless-ai
-              tag: "latest"
+              tag: "3.0.9"
             env:
               TZ: ${TIMEZONE}
               PUID: "1000"
