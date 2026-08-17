@@ -31,7 +31,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/rainbow-rescue
-              tag: 0.1.0
+              tag: 0.1.1
             probes:
               liveness: &probes
                 enabled: true
