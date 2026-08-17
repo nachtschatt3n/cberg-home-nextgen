@@ -568,6 +568,30 @@ def main(argv: list[str] | None = None) -> int:
                       f"{', '.join(sorted(reported)) or '(none)'} — pass --ran to declare it "
                       f"explicitly; a section that ran clean can write no rows and would "
                       f"otherwise look like it never ran")
+            # Persist the ran-set on the cycle row (notes JSON). Without this
+            # there is NO per-section run record anywhere, so the board renderer
+            # must show a clean section as "DID NOT REPORT" — a false gap. The
+            # record is written only here, from the same authoritative set the
+            # auto-close uses, so "ran clean" on the board always means a real run.
+            try:
+                import json as _json
+                import psycopg as _pg
+                with _pg.connect(dsn) as _c, _c.cursor() as _cur:
+                    _cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s", (cycle_id,))
+                    _row = _cur.fetchone()
+                    _notes = {}
+                    if _row and _row[0]:
+                        try:
+                            _notes = _json.loads(_row[0])
+                        except (ValueError, TypeError):
+                            _notes = {"legacy_notes": _row[0]}
+                    _notes["ran"] = sorted(reported)
+                    _cur.execute("UPDATE sweep_cycles SET notes = %s WHERE cycle_id = %s",
+                                 (_json.dumps(_notes), cycle_id))
+                    _c.commit()
+            except Exception as _e:  # noqa: BLE001 - the record is best-effort; reconcile must not die on it
+                print(f"==> WARNING: could not persist ran-set on cycle row: {_e}")
+
             skipped = [x for x in RECONCILE_CANDIDATES if x not in reported]
             if skipped:
                 print(f"==> auto-close SKIPPED for section(s) that did not report "

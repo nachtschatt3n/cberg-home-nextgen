@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -64,7 +65,7 @@ def _dsn() -> str | None:
 def _desc(title: str, limit: int = 96) -> str:
     """A short description from a raw finding title: keep the identifier and
     the first clause, drop trailing CVE enumerations and remediation prose."""
-    t = title.strip()
+    t = re.sub(r"\s+", " ", title.strip())
     # cut at the em-dash remediation tail or a CVE list, whichever comes first
     for sep in (" — CVE-", "; CVE-", " - CVE-"):
         i = t.find(sep)
@@ -124,6 +125,19 @@ def collect(cur, cycle_id: str | None) -> dict:
 
     out = {"cycle_id": str(cycle_id), "started_at": str(started),
            "finished": bool(finished), "db_verdict": verdict}
+
+    # Ran-set persisted by sweep-run reconcile (notes JSON, key "ran"). This is
+    # the only record that distinguishes "ran clean, wrote nothing" from "never
+    # ran" — without it a clean section must render as DID NOT REPORT.
+    cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s", (cycle_id,))
+    row = cur.fetchone()
+    ran: set[str] = set()
+    if row and row[0]:
+        try:
+            ran = set(json.loads(row[0]).get("ran", []))
+        except (ValueError, TypeError, AttributeError):
+            pass
+    out["ran"] = ran
 
     # 1+2+3 — contextual tiers over OPEN findings of this cycle
     cur.execute(
@@ -293,7 +307,10 @@ def render(d: dict, w: dict) -> str:
     for s in EXPECTED_SECTIONS:
         info = d["sections"].get(s)
         if info is None:
-            L.append(f"- `{s}`: **DID NOT REPORT** — gap, not a pass")
+            if s in d.get("ran", set()):
+                L.append(f"- `{s}`: ran clean — 0 new (run declared at reconcile)")
+            else:
+                L.append(f"- `{s}`: **DID NOT REPORT** — gap, not a pass")
         else:
             L.append(f"- `{s}`: {info['new']} new, {info['open']} open")
     L.append("")
