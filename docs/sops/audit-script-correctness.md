@@ -72,6 +72,9 @@ signal.
 | `health-check.sh` | counted batched `validation errors` LINES; ~18 drops per line, so the counter sat flat at ~362/h while loss grew 8x to 6720 points/h (`1482de6a`) | pass |
 | `health-check.sh` | §34 + fatal/OOM ES queries: `match` on the `body.text` KEYWORD is exact-equality, so "error logs 24h: 0" while `wildcard *error*` found 63,559 — hid two DNS outages; `severity_text` clause was dead too (`a54e88d8`) | pass |
 | `health-check.sh` | the fix commit for the row above claimed BOTH queries repaired; the fatal/OOM edit hit an anchor mismatch and silently never landed on disk — verify disk state after editing, never trust the commit message (`e1777211`) | pass (phantom fix) |
+| `health-check.sh` | ES stalled-port-forward class: `773b76e6` fixed a leaked port-forward holding :9201 so the ES bind failed silently; same class recurred 2026-08-17 as an orphan alert-bridge process holding :8787/:8788 while launchd crash-looped `EADDRINUSE` — a stale process holding a port makes the NEW instance the silent failure | pass (stale process answers) |
+| `health-check.sh` | FATAL/OOM wildcard `*fatal*` matched the NFS mount OPTION `fatal_neterrors=none` in mount-table output from the Talos cleanup pod — 2 of 6 "critical" hits were a filesystem flag, not a log level (fixed: must_not `*fatal_neterrors=*`) | fail (option name ≠ log level) |
+| `health-check.sh` | "Kustomizations not reconciled" emitted from TWO call sites (§5 + summary) for ONE condition → duplicate finding rows F-359d4bdf/F-a2726bda; a summary section must log-only, never re-add issues | double-fail |
 
 ## 3) Blueprints
 

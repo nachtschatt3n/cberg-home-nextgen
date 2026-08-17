@@ -749,7 +749,7 @@ log_section "Section 3: Certificates"
     if [ -n "$EXPIRING_SOON" ]; then
         echo "Certificates expiring within 14 days:"
         echo "$EXPIRING_SOON"
-        EXPIRY_COUNT=$(echo "$EXPIRING_SOON" | grep -c "/" || echo "0")
+        EXPIRY_COUNT=$(echo "$EXPIRING_SOON" | grep -c "/" || true)
         log_warning "Certificates expiring within 14 days: $EXPIRY_COUNT"
         add_major_issue "Certificates expiring within 14 days: $EXPIRY_COUNT"
     else
@@ -865,7 +865,7 @@ log_section "Section 5: Helm Deployments"
 
         if [ "$NOT_RECONCILED" -gt 0 ]; then
             # Check if stuck due to dependencies
-            DEPENDENCY_STUCK=$(flux get kustomizations -A 2>/dev/null | grep -c "dependency.*not ready" || echo "0")
+            DEPENDENCY_STUCK=$(flux get kustomizations -A 2>/dev/null | grep -c "dependency.*not ready" || true)
             HEALTHCHECK_STUCK=$(kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .reason=="Progressing" and (.message | contains("health check"))))] | length' || echo "0")
 
             if [ "$DEPENDENCY_STUCK" -gt 0 ]; then
@@ -1181,7 +1181,7 @@ log_section "Section 10: Longhorn Storage"
     ' || echo "")
     if [ -n "$REPLICA_MISMATCHES" ]; then
         echo "$REPLICA_MISMATCHES"
-        MISMATCH_COUNT=$(echo "$REPLICA_MISMATCHES" | grep -c "robustness=" || echo "0")
+        MISMATCH_COUNT=$(echo "$REPLICA_MISMATCHES" | grep -c "robustness=" || true)
         echo "Total volumes with unhealthy robustness: $MISMATCH_COUNT"
     else
         echo "None"
@@ -1921,8 +1921,10 @@ log_section "Section 20: GitOps Status"
         fi
 
         if [ "$NOT_RECONCILED" -gt 0 ]; then
+            # Section 5 already emitted the DB row for this exact condition; a second
+            # add_minor_issue here forked duplicate findings (F-359d4bdf/F-a2726bda,
+            # 2026-08-17). Log-only in this summary section.
             log_warning "GitOps reconciliation issues: $NOT_RECONCILED kustomizations not reconciled"
-            add_minor_issue "Kustomizations not reconciled: $NOT_RECONCILED (see Section 5 for details)"
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
@@ -3645,7 +3647,7 @@ except:
     #   - "failed to index document" / document_parsing_exception  (whole doc lost)
     #   - "validation errors"  (metric points dropped: cumulative histograms,
     #     Empty-ValueType) — see docs/sops/monitoring.md "ES rejected documents"
-    # NOTE: `grep -c ... || echo "0"` is WRONG here. grep -c already prints 0 and
+    # NOTE: `grep -c ... || true` is WRONG here. grep -c already prints 0 and
     # then exits 1 on no-match, so the fallback APPENDS a second zero, yielding
     # "0\n0" — and the `-gt` tests below then abort with "integer expression
     # expected". Net effect: whenever the count was genuinely zero, this
@@ -3990,7 +3992,8 @@ except:
                   {"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
                   {"wildcard": {"body.text": {"value": "*database system is shutting down*", "case_insensitive": true}}},
                   {"wildcard": {"body.text": {"value": "*terminating connection due to administrator command*", "case_insensitive": true}}},
-                  {"wildcard": {"body.text": {"value": "*not a git repository*", "case_insensitive": true}}}
+                  {"wildcard": {"body.text": {"value": "*not a git repository*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*fatal_neterrors=*", "case_insensitive": true}}}
                 ],
                 "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
             }
@@ -4200,7 +4203,7 @@ except Exception as e:
         echo "$PROBLEMATIC_SERVICES"
         echo ""
 
-        SERVICE_COUNT=$(echo "$PROBLEMATIC_SERVICES" | grep -c "/" || echo "0")
+        SERVICE_COUNT=$(echo "$PROBLEMATIC_SERVICES" | grep -c "/" || true)
 
         if [ "$SERVICE_COUNT" -gt 5 ]; then
             log_warning "Multiple services without endpoints: $SERVICE_COUNT"
