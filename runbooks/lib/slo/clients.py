@@ -91,8 +91,14 @@ class PromClient:
         current instant samples — they're not time-averaged but they're a
         useful sanity check when the operator is reading the snapshot.
         """
+        # Explicit subquery resolution for day+ windows: `[7d:]` at the default
+        # evaluation interval is ~20k steps, which can blow the client's 10s
+        # timeout for expensive inner expressions (longhorn's count-of-counts
+        # returned None -> compliance "—", 2026-08-17). 5m over >=1d windows is
+        # ~2k steps and indistinguishable for compliance arithmetic.
+        res = ":5m" if window.endswith("d") else ":"
         ratio_expr = (
-            f"avg_over_time((({q.numerator}) / ({q.denominator}))[{window}:])"
+            f"avg_over_time((({q.numerator}) / ({q.denominator}))[{window}{res}])"
         )
         ratio = self._query(ratio_expr)
         num = self._query(q.numerator)
