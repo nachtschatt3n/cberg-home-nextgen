@@ -33,7 +33,7 @@ conflicts_with:                         # VERIFICATION-CONFOUND conflicts, not d
   - bitnamilegacy-exit-nextcloud-db     # both restart the Nextcloud BACKEND this MCP proxies;
   - bitnamilegacy-exit-nextcloud-redis  # co-scheduling makes §4 tool-surface probe flap. See §6.
 security_ref: null                      # no security driver — feature bump held by misattribution.
-status: draft
+status: executed   # applied 2026-08-17 ad6bdfcd, pod Ready on 0.175.0
 window: null                            # window agent assigns. Recommended: any no-reboot weekday
                                         # slot (mon/tue/wed/thu/fri-early) or sat-early. NOT
                                         # sun-window (reserve reboot-capable slot for Talos churn).
