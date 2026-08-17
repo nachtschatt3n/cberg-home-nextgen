@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/stepbystepguide
-              tag: production-20260816205835
+              tag: production-20260817214948
               pullPolicy: IfNotPresent
             env:
               - name: TZ

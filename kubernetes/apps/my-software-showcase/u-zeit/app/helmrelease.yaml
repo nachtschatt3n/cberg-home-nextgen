@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/u-zeit
-              tag: production-20260816205828
+              tag: production-20260817220043
               pullPolicy: IfNotPresent
             env:
               - name: TZ
