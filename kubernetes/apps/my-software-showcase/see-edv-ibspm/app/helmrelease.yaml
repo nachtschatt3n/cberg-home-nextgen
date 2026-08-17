@@ -49,11 +49,12 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
-            # NOTE: the removed ConfigMap also carried SMTP_ADDRESS / SMTP_PORT /
-            # SMTP_USER_NAME for outbound mail. Those were a third-party mail host
-            # and a real mailbox address in a public repo, so they are not
-            # reinstated here. If this app must send mail, add SMTP_* keys to
-            # see-edv-ibspm/app/secret.sops.yaml — operator decision.
+            # No SMTP by design. The removed ConfigMap carried SMTP_ADDRESS /
+            # SMTP_PORT / SMTP_USER_NAME pointing at a third-party mail host,
+            # with a real mailbox address, in a public repo. This is a showcase
+            # deployment with no outbound integrations, so mail stays off: the
+            # app disables delivery when SMTP_* is unset rather than falling
+            # back to the real relay. Do not reinstate these.
             envFrom:
               - secretRef:
                   name: see-edv-ibspm-secrets
