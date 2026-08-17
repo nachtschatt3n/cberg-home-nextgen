@@ -29,9 +29,9 @@ Full-cluster Talos upgrade combined with a performance tuning sweep. Performs a 
 
 | Setting | Value |
 |---------|-------|
-| Talos version | `v1.13.7` ✅ |
+| Talos version | `v1.13.8` ✅ |
 | Kubernetes version | `v1.36.0` ✅ |
-| Kernel | `6.18.36-talos` (Clang/ThinLTO) ✅ |
+| Kernel | `6.18.42-talos` (Clang/ThinLTO) ✅ |
 | `CONFIG_IPV6_MROUTE` | `=y` ✅ |
 | CPU governor | `powersave` |
 | `machine-intelgpu.yaml` | ✅ wired (i915.enable_guc=3, hugepages=1024) |
