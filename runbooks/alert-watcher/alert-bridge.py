@@ -113,8 +113,28 @@ class _Webhook(BaseHTTPRequestHandler):
         pass
 
 
+def _bind_retry(factory, what, attempts=15, delay=2.0):
+    """Bind with retry: when launchd's KeepAlive respawn races the dying
+    predecessor (TIME_WAIT / not-yet-released socket), an immediate one-shot
+    bind fails with EADDRINUSE, the new instance exits 1, and launchd + a
+    surviving half-dead process settle into the orphan-holds-ports pattern
+    seen twice on 2026-08-17/18. Retrying for ~30s lets the predecessor
+    finish dying so exactly one instance ends up bound AND launchd-owned."""
+    import time as _time
+    last = None
+    for _ in range(attempts):
+        try:
+            return factory()
+        except OSError as e:
+            last = e
+            print(f"[{_ts()}] {what} bind busy ({e}); retrying...", flush=True)
+            _time.sleep(delay)
+    raise last
+
+
 def _http_thread():
-    ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), _Webhook).serve_forever()
+    srv = _bind_retry(lambda: ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), _Webhook), "http")
+    srv.serve_forever()
 
 
 async def _main():
@@ -129,9 +149,14 @@ async def _main():
     # observed recurring 1006 close). Disable the pong deadline so a non-ponging but
     # otherwise-live client isn't killed; liveness still comes from TCP + the
     # per-client send-failure discard in _fanout, and reconnect+REPLAY covers any gap.
-    async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT,
-                                ping_interval=20, ping_timeout=None):
-        await asyncio.Future()
+    for attempt in range(15):
+        try:
+            async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT,
+                                        ping_interval=20, ping_timeout=None):
+                await asyncio.Future()
+        except OSError as e:
+            print(f"[{_ts()}] ws bind busy ({e}); retrying...", flush=True)
+            await asyncio.sleep(2.0)
 
 
 if __name__ == "__main__":
