@@ -60,6 +60,23 @@ def _dsn() -> str | None:
         return None
 
 
+
+def _desc(title: str, limit: int = 96) -> str:
+    """A short description from a raw finding title: keep the identifier and
+    the first clause, drop trailing CVE enumerations and remediation prose."""
+    t = title.strip()
+    # cut at the em-dash remediation tail or a CVE list, whichever comes first
+    for sep in (" — CVE-", "; CVE-", " - CVE-"):
+        i = t.find(sep)
+        if i > 0:
+            t = t[:i]
+            break
+    i = t.find(" — ")
+    if i > 40:          # keep short titles whole; trim long remediation tails
+        head, tail = t[:i], t[i + 3:]
+        t = head + " — " + tail.split(".")[0].split(";")[0]
+    return (t[: limit - 1] + "…") if len(t) > limit else t
+
 def collect(cur, cycle_id: str | None) -> dict:
     if not cycle_id:
         cur.execute(
@@ -95,13 +112,30 @@ def collect(cur, cycle_id: str | None) -> dict:
     out["criticals"] = [{"id": f, "title": t} for f, t in cur.fetchall()]
 
     cur.execute(
-        """SELECT finding_id, title, metadata->>'exposure' AS exposure
+        """SELECT finding_id, title, metadata->>'exposure' AS exposure,
+                  COALESCE(metadata->>'subsection','') AS sub
            FROM sweep_findings
            WHERE cycle_id=%s AND status!='resolved'
              AND metadata->>'risk_tier'='high' ORDER BY title""",
         (cycle_id,))
-    out["high"] = [{"id": f, "title": t, "exposure": e}
-                   for f, t, e in cur.fetchall()]
+    out["high"] = [{"id": f, "title": t, "exposure": e, "sub": sub}
+                   for f, t, e, sub in cur.fetchall()]
+
+    # 3b — the numbered action list needs: new findings outside security,
+    # and the medium tier grouped by subsection so 144 rows become a few lines.
+    cur.execute(
+        """SELECT finding_id, section, title FROM sweep_findings
+           WHERE cycle_id=%s AND status='new' AND section != 'security'
+           ORDER BY section, finding_id""", (cycle_id,))
+    out["new_other"] = [{"id": f, "section": sec, "title": t}
+                        for f, sec, t in cur.fetchall()]
+    cur.execute(
+        """SELECT COALESCE(metadata->>'subsection', 'other') AS grp, count(*)
+           FROM sweep_findings
+           WHERE cycle_id=%s AND status!='resolved'
+             AND metadata->>'risk_tier'='medium'
+           GROUP BY 1 ORDER BY 2 DESC""", (cycle_id,))
+    out["medium_groups"] = [(g, n) for g, n in cur.fetchall()]
 
     # 4 — per-section counts + explicit gaps
     cur.execute(
@@ -170,21 +204,39 @@ def render(d: dict, w: dict) -> str:
     L.append(f"    medium    {tiers.get('medium', 0):>4}   <- maintenance-window queue")
     L.append(f"    low       {tiers.get('low', 0):>4}   <- weekly batch (policy/hygiene)")
     L.append("")
-    L.append("## 2 · Genuine criticals")
+    L.append("## 2 · Action list (numbered, by importance)")
     L.append("")
-    if d["criticals"]:
-        for c in d["criticals"]:
-            L.append(f"- **{c['id']}** {c['title'][:100]}")
-    else:
-        L.append("**NONE.** Nothing is externally exposed AND exploited-in-the-wild "
-                 "AND a real vulnerability. The pager stays silent.")
-    L.append("")
-    L.append(f"## 3 · High — reading list ({len(d['high'])})")
-    L.append("")
+    n = 0
+    def item(rating, category, desc):
+        nonlocal n
+        n += 1
+        L.append(f"{n:>3}. **[{rating}]** `{category}` — {desc}")
+
+    if not d["criticals"]:
+        L.append("*(no CRITICAL items — nothing pages; list starts at HIGH)*")
+        L.append("")
+    for c in d["criticals"]:
+        item("CRITICAL", "security/exposed+exploited", _desc(c["title"]))
     for h in d["high"]:
-        L.append(f"- {h['title'][:110]}")
+        # category: real exposure when recorded; else derive from subsection
+        # (git-history findings are repo-exposure, not a served endpoint) —
+        # never default to a specific-sounding label the data doesn't support.
+        exp = h.get("exposure")
+        sub = (h.get("sub") or "").replace("s3_git_history", "git-history") \
+                                  .replace("s4_cve_check", "cve")
+        cat = "security/" + (exp or sub or "untagged")
+        item("HIGH", cat, _desc(h["title"]))
+    for f_ in d.get("new_other", []):
+        item("MEDIUM", f_["section"] + "/new", _desc(f_["title"]))
+    for grp, cnt in d.get("medium_groups", []):
+        item("MEDIUM", f"security/{grp}",
+             f"{cnt} internal finding(s) — maintenance-window queue")
+    low = d["tiers"].get("low", 0)
+    if low:
+        item("LOW", "policy/hygiene",
+             f"{low} policy finding(s) (floating tags, drift, stale charts) — weekly batch")
     L.append("")
-    L.append("## 4 · Sections")
+    L.append("## 3 · Sections")
     L.append("")
     for s in EXPECTED_SECTIONS:
         info = d["sections"].get(s)
@@ -193,7 +245,7 @@ def render(d: dict, w: dict) -> str:
         else:
             L.append(f"- `{s}`: {info['new']} new, {info['open']} open")
     L.append("")
-    L.append("## 5 · SLO / SLI")
+    L.append("## 4 · SLO / SLI")
     L.append("")
     if d["slos"]:
         L.append("| SLO | compliance | target | burn 1h | budget left | as of |")
@@ -208,7 +260,7 @@ def render(d: dict, w: dict) -> str:
     else:
         L.append("no snapshots — SLO section did not run (gap, not a pass)")
     L.append("")
-    L.append("## 6 · Maintenance windows")
+    L.append("## 5 · Maintenance windows")
     L.append("")
     if "error" in w:
         L.append(f"- {w['error']}")

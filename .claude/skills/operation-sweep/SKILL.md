@@ -63,8 +63,11 @@ sections that did not report.
 4. **Render the board — never hand-write it:**
    `python3 runbooks/render-board.py` (add `--cycle <id>` for this run).
    The board IS the deliverable, in the operator's defined order:
-   tier board → genuine criticals → HIGH reading list → sections+gaps →
-   SLO/SLI table → maintenance windows.
+   tier board → **numbered action list** (every item numbered, categorized
+   `section/kind`, one-line description, rated CRITICAL/HIGH/MEDIUM/LOW by
+   the contextual model; individual entries for HIGH+, grouped entries for
+   the medium queue and low batch so bulk tiers don't drown the list) →
+   sections+gaps → SLO/SLI table → maintenance windows.
 
 5. **Append below the rendered board, briefly:** anything you verified that
    contradicts a specialist, anything you could NOT verify (stated as
