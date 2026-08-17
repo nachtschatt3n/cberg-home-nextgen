@@ -40,7 +40,7 @@ spec:
           seed-config:
             image:
               repository: busybox
-              tag: latest
+              tag: 1.37.0@sha256:2383baad1860bbe9d8a7a843775048fd07d8afe292b94bd876df64a69aae7cb1
             command:
               - sh
               - -c

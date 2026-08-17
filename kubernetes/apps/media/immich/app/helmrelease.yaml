@@ -45,7 +45,7 @@ spec:
           wait-for-postgres:
             image:
               repository: busybox
-              tag: stable
+              tag: 1.36.1
             command:
               - sh
               - -c
@@ -58,7 +58,7 @@ spec:
           wait-for-redis:
             image:
               repository: busybox
-              tag: stable
+              tag: 1.36.1
             command:
               - sh
               - -c

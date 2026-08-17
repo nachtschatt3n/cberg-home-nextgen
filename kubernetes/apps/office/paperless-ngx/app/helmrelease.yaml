@@ -249,7 +249,7 @@ spec:
     # See docs/sops/container-dependencies.md.
     initContainers:
       wait-for-mariadb:
-        image: busybox:stable
+        image: busybox:1.36.1
         command:
           - sh
           - -c
@@ -259,7 +259,7 @@ spec:
               sleep 2
             done
       wait-for-redis:
-        image: busybox:stable
+        image: busybox:1.36.1
         command:
           - sh
           - -c

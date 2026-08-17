@@ -33,7 +33,7 @@ spec:
           wait-for-postgres:
             image:
               repository: busybox
-              tag: stable
+              tag: 1.36.1
             command:
               - sh
               - -c
@@ -351,7 +351,8 @@ spec:
           app:
             image:
               repository: reeoss/paperclipai-paperclip
-              tag: latest
+              # Upstream publishes only latest; digest-pinned to the live build (2026-08-18).
+              tag: latest@sha256:677649a2ea0571cc83ab8cff2e1d29343c0641684113b464853c4fde16809e46
             env:
               - name: HOST
                 value: "0.0.0.0"

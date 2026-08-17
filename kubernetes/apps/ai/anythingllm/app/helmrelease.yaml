@@ -44,7 +44,7 @@ spec:
                 path: /spec/template/spec/initContainers
                 value:
                   - name: clear-vector-cache
-                    image: busybox
+                    image: busybox:1.37.0@sha256:2383baad1860bbe9d8a7a843775048fd07d8afe292b94bd876df64a69aae7cb1
                     command: ["sh", "-c", "rm -rf /storage/vector-cache/* /storage/comkey && echo 'Cache and key files cleared'"]
                     volumeMounts:
                       - name: storage
