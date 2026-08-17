@@ -38,7 +38,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/uzeit-de
-              tag: sha-d68fc0f80b487660ca83fd14d3b963b8a9ab74e1
+              tag: sha-afc5effaf440f1420adbad7cb61dc994fb149a40
               pullPolicy: IfNotPresent
             env:
               - name: TZ
