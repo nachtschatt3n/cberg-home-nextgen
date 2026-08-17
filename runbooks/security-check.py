@@ -764,7 +764,9 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file"
         "\\|REPLACE_WITH\\|pullSecret:' "
         # Bare or quoted shell variables like $DB_PASSWORD, "$ICLOUD_PASSWORD":
-        "| grep -vE 'PGPASSWORD=\\$|password=\"?\\$[A-Z_]+|token=\"?\\$[A-Z_]+|api.?key=\"?\\$[A-Z_]+' "
+        # -i: `X-Plex-Token=$TOKEN` must match the token= branch too (2026-08-17
+        # false positives); the $[A-Z_]+ var-name part stays effectively case-strict.
+        "| grep -viE 'PGPASSWORD=\\$|password=\"?\\$[A-Z_]+|token=\"?\\$[A-Z_]+|api.?key=\"?\\$[A-Z_]+' "
         "| grep -vE '^[+-]?\\s*#|description:' "
         "| grep -v '\"replace-me\"\\|\"my-strong-password\"\\|\"my-api-key\"\\|\"your-api-key-here\"\\|openssl rand' "
         # Template/doc placeholders like <github-personal-access-token>, <web-ui-password>:
@@ -781,11 +783,14 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -ivE '(token|password|secret|api.?key)\\s*[:=]\\s*[A-Za-z_][A-Za-z0-9_.]*\\(' "
         # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
         "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
+        # Language keyword RHS (`token: Optional[str] = None`) — a declaration
+        # default, structurally never a hardcoded credential:
+        "| grep -ivE '(token|password|secret|api.?key)[^=]*=\\s*(None|null|nil|true|false)\\s*[,;}\\)\\]]*\\s*$' "
         # sed/awk redaction-or-rotation commands: the matched credential text is a
         # regex SEARCH pattern (a bracket character-class quantified with +/*, e.g.
         # api_key = \"[a-f0-9]+\") and the replacement is a shell $VAR — it can never
         # be a hardcoded literal secret. e.g. sed -E 's/api_key = \"[a-f0-9]+\"/.../'.
-        "| grep -vE '\\bsed\\b.*\\[[^]]+\\][+*]' "
+        "| grep -vE '\\b(sed|grep)\\b.*\\[[^]]+\\][+*]' "
     )
     # Cross-line variable-reference filter.
     #
