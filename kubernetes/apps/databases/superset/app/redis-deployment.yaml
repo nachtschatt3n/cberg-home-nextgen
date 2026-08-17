@@ -1,0 +1,87 @@
+---
+# Superset's OWN Redis (cache + Celery broker only — nothing durable; the
+# bundled chart Redis it replaces ran persistence-free too and dropped its
+# contents on every restart).
+#
+# Plain Deployment + Service, NOT app-template, so Superset's datastores stay
+# outside the blast radius of app-template chart migrations — mirrors
+# kubernetes/apps/databases/postgresql/. Replaced the superset chart's bundled
+# bitnamilegacy/redis 2026-08-17 (archived registry, no security updates ever;
+# security_ref F-f6239bec on the superset-redis-official plan).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset-redis-official
+  namespace: databases
+  labels:
+    app: superset-redis-official
+spec:
+  replicas: 1
+  # No PVC, but Recreate semantics anyway: two concurrent brokers would split
+  # the Celery queue. maxSurge 0 tears the old pod down first.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: superset-redis-official
+  template:
+    metadata:
+      labels:
+        app: superset-redis-official
+    spec:
+      containers:
+      - name: redis
+        image: redis:8.10.0-alpine
+        imagePullPolicy: IfNotPresent
+        command:
+          - redis-server
+          - --save
+          - ""
+          - --appendonly
+          - "no"
+          - --requirepass
+          - $(REDIS_PASSWORD)
+        env:
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: superset-secrets
+                key: redis-password
+        ports:
+          - containerPort: 6379
+            name: redis
+        livenessProbe:
+          exec:
+            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset-redis-official
+  namespace: databases
+  labels:
+    app: superset-redis-official
+spec:
+  type: ClusterIP
+  selector:
+    app: superset-redis-official
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

@@ -123,22 +123,13 @@ spec:
     # that SAME SOPS secret so both sides share one password — no plaintext in
     # git. Verified by `helm template` render (2026-07-18): server
     # secretKeyRef=superset-secrets/redis-password, client env('REDIS_PASSWORD').
+    # Bundled Bitnami redis retired 2026-08-17: bitnamilegacy is an ARCHIVED
+    # registry (last push 2025-08-28, no future security fixes) and
+    # docker.io/bitnami/redis publishes no semver tags. Security driver on the
+    # superset-redis-official plan (security_ref F-f6239bec). Superset now uses
+    # the official redis image deployed by redis-deployment.yaml in this folder.
     redis:
-      enabled: true
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/redis
-      auth:
-        enabled: true
-        existingSecret: superset-secrets
-        existingSecretPasswordKey: redis-password
-      master:
-        persistence:
-          enabled: false
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
+      enabled: false
 
     # --- Superset web/UI pods ---
     supersetNode:

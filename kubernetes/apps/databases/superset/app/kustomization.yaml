@@ -14,4 +14,5 @@ resources:
   - data-pvc.yaml
   - secret.sops.yaml
   - helmrelease.yaml
+  - redis-deployment.yaml
   - ingress.yaml
