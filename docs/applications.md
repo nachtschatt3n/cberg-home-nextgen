@@ -27,8 +27,8 @@
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
-| my-software-showcase | 1 |
-| **Total** | **108** |
+| my-software-showcase | 15 |
+| **Total** | **122** |
 
 ---
 
@@ -90,7 +90,7 @@
 | pgadmin | pgAdmin — PostgreSQL admin UI | Internal | Databases |
 | redisinsight | RedisInsight — Redis GUI | Internal | Databases |
 | memgraph | Memgraph — in-memory graph database (Cypher/Bolt) with Lab web UI | Internal | Databases |
-| superset | Apache Superset — data exploration and visualization (bundled PG + Redis) | Internal | Databases |
+| superset | Apache Superset — data exploration and visualization (bundled PG; cache/broker on the standalone `superset-redis-official` Deployment — official `redis:8.10.0-alpine`, bundled bitnamilegacy Redis retired 2026-08-17) | Internal | Databases |
 | sweep-history | Postgres holding the operator-curated policy tables (`accepted_risks`, `slo_definitions`, `noise_suppressions`, `security_acceptances`) plus sweep findings/cycles. Edited via `runbooks/policy-cli.py`. | None | Databases |
 
 ---
@@ -280,9 +280,25 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 ### `my-software-showcase`
 
+Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 3.7.3, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
+
 | App | Purpose | Ingress |
 |-----|---------|---------|
-| zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app on port 3000 with `/health/{liveness,readiness,startup}` probes. Image `ghcr.io/ibdigital/zuhause-betreut-caretakermanager`; Flux image automation configured (auto-deploys the `production-*` tag). 5Gi Longhorn RWO data PVC (`strategy: Recreate`). Homepage group "Software Portfolio". **NOT YET RUNNING** (2026-08-16): `app/ghcr-secret.sops.yaml` is a hand-written placeholder, never SOPS-encrypted — Flux Kustomization fails decryption, namespace is empty. Operator must re-encrypt a real GHCR dockerconfigjson (see `docs/troubleshooting/zuhause-betreut-deployment-plan.md`). | Internal |
+| globalmobility | globalDISPO dispatch system (TYPO3 4.2) | Internal |
+| haarfabrik | Salon extranet | Internal |
+| holm-backend | Holm backend service | Internal |
+| ibgastro | Gastronomy ordering system | Internal |
+| inbewegung | Family Manager | Internal |
+| kfa-medienarchiv | Media Archive Management System | Internal |
+| mangold-smarthomeadvisor | Smart Home Advisory System | Internal |
+| max-jung | Vehicle fleet controlling | Internal |
+| metaldyne | Metaldyne Mini ERP | Internal |
+| ordiga | Ordiga order management | Internal |
+| see-edv-ibspm | IBSPM service management | Internal |
+| stepbystepguide | Step-by-step guide | Internal |
+| u-zeit | U-Zeit time management | Internal |
+| uzeit-de | Uzeit corporate website (TYPO3 6.2) | Internal |
+| zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app, `/health/{liveness,readiness,startup}` probes, Flux image automation on the `production-*` tag, 5Gi Longhorn RWO PVC (`strategy: Recreate`) | Internal |
 
 ---
 
