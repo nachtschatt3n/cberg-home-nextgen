@@ -1,0 +1,159 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+# HelmRelease for IB Gastro (CakePHP) — bjw-s/app-template v3.7.3
+# Converted from a hand-rolled Deployment + ConfigMap + plaintext Secret + PVC.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app ibgastro
+  namespace: my-software-showcase
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      ibgastro:
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/ibgastro
+              tag: sha-dc6fcacb65bbed61aea5f19ae7824591026f5306
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: CAKEPHP_DEBUG
+                value: "0"
+            envFrom:
+              - secretRef:
+                  name: ibgastro-secrets
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+            # /health is a CakePHP ROUTE (app/controllers/health_controller.php,
+            # wired in app/config/routes.php), not a file in app/webroot -- there
+            # is no health.php. It checks the DB connection and TMP writability
+            # and returns a real 503 on failure.
+            # The previous manifest probed "/", which routes to OrderclientsController
+            # and 302-redirects to /users/login. Kubernetes scores 3xx as success, so
+            # "/" reported Ready even with MySQL completely unreachable.
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 80
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 80
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 80
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  timeoutSeconds: 5
+                  failureThreshold: 30
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-secret
+      # No runAsNonRoot/runAsUser here, unlike the Rails apps: this image has no
+      # USER directive and its entrypoint starts nginx as root to bind :80 (a
+      # privileged port) before dropping workers to the `nginx` user. Forcing
+      # runAsNonRoot would stop the container from ever binding.
+      # The namespace runs Pod Security Admission "baseline", which permits this.
+      securityContext:
+        # fsGroup makes the uploads PVC writable by the nginx/php-fpm user.
+        # 101 is the gid Alpine's nginx package creates. VERIFY before rollout:
+        #   docker run --rm <image> id nginx
+        fsGroup: 101
+        fsGroupChangePolicy: "OnRootMismatch"
+    service:
+      main:
+        controller: ibgastro
+        ports:
+          http:
+            port: 80
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "IB Gastro"
+          gethomepage.dev/description: "Gastronomy ordering system"
+          gethomepage.dev/group: "Software Portfolio"
+          gethomepage.dev/icon: "mdi-silverware-fork-knife"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host "ibgastro.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+    persistence:
+      uploads:
+        enabled: true
+        type: persistentVolumeClaim
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn Volume CR
+        # must all be the same speaking identifier (ibgastro-uploads).
+        # The Volume CR is applied manually by the operator, not by Flux.
+        storageClass: longhorn-static
+        volumeName: ibgastro-uploads
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /var/www/html/app/webroot/uploads
+      tmp:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /var/www/html/app/tmp
+      cache:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /var/www/html/app/cache

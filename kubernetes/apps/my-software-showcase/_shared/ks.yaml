@@ -1,0 +1,31 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+# Namespace-scoped shared objects for my-software-showcase.
+#
+# Why this exists: `ghcr-secret` is ONE Secret in ONE namespace, but all 15 apps
+# need it as their imagePullSecret. The earlier layout shipped a byte-identical
+# copy inside 8 app directories, which made 8 Flux Kustomizations co-own the same
+# object. Every one of them sets `prune: true`, so removing any single app would
+# have pruned the pull secret out from under the other 14. One owner instead.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app showcase-shared
+  namespace: &namespace my-software-showcase
+spec:
+  targetNamespace: *namespace
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./kubernetes/apps/my-software-showcase/_shared
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  # wait: true — the apps depend on this; they must not start reconciling until
+  # the pull secret actually exists, or every pod ImagePullBackOffs first.
+  wait: true
+  interval: 30m
+  retryInterval: 1m
+  timeout: 5m

@@ -28,12 +28,13 @@ spec:
   values:
     controllers:
       inbewegung:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/inbewegung-familymanager
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:inbewegung:tag"}
+              tag: production-20260816200254
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -48,12 +49,6 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
-              - name: DATABASE_HOST
-                value: "mariadb.databases.svc.cluster.local"
-              - name: DATABASE_PORT
-                value: "3306"
-              - name: DATABASE_NAME
-                value: "showcase_inbewegung_prod"
             envFrom:
               - secretRef:
                   name: inbewegung-secrets
@@ -121,7 +116,7 @@ spec:
           gethomepage.dev/name: "Inbewegung"
           gethomepage.dev/description: "Family Manager"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "si-family"
+          gethomepage.dev/icon: "mdi-account-group"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -136,22 +131,6 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 5Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /data
-      uploads:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 10Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /app/public/uploads
       tmp:
         enabled: true
         type: emptyDir

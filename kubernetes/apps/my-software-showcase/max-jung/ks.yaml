@@ -11,6 +11,15 @@ spec:
   commonMetadata:
     labels:
       app.kubernetes.io/name: *app
+  dependsOn:
+    # the shared ghcr-secret must exist before any pod tries to pull
+    - name: showcase-shared
+    # every app in this namespace talks to the shared MariaDB
+    - name: mariadb
+      namespace: databases
+    # binds a longhorn-static PVC
+    - name: longhorn
+      namespace: storage
   path: ./kubernetes/apps/my-software-showcase/max-jung/app
   prune: true
   sourceRef:

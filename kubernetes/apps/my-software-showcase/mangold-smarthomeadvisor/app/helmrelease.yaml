@@ -27,12 +27,13 @@ spec:
   values:
     controllers:
       mangold-smarthomeadvisor:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/mangold-smarthomeadvisor
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:mangold-smarthomeadvisor:tag"}
+              tag: production-20260816205835
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -114,7 +115,7 @@ spec:
           gethomepage.dev/name: "Mangold Smart Home"
           gethomepage.dev/description: "Smart Home Advisory System"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "docker.png"
+          gethomepage.dev/icon: "mdi-home-automation"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -129,14 +130,18 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
+      uploads:
         enabled: true
         type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 5Gi
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
+        # Volume CR must all be the same speaking identifier (mangold-smarthomeadvisor-uploads).
+        # The Volume CR is applied manually by the operator, not by Flux.
+        storageClass: longhorn-static
+        volumeName: mangold-smarthomeadvisor-uploads
         accessMode: ReadWriteOnce
+        size: 5Gi
         globalMounts:
-          - path: /data
+          - path: /app/public/system
       tmp:
         enabled: true
         type: emptyDir

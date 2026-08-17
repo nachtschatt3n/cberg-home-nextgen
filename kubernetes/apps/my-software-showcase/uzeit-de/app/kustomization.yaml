@@ -1,26 +1,20 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
-namespace: my-software-showcase
-
 resources:
-  - namespace.yaml
-  - deployment.yaml
-  - service.yaml
-  - configmap.yaml
-  - pvc.yaml
-  - rbac.yaml
-  - ingress.yaml
-  - prometheus-rule.yaml
+  - helmrelease.yaml
+  - secret.sops.yaml
+  # PersistentVolumes are cluster-scoped, so Flux's targetNamespace
+  # cannot corrupt them. The PVCs themselves come from the chart's
+  # persistence block (storageClass: longhorn-static + volumeName).
+  - pv-uzeit-de-fileadmin.yaml
+  - pv-uzeit-de-uploads.yaml
 
-# Uncomment when secrets are encrypted with SOPS
-# secretGenerator:
-# - name: uzeit-de-secrets
-#   files:
-#   - secrets.yaml.enc
-#   behavior: merge
-
-# Image configuration for Flux
-images:
-  - name: ghcr.io/nachtschatt3n/uzeit-de
-    newTag: latest
+# Deliberately NOT listed above (see docs/sops/new-deployment-blueprint.md):
+#   longhorn-volume-uzeit-de-fileadmin.yaml
+#   longhorn-volume-uzeit-de-uploads.yaml
+# Flux applies `targetNamespace: my-software-showcase` to every resource in
+# this build, which would silently override `namespace: storage` on the
+# longhorn.io/v1beta2 Volume and create a duplicate Longhorn does not manage.
+# The operator applies those once by hand before the first reconcile.

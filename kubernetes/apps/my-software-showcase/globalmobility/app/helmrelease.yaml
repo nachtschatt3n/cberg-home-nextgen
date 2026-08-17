@@ -1,0 +1,162 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+# HelmRelease for Globalmobility globalDISPO (TYPO3 4.2) — bjw-s/app-template v3.7.3
+# Converted from a hand-rolled Deployment + ConfigMap + plaintext Secret +
+# ServiceAccount + local-path PVCs.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app globalmobility
+  namespace: my-software-showcase
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      globalmobility:
+        # replicas: 1, not 2. The previous manifest asked for 2 replicas while
+        # mounting ReadWriteOnce volumes -- the second pod could never attach.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
+              tag: master-3d6ab09
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+            envFrom:
+              - secretRef:
+                  name: globalmobility-secrets
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+            # Port 80, NOT 9000. The previous manifest exposed containerPort 9000
+            # and probed it over HTTP, but this image is php:5.6-apache (Apache +
+            # mod_php, EXPOSE 80) -- 9000 is the FastCGI port of an FPM setup this
+            # image does not use, so an HTTP GET there could never succeed.
+            # /health.php exists at the docroot and returns a real 503 when the DB
+            # is down, the typo3_src symlink is broken, typo3temp is unwritable, or
+            # the Install Tool is enabled.
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php
+                    port: 80
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php
+                    port: 80
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php
+                    port: 80
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 30
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-secret
+      # No runAsNonRoot/runAsUser: this image has no USER directive and Apache
+      # starts as root to bind :80 (privileged) before dropping to www-data.
+      # The namespace runs Pod Security Admission "baseline", which permits this.
+      securityContext:
+        # www-data is uid/gid 33 on the Debian base; the image chowns
+        # /app/typo3temp /app/uploads /app/fileadmin to www-data:www-data.
+        fsGroup: 33
+        fsGroupChangePolicy: "OnRootMismatch"
+    service:
+      main:
+        controller: globalmobility
+        ports:
+          http:
+            port: 80
+    ingress:
+      main:
+        enabled: true
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "globalDISPO"
+          gethomepage.dev/description: "Globalmobility dispatch system"
+          gethomepage.dev/group: "Software Portfolio"
+          gethomepage.dev/icon: "typo3.png"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host "globalmobility.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+    persistence:
+      # storageClass was `local-path`, which does not exist in this cluster --
+      # both PVCs would have stayed Pending forever. Now longhorn-static with
+      # speaking names; the Longhorn Volume CRs are applied manually by the
+      # operator (see longhorn-volume-*.yaml, deliberately not in kustomization).
+      fileadmin:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn-static
+        volumeName: globalmobility-fileadmin
+        accessMode: ReadWriteOnce
+        size: 10Gi
+        globalMounts:
+          - path: /app/fileadmin
+      uploads:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn-static
+        volumeName: globalmobility-uploads
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /app/uploads
+      typo3temp:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /app/typo3temp

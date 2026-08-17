@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: my-software-showcase
-  labels:
-    name: my-software-showcase
-    environment: production

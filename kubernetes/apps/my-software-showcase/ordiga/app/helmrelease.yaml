@@ -28,12 +28,13 @@ spec:
   values:
     controllers:
       ordiga:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ordiga
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:ordiga:tag"}
+              tag: production-20260816205839
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -48,12 +49,6 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
-              - name: DATABASE_HOST
-                value: "mariadb.databases.svc.cluster.local"
-              - name: DATABASE_PORT
-                value: "3306"
-              - name: DATABASE_NAME
-                value: "showcase_ordiga_prod"
             envFrom:
               - secretRef:
                   name: ordiga-secrets
@@ -120,11 +115,11 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Ordiga Order Management"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "si-databricks"
+          gethomepage.dev/icon: "mdi-clipboard-list"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "ordiga.\${SECRET_DOMAIN}"
+          - host: &host "ordiga.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -135,20 +130,16 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 5Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /data
       uploads:
         enabled: true
         type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 10Gi
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
+        # Volume CR must all be the same speaking identifier (ordiga-uploads).
+        # The Volume CR is applied manually by the operator, not by Flux.
+        storageClass: longhorn-static
+        volumeName: ordiga-uploads
         accessMode: ReadWriteOnce
+        size: 5Gi
         globalMounts:
           - path: /app/public/uploads
       tmp:

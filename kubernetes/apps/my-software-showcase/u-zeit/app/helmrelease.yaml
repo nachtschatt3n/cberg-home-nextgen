@@ -28,12 +28,13 @@ spec:
   values:
     controllers:
       u-zeit:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/u-zeit
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:u-zeit:tag"}
+              tag: production-20260816205828
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -48,12 +49,6 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
-              - name: DATABASE_HOST
-                value: "mariadb.databases.svc.cluster.local"
-              - name: DATABASE_PORT
-                value: "3306"
-              - name: DATABASE_NAME
-                value: "showcase_u_zeit_prod"
             envFrom:
               - secretRef:
                   name: u-zeit-secrets
@@ -71,6 +66,9 @@ spec:
                   httpGet:
                     path: /health/liveness
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 30
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -82,6 +80,9 @@ spec:
                   httpGet:
                     path: /health/readiness
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -93,6 +94,9 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 5
                   periodSeconds: 10
                   timeoutSeconds: 10
@@ -120,11 +124,11 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "U-Zeit Time Management"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "si-clock"
+          gethomepage.dev/icon: "mdi-clock-outline"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "u-zeit.\${SECRET_DOMAIN}"
+          - host: &host "u-zeit.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -135,22 +139,18 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 5Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /data
       uploads:
         enabled: true
         type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 10Gi
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
+        # Volume CR must all be the same speaking identifier (u-zeit-uploads).
+        # The Volume CR is applied manually by the operator, not by Flux.
+        storageClass: longhorn-static
+        volumeName: u-zeit-uploads
         accessMode: ReadWriteOnce
+        size: 5Gi
         globalMounts:
-          - path: /app/public/uploads
+          - path: /app/public/system
       tmp:
         enabled: true
         type: emptyDir

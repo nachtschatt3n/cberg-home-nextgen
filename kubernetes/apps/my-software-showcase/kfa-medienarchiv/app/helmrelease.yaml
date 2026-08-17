@@ -27,12 +27,13 @@ spec:
   values:
     controllers:
       kfa-medienarchiv:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/kfa_medienarchiv
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:kfa-medienarchiv:tag"}
+              tag: production-20260816190753
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -64,6 +65,9 @@ spec:
                   httpGet:
                     path: /health/liveness
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 30
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -75,6 +79,9 @@ spec:
                   httpGet:
                     path: /health/readiness
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -86,6 +93,9 @@ spec:
                   httpGet:
                     path: /health/startup
                     port: 3000
+                    httpHeaders:
+                      - name: X-Forwarded-Proto
+                        value: https
                   initialDelaySeconds: 5
                   periodSeconds: 10
                   timeoutSeconds: 10
@@ -114,7 +124,7 @@ spec:
           gethomepage.dev/name: "KFA Medienarchiv"
           gethomepage.dev/description: "Media Archive Management System"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "docker.png"
+          gethomepage.dev/icon: "mdi-image-multiple"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
@@ -129,14 +139,6 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 10Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /data
       tmp:
         enabled: true
         type: emptyDir

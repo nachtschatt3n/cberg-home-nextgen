@@ -28,12 +28,13 @@ spec:
   values:
     controllers:
       metaldyne:
+        replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/metaldyne-mini-erp
-              tag: production-20260816000000 # {"$imagepolicy": "my-software-showcase:metaldyne:tag"}
+              tag: production-20260816205832
               pullPolicy: IfNotPresent
             env:
               - name: TZ
@@ -48,12 +49,6 @@ spec:
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
-              - name: DATABASE_HOST
-                value: "mariadb.databases.svc.cluster.local"
-              - name: DATABASE_PORT
-                value: "3306"
-              - name: DATABASE_NAME
-                value: "showcase_metaldyne_prod"
             envFrom:
               - secretRef:
                   name: metaldyne-secrets
@@ -63,6 +58,13 @@ spec:
                 memory: 256Mi
               limits:
                 memory: 1Gi
+            # httpGet against the app's real health endpoints. config/routes.rb
+            # in the PUBLISHED tree defines all three explicitly
+            # (get 'health/liveness', to: 'health#liveness', etc.) and
+            # HealthController inherits ActionController::Base, so it is exempt
+            # from Devise/CanCan and from the DB-querying set_tasks filter.
+            # Verified in CI against a live container: readiness returns 200 with
+            # JSON and a genuine 503 when MySQL is stopped.
             probes:
               liveness:
                 enabled: true
@@ -120,11 +122,11 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Metaldyne Mini ERP"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "si-wrench"
+          gethomepage.dev/icon: "mdi-wrench"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "metaldyne.\${SECRET_DOMAIN}"
+          - host: &host "metaldyne.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -135,22 +137,6 @@ spec:
           - hosts:
               - *host
     persistence:
-      data:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 5Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /data
-      uploads:
-        enabled: true
-        type: persistentVolumeClaim
-        storageClass: longhorn
-        size: 10Gi
-        accessMode: ReadWriteOnce
-        globalMounts:
-          - path: /app/public/uploads
       tmp:
         enabled: true
         type: emptyDir

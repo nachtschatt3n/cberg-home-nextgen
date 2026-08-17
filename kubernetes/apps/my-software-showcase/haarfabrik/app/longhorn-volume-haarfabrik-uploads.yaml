@@ -1,0 +1,20 @@
+---
+# NOT listed in app/kustomization.yaml on purpose.
+# Flux's `targetNamespace: my-software-showcase` would override `namespace: storage`
+# below and create a duplicate Volume in the app namespace that Longhorn does not
+# manage. Apply this ONCE by hand before the first reconcile:
+#   mise exec -- kubectl apply -f kubernetes/apps/my-software-showcase/haarfabrik/app/longhorn-volume-haarfabrik-uploads.yaml
+# See docs/sops/new-deployment-blueprint.md (Storage blueprint).
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: haarfabrik-uploads
+  namespace: storage
+spec:
+  size: "5368709120"  # 5Gi in bytes
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
