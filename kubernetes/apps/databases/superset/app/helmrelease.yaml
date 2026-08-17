@@ -135,6 +135,16 @@ spec:
     redis:
       enabled: false
 
+    # The chart-generated superset-env secret is the ONLY envFrom the
+    # wait-for-postgres-redis INIT containers get (the superset-secrets
+    # override reaches the main containers, not init), and its REDIS_HOST
+    # falls back to "<release>-redis-headless" unless cache.host is set —
+    # that dead default kept every upgrade's init waiting forever during the
+    # 2026-08-17 cutover (attempt/rollback thrash). Point the chart itself
+    # at the replacement server.
+    cache:
+      host: superset-redis-official
+
     # --- Superset web/UI pods ---
     supersetNode:
       replicaCount: 1
