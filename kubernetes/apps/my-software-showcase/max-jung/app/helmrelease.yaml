@@ -1,10 +1,12 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
-# HelmRelease for zuhause-betreut-caretakermanager (bjw-s/app-template v3.7.3)
+# HelmRelease for Max Jung Fahrzeugcontrolling (bjw-s/app-template v3.7.3)
+# Replaces BOTH the hand-rolled Deployment and a HelmRelease that used the dead
+# `helm.fluxcd.io/v1` API against the Bitnami "rails" chart.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app zuhause-betreut
+  name: &app max-jung
   namespace: my-software-showcase
 spec:
   interval: 30m
@@ -26,41 +28,43 @@ spec:
       retries: 3
   values:
     controllers:
-      zuhause-betreut:
+      max-jung:
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              repository: ghcr.io/nachtschatt3n/max-jung-transporte-fahrzeugcontrolling
+              tag: production-20260816191422
               pullPolicy: IfNotPresent
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # live_production, NOT production: this app ships no
-              # config/environments/production.rb (only development / staging /
-              # live_production), and its Dockerfile sets RAILS_ENV=live_production.
-              # Overriding it to "production" makes Rails abort at boot.
               - name: RAILS_ENV
-                value: "live_production"
+                value: "production"
               - name: RACK_ENV
-                value: "live_production"
+                value: "production"
               - name: PORT
                 value: "3000"
               - name: RAILS_LOG_TO_STDOUT
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
+              - name: EXECJS_RUNTIME
+                value: "Node"
             envFrom:
               - secretRef:
-                  name: zuhause-betreut-secrets
+                  name: max-jung-secrets
             resources:
               requests:
                 cpu: 100m
                 memory: 256Mi
               limits:
                 memory: 1Gi
+            # config.force_ssl = true (config/environments/production.rb).
+            # ActionDispatch::SSL is Rack middleware, so no controller-level skip
+            # can exempt these paths -- without the header every probe gets a 301,
+            # which Kubernetes scores as success (false green on a dead app).
             probes:
               liveness:
                 enabled: true
@@ -115,7 +119,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
     service:
       main:
-        controller: zuhause-betreut
+        controller: max-jung
         ports:
           http:
             port: 3000
@@ -125,14 +129,14 @@ spec:
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Zuhause Betreut"
-          gethomepage.dev/description: "Caretaker Management System"
+          gethomepage.dev/name: "Max Jung Fahrzeugcontrolling"
+          gethomepage.dev/description: "Vehicle fleet controlling"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "mdi-home-heart"
+          gethomepage.dev/icon: "mdi-truck-delivery"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "zuhause-betreut.${SECRET_DOMAIN}"
+          - host: &host "max-jung.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -143,18 +147,21 @@ spec:
           - hosts:
               - *host
     persistence:
-      uploads:
+      csvimport:
         enabled: true
         type: persistentVolumeClaim
-        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
-        # Volume CR must all be the same speaking identifier (zuhause-betreut-uploads).
+        # Mount path is /app/csvimport, NOT /app/public/uploads: this app's
+        # CarrierWave uploader overrides store_dir to "#{Rails.root}/csvimport"
+        # (app/uploaders/csv_import_uploader.rb).
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn Volume CR
+        # must all be the same speaking identifier (max-jung-csvimport).
         # The Volume CR is applied manually by the operator, not by Flux.
         storageClass: longhorn-static
-        volumeName: zuhause-betreut-uploads
+        volumeName: max-jung-csvimport
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:
-          - path: /app/public/uploads
+          - path: /app/csvimport
       tmp:
         enabled: true
         type: emptyDir

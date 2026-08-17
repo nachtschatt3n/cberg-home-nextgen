@@ -92,7 +92,7 @@ This checklist outlines the steps required to fully deploy the zuhause-betreut-c
 
 ### 2.1 Verify GitHub Container Registry Access
 
-- **Repository:** `ghcr.io/ibdigital/zuhause-betreut-caretakermanager`
+- **Repository:** `ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager`
 - **Image Tag Format:** `production-YYYYMMDDHHMMSS` (e.g., `production-20260816000000`)
 - **Current Tag in Manifest:** `production-20260816000000`
 
@@ -100,7 +100,7 @@ This checklist outlines the steps required to fully deploy the zuhause-betreut-c
 1. Confirm the GitHub PAT has `read:packages` scope
 2. Test GHCR access locally:
    ```bash
-   docker pull ghcr.io/ibdigital/zuhause-betreut-caretakermanager:production-20260816000000
+   docker pull ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager:production-20260816000000
    ```
 3. Verify the image exists and is accessible
 

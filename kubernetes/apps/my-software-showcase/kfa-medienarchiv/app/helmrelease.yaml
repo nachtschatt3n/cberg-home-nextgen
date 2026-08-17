@@ -1,10 +1,10 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
-# HelmRelease for zuhause-betreut-caretakermanager (bjw-s/app-template v3.7.3)
+# HelmRelease for kfa-medienarchiv (bjw-s/app-template v3.7.3)
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app zuhause-betreut
+  name: &app kfa-medienarchiv
   namespace: my-software-showcase
 spec:
   interval: 30m
@@ -26,26 +26,22 @@ spec:
       retries: 3
   values:
     controllers:
-      zuhause-betreut:
+      kfa-medienarchiv:
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              repository: ghcr.io/nachtschatt3n/kfa_medienarchiv
+              tag: production-20260816190753
               pullPolicy: IfNotPresent
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # live_production, NOT production: this app ships no
-              # config/environments/production.rb (only development / staging /
-              # live_production), and its Dockerfile sets RAILS_ENV=live_production.
-              # Overriding it to "production" makes Rails abort at boot.
               - name: RAILS_ENV
-                value: "live_production"
+                value: "production"
               - name: RACK_ENV
-                value: "live_production"
+                value: "production"
               - name: PORT
                 value: "3000"
               - name: RAILS_LOG_TO_STDOUT
@@ -54,7 +50,7 @@ spec:
                 value: "1"
             envFrom:
               - secretRef:
-                  name: zuhause-betreut-secrets
+                  name: kfa-medienarchiv-secrets
             resources:
               requests:
                 cpu: 100m
@@ -115,7 +111,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
     service:
       main:
-        controller: zuhause-betreut
+        controller: kfa-medienarchiv
         ports:
           http:
             port: 3000
@@ -125,14 +121,14 @@ spec:
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Zuhause Betreut"
-          gethomepage.dev/description: "Caretaker Management System"
+          gethomepage.dev/name: "KFA Medienarchiv"
+          gethomepage.dev/description: "Media Archive Management System"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "mdi-home-heart"
+          gethomepage.dev/icon: "mdi-image-multiple"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "zuhause-betreut.${SECRET_DOMAIN}"
+          - host: &host "kfa-medienarchiv.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -143,18 +139,6 @@ spec:
           - hosts:
               - *host
     persistence:
-      uploads:
-        enabled: true
-        type: persistentVolumeClaim
-        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
-        # Volume CR must all be the same speaking identifier (zuhause-betreut-uploads).
-        # The Volume CR is applied manually by the operator, not by Flux.
-        storageClass: longhorn-static
-        volumeName: zuhause-betreut-uploads
-        accessMode: ReadWriteOnce
-        size: 5Gi
-        globalMounts:
-          - path: /app/public/uploads
       tmp:
         enabled: true
         type: emptyDir

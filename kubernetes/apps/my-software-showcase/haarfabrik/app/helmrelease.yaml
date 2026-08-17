@@ -1,10 +1,11 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
-# HelmRelease for zuhause-betreut-caretakermanager (bjw-s/app-template v3.7.3)
+# HelmRelease for Haarfabrik Extranet (bjw-s/app-template v3.7.3)
+# Converted from a hand-rolled Deployment + ConfigMap + RBAC + ServiceMonitor.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app zuhause-betreut
+  name: &app haarfabrik
   namespace: my-software-showcase
 spec:
   interval: 30m
@@ -26,41 +27,46 @@ spec:
       retries: 3
   values:
     controllers:
-      zuhause-betreut:
+      haarfabrik:
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              repository: ghcr.io/nachtschatt3n/haarfabrik-extranet
+              tag: production-20260816205833
               pullPolicy: IfNotPresent
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # live_production, NOT production: this app ships no
-              # config/environments/production.rb (only development / staging /
-              # live_production), and its Dockerfile sets RAILS_ENV=live_production.
-              # Overriding it to "production" makes Rails abort at boot.
               - name: RAILS_ENV
-                value: "live_production"
+                value: "production"
               - name: RACK_ENV
-                value: "live_production"
+                value: "production"
               - name: PORT
                 value: "3000"
               - name: RAILS_LOG_TO_STDOUT
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
+              # This app pulls in therubyracer/execjs; the image ships node.
+              - name: EXECJS_RUNTIME
+                value: "Node"
             envFrom:
               - secretRef:
-                  name: zuhause-betreut-secrets
+                  name: haarfabrik-secrets
             resources:
               requests:
                 cpu: 100m
                 memory: 256Mi
               limits:
                 memory: 1Gi
+            # config.force_ssl = true (config/environments/production.rb:37) and
+            # the health controller is NOT exempt (ActionDispatch::SSL is Rack
+            # middleware). Without the header every probe gets a 301, which
+            # Kubernetes scores as success -- a false green on a dead app.
+            # Probe paths use /health/liveness|readiness|startup, which
+            # config/routes.rb defines alongside the older /health/live|ready.
             probes:
               liveness:
                 enabled: true
@@ -115,7 +121,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
     service:
       main:
-        controller: zuhause-betreut
+        controller: haarfabrik
         ports:
           http:
             port: 3000
@@ -125,14 +131,14 @@ spec:
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Zuhause Betreut"
-          gethomepage.dev/description: "Caretaker Management System"
+          gethomepage.dev/name: "Haarfabrik Extranet"
+          gethomepage.dev/description: "Salon extranet"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "mdi-home-heart"
+          gethomepage.dev/icon: "ruby-on-rails.png"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "zuhause-betreut.${SECRET_DOMAIN}"
+          - host: &host "haarfabrik.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -146,15 +152,17 @@ spec:
       uploads:
         enabled: true
         type: persistentVolumeClaim
-        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
-        # Volume CR must all be the same speaking identifier (zuhause-betreut-uploads).
+        # Paperclip with no :path override -> default is public/system,
+        # so the mount is /app/public/system (has_attached_file :file).
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn Volume CR
+        # must all be the same speaking identifier (haarfabrik-uploads).
         # The Volume CR is applied manually by the operator, not by Flux.
         storageClass: longhorn-static
-        volumeName: zuhause-betreut-uploads
+        volumeName: haarfabrik-uploads
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:
-          - path: /app/public/uploads
+          - path: /app/public/system
       tmp:
         enabled: true
         type: emptyDir

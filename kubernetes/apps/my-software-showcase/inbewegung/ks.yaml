@@ -1,10 +1,10 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
-# Flux Kustomization for zuhause-betreut-caretakermanager
+# Flux Kustomization for Inbewegung Family Manager
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: &app zuhause-betreut
+  name: &app inbewegung
   namespace: &namespace my-software-showcase
 spec:
   targetNamespace: *namespace
@@ -17,10 +17,7 @@ spec:
     # every app in this namespace talks to the shared MariaDB
     - name: mariadb
       namespace: databases
-    # binds a longhorn-static PVC
-    - name: longhorn
-      namespace: storage
-  path: ./kubernetes/apps/my-software-showcase/zuhause-betreut/app
+  path: ./kubernetes/apps/my-software-showcase/inbewegung/app
   prune: true
   sourceRef:
     kind: GitRepository

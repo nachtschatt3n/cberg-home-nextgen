@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: max-jung-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: max-jung.rules
+    rules:
+    - alert: MaxJungPodNotReady
+      annotations:
+        description: Max Jung vehicle fleet controlling pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The service is likely unavailable.
+        summary: Max Jung vehicle fleet controlling pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="my-software-showcase", pod=~"max-jung-.*", condition="false"}
+        ) > 0
+      for: 5m
+      labels:
+        app: max-jung
+        namespace: my-software-showcase
+        severity: critical
+    - alert: MaxJungPodCrashLooping
+      annotations:
+        description: Max Jung vehicle fleet controlling pod {{ $labels.pod }} has restarted {{ $value |
+          printf "%.0f" }} times in the last 15 minutes. Check logs for startup
+          errors or dependency failures.
+        summary: Max Jung vehicle fleet controlling pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="my-software-showcase", pod=~"max-jung-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        app: max-jung
+        namespace: my-software-showcase
+        severity: critical
+    - alert: MaxJungPodRestarted
+      annotations:
+        description: Max Jung vehicle fleet controlling pod {{ $labels.pod }} has restarted at least once in
+          the last 15 minutes. Monitor for repeated restarts or OOMKills.
+        summary: Max Jung vehicle fleet controlling pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase", pod=~"max-jung-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        app: max-jung
+        namespace: my-software-showcase
+        severity: warning

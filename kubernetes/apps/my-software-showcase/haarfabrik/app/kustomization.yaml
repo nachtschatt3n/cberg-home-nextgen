@@ -8,10 +8,10 @@ resources:
   # PersistentVolumes are cluster-scoped, so Flux's targetNamespace
   # cannot corrupt them. The PVCs themselves come from the chart's
   # persistence block (storageClass: longhorn-static + volumeName).
-  - pv-zuhause-betreut-uploads.yaml
+  - pv-haarfabrik-uploads.yaml
 
 # Deliberately NOT listed above (see docs/sops/new-deployment-blueprint.md):
-#   longhorn-volume-zuhause-betreut-uploads.yaml
+#   longhorn-volume-haarfabrik-uploads.yaml
 # Flux applies `targetNamespace: my-software-showcase` to every resource in
 # this build, which would silently override `namespace: storage` on the
 # longhorn.io/v1beta2 Volume and create a duplicate Longhorn does not manage.

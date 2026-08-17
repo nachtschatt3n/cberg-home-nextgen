@@ -6,4 +6,22 @@ namespace: my-software-showcase
 components:
   - ../../flux/components/common
 resources:
+  # Namespace-scoped shared objects (ghcr-secret). Every app Kustomization
+  # below dependsOn this one, so it is listed first.
+  - ./_shared/ks.yaml
+  # Core Portfolio Apps (all 15 containerized legacy applications)
+  - ./globalmobility/ks.yaml
+  - ./haarfabrik/ks.yaml
+  - ./holm-backend/ks.yaml
+  - ./ibgastro/ks.yaml
+  - ./inbewegung/ks.yaml
+  - ./kfa-medienarchiv/ks.yaml
+  - ./mangold-smarthomeadvisor/ks.yaml
+  - ./max-jung/ks.yaml
+  - ./metaldyne/ks.yaml
+  - ./ordiga/ks.yaml
+  - ./see-edv-ibspm/ks.yaml
+  - ./stepbystepguide/ks.yaml
+  - ./u-zeit/ks.yaml
+  - ./uzeit-de/ks.yaml
   - ./zuhause-betreut/ks.yaml

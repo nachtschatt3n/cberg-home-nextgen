@@ -1,10 +1,11 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
-# HelmRelease for zuhause-betreut-caretakermanager (bjw-s/app-template v3.7.3)
+# HelmRelease for IB Gastro (CakePHP) — bjw-s/app-template v3.7.3
+# Converted from a hand-rolled Deployment + ConfigMap + plaintext Secret + PVC.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app zuhause-betreut
+  name: &app ibgastro
   namespace: my-software-showcase
 spec:
   interval: 30m
@@ -26,52 +27,44 @@ spec:
       retries: 3
   values:
     controllers:
-      zuhause-betreut:
+      ibgastro:
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              repository: ghcr.io/nachtschatt3n/ibgastro
+              tag: sha-dc6fcacb65bbed61aea5f19ae7824591026f5306
               pullPolicy: IfNotPresent
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # live_production, NOT production: this app ships no
-              # config/environments/production.rb (only development / staging /
-              # live_production), and its Dockerfile sets RAILS_ENV=live_production.
-              # Overriding it to "production" makes Rails abort at boot.
-              - name: RAILS_ENV
-                value: "live_production"
-              - name: RACK_ENV
-                value: "live_production"
-              - name: PORT
-                value: "3000"
-              - name: RAILS_LOG_TO_STDOUT
-                value: "1"
-              - name: RAILS_SERVE_STATIC_FILES
-                value: "1"
+              - name: CAKEPHP_DEBUG
+                value: "0"
             envFrom:
               - secretRef:
-                  name: zuhause-betreut-secrets
+                  name: ibgastro-secrets
             resources:
               requests:
                 cpu: 100m
                 memory: 256Mi
               limits:
-                memory: 1Gi
+                memory: 512Mi
+            # /health is a CakePHP ROUTE (app/controllers/health_controller.php,
+            # wired in app/config/routes.php), not a file in app/webroot -- there
+            # is no health.php. It checks the DB connection and TMP writability
+            # and returns a real 503 on failure.
+            # The previous manifest probed "/", which routes to OrderclientsController
+            # and 302-redirects to /users/login. Kubernetes scores 3xx as success, so
+            # "/" reported Ready even with MySQL completely unreachable.
             probes:
               liveness:
                 enabled: true
                 custom: true
                 spec:
                   httpGet:
-                    path: /health/liveness
-                    port: 3000
-                    httpHeaders:
-                      - name: X-Forwarded-Proto
-                        value: https
+                    path: /health
+                    port: 80
                   initialDelaySeconds: 30
                   periodSeconds: 30
                   timeoutSeconds: 5
@@ -81,11 +74,8 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /health/readiness
-                    port: 3000
-                    httpHeaders:
-                      - name: X-Forwarded-Proto
-                        value: https
+                    path: /health
+                    port: 80
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -95,44 +85,46 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /health/startup
-                    port: 3000
-                    httpHeaders:
-                      - name: X-Forwarded-Proto
-                        value: https
+                    path: /health
+                    port: 80
                   initialDelaySeconds: 5
-                  periodSeconds: 10
-                  timeoutSeconds: 10
+                  periodSeconds: 5
+                  timeoutSeconds: 5
                   failureThreshold: 30
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret
+      # No runAsNonRoot/runAsUser here, unlike the Rails apps: this image has no
+      # USER directive and its entrypoint starts nginx as root to bind :80 (a
+      # privileged port) before dropping workers to the `nginx` user. Forcing
+      # runAsNonRoot would stop the container from ever binding.
+      # The namespace runs Pod Security Admission "baseline", which permits this.
       securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-        runAsNonRoot: true
+        # fsGroup makes the uploads PVC writable by the nginx/php-fpm user.
+        # 101 is the gid Alpine's nginx package creates. VERIFY before rollout:
+        #   docker run --rm <image> id nginx
+        fsGroup: 101
         fsGroupChangePolicy: "OnRootMismatch"
     service:
       main:
-        controller: zuhause-betreut
+        controller: ibgastro
         ports:
           http:
-            port: 3000
+            port: 80
     ingress:
       main:
         enabled: true
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Zuhause Betreut"
-          gethomepage.dev/description: "Caretaker Management System"
+          gethomepage.dev/name: "IB Gastro"
+          gethomepage.dev/description: "Gastronomy ordering system"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "mdi-home-heart"
+          gethomepage.dev/icon: "mdi-silverware-fork-knife"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "zuhause-betreut.${SECRET_DOMAIN}"
+          - host: &host "ibgastro.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -146,22 +138,22 @@ spec:
       uploads:
         enabled: true
         type: persistentVolumeClaim
-        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
-        # Volume CR must all be the same speaking identifier (zuhause-betreut-uploads).
+        # longhorn-static: PVC name, volumeName, PV name and the Longhorn Volume CR
+        # must all be the same speaking identifier (ibgastro-uploads).
         # The Volume CR is applied manually by the operator, not by Flux.
         storageClass: longhorn-static
-        volumeName: zuhause-betreut-uploads
+        volumeName: ibgastro-uploads
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:
-          - path: /app/public/uploads
+          - path: /var/www/html/app/webroot/uploads
       tmp:
         enabled: true
         type: emptyDir
         globalMounts:
-          - path: /app/tmp
-      log:
+          - path: /var/www/html/app/tmp
+      cache:
         enabled: true
         type: emptyDir
         globalMounts:
-          - path: /app/log
+          - path: /var/www/html/app/cache

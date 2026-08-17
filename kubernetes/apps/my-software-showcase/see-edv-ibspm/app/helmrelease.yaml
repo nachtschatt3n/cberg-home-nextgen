@@ -1,10 +1,11 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
-# HelmRelease for zuhause-betreut-caretakermanager (bjw-s/app-template v3.7.3)
+# HelmRelease for See EDV IBSPM (bjw-s/app-template v3.7.3)
+# Converted from a hand-rolled Deployment + ConfigMap + plaintext Secret.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app zuhause-betreut
+  name: &app see-edv-ibspm
   namespace: my-software-showcase
 spec:
   interval: 30m
@@ -26,35 +27,36 @@ spec:
       retries: 3
   values:
     controllers:
-      zuhause-betreut:
+      see-edv-ibspm:
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
-              repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              repository: ghcr.io/nachtschatt3n/see-edv-ibspm
+              tag: production-20260816205827
               pullPolicy: IfNotPresent
             env:
               - name: TZ
                 value: "Europe/Berlin"
-              # live_production, NOT production: this app ships no
-              # config/environments/production.rb (only development / staging /
-              # live_production), and its Dockerfile sets RAILS_ENV=live_production.
-              # Overriding it to "production" makes Rails abort at boot.
               - name: RAILS_ENV
-                value: "live_production"
+                value: "production"
               - name: RACK_ENV
-                value: "live_production"
+                value: "production"
               - name: PORT
                 value: "3000"
               - name: RAILS_LOG_TO_STDOUT
                 value: "1"
               - name: RAILS_SERVE_STATIC_FILES
                 value: "1"
+            # NOTE: the removed ConfigMap also carried SMTP_ADDRESS / SMTP_PORT /
+            # SMTP_USER_NAME for outbound mail. Those were a third-party mail host
+            # and a real mailbox address in a public repo, so they are not
+            # reinstated here. If this app must send mail, add SMTP_* keys to
+            # see-edv-ibspm/app/secret.sops.yaml — operator decision.
             envFrom:
               - secretRef:
-                  name: zuhause-betreut-secrets
+                  name: see-edv-ibspm-secrets
             resources:
               requests:
                 cpu: 100m
@@ -115,7 +117,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
     service:
       main:
-        controller: zuhause-betreut
+        controller: see-edv-ibspm
         ports:
           http:
             port: 3000
@@ -125,14 +127,14 @@ spec:
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Zuhause Betreut"
-          gethomepage.dev/description: "Caretaker Management System"
+          gethomepage.dev/name: "See EDV IBSPM"
+          gethomepage.dev/description: "IBSPM service management"
           gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "mdi-home-heart"
+          gethomepage.dev/icon: "ruby-on-rails.png"
         labels:
           gethomepage.dev/enabled: "true"
         hosts:
-          - host: &host "zuhause-betreut.${SECRET_DOMAIN}"
+          - host: &host "see-edv-ibspm.${SECRET_DOMAIN}"
             paths:
               - path: /
                 pathType: Prefix
@@ -143,18 +145,7 @@ spec:
           - hosts:
               - *host
     persistence:
-      uploads:
-        enabled: true
-        type: persistentVolumeClaim
-        # longhorn-static: PVC name, volumeName, PV name and the Longhorn
-        # Volume CR must all be the same speaking identifier (zuhause-betreut-uploads).
-        # The Volume CR is applied manually by the operator, not by Flux.
-        storageClass: longhorn-static
-        volumeName: zuhause-betreut-uploads
-        accessMode: ReadWriteOnce
-        size: 5Gi
-        globalMounts:
-          - path: /app/public/uploads
+      # No PVC: no file-upload gem in the app's Gemfile.
       tmp:
         enabled: true
         type: emptyDir

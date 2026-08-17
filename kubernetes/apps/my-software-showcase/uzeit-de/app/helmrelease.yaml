@@ -1,0 +1,175 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+# HelmRelease for Uzeit.de (TYPO3 6.2) — bjw-s/app-template v3.7.3
+# Converted from a hand-rolled Deployment + ConfigMap + RBAC + PVCs + its own
+# Ingress and namespace. The old manifest also shipped a bogus in-namespace MySQL
+# Service with no backing workload, and two initContainers that pointed at it.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app uzeit-de
+  namespace: my-software-showcase
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 3.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    controllers:
+      uzeit-de:
+        # replicas: 1, not 2 -- the previous manifest asked for 2 while mounting
+        # ReadWriteOnce volumes, so the second pod could never attach.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/nachtschatt3n/uzeit-de
+              tag: sha-65c586bab2d66e1a00e0c2850ebe4a8c921e93bb
+              pullPolicy: IfNotPresent
+            env:
+              - name: TZ
+                value: "Europe/Berlin"
+              - name: PHP_MEMORY_LIMIT
+                value: "512M"
+              - name: PHP_MAX_EXECUTION_TIME
+                value: "300"
+            envFrom:
+              - secretRef:
+                  name: uzeit-de-secrets
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+            # nginx + php-fpm in one image; nginx listens on :80 and FPM is bound
+            # to loopback 127.0.0.1:9000, so :80 is the only HTTP port.
+            # health.php has two modes and returns a real 503 on failure:
+            #   ?mode=liveness -> PHP only (core present, Install Tool off), no DB
+            #   (default)      -> the above plus a MySQL connect, required tables,
+            #                     >=1 non-deleted page and >=1 root TypoScript template
+            # Liveness deliberately uses the DB-free mode so a database outage
+            # restarts nothing; readiness/startup use the full check.
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php?mode=liveness
+                    port: 80
+                  initialDelaySeconds: 40
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php
+                    port: 80
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health.php
+                    port: 80
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 10
+                  failureThreshold: 30
+    defaultPodOptions:
+      imagePullSecrets:
+        - name: ghcr-secret
+      # No runAsNonRoot/runAsUser: this image has no USER directive and the nginx
+      # master starts as root to bind :80 (privileged) before dropping workers to
+      # www-data. The namespace runs Pod Security Admission "baseline".
+      securityContext:
+        # www-data is uid/gid 33 on the Debian jessie base; the image chowns
+        # /var/www/html to www-data:www-data.
+        fsGroup: 33
+        fsGroupChangePolicy: "OnRootMismatch"
+    service:
+      main:
+        controller: uzeit-de
+        ports:
+          http:
+            port: 80
+    ingress:
+      main:
+        enabled: true
+        # className: internal. The replaced ingress.yaml used class `nginx`, an
+        # invented non-routable hostname, a per-app cluster-issuer annotation and
+        # its own TLS secret. Internal ingresses in this cluster instead ride the
+        # shared *.${SECRET_DOMAIN} wildcard held by the internal controller's
+        # default-ssl-certificate -- no per-app Certificate, no issuer annotation,
+        # no secretName.
+        className: internal
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Uzeit.de"
+          gethomepage.dev/description: "Uzeit corporate website"
+          gethomepage.dev/group: "Software Portfolio"
+          gethomepage.dev/icon: "typo3.png"
+          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+        labels:
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host "uzeit-de.${SECRET_DOMAIN}"
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+    persistence:
+      # storageClass was `standard`, which does not exist in this cluster --
+      # both PVCs would have stayed Pending forever. Now longhorn-static with
+      # speaking names; the Longhorn Volume CRs are applied manually by the
+      # operator (see longhorn-volume-*.yaml, deliberately not in kustomization).
+      fileadmin:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn-static
+        volumeName: uzeit-de-fileadmin
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /var/www/html/fileadmin
+      uploads:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn-static
+        volumeName: uzeit-de-uploads
+        accessMode: ReadWriteOnce
+        size: 5Gi
+        globalMounts:
+          - path: /var/www/html/uploads
+      typo3temp:
+        enabled: true
+        type: emptyDir
+        globalMounts:
+          - path: /var/www/html/typo3temp
