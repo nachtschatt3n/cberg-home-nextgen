@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ordiga
-              tag: production-20260816205839
+              tag: production-20260817210644
               pullPolicy: IfNotPresent
             env:
               - name: TZ

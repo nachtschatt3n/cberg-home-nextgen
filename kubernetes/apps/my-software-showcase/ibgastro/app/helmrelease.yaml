@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/ibgastro
-              tag: sha-dc6fcacb65bbed61aea5f19ae7824591026f5306
+              tag: sha-0dfc2c8298e1ac8f5276d3ef716ae5243ce612d7
               pullPolicy: IfNotPresent
             env:
               - name: TZ

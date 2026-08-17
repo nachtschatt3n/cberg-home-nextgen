@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/haarfabrik-extranet
-              tag: production-20260816205833
+              tag: production-20260817213730
               pullPolicy: IfNotPresent
             env:
               - name: TZ

@@ -37,7 +37,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/globalmobility-group-gmbh-globaldispo
-              tag: master-3d6ab09
+              tag: master-3ef100e
               pullPolicy: IfNotPresent
             env:
               - name: TZ
