@@ -64,7 +64,7 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: postgres:17.9-alpine@sha256:6f30057d31f5861b66f3545d4821f987aacf1dd920765f0acadea0c58ff975b1
+        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         ports:
         - containerPort: 5432
         env:
