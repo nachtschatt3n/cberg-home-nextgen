@@ -77,6 +77,34 @@ def _desc(title: str, limit: int = 96) -> str:
         t = head + " — " + tail.split(".")[0].split(";")[0]
     return (t[: limit - 1] + "…") if len(t) > limit else t
 
+
+def planned_findings() -> dict:
+    """finding_id -> (plan_id, window) for every ACTIVE maintenance plan that
+    carries a `security_ref`. Operator rule (2026-08-17): a finding already
+    planned into a window is handled by the window pipeline — the sweep
+    re-listing it is noise. Only an EXACT security_ref match hides an item;
+    component-name guessing would hide things the plans don't actually cover.
+    Executed/superseded plans don't count — their ref must resurface."""
+    out = {}
+    try:
+        import yaml
+        for p in (REPO / "runbooks" / "maintenance" / "plans").glob("*.md"):
+            if p.name == "README.md":
+                continue
+            try:
+                fm = yaml.safe_load(p.read_text().split("---", 2)[1]) or {}
+            except Exception:
+                continue
+            if fm.get("status") in ("executed", "superseded"):
+                continue
+            ref = fm.get("security_ref")
+            if ref and str(ref).startswith("F-"):
+                out[str(ref)] = (fm.get("plan_id") or p.stem,
+                                 fm.get("window") or "unscheduled")
+    except Exception:
+        pass  # board must render regardless; no plans-index -> nothing hidden
+    return out
+
 def collect(cur, cycle_id: str | None) -> dict:
     if not cycle_id:
         cur.execute(
@@ -220,12 +248,19 @@ def render(d: dict, w: dict) -> str:
         n += 1
         L.append(f"{n:>3}. **[{rating}]** `{category}` — {desc}")
 
+    planned = planned_findings()
     if not d["criticals"]:
         L.append("*(no CRITICAL items — nothing pages; list starts at HIGH)*")
         L.append("")
     for c in d["criticals"]:
-        item("CRITICAL", "security/exposed+exploited", _desc(c["title"]))
-    for h in d["high"]:
+        # criticals are NEVER hidden — they page; a plan is annotated, not a veil
+        note = ""
+        if c["id"] in planned:
+            pid, win = planned[c["id"]]
+            note = f"  *(planned: {pid} @ {win})*"
+        item("CRITICAL", "security/exposed+exploited", _desc(c["title"]) + note)
+    high_planned = [h for h in d["high"] if h["id"] in planned]
+    for h in [h for h in d["high"] if h["id"] not in planned]:
         # category: real exposure when recorded; else derive from subsection
         # (git-history findings are repo-exposure, not a served endpoint) —
         # never default to a specific-sounding label the data doesn't support.
@@ -234,6 +269,11 @@ def render(d: dict, w: dict) -> str:
                                   .replace("s4_cve_check", "cve")
         cat = "security/" + (exp or sub or "untagged")
         item("HIGH", cat, _desc(h["title"]))
+    if high_planned:
+        wins = sorted(planned[h["id"]][1] for h in high_planned)
+        item("HIGH", "security/planned",
+             f"{len(high_planned)} item(s) already planned into maintenance "
+             f"windows (earliest {wins[0]}) — handled by the window pipeline")
     if d.get("high_accepted"):
         item("HIGH", "security/accepted",
              f"{d['high_accepted']} AR-accepted item(s), no upstream fix yet — "

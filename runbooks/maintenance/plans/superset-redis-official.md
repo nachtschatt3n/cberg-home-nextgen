@@ -23,6 +23,7 @@ depends_on: []
 conflicts_with: []
 status: draft
 window: "thu-early:2026-08-20"
+security_ref: F-f6239bec        # bitnamilegacy/redis fixable-CRIT finding (linked 2026-08-17 so the sweep board can collapse it as planned)
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
