@@ -47,3 +47,15 @@ resources:
   - ./zuhause-betreut-alerts.yaml
   - ./kfa-medienarchiv-alerts.yaml
   - ./mangold-smarthomeadvisor-alerts.yaml
+  - ./globalmobility-alerts.yaml
+  - ./haarfabrik-alerts.yaml
+  - ./holm-backend-alerts.yaml
+  - ./ibgastro-alerts.yaml
+  - ./inbewegung-alerts.yaml
+  - ./max-jung-alerts.yaml
+  - ./metaldyne-alerts.yaml
+  - ./ordiga-alerts.yaml
+  - ./see-edv-ibspm-alerts.yaml
+  - ./stepbystepguide-alerts.yaml
+  - ./u-zeit-alerts.yaml
+  - ./uzeit-de-alerts.yaml

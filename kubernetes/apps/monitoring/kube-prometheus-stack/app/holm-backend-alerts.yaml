@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: holm-backend-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: holm-backend.rules
+    rules:
+    - alert: HolmBackendPodNotReady
+      annotations:
+        description: Holm backend service pod {{ $labels.pod }} has been not ready for more
+          than 5 minutes. The service is likely unavailable.
+        summary: Holm backend service pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="my-software-showcase", pod=~"holm-backend-.*", condition="false"}
+        ) > 0
+      for: 5m
+      labels:
+        app: holm-backend
+        namespace: my-software-showcase
+        severity: critical
+    - alert: HolmBackendPodCrashLooping
+      annotations:
+        description: Holm backend service pod {{ $labels.pod }} has restarted {{ $value |
+          printf "%.0f" }} times in the last 15 minutes. Check logs for startup
+          errors or dependency failures.
+        summary: Holm backend service pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="my-software-showcase", pod=~"holm-backend-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        app: holm-backend
+        namespace: my-software-showcase
+        severity: critical
+    - alert: HolmBackendPodRestarted
+      annotations:
+        description: Holm backend service pod {{ $labels.pod }} has restarted at least once in
+          the last 15 minutes. Monitor for repeated restarts or OOMKills.
+        summary: Holm backend service pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="my-software-showcase", pod=~"holm-backend-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        app: holm-backend
+        namespace: my-software-showcase
+        severity: warning
