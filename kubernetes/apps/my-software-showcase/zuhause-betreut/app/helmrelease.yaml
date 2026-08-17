@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260816205823
+              tag: production-20260817204426
               pullPolicy: IfNotPresent
             env:
               - name: TZ
