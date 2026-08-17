@@ -281,6 +281,13 @@ spec:
     postgresql:
       # Use built-in PostgreSQL for compatibility
       enabled: true
+      # Pin the postgres image explicitly (chart 2026.5.6 defaults to
+      # 17.10-bookworm) — keep in sync with cronjob-channels-cleanup.yaml.
+      # SAME major only: 18.x is a data-dir migration.
+      image:
+        registry: docker.io
+        repository: library/postgres
+        tag: "17.11-bookworm"
       auth:
         username: authentik
         database: authentik
