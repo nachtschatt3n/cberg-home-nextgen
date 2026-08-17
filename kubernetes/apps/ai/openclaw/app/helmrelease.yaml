@@ -287,19 +287,42 @@ spec:
                   echo "WARN: jq install failed after retries (continuing)"
                 fi
 
-                echo "Installing ffmpeg static build..."
-                FFMPEG_TMP="$(mktemp -d)"
-                curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o "$FFMPEG_TMP/ffmpeg.tar.xz"
-                tar -xf "$FFMPEG_TMP/ffmpeg.tar.xz" -C "$FFMPEG_TMP"
-                FFMPEG_DIR="$(find "$FFMPEG_TMP" -maxdepth 1 -type d -name 'ffmpeg-*static' | head -n 1)"
-                if [ -z "$FFMPEG_DIR" ]; then
-                  echo "Failed to unpack ffmpeg" >&2
-                  exit 1
+                # ffmpeg (used by `say` for mp3->ogg/opus). johnvansickle.com is a
+                # single-maintainer host: on 2026-08-17 it went unreachable and, because
+                # this step was fatal under `set -e`, every pod boot crash-looped and the
+                # whole family assistant stayed down. The binary lives on the PVC, so a
+                # reinstall is only needed when it is missing — and a third-party outage
+                # must never brick the boot again.
+                if [ -x "$BIN_DIR/ffmpeg" ] && [ -x "$BIN_DIR/ffprobe" ]; then
+                  echo "ffmpeg already present on the volume; skipping download"
+                else
+                  echo "Installing ffmpeg static build..."
+                  ffmpeg_ok=0
+                  FFMPEG_TMP="$(mktemp -d)"
+                  for ff_url in \
+                    "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" \
+                    "https://www.johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"; do
+                    if curl -fsSL --connect-timeout 15 --max-time 180 "$ff_url" -o "$FFMPEG_TMP/ffmpeg.tar.xz" \
+                       && tar -xf "$FFMPEG_TMP/ffmpeg.tar.xz" -C "$FFMPEG_TMP" 2>/dev/null; then
+                      FFMPEG_DIR="$(find "$FFMPEG_TMP" -maxdepth 1 -type d -name 'ffmpeg-*static' | head -n 1)"
+                      if [ -n "$FFMPEG_DIR" ]; then
+                        cp "$FFMPEG_DIR/ffmpeg" "$BIN_DIR/ffmpeg"
+                        cp "$FFMPEG_DIR/ffprobe" "$BIN_DIR/ffprobe"
+                        chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
+                        ffmpeg_ok=1
+                        break
+                      fi
+                    fi
+                    echo "WARN: ffmpeg fetch failed from $ff_url"
+                  done
+                  rm -rf "$FFMPEG_TMP"
+                  if [ "$ffmpeg_ok" != "1" ]; then
+                    # Non-fatal: only voice-note transcoding degrades; text, agents,
+                    # crons and every other channel keep working.
+                    echo "WARN: ffmpeg unavailable (upstream down?) — continuing without it;" \
+                         "voice-note transcoding will be degraded until the next boot"
+                  fi
                 fi
-                cp "$FFMPEG_DIR/ffmpeg" "$BIN_DIR/ffmpeg"
-                cp "$FFMPEG_DIR/ffprobe" "$BIN_DIR/ffprobe"
-                chmod +x "$BIN_DIR/ffmpeg" "$BIN_DIR/ffprobe"
-                rm -rf "$FFMPEG_TMP"
 
                 echo "Linking tools into /usr/local/bin for interactive shells..."
                 for tool in "$BIN_DIR"/*; do
