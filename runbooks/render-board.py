@@ -113,13 +113,21 @@ def collect(cur, cycle_id: str | None) -> dict:
 
     cur.execute(
         """SELECT finding_id, title, metadata->>'exposure' AS exposure,
-                  COALESCE(metadata->>'subsection','') AS sub
+                  COALESCE(metadata->>'subsection','') AS sub, severity
            FROM sweep_findings
            WHERE cycle_id=%s AND status!='resolved'
              AND metadata->>'risk_tier'='high' ORDER BY title""",
         (cycle_id,))
-    out["high"] = [{"id": f, "title": t, "exposure": e, "sub": sub}
-                   for f, t, e, sub in cur.fetchall()]
+    rows = [{"id": f, "title": t, "exposure": e, "sub": sub, "severity": sev}
+            for f, t, e, sub, sev in cur.fetchall()]
+    # Operator rule (2026-08-17): an ACCEPTED-risk finding is by definition
+    # acknowledged — "I don't need to see the accepted AR if there is no
+    # upstream fix yet." They collapse to one count line instead of individual
+    # entries; the AR's own review date is what resurfaces them.
+    out["high"] = [r for r in rows
+                   if r["severity"] != "accepted"
+                   and not r["title"].lstrip().startswith("[AR-")]
+    out["high_accepted"] = len(rows) - len(out["high"])
 
     # 3b — the numbered action list needs: new findings outside security,
     # and the medium tier grouped by subsection so 144 rows become a few lines.
@@ -226,6 +234,10 @@ def render(d: dict, w: dict) -> str:
                                   .replace("s4_cve_check", "cve")
         cat = "security/" + (exp or sub or "untagged")
         item("HIGH", cat, _desc(h["title"]))
+    if d.get("high_accepted"):
+        item("HIGH", "security/accepted",
+             f"{d['high_accepted']} AR-accepted item(s), no upstream fix yet — "
+             "resurface at their AR review dates, no action now")
     for f_ in d.get("new_other", []):
         item("MEDIUM", f_["section"] + "/new", _desc(f_["title"]))
     for grp, cnt in d.get("medium_groups", []):
