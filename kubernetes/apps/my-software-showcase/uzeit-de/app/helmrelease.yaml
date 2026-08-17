@@ -11,6 +11,9 @@ metadata:
   namespace: my-software-showcase
 spec:
   interval: 30m
+  # 15m: a from-scratch TYPO3 install (94-table schema + seed) exceeds the 5m
+  # default; the timeout->uninstall cycle churned PVCs and alerts (2026-08-18).
+  timeout: 15m
   chart:
     spec:
       chart: app-template
