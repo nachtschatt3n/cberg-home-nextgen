@@ -66,7 +66,11 @@ sections that did not report.
    tier board → **numbered action list** (every item numbered, categorized
    `section/kind`, one-line description, rated CRITICAL/HIGH/MEDIUM/LOW by
    the contextual model; individual entries for HIGH+, grouped entries for
-   the medium queue and low batch so bulk tiers don't drown the list) →
+   the medium queue and low batch so bulk tiers don't drown the list;
+   AR-accepted HIGHs and findings already covered by an active maintenance
+   plan — exact `security_ref` match only — each collapse to a single count
+   line [planned items show the earliest window date]; CRITICALs are never
+   collapsed) →
    sections+gaps → SLO/SLI table → maintenance windows.
 
 5. **Append below the rendered board, briefly:** anything you verified that

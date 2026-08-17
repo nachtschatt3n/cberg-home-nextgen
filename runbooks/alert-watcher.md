@@ -33,10 +33,13 @@ Uptime Kuma  ───┘   (push, 1s grp)   (HTTP POST)      :8788 → :8787   
   `.venv`): receives Alertmanager webhooks on `:8788`, relays each alert as a WS
   frame on `:8787`. Frames carry `{source,status,severity,alertname,namespace,
   pod,instance,summary}` for both `firing` and `resolved`.
-- **`claude-watch-webhook.yaml`** — an **ephemeral** `AlertmanagerConfig` (applied
-  with `kubectl`, NOT committed to Flux) that makes Alertmanager push every alert
-  to the bridge, in parallel with the existing `telegram` receiver (the operator
-  sets `continue:true` per config, so nothing else is affected).
+- **`claude-watch-webhook.yaml`** — the `AlertmanagerConfig` that makes
+  Alertmanager push every alert to the bridge, in parallel with the existing
+  `telegram` receiver (the operator sets `continue:true` per config, so nothing
+  else is affected). **Since 2026-08-17 the live copy is Flux-managed** in
+  `kubernetes/apps/monitoring/kube-prometheus-stack/app/`; the copy in
+  `runbooks/alert-watcher/` is SUPERSEDED and kept only for the ephemeral-mode
+  fallback (do NOT `kubectl apply` it — Flux owns the object).
 - **`KumaMonitorDown`** PrometheusRule (this IS in git —
   `kube-prometheus-stack/app/uptime-kuma-alerts.yaml`): turns Kuma's 69
   `monitor_status` series into alerts so Kuma-tracked endpoints flow through the
@@ -57,14 +60,14 @@ below for why the listen can't move into an agent). Note Alertmanager doesn't ev
 notify on *already-silenced* alerts, so the update SOP's pre-silence step keeps the
 watcher quiet during planned updates; the agent handles the leftovers.
 
-## Why session-scoped (not an in-cluster Deployment)
+## Why session-scoped (not an in-cluster Deployment) — SUPERSEDED, ephemeral-fallback rationale
 The consumer is Claude via the `Monitor` tool, which only exists while a session
 is alive. A permanent in-cluster bridge would push into the void when no session
 is watching, and a permanently-committed webhook receiver would trip
 `AlertmanagerFailedToSendAlerts` whenever the bridge is down. So the bridge + the
 webhook receiver are ephemeral and torn down with the session.
 
-## Stand up
+## Stand up (ephemeral fallback mode — NOT needed while persistent mode is active)
 ```bash
 runbooks/alert-watcher/alert-watch-up.sh
 ```
@@ -80,7 +83,7 @@ kubectl -n monitoring exec deploy/kube-prometheus-stack-operator -- true  # ensu
 # or POST to /api/v2/alerts via a port-forward (see git history 2026-07-18).
 ```
 
-## Tear down (ALWAYS when done watching)
+## Tear down (ephemeral fallback mode only — do NOT run against the persistent setup)
 ```bash
 runbooks/alert-watcher/alert-watch-down.sh   # deletes the AM receiver + stops the bridge
 ```
@@ -99,7 +102,8 @@ the bridge is down will eventually raise a failed-notification alert.
 |---|---|---|
 | No events ever | receiver not merged yet | wait ~30s for prometheus-operator; check the generated secret |
 | `reach: HTTP 000` in up.sh | Mac unreachable from cluster (firewall / IP changed) | verify Mac IP, macOS firewall allows `:8788`, VLAN routing |
-| Monitor watch ended unexpectedly | bridge crashed | check `/tmp/alert-bridge.log`, re-run up.sh, restart Monitor ws |
+| Monitor watch ended unexpectedly | bridge crashed | persistent mode: `~/.claude/logs/alert-bridge.log` (launchd KeepAlive restarts it — just restart Monitor ws); ephemeral mode: `/tmp/alert-bridge.log`, re-run up.sh |
+| launchd `runs` climbing, exit 1, `EADDRINUSE` in log | an orphan bridge process holds :8787/:8788 (e.g. leftover nohup instance) | `lsof -nP -i :8788` → kill the orphan; launchd binds on next respawn |
 | `AlertmanagerFailedToSendAlerts` firing | receiver left up with bridge down | run `alert-watch-down.sh` |
 
 ## Should this be a sub-agent? — No (design note)
