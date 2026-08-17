@@ -42,7 +42,8 @@ spec:
           app:
             image:
               repository: phpmyadmin
-              tag: latest
+              # Digest-pinned: upstream rebuilds 5.2.3/latest in place
+              tag: 5.2.3@sha256:0d745e282306c0d27e179330575882fc0a56aa240479c05852ac66be6c5b23cc
               pullPolicy: IfNotPresent
 
             env:

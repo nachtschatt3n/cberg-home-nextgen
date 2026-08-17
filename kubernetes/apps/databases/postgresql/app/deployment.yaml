@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:0.8.1-pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5432

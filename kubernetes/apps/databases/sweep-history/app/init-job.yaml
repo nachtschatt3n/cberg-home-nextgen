@@ -21,10 +21,13 @@
 #         is the one-shot. v2b's tables remain (idempotent CREATE IF NOT
 #         EXISTS). sweep_writer's DML grants from v2b carry over via
 #         ALTER DEFAULT PRIVILEGES.
+#   v3a — pin image to the live digest (float-tag pinning batch); no schema or
+#         bash change. Rename forces prune+recreate (Job spec is immutable);
+#         bootstrap is idempotent.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v3
+  name: sweep-history-init-v3a
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history
@@ -41,7 +44,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: pgvector/pgvector:pg16
+          image: pgvector/pgvector:0.8.1-pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
           command: ["bash", "/sql/bootstrap.sh"]
           env:
             # Service lives in this same namespace; short name resolves via
