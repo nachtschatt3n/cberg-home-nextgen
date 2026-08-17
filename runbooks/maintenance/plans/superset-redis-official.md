@@ -21,7 +21,7 @@ touches:
   shared: []                           # Superset's OWN cache; the shared databases/redis is untouched
 depends_on: []
 conflicts_with: []
-status: draft
+status: executed   # 2026-08-17, pulled forward from thu-early window; celery transport verified on superset-redis-official
 window: "thu-early:2026-08-20"
 security_ref: F-f6239bec        # bitnamilegacy/redis fixable-CRIT finding (linked 2026-08-17 so the sweep board can collapse it as planned)
 auto_execute: false
