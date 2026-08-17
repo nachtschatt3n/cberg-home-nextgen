@@ -1,3 +1,10 @@
+# SUPERSEDED 2026-08-17 — this receiver is now PERSISTENT and Flux-managed at
+# kubernetes/apps/monitoring/kube-prometheus-stack/app/claude-watch-webhook.yaml
+# (operator: "keep it alive longer"; Mac bridge is a launchd KeepAlive service,
+# com.cberg.alert-bridge, so the dead-endpoint hazard is gone). Do NOT kubectl
+# apply this copy — Flux owns the object now; a hand-apply would fight SSA.
+# Kept for the ephemeral-mode fallback: if the persistent setup is ever
+# removed, alert-watch-up.sh can revert to session-scoped use of this file.
 # EPHEMERAL — applied with kubectl for a Claude watch session, NOT GitOps.
 # Alertmanager pushes every alert (in parallel to telegram; the operator sets
 # continue:true per AlertmanagerConfig) to the Mac-side alert-bridge, which relays

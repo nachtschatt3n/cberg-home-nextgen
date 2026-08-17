@@ -7,6 +7,7 @@ resources:
   - ./helmvalues.yaml
   - ./helmrelease.yaml
   - ./alertmanager-telegram-config.yaml
+  - ./claude-watch-webhook.yaml
   - ./longhorn-alerts.yaml
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml

@@ -1,0 +1,32 @@
+# PERSISTENT since 2026-08-17 (operator decision: "keep it alive longer") —
+# previously an EPHEMERAL kubectl-applied config from runbooks/alert-watcher/,
+# torn down after each watch session. Now Flux-managed because the Mac-side
+# bridge is a launchd KeepAlive service (com.cberg.alert-bridge), so the
+# endpoint is durably up and the old "MUST delete or Alertmanager POSTs at a
+# dead bridge" hazard no longer applies. If the bridge is ever retired, remove
+# this file in the same change — an orphaned receiver would accumulate
+# AlertmanagerFailedToSendAlerts.
+#
+# Mirrors every alert (parallel to telegram, continue-style routing) to the
+# Mac-side alert-bridge, which relays to a Claude Monitor `ws` watcher.
+# NOTE: the url is the operator Mac mini on the trusted VLAN; update on IP change.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: claude-watch-webhook
+  namespace: monitoring
+  labels:
+    alertmanager-config: claude-watch
+spec:
+  route:
+    receiver: claude-webhook
+    groupBy: [alertname]
+    groupWait: 1s
+    groupInterval: 5s
+    repeatInterval: 4h
+    matchers: []            # all alerts
+  receivers:
+    - name: claude-webhook
+      webhookConfigs:
+        - url: http://192.168.30.111:8788/alertmanager
+          sendResolved: true

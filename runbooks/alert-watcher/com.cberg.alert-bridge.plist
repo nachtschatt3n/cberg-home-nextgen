@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Persistent alert-bridge (operator decision 2026-08-17: "keep it alive
+       longer"). Previously nohup + /tmp pidfile — died on reboot, silently.
+       launchd restarts it on crash and on login. Install:
+         cp runbooks/alert-watcher/com.cberg.alert-bridge.plist ~/Library/LaunchAgents/
+         launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.cberg.alert-bridge.plist
+       Remove (back to ephemeral mode):
+         launchctl bootout gui/$UID/com.cberg.alert-bridge -->
+  <key>Label</key><string>com.cberg.alert-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/mu/code/cberg-home-nextgen/.venv/bin/python3</string>
+    <string>/Users/mu/code/cberg-home-nextgen/runbooks/alert-watcher/alert-bridge.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WS_PORT</key><string>8787</string>
+    <key>HTTP_PORT</key><string>8788</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/mu/.claude/logs/alert-bridge.log</string>
+  <key>StandardErrorPath</key><string>/Users/mu/.claude/logs/alert-bridge.log</string>
+</dict>
+</plist>

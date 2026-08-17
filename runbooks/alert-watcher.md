@@ -1,5 +1,16 @@
 # Runbook: Claude push-alert watcher (Alertmanager + Kuma → one WebSocket)
 
+> **Mode change 2026-08-17 — the watcher is now PERSISTENT.** The bridge runs as
+> a launchd KeepAlive service (`com.cberg.alert-bridge`, plist in this dir;
+> restarts on crash, starts on login) and the Alertmanager receiver is
+> Flux-managed in `kubernetes/apps/monitoring/kube-prometheus-stack/app/`.
+> `alert-watch-up.sh` / `alert-watch-down.sh` are no longer needed per-session —
+> only the Monitor `ws` source (ws://127.0.0.1:8787/) is started per-session by
+> the assistant. To retire the persistent mode: `launchctl bootout
+> gui/$UID/com.cberg.alert-bridge`, remove the plist, delete the Flux manifest
+> (same change), and revert to the ephemeral flow below.
+
+
 A **session-scoped** watcher that pushes every cluster/Kuma alert to a Claude
 Code `Monitor` `ws` source in real time — no polling, no missed flaps. Stand it up
 when you want Claude actively watching alerts during a work session; tear it down
