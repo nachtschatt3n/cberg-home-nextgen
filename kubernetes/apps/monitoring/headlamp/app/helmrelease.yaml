@@ -51,6 +51,9 @@ spec:
 
     pluginsManager:
       enabled: true
+      # Chart default is node:lts-alpine (floating). Pinned to the version the
+      # cluster was running (digest-verified match to lts-alpine on 2026-08-17).
+      baseImage: node:24.12.0-alpine
       configContent: |
         plugins:
           - name: flux
