@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: app-template
-      version: 2.4.0
+      version: 3.7.3
       interval: 15m
       sourceRef:
         kind: HelmRepository
@@ -202,17 +202,17 @@ spec:
               - path: /
                 pathType: Prefix
                 service:
-                  name: main
+                  identifier: main
                   port: http
               - path: /nodered
                 pathType: Prefix
                 service:
-                  name: main
+                  identifier: main
                   port: nodered
               - path: /vis
                 pathType: Prefix
                 service:
-                  name: main
+                  identifier: main
                   port: vis
               # - host: "nodered.${SECRET_DOMAIN}"
               #   paths:
@@ -262,8 +262,7 @@ spec:
         memory: 2Gi
       limits:
         memory: 4Gi
-    securityContext:
-      capabilities:
-        add:
-          - SYS_ADMIN
-          - DAC_READ_SEARCH
+    # NOTE (2026-08-17, app-template 2.4.0 -> 3.7.3): a top-level `securityContext`
+    # with SYS_ADMIN/DAC_READ_SEARCH caps sat here for the chart's whole life but
+    # was NOT a valid v2 values key — helm template proved it never rendered, so
+    # the pod has always run without those caps. Dropped rather than migrated.
