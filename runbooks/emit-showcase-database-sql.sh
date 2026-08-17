@@ -22,7 +22,9 @@ for f in */app/secret.sops.yaml; do
   [ -f "$f" ] || continue
   d=$(sops -d "$f" 2>/dev/null) || { echo "-- skip $f (cannot decrypt)" >&2; continue; }
   # sops strips quotes from non-numeric scalars on decrypt, so accept both forms
-  get() { echo "$d" | sed -n "s/^  $1: *\"\\?\\([^\"]*\\)\"\\?$/\\1/p"; }
+  # \{0,1\} not \? — GNU sed's \? is a literal '?' on the macOS/BSD sed this
+  # operator-run script actually executes under (silent 0-database emission).
+  get() { echo "$d" | sed -n "s/^  $1: *\"\{0,1\}\([^\"]*\)\"\{0,1\}$/\1/p"; }
   user=$(get DB_USERNAME); [ -z "$user" ] && user=$(get DB_USER)
   [ -z "$user" ] && user=$(get DATABASE_USER)
   name=$(get DB_DATABASE); [ -z "$name" ] && name=$(get DB_NAME)
