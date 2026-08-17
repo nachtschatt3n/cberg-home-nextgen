@@ -29,7 +29,16 @@ for f in */app/secret.sops.yaml; do
   [ -z "$user" ] && user=$(get DATABASE_USER)
   name=$(get DB_DATABASE); [ -z "$name" ] && name=$(get DB_NAME)
   [ -z "$name" ] && name=$(get DATABASE_NAME)
+  # DB_PASS is the PHP tier's key name (ibgastro, globalmobility, uzeit-de).
+  # Omitting it created those three users with an EMPTY password: the app could
+  # not authenticate, and anything else in the cluster could. Refuse rather than
+  # emit a passwordless CREATE USER.
   pass=$(get DB_PASSWORD); [ -z "$pass" ] && pass=$(get DATABASE_PASSWORD)
+  [ -z "$pass" ] && pass=$(get DB_PASS)
+  if [ -z "$pass" ]; then
+    echo "-- REFUSING ${name:-unknown}: no password key found in $f" >&2
+    continue
+  fi
   [ -z "$user$name$pass" ] && continue
   # utf8mb3, not utf8mb4: these are Rails 3.2 / TYPO3 4.2-era schemas whose
   # index definitions predate the 767-byte prefix limit that utf8mb4 trips.
