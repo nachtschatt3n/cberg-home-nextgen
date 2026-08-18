@@ -16,8 +16,9 @@ touches:
     - "ghcr.io/nachtschatt3n/absenty"
   shared: []
 depends_on: []
-conflicts_with: []
-related: [harness-frontend-vite7]      # SAME root cause, DIFFERENT remedy — see §7
+conflicts_with: [harness-frontend-vite7]   # SAME root cause, DIFFERENT remedy, no shared
+                                           # work — do not co-schedule. See §10 for the
+                                           # operator override if capacity forces a pairing.
 status: draft
 window: null
 auto_execute: false                   # bundler major on the asset build path
@@ -34,7 +35,7 @@ generated: "2026-08-18"
 
 The 2026-08-18 dependency promotion (absenty `b470a9fe`, promoted to
 `production` as PR #59 / merge `ad33a415`) cleared the lockfile-pinned gem
-findings. One residual survives it by construction, because it is not an npm
+findings. One item survives it by construction, because it is not an npm
 package version problem at all.
 
 > **Security driver — detail withheld from this public repo.**
@@ -73,9 +74,9 @@ As of `b470a9fe` this prints:
 
 | path | version | state |
 |---|---|---|
-| `node_modules/esbuild` | **0.25.12** | **the residual** — direct devDependency, `^0.25.10` in `package.json` |
+| `node_modules/esbuild` | **0.25.12** | **must move** — direct devDependency, `^0.25.10` in `package.json` |
 | `node_modules/vite` | 7.3.6 | already current |
-| `node_modules/vite/node_modules/esbuild` | **0.28.2** | **already fixed** by the same bump |
+| `node_modules/vite/node_modules/esbuild` | **0.28.2** | **already ≥0.28** after the same bump |
 | `node_modules/vitest` | 3.2.7 | fine (vite peer range `^5 \|\| ^6 \|\| ^7`) |
 
 So:
@@ -94,7 +95,7 @@ depends on it. That is why the direct devDependency, not vite, is the carrier.
 ## 3) Is it a breaking change for absenty's build?
 
 esbuild is pre-1.0, so 0.25 → 0.28 crosses three lines that may each carry
-breaking changes. Absenty's exposure is unusually small, because it drives
+breaking changes. Absenty's surface is unusually small, because it drives
 esbuild through one CLI invocation with a long-stable flag set
 (`package.json` → `scripts.build`):
 
@@ -200,9 +201,9 @@ outage.**
 
 - esbuild runs at **image build time**. The published **production** image does
   not ship `node_modules` at all — the compiled esbuild binary is present in the
-  dev-lane image and in CI, not in the production runtime. So the driver itself
-  is a dev-lane/CI exposure, and the production runtime does not regress if this
-  plan is deferred.
+  dev-lane image and in CI, not in the production runtime. What that implies for
+  the driver's exposure, and therefore for how long this can sit in `draft`, is
+  recorded on **F-b8fbb7de** — read it there before picking a window.
 - A bad bump therefore surfaces as **a build that fails in CI** (loud, safe,
   caught before any tag is published) or — the case that matters — **a build
   that succeeds and emits a subtly different bundle**. Only the second one can
@@ -269,7 +270,9 @@ outage.**
   | repo | `ha-ai-harness` | `absenty` |
 
   **Recommendation: do NOT co-schedule for efficiency, and do not make either
-  depend on the other.** There is no shared artifact, namespace, image or
+  depend on the other.** This is encoded as
+  `conflicts_with: [harness-frontend-vite7]` in the frontmatter, because the
+  window agent reads the field and not this prose. There is no shared artifact, namespace, image or
   lockfile — the only thing in common is the lesson, which is already learned.
   Co-scheduling would put two bundler-toolchain changes with different failure
   signatures in one window and make a regression harder to attribute.
