@@ -1013,7 +1013,7 @@ _PRIVATE_REGISTRY_PREFIX = "ghcr.io/nachtschatt3n/"
 # that drives the CRITICAL findings and the unbumpable-escalation threshold.
 # They are also not fixable by the one remedy that tally implies: the packages
 # are pinned identically in newer upstream builds of the same image, so a bump
-# moves the count not at all (evidence: security_ref F-scrypted-kernhdr,
+# moves the count not at all (evidence: security_ref F-b885ec1b,
 # 2026-08-18 — the same header version in the current tag and the newer beta).
 #
 # Scope discipline: this is an ALLOWLIST of header-only packages, matched

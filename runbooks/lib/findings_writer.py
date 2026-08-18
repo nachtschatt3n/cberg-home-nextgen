@@ -28,6 +28,25 @@ Usage:
 The library degrades gracefully: if DSN is empty or None, all calls become
 no-ops so existing markdown-only invocations of the audit scripts still
 work unchanged.
+
+STALE-FINDING AUTO-CLOSE
+------------------------
+`close(verdict=...)` also RESOLVES this section's open findings that the run
+did not re-emit. A finding that a section stops emitting is fixed, and it is
+closed by the next successful run of THAT section — the writer is the only
+component that reliably knows the section, the exact fingerprint set just
+emitted, and whether the run finished.
+
+The gate is `section_complete`, inferred from `verdict is not None` when not
+passed explicitly. That distinguishes the caller's own end-of-run
+`close(verdict=...)` (a verdict only exists once the section produced a
+result) from `__exit__`'s bare `close()` on the exception path, and from
+partial users of the writer such as auto-update.py, which emits a single
+version finding and must never conclude anything about the version section.
+A section that ran but knows its coverage degraded calls `mark_incomplete()`.
+
+Env escape hatches: SWEEP_AUTOCLOSE=0 disables; SWEEP_AUTOCLOSE_DRYRUN=1
+prints what WOULD close and writes nothing.
 """
 
 from __future__ import annotations
@@ -224,6 +243,15 @@ class FindingsWriter:
         # finding → no cycle row.
         self._cycle_ensured = False
         self._enabled = bool(self.dsn)
+        # Every fingerprint this RUN emitted, in emit() order. This is the
+        # authority for stale-finding auto-close: a row that this section
+        # owns and did NOT re-emit is, by definition, no longer firing.
+        self._emitted_fps: set[str] = set()
+        # Set by mark_incomplete() when the section knows its coverage was
+        # partial (a scanner failed, a port-forward died). Auto-close is a
+        # conclusion drawn from ABSENCE, so it must never run on a partial
+        # result — the absence would be a tooling gap, not a resolution.
+        self._incomplete_reason: str | None = None
 
         if not self._enabled:
             return
@@ -314,6 +342,9 @@ class FindingsWriter:
 
         fp = fingerprint(self.section, subsection, title)
         fid = finding_id_from_fp(fp)
+        # Recorded even when disabled so the no-op path stays behaviourally
+        # identical, and so a caller can introspect what a dry run emitted.
+        self._emitted_fps.add(fp)
 
         if not self._enabled or self._conn is None:
             return fid
@@ -383,15 +414,145 @@ class FindingsWriter:
         self._conn.commit()
         return fid
 
-    def close(self, *, verdict: str | None = None) -> None:
-        """Finalise the cycle row.
+    def mark_incomplete(self, reason: str) -> None:
+        """Declare that this run's coverage was PARTIAL.
+
+        Auto-close infers "resolved" from ABSENCE, so it is only sound when
+        the section covered everything it normally covers. A section that
+        knows it degraded (a scanner errored, a port-forward died, an API
+        rate-limited) must say so — otherwise the missing findings look
+        fixed. Call this and close() will skip auto-close and say why.
+        """
+        self._incomplete_reason = reason
+
+    def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str]]:
+        """Resolve open findings THIS section owns that it did not re-emit.
+
+        Returns (finding_id, severity, title, last_seen) for each row closed
+        (or, under dry_run, that WOULD close). Never touches another
+        section's rows, and never touches a row this run re-emitted.
+        """
+        if self._conn is None:
+            return []
+        fps = list(self._emitted_fps)
+        sql_where = """
+             WHERE resolved_at IS NULL
+               AND section = %s
+               AND NOT (fingerprint = ANY(%s))
+        """
+        with self._conn.cursor() as cur:
+            if dry_run:
+                cur.execute(
+                    "SELECT finding_id, severity, title, last_seen "
+                    "FROM sweep_findings" + sql_where +
+                    " ORDER BY severity, finding_id",
+                    (self.section, fps),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE sweep_findings
+                       SET resolved_at = now(),
+                           status = 'resolved',
+                           resolved_commit = COALESCE(
+                               NULLIF(%s, ''), resolved_commit)
+                    """ + sql_where +
+                    " RETURNING finding_id, severity, title, last_seen",
+                    (self._git_head or "", self.section, fps),
+                )
+            rows = cur.fetchall()
+        if not dry_run:
+            self._conn.commit()
+        return [(r[0], r[1], r[2], str(r[3])) for r in rows]
+
+    def _report_autoclose(self, rows, *, dry_run: bool) -> None:
+        """Print what closed and WHY, in the shape the reconcile step uses.
+
+        AR-tagged / accepted rows are reported in their own block rather than
+        folded into the bulk count — an operator-accepted risk disappearing
+        must be visible, never silent.
+        """
+        verb = "WOULD auto-close" if dry_run else "auto-closed"
+        accepted = [r for r in rows if r[1] == "accepted" or "[AR-" in r[2]]
+        plain = [r for r in rows if r not in accepted]
+        if plain:
+            print(f"==> {verb} {len(plain)} {self.section} finding(s) that this "
+                  f"run did not re-emit (section completed, so absence == resolved):")
+            for fid, sev, title, seen in plain[:20]:
+                print(f"      ✓ resolved {self.section}/{fid} [{sev}] "
+                      f"(last fired {seen[:19]}): {title[:80]}")
+            if len(plain) > 20:
+                print(f"      … and {len(plain) - 20} more")
+        if accepted:
+            print(f"==> {verb} {len(accepted)} ACCEPTED/AR-tagged {self.section} "
+                  f"finding(s) — the accepted risk stopped firing, review whether "
+                  f"the AR is still needed:")
+            for fid, sev, title, seen in accepted:
+                print(f"      ✓ resolved {self.section}/{fid} [{sev}] "
+                      f"(last fired {seen[:19]}): {title[:80]}")
+
+    def close(self, *, verdict: str | None = None,
+              section_complete: bool | None = None) -> None:
+        """Finalise the cycle row, and auto-close this section's stale findings.
 
         verdict is one of: green | yellow | red (or None to leave unset).
         Idempotent for the same cycle — if called twice, last call wins
         on finished_at and verdict.
+
+        AUTO-CLOSE (added 2026-08-18). A finding that this section stops
+        emitting is resolved, and it is resolved on the next successful run
+        of THIS section — not whenever someone remembers to run a correctly
+        scoped `sweep-run.py --reconcile-only --ran <sections>`. That
+        orchestrator-only design is what left 78 obsolete app-template
+        chart-major criticals open after the 3.7.3→5.1.0 migration: the
+        version section completed at 13:52 and never re-emitted them, but
+        the only reconcile passes that day ran at 13:33 and 13:37 — BEFORE
+        it finished — so a human had to hand-resolve 82 rows. The writer is
+        the one place that always knows the section, the exact fingerprint
+        set it just emitted, and whether the run finished.
+
+        `section_complete` is the safety gate. When None it is INFERRED as
+        `verdict is not None`, which cleanly separates the two existing call
+        shapes with no call-site change:
+          * the caller's own `close(verdict=...)` at the end of a full run
+            — a verdict only exists once the section computed a result;
+          * `__exit__`'s bare `close()` on the exception path — a crashed,
+            partial run, which must NOT conclude anything from absence.
+        A section can also veto explicitly via mark_incomplete().
+
+        Escape hatches (env): SWEEP_AUTOCLOSE=0 disables it entirely;
+        SWEEP_AUTOCLOSE_DRYRUN=1 reports what WOULD close and writes nothing.
         """
         if not self._enabled or self._conn is None:
             return
+
+        if section_complete is None:
+            section_complete = verdict is not None
+
+        if os.environ.get("SWEEP_AUTOCLOSE", "1") == "0":
+            pass  # kill-switch: leave stale rows for a human
+        elif self._incomplete_reason:
+            print(f"==> auto-close SKIPPED for section {self.section}: run "
+                  f"declared INCOMPLETE ({self._incomplete_reason}) — its open "
+                  f"findings are left untouched, a coverage gap is not a fix")
+        elif not section_complete:
+            print(f"==> auto-close SKIPPED for section {self.section}: run did "
+                  f"not complete (no verdict) — its open findings are left "
+                  f"untouched, a failed run is not a resolution")
+        else:
+            dry = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "0") == "1"
+            try:
+                rows = self._autoclose_stale(dry_run=dry)
+                if rows:
+                    self._report_autoclose(rows, dry_run=dry)
+            except Exception as e:  # noqa: BLE001 — never lose the cycle close
+                print(f"==> auto-close failed for section {self.section}: "
+                      f"{type(e).__name__}: {e}")
+                try:
+                    self._conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
         with self._conn.cursor() as cur:
             cur.execute(
                 """

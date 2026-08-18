@@ -525,6 +525,21 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(
                     "--reconcile-only needs the DB (do not combine with --no-write)."
                 )
+            # A reconcile MUST target the cycle whose findings it is judging.
+            # Without --cycle-id (and without SWEEP_CYCLE_ID in the env) the
+            # id above is a FRESH uuid, so `cycle_id != <fresh>` is true for
+            # EVERY row — the auto-close would then resolve every open finding
+            # in every --ran section, including ones a specialist re-confirmed
+            # minutes earlier. This is not hypothetical: an un-scoped reconcile
+            # minted cycle f11badb9… on 2026-08-18 at 13:56. Refuse instead.
+            if not args.cycle_id:
+                raise SystemExit(
+                    "--reconcile-only requires --cycle-id (or SWEEP_CYCLE_ID in "
+                    "the env): reconciling against a freshly-minted cycle id "
+                    "would auto-close EVERY open finding in the --ran sections, "
+                    "because none of them can carry a cycle id that does not "
+                    "exist yet."
+                )
             # The fan-out finalizes here. Guarantee the shared cycle row exists
             # even if every specialist ran clean (lazy-create means no finding →
             # no row), so the verdict lands somewhere and /api/cycles/latest has

@@ -53,7 +53,19 @@ sections that did not report.
 3. **Update the lists** (this is the "updates" half of the skill):
    - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and
      `--ran <sections-that-actually-ran>` — AR suppression + auto-close.
-     Auto-close only touches sections that demonstrably ran.
+     Auto-close only touches sections that demonstrably ran, and
+     `--cycle-id` is now REQUIRED: without it the reconcile mints a fresh
+     cycle id that no row can carry, so every open finding in the `--ran`
+     scope would close.
+     This reconcile is now a BACKSTOP, not the primary closer. Each check
+     script's `FindingsWriter.close(verdict=...)` already resolves the
+     findings ITS OWN section stopped emitting, keyed on fingerprint, at
+     the moment that section finishes. That is what fixes the failure mode
+     where a section completes at 13:52 but the only reconcile passes ran
+     at 13:33/13:37 and its stale rows survive (2026-08-18: 82 obsolete
+     app-template chart-major rows hand-resolved). Set
+     `SWEEP_AUTOCLOSE_DRYRUN=1` to see what would close without writing;
+     `SWEEP_AUTOCLOSE=0` disables it.
    - SLO/SLI snapshots land via slo-agent (`slo-check.py`); confirm rows
      exist in the cycle's time window — a clean SLO run writes snapshots
      but no findings, which is NOT a gap.
