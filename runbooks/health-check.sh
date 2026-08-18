@@ -1942,7 +1942,7 @@ log_section "Section 20: GitOps Status"
         echo ""
 
         # (1) not-Ready across all three kinds
-        IMG_NOT_READY=$(python3 -c "
+        IMG_NOT_READY_OUT=$(python3 -c "
 import json, subprocess, sys
 bad = []
 for kind in ('imageupdateautomation', 'imagepolicy', 'imagerepository'):
@@ -1960,16 +1960,20 @@ for kind in ('imageupdateautomation', 'imagepolicy', 'imagerepository'):
             reason = ready.get('reason') if ready else 'NoReadyCondition'
             bad.append(f\"{kind}/{m['namespace']}/{m['name']} (reason={reason})\")
 for b in bad:
-    print('  NOT-READY: ' + b, file=sys.stderr)
+    print('  NOT-READY: ' + b)
 print(len(bad))
-" 2>&1 | tee /dev/stderr | tail -1 || echo "0")
-        IMG_NOT_READY=$(echo "$IMG_NOT_READY" | tr -cd '0-9'); [ -z "$IMG_NOT_READY" ] && IMG_NOT_READY=0
+" 2>/dev/null || echo "0")
+        # Last line is the count; everything before it is per-object detail.
+        # (Deliberately NOT `tee /dev/stderr`: when stderr is an append-redirected
+        # regular file, Linux reopens /dev/fd/2 at offset 0 and clobbers the report.)
+        echo "$IMG_NOT_READY_OUT" | sed '$d'
+        IMG_NOT_READY=$(echo "$IMG_NOT_READY_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_NOT_READY" ] && IMG_NOT_READY=0
 
         # (2) SILENT-FAILURE SHAPE: automation runs on schedule but has NEVER
         #     pushed. lastPushCommit null/absent while lastAutomationRunTime is
         #     within 24h. Suspended automations are exempt. An automation that is
         #     not running at all is a different (already visible) problem.
-        IMG_SILENT=$(python3 -c "
+        IMG_SILENT_OUT=$(python3 -c "
 import json, subprocess, sys
 from datetime import datetime, timezone, timedelta
 try:
@@ -2001,10 +2005,11 @@ for it in items:
             f\"{m['namespace']}/{m['name']} ran {run} but lastPushCommit is null \"
             f\"(sourceRef {src.get('kind', '?')}/{src.get('namespace', m['namespace'])}/{src.get('name', '?')})\")
 for s in silent:
-    print('  SILENT-NO-PUSH: ' + s, file=sys.stderr)
+    print('  SILENT-NO-PUSH: ' + s)
 print(len(silent))
-" 2>&1 | tee /dev/stderr | tail -1 || echo "0")
-        IMG_SILENT=$(echo "$IMG_SILENT" | tr -cd '0-9'); [ -z "$IMG_SILENT" ] && IMG_SILENT=0
+" 2>/dev/null || echo "0")
+        echo "$IMG_SILENT_OUT" | sed '$d'
+        IMG_SILENT=$(echo "$IMG_SILENT_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_SILENT" ] && IMG_SILENT=0
 
         if [ "$IMG_SILENT" -gt 0 ]; then
             log_warning "Image automations running but never pushing: $IMG_SILENT (lastPushCommit null)"

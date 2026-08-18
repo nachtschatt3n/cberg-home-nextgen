@@ -23,6 +23,12 @@ Because the GitRepository is genuinely healthy, nothing in the normal Flux surfa
 problem. The automation keeps running on its interval, keeps computing the correct new
 image tag, and keeps throwing the result away.
 
+Worse, the automation object itself is **green most of the time**: it only reports
+`Ready=False` on a reconcile where a new tag actually has to be written, and reports
+`Ready=True / "repository up-to-date"` on every other one (both states observed 22
+minutes apart on 2026-08-18, see §5 Example B). So the failure is invisible to a
+point-in-time Ready check and is only reliably detectable via `lastPushCommit`.
+
 - Scope: `image.toolkit.fluxcd.io` objects in any namespace; the `flux-system`
   `GitRepository` they point at; the `FluxInstance` that generates it.
 - Prerequisites: `mise exec -- kubectl`, `mise exec -- flux`, repo write access,
@@ -185,21 +191,35 @@ cd /Users/mu/code/cberg-home-nextgen && mise exec -- kubectl get imageupdateauto
 
 `lastPushCommit` non-null. Nothing to do.
 
-### Example B: the silent shape (edge case this SOP exists for)
+### Example B: the silent shape (the edge case this SOP exists for)
+
+`Ready` **flaps**, and that is the whole problem. Both states below were observed on
+the same two objects within 22 minutes on 2026-08-18, with no intervening change:
 
 ```bash
+# 16:13 -- a reconcile where a NEW tag had to be written: the failure is visible
 # NAMESPACE                NAME                   READY  STATUS
 # my-software-development  absenty-image-updates  False  failed to update source:
 #                                                        failed to push to remote:
 #                                                        authentication required:
 #                                                        No anonymous write access.
+
+# 16:35 -- a reconcile where the tag had not moved since the last failed attempt:
+# NAMESPACE                NAME                   READY  STATUS
+# my-software-development  absenty-image-updates  True   repository up-to-date
 ```
 
-Note the trap: here `READY=False` makes it *visible*. But the diagnostic value of this
-SOP is the case where the error string is transient or the object flaps back to
-`Ready=True` between reconciles — then the **only** durable evidence is
-`lastPushCommit: null` alongside a fresh `lastAutomationRunTime`. Never conclude
-"image automation is fine" from `Ready=True` alone.
+At 16:35 the object is `Ready=True`, `reason=Succeeded`, message `repository
+up-to-date` — indistinguishable from healthy by every ordinary Flux signal — while
+`lastPushCommit` is still `null` after **218 days** and not one commit has ever been
+pushed. "Up-to-date" here means *the controller compared and found nothing it was able
+to write*, not *the cluster is running the latest image*.
+
+**Consequence for any check you write:** a not-Ready assertion alone MISSES this most
+of the time, because the object is only red on the subset of reconciles where a new tag
+happens to need writing. The durable evidence is `lastPushCommit: null` alongside a
+fresh `lastAutomationRunTime`. Never conclude "image automation is fine" from
+`Ready=True`, and never conclude it from a green `flux get` table.
 
 ---
 
@@ -438,4 +458,7 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
   (218d) because the `flux-system` GitRepository carried no `secretRef`. Root cause
   traced to `FluxInstance.spec.sync` accepting `pullSecret` (string) while the repo
   declared `secretRef` (object), which the apiserver pruned silently. Remediation
-  documented, not executed — the PAT scope is operator-owned.
+  documented, not executed — the PAT scope is operator-owned. Also records the
+  observed `Ready` flap (False at 16:13, True/"repository up-to-date" at 16:35, same
+  objects, no change in between), which is why the health-check assertion keys on
+  `lastPushCommit` rather than on `Ready`.
