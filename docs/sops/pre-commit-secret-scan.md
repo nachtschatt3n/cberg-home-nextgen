@@ -18,8 +18,9 @@ is an incident. The hook blocks the commit (`exit 1`) if any layer fires.
 
 - Scope: all staged text files in `cberg-home-nextgen` (binary files are
   skipped via `file ... | grep text`)
-- Prerequisites: `git config core.hooksPath` set to `.githooks` (done once
-  per clone); `kubectl` reachable for Layer 1 (optional — see failure modes)
+- Prerequisites: `task install-hooks` run once per clone (sets
+  `core.hooksPath` to `.githooks`); `kubectl` reachable for Layer 1
+  (optional — see failure modes)
 - Out of scope: server-side scanning, history rewriting, secret rotation
   (see `docs/sops/sops-encryption.md` for encryption workflow)
 
@@ -30,7 +31,8 @@ is an incident. The hook blocks the commit (`exit 1`) if any layer fires.
 | Setting | Value |
 |---------|-------|
 | Active hook | `.githooks/pre-commit` (repo-tracked) |
-| Activation | `git config core.hooksPath .githooks` |
+| Sibling hook | `.githooks/commit-msg` — the vulnerability-disclosure guard (`docs/sops/vulnerability-disclosure.md`). Shares `core.hooksPath`, so it is installed and disabled by the SAME switch as this one |
+| Activation | `task install-hooks` (sets `core.hooksPath .githooks`; installs BOTH hooks) |
 | Stale copy | `.git/hooks/pre-commit` — legacy pre-layered version, **inactive** (core.hooksPath overrides it); ignore/delete |
 | Layer 1 | Substring match of the **staged hunks** (added lines of `git diff --cached -U0`, per file) against decoded cluster Secret values (~200 literals) |
 | Layer 1 cache | `${TMPDIR:-/tmp}/cberg-precommit-literals.cache`, TTL 600 s |
@@ -126,8 +128,8 @@ already verified the `sops:` block — and is not a plaintext leak.
   length window `8..256`
 
 ```bash
-# Activation blueprint (once per clone)
-git config core.hooksPath .githooks
+# Activation blueprint (once per clone) — installs pre-commit AND commit-msg
+task install-hooks
 ```
 
 ---
@@ -267,7 +269,7 @@ If failed:
 | `⚠ kubectl unreachable — skipping Layer 1` | No cluster access (VPN down, kubeconfig missing, off-LAN) | Restore access and re-commit; Layer 1 **fails open**, so treat the commit as unscanned against cluster literals |
 | `Password pattern` on a SOPS file | Missing `ENC[` guard match — value after `password:` is plaintext | Encrypt the file with SOPS; if it is ciphertext and still flagged, the file lost its `sops:` block |
 | `Unencrypted .sops.yaml file` | File decrypted in place and staged before re-encrypting | `sops -e -i <file>` in the repo path, re-stage |
-| Hook doesn't run at all | `core.hooksPath` unset in a fresh clone (only stale `.git/hooks/pre-commit` present) | `git config core.hooksPath .githooks` |
+| Hook doesn't run at all | `core.hooksPath` unset in a fresh clone (only stale `.git/hooks/pre-commit` present) | `task install-hooks` |
 | Old rotated secret still blocks | 10-min literal cache | `rm -f "${TMPDIR:-/tmp}/cberg-precommit-literals.cache"` |
 
 ```bash
@@ -321,12 +323,15 @@ If unclear:
 ```bash
 git config core.hooksPath                      # → .githooks
 test -x .githooks/pre-commit && echo hook-ok   # executable
+test -x .githooks/commit-msg  && echo msg-hook-ok  # disclosure guard
 kubectl get ns kube-system >/dev/null && echo layer1-ok
 ```
 
 Expected:
-- All three checks pass; commits print the `loaded/cached ... secret
+- All four checks pass; commits print the `loaded/cached ... secret
   literals` line (Layer 1 active) and end with `✅` or a block
+- `core.hooksPath` is a **shared** switch: if it is unset, the commit-msg
+  disclosure guard is off too, silently
 
 ---
 
@@ -363,7 +368,12 @@ git checkout <good-sha> -- .githooks/pre-commit
 git commit -m "revert(pre-commit): restore working hook"
 
 # Emergency: disable the hook entirely (LAST resort, re-enable ASAP):
-git config --unset core.hooksPath      # re-enable: git config core.hooksPath .githooks
+#   ⚠ This unsets the hooks path for the WHOLE clone, so it also disables
+#   .githooks/commit-msg — the vulnerability-disclosure guard on a PUBLIC
+#   repo — with no warning, and leaves it off for every later commit.
+#   Prefer a scoped, single-commit `git commit --no-verify` and re-review
+#   the message by hand; unset the path only if the hook itself is broken.
+git config --unset core.hooksPath      # re-enable: task install-hooks
 
 # A commit that leaked despite/around the hook:
 # → rotate the exposed credential FIRST, then clean history.
@@ -392,3 +402,8 @@ git config --unset core.hooksPath      # re-enable: git config core.hooksPath .g
   (`git diff --cached -U0`) so pre-existing committed lines can't re-trip
   the scanner; Verification Test 4 added; troubleshooting/diagnose recipes
   adjusted to the hunk-scoped flow.
+- `2026.08.18`: `core.hooksPath` is a SHARED switch — activation is now
+  `task install-hooks` (installs pre-commit AND the commit-msg
+  vulnerability-disclosure guard), and the Rollback Plan warns that
+  `git config --unset core.hooksPath` silently disables the disclosure
+  guard too. Health Check asserts both hooks.

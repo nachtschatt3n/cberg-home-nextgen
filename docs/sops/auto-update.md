@@ -26,7 +26,11 @@ breaking `env→config.json` change; it is caught by both the deny-list and the
 release-notes scan).
 
 Related: `runbooks/version-check.md`, `.github/renovate.json5`,
-`docs/sops/monitoring.md` (alert authoring), `docs/sops/new-deployment-blueprint.md`.
+`docs/sops/monitoring.md` (alert authoring), `docs/sops/new-deployment-blueprint.md`,
+`docs/sops/immutable-job-image-bumps.md` — an auto-applied image bump that
+lands on a **Job** wedges the whole Flux Kustomization (`spec.template ...
+field is immutable`) and every later change to it stops reconciling silently;
+that SOP has the `vN`-rename fix and the detection command.
 
 ## 2) Overview
 
@@ -250,5 +254,6 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.08.18 | 2026-08-18 | Cross-referenced `docs/sops/immutable-job-image-bumps.md` — an auto-applied image bump landing on a Job wedges the whole Kustomization. |
 | 2026.08.18 | 2026-08-18 | Documented the G0 parse gate; added Renovate's bare `update <dep> to <x.y.z>` shape (PR #205 held on `gate=parse` despite being a green version-only patch); corrected the window cadence to daily. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. Sweep-driven, health-gated auto-merge of patch+minor Renovate PRs; deny-by-default policy + release-notes breaking scan; cron-only apply guard; auto-revert on post-apply regression. |

@@ -63,6 +63,8 @@ i.e. launched by `runbooks/sweep-run.py` or the daily-operation fan-out); an
 ad-hoc standalone run does NOT auto-close unless you opt in with
 `SWEEP_AUTOCLOSE=1`. Set `SWEEP_AUTOCLOSE=0` to always disable it, or
 `SWEEP_AUTOCLOSE_DRYRUN=1` to see what would close without writing.
+Full contract — statuses, the incomplete-run veto, and why a PASS
+confirmation must never be written as a finding: `docs/sops/sweep-findings-lifecycle.md`.
 
 ---
 

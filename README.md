@@ -375,10 +375,19 @@ Wazuh alerts. Accepted-risk record: `accepted_risks` table in sweep_history Post
 
 ### Defense-in-depth checks
 
-- **Pre-commit hook** (`.githooks/pre-commit`) scans staged files against
-  decoded values of every in-cluster Secret (10-min cached), warns on
-  unencrypted `*.sops.yaml`, and detects common credential patterns. K8s
-  resource names are filtered to avoid false positives.
+- **Git hooks** — `task install-hooks` (run once per clone; sets
+  `core.hooksPath` to `.githooks`). **A fresh clone has NO hooks until you run
+  it** — `core.hooksPath` is local git config, not something the repo can carry.
+  Two hooks are installed:
+  - `.githooks/pre-commit` — scans staged files against decoded values of every
+    in-cluster Secret (10-min cached), warns on unencrypted `*.sops.yaml`, and
+    detects common credential patterns. K8s resource names are filtered to
+    avoid false positives. See
+    [`docs/sops/pre-commit-secret-scan.md`](docs/sops/pre-commit-secret-scan.md).
+  - `.githooks/commit-msg` — blocks commit messages that disclose
+    currently-unfixed vulnerability detail on a service we run (this repo is
+    public). Boundary and the `security_ref: F-xxxxxxxx` alternative:
+    [`docs/sops/vulnerability-disclosure.md`](docs/sops/vulnerability-disclosure.md).
 - **Security audit script** (`runbooks/security-check.py`) runs 13 sections
   end-to-end: SOPS coverage, image CVEs (Trivy in parallel), attack patterns,
   external ingress drift vs Cloudflare tunnel, internal mTLS, per-Wazuh-agent
