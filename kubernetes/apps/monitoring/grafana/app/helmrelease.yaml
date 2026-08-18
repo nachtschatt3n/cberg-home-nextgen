@@ -32,31 +32,6 @@ spec:
     # Note kube-prometheus-stack sets `grafana.enabled: false`, so this release
     # alone owns Grafana. Rollback: chart revert + grafana-config Longhorn
     # backup (03:00 daily) — Grafana 13 migrates the sqlite schema on boot.
-    #
-    # 2026-08-18 (security): pinned to the `-slim` image variant.
-    #
-    # Rationale, mechanism only — scan figures live on the finding record,
-    # never in this public repo. security_ref: F-de4d92cd
-    #
-    # Upstream grew `scripts/catalog-plugins-defaults` from 2 entries to 13
-    # across eleven PRs (2026-06-23..08-03). Those bundled datasource backends
-    # are NOT built by Grafana's release pipeline: the Makefile downloads
-    # pre-built ZIPs from grafana.com, so each carries whatever Go toolchain
-    # its own repo's CI used rather than Grafana's. Per upstream PR #129593
-    # they are redundant scaffolding — the on-prem prep for extracting core
-    # datasources, so the image ships BOTH the plugin binary and the
-    # compiled-in implementation. `-slim` sets SLIM=true in the
-    # grafana-plugins Dockerfile stage, shipping data/plugins-bundled EMPTY,
-    # which removes exactly those binaries and nothing else.
-    #
-    # Not a base-image change: plain and slim are both alpine 3.24.1.
-    # Not rolled back to 13.1.x — the sqlite migration noted above is
-    # forward-only and has already run. Not grafana-oss: deprecated since
-    # 12.4.0. Fallback if slim misbehaves is plain `13.2.0`, NOT a chart
-    # revert. `-slim` is published for every 13.x but is UNDOCUMENTED
-    # upstream, so re-verify every datasource on each future bump.
-    image:
-      tag: "13.2.0-slim"
     deploymentStrategy:
       type: Recreate
     admin:
@@ -64,13 +39,6 @@ spec:
     envFromSecret: grafana-admin-secret
     env:
       GF_EXPLORE_ENABLED: true
-      # LOAD-BEARING, do not drop when editing this block. The same upstream
-      # PRs grew `defaultPreinstallPlugins` from 6 to 18 entries, so a slim
-      # container DOWNLOADS the identical vulnerable binaries from grafana.com
-      # at startup: the image would scan clean while the runtime is unchanged.
-      # That is worse than plain 13.2.0 because it manufactures a false green,
-      # and it adds an egress dependency on grafana.com at pod start.
-      GF_PLUGINS_PREINSTALL_DISABLED: "true"
     extraSecretMounts:
       - name: elasticsearch-credentials
         secretName: elasticsearch-es-elastic-user
