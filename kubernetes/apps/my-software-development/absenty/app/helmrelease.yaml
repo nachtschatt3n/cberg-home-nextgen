@@ -32,7 +32,7 @@ spec:
           bundle-install:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: development-20260818142457 # {"$imagepolicy": "my-software-development:absenty:tag"}
+              tag: development-20260817185549 # {"$imagepolicy": "my-software-development:absenty:tag"}
             command:
               - bash
               - -lc
@@ -41,7 +41,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: development-20260818142457 # {"$imagepolicy": "my-software-development:absenty:tag"}
+              tag: development-20260817185549 # {"$imagepolicy": "my-software-development:absenty:tag"}
               pullPolicy: Always
             command:
               - bash
