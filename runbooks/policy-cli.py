@@ -17,6 +17,8 @@ Usage examples:
   policy-cli risk show AR-001
   policy-cli risk add AR-028 --description 'New risk' --severity informational \\
                               --justification 'why we accept it'
+  policy-cli risk edit AR-047 --description 'openclaw: image node'
+  policy-cli risk lint                  # descriptions that will drift out of matching
   policy-cli risk review AR-001         # bumps last_reviewed_at to now
   policy-cli risk disable AR-001        # soft-disable (enabled=false)
   policy-cli risk delete AR-001         # hard delete
@@ -67,6 +69,7 @@ import base64
 import datetime as _dt
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -254,6 +257,143 @@ def cmd_risk_add(args, dsn):
             return 1
         conn.commit()
         print(f"added {args.ar_id}")
+
+
+# An AR's `description` is used as a SUBSTRING needle against open finding
+# titles (see _apply_ar_suppression in sweep-run.py). A needle that pins a
+# PATCH-level version therefore stops matching the moment the underlying
+# component drifts one patch — the suppression silently lapses and the
+# finding re-surfaces as an unsuppressed duplicate. Operator memory
+# `project_sweep_ar_version_drift` records this exact failure (AR-030
+# pinned "→ 5.0.0"; the target moved to 5.0.1). Descriptions must be
+# DRIFT-STABLE: name the component, not the patch.
+_DRIFT_PIN_RE = re.compile(r"\b\d+\.\d+\.\d+")          # x.y.z anywhere
+_DRIFT_COUNT_RE = re.compile(r"\b\d+\s+(?:HIGH|CRITICAL|devices?|CVEs?)\b", re.I)
+
+
+def _drift_warnings(desc: str) -> list:
+    """Reasons `desc` is not drift-stable. Empty list = stable."""
+    out = []
+    if _DRIFT_PIN_RE.search(desc or ""):
+        out.append("contains a patch-level version (x.y.z) — drifts on the next patch bump")
+    if _DRIFT_COUNT_RE.search(desc or ""):
+        out.append("contains a volatile COUNT (CVE/device tally) — drifts on every rescan")
+    return out
+
+
+def cmd_risk_edit(args, dsn):
+    """Update an existing AR in place. This is the sanctioned way to make a
+    description drift-stable without delete+re-add (which loses accepted_at).
+    """
+    sets, params = [], []
+    for col in ("description", "severity", "justification"):
+        val = getattr(args, col, None)
+        if val is not None:
+            sets.append(f"{col} = %s")
+            params.append(val)
+    if not sets:
+        print("nothing to change — pass at least one of "
+              "--description/--severity/--justification", file=sys.stderr)
+        return 1
+    if args.description is not None:
+        warn = _drift_warnings(args.description)
+        if warn and not args.allow_drift:
+            print(f"REFUSING: proposed description is not drift-stable:", file=sys.stderr)
+            for w in warn:
+                print(f"  - {w}", file=sys.stderr)
+            print("  (see operator memory project_sweep_ar_version_drift; "
+                  "pass --allow-drift to override)", file=sys.stderr)
+            return 2
+    sets.append("last_reviewed_at = now()")
+    params.append(args.ar_id)
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("SELECT description FROM accepted_risks WHERE ar_id = %s", (args.ar_id,))
+        row = cur.fetchone()
+        if not row:
+            print(f"AR {args.ar_id} not found", file=sys.stderr); return 1
+        before = row["description"]
+        cur.execute(
+            f"UPDATE accepted_risks SET {', '.join(sets)} WHERE ar_id = %s", params)
+        conn.commit()
+    print(f"edited {args.ar_id}")
+    if args.description is not None:
+        print(f"  description: {before!r}")
+        print(f"           -> {args.description!r}")
+    return 0
+
+
+def _near_miss(cur, desc: str):
+    """Empirical drift probe for a description that matches NOTHING.
+
+    Progressively drops trailing whitespace-separated tokens from the needle
+    and re-tests. If a SHORTER prefix of the description matches an open
+    finding, the AR is not merely quiet — the tail of its description (the
+    version/count that drifted) is what stopped it matching. Returns
+    (surviving_prefix, finding_id, finding_title) or None.
+
+    This is the check that a static "does it contain x.y.z" rule cannot make:
+    AR-047 pinned `node 22-bookworm` (no patch digit at all, so statically
+    clean) yet stopped matching the moment the pin moved to 22.23.2-bookworm.
+    """
+    toks = (desc or "").strip().split()
+    for cut in range(len(toks) - 1, 1, -1):
+        prefix = " ".join(toks[:cut])
+        cur.execute(
+            "SELECT finding_id, title FROM sweep_findings "
+            "WHERE resolved_at IS NULL AND position(%s in lower(title)) > 0 "
+            "ORDER BY last_seen DESC LIMIT 1",
+            (prefix.lower(),))
+        row = cur.fetchone()
+        if row:
+            return prefix, row["finding_id"], row["title"]
+    return None
+
+
+def cmd_risk_lint(args, dsn):
+    """Report ARs whose description has stopped (or will stop) matching.
+
+    Two independent signals:
+      STATIC  — the description embeds a patch-level version or a volatile
+                count, so it WILL drift out of matching on the next bump.
+      DRIFTING NOW — the description matches zero open findings, but a
+                shorter PREFIX of it does. That is proof the tail drifted.
+    """
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT ar_id, description FROM accepted_risks "
+            "WHERE enabled = true AND status = 'accepted' ORDER BY ar_id")
+        ars = [(r["ar_id"], r["description"]) for r in cur.fetchall()]
+        rows = []
+        for ar_id, desc in ars:
+            warn = _drift_warnings(desc or "")
+            cur.execute(
+                "SELECT count(*) AS n FROM sweep_findings "
+                "WHERE resolved_at IS NULL AND position(%s in lower(title)) > 0",
+                ((desc or "").strip().lower(),))
+            matches = cur.fetchone()["n"]
+            miss = _near_miss(cur, desc) if matches == 0 else None
+            if warn or miss or args.all:
+                rows.append((ar_id, desc, matches, warn, miss))
+    if not rows:
+        print("all enabled AR descriptions are drift-stable and matching")
+        return 0
+    print(f"{'AR':<8} {'open-match':>10}  description")
+    for ar_id, desc, matches, warn, miss in rows:
+        if miss:
+            flag = "DRIFTING NOW"
+        elif warn:
+            flag = "at risk"
+        else:
+            flag = "ok"
+        print(f"{ar_id:<8} {matches:>10}  {desc!r}  [{flag}]")
+        for w in warn:
+            print(f"{'':<21}! {w}")
+        if miss:
+            prefix, fid, title = miss
+            print(f"{'':<21}! description matches 0 open findings, but the prefix "
+                  f"{prefix!r} matches {fid}:")
+            print(f"{'':<23}{title[:100]}")
+    return 0
 
 
 def cmd_risk_review(args, dsn):
@@ -774,6 +914,17 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--severity", default="informational")
     ra.add_argument("--justification")
     ra.set_defaults(handler=cmd_risk_add)
+    re_ = risk.add_parser("edit", help="update an existing AR in place")
+    re_.add_argument("ar_id")
+    re_.add_argument("--description")
+    re_.add_argument("--severity")
+    re_.add_argument("--justification")
+    re_.add_argument("--allow-drift", action="store_true",
+                     help="accept a description that pins a patch version / count")
+    re_.set_defaults(handler=cmd_risk_edit)
+    rlint = risk.add_parser("lint", help="report AR descriptions that are not drift-stable")
+    rlint.add_argument("--all", action="store_true", help="include drift-stable ARs too")
+    rlint.set_defaults(handler=cmd_risk_lint)
     rv = risk.add_parser("review"); rv.add_argument("ar_id")
     rv.set_defaults(handler=cmd_risk_review)
     rd = risk.add_parser("disable"); rd.add_argument("ar_id")
