@@ -54,9 +54,9 @@ def test_ar_tagging_does_not_change_identity():
     """The whole point. Tagging is a suppression decision, not a new finding."""
     base = fp(FIXABLE)
     for variant in (
-            "[AR-029] " + FIXABLE,
-            "[AR-071] [AR-029] " + FIXABLE,
-            "[AR-029][AR-071] " + FIXABLE,
+            "[AR-903] " + FIXABLE,
+            "[AR-906] [AR-903] " + FIXABLE,
+            "[AR-903][AR-906] " + FIXABLE,
             "[ar-029] " + FIXABLE,            # case-insensitive
     ):
         assert fp(variant) == base, f"AR tagging changed identity: {variant[:50]}"
@@ -65,19 +65,19 @@ def test_ar_tagging_does_not_change_identity():
 def test_untagging_restores_the_same_identity():
     """The 08-18 half of the incident: an AR lapsing must not resurrect a row
     under a new id."""
-    assert fp("[AR-063] " + NOFIX) == fp(NOFIX)
+    assert fp("[AR-905] " + NOFIX) == fp(NOFIX)
 
 
 def test_retagging_to_a_different_ar_is_identity_preserving():
     """Re-wording an AR so a DIFFERENT one matches is still the same finding."""
-    assert fp("[AR-029] " + NOFIX) == fp("[AR-052] " + NOFIX)
+    assert fp("[AR-903] " + NOFIX) == fp("[AR-904] " + NOFIX)
 
 
 def test_prose_shaped_findings_are_also_ar_stable():
     """Titles with no backticked span take the _normalize() fallback, which had
     the same bug: the tag was part of the hashed prose."""
     msg = "Cluster has an unexpected externally reachable ingress"
-    assert fp(msg, "security", "s8") == fp("[AR-018] " + msg, "security", "s8")
+    assert fp(msg, "security", "s8") == fp("[AR-902] " + msg, "security", "s8")
 
 
 # --------------------------------------------------------------------------
@@ -95,10 +95,10 @@ def test_rebuild_is_distinct_from_both():
 
 
 def test_kind_survives_the_ar_tag_that_used_to_encode_it():
-    """The pairing seen in production: the no-fix line carries [AR-029] and the
+    """The pairing seen in production: the no-fix line carries [AR-903] and the
     fixable line does not. Identity must come from the KIND, not the tag."""
-    assert fp("[AR-029] " + NOFIX) != fp(FIXABLE)
-    assert fp("[AR-029] " + NOFIX) == fp(NOFIX)
+    assert fp("[AR-903] " + NOFIX) != fp(FIXABLE)
+    assert fp("[AR-903] " + NOFIX) == fp(NOFIX)
 
 
 # --------------------------------------------------------------------------
@@ -106,15 +106,15 @@ def test_kind_survives_the_ar_tag_that_used_to_encode_it():
 # --------------------------------------------------------------------------
 
 def test_version_is_part_of_identity():
-    a = "`postgres:17.10-bookworm`: 3 fixable CRITICAL CVE(s)"
-    b = "`postgres:17.11-bookworm`: 3 fixable CRITICAL CVE(s)"
+    a = "`example-org/widget:1.2.3`: fixable CRITICAL CVE(s)"
+    b = "`example-org/widget:1.2.4`: fixable CRITICAL CVE(s)"
     assert fp(a) != fp(b)
 
 
 def test_reword_does_not_fork():
     """The bug _stable_anchor was originally introduced to fix."""
-    a = "`redis:8.10.0-alpine`: 4 fixable HIGH CVE(s) — newer upstream tag available"
-    b = "`redis:8.10.0-alpine`: 4 fixable HIGH CVE(s) — bump the image, newer tag exists"
+    a = "`example-org/widget:1.2.3`: fixable HIGH CVE(s) — newer upstream tag available"
+    b = "`example-org/widget:1.2.3`: fixable HIGH CVE(s) — bump the image, newer tag exists"
     assert fp(a) == fp(b)
 
 
@@ -126,7 +126,7 @@ def test_section_and_subsection_still_scope_identity():
 def test_finding_id_is_derived_and_stable():
     f = fp(FIXABLE)
     assert fw.finding_id_from_fp(f) == f"F-{f[:8]}"
-    assert fw.finding_id_from_fp(fp("[AR-029] " + FIXABLE)) == fw.finding_id_from_fp(f)
+    assert fw.finding_id_from_fp(fp("[AR-903] " + FIXABLE)) == fw.finding_id_from_fp(f)
 
 
 # --------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def test_finding_id_is_derived_and_stable():
 # --------------------------------------------------------------------------
 
 def test_strip_ar_tags_is_exported_and_total():
-    assert fw.strip_ar_tags("[AR-001] [AR-002] hello") == "hello"
+    assert fw.strip_ar_tags("[AR-907] [AR-908] hello") == "hello"
     assert fw.strip_ar_tags("hello") == "hello"
     assert fw.strip_ar_tags("") == ""
 
