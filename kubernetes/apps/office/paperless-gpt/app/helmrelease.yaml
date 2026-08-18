@@ -33,9 +33,15 @@ spec:
           main:
             image:
               repository: icereed/paperless-gpt
-              tag: "v0.25.1"
+              tag: "v0.27.0"
+            # v0.26.0+ ships a root-only entrypoint.sh (adduser + mkdir/chown
+            # /home/paperless-gpt + su-exec privilege drop) that crashes under
+            # our non-root securityContext. Exec the binary directly — the
+            # v0.25.1 model — since we already run as 1000:1000.
+            command: ["/app/paperless-gpt"]
             env:
               TZ: ${TIMEZONE}
+              HOME: /home/paperless-gpt
               PAPERLESS_BASE_URL: "http://paperless-ngx.office.svc.cluster.local:8000"
               PAPERLESS_API_TOKEN:
                 valueFrom:
@@ -154,6 +160,12 @@ spec:
           main:
             main:
               - path: /app/db
+      home:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /home/paperless-gpt
       # Override only the OCR prompt (the shipped default encourages
       # hallucination). subPath leaves the other templates on the emptyDir,
       # which paperless-gpt populates with its defaults on startup.
