@@ -56,6 +56,14 @@ deny:
     max: patch
   - match: "*mcpo*"
     reason: "python init base image major (3.11→3.14) rides these tags."
+  # MUST stay above "*nextcloud*": first match wins, and the glob below would
+  # otherwise swallow nextcloud-mcp and justify holding it with the Nextcloud
+  # SERVER's occ/maintenance-mode reason. nextcloud-mcp is a standalone
+  # third-party MCP bridge — no chart coupling, no occ, no maintenance mode —
+  # so that reason was simply false, and a false reason is what makes an
+  # operator override a hold that turns out to be real (0.176.0 drops a table).
+  - match: "*nextcloud-mcp*"
+    reason: "third-party MCP bridge; upstream ships BREAKING-tagged releases on minor hops (0.176.0 removed the webhook registration API and dropped its table; 0.177.0 tightened create_share). Read the release notes per hop — never an unattended bump."
   - match: "*nextcloud*"
     reason: "chart+image must bump together and run occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised only."
   - match: "*openclaw*"
