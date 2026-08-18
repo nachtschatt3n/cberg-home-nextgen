@@ -495,7 +495,15 @@ class VersionChecker:
     # positive — that's the debian build, not a newer release).
     _VARIANT_NAMES = (r'alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|'
                       r'focal|jammy|noble')
-    _VARIANT_RE = re.compile(rf'-({_VARIANT_NAMES})$', re.IGNORECASE)
+    # Some vendors publish a COMPOUND variant: a distro codename plus a build
+    # flavour (`v0.143.0-noble-full`, `-noble-nvidia`, `-noble-lite`). The
+    # anchor stays a known distro name, so this cannot swallow a pre-release or
+    # a patch suffix — but without the trailing flavour group NO tag of such a
+    # repo was version-shaped, the picker returned None, and the CVE sweep
+    # rendered that as "newer-tag lookup UNDETERMINED" while a genuinely newer
+    # tag sat one minor away (2026-08-18: koush/scrypted, whole repo invisible).
+    _VARIANT_TAIL = rf'(?:{_VARIANT_NAMES})(?:-[a-z][a-z0-9]*)*'
+    _VARIANT_RE = re.compile(rf'-({_VARIANT_TAIL})$', re.IGNORECASE)
     # NOTE the optional third component. Two-part tags are a real and common
     # upstream versioning scheme (postgres 18.6 / 17.11, and every image that
     # ships `<major>.<minor>` only). Requiring three parts made EVERY tag of
@@ -504,9 +512,30 @@ class VersionChecker:
     # surfaced a CRITICAL, implying the registry was unreachable when it had
     # answered perfectly (2026-08-16: postgres 18.6 / 17.10-bookworm).
     _SEMVER_TAG_RE = re.compile(
-        rf'^v?\d+\.\d+(\.\d+)?(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_NAMES}))?$',
+        rf'^v?\d+\.\d+(\.\d+)?(\.\d+)?(-[0-9a-f]+)?(-(?:{_VARIANT_TAIL}))?$',
         re.IGNORECASE,
     )
+    # Pre-release markers. `_SEMVER_TAG_RE` already rejects most of them by
+    # accident (`beta1` is not hex, `rc.1` has a dot), which is exactly why this
+    # needs to be explicit: the accident does NOT cover short hex-lookalike
+    # markers such as `-b1`, `-a1`, `-e2`. A pre-release is never the answer to
+    # "what should we run", so it must be excluded DELIBERATELY and by name
+    # rather than as a side effect of a character class (2026-08-18: frigate
+    # ships 0.18.0-beta{1,2,3} alongside stable 0.17.2).
+    _PRERELEASE_TAG_RE = re.compile(
+        r'-(?:alpha|beta|rc|pre|preview|dev|snapshot|nightly|canary|next|test|'
+        r'[ab]\d+|rc\d+)(?:[.\-]?\d+)*(?:-.*)?$',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_prerelease_tag(cls, tag: str) -> bool:
+        """True for `0.18.0-beta3`, `2.0.0-rc.1`, `1.4.0-b2`, … .
+
+        Variant suffixes are stripped first so `0.18.0-beta1-tensorrt` is still
+        recognised as a pre-release rather than as a plain variant build.
+        """
+        return bool(cls._PRERELEASE_TAG_RE.search(cls._VARIANT_RE.sub('', str(tag or ''))))
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
     # git-sha pins and floating tags. We skip these cleanly instead of emitting
     # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
@@ -550,6 +579,12 @@ class VersionChecker:
         version_tags = [t for t in tags if t and self._SEMVER_TAG_RE.match(t)]
         if not version_tags:
             return None
+        # Never recommend a pre-release. Conditional on a stable candidate
+        # surviving, so a component deliberately pinned to a pre-release line
+        # with no stable release yet still gets an answer instead of None.
+        stable_tags = [t for t in version_tags if not self._is_prerelease_tag(t)]
+        if stable_tags:
+            version_tags = stable_tags
         # Stay on the SAME build variant as the current pin. Crossing variants
         # (alpine → debian) is a rebase of the base image, not an upgrade, and
         # must never be proposed as one. If we're on a variant, only same-variant
@@ -635,8 +670,8 @@ class VersionChecker:
         return dict(re.findall(r'(\w+)="([^"]*)"', header or ''))
 
     def _oci_v2_tags(self, host: str, image_path: str,
-                     max_pages: int = 500, page_size: int = 100,
-                     budget_s: float = 25.0) -> Optional[List[str]]:
+                     max_pages: int = 400, page_size: int = 1000,
+                     budget_s: float = 60.0) -> Optional[List[str]]:
         """List ALL tags from any OCI-compliant Registry v2, following the
         standard anonymous bearer-token dance and `Link: rel="next"` pagination.
 
@@ -658,12 +693,25 @@ class VersionChecker:
         on a truncated list returns an OLDER tag and the caller reports a
         phantom DOWNGRADE as an update (the exact class this file already
         fights elsewhere). None routes to the security-safe "undeterminable"
-        instead, which is honest and never invents a wrong version. The default
-        max_pages is high enough that any real repo paginates fully in a few
-        seconds (home-assistant, the largest repo in the inventory: 4416 tags in
-        ~7s); the 25s budget only trips on a genuinely slow/broken registry
-        (docker.elastic.co needs credentials for anonymous tag listing, so it
-        correctly resolves to None instead of a fabricated version).
+        instead, which is honest and never invents a wrong version.
+
+        `page_size` asks for 1000, not 100. The registry is free to return
+        fewer (`n` is a MAXIMUM in the OCI spec) and GHCR caps at exactly 1000,
+        so this requests bigger pages rather than assuming them — small repos
+        still answer in one short page. It is what makes the bound usable on a
+        CI-heavy repo: blakeblackshear/frigate publishes ~20k tags, which is
+        200+ round-trips at n=100 and blew the wall-clock budget every time, so
+        the sweep reported "newer-tag lookup UNDETERMINED" for an image that
+        was in fact current (2026-08-18). At n=1000 the same repo paginates
+        fully in ~4s. The bounds are sized off the real worst case in this
+        inventory — immich-machine-learning publishes ~194k tags (194 pages,
+        ~30s) — with headroom, so the 400-page cap and 60s budget stop a
+        pathological or wedged registry without cutting off a repo that is
+        merely large. Hitting either the cap or the budget returns None —
+        truncation is REPORTED as undeterminable, never silently served as a
+        partial (oldest-first!) list that would fabricate a downgrade.
+        docker.elastic.co, which needs credentials for anonymous tag listing,
+        still correctly resolves to None instead of a fabricated version.
         """
         import time as _time
         tags: List[str] = []

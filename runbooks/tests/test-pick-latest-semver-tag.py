@@ -72,6 +72,56 @@ class PickLatestSemverTagTest(unittest.TestCase):
         tags = ["2.33.3-12d3f08", "2.33.3", "2.33.2"]
         self.assertEqual(self.pick(tags, "2.33.2"), "2.33.3")
 
+    # ── Pre-releases are never a recommendation (2026-08-18) ───────────
+    def test_prerelease_never_recommended(self):
+        """frigate case: 0.18.0-beta* must not beat stable 0.17.2."""
+        tags = ["0.17.1", "0.17.2", "0.18.0-beta1", "0.18.0-beta2",
+                "0.18.0-beta3"]
+        self.assertEqual(self.pick(tags, "0.17.2"), "0.17.2")
+
+    def test_prerelease_with_variant_suffix_still_excluded(self):
+        """A hex-lookalike pre-release IS version-shaped once a known variant
+        follows it (`0.18.0-b1-noble`), so only the explicit pre-release rule
+        keeps it out."""
+        tags = ["0.17.2-noble", "0.18.0-b1-noble"]
+        self.assertEqual(self.pick(tags, "0.17.2-noble"), "0.17.2-noble")
+
+    def test_short_hex_lookalike_prerelease_excluded(self):
+        """`-b2` parses as a hex build suffix; it is still a pre-release."""
+        tags = ["1.4.0", "1.5.0-b2", "1.5.0-rc.1"]
+        self.assertEqual(self.pick(tags, "1.4.0"), "1.4.0")
+
+    def test_dotted_rc_excluded(self):
+        """whiteboard case: v2.0.0-beta.1 must not mask the v1.5.x line."""
+        tags = ["v1.5.3", "v1.5.9", "v2.0.0-beta.1"]
+        self.assertEqual(self.pick(tags, "v1.5.3"), "v1.5.9")
+
+    def test_prerelease_only_repo_still_answers(self):
+        """No stable candidate exists → do not collapse to None, answer with
+        the pre-release line. (Word-shaped markers like `beta1` never reach
+        this rule — `_SEMVER_TAG_RE` already rejects them as unparseable.)"""
+        picked = self.pick(["0.9.0-b1", "1.0.0-b1"], "0.9.0-b1")
+        self.assertEqual(picked, "1.0.0-b1")
+
+    # ── Compound distro variants (2026-08-18, koush/scrypted) ──────────
+    def test_compound_distro_variant_is_version_shaped(self):
+        """`-noble-full` is a build flavour, not a version — and the whole
+        repo was invisible to the picker without it."""
+        tags = ["v0.142.9-noble-full", "v0.143.0-noble-full",
+                "v0.144.1-noble-full", "v0.144.1-noble-lite"]
+        self.assertEqual(self.pick(tags, "v0.143.0-noble-full"),
+                         "v0.144.1-noble-full")
+
+    def test_compound_variant_pinning_does_not_cross_flavours(self):
+        tags = ["v0.143.0-noble-full", "v0.144.1-noble-nvidia"]
+        self.assertEqual(self.pick(tags, "v0.143.0-noble-full"),
+                         "v0.143.0-noble-full")
+
+    def test_compound_variant_does_not_swallow_prerelease(self):
+        self.assertTrue(_mod.VersionChecker._is_prerelease_tag("0.18.0-beta1-tensorrt"))
+        self.assertFalse(_mod.VersionChecker._is_prerelease_tag("v0.144.1-noble-full"))
+        self.assertFalse(_mod.VersionChecker._is_prerelease_tag("8.10.0-alpine"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
