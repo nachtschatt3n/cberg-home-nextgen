@@ -19,7 +19,7 @@ touches:
     - deployment/superset-pg           # becomes the live metadata DB
     - "superset-postgresql (old, left RUNNING — it is the rollback)"
   shared: []
-depends_on: [superset-pg-standup]
+depends_on: []  # RESOLVED 2026-08-18: superset-pg-standup EXECUTED 2026-08-18 (95322f1f, 47/47 tables verified) — dependency satisfied
 conflicts_with: [longhorn-1.12.1-engine]
 status: draft
 window: "wed-early:2026-08-26"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence

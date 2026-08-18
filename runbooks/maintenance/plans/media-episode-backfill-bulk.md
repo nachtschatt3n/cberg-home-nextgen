@@ -16,7 +16,7 @@ touches:
     - "job/media-episode-sidecar (one Job per show)"
     - "Plex + Jellyfin TV libraries (rescan per batch)"
   shared: [media]
-depends_on: [media-episode-canary]
+depends_on: []  # RESOLVED 2026-08-18: media-episode-canary EXECUTED 2026-08-18 (18/18 verified, plan retired a7d26eb4) — dependency satisfied
 conflicts_with: []
 status: draft
 window: "sun-window:2026-08-30"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
