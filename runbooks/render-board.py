@@ -173,9 +173,13 @@ def collect(cur, cycle_id: str | None) -> dict:
 
     # 3b — the numbered action list needs: new findings outside security,
     # and the medium tier grouped by subsection so 144 rows become a few lines.
+    # severity filter: `clean` rows are pass confirmations, `accepted` rows
+    # are operator-acknowledged ARs — neither is an action item (the 44
+    # "SOP … compliant" doc rows of cycle b2410887 rendered as 44 MEDIUMs).
     cur.execute(
         """SELECT finding_id, section, title FROM sweep_findings
            WHERE cycle_id=%s AND status='new' AND section != 'security'
+             AND severity NOT IN ('clean', 'accepted')
            ORDER BY section, finding_id""", (cycle_id,))
     out["new_other"] = [{"id": f, "section": sec, "title": t}
                         for f, sec, t in cur.fetchall()]
@@ -292,8 +296,22 @@ def render(d: dict, w: dict) -> str:
         item("HIGH", "security/accepted",
              f"{d['high_accepted']} AR-accepted item(s), no upstream fix yet — "
              "resurface at their AR review dates, no action now")
+    # Non-security new findings: individually while a section's list is
+    # readable, but collapse to one grouped line beyond that — same contract
+    # as the security medium groups below (medium-queue items are groupable;
+    # 44 individual `doc/new` rows on the 2026-08-18 board proved the bypass).
+    _by_sec: dict[str, list] = {}
     for f_ in d.get("new_other", []):
-        item("MEDIUM", f_["section"] + "/new", _desc(f_["title"]))
+        _by_sec.setdefault(f_["section"], []).append(f_)
+    for sec in sorted(_by_sec):
+        items_ = _by_sec[sec]
+        if len(items_) > 5:
+            item("MEDIUM", f"{sec}/new",
+                 f"{len(items_)} new finding(s) — grouped; see the {sec} "
+                 f"section report for the list")
+        else:
+            for f_ in items_:
+                item("MEDIUM", f"{sec}/new", _desc(f_["title"]))
     for grp, cnt in d.get("medium_groups", []):
         item("MEDIUM", f"security/{grp}",
              f"{cnt} internal finding(s) — maintenance-window queue")
