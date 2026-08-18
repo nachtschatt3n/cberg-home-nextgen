@@ -288,7 +288,7 @@ Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails,
 | globalmobility | globalDISPO dispatch system (TYPO3 4.2) | Internal |
 | haarfabrik | Salon extranet | Internal |
 | holm-backend | Holm backend service | Internal |
-| ibgastro | Gastronomy ordering system | Internal |
+| ibgastro | Gastronomy ordering system (CakePHP 1.x on php-fpm + nginx). **Split probes**: liveness -> `/health` :80 (CakePHP route, real DB + tmp-writability check); readiness + startup -> `/healthz` :8080, a static nginx `return 200` server added via `configmap-nginx-healthz.yaml` and NOT exposed on the Service or ingress. The framework route must not be probed at kubelet frequency — it booted the framework ~480x/h and produced 58% of all cluster log ingest. See `docs/sops/log-volume-runaway.md`. | Internal |
 | inbewegung | Family Manager | Internal |
 | kfa-medienarchiv | Media Archive Management System | Internal |
 | mangold-smarthomeadvisor | Smart Home Advisory System | Internal |

@@ -1523,7 +1523,7 @@ curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-de
     }
   },
   "aggs": {
-    "by_namespace": {"terms": {"field": "resource.attributes.k8s.namespace.name.keyword", "size": 20}},
+    "by_namespace": {"terms": {"field": "resource.attributes.k8s.namespace.name.keyword", "size": 25}},
     "by_pod":       {"terms": {"field": "resource.attributes.k8s.pod.name.keyword", "size": 20}},
     "by_container": {"terms": {"field": "resource.attributes.k8s.container.name.keyword", "size": 20}}
   }
@@ -1636,7 +1636,19 @@ wait $PF_PID 2>/dev/null || true
 | `metrics-generic.otel-default` | `metrics@lifecycle` | 7 days |
 | `traces-generic-default` | `traces@lifecycle` | 7 days |
 
-Expected storage at current ingest rate (~2.2 GiB/day metrics, ~360 MiB/day logs): ≈ 20 GiB / 50 GiB volume.
+Expected storage at current ingest rate. **Re-measured 2026-08-18** — the previous
+figure here (~360 MiB/day logs, 50 GiB volume) understated logs by more than 2x and
+named the wrong volume size:
+
+| Measure | Value (2026-08-18) |
+|---|---|
+| `logs-generic-default` baseline | 3.1–3.5M docs/day, **736–882 MB/day** (~250 bytes/doc) |
+| Retention (DLM) | 14 days — so the bill is `bytes/day x 14` |
+| ES disk | **37.5 GB used / 83.1 GB total = 45%** |
+
+This is the number an operator uses to judge whether a volume jump is normal, so keep it
+measured rather than estimated. For the method — attributing a jump to a namespace/pod
+and pricing it against the DLM window — see `docs/sops/log-volume-runaway.md`.
 To check current data stream sizes:
 ```bash
 kubectl port-forward -n monitoring svc/elasticsearch-es-http 9200:9200 &
@@ -1656,12 +1668,54 @@ for i in json.load(sys.stdin):
 - Judge OOM from the two pod-state controls, never from a log-text count
 - `external-dns` FATAL log entries (Cloudflare sync failures) are a **known false positive** — classify as MINOR; it auto-recovers
 
-**Error Rate Thresholds:**
-- **Normal**: <1000 errors/day (mostly benign)
-- **Monitor**: 1000-5000 errors/day (review error patterns)
-- **Minor**: 5000-10000 errors/day (investigate top error sources)
-- **Major**: >10000 errors/day  (the script emits log_warning + add_major_issue here;
-  it never raises a CRITICAL on total error count)
+> Attribution queries, the deprecation-vs-real-error decision table, DLM pricing
+> and the remediation menu live in
+> [`docs/sops/log-volume-runaway.md`](../docs/sops/log-volume-runaway.md) — the SOP
+> the script's own CRITICAL message points at.
+
+**Error-volume thresholds — PER NAMESPACE, 24h.** Rewritten 2026-08-18 (`13c5ec82`).
+The previous rule was cluster-wide `>10,000 => MAJOR`, which could never clear: the
+measured 7-day baseline was 113,571–133,922/day, and ~44,000/day even with the loudest
+namespace excluded entirely. It is now per-namespace, so one chatty app cannot own the
+cluster verdict — a floor high enough to clear one loud namespace would have hidden a
+10x regression in every quieter one behind it.
+
+- **Minor**:    >= 40,000        (3.2x the current worst namespace, kube-system ~12,500)
+- **Major**:    >= 40,000 AND >= 40% of the cluster total  (concentration rule)
+- **Major**:    >= 100,000
+- **Critical**: >= 500,000       (log-volume runaway — see `docs/sops/log-volume-runaway.md`)
+
+**Cluster-wide backstop tiers** (fire only when NO single namespace already
+explains the total, so they never double-count a namespace finding). Measured
+storm-free cluster steady state is ~44,000/day:
+
+- **Minor**:    >= 120,000   (2.7x baseline)
+- **Major**:    >= 250,000   (5.7x)
+- **Critical**: >= 1,000,000 (22.7x)
+
+These exist because 22 namespaces each sitting at 39,999 would total 879,978 —
+a 20x cluster-wide regression — and score green on the per-namespace floors
+alone. Broad causes (CoreDNS/AdGuard, apiserver or etcd flap, the NAS/CIFS path
+dropping, a cert expiry, an ES/OTel ingestion stall) spread errors across
+namespaces without any one dominating.
+
+**Known limitation:** the per-namespace tiers are ABSOLUTE, not relative to each
+namespace's own history, so a namespace going 50 -> 30,000/day still reads green.
+A trailing per-namespace baseline is a follow-up.
+
+The **cluster-wide total is display-only**, honouring this section's own long-standing
+note that "the per-namespace breakdown is what makes it useful". One backstop remains:
+`>= 1,000,000` raises CRITICAL, but only when no single namespace already explains it
+(otherwise it would just double-count the namespace finding).
+
+Two supporting changes in the same commit:
+- the `by_namespace` aggregation is `size: 25` (was 10) — a per-namespace check must not
+  be blind to an 11th noisy namespace;
+- a failed `ERROR_DATA` query used to fall back to a synthetic zero-hit document and
+  score green. It now raises a MAJOR "assertion did not run" instead.
+
+Re-measure before changing any floor, and record the change in
+`docs/sops/audit-script-correctness.md`.
 
 **Fatal-level thresholds** (post-exclusion count; tiered so that ordinary pod-restart
 noise cannot pin a permanent CRITICAL — the pre-2026-08-18 rule was `>0 ⇒ CRITICAL`,
@@ -1675,10 +1729,24 @@ which structurally could never clear):
 bursts and are a pool/capacity signal, not a fatal-error signal):
 - **Monitor**: 1–99 · **Minor**: 100–499 · **Major**: ≥500
 
-**OOM**: any OOMKilled **event** or pod **`lastState`** ⇒ CRITICAL. Both controls are
+**OOM**: any OOMKilled **event** or pod **`lastState`** ⇒ CRITICAL. The controls are
 implemented in Section 1, which owns the OOM verdict — §34 only corroborates it, so a
 CRITICAL for OOM will appear in Section 1's output, not here. Log-text OOM with no
 pod-state confirmation ⇒ warning (in-process OOM: JVM heap, ffmpeg allocation failures).
+
+There are **three** pod-state controls, not two (third added 2026-08-18, `13c5ec82`):
+
+| Control | Source | Window |
+|---|---|---|
+| `OOM_COUNT` | `kubectl get events --field-selector reason=OOMKilled` | **~1h** (etcd event TTL) |
+| `OOM_LASTSTATE` | `containerStatuses[].lastState.terminated.reason` | unbounded, but only for pods that **still exist** |
+| `OOM_LASTSTATE_24H` | the same, filtered on `lastState.terminated.finishedAt` | **24h — matches the ES query** |
+
+`OOM_LASTSTATE_24H` is the **primary** corroborator for §34's log-text count. Before it,
+§34 compared a 24h Elasticsearch window against a ~1h event window: a real OOM three
+hours ago whose pod had since been replaced left the event expired and no surviving
+`lastState`, so it could only ever reach MINOR. Corroboration is only corroboration when
+both sides measure the same window.
 
 **Assertion B — connection exhaustion** (`should` clauses; `must_not` = flux-system +
 `*database system is shutting down*`):

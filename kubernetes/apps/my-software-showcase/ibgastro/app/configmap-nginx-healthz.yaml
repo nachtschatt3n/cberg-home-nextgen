@@ -47,8 +47,13 @@ data:
         # The whole point: probes must not produce log lines.
         access_log off;
 
+        # default_type, not add_header: the image sets default_type
+        # application/octet-stream, and add_header would APPEND a second
+        # Content-Type rather than replace it (duplicate Content-Type is
+        # malformed HTTP; the kubelet tolerates it, nothing else should).
+        default_type text/plain;
+
         location = /healthz {
-            add_header Content-Type text/plain always;
             return 200 "ok\n";
         }
 

@@ -4,8 +4,8 @@ component: ibgastro
 pr: https://github.com/nachtschatt3n/ibgastro/pull/1
 kind: image
 current: "sha-73f8d53d8db8a962079d30f38582479f2cb5bff3 — emits ~380 PHP Strict Standards notices per request"
-target: "new sha-<merge-commit> built from master with Configure::write('log', <mask>) in app/config/core.php"
-update_type: config                   # one-line change in the app's own config file; no dependency moves
+target: "new sha-<merge-commit> built from the default branch with an integer error-reporting mask in the app config"
+update_type: refactor                 # one-line change in the app's own config file; no dependency moves
 risk: low
 est_duration_min: 30
 needs_reboot: false
@@ -75,10 +75,11 @@ plan and not a merged PR.
 
 ## 3) The change (PR #1, CI green, NOT merged)
 
-Branch `fix/silence-strict-deprecated-log-flood`, commit `c6e60e8`, base
-`master`.
+> The image repo is **private**. Branch names, commit SHAs and CI script names
+> are deliberately omitted here — this repo is public. Read them from the PR.
 
-`app/config/core.php:88`:
+The single functional line, in the app's CakePHP config
+(`app/config/core.php` — a standard, publicly-documented CakePHP path):
 
 ```php
 - Configure::write('log', true);
@@ -105,23 +106,22 @@ not taken and dev behaviour is unchanged.
 
 1. Confirm the PR still shows CI green and no new commits on `master`:
    `gh pr checks 1 --repo nachtschatt3n/ibgastro`
-2. Note that `master` has **already moved past the deployed pin** — `feb0512`
-   ("docs: agent context") built and published after
-   `sha-73f8d53d8db8a962079d30f38582479f2cb5bff3`. Merging this PR therefore
-   rolls TWO commits into the cluster, not one. Review `feb0512` before the
-   window; if it is docs-only as its subject claims, this is not a concern.
+2. Note the image repo's default branch has **already moved past the deployed
+   pin** by one commit (subject suggests docs-only). Merging this PR therefore
+   rolls TWO commits into the cluster, not one. Confirm the intervening commit
+   is inert before the window.
 3. Record the current line rate for the before/after comparison
    (`docs/sops/log-volume-runaway.md` §8.12).
 
 ## 5) Execution
 
 1. Merge PR #1 on `nachtschatt3n/ibgastro` (operator, or `gh pr merge 1 --squash`).
-2. Wait for the `build-push.yml` run on `master` to complete. It builds, loads
-   locally, runs `scripts/smoke-test.sh` (MySQL 5.7 + seeds + real HTTP auth
-   assertions + the `assert_no_external_hosts.sh` egress gate), and only then
-   pushes to GHCR.
-3. Read the new long-form sha tag from the run:
-   `gh run view <id> --repo nachtschatt3n/ibgastro --log | grep 'sha-'`
+2. Wait for the image build workflow on the default branch to complete. It
+   builds, loads the image locally, runs the repo's smoke-test suite (real
+   database + HTTP auth assertions + an outbound-host gate) and only pushes to
+   GHCR if that passes.
+3. Read the new long-form sha tag from the workflow run
+   (`gh run view <id> --repo <image-repo> --log | grep 'sha-'`).
 4. In this repo, bump the pin in
    `kubernetes/apps/my-software-showcase/ibgastro/app/helmrelease.yaml`:
    `tag: sha-<new-40-char-sha>`. **Digest-pinned sha tag only — never `latest`
@@ -140,7 +140,7 @@ not taken and dev behaviour is unchanged.
 - 24h later, the whole-stream error count returns to the measured non-storm
   baseline of ~44,000/day (§8.6). It is a trailing window; do not judge it at
   T+10 minutes.
-- The app still serves: sign-in page loads, demo credential prefill works.
+- The app still serves: the sign-in page loads and behaves as before.
 
 ## 7) Known residual (accepted, not blocking)
 

@@ -545,6 +545,12 @@ kubectl port-forward -n monitoring svc/kibana-kb-http 5601:5601 &
 
 ### Log Investigation Workflow
 
+> **Pipeline healthy but one producer is drowning it?** That is a different
+> problem from the ingestion failures below, and it has its own SOP:
+> [`docs/sops/log-volume-runaway.md`](log-volume-runaway.md) — attributing volume
+> by namespace/pod, telling a mislabelled deprecation stream from a real error
+> stream, pricing it against the 14d DLM window, and the ordered remediation menu.
+
 1. Open Kibana → Discover
 2. Select index pattern `logs-generic-default`
 3. Set time range (e.g., last 1 hour)

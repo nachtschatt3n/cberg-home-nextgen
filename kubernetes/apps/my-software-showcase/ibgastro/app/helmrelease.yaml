@@ -77,8 +77,9 @@ spec:
             #                                   only probe that must detect a dead
             #                                   PHP tier. 120 boots/hour.
             #   readiness -> /healthz on :8080  static nginx `return 200`, never
-            #   startup   -> /healthz on :8080  reaches php-fpm, `access_log off`,
-            #                                   so it emits nothing at all.
+            #   startup   -> /health  on :80    deep route as well. It fires 0x/hour
+            #                                   in steady state, so it costs no volume, and
+            #                                   it is what gates the Flux rollout.
             #
             # Do NOT "fix" this by relaxing the intervals instead -- that is
             # palliative and costs failure-detection latency. Do NOT drop the
@@ -107,17 +108,33 @@ spec:
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 3
+              # STARTUP STAYS ON THE DEEP ROUTE (corrected 2026-08-18, same day).
+              # The first cut moved startup to /healthz too. That was wrong: startup
+              # fires ZERO times per hour in steady state -- it stops once it
+              # succeeds -- so moving it saved no log volume at all, while costing
+              # the deploy-time gate. While startup is failing the container is not
+              # Ready, so the Deployment never becomes Available and Flux's
+              # `upgrade.remediation.strategy: rollback` triggers. With the shallow
+              # probe there, a pod that comes up with a bad DB credential, an
+              # unreachable MariaDB or an unwritable TMP would report the release
+              # SUCCESSFUL and only CrashLoop afterwards. The 360 boots/hour saving
+              # is entirely in READINESS; this one was given away for nothing.
+              #
+              # failureThreshold 30 -> 12 bounds the noise a genuinely broken pod can
+              # emit while crash-looping (12 x ~380 lines per start attempt instead of
+              # 30 x). 5s delay + 12 x 5s = 65s of startup budget; the pod reaches
+              # Ready in ~11s, so this is still ~6x headroom.
               startup:
                 enabled: true
                 custom: true
                 spec:
                   httpGet:
-                    path: /healthz
-                    port: 8080
+                    path: /health
+                    port: 80
                   initialDelaySeconds: 5
                   periodSeconds: 5
                   timeoutSeconds: 5
-                  failureThreshold: 30
+                  failureThreshold: 12
     defaultPodOptions:
       imagePullSecrets:
         - name: ghcr-secret

@@ -68,12 +68,17 @@ one takes five minutes.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 mise exec -- bash -c '
-  kubectl get secret -n monitoring elasticsearch-es-elastic-user \
-    -o jsonpath="{.data.elastic}" | base64 -d > /tmp/.espw
+  # umask 077: this is the elastic SUPERUSER password. Never leave it 0644.
+  ( umask 077; kubectl get secret -n monitoring elasticsearch-es-elastic-user \
+      -o jsonpath="{.data.elastic}" | base64 -d > /tmp/.espw )
   kubectl port-forward -n monitoring svc/elasticsearch-es-http 9299:9200 >/dev/null 2>&1 &
+  echo $! > /tmp/.espf
   sleep 5
 '
 ```
+
+**You are now holding the Elasticsearch superuser password in a file.** Step 7
+tears it down; do not end the investigation without running it.
 
 Use a non-default local port (`9299`, not `9200`/`9201`). A leaked port-forward
 from a previous sweep holding the default port makes the new one fail silently
@@ -153,7 +158,17 @@ one before it.
    information-free. Record it as an accepted risk
    (`runbooks/policy-cli.py risk`).
 
-### Step 7 — Re-verify and re-baseline
+### Step 7 — Tear down, then re-verify and re-baseline
+
+**Always, before anything else:**
+
+```bash
+kill $(cat /tmp/.espf) 2>/dev/null; rm -f /tmp/.espw /tmp/.espf /tmp/esq.py
+```
+
+Leaving `/tmp/.espw` behind parks the `elastic` superuser password in cleartext
+on the workstation indefinitely. The port-forward left running is the "stale
+process answers" trap in §7 for whoever investigates next.
 
 Run §6. Then check whether the *audit assertion* that surfaced this is itself
 calibrated against the new baseline — a runaway often reveals that a threshold
@@ -250,6 +265,8 @@ to, so that window is identical either way. With multiple replicas, weigh it.
 
 ## 6) Verification Tests
 
+0. **Tear down first** (Step 7) — then verify. A verification run that reuses a
+   stale port-forward is not a verification.
 1. **The producer went quiet.** Per-minute histogram for the NEW pod (§8.12),
    over a window that starts at least 2 minutes after the pod became Ready —
    the first boots are startup noise and will mislead you.
@@ -503,6 +520,17 @@ Post-change, also run `health-check-agent`, `security-agent` and `doc-agent`.
 - **Redaction.** Log samples pasted into findings or commits must not carry
   internal domains, public IPs, credentials or personal data. Quote the message
   shape, not a full request line.
+- **The credential file is gone.** This procedure writes the Elasticsearch
+  superuser password to `/tmp/.espw`. Confirm teardown ran:
+  ```bash
+  ls -l /tmp/.espw 2>/dev/null && echo "STILL PRESENT - rm it now" || echo "clean"
+  ```
+  Create it under `umask 077` and delete it in Step 7. It must never outlive the
+  investigation, and it must never be written inside the repo tree.
+- **Private-repo detail.** If the fix lives in a private image repo, keep
+  branch names, commit SHAs and CI script names out of plans committed here.
+  Reference the PR by URL and describe the root cause in terms of upstream,
+  publicly-documented framework behaviour.
 
 ---
 

@@ -1,10 +1,10 @@
 # SOP: New Deployment Blueprint
 
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
-> Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
+> Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -259,7 +259,11 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
    - Add a new `*-blueprint.yaml` key per the Authentik SSO blueprint section above. `client_secret` lives in the SOPS ConfigMap AND in the app's own SOPS Secret — keep both in sync.
    - Never configure providers via the Authentik UI only — blueprints are authoritative.
 8. Add monitoring coverage:
-   - Ensure app health endpoints/probes are set.
+   - Ensure app health endpoints/probes are set, and that the probe target is a
+     **static, cheap, silent** endpoint — never a framework route. The kubelet hits
+     it ~480x/hour; a route that boots the application on every request turns that
+     into a log-volume incident. See Known Gotcha #13 and
+     `docs/sops/log-volume-runaway.md`.
    - Add `ServiceMonitor` when required.
    - Confirm logs/events are observable.
 9. Create AlertManager PrometheusRule (mandatory):
@@ -714,6 +718,68 @@ nothing either (`smb.csi.k8s.io` has `attachRequired: false`).
 
 Full SOP: [`docs/sops/longhorn-rwo-multi-attach.md`](longhorn-rwo-multi-attach.md).
 
+### 13. Probe endpoints must be STATIC — a framework route probed at kubelet frequency is a log-volume incident
+
+The kubelet is the highest-frequency client any app has. With the house probe
+defaults (readiness 10s, liveness 30s, startup 5s) it makes **~480 requests per
+hour, forever**, on a service with zero users. Whatever a probe costs, it costs
+480 times an hour.
+
+That is fine for a static endpoint and ruinous for a framework route. On a
+per-request-boot runtime (php-fpm, CGI, some Python WSGI setups) a route boots
+the entire framework on every hit. One real case: a CakePHP 1.x `/health` route
+emitted ~370 PHP deprecation notices per boot, each double-logged by php-fpm and
+nginx:
+
+```
+480 boots/hour x ~370 notices = ~179,000 log lines/hour = 4.35M/24h
+```
+
+which was **58% of the entire cluster's log ingest** and **98.8% of the error
+metric** — from health probes alone, on an app that was working perfectly. It
+also scored as errors only because the substring `Error` sits inside the method
+name `handleError`. Nothing was broken; the health check was the incident.
+
+**The pattern — split the probes:**
+
+| Probe | Target | Why |
+|---|---|---|
+| liveness | the deep framework route | must detect a dead app tier; 120 boots/hour is affordable |
+| readiness | a **static** endpoint | 360 boots/hour — this is the whole saving |
+| startup | the deep framework route | fires **0x/hour** in steady state, so it costs nothing, and it is what gates the Flux rollout |
+
+The startup row is the counter-intuitive one and it is easy to get wrong. It is
+tempting to move all three to the cheap endpoint, but startup stops firing once
+it succeeds, so moving it saves no volume at all — while giving up the
+deploy-time gate. While startup fails the container is not Ready, the Deployment
+never becomes Available, and `upgrade.remediation.strategy: rollback` triggers.
+With a shallow startup probe, a pod that comes up with a bad DB credential
+reports the release **successful** and only CrashLoops afterwards.
+
+If the image has no static health endpoint, add one **additively** rather than
+overriding the image's config — a ConfigMap `subPath`-mounted into
+`/etc/nginx/conf.d/` adds a file without shadowing `default.conf`:
+
+```nginx
+server {
+    listen 8080;
+    server_name _;
+    access_log off;              # probes must not log either
+    default_type text/plain;
+    location = /healthz { return 200 "ok\n"; }
+    location /         { return 404; }
+}
+```
+
+Keep that port off the Service and the ingress. Reference implementation:
+`kubernetes/apps/my-software-showcase/ibgastro/app/configmap-nginx-healthz.yaml`.
+
+**Do not "fix" a probe storm by relaxing the intervals** (palliative, costs
+detection latency) **or by dropping the lines at the collector** (masks the
+problem, and the app then has no way to report a real error). Full remediation
+order and the attribution queries:
+[`docs/sops/log-volume-runaway.md`](log-volume-runaway.md).
+
 ---
 
 ## Troubleshooting
@@ -873,3 +939,4 @@ Rollback success criteria:
 | `2026.04.19` | `2026-04-19` | Consolidate prior 04.18/04.18b/04.18c versions into a single YYYY.MM.DD format (doc-check compliance) |
 | `2026.05.04` | `2026-05-04` | Add Known Gotcha #9: bjw-s app-template `resources` placement (top-level is a no-op → OOMKilled); update troubleshooting table; renumber WSGI gotcha to #10 |
 | `2026.05.06` | `2026-05-06` | Add Known Gotcha #11: external ingress requires `external-dns.alpha.kubernetes.io/target` annotation — without it Cloudflare rejects the A record (error 9003) and hostname returns NXDOMAIN |
+| `2026.08.18` | `2026-08-18` | Add Known Gotcha #13: probe endpoints must be static — a framework route probed at kubelet frequency (~480 req/h) produced 58% of all cluster log ingest; split-probe pattern, and why `startup` must stay on the deep route |

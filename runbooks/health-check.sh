@@ -732,6 +732,9 @@ print(n)
     echo "OOM kills (OOMKilled lastState finished within 24h): $OOM_LASTSTATE_24H"
 
     EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    # Same `|| echo 0` append trap as OOM_COUNT above: safe_count can emit "00".
+    EVICTED_COUNT=$(echo "$EVICTED_COUNT" | tail -1 | tr -cd '0-9'); [ -z "$EVICTED_COUNT" ] && EVICTED_COUNT=0
+    EVICTED_COUNT=$((10#$EVICTED_COUNT))
     echo "Pod evictions: $EVICTED_COUNT"
 
     if [ "$WARNING_COUNT" -gt 10 ]; then
@@ -747,7 +750,7 @@ print(n)
         log_critical "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
         add_critical_issue "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
     else
-        log_success "No OOM kills (both controls: events=0, lastState=0)"
+        log_success "No OOM kills (events=0, lastState=0, lastState within 24h=$OOM_LASTSTATE_24H)"
     fi
 
     if [ "$EVICTED_COUNT" -gt 0 ]; then
@@ -4874,12 +4877,53 @@ except Exception:
                 fi
             done <<< "$NS_ERROR_ROWS"
 
-            # Broad backstop: a cluster-wide runaway that no SINGLE namespace
-            # explains. If a namespace already tripped above, that finding is the
-            # honest one and this would only double-count it.
+            # An aggregation that EXISTS but has zero buckets is the same silent-green
+            # trap as a failed query, one level down: if the namespace field is
+            # unmapped or renamed (this pipeline has a documented history of edot/ES
+            # mapping churn), ES returns by_namespace with buckets: [] and every
+            # per-namespace verdict below is skipped over nothing at all.
+            NS_BUCKET_COUNT=$(printf '%s\n' "$NS_ERROR_ROWS" | grep -c . || true)
+            NS_BUCKET_COUNT=$((10#${NS_BUCKET_COUNT:-0}))
+            if [ "$NS_BUCKET_COUNT" -eq 0 ] && [ "$TOTAL_ERRORS_INT" -ge 1000 ]; then
+                log_warning "Namespace breakdown returned ZERO buckets for $TOTAL_ERRORS_INT matches - the per-namespace assertion measured nothing"
+                add_major_issue "Log-volume per-namespace breakdown returned no buckets for $TOTAL_ERRORS_INT matches in 24h (likely a k8s.namespace.name mapping change) - the assertion did not run"
+                NS_FLAGGED=1
+            fi
+
+            # Broad backstop: a cluster-wide regression that no SINGLE namespace
+            # explains. Gated on NS_FLAGGED so it can never double-count a namespace
+            # finding that already says the same thing.
+            #
+            # TIERED, not a lone 1,000,000 floor. With 22 namespaces and a 40,000
+            # per-namespace floor, the arithmetic worst case is 22 x 39,999 = 879,978
+            # matches in 24h -- a 20x cluster-wide regression -- scoring fully green.
+            # That gap is not a contrived shape: it is the CHARACTERISTIC shape of a
+            # cluster-wide cause (CoreDNS/AdGuard failure, apiserver or etcd flap, the
+            # NAS/CIFS path dropping so every mounted app logs at once, a cert expiry,
+            # an ES/OTel ingestion stall). Those spread errors across namespaces
+            # without any one dominating, which is exactly what the per-namespace
+            # floors are blind to. Tiers are set against the measured storm-free
+            # cluster steady state of ~44,000/day:
+            #    120,000  MINOR     2.7x steady state
+            #    250,000  MAJOR     5.7x
+            #  1,000,000  CRITICAL  22.7x
+            # Steady state still reads green, so the assertion stays clearable.
+            #
+            # KNOWN LIMITATION, deliberately not papered over: the per-namespace tiers
+            # are ABSOLUTE, not relative to each namespace's own history. A namespace
+            # going 50 -> 30,000/day is a 600x regression that still reads green. Doing
+            # this properly needs a trailing per-namespace baseline (date_histogram
+            # over now-8d/now-1d, flag at >= 5x the namespace's own median). That is a
+            # follow-up, not a claim this check already makes.
             if [ "$NS_FLAGGED" -eq 0 ] && [ "$TOTAL_ERRORS_INT" -ge 1000000 ]; then
                 log_critical "Broad cluster-wide log-volume runaway: $TOTAL_ERRORS_INT error-substring matches in 24h across namespaces, none dominant"
                 add_critical_issue "Broad cluster-wide log-volume runaway: $TOTAL_ERRORS_INT error-substring matches in 24h with no single dominant namespace"
+            elif [ "$NS_FLAGGED" -eq 0 ] && [ "$TOTAL_ERRORS_INT" -ge 250000 ]; then
+                log_warning "Broad cluster-wide error-log increase: $TOTAL_ERRORS_INT in 24h across namespaces, none dominant (~5.7x baseline)"
+                add_major_issue "Broad cluster-wide error-log increase: $TOTAL_ERRORS_INT matches in 24h with no single dominant namespace (measured baseline ~44,000/day)"
+            elif [ "$NS_FLAGGED" -eq 0 ] && [ "$TOTAL_ERRORS_INT" -ge 120000 ]; then
+                log_warning "Cluster-wide error-log volume above baseline: $TOTAL_ERRORS_INT in 24h, none dominant (~2.7x baseline)"
+                add_minor_issue "Cluster-wide error-log volume above baseline: $TOTAL_ERRORS_INT matches in 24h with no single dominant namespace (measured baseline ~44,000/day)"
             elif [ "$NS_FLAGGED" -eq 0 ]; then
                 log_success "Error-log volume within range in every namespace (cluster total $TOTAL_ERRORS_INT in 24h; highest namespace below the 40,000 floor)"
             fi
