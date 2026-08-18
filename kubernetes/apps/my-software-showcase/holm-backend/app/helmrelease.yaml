@@ -35,7 +35,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/holm-backend
-              tag: production-20260817213646
+              tag: production-20260818060203
               pullPolicy: IfNotPresent
             env:
               - name: TZ

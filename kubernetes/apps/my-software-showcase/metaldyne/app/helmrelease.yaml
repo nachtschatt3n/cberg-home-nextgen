@@ -34,7 +34,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/metaldyne-mini-erp
-              tag: production-20260817214434
+              tag: production-20260818064837
               pullPolicy: IfNotPresent
             env:
               - name: TZ
