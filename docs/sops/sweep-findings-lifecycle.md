@@ -176,6 +176,14 @@ survivor.
 > affirmative "fixed" claim, not an absence — which is why the veto is wired
 > at the dependency, not inferred from the emitted-finding count.
 >
+> **Degradation crosses module boundaries.** `security-check.py`'s s4 decides
+> "is this CVE fixable by a newer tag?" by dynamically loading
+> `check-all-versions.py` and querying it — a second `DegradationLog` owner. A
+> throttled registry therefore degrades the *security* verdict while recording
+> the reason in the *version* log. `main()` drains the oracle's log into the
+> security one before `apply()`. If you add another cross-module oracle, drain
+> it too, or its degradation is invisible to the section that depends on it.
+>
 > **The rate-limit case is the sharpest.** A Docker Hub anonymous pull that
 > returns 429 under concurrency yields the *same* Python value as "no newer tag
 > exists". On 2026-08-18 that produced ~40 bogus "up to date" answers that only
