@@ -33,7 +33,7 @@ metadata curation.
 | Chart / image | gabe565 `paperless-ngx` · image `2.20.15` |
 | Ingress | `paperless.${SECRET_DOMAIN}` |
 | **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
-| DB / cache | mariadb + redis (bitnamilegacy), `longhorn-static` PVCs |
+| DB / cache | mariadb (bitnamilegacy, `longhorn-static` PVC) + standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC — old PV `paperless-redis` kept Retain as rollback) |
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
@@ -193,7 +193,7 @@ hit-rate false-positives on foreign-language docs — don't use it.)
 ## 9) Health Check ("check paperless")
 
 Read-only; summarise green/finding per row:
-1. Pods `paperless-ngx` / `-gpt` / `-ai` / mariadb / redis / `scan-inbox-validator`
+1. Pods `paperless-ngx` / `-gpt` / `-ai` / mariadb / `paperless-redis` / `scan-inbox-validator`
    — READY + **restart count** (climbing = OOM crash-storm).
 2. paperless mem limit = **6Gi**; `Document.objects.count()`; `/consume` PDF
    backlog = 0; validator heartbeat fresh.
