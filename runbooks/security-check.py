@@ -1039,8 +1039,48 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # printed "Domain not in non-sops git history" on every run without
         # ever having searched. Command substitution splits on IFS into
         # ARGUMENTS, which is what was intended. Measured: ~3s, was timing out.
+        # CUTOFF-SCOPED (2026-08-18). Two bugs, one fix.
+        #
+        # 1. The check counted the domain across ALL history, so it reported the
+        #    SAME pre-redaction exposure on every single run — the one already
+        #    on the risk register as AR-001/AR-016. It could never go green, and
+        #    an already-accepted, already-immutable fact was re-litigated every
+        #    cycle. Broadening AR-016 to match it (`Domain literal found in`)
+        #    was rejected: that wildcard would also silence a FRESH plaintext
+        #    domain committed tomorrow, i.e. it disables the detector to quiet
+        #    the detector. Instead, scope the question to what is still
+        #    ACTIONABLE: lines introduced AFTER the redaction commit
+        #    `84b81004` ("chore(docs): redact literal domain to
+        #    ${SECRET_DOMAIN} placeholder", 2026-05-09). Everything at or
+        #    before it is the accepted, unrewritable past; everything after it
+        #    is a new leak and must fire loudly and UNSUPPRESSED. Today this is
+        #    0 and the check goes green honestly.
+        #
+        # 2. The message said "deleted lines". The pipeline greps `^+` — those
+        #    are ADDED lines. The label had been inverted since it was written.
+        #
+        # The cutoff is applied BOTH topologically and by DATE, because
+        # neither alone is correct here:
+        #   * `--not 84b81004` alone leaks 7 hits from stale side branches
+        #     (fix/redisinsight-*, renovate/*) that were cut from main BEFORE
+        #     the redaction and so are not ancestors of it — pre-redaction
+        #     content by date, unreachable-from-cutoff by topology.
+        #   * `--since` alone would re-report the accepted past if an old
+        #     branch were ever rebased forward.
+        # Requiring both means only genuinely NEW content counts. The date is
+        # read off the cutoff commit rather than hard-coded, so the two can
+        # never drift apart.
+        #
+        # If the cutoff commit is absent (shallow clone / fresh mirror), fall
+        # back to full history rather than silently reporting 0 — under-
+        # reporting a domain leak is the one outcome worse than repeating it.
+        _cutoff = "84b81004"
+        _cutoff_date = run(f"git show -s --format=%cI {_cutoff} 2>/dev/null").strip()
+        _have_cutoff = bool(_cutoff_date)
+        _range = (f"--all --not {_cutoff} --since='{_cutoff_date}'"
+                  if _have_cutoff else "--all")
         count = run(
-            f"git log --all -p -S '{domain}' -- "
+            f"git log {_range} -p -S '{domain}' -- "
             f"$(git ls-files | grep -v '\\.sops\\.yaml$') 2>/dev/null "
             f"| grep '^+.*{domain}' | grep -v 'sops\\|ENC\\[' | wc -l",
             timeout=120,
@@ -1053,11 +1093,12 @@ def s3_git_history() -> tuple[str, Findings, str]:
                             "scan produced no count — domain-leak history check "
                             "did not run")
             n = -1
+        _since = f"since `{_cutoff}`" if _have_cutoff else "in full history (cutoff commit missing)"
         if n > 0:
-            f.add(WARNING, f"Domain literal found in {n} deleted lines of non-sops history")
-            cprint(C.YELLOW, f"  🟡 Domain in {n} lines of non-sops git history (deleted content)")
+            f.add(WARNING, f"Domain literal added to non-sops history {_since}")
+            cprint(C.YELLOW, f"  🟡 Domain added in {n} line(s) of non-sops git history {_since}")
         elif n == 0:
-            cprint(C.GREEN, "  🟢 Domain not in non-sops git history")
+            cprint(C.GREEN, f"  🟢 Domain not added to non-sops git history {_since}")
 
     # Secret-named files ever committed outside .sops.yaml
     secret_files = run_lines(
