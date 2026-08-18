@@ -105,6 +105,15 @@ data:
       ON sweep_findings(fingerprint);
     CREATE INDEX IF NOT EXISTS idx_findings_first_seen
       ON sweep_findings(first_seen);
+    -- `finding_id` is derived from the fingerprint, so a resolved finding that
+    -- recurs legitimately re-derives its old id — the column can never be
+    -- globally unique. But two OPEN rows sharing an id is always a bug, and it
+    -- silently mis-resolves every consumer that looks a finding up by id
+    -- (the live table held two open+resolved F-094be167 rows before the
+    -- 2026-08-18 fingerprint migration). Enforce it where it is an invariant.
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_findings_open_finding_id
+      ON sweep_findings(finding_id)
+      WHERE resolved_at IS NULL;
 
     CREATE TABLE IF NOT EXISTS slo_snapshots (
       id                   BIGSERIAL PRIMARY KEY,

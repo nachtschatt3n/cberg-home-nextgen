@@ -674,12 +674,36 @@ def _finding_fingerprint(section: str, subsection: str | None, title: str) -> tu
 
 
 def _finding_row(cur, finding_id: str):
+    """Resolve a finding by id, falling back to its historical ids.
+
+    `finding_id` is derived from the fingerprint, so any change to the identity
+    function renames rows (the 2026-08-18 AR-independent-fingerprint migration
+    renamed 179). Committed `security_ref: F-xxxxxxxx` lines and plan files are
+    immutable, so the old id has to keep resolving or every reference in git
+    history silently rots. `runbooks/refingerprint-findings.py` records the old
+    ids in `metadata.prior_finding_ids`; this is the read side of that.
+
+    Current id wins; a prior id only resolves when nothing owns it today.
+    """
     cur.execute(
         "SELECT * FROM sweep_findings WHERE finding_id = %s "
         "ORDER BY resolved_at IS NULL DESC, last_seen DESC LIMIT 1",
         (finding_id,),
     )
-    return cur.fetchone()
+    row = cur.fetchone()
+    if row is not None:
+        return row
+    cur.execute(
+        "SELECT * FROM sweep_findings "
+        " WHERE metadata->'prior_finding_ids' ? %s "
+        " ORDER BY resolved_at IS NULL DESC, last_seen DESC LIMIT 1",
+        (finding_id,),
+    )
+    row = cur.fetchone()
+    if row is not None:
+        print(f"note: {finding_id} was renamed to {row['finding_id']} "
+              f"(fingerprint migration); showing the current row.", file=sys.stderr)
+    return row
 
 
 def _ref_block(row: dict) -> str:

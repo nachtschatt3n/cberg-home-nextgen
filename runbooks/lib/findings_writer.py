@@ -133,20 +133,63 @@ _RE_WS        = re.compile(r"\s+")
 
 # A finding's stable IDENTITY is the code-identifier(s) it names, not the prose
 # around them. Audit messages put those identifiers in `backticks` (an image
-# ref like `postgres:17.10-bookworm`, a resource name, an alertname) and carry
-# any accepted-risk `[AR-0NN]` tags that qualify which finding-of-that-object
-# this is. Everything else in the line is human prose that gets reworded.
+# ref like `postgres:17.10-bookworm`, a resource name, an alertname).
+# Everything else in the line is human prose that gets reworded.
 _RE_BACKTICK  = re.compile(r"`([^`]+)`")
-_RE_ARTAG     = re.compile(r"\[AR-\d+\]", re.I)
+_RE_ARTAG     = re.compile(r"\[AR-\d+\]\s*", re.I)
+
+# WHICH finding-about-this-object is this? Two findings can name the same image
+# and mean different things — "there is a fix, take it" vs "there is no fix".
+# That distinction is part of the identity and must be in the anchor.
+#
+# It USED to be carried by the `[AR-0NN]` tag set, which was wrong: an AR tag is
+# a SUPPRESSION DECISION, i.e. presentation, and folding it into the identity
+# made an unchanged finding change identity whenever an AR was added, removed or
+# re-worded. Observed 2026-08-18: F-094be167 was born 08-16, "resolved" 08-17
+# when AR-063 started matching (forking F-e14cda04), and re-appeared 08-18 when
+# AR-063's wording lapsed — one problem, three rows, no change in the world.
+#
+# These markers are matched verbatim, deliberately NOT parsed from prose — the
+# same explicit-marker discipline as risk_model.S4_POLICY_MARKERS. Measured
+# against all 296 open rows: this reproduces the AR-tag set's discrimination
+# exactly (296 -> 296 distinct fingerprints, zero merges) while being completely
+# invariant to AR tagging.
+#
+# ORDER MATTERS: first match wins, so the most specific marker goes first.
+# Adding a marker CHANGES IDENTITY for matching findings — run
+# `runbooks/refingerprint-findings.py` after any edit here.
+_KIND_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("nofix",   ("with no upstream fix",)),
+    ("rebuild", ("but already on the newest upstream tag",
+                 "already the newest upstream tag")),
+)
+
+
+def _kind_token(title: str) -> str:
+    """Which finding-about-this-object this is. '' = the ordinary case."""
+    low = title.lower()
+    for token, markers in _KIND_MARKERS:
+        if any(m in low for m in markers):
+            return token
+    return ""
+
+
+def strip_ar_tags(title: str) -> str:
+    """Title with every `[AR-0NN]` tag removed. Identity is computed on this.
+
+    An AR tag is a suppression DECISION applied on top of a finding, not a
+    property of the finding. It is presentation; it must never reach the
+    fingerprint.
+    """
+    return _RE_ARTAG.sub("", title).strip()
 
 
 def _stable_anchor(title: str) -> str | None:
     """A prose-independent identity for `title`, or None if it has no anchor.
 
-    Built from the backtick-quoted identifiers plus the sorted set of
-    `[AR-0NN]` tags. Returns None when the title contains no backticked span,
-    so ordinary sentence-shaped findings fall back to the normalized-title
-    fingerprint (unchanged behaviour).
+    Built from the backtick-quoted identifiers plus a KIND token. Returns None
+    when the title contains no backticked span, so ordinary sentence-shaped
+    findings fall back to the normalized-title fingerprint.
 
     Why this exists: the previous fingerprint hashed the whole normalized
     PROSE, so rewording a message forked a brand-new finding row for an
@@ -154,18 +197,21 @@ def _stable_anchor(title: str) -> str | None:
     into 39 rows). Backtick content is kept VERBATIM (digits included) — the
     image *version* is part of the identity: `postgres:17.10-bookworm` and
     `postgres:17.11-bookworm` are genuinely different findings, and this is
-    the "hash on image@section, not on rendered prose" fix. The AR-tag set is
-    what keeps two DISTINCT findings about the SAME object apart — e.g. an
-    image's fixable-CRITICAL line (often untagged, or `[AR-052]`) vs its
-    no-upstream-fix accepted line (always `[AR-029]`) — which a bare image key
-    would wrongly collapse into one row.
+    the "hash on image@section, not on rendered prose" fix.
+
+    The second component keeps two DISTINCT findings about the SAME object
+    apart — an image's fixable line vs its no-upstream-fix line. That job used
+    to belong to the `[AR-0NN]` tag set, which made identity depend on
+    suppression state; see the _KIND_MARKERS comment above for why that was a
+    defect and what replaced it. AR tags are stripped before anchoring, so
+    tagging, re-tagging and un-tagging are all identity-preserving.
     """
-    spans = _RE_BACKTICK.findall(title)
+    bare = strip_ar_tags(title)
+    spans = _RE_BACKTICK.findall(bare)
     if not spans:
         return None
     ids = "``".join(_RE_WS.sub(" ", s.strip().lower()) for s in spans)
-    ar = ",".join(sorted({m.upper() for m in _RE_ARTAG.findall(title)}))
-    return f"{ids}|{ar}"
+    return f"{ids}|{_kind_token(bare)}"
 
 
 def _normalize(title: str) -> str:
@@ -194,7 +240,9 @@ def fingerprint(section: str, subsection: str | None, title: str) -> str:
     """
     basis = _stable_anchor(title)
     if basis is None:
-        basis = _normalize(title)
+        # Prose fallback: strip AR tags here too, or a tagged sentence-shaped
+        # finding forks from its untagged self exactly as the anchored ones did.
+        basis = _normalize(strip_ar_tags(title))
     parts = (section, subsection or "", basis)
     blob = "|".join(parts).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
