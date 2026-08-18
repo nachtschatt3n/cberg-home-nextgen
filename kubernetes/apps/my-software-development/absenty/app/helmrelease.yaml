@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: app-template
-      version: 3.7.3
+      version: 5.1.0
       sourceRef:
         kind: HelmRepository
         name: bjw-s
@@ -158,6 +158,7 @@ spec:
               - *host
     persistence:
       data:
+        suffix: data
         enabled: true
         type: persistentVolumeClaim
         storageClass: longhorn
@@ -166,6 +167,7 @@ spec:
         globalMounts:
           - path: /data
       storage:
+        suffix: storage
         enabled: true
         type: persistentVolumeClaim
         storageClass: longhorn
@@ -184,6 +186,7 @@ spec:
         globalMounts:
           - path: /app/log
       bundle:
+        suffix: bundle
         enabled: true
         type: persistentVolumeClaim
         storageClass: longhorn
