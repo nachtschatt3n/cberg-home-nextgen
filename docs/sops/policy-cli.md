@@ -33,8 +33,11 @@ Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `
 **AR descriptions are substring matchers, so they must be drift-stable.** `risk edit` REFUSES a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
 
 **Two classes of finding are exempt from AR substring suppression entirely**
-(`_apply_ar_suppression` in `runbooks/sweep-run.py`; mirrored spec pending for
-`Findings.suppress_accepted` in `runbooks/security-check.py`):
+(`_apply_ar_suppression` in `runbooks/sweep-run.py`). **The same matcher exists a
+second time in `Findings.suppress_accepted` (`runbooks/security-check.py`) and does
+NOT yet carry these guards** — tracked on `F-21ceb683`; until it lands, an
+audit-integrity finding can still be tagged at emit time even though the
+reconcile pass will no longer do it:
 
 1. **Audit-integrity findings** — `metadata.risk_nature` in
    `{policy-drift, audit-coverage-gap, audit-integrity, meta}`, or a
@@ -48,7 +51,7 @@ Why: on 2026-08-18 a finding reporting *"AR-063 no longer suppresses its
 target"* was tagged `[AR-063] accepted`, because re-wording AR-063 to the bare
 `iib0011/omni-tools` made that string occur inside the sentence describing
 AR-063's own breakage. The report of the failure was eaten by the thing that
-failed. Regression test: `runbooks/tests/test-ar-suppression-guard.py`.
+failed. Regression test: `runbooks/tests/test-ar-suppression-guard.py` (9/9).
 If a suppression pass exempts anything, it says so in the run log — an
 over-broad description is visible rather than silently matching nothing.
 
@@ -155,6 +158,7 @@ After any add/disable/delete:
 ```bash
 python3 runbooks/policy-cli.py stats                  # row counts shift as expected
 python3 runbooks/policy-cli.py <ns> list              # newly-added row visible
+python3 runbooks/tests/test-ar-suppression-guard.py   # 9/9 — the two exemption classes
 ```
 
 For accepted_risks: rerun security-check.py end-to-end and confirm the matching finding is now tagged `🛡️ [AR-NNN]` instead of being flagged critical/warning:
@@ -261,4 +265,4 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 | Date | Version | Change |
 |---|---|---|
 | 2026-05-27 | 2026.05.27 | Initial — Phase 3 of policy-in-DB migration |
-| 2026-08-18 | 2026.08.18 | Documented `risk edit` / `risk lint` / `slo update`; drift-stable AR description rule; made the §6 verification rerun non-destructive (`SWEEP_AUTOCLOSE=0`) |
+| 2026-08-18 | 2026.08.18 | Documented `risk edit` / `risk lint` / `slo update`; drift-stable AR description rule; made the §6 verification rerun non-destructive (`SWEEP_AUTOCLOSE=0`); documented the two AR-suppression exemption classes (audit-integrity + self-reference) after F-21ceb683, and the not-yet-guarded second matcher in `security-check.py` |

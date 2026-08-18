@@ -55,6 +55,7 @@ class FakeCursor:
             self._mode = "ars"
         elif norm.upper().startswith("SELECT COUNT(*)"):
             self._mode = "count"
+            self._count = self.conn.count_exempt(norm, params)
         elif norm.upper().startswith("UPDATE"):
             self._mode = "update"
             self.rowcount = self.conn.match(norm, params)
@@ -65,7 +66,9 @@ class FakeCursor:
         return list(self.conn.ars)
 
     def fetchone(self):
-        return (0,)
+        if getattr(self, "_mode", None) == "count":
+            return (self._count,)
+        return None
 
 
 class FakeConn:
@@ -76,6 +79,7 @@ class FakeConn:
         self.rows = rows        # [dict(finding_id, title, severity, meta), ...]
         self.log: list = []
         self.tagged: list[tuple[str, str]] = []   # (ar_id, finding_id)
+        self.exempt_count = 0
 
     # context-manager protocol used by `with psycopg.connect(dsn) as conn:`
     def __enter__(self):
@@ -89,6 +93,29 @@ class FakeConn:
 
     def commit(self):
         pass
+
+    def count_exempt(self, sql, params) -> int:
+        """Re-implement the exemption-count SELECT's WHERE. Mirrors `match`
+        but in POSITIVE form: a row is counted when it WOULD have been tagged
+        by the old predicate and is now held back by one of the guards."""
+        needle, tag, natures, ar_id = params
+        n = 0
+        for r in self.rows:
+            meta = r.get("meta") or {}
+            if r.get("resolved_at") is not None:
+                continue
+            if r["severity"] not in ("critical", "warning", "monitor"):
+                continue
+            if needle not in r["title"].lower():
+                continue
+            if tag in r["title"]:
+                continue
+            if (meta.get("risk_nature", "") in natures
+                    or re.match(r"(?i)^audit[-_]", meta.get("subsection", ""))
+                    or meta.get("ar_id", "") == ar_id):
+                n += 1
+        self.exempt_count += n
+        return n
 
     def match(self, sql, params) -> int:
         """Re-implement the UPDATE's WHERE in Python, honouring exactly the
@@ -134,37 +161,51 @@ def _load_sweep_run(conn: FakeConn):
 
 
 # --------------------------------------------------------------------------
-# Fixtures — the three row shapes that matter
+# Fixtures — the row shapes that matter
+#
+# DISCLOSURE: the images and AR ids below are SYNTHETIC. Pairing a real
+# deployed tag with a non-zero fixable-CRITICAL count is not publishable
+# (docs/sops/vulnerability-disclosure.md §2.1: "a non-zero count for anything
+# we run"), and a fixture is a committed file. The tests assert substring and
+# tag behaviour only, so the values are free variables — keep them synthetic.
+# The incident these guards exist for is F-21ceb683; the register holds the
+# real strings.
 # --------------------------------------------------------------------------
+
+# A repository we do not run, and an AR id outside the allocated range.
+_IMG = "example-org/widget"
+_AR = "AR-900"
+
 
 def _rows():
     return [
-        # 1. the real target of AR-063: an ordinary CVE finding. MUST tag.
+        # 1. the real target of the AR: an ordinary CVE finding. MUST tag.
         dict(finding_id="F-canon", severity="critical",
-             title="`iib0011/omni-tools:0.6.0`: 3 fixable CRITICAL CVE(s)",
+             title=f"`{_IMG}:1.0.0`: fixable CRITICAL CVE(s) — bump the image",
              meta={"risk_nature": "vuln", "subsection": "s4_cve_check"},
              resolved_at=None),
-        # 2. the incident row: audit-integrity, quotes the AR verbatim.
-        dict(finding_id="F-21ceb683", severity="warning",
-             title=("AR-063 no longer suppresses its target: the description "
-                    "`iib0011/omni-tools` is not a substring of the finding title"),
+        # 2. the incident shape: audit-integrity, quotes the AR description
+        #    verbatim, which is exactly why the old matcher ate it.
+        dict(finding_id="F-incident", severity="warning",
+             title=(f"{_AR} no longer suppresses its target: the description "
+                    f"`{_IMG}` is not a substring of the finding title"),
              meta={"risk_nature": "policy-drift", "subsection": "s4_cve_check",
-                   "ar_id": "AR-063"},
+                   "ar_id": _AR},
              resolved_at=None),
-        # 3. self-reference only: ordinary nature, but it is ABOUT AR-063.
+        # 3. self-reference only: ordinary nature, but it is ABOUT the AR.
         dict(finding_id="F-selfref", severity="warning",
-             title="AR-063 review overdue for `iib0011/omni-tools`",
+             title=f"{_AR} review overdue for `{_IMG}`",
              meta={"risk_nature": "policy", "subsection": "s10_flux_posture",
-                   "ar_id": "AR-063"},
+                   "ar_id": _AR},
              resolved_at=None),
         # 4. nature-only: audit-integrity, no ar_id key at all.
         dict(finding_id="F-cover", severity="warning",
-             title="Trivy could not scan `iib0011/omni-tools:0.6.0` this run",
+             title=f"Trivy could not scan `{_IMG}:1.0.0` this run",
              meta={"risk_nature": "audit-coverage-gap", "subsection": "s4_cve_check"},
              resolved_at=None),
         # 5. subsection-only: media-style audit row, no risk_nature.
         dict(finding_id="F-mediaaudit", severity="warning",
-             title="audit false positive on `iib0011/omni-tools` classifier",
+             title=f"audit false positive on `{_IMG}` classifier",
              meta={"subsection": "audit_false_positive_multipart"},
              resolved_at=None),
     ]
@@ -183,27 +224,27 @@ def _run(ars, rows):
 
 def test_audit_integrity_rows_are_exempt():
     rows = _rows()
-    _, conn, tagged = _run([("AR-063", "iib0011/omni-tools")], rows)
+    _, conn, tagged = _run([(_AR, _IMG)], rows)
     got = {fid for _, fid in conn.tagged}
     assert got == {"F-canon"}, f"expected only the real target to tag, got {got}"
     assert tagged == 1
 
 
 def test_the_incident_row_is_never_silenced_by_its_own_ar():
-    """F-21ceb683 verbatim: the report of AR-063's breakage, vs AR-063."""
+    """The F-21ceb683 shape: the report of an AR's breakage, vs that AR."""
     rows = _rows()
-    _run([("AR-063", "iib0011/omni-tools")], rows)
-    row = next(r for r in rows if r["finding_id"] == "F-21ceb683")
+    _run([(_AR, _IMG)], rows)
+    row = next(r for r in rows if r["finding_id"] == "F-incident")
     assert row["severity"] == "warning", "audit-integrity finding was suppressed"
-    assert not row["title"].startswith("[AR-063]")
+    assert not row["title"].startswith(f"[{_AR}]")
 
 
 def test_each_guard_is_load_bearing_on_its_own():
-    """Self-reference and nature must each independently exempt a row."""
+    """Self-reference, nature and subsection must each independently exempt."""
     rows = _rows()
-    _run([("AR-063", "iib0011/omni-tools")], rows)
+    _run([(_AR, _IMG)], rows)
     by_id = {r["finding_id"]: r for r in rows}
-    # ordinary nature, but about AR-063 -> caught by the self-ref guard
+    # ordinary nature, but about the AR -> caught by the self-ref guard
     assert by_id["F-selfref"]["severity"] == "warning"
     # no ar_id, but audit-integrity nature -> caught by the nature guard
     assert by_id["F-cover"]["severity"] == "warning"
@@ -211,15 +252,14 @@ def test_each_guard_is_load_bearing_on_its_own():
     assert by_id["F-mediaaudit"]["severity"] == "warning"
 
 
-def test_a_different_ar_still_suppresses_an_audit_row_it_legitimately_covers():
-    """The self-ref guard is scoped to the SAME AR — it must not turn every
-    audit-integrity row into a permanently unsuppressable one for unrelated
-    ARs... except that the NATURE guard does exactly that, deliberately.
-    This pins the intended precedence so a future edit does not silently
-    relax it: audit-integrity is exempt from ALL ARs, not just its own."""
+def test_audit_integrity_is_exempt_from_every_ar_not_only_its_own():
+    """Precedence pin. The self-reference guard is scoped to the SAME AR, so
+    on its own an UNRELATED AR could still eat an audit-integrity row. The
+    NATURE guard deliberately widens that to all ARs. This test fails if a
+    future edit narrows the nature guard to self-reference only."""
     rows = _rows()
-    _run([("AR-099", "AR-063 no longer suppresses")], rows)
-    row = next(r for r in rows if r["finding_id"] == "F-21ceb683")
+    _run([("AR-901", f"{_AR} no longer suppresses")], rows)
+    row = next(r for r in rows if r["finding_id"] == "F-incident")
     assert row["severity"] == "warning", (
         "an audit-integrity finding must be exempt from every AR, not only "
         "the one it names")
@@ -227,20 +267,20 @@ def test_a_different_ar_still_suppresses_an_audit_row_it_legitimately_covers():
 
 def test_ordinary_suppression_still_works():
     rows = [dict(finding_id="F-plain", severity="critical",
-                 title="`apache/superset:5.0.0`: 2 fixable CRITICAL CVE(s)",
+                 title=f"`{_IMG}:1.0.0`: fixable CRITICAL CVE(s)",
                  meta={"risk_nature": "vuln", "subsection": "s4_cve_check"},
                  resolved_at=None)]
-    _, conn, tagged = _run([("AR-052", "apache/superset")], rows)
+    _, conn, tagged = _run([(_AR, _IMG)], rows)
     assert tagged == 1 and rows[0]["severity"] == "accepted"
-    assert rows[0]["title"].startswith("[AR-052] ")
+    assert rows[0]["title"].startswith(f"[{_AR}] ")
 
 
 def test_already_tagged_rows_are_idempotent():
     rows = [dict(finding_id="F-plain", severity="critical",
-                 title="[AR-052] `apache/superset:5.0.0`: 2 fixable CRITICAL CVE(s)",
+                 title=f"[{_AR}] `{_IMG}:1.0.0`: fixable CRITICAL CVE(s)",
                  meta={"risk_nature": "vuln", "subsection": "s4_cve_check"},
                  resolved_at=None)]
-    _, _, tagged = _run([("AR-052", "apache/superset")], rows)
+    _, _, tagged = _run([(_AR, _IMG)], rows)
     assert tagged == 0
 
 
@@ -248,13 +288,35 @@ def test_guard_clauses_are_present_in_the_emitted_sql():
     """Structural backstop: the Python re-implementation above only applies a
     guard it can SEE, so this asserts the SQL actually carries all three."""
     rows = _rows()
-    _, conn, _ = _run([("AR-063", "iib0011/omni-tools")], rows)
+    _, conn, _ = _run([(_AR, _IMG)], rows)
     upd = [s for s, _ in conn.log if s.upper().startswith("UPDATE")]
     assert upd, "no UPDATE was issued"
     sql = upd[0]
     assert "risk_nature" in sql and "<> ALL" in sql, "nature guard missing"
     assert "subsection" in sql and "!~*" in sql, "subsection guard missing"
     assert "'ar_id'" in sql, "self-reference guard missing"
+
+
+def test_the_exemption_count_matches_what_was_held_back():
+    """The operator-visible log line is a real assertion, not decoration.
+
+    The count SELECT is a SEPARATE statement from the UPDATE, mirroring the
+    guard predicate in POSITIVE form. Nothing else checks it, so an edit that
+    inverts one of the two predicates would leave suppression correct and the
+    log line silently lying about it."""
+    rows = _rows()
+    _, conn, _ = _run([(_AR, _IMG)], rows)
+    sel = [(s, p) for s, p in conn.log if s.upper().startswith("SELECT COUNT(*)")]
+    assert sel, "no exemption-count SELECT was issued"
+    sql, _params = sel[0]
+    assert "= ANY" in sql, "count query does not mirror the nature guard"
+    assert "~*" in sql and "!~*" not in sql, (
+        "count query must mirror the subsection guard in POSITIVE form")
+    assert "'ar_id'" in sql and "=" in sql, (
+        "count query does not mirror the self-reference guard")
+    # 4 of the 5 fixture rows are exempt; only F-canon is tagged.
+    assert conn.exempt_count == 4, (
+        f"expected 4 exemptions, predicate counted {conn.exempt_count}")
 
 
 def test_nature_vocabulary_covers_the_values_in_use():

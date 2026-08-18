@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, the paperless-gpt (vision-OCR) and paperless-ai (RAG) add-ons, OCR tuning, and library curation.
-> Version: `2026.07.13`
-> Last Updated: `2026-07-13`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -30,7 +30,7 @@ metadata curation.
 |---------|-------|
 | Namespace | `office` |
 | Source of truth | `kubernetes/apps/office/paperless-ngx/app/` + this SOP + `paperless-agent` |
-| Chart / image | gabe565 `paperless-ngx` · image `2.20.15` |
+| Chart / image | gabe565 `paperless-ngx` · app image `3.0.5`. The `scan-inbox-validator` Deployment **reuses the same tag** (it wants only the image's python3 + pikepdf runtime, and overrides the entrypoint) — bump `helmrelease.yaml` and `validator-deployment.yaml` in the SAME commit, or the validator silently keeps running a retired image. |
 | Ingress | `paperless.${SECRET_DOMAIN}` |
 | **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
 | DB / cache | mariadb (bitnamilegacy, `longhorn-static` PVC) + standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC — old PV `paperless-redis` kept Retain as rollback) |
@@ -146,6 +146,13 @@ process_mail_accounts.delay()
 4. Email: forward an invoice → within 10 min a new document appears; INBOX
    unprocessed-PDF count returns to 0.
 5. Large-doc OCR: a 12+ page PDF consumes without OOM (pod restart count stays 0).
+6. Image parity: the app and the validator must run the SAME tag —
+   `kubectl -n office get deploy paperless-ngx scan-inbox-validator -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.template.spec.containers[0].image}{"\n"}{end}'`.
+   A mismatch means an upgrade bumped the HelmRelease and left the validator behind.
+7. Validator liveness on a new tag: the loop must still turn.
+   `kubectl -n office exec deploy/scan-inbox-validator -- python3 -c "import os;print(os.path.getmtime('/tmp/validator.heartbeat'))"`
+   twice, ~20s apart — the value must advance by `POLL_SECONDS`. A frozen
+   heartbeat means the image lost `python3`/`pikepdf` or the CIFS inbox stalled.
 
 ---
 
