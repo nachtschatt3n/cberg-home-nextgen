@@ -276,6 +276,13 @@ class FindingsWriter:
         # partial (a scanner failed, a port-forward died). Auto-close is a
         # conclusion drawn from ABSENCE, so it must never run on a partial
         # result — the absence would be a tooling gap, not a resolution.
+        # The AUTHORITATIVE list; `_incomplete_reason` is the joined view of it.
+        # Kept as a list because reason details routinely contain "; "
+        # themselves ("HTTP 429; tag list is empty"), so de-duplicating by
+        # splitting the joined string on "; " matches against fragments and can
+        # silently drop a genuinely distinct reason — the exact class of silent
+        # loss this whole mechanism exists to prevent.
+        self._incomplete_reasons: list[str] = []
         self._incomplete_reason: str | None = None
 
         if not self._enabled:
@@ -468,10 +475,10 @@ class FindingsWriter:
         reason = (reason or "").strip()
         if not reason:
             return
-        if self._incomplete_reason is None:
-            self._incomplete_reason = reason
-        elif reason not in self._incomplete_reason.split("; "):
-            self._incomplete_reason += f"; {reason}"
+        if reason in self._incomplete_reasons:
+            return
+        self._incomplete_reasons.append(reason)
+        self._incomplete_reason = "; ".join(self._incomplete_reasons)
 
     def _persist_incomplete(self) -> None:
         """Record this section's incompleteness on the shared cycle row.
