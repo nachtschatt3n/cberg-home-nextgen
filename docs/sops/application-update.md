@@ -110,6 +110,7 @@ kubectl exec -n <ns> <pod> -c <c> -- <app-version-cmd>
 | Symptom | Cause | Action |
 |---|---|---|
 | `spec.selector: field is immutable` | chart relabelled Deployment selectors | delete the Deployments, `reconcile --force` |
+| image bump committed but never reaches the cluster; Flux Kustomization `NotReady` with `Job.batch "<name>" is invalid: spec.template: ... field is immutable` | Job `.spec.template` is immutable after creation, so the apply fails and the whole Kustomization silently stops updating | rename `metadata.name` with the next `vN` suffix so Flux prunes+recreates — `docs/sops/immutable-job-image-bumps.md` (CronJobs are mutable; do NOT rename those) |
 | new pod crash-loops then reverts to old version | Flux `remediation` rollback | disable rollback (Step 2), retry |
 | helm stuck `pending-upgrade` | crash-loop during `--wait`, or hand-deleting pods mid-Recreate | `helm rollback <app> <last-deployed> -n <ns> --wait=false`, then reconcile |
 | `helm rollback` can't reach old version | `maxHistory: 1` pruned it | revert git spec instead (§11) |
