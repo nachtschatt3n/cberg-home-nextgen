@@ -1,4 +1,3 @@
----
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -30,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: production-20260818155406 # {"$imagepolicy": "my-software-production:absenty:tag"}
+              tag: production-20260818170939 # {"$imagepolicy": "my-software-production:absenty:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: TZ
