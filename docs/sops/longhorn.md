@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -411,6 +411,25 @@ kubectl exec -n storage deploy/longhorn-manager -- \
 ---
 
 ## Troubleshooting
+
+### PV `Released` / PVC `Pending` — "volume already bound to a different claim"
+
+Happens when the PVC was deleted+recreated (helm chart renamed the generated
+PVC, a rollback recreated it, etc.): the PV keeps the DELETED claim's uid in
+`spec.claimRef`, so the same-named new PVC cannot bind. With `Retain` PVs the
+data is safe; the fix is one patch — clear the stale binding, never delete:
+
+```bash
+kubectl patch pv <pv-name> --type json \
+  -p '[{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'
+# PV -> Available; the Pending PVC (with matching volumeName/name) binds within seconds.
+```
+
+Prevention: chart-generated PVC names can CHANGE across chart majors
+(app-template 5.x drops `-<key>` for single-item persistence — pin with
+`persistence.<key>.suffix`). Flux-static PVC manifests are immune and match
+the house speaking-name convention — prefer them. Details:
+`docs/sops/application-update.md` §7b.
 
 ### Volume Stuck in Attaching State
 

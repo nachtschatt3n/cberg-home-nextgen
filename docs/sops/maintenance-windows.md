@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 
 ## 1) Description
 
@@ -220,6 +220,26 @@ unresolved `INTERFERENCE` for any window with a date in the future.
 | ORPHAN plan | PR merged/closed elsewhere | set `status: superseded` or delete the file |
 | MISSED window warning | window date passed, plans unexecuted | run `maintenance-window-agent` for the next slot; investigate why it didn't fire |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
+| Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
+| Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |
+
+### Plan-authoring lessons (2026-08-18, bitnamilegacy-exit-phase1 incident)
+
+- **Verify RBAC per kubectl SUBCOMMAND in plan Jobs.** `kubectl wait
+  --for=delete pod/<name>` (and any by-name `get pod/<name>`) needs the `get`
+  verb — `list`+`watch` is NOT enough. A selector-form
+  `kubectl wait --for=delete pod -l <sel>` rides `list`. Dry-run the exact
+  commands under the Job's ServiceAccount (`kubectl auth can-i get pods
+  --as=system:serviceaccount:<ns>:<sa>`) as a plan pre-check.
+- **Scale-down/up Jobs must not strand the workload.** If a Job's init chain
+  is scale-down → wait → work → scale-up, EVERY retry re-runs scale-down and a
+  mid-chain failure leaves the app at 0 replicas until intervention. Either
+  make scale-up unconditional (separate container/Job that always runs) or
+  cap `backoffLimit` low and pair the plan with an explicit "restore replicas"
+  rollback step.
+- **A plan's "resource X unchanged, re-verified" claim is an assertion to
+  RE-TEST at execution time**, not a fact — the paperclip Role claim was wrong
+  and cost a 15-min outage.
 
 ## 8) Diagnose Examples
 

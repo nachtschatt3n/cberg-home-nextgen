@@ -1,7 +1,7 @@
 # SOP: Application Version Update / Upgrade
 
-> Version: `2026.07.18`
-> Last Updated: `2026-07-18`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 
 ## 1) Description
 
@@ -113,6 +113,41 @@ kubectl exec -n <ns> <pod> -c <c> -- <app-version-cmd>
 | new pod crash-loops then reverts to old version | Flux `remediation` rollback | disable rollback (Step 2), retry |
 | helm stuck `pending-upgrade` | crash-loop during `--wait`, or hand-deleting pods mid-Recreate | `helm rollback <app> <last-deployed> -n <ns> --wait=false`, then reconcile |
 | `helm rollback` can't reach old version | `maxHistory: 1` pruned it | revert git spec instead (§11) |
+| PVC `Pending`, events say `volume already bound to a different claim` | old PVC deleted (e.g. chart renamed it); PV is `Released` with stale `claimRef` uid | `kubectl patch pv <pv> --type json -p '[{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'` — PV goes `Available`, same-name PVC rebinds. Retain PVs only; NEVER delete the PV |
+| HR retry loop applies a HALF-landed fix (e.g. pre-fix render deletes/recreates PVCs) | Flux retried the failing upgrade before the git fix revision reached the HR spec | suspend the HR across the fix push (`flux suspend hr` → push → verify spec updated → `flux resume hr`), or verify kustomization+HR are on the fix revision before any retry can start |
+
+### 7b) Library-chart MAJOR migrations (learned from app-template 3.7.3→5.1.0, 2026-08-18)
+
+A major bump of a **library chart that wraps many apps** (bjw-s app-template et al.)
+is a migration, not an update. Beyond the immutable-selector dance above:
+
+1. **PVC NAME CONTINUITY — diff rendered PVC names against live before bumping.**
+   app-template 5.x drops the `-<key>` suffix for single-item `persistence`
+   blocks, silently renaming the generated PVC (`app-uploads` → `app`). With
+   `longhorn-static` speaking-name PVs this orphans the PV (`Released`, stale
+   claimRef) and strands the new pod `Pending`. Fix in values, same commit as
+   the bump: `persistence.<key>.suffix: <key>` pins the old name. Apps whose
+   PVCs are **Flux-static manifests** (not chart-generated) are immune — prefer
+   that pattern for new apps. Recovery for already-orphaned PVs: claimRef
+   uid-clear (table above). All data survived because the PVs were `Retain` —
+   another reason that policy is non-negotiable.
+2. **Values are schema-validated from 5.x** (`values.schema.json`) — a
+   restructured key (e.g. `serviceAccount` map form) HARD-FAILS the render, so
+   value migrations must land **in the same commit** as the version bump.
+   Watch for `global.createDefaultServiceAccount` colliding with an
+   existing kustomize-owned ServiceAccount of the same name.
+3. **Re-verify guard values survived the major**: rendered
+   `strategy: Recreate` (RWO multi-attach guard,
+   `docs/sops/longhorn-rwo-multi-attach.md`), probes, securityContext —
+   chart defaults move across majors.
+4. **Frozen-registry blind spot**: if Renovate shows NO update for a chart in
+   years, check whether the OCI repo MOVED (bjw-s → bjw-s-labs; also grafana,
+   k8s-gateway). Repoint `kubernetes/flux/meta/repositories/` first — verify
+   the CURRENT pinned version also exists at the new repo so the repoint is
+   inert on its own.
+5. **Batch by blast tier** (canary → stateless → smart-home broker-first →
+   stateful → external tunnel LAST, alone) and gate each tier on full green +
+   zero PVC-uid churn before the next.
 
 ## 8) Diagnose Examples
 
