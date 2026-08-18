@@ -4,21 +4,34 @@ component: unpoller
 pr: null                              # no Renovate PR open (image lives in chart
                                       # values `image.tag`); held via sweep finding
                                       # F-a5ceabc1 (section: version) — direct bump.
-kind: image
-current: "v2.39.0"
-target: "v3.5.0"                      # RETARGETED 2026-08-18 from v3.4.1: v3.5.0 published
-                                      # the same day and fixes an input-plugin panic reported
-                                      # on our exact controller version (see §1.3). Delta is
-                                      # 12 commits / 6 files — fully enumerated below.
+kind: image+chart                     # BOTH halves, one window — see §1.4
+current: "image v2.39.0 / chart 2.1.0"
+target: "image v3.5.0 + chart 2.4.0"  # RETARGETED 2026-08-18 (twice). (a) image v3.4.1 ->
+                                      # v3.5.0: published the same day, fixes an input-plugin
+                                      # panic reported on our exact controller version (§1.3).
+                                      # (b) chart 2.1.0 -> 2.4.0: this plan originally said
+                                      # "upstream has published no v3-aware chart; 2.1.0 is
+                                      # its newest". TRUE when written this afternoon, FALSE
+                                      # hours later — chart 2.3.0 (appVersion v3.4.1) shipped
+                                      # 2026-08-18 00:37Z and 2.4.0 (appVersion v3.5.0) at
+                                      # 14:52Z. The chart must move WITH the image: 2.4.0
+                                      # changes three templates our HelmRelease depends on
+                                      # (§1.4), and a chart-only bump would put a v3-aware
+                                      # chart on a v2 image.
 update_type: major
 risk: medium
-est_duration_min: 30                  # + a 24h metric-continuity soak before the
+est_duration_min: 45                  # +15m for the chart-side template changes (§1.4);
+                                      # + a 24h metric-continuity soak before the
                                       # dashboards/alerts follow-up is judged
 needs_reboot: false
 touches:
   namespaces: [monitoring]
   resources:
-    - helmrelease/unpoller                    # image.tag bump; chart stays 2.1.0
+    - helmrelease/unpoller                    # image.tag bump AND chart 2.1.0 -> 2.4.0
+    - service/unpoller                        # chart 2.4.0 ADDS a Service template that
+                                              # collides with our hand-written one (§1.4)
+    - podmonitor/unifi-poller                 # chart 2.4.0 makes it conditional; the
+                                              # postRenderer that deletes it can go (§1.4)
     - deployment/unpoller                     # rolls (RollingUpdate, stateless, no PVC)
     - "metric continuity: 5 provisioned Grafana dashboards (network-sites, uap/usg/usw/client-insights) — all query unpoller_* via the Prometheus datasource"
     - prometheusrule/unifi-alerts             # not edited, but its one LIVE rule changes meaning (see notes)
@@ -43,17 +56,23 @@ sops_refs:
   - docs/sops/unifi-controller-rate-limit.md
   - docs/sops/monitoring.md
 generated: "2026-08-18"
-retargeted: "2026-08-18"              # v3.4.1 -> v3.5.0; analysis re-verified against the v3.4.1...v3.5.0 diff
+retargeted: "2026-08-18"              # v3.4.1 -> v3.5.0 (image) AND +chart 2.4.0; both
+                                      # deltas re-verified against the upstream diffs
 ---
 
-# unpoller v2.39.0 → v3.5.0 (image major)
+# unpoller v2.39.0 → v3.5.0 (image major) + chart 2.1.0 → 2.4.0
 
 ## 1. Summary & why held
 
-Bump `ghcr.io/unpoller/unpoller` from v2.39.0 to v3.5.0 in the unpoller
-HelmRelease values (chart stays `unpoller@2.1.0` — the upstream helm-chart repo
-has published **no v3-aware chart**; 2.1.0 is its newest and is a thin
-deployment+secret chart, expected to run the v3 image unchanged).
+Bump `ghcr.io/unpoller/unpoller` from v2.39.0 to v3.5.0 **and** the `unpoller`
+chart from 2.1.0 to 2.4.0, in the SAME window, as one change.
+
+> **Premise correction (2026-08-18, evening).** This plan was written this
+> afternoon saying *"the upstream helm-chart repo has published no v3-aware
+> chart; 2.1.0 is its newest"*. That was true when written and went stale hours
+> later: chart **2.3.0** (appVersion `v3.4.1`) was published 2026-08-18 00:37Z
+> and **2.4.0** (appVersion `v3.5.0`) at 14:52Z. Both halves now move together —
+> see §1.4 for the three chart template changes that actually touch us.
 
 Held because it is a **major** with two documented breaking changes (sweep
 finding `F-a5ceabc1`):
@@ -116,6 +135,43 @@ finding `F-a5ceabc1`):
    - Not applicable to us: the `alarms` endpoint 400 fix — our config sets
      `save_alarms = false`.
 
+4. **Chart 2.1.0 → 2.4.0 (new, 2026-08-18) — three template changes that hit
+   THIS HelmRelease.** Diffed 2.1.0 vs 2.4.0 tarballs; the chart is still a thin
+   deployment+secret chart, but:
+   - **`service.enabled` is now a real template (default `false`) — a NAME
+     COLLISION with our hand-written Service.** 2.1.0 had no Service template at
+     all, which is why `kubernetes/apps/monitoring/unpoller/app/service.yaml`
+     exists and why our `values.service.enabled: true` has been inert. Under
+     2.4.0 that value suddenly RENDERS `Service/unpoller` in `monitoring` — the
+     same name our Kustomization already owns. Two owners for one object, and
+     the chart's port is named **`tcp`** while `servicemonitor.yaml` scrapes
+     `port: http`: if the chart's Service wins, the ServiceMonitor selects a
+     Service with no `http` port, the scrape target disappears, and **every**
+     `unpoller_*` series stops — dashboards, alerts and the SLO all at once,
+     with a green HelmRelease. **Action: set `service.enabled: false` in
+     values** and keep the hand-written Service (it is the one the ServiceMonitor
+     is written against). This is exactly the vetting an unattended chart-only
+     bump would have skipped.
+   - **`podMonitor.enabled` is now honoured.** 2.1.0 rendered
+     `templates/pod-monitor.yaml` unconditionally, which is why the HelmRelease
+     carries a `postRenderers` kustomize `$patch: delete` for
+     `PodMonitor/unifi-poller` (a second 30s scrape doubles UniFi API load and
+     duplicates every series). 2.4.0 wraps it in `{{- if .Values.podMonitor.enabled }}`
+     and our values already say `false`, so **the postRenderer becomes dead
+     code — remove it in the same commit** (leaving it is harmless but keeps a
+     misleading comment in the manifest).
+   - **`upConfigExistingSecret` added — do NOT adopt it here.** Our config comes
+     from `valuesFrom` → `upConfig` (SOPS secret `unpoller-credentials`), which
+     still renders the chart-managed secret exactly as today. Switching to the
+     new mechanism is an unrelated refactor; not in this window.
+   - Also new and unused by us: `extraEnv`, `priorityClassName`, and a
+     whitespace-only fix in the default `upConfig` (we override it).
+   - **appVersion is now `v3.5.0`** (2.1.0 said `v2.21.0`). We pin `image.tag`
+     explicitly, so appVersion never selects the image for us — but it is the
+     reason the chart and image must move together: chart 2.4.0 is written for
+     the v3 image, and shipping it against `tag: v2.39.0` is an untested pairing
+     that nobody planned.
+
 ### Blast radius enumeration (what queries unpoller metric names)
 
 | Consumer | Prefix used | Live today? |
@@ -167,12 +223,34 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
    ```bash
    runbooks/update-marker.sh add unpoller monitoring 4 "v2.39.0->v3.5.0 major"
    ```
-2. Edit `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`:
+2. Edit `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml` — **chart and
+   image in ONE commit** (§1.4):
    ```yaml
+     chart:
+       spec:
+         chart: unpoller
+         version: 2.4.0     # was 2.1.0
+   ...
        image:
          repository: ghcr.io/unpoller/unpoller
          pullPolicy: IfNotPresent
          tag: v3.5.0        # was v2.39.0
+   ...
+       service:
+         enabled: false     # was true — INERT on 2.1.0 (no Service template),
+                            # but 2.4.0 renders Service/unpoller and collides
+                            # with our hand-written service.yaml, whose port is
+                            # named `http` (the ServiceMonitor selects on it)
+   ```
+   …and DELETE the now-dead `postRenderers:` block (chart 2.4.0 honours
+   `podMonitor.enabled: false`, which our values already set).
+
+   Render before pushing — this is the gate that catches the Service collision:
+   ```bash
+   mise exec -- helm template unpoller unpoller/unpoller --version 2.4.0 \
+     -f /tmp/unpoller-values.yaml | grep -E '^kind:|^  name:'
+   # expect: Deployment + Secret + ServiceAccount only.
+   # NO Service, NO PodMonitor. If either appears, stop — the values are wrong.
    ```
    **Do not touch `secret.sops.yaml`.** The existing `up.conf` TOML
    (`[unifi]`/`[[unifi.controller]]` user+pass, `[prometheus]`, `[influxdb]`)
@@ -196,7 +274,7 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 3. Commit + push (hunk-scoped, this file only):
    ```bash
    git add kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml
-   git commit -m "feat(unpoller)!: v2.39.0 -> v3.5.0 (plan unpoller-v3, F-a5ceabc1)"
+   git commit -m "feat(unpoller)!: chart 2.1.0 -> 2.4.0 + image v2.39.0 -> v3.5.0 (plan unpoller-v3, F-a5ceabc1)"
    git push
    ```
 4. Watch the rollout — startup log is the config-compat gate (no local way to
@@ -217,8 +295,16 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 ## 4. Verification
 
 ```bash
-# scrape target up, HR Ready
-kubectl get hr -n monitoring unpoller -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
+# scrape target up, HR Ready ON THE NEW CHART
+kubectl get hr -n monitoring unpoller \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} chart={.status.history[0].chartVersion}{"\n"}'   # True 2.4.0
+
+# chart-side collision check (§1.4): exactly ONE Service, ours, with an `http`
+# port — and no chart PodMonitor
+kubectl get svc -n monitoring unpoller -o jsonpath='{.spec.ports[*].name}{"\n"}'   # http
+kubectl get podmonitor -n monitoring unifi-poller 2>&1 | tail -1                   # NotFound
+kubectl get servicemonitor -n monitoring unpoller -o jsonpath='{.spec.endpoints[0].port}{"\n"}'  # http
+
 curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=up{job="unpoller"}'   # == 1
 
 # metric surface survived the API rebase (within ~20% of the 7886 baseline;
@@ -259,7 +345,10 @@ rule — see §1.3, the metric already exists) + the stale
 ## 5. Rollback
 
 ```bash
-git revert <bump-commit-sha> && git push     # single-file revert of the tag bump
+git revert <bump-commit-sha> && git push     # single-file revert: chart 2.4.0 -> 2.1.0,
+                                            # image v3.5.0 -> v2.39.0, service.enabled
+                                            # back to true, postRenderer restored — all
+                                            # in one commit, so one revert undoes both halves
 flux reconcile kustomization unpoller -n flux-system --with-source   # optional: skip the 30m wait
 kubectl rollout status deployment/unpoller -n monitoring --timeout=120s
 # confirm back: image v2.39.0, up{job="unpoller"} == 1, series count back at baseline
