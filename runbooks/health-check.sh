@@ -662,7 +662,31 @@ log_section "Section 1: Cluster Events & Logs"
     echo "Warning events: $WARNING_COUNT"
 
     OOM_COUNT=$(safe_count "kubectl get events -A --field-selector reason=OOMKilled 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
-    echo "OOM kills: $OOM_COUNT"
+    OOM_COUNT=$((10#${OOM_COUNT:-0}))   # strip leading zeros: "010" must not parse as octal
+    echo "OOM kills (events reason=OOMKilled): $OOM_COUNT"
+
+    # Second authoritative control. Events age out of etcd, so a pod that was
+    # OOMKilled hours ago can have no surviving event while its containerStatus
+    # still records it. Neither control is a log line -- OOMKilled is a pod-status
+    # reason and NEVER appears in log text, which is why grepping logs for it
+    # always returns 0 and proves nothing.
+    OOM_LASTSTATE=$(kubectl get pods -A -o json 2>/dev/null | python3 -c "
+import sys, json
+n = 0
+try:
+    for p in json.load(sys.stdin).get('items', []):
+        for cs in (p.get('status', {}).get('containerStatuses') or []):
+            if (cs.get('lastState', {}).get('terminated', {}) or {}).get('reason') == 'OOMKilled':
+                n += 1
+                print('  OOMKilled lastState: %s/%s [%s]' % (p['metadata']['namespace'], p['metadata']['name'], cs['name']))
+except Exception:
+    pass
+print(n)
+" 2>/dev/null || echo "0")
+    echo "$OOM_LASTSTATE" | sed '$d'
+    OOM_LASTSTATE=$(echo "$OOM_LASTSTATE" | tail -1 | tr -cd '0-9'); [ -z "$OOM_LASTSTATE" ] && OOM_LASTSTATE=0
+    OOM_LASTSTATE=$((10#$OOM_LASTSTATE))
+    echo "OOM kills (pods with OOMKilled lastState): $OOM_LASTSTATE"
 
     EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
     echo "Pod evictions: $EVICTED_COUNT"
@@ -676,11 +700,11 @@ log_section "Section 1: Cluster Events & Logs"
         log_success "No warning events"
     fi
 
-    if [ "$OOM_COUNT" -gt 0 ]; then
-        log_critical "OOM kills detected: $OOM_COUNT"
-        add_critical_issue "OOM kills detected: $OOM_COUNT pods"
+    if [ "$OOM_COUNT" -gt 0 ] || [ "$OOM_LASTSTATE" -gt 0 ]; then
+        log_critical "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
+        add_critical_issue "OOM kills detected: $OOM_COUNT event(s), $OOM_LASTSTATE pod(s) with OOMKilled lastState"
     else
-        log_success "No OOM kills"
+        log_success "No OOM kills (both controls: events=0, lastState=0)"
     fi
 
     if [ "$EVICTED_COUNT" -gt 0 ]; then
@@ -1962,11 +1986,15 @@ for kind in ('imageupdateautomation', 'imagepolicy', 'imagerepository'):
 for b in bad:
     print('  NOT-READY: ' + b)
 print(len(bad))
-" 2>/dev/null || echo "0")
+" 2>/dev/null || echo "ERR")
         # Last line is the count; everything before it is per-object detail.
         # (Deliberately NOT `tee /dev/stderr`: when stderr is an append-redirected
         # regular file, Linux reopens /dev/fd/2 at offset 0 and clobbers the report.)
         echo "$IMG_NOT_READY_OUT" | sed '$d'
+        if echo "$IMG_NOT_READY_OUT" | tail -1 | grep -q ERR; then
+            log_warning "Image-automation readiness query failed - assertion did NOT run"
+            add_major_issue "Flux image-automation readiness assertion did not run (kubectl/python failure)"
+        fi
         IMG_NOT_READY=$(echo "$IMG_NOT_READY_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_NOT_READY" ] && IMG_NOT_READY=0
 
         # (2) SILENT-FAILURE SHAPE: automation runs on schedule but has NEVER
@@ -2046,8 +2074,12 @@ for u in unproven:
 for x in silent:
     print('  SILENT-NO-PUSH: ' + x)
 print(len(silent))
-" 2>/dev/null || echo "0")
+" 2>/dev/null || echo "ERR")
         echo "$IMG_SILENT_OUT" | sed '$d'
+        if echo "$IMG_SILENT_OUT" | tail -1 | grep -q ERR; then
+            log_warning "Image-automation push query failed - assertion did NOT run"
+            add_major_issue "Flux image-automation push assertion did not run (kubectl/python failure)"
+        fi
         IMG_SILENT=$(echo "$IMG_SILENT_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_SILENT" ] && IMG_SILENT=0
 
         if [ "$IMG_SILENT" -gt 0 ]; then
@@ -4334,8 +4366,8 @@ import sys, json
 try:
     print(json.load(sys.stdin)['hits']['total']['value'])
 except Exception:
-    print('0')
-" || echo "0"
+    print('ERR')
+" || echo "ERR"
         }
 
         # A) Fatal-level log text, benign + connection-exhaustion classes removed
@@ -4361,10 +4393,18 @@ except Exception:
             '{"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
              {"wildcard": {"body.text": {"value": "*disconnected due to out of memory*", "case_insensitive": true}}}')
 
+        # A failed query must NOT read as a clean zero. es_count emits ERR on any
+        # parse/transport failure; surface it instead of silently scoring green.
+        if echo "${FATAL_TEXT_COUNT}${CONN_EXHAUST_COUNT}${OOM_TEXT_COUNT}" | grep -q ERR; then
+            log_warning "Elasticsearch fatal/OOM queries failed - these three assertions did NOT run"
+            add_major_issue "Elasticsearch log assertions did not run (query failure) - fatal/connection/OOM coverage is blind for this cycle"
+            FATAL_TEXT_COUNT=0; CONN_EXHAUST_COUNT=0; OOM_TEXT_COUNT=0
+            ES_LOG_ASSERTIONS_FAILED=1
+        fi
         echo "  Fatal-level log lines, benign classes excluded (24h): $FATAL_TEXT_COUNT"
         echo "  DB connection-exhaustion log lines (24h):             $CONN_EXHAUST_COUNT"
         echo "  Out-of-memory log lines (24h):                        $OOM_TEXT_COUNT"
-        echo "  (authoritative OOM control, events reason=OOMKilled:  ${OOM_COUNT:-0})"
+        echo "  (authoritative OOM controls: events=${OOM_COUNT:-0}, pod lastState=${OOM_LASTSTATE:-0})"
         echo ""
 
         kill $PF_PID 2>/dev/null || true
@@ -4378,6 +4418,10 @@ except Exception:
         [ -z "$CONN_EXHAUST_INT" ] && CONN_EXHAUST_INT=0
         OOM_TEXT_INT=$(echo "$OOM_TEXT_COUNT" | tr -cd '0-9' || echo "0")
         [ -z "$OOM_TEXT_INT" ] && OOM_TEXT_INT=0
+
+        if [ "${ES_LOG_ASSERTIONS_FAILED:-0}" -eq 1 ]; then
+            log_info "Skipping fatal/connection/OOM verdicts - the queries did not run (see warning above)"
+        else
 
         # A) Fatal-level text -- TIERED, not >0. Floors chosen against the measured
         # 24h baseline of 14 residual hits so ordinary pod-restart noise cannot pin
@@ -4397,7 +4441,10 @@ except Exception:
         # B) Connection exhaustion -- its own, lower-severity assertion. These come
         # in restart-tied bursts (a pool reconnecting), so they are a capacity/pool
         # signal, not a fatal-error signal.
-        if [ "$CONN_EXHAUST_INT" -ge 500 ]; then
+        if [ "$CONN_EXHAUST_INT" -ge 5000 ]; then
+            log_critical "DB connection exhaustion at outage scale: $CONN_EXHAUST_INT in 24h"
+            add_critical_issue "DB connection exhaustion: $CONN_EXHAUST_INT log lines in 24h (sustained pool exhaustion is an availability outage)"
+        elif [ "$CONN_EXHAUST_INT" -ge 500 ]; then
             log_warning "DB connection exhaustion sustained: $CONN_EXHAUST_INT in 24h"
             add_major_issue "DB connection exhaustion: $CONN_EXHAUST_INT log lines in 24h"
         elif [ "$CONN_EXHAUST_INT" -ge 100 ]; then
@@ -4412,18 +4459,24 @@ except Exception:
         # C) OOM log text. The CRITICAL OOM verdict belongs to OOM_COUNT (events)
         # above; this corroborates it and catches in-process OOM that never
         # produces an OOMKilled pod status (JVM heap, ffmpeg allocation failures).
-        if [ "$OOM_TEXT_INT" -gt 0 ] && [ "${OOM_COUNT:-0}" -gt 0 ]; then
-            log_critical "OOM confirmed by both controls: $OOM_COUNT OOMKilled events, $OOM_TEXT_INT log lines"
-            add_critical_issue "OOM: $OOM_COUNT OOMKilled events and $OOM_TEXT_INT OOM log lines in 24h"
+        if [ "$OOM_TEXT_INT" -gt 0 ] && { [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; }; then
+            log_critical "OOM confirmed by both controls: $OOM_TEXT_INT log lines, events=${OOM_COUNT:-0} lastState=${OOM_LASTSTATE:-0}"
+            add_critical_issue "OOM: $OOM_TEXT_INT OOM log lines with pod-state confirmation (events=${OOM_COUNT:-0}, lastState=${OOM_LASTSTATE:-0})"
         elif [ "$OOM_TEXT_INT" -ge 100 ]; then
             log_warning "In-process OOM log lines (no OOMKilled events): $OOM_TEXT_INT in 24h"
             add_major_issue "In-process OOM log lines: $OOM_TEXT_INT in 24h"
         elif [ "$OOM_TEXT_INT" -gt 0 ]; then
             log_warning "OOM log lines present (no OOMKilled events): $OOM_TEXT_INT in 24h"
             add_minor_issue "OOM log lines: $OOM_TEXT_INT in 24h"
+        elif [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; then
+            # Pod state says OOM, log text does not. Section 1 already raised the
+            # CRITICAL; do not print a success line next to a live OOM.
+            log_info "No OOM log text, but the pod-state controls are non-zero (events=${OOM_COUNT:-0}, lastState=${OOM_LASTSTATE:-0}) - see Section 1"
         else
-            log_success "No out-of-memory log lines in 24h (OOMKilled events: ${OOM_COUNT:-0})"
+            log_success "No out-of-memory log lines in 24h (both pod-state controls also 0)"
         fi
+
+        fi  # end ES_LOG_ASSERTIONS_FAILED guard
 
         if [ "$TOTAL_ERRORS_INT" -gt 10000 ]; then
             log_warning "High error count in logs: $TOTAL_ERRORS_INT (>10,000 threshold)"

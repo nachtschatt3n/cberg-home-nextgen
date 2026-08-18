@@ -77,7 +77,7 @@ The automation itself is normal and correct — the defect is never here:
 
 ```yaml
 # kubernetes/apps/<namespace>/<app>/app/image-automation.yaml (abridged)
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1   # v1 only; v1beta2 is gone since the Flux 2.7 image-API GA
 kind: ImageUpdateAutomation
 spec:
   interval: 30m
@@ -139,6 +139,11 @@ credential at all. `kubeconform` cannot catch this either: the offending text is
 > These steps change cluster credentials. Steps 1–2 are read-only. Steps 3–5 are the
 > documented remediation and require operator go/no-go because the PAT's scope is
 > operator-owned.
+>
+> **For the 2026-08-18 incident this is now historical** — step 3b was executed in
+> `505fefa4`. What remains genuinely open is the credential-scope verification in §10
+> (is the live token a fine-grained PAT or an account-wide classic `repo` PAT?) and
+> branch protection on `main`. Do not re-run steps 3–5 for that incident.
 
 1. **Confirm the shape** (read-only) — §8 Diagnose Example 1.
 2. **Confirm which half is missing** (read-only): does the secret exist, and is the
@@ -167,7 +172,10 @@ credential at all. `kubeconform` cannot catch this either: the offending text is
    #   password: <FINE_GRAINED_PAT>  # never paste this into a shell history or a commit
    ```
 
-3b. **Fix the field name** (the 2026-08-18 case — credential already existed):
+3b. **Fix the field name** (the 2026-08-18 case — credential already existed).
+   **STATUS: this landed in `505fefa4` on 2026-08-18**; `helm-values.yaml` now carries
+   `pullSecret:` and the generated GitRepository has the credential. Kept here as the
+   procedure, not as an open action. Step 3a was never needed — the secret pre-existed.
 
    ```bash
    cd /Users/mu/code/cberg-home-nextgen
@@ -226,8 +234,8 @@ the same two objects within 22 minutes on 2026-08-18, with no intervening change
 
 At 16:35 the object is `Ready=True`, `reason=Succeeded`, message `repository
 up-to-date` — indistinguishable from healthy by every ordinary Flux signal — while
-`lastPushCommit` is still `null` after **218 days** and not one commit has ever been
-pushed. "Up-to-date" here means *the controller compared and found nothing it was able
+`lastPushCommit` is still `null` and not one commit has ever been pushed (duration
+and affected workloads: `security_ref: F-4c1f9ab2`). "Up-to-date" here means *the controller compared and found nothing it was able
 to write*, not *the cluster is running the latest image*.
 
 **Consequence for any check you write:** a not-Ready assertion alone MISSES this most
@@ -268,7 +276,13 @@ for i in json.load(sys.stdin)['items']:
 ```
 
 Expected:
-- Every non-suspended automation reports a non-null `push=` within one interval.
+- Every automation that has a **pending** update (its ImagePolicy resolved a tag that is
+  not deployed) reports a non-null `push=` within one interval.
+- An automation with nothing to change legitimately keeps `push= None` forever. That is
+  not a failure — its push path is merely *unproven*. To prove it, give it something to
+  push (regress the tag by one step and let it push back), or wait for the next real
+  image build. `runbooks/health-check.sh` reports this case as
+  `NEVER-PUSHED-BUT-IDLE` at info level and does not escalate it.
 
 If failed:
 - Non-null secretRef but still no push → the credential is real but **read-only**.
@@ -430,6 +444,28 @@ Expected:
 - Granting write access to the cluster's git remote widens the blast radius of any
   in-cluster compromise. Prefer a **deploy key** (single repository by construction)
   over a PAT (account-scoped) where GitHub allows it.
+- **Say the blast radius plainly: git write access to this repo is equivalent to
+  cluster admin.** Flux reconciles `main` continuously, so anyone holding this
+  credential can push arbitrary manifests that the cluster then applies. Neither a
+  deploy key nor a fine-grained PAT can be scoped to a path — the credential that lets
+  Flux bump one image tag lets it rewrite every manifest in the cluster. Require branch
+  protection on `main` (block force-push and deletion); a write-enabled deploy key can
+  otherwise force-push and delete branches.
+- **The deploy-key option requires an SSH remote.** Step 3a's secret template is the
+  HTTPS basic-auth (PAT) shape. A deploy key additionally requires changing
+  `FluxInstance.spec.sync.url` from `https://` to `ssh://git@github.com/<owner>/<repo>`
+  and a secret with `identity` / `identity.pub` / `known_hosts` keys instead of
+  `username` / `password`. Following 3a with a deploy key but an https URL produces a
+  non-working config with no useful error. Choose one path and change both halves.
+- **Expiry is a silent re-break, and the §9 health check will NOT catch it.** Fine-grained
+  PATs expire; deploy keys do not. When a PAT expires the automation keeps running,
+  keeps resolving tags, and stops pushing — but `lastPushCommit` stays non-null from the
+  pre-expiry pushes, so the "has it ever pushed" assertion reads healthy. If you choose
+  the PAT, record its expiry date in §2 and set a calendar reminder; the durable fix is
+  to assert push *freshness* against a pending ImagePolicy update, not mere presence.
+- **Rotation procedure** (revocation first — a value that reached a public repo cannot be
+  recalled from clones): revoke at GitHub → `mise exec -- sops` the new value in-path →
+  commit + push → confirm `lastPushCommit` advances on the next pending update.
 
 ---
 
@@ -468,9 +504,17 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
 
 ## Version History
 
+- `2026.08.18` (rev 2): Remediation executed in `505fefa4` (field-name fix; no new
+  credential was needed). Corrected the §3 blueprint from the retired
+  `image.toolkit.fluxcd.io/v1beta2` to `v1` — the live CRD serves v1 only since the
+  Flux 2.7 image-API GA. Added the null-but-idle distinction to §2/§6/§9, the SSH
+  requirement for the deploy-key path, PAT expiry/rotation guidance, and the plain
+  statement that repo write access is cluster-admin-equivalent here. OPEN: verify the
+  live token's scope class and add branch protection on `main`.
 - `2026.08.18`: Initial version. Written from the 2026-08-18 sweep finding: both
   `absenty-image-updates` automations had `lastPushCommit: null` since creation
-  (218d) because the `flux-system` GitRepository carried no `secretRef`. Root cause
+  because the `flux-system` GitRepository carried no `secretRef` (duration and
+  affected workloads: `security_ref: F-4c1f9ab2`). Root cause
   traced to `FluxInstance.spec.sync` accepting `pullSecret` (string) while the repo
   declared `secretRef` (object), which the apiserver pruned silently. Remediation
   documented, not executed — the PAT scope is operator-owned. Also records the

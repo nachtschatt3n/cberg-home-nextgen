@@ -739,7 +739,40 @@ kubectl logs -n network deployment/external-dns --tail=50 | grep -iE "error|fail
 **Objective**: Ensure GitOps reconciliation is working
 **Success Criteria**: All sources and kustomizations reconciled, Flux controllers healthy
 
-**Automated**: Git sources, OCI sources, HelmRepositories, Kustomizations, and Flux controller pod status are all checked by the script.
+**Automated**: Git sources, OCI sources, Kustomizations, Flux controller pod status,
+and the **Flux image-automation family** (`ImageUpdateAutomation` / `ImagePolicy` /
+`ImageRepository`) are all checked by the script. (HelmRepositories are checked in §5,
+not here.)
+
+**Flux image automation** — two assertions, added 2026-08-18:
+
+```bash
+# 1. not-Ready across all three kinds
+kubectl get imageupdateautomation,imagepolicy,imagerepository -A
+
+# 2. the SILENT-NO-PUSH shape: ran recently, never pushed, AND has something to push
+kubectl get imageupdateautomation -A -o wide   # lastPushCommit is NOT in the wide output
+kubectl get imageupdateautomation -A -o json | python3 -c "
+import sys, json
+for i in json.load(sys.stdin)['items']:
+    st = i.get('status', {})
+    print(i['metadata']['namespace'], i['metadata']['name'],
+          'push=', st.get('lastPushCommit'), 'run=', st.get('lastAutomationRunTime'))"
+```
+
+- The tell is `lastPushCommit` null while `lastAutomationRunTime` advances. An
+  automation that has pushed even once keeps a non-null `lastPushCommit` forever.
+- **`lastPushCommit: null` alone is NOT a fault.** An automation whose policy tag already
+  matches what is deployed has never had a change to make and would report null forever.
+  The script escalates only when the null coincides with a *pending* update (the
+  ImagePolicy resolved a tag that is not deployed in that namespace); the idle case is
+  reported as `NEVER-PUSHED-BUT-IDLE` at info level.
+- Suspended automations are exempt. Severity is **MAJOR, not CRITICAL** — remediation
+  needs operator-owned credentials, and a CRITICAL would pin the sweep red for days.
+- **Never conclude image automation is healthy from `Ready=True` or a green
+  `flux get` table.** The Ready condition flaps to True/"repository up-to-date" on every
+  reconcile where the tag has not moved, i.e. it is green precisely when the fault is
+  present. Full SOP: `docs/sops/flux-image-automation-push-auth.md`.
 
 **Commands to Execute:**
 ```bash
@@ -1602,8 +1635,9 @@ for i in json.load(sys.stdin):
 **Error Rate Thresholds:**
 - **Normal**: <1000 errors/day (mostly benign)
 - **Monitor**: 1000-5000 errors/day (review error patterns)
-- **Warning**: 5000-10000 errors/day (investigate top error sources)
-- **Critical**: >10000 errors/day
+- **Minor**: 5000-10000 errors/day (investigate top error sources)
+- **Major**: >10000 errors/day  (the script emits log_warning + add_major_issue here;
+  it never raises a CRITICAL on total error count)
 
 **Fatal-level thresholds** (post-exclusion count; tiered so that ordinary pod-restart
 noise cannot pin a permanent CRITICAL — the pre-2026-08-18 rule was `>0 ⇒ CRITICAL`,
@@ -1617,8 +1651,24 @@ which structurally could never clear):
 bursts and are a pool/capacity signal, not a fatal-error signal):
 - **Monitor**: 1–99 · **Minor**: 100–499 · **Major**: ≥500
 
-**OOM**: any OOMKilled event or pod `lastState` ⇒ CRITICAL. Log-text OOM without an
-OOMKilled event ⇒ warning (in-process OOM).
+**OOM**: any OOMKilled **event** or pod **`lastState`** ⇒ CRITICAL. Both controls are
+implemented in Section 1, which owns the OOM verdict — §34 only corroborates it, so a
+CRITICAL for OOM will appear in Section 1's output, not here. Log-text OOM with no
+pod-state confirmation ⇒ warning (in-process OOM: JVM heap, ffmpeg allocation failures).
+
+**Assertion B — connection exhaustion** (`should` clauses; `must_not` = flux-system +
+`*database system is shutting down*`):
+`*too many clients already*`, `*too many connections*`, `*remaining connection slots*`
+Tiers: 1-99 monitor · 100-499 minor · 500-4999 major · **>=5000 critical** (sustained
+pool exhaustion is an availability outage).
+
+**Assertion C — OOM log text** (`should` clauses; `must_not` = flux-system +
+`*disconnected due to out of memory*`, the mosquitto line about an IoT *client* device's
+memory, not ours):
+`*out of memory*`, `*OutOfMemoryError*`, `*Cannot allocate memory*`
+
+If any of the three ES queries fails, the script emits a MAJOR "assertions did not run"
+and skips all three verdicts — a failed query must never score as a clean zero.
 
 ---
 
