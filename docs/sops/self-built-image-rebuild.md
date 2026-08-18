@@ -379,6 +379,10 @@ reconcile — never patch the Deployment directly (GitOps rule).
 - `docs/sops/application-update.md` — third-party version bumps
 - `docs/sops/maintenance-windows.md` — the REBUILD lane and the transient-plan convention
 - `docs/sops/audit-script-correctness.md` — do not score an auth failure as "clean"
+- `docs/sops/flux-image-automation-push-auth.md` — **why a rebuilt image may never
+  reach the cluster**: `ImageUpdateAutomation` can scan, resolve the new tag, and run
+  on schedule while pushing nothing, if its GitRepository has no write credential.
+  Check `lastPushCommit` before assuming a published tag was rolled out.
 - `docs/sops/vulnerability-disclosure.md` — **read before writing any CVE detail into a committed file**
 - `runbooks/coverage.py` — `SELF_BUILT` inventory and lane assignment
 - `runbooks/maintenance/plans/harness-frontend-vite7.md` — worked example of trap 5

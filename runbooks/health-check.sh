@@ -1920,6 +1920,110 @@ log_section "Section 20: GitOps Status"
     fi
     echo ""
 
+    # --- Flux image-automation family (added 2026-08-18) ---
+    # Gap closed: this script had 17 Flux assertions and ZERO for the
+    # image-reflector / image-automation controllers. The failure found on
+    # 2026-08-18 is a SILENT one: an ImageUpdateAutomation can scan fine
+    # (ImageRepository Ready), resolve a new tag fine (ImagePolicy Ready), and run
+    # on schedule -- while never pushing a single commit, because its sourceRef
+    # GitRepository is an https URL with no secretRef. Anonymous READ succeeds, so
+    # the GitRepository is Ready and nothing else complains; but automation must
+    # PUSH, and anonymous https has no write path. The tell is `lastPushCommit`
+    # staying null while `lastAutomationRunTime` keeps advancing.
+    # Full SOP: docs/sops/flux-image-automation-push-auth.md
+    #
+    # Severity note: silent-no-push is MAJOR, not CRITICAL. Remediation needs
+    # operator-owned credentials (a write-capable deploy key/PAT), so a CRITICAL
+    # here would pin the sweep red for days -- the same anti-pattern this file
+    # just removed from the fatal-log assertion.
+    echo "Flux image automation:"
+    if kubectl get crd imageupdateautomations.image.toolkit.fluxcd.io >/dev/null 2>&1; then
+        kubectl get imageupdateautomation -A 2>/dev/null || true
+        echo ""
+
+        # (1) not-Ready across all three kinds
+        IMG_NOT_READY=$(python3 -c "
+import json, subprocess, sys
+bad = []
+for kind in ('imageupdateautomation', 'imagepolicy', 'imagerepository'):
+    try:
+        out = subprocess.run(['kubectl', 'get', kind, '-A', '-o', 'json'],
+                             capture_output=True, text=True, timeout=60).stdout
+        items = json.loads(out).get('items', [])
+    except Exception:
+        continue
+    for it in items:
+        conds = it.get('status', {}).get('conditions', []) or []
+        ready = next((c for c in conds if c.get('type') == 'Ready'), None)
+        if ready is None or ready.get('status') != 'True':
+            m = it['metadata']
+            reason = ready.get('reason') if ready else 'NoReadyCondition'
+            bad.append(f\"{kind}/{m['namespace']}/{m['name']} (reason={reason})\")
+for b in bad:
+    print('  NOT-READY: ' + b, file=sys.stderr)
+print(len(bad))
+" 2>&1 | tee /dev/stderr | tail -1 || echo "0")
+        IMG_NOT_READY=$(echo "$IMG_NOT_READY" | tr -cd '0-9'); [ -z "$IMG_NOT_READY" ] && IMG_NOT_READY=0
+
+        # (2) SILENT-FAILURE SHAPE: automation runs on schedule but has NEVER
+        #     pushed. lastPushCommit null/absent while lastAutomationRunTime is
+        #     within 24h. Suspended automations are exempt. An automation that is
+        #     not running at all is a different (already visible) problem.
+        IMG_SILENT=$(python3 -c "
+import json, subprocess, sys
+from datetime import datetime, timezone, timedelta
+try:
+    out = subprocess.run(['kubectl', 'get', 'imageupdateautomation', '-A', '-o', 'json'],
+                         capture_output=True, text=True, timeout=60).stdout
+    items = json.loads(out).get('items', [])
+except Exception:
+    items = []
+now = datetime.now(timezone.utc)
+silent = []
+for it in items:
+    m = it['metadata']
+    st = it.get('status', {}) or {}
+    sp = it.get('spec', {}) or {}
+    if sp.get('suspend') is True:
+        continue
+    run = st.get('lastAutomationRunTime')
+    if not run:
+        continue
+    try:
+        run_dt = datetime.fromisoformat(run.replace('Z', '+00:00'))
+    except Exception:
+        continue
+    if now - run_dt > timedelta(hours=24):
+        continue
+    if not st.get('lastPushCommit'):
+        src = sp.get('sourceRef', {}) or {}
+        silent.append(
+            f\"{m['namespace']}/{m['name']} ran {run} but lastPushCommit is null \"
+            f\"(sourceRef {src.get('kind', '?')}/{src.get('namespace', m['namespace'])}/{src.get('name', '?')})\")
+for s in silent:
+    print('  SILENT-NO-PUSH: ' + s, file=sys.stderr)
+print(len(silent))
+" 2>&1 | tee /dev/stderr | tail -1 || echo "0")
+        IMG_SILENT=$(echo "$IMG_SILENT" | tr -cd '0-9'); [ -z "$IMG_SILENT" ] && IMG_SILENT=0
+
+        if [ "$IMG_SILENT" -gt 0 ]; then
+            log_warning "Image automations running but never pushing: $IMG_SILENT (lastPushCommit null)"
+            add_major_issue "Flux image automation silently not pushing: $IMG_SILENT automation(s) run on schedule with lastPushCommit null - image updates never reach git (docs/sops/flux-image-automation-push-auth.md)"
+        else
+            log_success "All active Flux image automations have pushed at least once"
+        fi
+
+        if [ "$IMG_NOT_READY" -gt 0 ]; then
+            log_warning "Not-Ready Flux image-automation objects: $IMG_NOT_READY"
+            add_major_issue "Flux image automation/policy/repository not Ready: $IMG_NOT_READY object(s)"
+        else
+            log_success "Flux image automation/policy/repository objects all Ready"
+        fi
+    else
+        echo "  image-automation CRDs not installed - skipping"
+    fi
+    echo ""
+
     echo "Flux controllers status:"
     kubectl get pods -n flux-system
     echo ""
