@@ -55,11 +55,21 @@ class ChannelGateTest(unittest.TestCase):
         self.assertIn("PRE-RELEASE", reason)
         self.assertIn("AR-081", reason)
 
-    def test_scrypted_stable_odd_minor_still_flows(self):
-        """The gate is a CHANNEL predicate, not a freeze: 0.143 -> 0.145 is stable."""
-        it = item("scrypted", current="v0.143.0-noble-full",
-                  target="v0.145.0-noble-full")
-        lane, _, _ = cov.assign_lane(it, POLICY, {}, [])
+    def test_channel_gate_is_a_predicate_not_a_freeze(self):
+        """WHICH GUARD COVERS WHAT. The channel gate holds only PRE-RELEASE
+        targets: a stable odd minor (0.143 -> 0.145) clears it. scrypted stays
+        out of AUTO anyway, but via the separate 0.x release-line rule below —
+        two independent guards, deliberately not one. If upstream ever moves to
+        1.x, the channel gate is the one still doing the work."""
+        stable = item("scrypted", current="v0.143.0-noble-full",
+                      target="v0.145.0-noble-full")
+        beta = item("scrypted", current="v0.143.0-noble-full",
+                    target="v0.144.1-noble-full")
+        self.assertIsNone(cov.channel_hold("scrypted", stable))
+        self.assertIsNotNone(cov.channel_hold("scrypted", beta))
+        # 1.x on the same channel rule: stable odd minor reaches AUTO
+        lane, _, _ = cov.assign_lane(
+            item("scrypted", current="v1.143.0", target="v1.145.0"), POLICY, {}, [])
         self.assertEqual(lane, "AUTO")
 
     def test_open_renovate_pr_does_not_launder_a_beta(self):
@@ -88,6 +98,29 @@ class ChannelGateTest(unittest.TestCase):
                                           {"someapp": "AR-999"})
         self.assertEqual(lane, "PLAN")
         self.assertIn("AR-999", reason)
+
+
+class ZeroVerLineTest(unittest.TestCase):
+    """At major 0 the MINOR is the breaking axis (this repo's own
+    `_release_line` doctrine; nextcloud-mcp 0.176.0 dropped a table on a minor
+    hop). A 0.x minor is a release-LINE move, not a safe in-line bump."""
+
+    def test_zero_x_minor_is_planned(self):
+        lane, reason, _ = cov.assign_lane(
+            item("someapp", current="0.175.0", target="0.178.1"), POLICY, {}, [])
+        self.assertEqual(lane, "PLAN")
+        self.assertIn("0.x release-line", reason)
+
+    def test_zero_x_patch_still_flows_to_auto(self):
+        lane, _, _ = cov.assign_lane(
+            item("someapp", current="0.27.3", target="0.27.4", type_="patch"),
+            POLICY, {}, [])
+        self.assertEqual(lane, "AUTO")
+
+    def test_one_x_minor_is_unaffected(self):
+        lane, _, _ = cov.assign_lane(
+            item("someapp", current="1.4.0", target="1.6.2"), POLICY, {}, [])
+        self.assertEqual(lane, "AUTO")
 
 
 class LockstepTest(unittest.TestCase):

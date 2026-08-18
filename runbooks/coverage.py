@@ -602,6 +602,17 @@ def assign_lane(item, policy, prs, plans, ar_holds=None):
     ch = channel_hold(comp, item, ar_holds)
     if ch:
         return "PLAN", ch, None
+    # 0.x: the MINOR is the breaking axis, so a "minor" label there is a
+    # release-LINE move, not a safe in-line bump. This repo already encodes that
+    # in `_release_line` (plan matching) and lives it: nextcloud-mcp 0.176.0
+    # removed an API and dropped a table on a minor hop. It is also the second,
+    # component-agnostic reason scrypted 0.143 -> 0.144 must not be unattended —
+    # `_semver_type` calls it "minor" only because both majors are 0.
+    zt, zc = _ver_tuple(item["target"]), _ver_tuple(item["current"])
+    if zt and zc and zc[0] == 0 and zt[0] == 0 and zt[1] != zc[1]:
+        return "PLAN", ("0.x release-line move (0.%d -> 0.%d) — at major 0 the minor "
+                        "IS the breaking axis; needs an assessed window plan"
+                        % (zc[1], zt[1])), None
     if prs.get(comp) or prs.get(key):
         return "AUTO", f"Renovate PR #{prs.get(comp) or prs.get(key)}", None
     dn = denied(policy, key, utype)
