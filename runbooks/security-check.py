@@ -1284,6 +1284,46 @@ def _newer_upstream_tag_exists(image_ref: str):
         return None
 
 
+def _parse_version_snapshot(content: str) -> list[tuple[str, str]]:
+    """Extract (deployment, app_version) from version-check-current.md.
+
+    The table is `| Deployment | Namespace | Chart | Image | App | Complexity |`.
+    The previous regex took the first two BACKTICKED cells, which are
+    Deployment and **Namespace** — so it sent `version: "ai"` / `"databases"`
+    to OSV. OSV does not reject an unparseable version; it falls back to
+    returning EVERY vulnerability for the package, so one component came back
+    with 233 CVEs regardless of the version actually deployed. Column position,
+    not backtick position, is what identifies the version.
+
+    `App` is the application version (the Chart column is the Helm chart, e.g.
+    app-template 5.1.0, which is not the software under test). Rows whose App
+    cell is not a comparable version — `-`, `latest`, `git-<sha>`, a bare
+    digest — are dropped: OSV cannot match them, and guessing is worse than
+    not checking.
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for line in content.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) < 7:
+            continue
+        name = cells[1].strip("` ")
+        app = cells[5]
+        if not name or name in seen or name == "Deployment":
+            continue
+        # Strip decoration, digest pins and build variants.
+        app = app.split("@")[0].split()[0] if app.split() else ""
+        app = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*',
+                     '', app).lstrip("v")
+        if not re.fullmatch(r'\d+(\.\d+)*', app):
+            continue
+        seen.add(name)
+        out.append((name, app))
+    return out
+
+
 # Verified OSV coordinates for the components the version snapshot tracks.
 #
 # OSV has NO "Helm" ecosystem — the previous code sent one and was rejected
@@ -1336,31 +1376,25 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     content = version_file.read_text()
-    rows = re.findall(r'\|\s*`([^`]+)`\s*\|\s*`([^`\s]+)', content)
-    seen: set[str] = set()
-    unique = [(n, v) for n, v in rows if not (n in seen or seen.add(n))]  # type: ignore[func-returns-value]
+    unique = _parse_version_snapshot(content)
 
-    candidates = unique[:25]
-    cprint(C.CYAN, f"  Checking {len(candidates)} components against OSV.dev...")
+    # Spend the query budget on components we can ACTUALLY check. Capping the
+    # raw list at 25 first meant the cap was consumed by unmapped components
+    # and dropped mapped ones (cert-manager) off the end without checking them.
+    candidates = [(n, v) for n, v in unique if n in _OSV_PACKAGES][:25]
+    unmapped = [n for n, _v in unique if n not in _OSV_PACKAGES]
+    cprint(C.CYAN, f"  Checking {len(candidates)} of {len(unique)} components "
+                   f"against OSV.dev ({len(unmapped)} have no verified OSV "
+                   f"package identity)...")
     found_vulns = False
     osv_ok = 0                 # queries that actually got an answer
     osv_transient = 0          # retry-worthy blips -> veto auto-close
     osv_rejected = 0           # permanent 4xx -> emit a finding instead
     osv_reason = ""
-    unmapped: list[str] = []
 
     for name, ver in candidates:
-        coords = _OSV_PACKAGES.get(name)
-        if coords is None:
-            # NOT a pass. We simply have no verified OSV identity for this
-            # component, and guessing one is worse than not checking: `redis`
-            # on Packagist is a PHP client, not the server we run, and OSV
-            # answers 200 with an empty list for a package that does not exist
-            # at all — so a wrong guess is indistinguishable from a clean bill.
-            unmapped.append(name)
-            continue
-        ecosystem, pkg = coords
-        clean = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*', '', ver).lstrip('v')
+        ecosystem, pkg = _OSV_PACKAGES[name]
+        clean = ver
         payload = json.dumps({"version": clean,
                               "package": {"name": pkg, "ecosystem": ecosystem}}).encode()
         req = urllib.request.Request(
@@ -1423,11 +1457,11 @@ def s4_cve_check() -> tuple[str, Findings, str]:
 
     if unmapped:
         # Explicit "not checked", never folded into the green above.
-        f.add(WARNING, f"OSV coverage gap: {len(unmapped)} of {len(candidates)} "
+        f.add(WARNING, f"OSV coverage gap: {len(unmapped)} of {len(unique)} "
                        f"components not checked — ecosystem undetermined "
                        f"({', '.join(sorted(unmapped)[:8])}"
                        f"{', …' if len(unmapped) > 8 else ''})")
-        cprint(C.YELLOW, f"  🟡 {len(unmapped)}/{len(candidates)} components not "
+        cprint(C.YELLOW, f"  🟡 {len(unmapped)}/{len(unique)} components not "
                          f"checked — no verified OSV package identity")
 
     # ─── Trivy: scan running container images for CRITICAL/HIGH CVEs ────────

@@ -127,6 +127,49 @@ class TestOsvMappingTable(unittest.TestCase):
         self.assertTrue(sc._OSV_PACKAGES, "mapping table is empty — nothing is checked")
 
 
+class TestVersionSnapshotParser(unittest.TestCase):
+    """The version sent to OSV must be the App version, not the Namespace.
+
+    The original regex took the first two BACKTICKED cells of
+    `| Deployment | Namespace | Chart | Image | App | Complexity |`, which are
+    Deployment and Namespace — so it queried `version: "ai"`. OSV does not
+    reject an unparseable version, it returns EVERY vulnerability for the
+    package: one component came back with 233 CVEs independent of the version
+    actually deployed. Column position identifies the version, not backticks.
+    """
+
+    TABLE = """
+| Deployment | Namespace | Chart | Image | App | Complexity |
+|------------|-----------|-------|-------|-----|------------|
+| `open-webui` | `ai` | 16.0.0 | 0.11.0 | 0.11.0 | - |
+| `superset` | `databases` | 1.2.3 | 5.0.0 | 5.0.0 | - |
+| `librechat` | `ai` | 2.0.7 | latest | - | - |
+| `mcpo` | `ai` | 5.1.0 | git-44ce6d0 | git-44ce6d0 | - |
+| `openclaw` | `ai` | 5.1.0 | x | 22.23.2-bookworm@sha256:0557ac14 | - |
+"""
+
+    def test_extracts_app_version_not_namespace(self):
+        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        self.assertEqual(rows.get("open-webui"), "0.11.0")
+        self.assertEqual(rows.get("superset"), "5.0.0")
+        for name, ver in rows.items():
+            self.assertNotIn(ver, ("ai", "databases"),
+                             f"{name}: namespace leaked through as the version")
+
+    def test_drops_uncomparable_versions(self):
+        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        self.assertNotIn("librechat", rows, "'-' is not a comparable version")
+        self.assertNotIn("mcpo", rows, "'git-<sha>' is not a comparable version")
+
+    def test_strips_variant_suffix_and_digest(self):
+        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        self.assertEqual(rows.get("openclaw"), "22.23.2")
+
+    def test_header_row_is_not_a_component(self):
+        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        self.assertNotIn("Deployment", rows)
+
+
 class TestOsvLive(unittest.TestCase):
     """Acceptance: the mapping actually works against the real API."""
 
