@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: jlesage/jdownloader-2
-              tag: "v26.08.1"
+              tag: "v26.08.2"
               pullPolicy: IfNotPresent
             env:
               TZ: ${TIMEZONE}
