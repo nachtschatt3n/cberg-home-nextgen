@@ -282,8 +282,13 @@ spec:
       # Use built-in PostgreSQL for compatibility
       enabled: true
       # Pin the postgres image explicitly (chart 2026.5.6 defaults to
-      # 17.10-bookworm) — keep in sync with cronjob-channels-cleanup.yaml.
-      # SAME major only: 18.x is a data-dir migration.
+      # 17.10-bookworm). SAME major only: 18.x is a data-dir migration.
+      # Keep the MAJOR/MINOR (17.11) in sync with
+      # cronjob-channels-cleanup.yaml so the client psql matches the server;
+      # the BASE deliberately differs — the cleanup job runs alpine (psql
+      # only, no state), while this server stays on the Debian base because
+      # swapping the base under a live data directory is a separate change
+      # with its own validation.
       image:
         registry: docker.io
         repository: library/postgres
