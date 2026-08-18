@@ -21,7 +21,7 @@ touches:
 depends_on: []                        # stage 1 (grafana-repo-swap) LANDED 2026-08-15 as 0f8baf00;
                                       # plan file deleted per the plans README convention.
                                       # Pre-check (a) below re-asserts the live source URL anyway.
-conflicts_with: [kube-prometheus-stack-88]
+conflicts_with: []                    # RESOLVED 2026-08-18: kube-prometheus-stack-88 EXECUTED (ad-hoc run, chart 88.3.0 verified green) — dead ref removed; window-agent confirmed no re-vet needed, keep a soak day before this plan runs
 status: draft
 window: "fri-early:2026-08-21"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are

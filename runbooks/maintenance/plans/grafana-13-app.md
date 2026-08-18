@@ -20,7 +20,7 @@ touches:
     - "Authentik OIDC login for grafana"
   shared: [monitoring]
 depends_on: [grafana-chart-12]
-conflicts_with: [kube-prometheus-stack-88]
+conflicts_with: []                    # RESOLVED 2026-08-18: kube-prometheus-stack-88 EXECUTED — dead ref removed
 status: draft
 window: "sun-window:2026-09-13"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are

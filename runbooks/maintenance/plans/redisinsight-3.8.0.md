@@ -35,7 +35,7 @@ touches:
                                        # operation (no create/resize/delete) — an ordinary
                                        # detach/attach on pod roll. See §6.
 depends_on: []
-conflicts_with: [superset-redis-official, bitnamilegacy-exit-paperless-redis, bitnamilegacy-exit-nextcloud-redis, homepage-2.0.0]
+conflicts_with: [bitnamilegacy-exit-paperless-redis, bitnamilegacy-exit-nextcloud-redis]  # RESOLVED 2026-08-18: superset-redis-official + homepage-2.0.0 both EXECUTED — dead refs removed
                                        # VERIFICATION-CONFOUND conflicts, not danger conflicts.
                                        # Each of these moves something this plan's Section 4
                                        # asserts against (a saved connection endpoint, or the

@@ -19,7 +19,7 @@ touches:
     - pvc/grafana-config
   shared: [monitoring]
 depends_on: [grafana-chart-11]
-conflicts_with: [kube-prometheus-stack-88]
+conflicts_with: []                    # RESOLVED 2026-08-18: kube-prometheus-stack-88 EXECUTED — dead ref removed
 status: draft
 window: "thu-early:2026-08-27"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are

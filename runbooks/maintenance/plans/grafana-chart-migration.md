@@ -15,7 +15,7 @@ touches:
     - "see the individual stage plans — this file executes nothing"
   shared: [monitoring]
 depends_on: []
-conflicts_with: [kube-prometheus-stack-88]
+conflicts_with: []                    # RESOLVED 2026-08-18: kube-prometheus-stack-88 EXECUTED — dead ref removed (index-only plan)
 status: superseded                    # INDEX ONLY — split into 4 stage plans on 2026-08-15
 window: null                          # never schedule this file; schedule the stages
 auto_execute: false

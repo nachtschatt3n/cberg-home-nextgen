@@ -31,7 +31,7 @@ touches:
                                     # PUBLIC Cloudflare zone (26 hostnames) via
                                     # external-dns under `policy: sync`, which deletes.
 depends_on: [envoy-gateway-phase2]
-conflicts_with: [app-template-5.0]  # don't run an app-template tier in this session
+conflicts_with: []  # don't run an app-template tier in this session  # RESOLVED 2026-08-18: app-template migration (renamed 5.1) EXECUTED 78/78 — dead ref removed
 security_ref: null                  # see envoy-gateway-phase4; AR-055's escalation
                                     # clause keys on THIS phase (the external cutover)
 status: scheduled                   # unblocked 2026-08-15: k8s-gateway 3.7.2/1.8.0
