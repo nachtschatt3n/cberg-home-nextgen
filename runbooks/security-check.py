@@ -3198,6 +3198,16 @@ def main(argv: list[str] | None = None) -> int:
         git_head=git_head(),
     ) as writer:
         _emit_findings(writer, results, scored)
+        # s4 classifies "is this CVE fixable by a newer tag?" through the
+        # check-all-versions registry oracle, which is a SEPARATE module with
+        # its own DegradationLog. A throttled registry therefore degrades the
+        # SECURITY section's fixability verdict while recording the reason in
+        # someone else's log, where our veto would never see it. Drain it.
+        _vc_log = getattr(_VER_CHECKER, "degraded", None) if _VER_CHECKER else None
+        if _vc_log:
+            for _r in _vc_log.reasons:
+                DEGRADED.record("s4_cve_check (image-tag oracle)",
+                                "check-all-versions registry lookup", _r)
         # Veto stale-finding auto-close if ANY dependency degraded this run.
         # The run still completes and reports everything it could measure —
         # this only stops the writer reading "absent" as "resolved" for the
