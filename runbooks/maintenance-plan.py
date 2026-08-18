@@ -66,18 +66,48 @@ def load_plans(cfg):
     return out
 
 
+def _last_json_object(text: str):
+    """The last top-level JSON object in `text`, or None.
+
+    Belt-and-braces for the 2026-08-18 bug: auto-update.py now fences its
+    stdout (see its `emit_json`), but a plain `json.loads` on that stdout meant
+    ANY future library print silently degraded this to `0 held update(s)` — a
+    number the sweep reports as fact. Scanning back from the last `{` recovers
+    the payload instead.
+    """
+    depth = start = 0
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] == "}":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif text[i] == "{":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[i:start + 1])
+                except Exception:
+                    return None
+    return None
+
+
 def get_held():
-    """Held (non-safe) updates from the auto-updater, decoupled via subprocess."""
+    """(held, error) — held (non-safe) updates from the auto-updater, decoupled
+    via subprocess. `error` is non-None when the count is UNKNOWN, which must
+    never be rendered as zero."""
     try:
         p = subprocess.run(
             [sys.executable, str(SCRIPT_DIR / "auto-update.py"), "--json"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=300,
         )
-        data = json.loads(p.stdout or "{}")
-        return data.get("held", [])
     except Exception as e:
-        print(f"!! could not read held updates: {e}", file=sys.stderr)
-        return []
+        return [], f"auto-update.py did not run: {type(e).__name__}: {e}"
+    data = _last_json_object(p.stdout or "")
+    if data is None:
+        tail = (p.stderr or "").strip().splitlines()[-1:] or [""]
+        return [], (f"auto-update.py --json produced no parseable JSON "
+                    f"(rc={p.returncode}; last stderr: {tail[0][:120]})")
+    return data.get("held", []), None
 
 
 def next_occurrence(day_name, start_hhmm, today):
@@ -108,7 +138,7 @@ def held_key(h):
 
 
 def reconcile(cfg, today):
-    held = get_held()
+    held, held_error = get_held()
     plans = load_plans(cfg)
     plans_by_pr = {str(p.get("pr")): p for p in plans if p.get("pr")}
     plans_by_comp = {}
@@ -251,6 +281,8 @@ def reconcile(cfg, today):
     return {
         "today": today.isoformat(),
         "held_count": len(held),
+        # non-None => held_count is NOT a fact; render it as unknown
+        "held_error": held_error,
         "needs_plan": needs_plan,
         "stale": stale,
         "orphan_plans": orphan,
@@ -265,7 +297,11 @@ def reconcile(cfg, today):
 
 
 def human(r, cfg):
-    L = [f"== maintenance schedule · {r['today']} · {r['held_count']} held update(s) =="]
+    held_txt = (f"{r['held_count']} held update(s)" if not r.get("held_error")
+                else "held updates UNKNOWN ⚠")
+    L = [f"== maintenance schedule · {r['today']} · {held_txt} =="]
+    if r.get("held_error"):
+        L.append(f"!! held-update lookup failed — count is NOT zero, it is unknown: {r['held_error']}")
     nxt = r["next_windows"][0] if r["next_windows"] else None
     if nxt:
         L.append(f"next window: {nxt['slot']} {nxt['start']} {cfg['timezone']} "

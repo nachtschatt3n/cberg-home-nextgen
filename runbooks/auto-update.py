@@ -62,10 +62,29 @@ SAFE_TYPES = {"patch", "minor"}
 RECONCILE_WAIT_S = int(os.environ.get("AUTO_UPDATE_RECONCILE_WAIT", "150"))
 
 
+# The REAL stdout, captured before --json mode reroutes sys.stdout. Only the
+# machine-readable payload is ever written here.
+_JSON_OUT = sys.stdout
+
+
 def log(*a):
     # progress → stderr, so stdout stays pure JSON under --json (the sweep
     # orchestrator parses stdout).
     print(*a, flush=True, file=sys.stderr)
+
+
+def emit_json(result) -> None:
+    """Write the ONLY thing --json mode may put on stdout.
+
+    `log()` alone was not enough to keep that promise: FindingsWriter prints its
+    auto-close/incomplete diagnostics (`==> …`) with a plain `print`, and in the
+    sweep — the one context that parses this — SWEEP_PG_DSN is set, so those
+    lines land on stdout AHEAD of the payload. maintenance-plan.py's `get_held()`
+    then failed `json.loads` on every single run and silently reported
+    `0 held update(s)` forever. Fixing the contract at the source beats teaching
+    each caller to strip banners: any future library print is caught too.
+    """
+    print(json.dumps(result, indent=2), file=_JSON_OUT, flush=True)
 
 
 def run(cmd, timeout=60, check=False):
@@ -426,6 +445,11 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true", help="merge safe PRs (needs cron trigger)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     args = ap.parse_args(argv)
+    if args.json:
+        # Fence stdout for the whole run: anything printed by a library (the
+        # findings writer, an imported module's banner) goes to stderr, and only
+        # emit_json() reaches the real stdout. See emit_json's docstring.
+        sys.stdout = sys.stderr
 
     trigger = os.environ.get("SWEEP_TRIGGER", "manual")
     force = os.environ.get("AUTO_UPDATE_APPLY") == "1"
@@ -463,7 +487,7 @@ def main(argv=None):
                            subsection="auto-update",
                            metadata={"safe": [f"#{c['number']} {c['dep']}" for c in safe]})
         if args.json:
-            print(json.dumps(result, indent=2))
+            emit_json(result)
         log(f"\n== {len(safe)} safe / {len(held)} held · dry-run (no changes) ==")
         return 0
 
@@ -471,7 +495,7 @@ def main(argv=None):
     if not safe:
         log("\n== nothing safe to merge ==")
         if args.json:
-            print(json.dumps(result, indent=2))
+            emit_json(result)
         return 0
 
     merged, all_apps = [], set()
@@ -489,7 +513,7 @@ def main(argv=None):
     if not merged:
         log("== no PRs merged (all merge attempts failed) ==")
         if args.json:
-            print(json.dumps(result, indent=2))
+            emit_json(result)
         return 1
 
     log(f"\n-- syncing local main + reconciling {len(all_apps)} affected app(s) --")
@@ -540,7 +564,7 @@ def main(argv=None):
             log(f"  (operator notify failed: {e})")
         log("\n== ALERT: batch auto-reverted; cluster restored to pre-merge state ==")
         if args.json:
-            print(json.dumps(result, indent=2))
+            emit_json(result)
         return 2
 
     log(f"\n== applied {len(merged)} update(s), post-apply health OK ==")
@@ -550,7 +574,7 @@ def main(argv=None):
                    subsection="auto-update",
                    metadata={"merged": [f"#{c['number']} {c['dep']}→{c['new']}" for c in merged]})
     if args.json:
-        print(json.dumps(result, indent=2))
+        emit_json(result)
     return 0
 
 
