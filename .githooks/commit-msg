@@ -140,7 +140,9 @@ if not os.path.exists(_dp_path):
 _spec = _ilu.spec_from_file_location("disclosure_patterns", _dp_path)
 _dp = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_dp)
-COMPILED = _dp.COMPILED
+# NB: intentionally NOT binding _dp.COMPILED here. That export exists only for
+# back-compat and carries no acquittal data; binding it invites someone to
+# scan it directly again and silently lose the §2.1 closed-gap allowances.
 
 # `security_ref: F-xxxxxxxx` is the sanctioned reference form — a pointer,
 # not a disclosure. Drop those lines before scanning.
@@ -168,19 +170,26 @@ def sanitize(text):
     return "".join(ch if ch.isprintable() or ch == " " else "?" for ch in text)
 
 
-violations = []
-seen = set()
-for rx, label in COMPILED:
-    m = rx.search(normalized)
-    if not m:
-        continue
-    if label in seen:
-        continue
-    seen.add(label)
-    start = max(0, m.start() - 40)
-    end = min(len(normalized), m.end() + 40)
-    excerpt = ("…" if start else "") + normalized[start:end] + ("…" if end < len(normalized) else "")
-    violations.append((excerpt, m.group(0), label))
+# Route through dp.scan()/dp.scan_warn() rather than iterating COMPILED here.
+# COMPILED is a back-compat 2-tuple export that carries NO acquittal data, so
+# scanning it directly would reject the closed-gap phrasings the SOP (§2.1)
+# explicitly publishes — "post-rebuild: 0 fixable CRITICAL" among them. One
+# code path, one set of semantics: the library decides, the hook reports.
+violations = _dp.scan(normalized)
+advisories = _dp.scan_warn(normalized)
+
+# WARN tier: real signal, measured false-positive rate against ordinary
+# supply-chain prose, so it NAGS and never gates. Printed even when the commit
+# is accepted — and deliberately before the reject banner, so it is not lost
+# in the scrollback of a rejection.
+if advisories:
+    print("", file=sys.stderr)
+    print(f"{YELLOW}⚠  disclosure advisory (not blocking){NC}", file=sys.stderr)
+    for excerpt, matched, label in advisories:
+        print(f"   · {label}: {sanitize(matched)[:90]}", file=sys.stderr)
+    print(f"   Check it against {YELLOW}docs/sops/vulnerability-disclosure.md{NC} "
+          f"§2.1 before you push.", file=sys.stderr)
+    print("", file=sys.stderr)
 
 if not violations:
     sys.exit(0)

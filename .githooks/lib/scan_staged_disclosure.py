@@ -58,6 +58,11 @@ SELF_REFERENTIAL = (
     "runbooks/security-check.md",
     "runbooks/version-check.md",
     "runbooks/maintenance/plans/README.md",         # explains the boundary
+    # Boundary tests: a fixture asserting that "the finding stays open" is
+    # blocked has to CONTAIN "the finding stays open". Fixtures there are
+    # synthetic by convention (see test-trivy-tally.py) — never real fleet
+    # state — which is what makes this safe to exclude.
+    "runbooks/tests/",
     # Agent-instruction files: they QUOTE the policy ("vulnerability counts,
     # exploitability notes … must NOT be committed"), which trips the
     # exploitability rule on the sentence that forbids exploitability detail.
