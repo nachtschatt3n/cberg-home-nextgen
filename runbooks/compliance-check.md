@@ -244,6 +244,13 @@ kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp \
 kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt,STATE:.status.state,ROBUSTNESS:.status.robustness --no-headers
 ```
 
+> **Caveat:** `lastBackupAt` can lag a full backup cycle even when the backup
+> succeeded (backup-store `volume.cfg` rewrite lost under parallel load) —
+> confirm via the volume's Completed Backup CRs before declaring it stale.
+> See `docs/sops/backup.md` → Troubleshooting: "lastBackupAt Can Lag".
+> `runbooks/health-check.sh` implements the Backup-CR-first per-volume judgment
+> (`longhorn_backup_age_hours --per-volume`) — prefer it over the raw check below.
+
 Optional staleness check (48h):
 ```bash
 kubectl get volumes -n storage -o json | python3 - <<'PY'
@@ -272,6 +279,8 @@ Pass criteria:
 - Latest backup jobs succeed
 - No critical Longhorn volume missing `lastBackupAt`
 - No critical volume older than 48h backup age
+  (after ruling out the `lastBackupAt` status lag via Backup CRs — a volume
+  with a Completed Backup CR <25h old is fresh regardless of `lastBackupAt`)
 
 ### 7.5 Non-Longhorn PVC Restore Coverage
 Data on `cifs-*` or other non-Longhorn storage classes is not covered by Longhorn backups.

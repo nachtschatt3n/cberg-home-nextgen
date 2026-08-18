@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.05.12`
-> Last Updated: `2026-05-12`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -254,10 +254,14 @@ kubectl annotate volume <name> -n storage \
 
 **Recovery (faulted, all replicas lost):**
 
-1. Identify the latest backup:
+1. Identify the latest backup (`lastBackupAt` can lag one cycle — cross-check
+   the volume's Completed Backup CRs, see `docs/sops/backup.md` "lastBackupAt
+   Can Lag"):
    ```bash
    kubectl get volumes -n storage <name> \
      -o jsonpath='{.status.lastBackupAt}'
+   kubectl get backups -n storage -l backup-volume=<name> \
+     --sort-by=.metadata.creationTimestamp | tail -3
    ```
 2. Restore from backup per `docs/sops/backup.md` §Restore.
 3. Rebind the PV/PVC if names changed.
@@ -270,7 +274,8 @@ kubectl annotate volume <name> -n storage \
 - Pods with CIFS mounts: `MountVolume.SetUp failed` events.
 - Apps with NAS-backed data (Plex, Jellyfin, JDownloader, Frigate, Tube
   Archivist, Paperless, Nextcloud, iCloud-docker) go to error state.
-- Longhorn backups stop (no recent `lastBackupAt`).
+- Longhorn backups stop (no recent `lastBackupAt` — confirm via Backup CRs,
+  since `lastBackupAt` alone can lag one cycle; see `docs/sops/backup.md`).
 
 **Blast radius:**
 - **Lost (CIFS-only)**: media libraries, JDownloader intake, Frigate recordings,
@@ -397,9 +402,12 @@ Full workflow: `docs/sops/authentik.md`.
 ### Example: Recover a single failed PV from backup
 
 ```bash
-# Identify the latest backup
+# Identify the latest backup (lastBackupAt can lag one cycle — cross-check
+# Backup CRs, see docs/sops/backup.md "lastBackupAt Can Lag")
 kubectl get volumes -n storage <volume-name> \
   -o jsonpath='{.status.lastBackupAt}'
+kubectl get backups -n storage -l backup-volume=<volume-name> \
+  --sort-by=.metadata.creationTimestamp | tail -3
 
 # Trigger restore (Longhorn UI: Volume → Restore Latest Backup → New volume name)
 # Or via CRD:

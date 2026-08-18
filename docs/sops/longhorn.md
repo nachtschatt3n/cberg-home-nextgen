@@ -109,6 +109,11 @@ kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP
 Expected:
 - Backup job exists and volumes show recent backup timestamps.
 
+> **Caveat:** `lastBackupAt` can lag a full backup cycle even when the backup
+> succeeded (backup-store `volume.cfg` rewrite lost under parallel load) —
+> confirm via the volume's Completed Backup CRs before declaring it stale.
+> See `docs/sops/backup.md` → Troubleshooting: "lastBackupAt Can Lag".
+
 If failed:
 - Check Longhorn backup target and controller logs.
 
@@ -392,7 +397,8 @@ kubectl get setting.longhorn.io -n storage auto-cleanup-recurring-job-backup-sna
 ### Check Backup Status
 
 ```bash
-# Volume backup timestamps
+# Volume backup timestamps (NOTE: lastBackupAt can lag one cycle — cross-check
+# Backup CRs, see docs/sops/backup.md "lastBackupAt Can Lag")
 kubectl get volumes -n storage \
   -o custom-columns=NAME:.metadata.name,SIZE:.spec.size,LAST_BACKUP:.status.lastBackupAt
 
