@@ -104,9 +104,17 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   # auto-close issues no longer open (pass the current open-key set)
   ... home-operation reconcile --source maintenance --open '<[plan_id,...]>'
   # window agent: pull cleared-to-run decisions, then ack execution
-  ... home-operation decisions --json --pending-exec
+  ... home-operation --json decisions --pending-exec
   ... home-operation resolve --issue <key> --by executed|denied|superseded [--note <commit>]
   ```
+  **Two different `--json` flags — placement is not interchangeable.** The
+  machine-readable-output switch is a **global** boolean and must come
+  **BEFORE** the subcommand (`home-operation --json decisions ...`); putting it
+  after fails with `error: unrecognized arguments: --json`, because only
+  `ingest` defines a `--json` of its own — and that one is the required
+  issue **payload** argument, so it must come **AFTER** `ingest`. Every other
+  subcommand (`decisions`, `list`, `brief`, `reconcile`, `resolve`, `decide`,
+  `ack`, `tick`, `run`) takes the global form only.
   Issue fields: `key` (plan_id|finding_id, required), `kind`
   (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|`window_warning`),
   `source`, `severity` (`info`|`warning`|`critical`), `title`, `action` (csv;
