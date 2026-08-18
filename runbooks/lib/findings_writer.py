@@ -208,8 +208,9 @@ def finding_id_from_fp(fp: str) -> str:
 class FindingsWriter:
     """Append-or-update findings into sweep-history Postgres.
 
-    One instance per (script run × section). The cycle row is created
-    on construction and finalised on close().
+    One instance per (script run × section). The cycle row is created LAZILY
+    on the first emit() — never on construction, so a writer that emits
+    nothing leaves no orphan row — and finalised on close().
 
     Degrades to no-op if dsn is empty or None — emit() returns the
     derived finding_id but performs no DB write. Lets the existing

@@ -141,7 +141,9 @@ When writing or reviewing an audit check:
    over inferring it from written rows — a section that ran clean may write
    nothing.
 
-   Since 2026-08-18 auto-close lives primarily in the **writer**:
+   Full contract: **[`docs/sops/sweep-findings-lifecycle.md`](sweep-findings-lifecycle.md)**.
+
+Since 2026-08-18 auto-close lives primarily in the **writer**:
    `FindingsWriter.close(verdict=...)` resolves the open findings of its OWN
    section that the run did not re-emit, keyed on fingerprint. The gate is
    `section_complete`, inferred from `verdict is not None` — so `__exit__`'s bare

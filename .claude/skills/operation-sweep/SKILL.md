@@ -66,6 +66,12 @@ sections that did not report.
      app-template chart-major rows hand-resolved). Set
      `SWEEP_AUTOCLOSE_DRYRUN=1` to see what would close without writing;
      `SWEEP_AUTOCLOSE=0` disables it.
+     A section whose dependencies DEGRADED declares itself incomplete; both
+     the writer and this backstop then leave its findings alone (the veto is
+     persisted on `sweep_cycles.notes.incomplete` so it survives the process
+     boundary). Expect `auto-close SKIPPED … declared INCOMPLETE` in the log
+     — that is the veto working, not an error. Full contract:
+     `docs/sops/sweep-findings-lifecycle.md`.
    - SLO/SLI snapshots land via slo-agent (`slo-check.py`); confirm rows
      exist in the cycle's time window — a clean SLO run writes snapshots
      but no findings, which is NOT a gap.

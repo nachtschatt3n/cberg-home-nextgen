@@ -43,9 +43,11 @@ file — and we hit three separate production failure modes in one day (§7).
 | Tables | `sweep_cycles`, `sweep_findings` |
 | Board | `https://sweep.<DOMAIN>/` |
 | Valid sections | `health, security, version, doc, media, smarthome, slo, infra, carry` |
-| Auto-close owner | `FindingsWriter.close()` (primary) + `sweep-run.py --reconcile-only` (backstop) |
+| Auto-close owner | `FindingsWriter.close()` (primary, all four gates) + `sweep-run.py` (backstop, gate 3 only — §4.8) |
 
-**The four gates.** Auto-close only fires when ALL of these hold:
+**The four gates.** Auto-close **via `FindingsWriter.close()`** only fires
+when ALL of these hold. The orchestrator's backstop pass is a *separate*
+implementation and honours only gate 3 — see §4.8.
 
 | # | Gate | Trips when | Where |
 |---|------|-----------|-------|
@@ -129,6 +131,17 @@ auto-closing; fix the dependency and re-run.
 6. **Report.** Closures print per-row, and AR-tagged/accepted closures print in
    their own block — an operator-accepted risk disappearing must never be
    silent.
+
+### 4.1a Never emit a PASS confirmation as a finding
+
+A finding is a *problem*. Emitting "SOP X is compliant" as a finding puts a
+green fact into a table whose whole purpose is tracking open work — and
+`render-board.py` keys the operator's action list on `status='new'`, not on
+severity, so 44 "compliant" rows once landed on the board as MEDIUM action
+items (cycle `b2410887`). Report a pass in the markdown body or as a count;
+never as a row in `sweep_findings`.
+
+---
 
 ### 4.2 Section scoping
 
@@ -244,6 +257,36 @@ window) and stores it. Auto-close adds `AND last_seen < <run_start>`, so a
 concurrent or out-of-band run of the same section cannot resolve rows the other
 run just wrote.
 
+### 4.8 The backstop is a SEPARATE implementation — know what it does not check
+
+`sweep-run.py:_auto_close_stale_findings()` is not the writer. It is its own
+SQL, scoped only by `section = ANY(...)` and `cycle_id != <this cycle>`, and it
+runs after every step. It therefore does **not** apply:
+
+| Gate | Writer | Backstop |
+|------|--------|----------|
+| 1 `section_complete` / verdict | yes | **no** |
+| 2 orchestrated-vs-ad-hoc | yes | n/a (it *is* the orchestrator) |
+| 3 incomplete veto | yes | **yes — via `sweep_cycles.notes.incomplete`** |
+| 4 zero-emit breaker | yes | **no** |
+| run-start `last_seen` bound | yes | **no** |
+
+Gate 3 crosses the process boundary because the writer *persists* it:
+`_persist_incomplete()` writes `{section: reason}` into
+`sweep_cycles.notes.incomplete` (under `SELECT … FOR UPDATE`, since several
+specialists finish concurrently), and the backstop reads it back and drops
+those sections, naming each. **If the backstop cannot read the veto it aborts
+without closing anything** — fail-closed, because the alternative is resolving
+findings from a section we cannot prove was healthy.
+
+This was not always true. Until 2026-08-18 the backstop honoured nothing: a
+degraded section printed `auto-close SKIPPED … INCOMPLETE` and the orchestrator
+closed exactly those rows seconds later, in the same sweep. The veto was
+inoperative in the only mode where auto-close is armed at all. If you add a
+gate to the writer, decide explicitly whether the backstop needs it too.
+
+---
+
 ### 4.7 What `--ran` means
 
 `sweep-run.py --reconcile-only --ran doc,version,security,health,slo` is the
@@ -320,12 +363,14 @@ If failed:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen && \
-  mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py -v 2>&1 | grep -i autoclose
+  mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py \
+  | grep -E "healthy_run_still_autocloses|veto_is_persisted"
 ```
 
 Expected:
-- An `UPDATE sweep_findings ... SET resolved_at = now()` statement is issued
-  when no degradation was recorded.
+- `PASS test_healthy_run_still_autocloses` — a clean run DOES close.
+- `PASS test_veto_is_persisted_so_the_orchestrator_can_honour_it` — the veto
+  reaches the backstop.
 
 If failed:
 - Confirm the fixture marks the run orchestrated (gate 2) and emits ≥1 finding
@@ -335,12 +380,20 @@ If failed:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen && \
-  SWEEP_ES_HOST=127.0.0.1 SWEEP_ES_PORT=1 mise exec -- python3 runbooks/security-check.py; echo "exit=$?"
+  mise exec -- python3 runbooks/tests/test-osv-coverage.py
 ```
 
+(There is no env var that fakes an unreachable Elasticsearch — an earlier
+revision of this SOP invented `SWEEP_ES_HOST`/`SWEEP_ES_PORT`, which no script
+reads. Drive the degrade paths through the tests instead.)
+
 Expected:
-- Run finishes, report written, `exit=0` or `1` (never a traceback).
-- `⚠ DEGRADED — …: Elasticsearch unavailable` appears.
+- `test_zero_successful_queries_cannot_report_clean` passes — a dependency
+  that rejects everything can never yield a clean verdict.
+- `test_cloudflare_and_5xx_range_are_transient` passes — a transient failure
+  arms the veto.
+- For a real degraded run: it finishes, report written, `exit=0` or `1` (never
+  a traceback), with `⚠ DEGRADED` lines and a closing `auto-close SKIPPED`.
 
 If failed:
 - A degrade path is raising instead of recording — that is a bug in the
@@ -447,7 +500,8 @@ If unclear:
 
 ```bash
 # 1) Unit contract still holds
-cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+cd /Users/mu/code/cberg-home-nextgen && cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-osv-coverage.py
 
 # 2) No section has been fully wiped in the last day
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 - <<'PY'
@@ -475,7 +529,9 @@ cd /Users/mu/code/cberg-home-nextgen && \
 
 # Every degrade path in the security audit records a reason
 cd /Users/mu/code/cberg-home-nextgen && \
-  grep -c "DEGRADED.record" runbooks/security-check.py
+  grep -cE "(DEGRADED|degraded)\\.record" runbooks/security-check.py
+# check-all-versions.py records via `self.degraded.record` off a module-level
+# _DEGRADED, so a literal "DEGRADED.record" grep under-counts it (2 vs ~35).
 ```
 
 Expected:
@@ -523,6 +579,7 @@ UPDATE sweep_findings
 
 - `runbooks/lib/findings_writer.py` — writer, gates, `DegradationLog`
 - `runbooks/lib/test_findings_writer_autoclose.py` — the executable contract
+- `runbooks/tests/test-osv-coverage.py` — OSV coverage + transient-classifier contract
 - `runbooks/sweep-run.py` — orchestrator, `--ran`, `--reconcile-only`
 - `runbooks/{security,doc,health}-check.py`, `runbooks/check-all-versions.py`
 - `docs/sops/audit-script-correctness.md`
