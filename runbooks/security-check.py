@@ -995,6 +995,110 @@ _UNBUMPABLE_CRIT_ESCALATE = 50
 _PRIVATE_REGISTRY_PREFIX = "ghcr.io/nachtschatt3n/"
 
 
+# ---------------------------------------------------------------------------
+# Kernel-header packages: header FILES, never executed code.
+#
+# `linux-libc-dev` (Debian/Ubuntu) and its friends ship ONLY /usr/include/linux
+# — the userspace copy of the kernel UAPI headers. They exist in an image
+# because something in the build needed them to COMPILE (node-gyp and other
+# native addons pull them in), and nothing in the image ever RUNS them. The
+# CVEs Trivy attaches to them are Linux KERNEL CVEs, and the kernel our
+# containers execute against is the Talos node kernel, not the distro's.
+# Ubuntu's 6.8 / Debian's 6.1 header package is a version string in a package
+# DB, not an attack surface on this cluster.
+#
+# Counting them made every Ubuntu/Debian-based image look materially
+# vulnerable and, worse, look FIXABLE — Trivy reports a FixedVersion because
+# the distro publishes patched headers, so these landed in the crit_fix tally
+# that drives the CRITICAL findings and the unbumpable-escalation threshold.
+# They are also not fixable by the one remedy that tally implies: the packages
+# are pinned identically in newer upstream builds of the same image, so a bump
+# moves the count not at all (evidence: security_ref F-scrypted-kernhdr,
+# 2026-08-18 — the same header version in the current tag and the newer beta).
+#
+# Scope discipline: this is an ALLOWLIST of header-only packages, matched
+# against os-pkgs results only, and it is the ONLY package-level exclusion in
+# this parser. It exists so a future header-only package (a distro renaming
+# linux-libc-dev, a `linux-headers-*` split) can be added deliberately with the
+# same justification — NOT as a general-purpose "noisy package" mute. Anything
+# that ships executable code, a shared library, or a service belongs in the
+# tally even when it is inconvenient. If you are tempted to add a package here,
+# the test is: can code from this package ever execute in the container?
+_KERNEL_HEADER_PKGS = frozenset({
+    "linux-libc-dev",     # Debian / Ubuntu
+    "kernel-headers",     # Alpine / RHEL / Fedora
+    "linux-headers",      # Alpine meta-package
+})
+# Split-out per-flavour header packages (linux-headers-6.8.0-87, …).
+_KERNEL_HEADER_PREFIXES = ("linux-headers-", "linux-libc-dev-", "kernel-headers-")
+
+
+def _is_kernel_header_pkg(pkg_name: str, result_class: str) -> bool:
+    """True for header-only OS packages whose CVEs describe the RUNNING kernel.
+
+    Restricted to `os-pkgs` on purpose: a language-ecosystem package that
+    happens to share the name is a different artifact and stays counted.
+    """
+    if result_class != "os-pkgs":
+        return False
+    name = (pkg_name or "").lower()
+    return name in _KERNEL_HEADER_PKGS or name.startswith(_KERNEL_HEADER_PREFIXES)
+
+
+def tally_trivy_report(report: dict) -> dict | None:
+    """Reduce a Trivy JSON report to the CRITICAL/HIGH counts the sweep acts on.
+
+    Split by fix-availability. A CVE with a non-empty FixedVersion has an
+    upstream fix -> actionable (update the image). One with no FixedVersion
+    (Status affected/will_not_fix/fix_deferred/end_of_life) cannot be patched
+    until upstream ships -- that's the AR-029 accepted class. Severity does NOT
+    decide acceptance; fix-availability does.
+
+    Returns None when the image has nothing in either bucket. Module-level (not
+    nested in the scan worker) so the counting rules are unit-testable against
+    a saved report -- see runbooks/tests/test-trivy-tally.py.
+    """
+    cf = cn = hf = hn = 0  # crit-fixable, crit-nofix, high-fixable, high-nofix
+    fix_ids: list[str] = []    # ALL fixable CRITICAL/HIGH CVE IDs (deduped)
+    nofix_ids: list[str] = []  # ALL no-upstream-fix CRITICAL/HIGH CVE IDs
+    for tgt in report.get("Results", []) or []:
+        tgt_class = tgt.get("Class", "")
+        for v in tgt.get("Vulnerabilities", []) or []:
+            sev = v.get("Severity", "")
+            fixable = bool(v.get("FixedVersion"))
+            vid = v.get("VulnerabilityID")
+            # Kernel-header packages carry kernel CVEs against a kernel this
+            # image never executes (see _is_kernel_header_pkg). Drop them from
+            # the FIXABLE tallies only: those are what raise CRITICAL/WARNING
+            # findings and feed _UNBUMPABLE_CRIT_ESCALATE, and "bump the image"
+            # is not a real remedy for them. The no-fix tallies are untouched --
+            # they only ever render as AR-029 accepted-risk context, so this
+            # change stays narrow and auditable.
+            if fixable and _is_kernel_header_pkg(v.get("PkgName", ""), tgt_class):
+                continue
+            if sev == "CRITICAL":
+                cf, cn = (cf + 1, cn) if fixable else (cf, cn + 1)
+            elif sev == "HIGH":
+                hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
+            else:
+                continue
+            # Capture the FULL CVE-ID list (deduped), not just a 5-id sample.
+            # These ride on sweep_findings.metadata.cve_ids (DB-only, per
+            # disclosure policy) so KEV can assess every CVE finding -- the
+            # Phase-1 gap where 122/199 scored exploited=UNKNOWN was purely
+            # missing IDs, not missing risk.
+            if vid:
+                bucket = fix_ids if fixable else nofix_ids
+                if vid not in bucket:
+                    bucket.append(vid)
+    if not (cf or cn or hf or hn):
+        return None
+    return {"crit_fix": cf, "crit_nofix": cn,
+            "high_fix": hf, "high_nofix": hn,
+            "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5],
+            "fix_ids": fix_ids, "nofix_ids": nofix_ids}
+
+
 def _newer_upstream_tag_exists(image_ref: str):
     """Is there a newer upstream image TAG than the one we run?
 
@@ -1209,40 +1313,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 report = json.loads(stdout)
             except Exception:
                 return img, None, False
-            # Split by fix-availability. A CVE with a non-empty FixedVersion has
-            # an upstream fix → actionable (update the image). One with no
-            # FixedVersion (Status affected/will_not_fix/fix_deferred/end_of_life)
-            # cannot be patched until upstream ships — that's the AR-029 accepted
-            # class. Severity does NOT decide acceptance; fix-availability does.
-            cf = cn = hf = hn = 0  # crit-fixable, crit-nofix, high-fixable, high-nofix
-            fix_ids: list[str] = []    # ALL fixable CRITICAL/HIGH CVE IDs (deduped)
-            nofix_ids: list[str] = []  # ALL no-upstream-fix CRITICAL/HIGH CVE IDs
-            for tgt in report.get("Results", []) or []:
-                for v in tgt.get("Vulnerabilities", []) or []:
-                    sev = v.get("Severity", "")
-                    fixable = bool(v.get("FixedVersion"))
-                    vid = v.get("VulnerabilityID")
-                    if sev == "CRITICAL":
-                        cf, cn = (cf + 1, cn) if fixable else (cf, cn + 1)
-                    elif sev == "HIGH":
-                        hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
-                    else:
-                        continue
-                    # Capture the FULL CVE-ID list (deduped), not just a 5-id
-                    # sample. These ride on sweep_findings.metadata.cve_ids
-                    # (DB-only, per disclosure policy) so KEV can assess every
-                    # CVE finding — the Phase-1 gap where 122/199 scored
-                    # exploited=UNKNOWN was purely missing IDs, not missing risk.
-                    if vid:
-                        bucket = fix_ids if fixable else nofix_ids
-                        if vid not in bucket:
-                            bucket.append(vid)
-            if cf or cn or hf or hn:
-                return img, {"crit_fix": cf, "crit_nofix": cn,
-                             "high_fix": hf, "high_nofix": hn,
-                             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5],
-                             "fix_ids": fix_ids, "nofix_ids": nofix_ids}, True
-            return img, None, True
+            return img, tally_trivy_report(report), True
 
         # 6 parallel scans is enough to overlap registry latency without
         # hammering the local Trivy DB lock.
