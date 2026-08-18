@@ -134,7 +134,7 @@ manages all subsequent deployments including upgrades to these components.
 
 > **Note:** Flux distribution is v2.9.3 (flux-operator/flux-instance chart 0.57.0). The `flux` CLI tool (mise) is v2.9.0, matched to the running distribution. Controllers: source-controller v1.9.3, kustomize-controller v1.9.4, helm-controller v1.6.3, notification-controller v1.9.2, image-reflector-controller v1.2.3, image-automation-controller v1.2.3. The former v2.6+ CRD-incompatibility pin (at operator v0.14.0) was cleared by the 0.14.0→0.57.0 operator upgrade + Flux 2.7 image-API GA storage migration on 2026-08-11 — see `docs/sops/flux-upgrade.md`.
 
-> **Note — bjw-s app-template frozen at 3.7.3:** The `bjw-s/app-template` chart is intentionally held at v3.7.3 cluster-wide (~40 apps). Upgrading to 4.x requires a schema-breaking values migration (`controllers`, `containers`, `persistence` key paths all changed). This will be done as a dedicated multi-week migration project. Do not bump individual apps to 4.x ahead of the bulk migration — mixed versions create inconsistent maintenance overhead.
+> **Note — bjw-s app-template at 5.1.0 cluster-wide (migrated 2026-08-18):** The long-standing 3.7.3 freeze is over — all ~70 app-template HelmReleases were bulk-migrated 3.7.3→5.1.0 on 2026-08-18 (values now carry explicit persistence suffix pins; chart is pulled from the `bjw-s-labs` OCI registry, `oci://ghcr.io/bjw-s-labs/helm`). Keep the chart version uniform cluster-wide: future majors go through the library-chart migration procedure in `docs/sops/application-update.md` §7b, never as per-app bumps.
 
 ---
 

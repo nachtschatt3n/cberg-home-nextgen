@@ -1,8 +1,8 @@
 # SOP: Immich Photo Library
 
 > Description: Deploy and operate Immich — the self-hosted family photo/video library — as a read-only **external-library viewer** over the iCloud backup on the UniFi NAS, with Intel-iGPU ML face detection, Authentik OIDC SSO, and full Prometheus + Elasticsearch observability.
-> Version: `2026.08.08`
-> Last Updated: `2026-08-08`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `cberg-agent / media`
 
 ---
@@ -55,7 +55,8 @@ deletes the originals (`:ro` CIFS mount).
 1. Manifests live under `kubernetes/apps/media/immich/`; registered in
    `kubernetes/apps/media/kustomization.yaml`. Push to main → Flux reconciles.
 2. Bring-up order is enforced by `dependsOn`: postgres + redis → server; ML is
-   independent. All four are app-template `3.7.3` HelmReleases.
+   independent. All four are app-template `5.1.0` HelmReleases (cluster-wide
+   3.7.3→5.1.0 migration, 2026-08-18).
 
 ### ⚠️ Hard rule — CPU caps during bulk (re)scans (thermal)
 On these NUC14 (Meteor Lake) nodes, an **uncapped** Immich bulk scan will

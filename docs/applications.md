@@ -280,7 +280,7 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 ### `my-software-showcase`
 
-Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 3.7.3, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
+Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 5.1.0, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
 
 | App | Purpose | Ingress |
 |-----|---------|---------|

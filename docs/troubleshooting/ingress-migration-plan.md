@@ -48,7 +48,8 @@ gethomepage `kubernetes.gateway: true` HTTPRoute discovery).
   removed from the cluster on 2026-08-13** — that item is gone, and with it
   the need for an app-side NextAuth cookie fix or a Lua EnvoyExtensionPolicy.
 - ~60 apps are bjw-s app-template → `ingress:` → `route:` values swap
-  (mechanical; route syntax survives the separate 3.7.3→5.x chart plan).
+  (mechanical; route syntax survived the 3.7.3→5.1.0 chart migration,
+  completed 2026-08-18).
 - ~~k8s-gateway supports watching HTTPRoute (per-app DNS flips automatically)~~
   **Was FALSE on app 0.4.0, TRUE again since 2026-08-15:** k8s_gateway v0.4.0
   failed closed for ALL names once any Gateway API CRD existed (see §Phase 0

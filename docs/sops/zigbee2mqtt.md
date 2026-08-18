@@ -534,7 +534,9 @@ Expected:
 - Pod `Ready 1/1`
 - HelmRelease `Ready=True`
 - `bridge/state` returns `{"state":"online"}`
-- `LAST_BACKUP_AT` within the last 24h
+- `LAST_BACKUP_AT` within the last 24h (if it looks stale, first rule out the
+  `lastBackupAt` status lag — check the volume's newest Completed Backup CR;
+  see `docs/sops/backup.md` → Troubleshooting: "lastBackupAt Can Lag")
 
 ---
 
