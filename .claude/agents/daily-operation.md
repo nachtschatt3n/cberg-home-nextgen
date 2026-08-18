@@ -163,9 +163,18 @@ needs their decision, and what got auto-fixed.
     open findings:
 
         .venv/bin/python3 runbooks/sweep-run.py --reconcile-only \
-          --cycle-id "$SWEEP_CYCLE_ID"
+          --cycle-id "$SWEEP_CYCLE_ID" --ran <sections-that-actually-ran>
 
     (red = any open critical · yellow = any open warning · green = neither.)
+
+    This is a **backstop, not the primary closer**. Each specialist's check
+    script already auto-closed its own section's stale findings when it
+    finished (`FindingsWriter.close(verdict=…)`, fingerprint-keyed). This pass
+    re-applies AR suppression, catches sections whose writer path was skipped,
+    and recomputes the one true verdict. `--cycle-id` is **mandatory** here —
+    without it the reconcile refuses, because a freshly-minted id would
+    auto-close every open finding in the `--ran` scope. `--ran` is what keeps a
+    section that never reported out of scope.
     Skipping this leaves whichever section closed last — or a stale
     pre-suppression "red" — as the cycle verdict, which is exactly the
     "red verdict / 0 open findings" dashboard artifact. Only after this
@@ -174,7 +183,8 @@ needs their decision, and what got auto-fixed.
 4c. **Report the safe-update queue — REPORT-ONLY (the sweep never merges).**
     The sweep is read-only observability; SAFE updates are APPLIED in the
     maintenance windows (the `maintenance-window-agent`'s Step 0 runs
-    `auto-update.py --apply` every tue/thu/sun window), NOT here. So here just
+    `auto-update.py --apply` every maintenance window — daily since 2026-08-16,
+    see `runbooks/maintenance-windows.yaml`), NOT here. So here just
     DRY-RUN the auto-updater to show what will land next window:
 
         .venv/bin/python3 runbooks/auto-update.py --json

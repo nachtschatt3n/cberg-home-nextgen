@@ -4,15 +4,15 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `operator + daily-operation agents`
 
 ---
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-16, **twelve** defects across five audit scripts
+Between 2026-07-30 and 2026-08-18, **fourteen** defects across five audit scripts
 shared one root cause: an unmeasured, failed or absent probe was reported as a
 definite outcome. Four of them were introduced *while fixing the others*.
 
@@ -75,6 +75,8 @@ signal.
 | `health-check.sh` | ES stalled-port-forward class: `773b76e6` fixed a leaked port-forward holding :9201 so the ES bind failed silently; same class recurred 2026-08-17 as an orphan alert-bridge process holding :8787/:8788 while launchd crash-looped `EADDRINUSE` — a stale process holding a port makes the NEW instance the silent failure | pass (stale process answers) |
 | `health-check.sh` | FATAL/OOM wildcard `*fatal*` matched the NFS mount OPTION `fatal_neterrors=none` in mount-table output from the Talos cleanup pod — 2 of 6 "critical" hits were a filesystem flag, not a log level (fixed: must_not `*fatal_neterrors=*`) | fail (option name ≠ log level) |
 | `health-check.sh` | "Kustomizations not reconciled" emitted from TWO call sites (§5 + summary) for ONE condition → duplicate finding rows F-359d4bdf/F-a2726bda; a summary section must log-only, never re-add issues | double-fail |
+| `sweep-run.py` | auto-close lived ONLY in the orchestrator's reconcile, so a section finishing at 13:52 kept 78 obsolete findings open when the day's reconciles ran at 13:33/13:37 — 82 rows hand-resolved | fail (false persistence) |
+| `sweep-run.py` | `--reconcile-only` without `--cycle-id` minted a FRESH uuid, making `cycle_id != <fresh>` true for every row — would have resolved every open finding in the `--ran` scope (cycle f11badb9, 2026-08-18 13:56) | pass (mass false resolution) |
 
 ## 3) Blueprints
 
@@ -131,6 +133,21 @@ When writing or reviewing an audit check:
    sections that demonstrably ran. Prefer an explicit declaration from the caller
    over inferring it from written rows — a section that ran clean may write
    nothing.
+
+   Since 2026-08-18 auto-close lives primarily in the **writer**:
+   `FindingsWriter.close(verdict=...)` resolves the open findings of its OWN
+   section that the run did not re-emit, keyed on fingerprint. The gate is
+   `section_complete`, inferred from `verdict is not None` — so `__exit__`'s bare
+   `close()` on the exception path, and partial writer users like
+   `auto-update.py`, conclude nothing. A section that ran but knows its coverage
+   degraded (scanner errored, port-forward died, API rate-limited) **must** call
+   `mark_incomplete(reason)`; a coverage gap is not a fix.
+   `sweep-run.py --reconcile-only --ran <sections>` remains as a backstop.
+   Kill switches: `SWEEP_AUTOCLOSE=0`, `SWEEP_AUTOCLOSE_DRYRUN=1`.
+   **Auto-close is section-scoped and fires only on an ORCHESTRATED run**
+   (`SWEEP_CYCLE_ID` set in the env — i.e. launched by `sweep-run.py` or the
+   daily-operation fan-out). An ad-hoc standalone run of a check script does
+   NOT auto-close unless you opt in with `SWEEP_AUTOCLOSE=1`.
 7. **Fail-safe direction is security-dependent.** Security checks surface on
    `not-measured`; cosmetic checks may stay quiet — but both must say which it is.
 
@@ -194,6 +211,7 @@ inventory and eyeball every match.
 | `integer expression expected` in a shell guard | `grep -c … \|\| echo 0` (rule 3) |
 | Same item appears as two findings | missing canonicalisation (rule 5) |
 | Finding auto-resolves and reappears next cycle | auto-close acting on a section that did not run (rule 6) |
+| A resolved finding stays open across cycles | the section auto-closes only on a completed run — check for "auto-close SKIPPED … no verdict" / "declared INCOMPLETE" in its output (rule 6) |
 | Operators stop believing a section | `not-measured` worded as `fail` (rule 7) |
 
 ```bash
@@ -242,6 +260,9 @@ python3 runbooks/doc-check.py 2>/dev/null | tail -20
   reasoning in `justification`.
 - Do not AR-suppress a false positive. Fix the audit logic; the AR register is
   for risks that are real and accepted.
+- Run `runbooks/policy-cli.py risk lint` to find descriptions that are drifting
+  or will drift, and `risk edit AR-NNN --description '<drift-stable>'` to fix one
+  in place (it refuses a description embedding `x.y.z` or a volatile count).
 
 ## 11) Rollback Plan
 
