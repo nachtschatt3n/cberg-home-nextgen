@@ -185,6 +185,22 @@ def _stop(pf: subprocess.Popen | None) -> None:
         pass
 
 
+# Natures that mark a finding as being ABOUT THE AUDIT ITSELF rather than
+# about the estate: a suppression that stopped matching, a check that could
+# not cover its target, a rule that regressed. These are exempt from AR
+# substring suppression entirely — see _apply_ar_suppression().
+#
+# `policy-drift` and `audit-coverage-gap` are the values already in use on
+# live rows; `audit-integrity` / `meta` are accepted as future synonyms so a
+# new emitter does not have to touch this file to be protected.
+AUDIT_INTEGRITY_NATURES = [
+    "policy-drift",
+    "audit-coverage-gap",
+    "audit-integrity",
+    "meta",
+]
+
+
 def _apply_ar_suppression(dsn: str) -> int:
     """Re-tag open findings whose title substring-matches an accepted-risk
     description. Sets severity='accepted' and prepends [AR-NNN] to the
@@ -194,6 +210,28 @@ def _apply_ar_suppression(dsn: str) -> int:
     suppresses matching version findings AND any other section's finding
     that happens to share the substring. Description authoring is the
     knob to control scope.
+
+    TWO CLASSES OF ROW ARE NEVER SUPPRESSED, no matter what they match:
+
+    1. **Audit-integrity findings** (`risk_nature` in
+       AUDIT_INTEGRITY_NATURES, or a `subsection` starting `audit_`/`audit-`).
+       These report that the audit machinery is mis-firing. Silencing them
+       with the same machinery turns a detector into a blindfold.
+
+    2. **A finding about a specific AR, suppressed by that same AR**
+       (`metadata->>'ar_id'` equals the AR being applied). Self-suppression
+       is never a legitimate outcome.
+
+    Incident that forced this (2026-08-18, F-21ceb683): a finding titled
+    "AR-063 no longer suppresses its target: the description
+    `iib0011/omni-tools image` is not a substring of the finding title …"
+    was tagged `[AR-063] accepted` — because once AR-063 was re-worded to
+    the bare `iib0011/omni-tools`, that string occurred inside the very
+    sentence reporting AR-063's breakage. The report of the failure was
+    eaten by the thing that failed. Either guard alone would have caught
+    it; both are here because they fail in different directions — (1)
+    covers audit-integrity rows that carry no `ar_id`, (2) covers rows
+    that carry an `ar_id` but were emitted with an ordinary nature.
 
     Returns count of rows re-tagged this pass.
     """
@@ -210,10 +248,32 @@ def _apply_ar_suppression(dsn: str) -> int:
                 )
                 ars = cur.fetchall()
                 tagged = 0
+                exempt = 0
                 for ar_id, desc in ars:
                     needle = (desc or "").strip()
                     if not needle:
                         continue
+                    # Count what the guards held back, so an over-broad AR
+                    # description is visible in the run log instead of just
+                    # quietly matching nothing.
+                    cur.execute(
+                        """
+                        SELECT count(*)
+                          FROM sweep_findings
+                         WHERE resolved_at IS NULL
+                           AND severity IN ('critical', 'warning', 'monitor')
+                           AND position(%s in lower(title)) > 0
+                           AND position(%s in title) = 0
+                           AND (
+                                 coalesce(metadata->>'risk_nature', '') = ANY(%s)
+                              OR coalesce(metadata->>'subsection', '') ~* '^audit[-_]'
+                              OR coalesce(metadata->>'ar_id', '') = %s
+                               )
+                        """,
+                        (needle.lower(), f"[{ar_id}]",
+                         AUDIT_INTEGRITY_NATURES, ar_id),
+                    )
+                    exempt += (cur.fetchone() or (0,))[0]
                     cur.execute(
                         """
                         UPDATE sweep_findings
@@ -223,11 +283,19 @@ def _apply_ar_suppression(dsn: str) -> int:
                            AND severity IN ('critical', 'warning', 'monitor')
                            AND position(%s in lower(title)) > 0
                            AND position(%s in title) = 0
+                           AND coalesce(metadata->>'risk_nature', '') <> ALL(%s)
+                           AND coalesce(metadata->>'subsection', '') !~* '^audit[-_]'
+                           AND coalesce(metadata->>'ar_id', '') <> %s
                         """,
-                        (f"[{ar_id}] ", needle.lower(), f"[{ar_id}]"),
+                        (f"[{ar_id}] ", needle.lower(), f"[{ar_id}]",
+                         AUDIT_INTEGRITY_NATURES, ar_id),
                     )
                     tagged += cur.rowcount
             conn.commit()
+        if exempt:
+            print(f"==> AR-suppression: {exempt} audit-integrity/self-referential "
+                  f"finding(s) matched an AR description and were EXEMPTED "
+                  f"(a finding about the audit is never silenced by the audit)")
         return tagged
     except Exception as e:  # noqa: BLE001
         print(f"==> AR-suppression failed: {type(e).__name__}: {e}")

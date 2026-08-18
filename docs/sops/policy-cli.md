@@ -32,6 +32,26 @@ Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `
 
 **AR descriptions are substring matchers, so they must be drift-stable.** `risk edit` REFUSES a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
 
+**Two classes of finding are exempt from AR substring suppression entirely**
+(`_apply_ar_suppression` in `runbooks/sweep-run.py`; mirrored spec pending for
+`Findings.suppress_accepted` in `runbooks/security-check.py`):
+
+1. **Audit-integrity findings** — `metadata.risk_nature` in
+   `{policy-drift, audit-coverage-gap, audit-integrity, meta}`, or a
+   `metadata.subsection` starting `audit_` / `audit-`. These report that the
+   audit machinery itself is mis-firing.
+2. **A finding about a specific AR, matched by that same AR** —
+   `metadata.ar_id` equals the AR being applied. Self-suppression is never a
+   legitimate outcome.
+
+Why: on 2026-08-18 a finding reporting *"AR-063 no longer suppresses its
+target"* was tagged `[AR-063] accepted`, because re-wording AR-063 to the bare
+`iib0011/omni-tools` made that string occur inside the sentence describing
+AR-063's own breakage. The report of the failure was eaten by the thing that
+failed. Regression test: `runbooks/tests/test-ar-suppression-guard.py`.
+If a suppression pass exempts anything, it says so in the run log — an
+over-broad description is visible rather than silently matching nothing.
+
 A fifth namespace, `policy-cli finding …`, reads/writes the **`sweep_findings`**
 table. It is not a policy table — it is where **vulnerability detail lives instead
 of in this public repo** (`list` / `show` / `ref` / `add` / `detail`). See
