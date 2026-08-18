@@ -46,6 +46,29 @@ more semantic weight than a php.ini line.**
 
 ## 2) Root cause (corrected)
 
+> ### THE TRAP
+>
+> **The image's php.ini already sets the correct `error_reporting`, and it is a
+> no-op.** The obvious fix looks right, is already present, and does nothing.
+>
+> Anyone triaging this will reach for php.ini first, find the value they were
+> about to add already sitting there, and conclude the notices must be coming
+> from somewhere else. They are not. The ini is simply overruled:
+>
+> 1. php.ini is read at startup and sets the mask correctly.
+> 2. CakePHP 1.3 then calls `error_reporting()` **itself, at runtime**, in two
+>    places, and whatever it computes wins.
+> 3. What it computes is `E_ALL & ~E_DEPRECATED` — and **`E_ALL` has included
+>    `E_STRICT` since PHP 5.4**, so Strict Standards comes straight back on.
+>
+> The general lesson, which is why this is worth writing down: **a runtime that
+> can call `error_reporting()` (or its equivalent) makes every static config
+> file advisory.** Verify the EFFECTIVE value at request time, not the value in
+> the config file. The same shape appears elsewhere in this cluster — see
+> F-a49c67c3, where `RAILS_LOG_TO_STDOUT=1` is set correctly on four apps and is
+> equally inert because the image never reads it.
+
+
 The php.ini in the image **already** carries the right value:
 
 ```

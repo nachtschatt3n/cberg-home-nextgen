@@ -283,6 +283,16 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 
 Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails, PHP era), all on bjw-s app-template 5.1.0, deployed 2026-08-18. Databases live on the shared `databases/mariadb` (legacy-compat `sql_mode=NO_ENGINE_SUBSTITUTION` + `init_connect SET NAMES utf8` persisted in its HR for these tenants). **No outbound integrations by design** (no SMTP/Sentry/Twilio etc. — see `kubernetes/apps/my-software-showcase/README.md`). Homepage group "Software Portfolio".
 
+> **Observability gap on four apps in this namespace (2026-08-18, `F-a49c67c3`).**
+> `u-zeit`, `zuhause-betreut`, `metaldyne` and `uzeit-de` run normally (1/1, no
+> restarts) but ship **zero** documents to Elasticsearch. Their logs are written
+> to a file on an `emptyDir` instead of stdout, so they are never collected and
+> are destroyed on every pod restart. `RAILS_LOG_TO_STDOUT=1` is set on all of
+> them and is **inert** — the legacy images never read it, which is why the
+> manifests look correct. Treat any log-based "clean" verdict for these four as
+> absence of data, not absence of errors.
+> Detail and proposed fix: `runbooks/policy-cli.py finding show F-a49c67c3`.
+
 | App | Purpose | Ingress |
 |-----|---------|---------|
 | globalmobility | globalDISPO dispatch system (TYPO3 4.2) | Internal |

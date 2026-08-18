@@ -748,13 +748,34 @@ name `handleError`. Nothing was broken; the health check was the incident.
 | readiness | a **static** endpoint | 360 boots/hour — this is the whole saving |
 | startup | the deep framework route | fires **0x/hour** in steady state, so it costs nothing, and it is what gates the Flux rollout |
 
-The startup row is the counter-intuitive one and it is easy to get wrong. It is
-tempting to move all three to the cheap endpoint, but startup stops firing once
-it succeeds, so moving it saves no volume at all — while giving up the
-deploy-time gate. While startup fails the container is not Ready, the Deployment
-never becomes Available, and `upgrade.remediation.strategy: rollback` triggers.
-With a shallow startup probe, a pod that comes up with a bad DB credential
-reports the release **successful** and only CrashLoops afterwards.
+The startup row is the counter-intuitive one, and it was got wrong once already
+in this repo before being caught in review. State the division of labour
+plainly:
+
+> **Startup is the DEPLOY gate. Readiness is the TRAFFIC gate.**
+
+They fail differently and they must be probed differently:
+
+- **Readiness** answers *"should this pod receive requests right now?"* — asked
+  360 times an hour, forever. This is where every probe saving is, and a shallow
+  check is acceptable because liveness still catches a dead tier within one
+  window.
+- **Startup** answers *"did this release actually come up?"* — asked a handful of
+  times, once, and then **never again**. Its steady-state rate is **0/hour**, so
+  moving it to a cheap endpoint saves *nothing whatsoever*.
+
+What a shallow startup probe costs is the release verdict. While startup fails
+the container is not Ready, the Deployment never becomes Available, and the
+HelmRelease's `upgrade.remediation.strategy: rollback` fires. Point startup at
+a static endpoint and that safety net is gone: a pod that boots with a bad DB
+credential, an unreachable database or an unwritable temp dir answers the shallow
+check instantly, so **the release reports SUCCESSFUL** and the app only starts
+CrashLooping afterwards — after Flux has already recorded a good deploy and moved
+on. With `strategy: Recreate` at `replicas: 1`, the previous working pod was
+deleted before the new one started, so there is nothing still serving.
+
+Trading a real deploy gate for a 0/hour saving is always a bad trade. If you are
+tempted to shallow a probe, first ask how often it actually fires.
 
 If the image has no static health endpoint, add one **additively** rather than
 overriding the image's config — a ConfigMap `subPath`-mounted into
