@@ -37,6 +37,11 @@ spec:
               tag: production-20260818064310
               pullPolicy: IfNotPresent
             env:
+              # Showcase deployment opts in: the sign-in form arrives with the
+              # shared demo credential already filled so a visitor only presses
+              # submit. Default in the app is OFF; only this deployment enables it.
+              - name: SHOWCASE_DEMO_PREFILL
+                value: "1"
               - name: TZ
                 value: "Europe/Berlin"
               - name: RAILS_ENV
