@@ -1,0 +1,263 @@
+#!/bin/bash
+# commit-msg hook — repo-tracked, activated via `git config core.hooksPath .githooks`
+#
+# Enforces the vulnerability-disclosure boundary from
+# docs/sops/vulnerability-disclosure.md on COMMIT MESSAGES.
+#
+# This repository is PUBLIC. A commit message that says what is currently
+# UNFIXED on a service we actually run is a disclosure — it tells a reader
+# exactly where to aim and that nobody has closed it yet. Git history cannot
+# be rewritten once pushed, so this has to be caught before the commit exists.
+#
+# What is blocked:
+#   · CVE / GHSA identifiers, and the bare word "CVE"
+#   · scanner vocabulary ("fixable", "will_not_fix", "criticals", "highs")
+#   · counted or quantified vulnerability phrasing
+#     ("13 fixable criticals", "one critical remains", "clears 4 CVEs")
+#   · explicit unfixed-state statements
+#     ("vulnerable to", "unpatched", "exploitable", "residual critical")
+#
+# What is allowed:
+#   · `security_ref: F-xxxxxxxx` — the sanctioned pointer to the finding record
+#   · plain version bumps with no vulnerability language
+#   · describing a FIX without quantifying what remains
+#
+# Correct shape for a security-driven bump:
+#
+#     fix(app): image 1.2.3 -> 1.2.4
+#
+#     Patch release, no breaking changes in upstream notes.
+#
+#     security_ref: F-1db8884d
+#
+# Detail belongs on the finding record, not in git:
+#     runbooks/policy-cli.py finding detail F-xxxxxxxx
+#
+# Escape hatch: `git commit --no-verify` bypasses this hook (as it does every
+# hook). Use it only for a message that is genuinely a false positive, and see
+# the SOP before deciding that it is.
+
+set -e
+
+MSG_FILE="$1"
+[ -z "$MSG_FILE" ] && exit 0
+[ -f "$MSG_FILE" ] || exit 0
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# Resolve python3: PATH, then mise shims, then `mise exec --`.
+PY=""
+if command -v python3 >/dev/null 2>&1; then
+    PY="python3"
+elif [ -x "$HOME/.local/share/mise/shims/python3" ]; then
+    PY="$HOME/.local/share/mise/shims/python3"
+elif command -v mise >/dev/null 2>&1; then
+    PY="mise exec -- python3"
+fi
+
+if [ -z "$PY" ]; then
+    echo -e "${YELLOW}⚠️  commit-msg: python3 not found — disclosure scan SKIPPED${NC}" >&2
+    exit 0
+fi
+
+$PY - "$MSG_FILE" <<'PYEOF'
+import re
+import sys
+
+RED = "\033[0;31m"
+YELLOW = "\033[1;33m"
+GREEN = "\033[0;32m"
+DIM = "\033[2m"
+NC = "\033[0m"
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    raw = fh.read()
+
+# `git commit -v` appends the staged diff below a scissors line. Everything
+# from there down is not part of the message and must not be scanned.
+scissors = re.search(r"^#\s*-+\s*>8\s*-+.*$", raw, re.MULTILINE)
+if scissors:
+    raw = raw[: scissors.start()]
+
+# Drop comment lines (git's own template guidance mentions nothing relevant,
+# but a user's editor comments should never trip the scan).
+lines = [ln for ln in raw.splitlines() if not ln.lstrip().startswith("#")]
+
+if not any(ln.strip() for ln in lines):
+    sys.exit(0)  # empty message — git will abort on its own
+
+# Severity tokens, guarded so ordinary hyphenated adjectives
+# ("high-availability", "low-latency", "critical-path") do not match.
+SEV = r"(?:critical|high|medium|low)(?![-\w])"
+VULN = r"(?:vulnerabilit\w*|advisor(?:y|ies)|cves?)"
+
+PATTERNS = [
+    (
+        r"\bCVE-\d{4}-\d{4,}\b",
+        "CVE identifier",
+    ),
+    (
+        r"\bGHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}\b",
+        "GHSA advisory identifier",
+    ),
+    (
+        r"\bCVEs?\b",
+        'the bare word "CVE"',
+    ),
+    (
+        r"\bfixable\b",
+        'scanner vocabulary ("fixable")',
+    ),
+    (
+        r"\bwill[ _-]not[ _-]fix\b",
+        'scanner vocabulary ("will_not_fix")',
+    ),
+    (
+        r"\b(?:criticals|highs)\b",
+        "vulnerability-count noun",
+    ),
+    (
+        # "13 fixable criticals", "clears 4 CVEs", "2 high findings"
+        r"\b\d+\s+(?:\w+[- ]){0,2}?(?:" + SEV + r"s?|" + VULN + r")",
+        "counted vulnerability phrasing",
+    ),
+    (
+        # "one critical remains", "most fixable criticals", "several CVEs"
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|no|several|"
+        r"multiple|most|some|few|many|residual|remaining|outstanding)\s+"
+        r"(?:\w+[- ]){0,2}?(?:" + SEV + r"s?|" + VULN + r")",
+        "quantified vulnerability phrasing",
+    ),
+    (
+        r"\bvulnerable\s+to\b",
+        "unfixed-vulnerability statement",
+    ),
+    (
+        r"\bunpatched\b",
+        "unfixed-vulnerability statement",
+    ),
+    (
+        r"\bexploitab\w*\b",
+        "exploitability detail",
+    ),
+    (
+        r"\b(?:zero|0)[- ]day\b",
+        "exploitability detail",
+    ),
+    (
+        r"\bscan surface\b",
+        "residual-exposure statement",
+    ),
+    (
+        # "... critical remains", "... CVE is outstanding"
+        r"(?:" + SEV + r"|" + VULN + r")\W+(?:\w+\W+){0,4}?"
+        r"(?:remains?|residual|outstanding|still\s+open)\b",
+        "residual-exposure statement",
+    ),
+    (
+        # "remains one critical", "residual fixable critical"
+        r"\b(?:remains?|residual|outstanding)\W+(?:\w+\W+){0,4}?"
+        r"(?:" + SEV + r"|" + VULN + r")",
+        "residual-exposure statement",
+    ),
+]
+
+COMPILED = [(re.compile(p, re.IGNORECASE), label) for p, label in PATTERNS]
+
+violations = []
+seen = set()
+for idx, line in enumerate(lines, start=1):
+    # `security_ref: F-xxxxxxxx` is the sanctioned reference form — it is a
+    # pointer, not a disclosure, and must never be flagged.
+    if re.match(r"^\s*security_ref:\s*F-[0-9a-f]{8}\s*$", line, re.IGNORECASE):
+        continue
+    for rx, label in COMPILED:
+        m = rx.search(line)
+        if m:
+            key = (idx, label)
+            if key in seen:
+                continue
+            seen.add(key)
+            violations.append((idx, line.rstrip(), m.group(0), label))
+
+if not violations:
+    sys.exit(0)
+
+out = sys.stderr
+print("", file=out)
+print(
+    f"{RED}╔══════════════════════════════════════════════════════════════════╗{NC}",
+    file=out,
+)
+print(
+    f"{RED}║  COMMIT REJECTED — vulnerability-disclosure policy               ║{NC}",
+    file=out,
+)
+print(
+    f"{RED}╚══════════════════════════════════════════════════════════════════╝{NC}",
+    file=out,
+)
+print("", file=out)
+print(
+    f"  Policy: {YELLOW}docs/sops/vulnerability-disclosure.md{NC}", file=out
+)
+print("", file=out)
+print(
+    "  This repository is PUBLIC. A commit message must not describe",
+    file=out,
+)
+print(
+    "  currently-unfixed vulnerability state on a service we run.",
+    file=out,
+)
+print("", file=out)
+print(f"  {RED}Offending content:{NC}", file=out)
+for idx, line, hit, label in violations:
+    print("", file=out)
+    print(f"    {DIM}line {idx}:{NC} {line}", file=out)
+    print(f"    {RED}  ^ matched {hit!r} — {label}{NC}", file=out)
+print("", file=out)
+print(f"  {GREEN}How to fix:{NC}", file=out)
+print("", file=out)
+print(
+    "    1. Move the detail onto the finding record (stays in the cluster DB,",
+    file=out,
+)
+print("       never in git):", file=out)
+print("", file=out)
+print(
+    f"         {DIM}runbooks/policy-cli.py finding detail F-xxxxxxxx{NC}",
+    file=out,
+)
+print("", file=out)
+print("    2. Reference it from the commit message instead:", file=out)
+print("", file=out)
+print(f"         {DIM}security_ref: F-xxxxxxxx{NC}", file=out)
+print("", file=out)
+print(
+    "    3. Say what the change DOES, not what remains unfixed. e.g.", file=out
+)
+print("", file=out)
+print(f"         {DIM}fix(app): image 1.2.3 -> 1.2.4{NC}", file=out)
+print("", file=out)
+print(f"         {DIM}Patch release, no breaking changes upstream.{NC}", file=out)
+print("", file=out)
+print(f"         {DIM}security_ref: F-1db8884d{NC}", file=out)
+print("", file=out)
+print(
+    f"  {DIM}False positive? `git commit --no-verify` bypasses this hook.{NC}",
+    file=out,
+)
+print(
+    f"  {DIM}Read the SOP before deciding that it is one.{NC}",
+    file=out,
+)
+print("", file=out)
+
+sys.exit(1)
+PYEOF

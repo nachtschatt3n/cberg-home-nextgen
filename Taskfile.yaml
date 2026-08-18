@@ -26,15 +26,21 @@ tasks:
   default: task --list
 
   install-hooks:
-    desc: Activate the in-repo pre-commit hook (.githooks/pre-commit)
+    desc: Activate the in-repo git hooks (.githooks/)
     summary: |
       Sets `git config core.hooksPath .githooks` so commits in this clone use the
-      tracked pre-commit hook. Run once after `git clone` (or after re-cloning).
-      The hook scans staged files for cluster-Secret value literals, unencrypted
-      *.sops.yaml files, and common credential patterns. See .githooks/pre-commit.
+      tracked hooks. Run once after `git clone` (or after re-cloning).
+
+      pre-commit  — scans staged files for cluster-Secret value literals,
+                    unencrypted *.sops.yaml files, and common credential
+                    patterns. See .githooks/pre-commit.
+      commit-msg  — blocks commit messages that disclose currently-unfixed
+                    vulnerability state (CVE/GHSA ids, counted "fixable
+                    critical" phrasing). See docs/sops/vulnerability-disclosure.md.
     cmds:
       - git config core.hooksPath .githooks
       - test -x .githooks/pre-commit && echo "✅ pre-commit hook active"
+      - test -x .githooks/commit-msg && echo "✅ commit-msg hook active"
 
   reconcile:
     desc: Force Flux to pull in changes from your Git repository
