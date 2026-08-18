@@ -679,6 +679,23 @@ class VersionChecker:
         m = cls._VARIANT_RE.search(cls._strip_digest(tag))
         return m.group(1).lower() if m else ''
 
+    # Ubuntu's tag stream mixes two release CLASSES. An LTS (even year, `.04`)
+    # gets 5 years of standard security maintenance; an INTERIM (`.10`, and the
+    # odd-year `.04`) gets 9 months and is then EOL. So the newest tag is
+    # routinely the WORSE one: 24.04 -> 24.10 reads as a tidy minor bump while
+    # actually moving a supported base image onto one that is already
+    # end-of-life (2026-08-18: paperclip's tools image). Numeric ordering alone
+    # can never see this — the class is not in the version, it is in the
+    # calendar — so it has to be encoded.
+    _DISTRO_LTS_REPO_RE = re.compile(r'(^|/)ubuntu$', re.IGNORECASE)
+
+    @classmethod
+    def _is_ubuntu_lts(cls, tag: str) -> bool:
+        """True for Ubuntu LTS tags (`24.04`, `24.04.4`, `22.04-slim`)."""
+        t = cls._VARIANT_RE.sub('', cls._strip_digest(tag)).lstrip('vV')
+        m = re.match(r'^(\d{2})\.(\d{2})(?:\.|$|-)', t)
+        return bool(m) and int(m.group(1)) % 2 == 0 and m.group(2) == '04'
+
     @classmethod
     def _semver_tag_key(cls, tag: str) -> tuple:
         """Sort key for semver-shaped tags: strip v-prefix, variant and -<hash>
@@ -698,10 +715,14 @@ class VersionChecker:
         has_build_suffix = bool(re.search(r'-[0-9a-f]+$', cls._VARIANT_RE.sub('', tag)))
         return tuple(nums[:4]) + (0 if has_build_suffix else 1,)
 
-    def _pick_latest_semver_tag(self, tags: list, current_tag: str = '') -> Optional[str]:
+    def _pick_latest_semver_tag(self, tags: list, current_tag: str = '',
+                                repository: str = '') -> Optional[str]:
         """Highest semver-shaped tag from `tags`, preferring current's major.
         Returns None when no version-shaped tag exists — callers must NOT fall
-        back to a meaningless 'latest'."""
+        back to a meaningless 'latest'.
+
+        `repository` is optional and used only for release-CLASS rules that the
+        tag string alone cannot express (Ubuntu LTS vs interim)."""
         version_tags = [t for t in tags if t and self._SEMVER_TAG_RE.match(t)]
         if not version_tags:
             return None
@@ -721,6 +742,16 @@ class VersionChecker:
                             if self._tag_variant(t) == cur_variant]
             if same_variant:
                 version_tags = same_variant
+        # Never propose an interim Ubuntu release. Applied unconditionally, not
+        # just when we are already on an LTS: from an interim pin the honest
+        # recommendation is the current LTS, not the next interim (which is
+        # typically still in development — Docker Hub publishes `26.10` months
+        # before it releases). Guarded by `if lts` so a repo with no LTS tag is
+        # still answerable instead of collapsing to None.
+        if repository and self._DISTRO_LTS_REPO_RE.search(repository.split(':')[0].rstrip('/')):
+            lts = [t for t in version_tags if self._is_ubuntu_lts(t)]
+            if lts:
+                version_tags = lts
         version_tags.sort(key=self._semver_tag_key, reverse=True)
         # Prefer an update WITHIN the current major (an in-line bump is the
         # actionable next step when one exists, mirroring Renovate's
@@ -1003,7 +1034,7 @@ class VersionChecker:
                 response = requests.get(api_url, timeout=15)
                 if response.status_code == 200:
                     tags = [t.get('name', '') for t in response.json().get('tags', [])]
-                    return self._pick_latest_semver_tag(tags, current_tag)
+                    return self._pick_latest_semver_tag(tags, current_tag, repo)
                 if _is_transient(response.status_code):
                     self.degraded.record(
                         f"image {repo}", _dep('quay.io', response.status_code),
@@ -1023,7 +1054,7 @@ class VersionChecker:
                 if '/' not in image_name:
                     image_name = f"library/{image_name}"
                 tags = self._dockerhub_tags(image_name, current_tag)
-                return self._pick_latest_semver_tag(tags, current_tag) if tags else None
+                return self._pick_latest_semver_tag(tags, current_tag, repo) if tags else None
 
             # Everything else (ghcr.io, registry.k8s.io, registry.librechat.ai,
             # vendor mirrors, self-hosted) speaks OCI Registry v2.
@@ -1031,7 +1062,7 @@ class VersionChecker:
                 return None  # a bare host with no image path
             image_path = repo.split('/', 1)[1].split(':')[0]
             tags = self._oci_v2_tags(host, image_path)
-            return self._pick_latest_semver_tag(tags, current_tag) if tags else None
+            return self._pick_latest_semver_tag(tags, current_tag, repo) if tags else None
         except Exception as e:
             self.degraded.record(f"image {repository}", 'container registry',
                                  f"{type(e).__name__}: {e}")

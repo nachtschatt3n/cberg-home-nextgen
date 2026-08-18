@@ -33,8 +33,8 @@ class PickLatestSemverTagTest(unittest.TestCase):
     def setUp(self):
         self.c = _checker()
 
-    def pick(self, tags, current=""):
-        return self.c._pick_latest_semver_tag(tags, current)
+    def pick(self, tags, current="", repository=""):
+        return self.c._pick_latest_semver_tag(tags, current, repository)
 
     # ── The redisinsight §1.1 regression ────────────────────────────────
     def test_head_of_stale_major_surfaces_newer_major(self):
@@ -156,6 +156,51 @@ class PickLatestSemverTagTest(unittest.TestCase):
         k = _mod.VersionChecker._semver_tag_key
         self.assertEqual(k("22.23.2-bookworm" + self.DIGEST),
                          k("22.23.2-bookworm"))
+
+    # ── Ubuntu LTS vs interim (2026-08-18, paperclip) ──────────────────
+    UBUNTU_TAGS = ["20.04", "20.10", "22.04", "22.10", "23.04", "23.10",
+                   "24.04", "24.04.4", "24.10", "25.04", "25.10", "26.04",
+                   "26.10"]
+
+    def test_lts_pin_is_never_offered_an_interim(self):
+        """paperclip: ubuntu 24.04 (LTS, supported to 2029) was offered 24.10,
+        an interim release that is already EOL. Numeric ordering cannot see
+        this — the release class is in the calendar, not the version."""
+        # with an in-line LTS point release available, that wins (same major)
+        self.assertEqual(
+            self.pick(self.UBUNTU_TAGS, "24.04", repository="ubuntu"), "24.04.4")
+        # without one, the answer is the next LTS — never the interim 24.10
+        no_point = [t for t in self.UBUNTU_TAGS if t != "24.04.4"]
+        self.assertEqual(
+            self.pick(no_point, "24.04", repository="ubuntu"), "26.04")
+
+    def test_interim_pin_is_offered_the_current_lts(self):
+        """From an interim pin the honest answer is the LTS, not the next
+        interim (Docker Hub publishes `26.10` months before it releases)."""
+        self.assertEqual(
+            self.pick(self.UBUNTU_TAGS, "24.10", repository="ubuntu"), "26.04")
+
+    def test_lts_rule_survives_a_variant_and_digest_pin(self):
+        tags = ["24.04", "24.10", "26.04"]
+        self.assertEqual(
+            self.pick(tags, "24.04" + self.DIGEST, repository="docker.io/library/ubuntu"),
+            "26.04")
+
+    def test_lts_rule_does_not_touch_other_repos(self):
+        """Only ubuntu has the LTS/interim split — debian's point releases are
+        all supported, and an app that happens to version itself 24.04 must
+        keep getting 24.10."""
+        tags = ["13.5", "13.6"]
+        self.assertEqual(self.pick(tags, "13.5", repository="debian"), "13.6")
+        self.assertEqual(self.pick(["24.04", "24.10"], "24.04",
+                                   repository="ghcr.io/vendor/app"), "24.10")
+
+    def test_is_ubuntu_lts_classification(self):
+        lts = _mod.VersionChecker._is_ubuntu_lts
+        for t in ("24.04", "22.04", "24.04.4", "26.04", "20.04-slim"):
+            self.assertTrue(lts(t), t)
+        for t in ("24.10", "25.04", "23.10", "25.10", "26.10"):
+            self.assertFalse(lts(t), t)
 
     def test_compound_variant_does_not_swallow_prerelease(self):
         self.assertTrue(_mod.VersionChecker._is_prerelease_tag("0.18.0-beta1-tensorrt"))
