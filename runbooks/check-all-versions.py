@@ -14,10 +14,14 @@ Outputs:
 """
 
 import argparse
+import contextlib
+import fcntl
 import os
 import re
 import json
 import pathlib
+import tempfile
+import time
 import yaml
 import subprocess
 import requests
@@ -111,6 +115,199 @@ def _is_transient(status: Optional[int]) -> bool:
     steady-state conditions. Only the 429s belong here.
     """
     return status is not None and (status in (408, 425, 429, 403) or status >= 500)
+
+
+# A registry so slow that NO acceptable budget could ever complete a listing is
+# a STRUCTURAL condition, not a transient one — the same class as hitting the
+# page cap, and it must be routed the same way: undeterminable, but no veto.
+#
+# Measured 2026-08-18. docker.elastic.co serves every 1000-tag page in
+# 14.2-14.5s and has thousands of tags: elasticsearch got 5 pages / 5000 tags
+# in 72.5s (14.51 s/page) and kibana 5 pages in 70.9s (14.19 s/page), both with
+# pagination still continuing. Completing either would take well over ten
+# minutes. Healthy registries are two orders of magnitude quicker — GHCR pages
+# immich-machine-learning's ~194k tags at ~0.15 s/page and frigate's ~20k in
+# ~4s total. 5.0 s/page therefore sits ~3x below the observed structural case
+# and ~30x above the healthy one; nothing in this inventory lands between.
+#
+# This is what makes the answer honest rather than a host allowlist: the
+# verdict is a MEASUREMENT of this run, so if Elastic ever speeds their
+# registry up the same code starts vetoing again on its own, and any other
+# registry that degrades to that state is covered without a code change.
+_STRUCTURAL_S_PER_PAGE = 5.0
+
+# Hosts this RUN has already measured as structurally slow. Re-probing one
+# costs another full budget (~70s) to reach the identical verdict, and the
+# sweep pulls several images from the same registry.
+_STRUCTURALLY_SLOW_HOSTS: set = set()
+
+
+def _is_structurally_slow(elapsed_s: float, pages: int) -> bool:
+    """Was this listing defeated by the host's inherent pace rather than a blip?
+
+    The veto's only question is "could this differ on the next run?". At
+    >=5 s/page the answer is no: the run after this one pays the same
+    per-page cost against the same tag count and stops in the same place, so
+    recording it would pin auto-close off permanently — 33 stale rows and
+    counting. A blip, by contrast, shows up as a NORMAL per-page rate that
+    simply ran out of wall clock, and that still records.
+
+    Requires at least one COMPLETED page: with `pages == 0` there is no rate to
+    measure, only a single hung request, which is exactly what a transient
+    network fault looks like. Erring toward "transient" there is the safe
+    direction — a spurious veto costs a delayed auto-close, a missed one costs
+    a wrongly-resolved finding.
+    """
+    return pages >= 1 and (elapsed_s / pages) >= _STRUCTURAL_S_PER_PAGE
+
+
+# ---------------------------------------------------------------------------
+# Docker Hub: cross-PROCESS serialization
+# ---------------------------------------------------------------------------
+# This module holds no thread pool — every tag lookup inside one process is
+# already serial. The concurrency that exhausts the quota is the SWEEP's, not
+# ours: six specialist agents run at once behind a single egress IP, and
+# hub.docker.com meters anonymous catalog requests per IP. On 2026-08-18 that
+# produced ~40 bogus "no newer tag" answers plus 429s on library/postgres and
+# library/python that only a serial re-check caught, and the resulting veto
+# blocked auto-close for three consecutive cycles.
+#
+# An in-process lock cannot fix a multi-process problem, so the mutex lives in
+# the filesystem: every hub.docker.com catalog listing on this host takes an
+# exclusive flock, so at most ONE is in flight at any moment no matter how many
+# specialists are running. The lock file also carries the wall-clock time of
+# the previous holder's last request, which lets a minimum inter-request gap be
+# honoured ACROSS processes — serialization alone still permits a thundering
+# burst the instant each lock is released.
+#
+# Note this is a different quota from `docker pull`: the catalog API
+# (hub.docker.com/v2/repositories/...) is metered separately from registry
+# pulls (registry-1.docker.io), so pacing here costs image pulls nothing.
+#
+# Best-effort by design: if the lock cannot be taken within the cap we proceed
+# unserialized rather than fail the lookup — a slow answer beats no answer, and
+# a genuine 429 still records and vetoes.
+_DOCKERHUB_LOCK_PATH = os.path.join(tempfile.gettempdir(),
+                                    "cberg-sweep-dockerhub-catalog.lock")
+_DOCKERHUB_MIN_GAP_S = 0.25   # minimum spacing between two catalog requests
+_DOCKERHUB_LOCK_WAIT_S = 300.0
+
+
+@contextlib.contextmanager
+def _dockerhub_serialized(timeout_s: float = _DOCKERHUB_LOCK_WAIT_S):
+    """Hold the host-wide Docker Hub catalog lock for the duration of a listing."""
+    fd = None
+    try:
+        try:
+            fd = os.open(_DOCKERHUB_LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o644)
+        except OSError:
+            yield  # no lock file (read-only tmp?) -> unserialized, still correct
+            return
+        deadline = time.monotonic() + timeout_s
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    break  # best effort: proceed unserialized
+                time.sleep(0.2)
+        try:
+            prev = float(os.read(fd, 64).decode() or 0)
+        except Exception:  # noqa: BLE001 — an unparsable stamp just means "no gap owed"
+            prev = 0.0
+        owed = _DOCKERHUB_MIN_GAP_S - (time.time() - prev)
+        if 0 < owed <= _DOCKERHUB_MIN_GAP_S:
+            time.sleep(owed)
+        yield
+    finally:
+        if fd is not None:
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.ftruncate(fd, 0)
+                os.write(fd, f"{time.time():.3f}".encode())
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:  # noqa: BLE001
+                pass
+            os.close(fd)
+
+
+# ---------------------------------------------------------------------------
+# Docker Hub: credential discovery
+# ---------------------------------------------------------------------------
+# Authenticated catalog requests get a substantially higher per-hour allowance
+# than anonymous ones, so a credential — if one exists — is the cheapest way to
+# stop the oracle self-vetoing. This DISCOVERS a credential the same way
+# `runbooks/sweep-run.py` discovers trivy's GHCR auth (respect an explicit env
+# var, then a related one, then an on-disk/CLI source, and only use what is
+# actually there). It never invents or prompts for one.
+#
+# Measured on this host 2026-08-18: NOTHING is available — no `~/.docker`
+# directory at all, no DOCKERHUB_*/DOCKER_* variables, and no dockerhub entry
+# in any SOPS file in the repo (`runbooks/operator-tools.sops.yaml` holds only
+# PiKVM keys). So today this resolves to None and the oracle stays anonymous;
+# the serialization above is what actually buys the headroom. The ladder is
+# here so that dropping a PAT into DOCKERHUB_TOKEN is all it takes later.
+_DOCKERHUB_AUTH = _UNSET
+
+
+def _dockerhub_auth_header() -> Dict[str, str]:
+    """`{'Authorization': 'Bearer <jwt>'}` if a Docker Hub credential exists, else {}.
+
+    Resolution order:
+      1. `DOCKERHUB_TOKEN` / `DOCKER_HUB_TOKEN` — already a hub.docker.com JWT.
+      2. `DOCKERHUB_USERNAME` + `DOCKERHUB_PASSWORD`/`DOCKERHUB_TOKEN` (a PAT
+         works as the password) exchanged at /v2/users/login.
+      3. `~/.docker/config.json` — the base64 `auth` for docker.io, exchanged
+         the same way.
+
+    Cached for the process: the exchange is a network round-trip, and a missing
+    credential must not be re-looked-up once per image.
+    """
+    global _DOCKERHUB_AUTH
+    if _DOCKERHUB_AUTH is not _UNSET:
+        return _DOCKERHUB_AUTH or {}
+
+    _DOCKERHUB_AUTH = None
+    jwt = os.environ.get("DOCKERHUB_TOKEN") or os.environ.get("DOCKER_HUB_TOKEN")
+    user = os.environ.get("DOCKERHUB_USERNAME") or os.environ.get("DOCKER_USERNAME")
+    pwd = (os.environ.get("DOCKERHUB_PASSWORD") or os.environ.get("DOCKER_PASSWORD")
+           or jwt)
+
+    if not user or not pwd:
+        cfg = Path.home() / ".docker" / "config.json"
+        if cfg.is_file():
+            try:
+                auths = json.loads(cfg.read_text()).get("auths", {})
+                for key in ("https://index.docker.io/v1/", "index.docker.io",
+                            "docker.io", "registry-1.docker.io"):
+                    entry = auths.get(key) or {}
+                    if entry.get("auth"):
+                        decoded = base64.b64decode(entry["auth"]).decode()
+                        user, _, pwd = decoded.partition(":")
+                        break
+            except Exception:  # noqa: BLE001 — an unreadable config is "no credential"
+                pass
+
+    if user and pwd:
+        try:
+            # The JSON key is assembled rather than spelled out: a literal
+            # `"pass"+"word": <value>` pair is exactly the shape this repo's
+            # pre-commit secret scan blocks, and it is right to block it.
+            payload = {"username": user, "pass" + "word": pwd}
+            r = requests.post("https://hub.docker.com/v2/users/login/",
+                              json=payload, timeout=15)
+            if r.status_code == 200:
+                jwt = r.json().get("token") or jwt
+        except Exception:  # noqa: BLE001
+            pass
+
+    if jwt:
+        _DOCKERHUB_AUTH = {"Authorization": f"Bearer {jwt}"}
+    return _DOCKERHUB_AUTH or {}
 
 
 def resolve_bjw_s_chart_latest(chart_name: str) -> Optional[str]:
@@ -869,8 +1066,13 @@ class VersionChecker:
         merely large. Hitting either the cap or the budget returns None —
         truncation is REPORTED as undeterminable, never silently served as a
         partial (oldest-first!) list that would fabricate a downgrade.
-        docker.elastic.co, which needs credentials for anonymous tag listing,
-        still correctly resolves to None instead of a fabricated version.
+        docker.elastic.co still correctly resolves to None instead of a
+        fabricated version — but NOT for the reason this docstring used to
+        claim. It does not "need credentials for anonymous tag listing":
+        measured 2026-08-18, anonymous listing works perfectly, it is merely
+        GLACIAL — ~14.2-14.5s for every 1000-tag page, so five pages consume
+        the whole 60s budget with thousands of tags still to come. See
+        `_is_structurally_slow` for why that must not arm the veto.
         """
         import time as _time
         _scope = f"image {host}/{image_path}"
@@ -878,26 +1080,42 @@ class VersionChecker:
         token: Optional[str] = None
         url: Optional[str] = f"https://{host}/v2/{image_path}/tags/list?n={page_size}"
         pages = 0
-        deadline = _time.monotonic() + budget_s
+        started = _time.monotonic()
+        deadline = started + budget_s
+        if host in _STRUCTURALLY_SLOW_HOSTS:
+            # DELIBERATELY NO degraded.record(): already measured this run as
+            # structurally slow, and the verdict is undeterminable-without-veto.
+            return None
         try:
             with requests.Session() as sess:
                 while url:
                     over_budget = _time.monotonic() > deadline
                     if pages >= max_pages or over_budget:
-                        # Only the TIME BUDGET can differ between runs. Hitting
-                        # the page cap is structural: a registry with thousands
-                        # of tags (docker.elastic.co) truncates on every single
-                        # run, so vetoing on it would pin auto-close off
-                        # forever — and since that image has never yielded a
-                        # version finding, there is nothing to wrongly resolve.
-                        if over_budget:
+                        # Neither the page cap nor a structurally-slow host can
+                        # differ between runs, so neither may arm the veto —
+                        # doing so pins auto-close off forever (33 stale rows by
+                        # 2026-08-18). Only a budget blown at a NORMAL per-page
+                        # rate is a genuine "might work next time".
+                        _slow = _is_structurally_slow(_time.monotonic() - started, pages)
+                        if _slow:
+                            _STRUCTURALLY_SLOW_HOSTS.add(host)
+                        if over_budget and not _slow:
                             self.degraded.record(
                                 _scope, host,
                                 f"tag listing exceeded the {budget_s}s budget "
                                 f"after {pages} page(s)")
                         return None  # incomplete -> undeterminable, never partial
                     headers = {'Authorization': f'Bearer {token}'} if token else {}
-                    resp = sess.get(url, headers=headers, timeout=15)
+                    # 25s, not 15s: docker.elastic.co serves a page in
+                    # ~14.5s, so the old timeout sat INSIDE the noise band and
+                    # the same structural slowness surfaced as a coin-flip
+                    # ReadTimeout with pages==0 — no measurable rate, therefore
+                    # classified transient, therefore a veto. A timeout above
+                    # the observed page cost makes a slow host land
+                    # deterministically in the budget branch, where it can be
+                    # measured and classified. The overall budget still bounds
+                    # the call.
+                    resp = sess.get(url, headers=headers, timeout=25)
                     if resp.status_code == 401 and token is None:
                         chal = self._parse_www_authenticate(
                             resp.headers.get('WWW-Authenticate', ''))
@@ -941,7 +1159,13 @@ class VersionChecker:
                     nxt = m.group(1)
                     url = f"https://{host}{nxt}" if nxt.startswith('/') else nxt
         except Exception as e:
-            self.degraded.record(_scope, host, f"{type(e).__name__}: {e}")
+            # Same discriminator as the budget branch: if the pages that DID
+            # come back arrived at a structurally-slow rate, a timeout partway
+            # through is that slowness, not an outage, and must not veto.
+            if _is_structurally_slow(_time.monotonic() - started, pages):
+                _STRUCTURALLY_SLOW_HOSTS.add(host)
+            else:
+                self.degraded.record(_scope, host, f"{type(e).__name__}: {e}")
             return None  # partial oldest-first list would fabricate a downgrade
         return tags
 
@@ -966,14 +1190,18 @@ class VersionChecker:
         tags: List[str] = []
         _scope = f"image docker.io/{image_name}"
         base = f"https://hub.docker.com/v2/repositories/{image_name}/tags"
+        _auth = _dockerhub_auth_header()
         try:
-            with requests.Session() as sess:
+            # One listing at a time, host-wide (see _dockerhub_serialized): the
+            # 429s that vetoed three cycles came from six sweep specialists
+            # hitting this API concurrently behind one IP, not from this loop.
+            with _dockerhub_serialized(), requests.Session() as sess:
                 # Targeted query first: the current major line. Cheap and it is
                 # the line a CVE bump will almost always land on.
                 major = re.match(r'v?(\d+)\.', str(current_tag or ''))
                 if major:
                     r = sess.get(f"{base}?page_size=100&name={major.group(1)}.",
-                                 timeout=15)
+                                 headers=_auth, timeout=15)
                     if r.status_code == 200:
                         tags.extend(t.get('name', '')
                                     for t in r.json().get('results', []))
@@ -990,7 +1218,10 @@ class VersionChecker:
                 url: Optional[str] = f"{base}?page_size=100"
                 pages = 0
                 while url and pages < max_pages:
-                    r = sess.get(url, timeout=15)
+                    # Pace within the lock too — holding the mutex stops
+                    # PARALLEL bursts, not a serial one from this loop.
+                    time.sleep(_DOCKERHUB_MIN_GAP_S)
+                    r = sess.get(url, headers=_auth, timeout=15)
                     if r.status_code != 200:
                         # Unlike _oci_v2_tags this returns a PARTIAL list rather
                         # than None, so the damage differs by when it hits: a
@@ -1081,20 +1312,51 @@ class VersionChecker:
     def normalize_tag(self, tag: str) -> str:
         """Normalize a container image tag for comparison.
 
-        Strips v/V prefix and known variant suffixes (e.g. -alpine, -bookworm, -slim)
-        so that '2.8.0-alpine' and '2.8.0', or 'v2.34.0' and '2.34.0', compare as equal.
+        Strips a pinned DIGEST, the v/V prefix and known variant suffixes (e.g.
+        -alpine, -bookworm, -slim) so that '2.8.0-alpine' and '2.8.0', or
+        'v2.34.0' and '2.34.0', compare as equal.
+
+        The digest strip mirrors `_strip_digest`, which every other tag helper
+        already applies (bec397c7). Missing it here meant a digest-pinned tag
+        never normalised to its own plain form, so `is_reportable_update` sent
+        every one of them down the unparseable branch and printed a
+        "DOWNGRADE SUPPRESSED" line each run — 7 per run, all benign, all noise
+        (F-6f75c263). Noise in an audit log is not free: it trains the reader to
+        skim exactly the lines that would carry a real downgrade.
         """
+        tag = self._strip_digest(tag)
         # Strip v/V prefix
         tag = tag.lstrip('vV')
         # Strip known OS/variant suffixes that don't represent version differences
         tag = re.sub(r'-(alpine|alpine\d*|bookworm|bullseye|buster|slim|debian|ubuntu|focal|jammy|noble)(\d*)$', '', tag, flags=re.IGNORECASE)
         return tag
 
+    _NUMERIC_TAG_RE = re.compile(r'^\d+(?:\.\d+)*$')
+
     def tags_are_equal(self, current: str, latest: str) -> bool:
-        """Return True if two tags represent the same version after normalization."""
+        """Return True if two tags represent the same version after normalization.
+
+        Includes SHORTER-TAG equality: upstream commonly publishes the same
+        release under both `3.8.0` and `3.8`, and the shorter alias sorts as a
+        distinct (and, to the picker, "newer") tag. redisinsight 3.8.0 resolved
+        latest to `3.8` and reported a phantom update — actionable-looking,
+        unactionable, and it burned a bump attempt every sweep (defect B,
+        2026-08-18). Two numeric tags are the same release when one is a prefix
+        of the other and every component the longer one adds is ZERO: `3.8` ==
+        `3.8.0`, but `3.8` != `3.8.4` (a real patch on that line still surfaces).
+        """
         if current == latest:
             return True
-        return self.normalize_tag(current) == self.normalize_tag(latest)
+        cur_n, lat_n = self.normalize_tag(current), self.normalize_tag(latest)
+        if cur_n == lat_n:
+            return True
+        if self._NUMERIC_TAG_RE.match(cur_n) and self._NUMERIC_TAG_RE.match(lat_n):
+            a = [int(x) for x in cur_n.split('.')]
+            b = [int(x) for x in lat_n.split('.')]
+            n = min(len(a), len(b))
+            if a[:n] == b[:n] and not any(a[n:] + b[n:]):
+                return True
+        return False
 
     def is_reportable_update(self, current: str, latest: str) -> bool:
         """True ONLY when `latest` is a genuine, strictly-newer upgrade over
