@@ -46,10 +46,14 @@
 #         closed while the board still renders them as live. Same ownership
 #         constraint as v4, hence delivery here. The ADD fails loudly if any
 #         row still violates it; fix the rows first.
+#   v5a — wrap v5's DROP+ADD in an explicit transaction. schema.sql runs under
+#         `psql -f` without --single-transaction, so the two statements
+#         autocommitted independently: a failed ADD would have left the table
+#         with NO constraint. SQL-delivery fix only; resulting schema identical.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v5
+  name: sweep-history-init-v5a
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

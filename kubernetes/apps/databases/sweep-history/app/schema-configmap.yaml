@@ -125,11 +125,21 @@ data:
     -- 2026-08-18, so it is now a constraint rather than a convention.
     -- DROP+ADD instead of a DO block: idempotent, and no dollar-quoting for
     -- Flux's postBuild substitution to trip over.
+    --
+    -- The explicit transaction is load-bearing. This file is run with
+    -- `psql -f` (no --single-transaction), so every statement otherwise
+    -- autocommits on its own: if the ADD failed on a violating row the DROP
+    -- would already be committed and the table would come out of a FAILED
+    -- Job with NO constraint at all — silently weaker than before the Job ran,
+    -- which is the worst possible outcome for a guard rail. Wrapped, a bad row
+    -- fails the Job loudly and leaves the existing constraint in place.
+    BEGIN;
     ALTER TABLE sweep_findings
       DROP CONSTRAINT IF EXISTS ck_findings_resolved_status;
     ALTER TABLE sweep_findings
       ADD CONSTRAINT ck_findings_resolved_status
       CHECK (resolved_at IS NULL OR status = 'resolved');
+    COMMIT;
 
     CREATE TABLE IF NOT EXISTS slo_snapshots (
       id                   BIGSERIAL PRIMARY KEY,
