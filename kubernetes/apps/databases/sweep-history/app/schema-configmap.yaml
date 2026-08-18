@@ -114,6 +114,22 @@ data:
     CREATE UNIQUE INDEX IF NOT EXISTS uq_findings_open_finding_id
       ON sweep_findings(finding_id)
       WHERE resolved_at IS NULL;
+    -- "resolved" is stored twice: `resolved_at` (what the writer and every
+    -- fingerprint query test) and `status` (what render-board.py and the
+    -- dashboard filter on). A resolve path that sets one and forgets the other
+    -- puts a row in split-brain: invisible to auto-close and de-duplication,
+    -- still rendered to the operator as a live action item, and outside the
+    -- partial unique index above so a later sweep can legitimately open a
+    -- SECOND row with the same finding_id. It fails silently and only shows up
+    -- as a phantom board entry. Two separate resolve paths got this wrong on
+    -- 2026-08-18, so it is now a constraint rather than a convention.
+    -- DROP+ADD instead of a DO block: idempotent, and no dollar-quoting for
+    -- Flux's postBuild substitution to trip over.
+    ALTER TABLE sweep_findings
+      DROP CONSTRAINT IF EXISTS ck_findings_resolved_status;
+    ALTER TABLE sweep_findings
+      ADD CONSTRAINT ck_findings_resolved_status
+      CHECK (resolved_at IS NULL OR status = 'resolved');
 
     CREATE TABLE IF NOT EXISTS slo_snapshots (
       id                   BIGSERIAL PRIMARY KEY,

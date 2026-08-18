@@ -685,25 +685,32 @@ def _finding_row(cur, finding_id: str):
 
     Current id wins; a prior id only resolves when nothing owns it today.
     """
-    cur.execute(
-        "SELECT * FROM sweep_findings WHERE finding_id = %s "
-        "ORDER BY resolved_at IS NULL DESC, last_seen DESC LIMIT 1",
-        (finding_id,),
-    )
-    row = cur.fetchone()
-    if row is not None:
-        return row
-    cur.execute(
-        "SELECT * FROM sweep_findings "
-        " WHERE metadata->'prior_finding_ids' ? %s "
-        " ORDER BY resolved_at IS NULL DESC, last_seen DESC LIMIT 1",
-        (finding_id,),
-    )
-    row = cur.fetchone()
-    if row is not None:
-        print(f"note: {finding_id} was renamed to {row['finding_id']} "
-              f"(fingerprint migration); showing the current row.", file=sys.stderr)
-    return row
+    # A LIVE row always beats a dead one, whether it is reached by the current
+    # id or by an alias. Exact-then-alias alone is not enough: a superseded row
+    # KEEPS its finding_id when it is resolved, so an exact match can return a
+    # closed stub while the keeper that inherited its alias is open. That
+    # matters because this function feeds `finding detail`, which WRITES the
+    # private vulnerability payload to `row["id"]` — attaching it to a stub
+    # loses it from the live register with no error.
+    for open_only in (True, False):
+        clause = " AND resolved_at IS NULL" if open_only else ""
+        for by_alias in (False, True):
+            pred = ("metadata->'prior_finding_ids' ? %s" if by_alias
+                    else "finding_id = %s")
+            cur.execute(
+                f"SELECT * FROM sweep_findings WHERE {pred}{clause} "
+                f"ORDER BY last_seen DESC LIMIT 1",
+                (finding_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                continue
+            if row["finding_id"] != finding_id:
+                print(f"note: {finding_id} was renamed to {row['finding_id']} "
+                      f"(fingerprint migration); showing the current row.",
+                      file=sys.stderr)
+            return row
+    return None
 
 
 def _ref_block(row: dict) -> str:

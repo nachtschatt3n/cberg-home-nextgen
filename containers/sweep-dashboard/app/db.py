@@ -127,16 +127,26 @@ def open_findings(
 
 
 def finding_history(finding_id: str) -> list[dict[str, Any]]:
-    """Every row in sweep_findings sharing this finding_id (newest first)."""
+    """Every row in sweep_findings sharing this finding_id (newest first).
+
+    Also matches rows that PREVIOUSLY answered to this id. `finding_id` is
+    derived from the fingerprint, so it is re-derived whenever the identity
+    function changes (2026-08-18 renamed 179 of them), and the
+    `/findings/<F-id>` links that `policy-cli finding ref` pastes into
+    committed plan files are frozen at authoring time. Without the
+    `prior_finding_ids` arm those published links 404 while the CLI line
+    printed directly beneath them still resolves.
+    """
     return fetch_all(
         """
         SELECT id, finding_id, section, severity, status, title, action,
                first_seen, last_seen, resolved_at, cycle_id, metadata
           FROM sweep_findings
          WHERE finding_id = %s
+            OR metadata->'prior_finding_ids' ? %s
          ORDER BY last_seen DESC
         """,
-        (finding_id,),
+        (finding_id, finding_id),
     )
 
 

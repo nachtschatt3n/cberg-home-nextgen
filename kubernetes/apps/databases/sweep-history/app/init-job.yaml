@@ -39,10 +39,17 @@
 #         delivery here rather than in that migration. Index creation is
 #         IF NOT EXISTS; run refingerprint-findings.py FIRST if any duplicate
 #         open ids exist, or this Job fails on the index build.
+#   v5  — CHECK ck_findings_resolved_status: resolved_at IS NULL OR
+#         status='resolved'. "Resolved" was stored in two columns with nothing
+#         keeping them agreed, and two separate resolve paths set one without
+#         the other on 2026-08-18 — producing rows that auto-close treats as
+#         closed while the board still renders them as live. Same ownership
+#         constraint as v4, hence delivery here. The ADD fails loudly if any
+#         row still violates it; fix the rows first.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v4
+  name: sweep-history-init-v5
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

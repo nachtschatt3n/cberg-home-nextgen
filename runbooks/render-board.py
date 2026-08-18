@@ -79,13 +79,23 @@ def _desc(title: str, limit: int = 96) -> str:
     return (t[: limit - 1] + "…") if len(t) > limit else t
 
 
-def planned_findings() -> dict:
+def planned_findings(cur=None) -> dict:
     """finding_id -> (plan_id, window) for every ACTIVE maintenance plan that
     carries a `security_ref`. Operator rule (2026-08-17): a finding already
     planned into a window is handled by the window pipeline — the sweep
     re-listing it is noise. Only an EXACT security_ref match hides an item;
     component-name guessing would hide things the plans don't actually cover.
-    Executed/superseded plans don't count — their ref must resurface."""
+    Executed/superseded plans don't count — their ref must resurface.
+
+    A plan file's `security_ref` is frozen at authoring time, but `finding_id`
+    is derived from the fingerprint and is re-derived whenever the identity
+    function changes (2026-08-18 renamed 179 of them). An exact-match-only
+    lookup therefore stops hiding a planned finding the moment it is renamed,
+    and the item resurfaces as un-planned noise — the exact failure the
+    operator rule above exists to prevent. When a cursor is available we also
+    register each ref under the id that currently owns it, resolved through
+    `metadata.prior_finding_ids`.
+    """
     out = {}
     try:
         import yaml
@@ -104,6 +114,26 @@ def planned_findings() -> dict:
                                  fm.get("window") or "unscheduled")
     except Exception:
         pass  # board must render regardless; no plans-index -> nothing hidden
+
+    if cur is not None and out:
+        # Additive only: the frozen ref keeps its entry, so a ref that was
+        # never renamed behaves exactly as before and a DB hiccup can only
+        # fail to ADD an alias, never drop a real one.
+        try:
+            cur.execute(
+                "SELECT finding_id, metadata->'prior_finding_ids' AS priors "
+                "  FROM sweep_findings "
+                " WHERE metadata->'prior_finding_ids' ?| %s",
+                (list(out),),
+            )
+            for row in cur.fetchall():
+                cur_id = row[0] if not isinstance(row, dict) else row["finding_id"]
+                priors = row[1] if not isinstance(row, dict) else row["priors"]
+                for old_id in (priors or []):
+                    if old_id in out and cur_id not in out:
+                        out[cur_id] = out[old_id]
+        except Exception:
+            pass  # same contract as above: never block the board
     return out
 
 def collect(cur, cycle_id: str | None) -> dict:
@@ -138,6 +168,9 @@ def collect(cur, cycle_id: str | None) -> dict:
         except (ValueError, TypeError, AttributeError):
             pass
     out["ran"] = ran
+    # Resolved here, not in render(), because this is where the cursor is —
+    # the plan refs need a DB lookup to follow renamed finding ids.
+    out["planned"] = planned_findings(cur)
 
     # 1+2+3 — contextual tiers over OPEN findings of this cycle
     cur.execute(
@@ -266,7 +299,7 @@ def render(d: dict, w: dict) -> str:
         n += 1
         L.append(f"{n:>3}. **[{rating}]** `{category}` — {desc}")
 
-    planned = planned_findings()
+    planned = d.get("planned") or planned_findings()
     if not d["criticals"]:
         L.append("*(no CRITICAL items — nothing pages; list starts at HIGH)*")
         L.append("")

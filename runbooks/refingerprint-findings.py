@@ -182,10 +182,28 @@ def main() -> int:
                 return 0
 
             with conn.cursor() as cur:
+                # Serialise against a concurrently running sweep. Without this
+                # the plan is computed from a snapshot, a sweep can insert a
+                # row whose fingerprint collides with one being rewritten, and
+                # the post-check below only REPORTS the collision — it runs
+                # after commit and cannot prevent it. Transaction-scoped, so it
+                # releases on commit or rollback with no cleanup path to miss.
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext('sweep_findings_refingerprint'))")
                 for dup, keep in supersedes:
+                    # `status` MUST move with `resolved_at`. The two columns are
+                    # read by different consumers — the writer and every
+                    # fingerprint query test `resolved_at`, render-board.py and
+                    # the dashboard filter on `status != 'resolved'` — so setting
+                    # one alone yields a row that auto-close treats as closed
+                    # while the board still shows it as a live action item, and
+                    # which sits outside uq_findings_open_finding_id so a later
+                    # sweep can open a SECOND row with the same id. Enforced by
+                    # ck_findings_resolved_status since init Job v5; kept
+                    # explicit here so the intent survives a constraint drop.
                     cur.execute(
                         """UPDATE sweep_findings
                               SET resolved_at = now(),
+                                  status = 'resolved',
                                   action = coalesce(action || ' | ', '') || %s
                             WHERE id = %s""",
                         (MIGRATION_NOTE.format(
@@ -196,10 +214,23 @@ def main() -> int:
                     # `security_ref:` lines and plan files are immutable, so a
                     # rename must not orphan them — policy-cli._finding_row
                     # falls back to this list.
+                    # Union of: ids this row already answered to, the ids of
+                    # every row it supersedes AND the aliases THOSE rows had
+                    # accumulated, plus this row's outgoing id. Taking only the
+                    # dup's derived id would break the chain on a second
+                    # migration — every alias earned in the first would be
+                    # dropped, silently orphaning the oldest committed refs,
+                    # which are the ones most likely to still be cited.
+                    inherited: set[str] = set()
+                    for d, k in supersedes:
+                        if k["id"] != u["id"]:
+                            continue
+                        inherited.add(d["finding_id"])
+                        inherited.update((d["metadata"] or {}).get(
+                            "prior_finding_ids") or [])
                     priors = sorted({
                         *((u["metadata"] or {}).get("prior_finding_ids") or []),
-                        *(fw.finding_id_from_fp(d["fingerprint"])
-                          for d, k in supersedes if k["id"] == u["id"]),
+                        *inherited,
                         u["finding_id"],
                     } - {new_id})
                     cur.execute(
