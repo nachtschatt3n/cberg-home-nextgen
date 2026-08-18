@@ -37,7 +37,37 @@ depends_on: [superset-pg-cutover]      # HARD. See §6 — this must not run aga
 conflicts_with: [superset-pg-cutover, superset-pg-decommission, longhorn-1.12.1-engine]
 security_ref: F-9d259837
 status: draft
-window: null                           # window agent assigns; see §6 for the two viable slots
+window: "sun-window:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B
+                                       # (after superset-pg-decommission), NOT Option A.
+                                       # Why B: A (sat 08-29) would close the security driver
+                                       # ~2 weeks sooner but leaves only 3 days of soak on a
+                                       # freshly-cut-over database before running 13 one-way
+                                       # migrations on top of it. If the cutover has a latent
+                                       # issue that surfaces in week two, we would be unwinding
+                                       # an app major AND a database migration together. The
+                                       # driver is app-level only, on an internal-only service
+                                       # (security_ref: F-9d259837); that does not justify
+                                       # compressing a database soak.
+                                       # Why 09-20 and not §6's suggested 09-13/09-19: both were
+                                       # taken after this plan was written. Needs a SOLO 90-min
+                                       # slot (75 min of work), so only sat-early/sun-window
+                                       # qualify, and every one through 09-19 already holds a
+                                       # 60-80 min HIGH-risk plan: sun 09-06 bitnamilegacy-exit-
+                                       # paperless-db (70m), sat 09-12 bitnamilegacy-exit-
+                                       # nextcloud-db (80m), sun 09-13 grafana-13-app (60m),
+                                       # sat 09-19 authentik-postgres-18 (60m). sun-window
+                                       # 2026-09-20 is the first free 90-min slot; capacity 6
+                                       # (this plan = 3), no reboot plan competing for it.
+                                       # Interference surface clear: cutover wed 08-26,
+                                       # decommission sat 09-05, longhorn-1.12.1-engine sat
+                                       # 08-22, nocodb-calver (shared: postgresql) tue 08-25.
+                                       # WATCH: authentik-postgres-18 (sat 09-19) migrates the
+                                       # SSO database the DAY BEFORE, and §4's acceptance test
+                                       # is an Authentik OIDC login. Confirm an OIDC login works
+                                       # BEFORE starting §3, so a login failure is not
+                                       # mis-attributed to the Flask-AppBuilder major. If
+                                       # authentik-postgres-18 slips into 09-20 or was rolled
+                                       # back, move this to sat-early:2026-09-26.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
@@ -662,10 +692,11 @@ Running this plan first would be wrong in two independent ways:
 §2a is the hard gate: `printenv DB_HOST` must read `superset-pg`. **If it reads
 `superset-postgresql`, abort the plan — do not "just also do the cutover".**
 
-**Scheduling — two viable slots, with an honest trade.** `window: null`; the window
-agent assigns. It needs a **90-minute, no-reboot** slot (`sat-early` or
-`sun-window`); 75 min of work in a 60-min weekday slot leaves nothing for a
-restore-from-dump rollback.
+**Scheduling — DECIDED 2026-08-19: Option B, `sun-window:2026-09-20`.** The trade
+below is recorded for history; it is **closed** — the window agent must not re-open
+it. Needs a **90-minute** slot (`sat-early` or `sun-window`); 75 min of work in a
+60-min weekday slot leaves nothing for a restore-from-dump rollback, and 75 min
+against a 90-min window means the slot must be **solo**.
 
 - **Option A — `sat-early:2026-08-29`** (earliest 90-min slot after the cutover).
   Closes the security driver ~2 weeks sooner. **Cost:** it lands *inside* the
@@ -682,8 +713,20 @@ restore-from-dump rollback.
   from a single, settled metadata DB. **Cost:** ~3 more weeks on the security driver.
 
 Per the windows YAML: *"Daily windows compress the INDEPENDENT work; they must not
-be used to collapse a soak."* This plan is not independent of that soak, which is
-why the trade is surfaced rather than decided here. **Operator call.**
+be used to collapse a soak."* This plan is not independent of that soak.
+
+**Operator ruling (2026-08-19): Option B.** Option A's 3-day soak on a freshly
+cut-over metadata DB, followed immediately by 13 one-way migrations, risks having to
+unwind an app major *and* a database migration together if a latent cutover issue
+surfaces in week two. An app-level driver on an internal-only service
+(`security_ref: F-9d259837`) does not justify compressing a database soak.
+
+The two slots §6 originally offered as free were both taken between this plan being
+written and being scheduled (`sun-window:2026-09-13` → `grafana-13-app`;
+`sat-early:2026-09-19` → `authentik-postgres-18`, itself scheduled 2026-08-18). The
+first genuinely free 90-min slot on/after the decommission is **`sun-window:2026-09-20`**
+— see the frontmatter comment for the full slot-by-slot elimination and the
+Authentik-adjacency pre-flight note.
 
 **Same-window exclusions.**
 - `conflicts_with: superset-pg-cutover` — the cutover is the prerequisite, and the
