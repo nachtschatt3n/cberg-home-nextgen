@@ -62,7 +62,9 @@ SELF_REFERENTIAL = (
     # blocked has to CONTAIN "the finding stays open". Fixtures there are
     # synthetic by convention (see test-trivy-tally.py) — never real fleet
     # state — which is what makes this safe to exclude.
-    "runbooks/tests/",
+    "runbooks/tests/test-",  # test-*.py only — NOT the whole directory, so a
+                            # future captured-scanner-output fixture landing
+                            # in runbooks/tests/ is still scanned.
     # Agent-instruction files: they QUOTE the policy ("vulnerability counts,
     # exploitability notes … must NOT be committed"), which trips the
     # exploitability rule on the sentence that forbids exploitability detail.

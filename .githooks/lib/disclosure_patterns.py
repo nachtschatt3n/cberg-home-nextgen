@@ -32,8 +32,15 @@ WHY THE RESIDUAL TIER EXISTS (2026-08-18). Every rule here originally needed
 a NUMBER, a QUANTIFIER or an IMAGE_REF to fire. A purely QUALITATIVE residual
 claim -- "does not close F-xxxxxxxx", "the finding stays open", "ships it
 unchanged" -- carried none of those and sailed through, and one reached a
-public commit body. The residual rules below therefore key on the CLAIM
-SHAPE, not on a count.
+public commit body. The residual rules below fire without a count.
+
+Be honest about what they are: a CLOSED LIST OF FOUR PHRASINGS taken from that
+miss, not a claim-shape detector. An adversarial review got a complete residual
+disclosure through them in a single rewrite using no evasion. Paraphrase is
+covered by the WARN tier only, because the vocabulary that catches it
+(`persists`, `carried forward`, `issue`, `gap`) is too common in ordinary
+engineering prose to gate on -- measured at 15 of 25 flips over 4841 commits,
+mostly `persist` in its database sense.
 
 This hook is a BACKSTOP against careless disclosure, never a substitute for
 the author's judgement. Three structurally distinct false negatives were
@@ -91,37 +98,49 @@ CLOSED_GAP = (
     r"resolved|closes?|closed|no|zero|none|last|left|0)\b"
 )
 # A commit that edits our own audit tooling has to name the vocabulary it
-# matches on. Narrow on purpose: our script names plus explicit meta-words --
-# NOT a general "scan"/"security" escape hatch, which would acquit real
-# disclosures written by anyone who mentioned a sweep.
+# matches on. FILE-PATH TOKENS ONLY.
+#
+# The first version of this list also carried English words (`false positive`,
+# `regex`, `fixture`, `suppress*`, `vocabular*`) and the conventional-commit
+# SCOPES (`fix(security)`, `fix(sweep)`). An adversarial review showed that was
+# forgeable with ordinary prose rather than deliberate evasion:
+#     fix(security): fixable CRITICAL driver still present on the edge image
+# passed, because the scope itself acquitted it — handing a free pass to
+# precisely the commits most likely to carry a residual claim. Worse, a body
+# opening "Not a false positive: ..." acquitted itself with the very phrase an
+# honest author reaches for. An acquittal must be something you cannot emit by
+# accident, so it is now a path a tooling commit necessarily mentions.
 TOOLING_TALK = (
     r"(?:security-check\.py|check-all-versions|scan_staged_disclosure|"
     r"disclosure_patterns|auto-update\.py|coverage\.py|tally_trivy_report|"
-    r"_newer_upstream_tag_exists|fix-availability|head-of-line|"
-    r"false[- ]positive|kernel-header|fixture|unit[- ]test|regex|predicate|"
-    r"vocabular\w*|suppress\w*|"
-    # The conventional-commit SCOPE of our own audit tooling. A commit titled
-    # `fix(security-check): ...` is by definition editing the scanner and has
-    # to name the vocabulary it matches on. Bounded on purpose: acquittals
-    # apply ONLY to the residual tier, so a real CVE ID or a non-zero count in
-    # such a commit is still blocked by the un-acquitted rules above.
-    r"\((?:security|security-check|version-check|sweep|maintenance)\))"
+    r"_newer_upstream_tag_exists|risk_model\.py|findings_writer\.py|"
+    r"policy-cli\.py|render-board\.py|sweep-run\.py)"
 )
 
-# Acquits the negated-closure rules. "does not reopen a closed finding" and
-# "does not clear the LAST fixable critical" both put a negation next to a
-# closure verb while asserting the exact OPPOSITE of a residual — that a gap
-# is shut. Without this the rule reads the grammar and misses the meaning.
-REOPEN_OR_CLOSED = (
-    r"(?:\breopen\w*|\bclosed\b\s+(?:finding|issue|gap)|"
-    + CLOSED_GAP + r"\s+(?:the\s+)?(?:last|final))"
-)
+# Deliberate, greppable opt-out for a tooling commit whose prose genuinely
+# needs the vocabulary and mentions no script path. Message-level, not
+# window-level: an author must TYPE this, which makes acquitting an auditable
+# act rather than an accident. Applies to the residual tier only — a CVE ID or
+# a non-zero count still blocks with the trailer present.
+TOOLING_OPT_IN = re.compile(
+    r"^\s*disclosure-review:\s*tooling-edit\s*$", re.IGNORECASE | re.MULTILINE)
 
 # Anchors for the residual rules: a TRACKED FINDING or an unambiguous
 # vulnerability word. Deliberately NOT bare SEV -- "High error count" is
 # ordinary ops prose and matched SEV, which produced the only R1 false
 # positive in the whole history sweep.
 FINDING_ANCHOR = r"(?:F-[0-9a-f]{8}|\bfinding\b|\badvisor(?:y|ies)\b|\bcves?\b|\bvulnerabilit\w*)"
+
+# Wider anchor for the NEGATED-CLOSURE rules specifically. The narrow anchor
+# left an inconsistency an adversarial review found: the left-open rule already
+# accepted "issue"/"gap", the negated-closure rules did not, so "does not
+# address the issue" walked through while "the issue remains open" blocked.
+# "driver" is here because that is the noun a residual claim reaches for once
+# the CVE id has been stripped ("the fixable-CRITICAL driver is unchanged").
+FINDING_ANCHOR_WIDE = (
+    r"(?:F-[0-9a-f]{8}|\bfinding\b|\badvisor(?:y|ies)\b|\bcves?\b|"
+    r"\bvulnerabilit\w*|\bissue\b|\bgap\b|\bdriver\b)"
+)
 
 # Negation, spelled every way English actually spells it. The first draft
 # covered only "does not"-style auxiliaries and missed BOTH contractions
@@ -135,11 +154,44 @@ NEG = (
     r"must)n[\u2019']?t"
     r"|cannot|fails?\s+to|failed\s+to)"
 )
+# Bare negation, for acquittals that must bind to the negation itself.
+NEG_LOOSE = r"(?:\bnot\b|n[\u2019']t\b|\bno\b|\bnothing\b|\bnever\b)"
 # Closure verbs incl. past participles, so the passive voice is reachable.
 CLOSURE_VERB = (
     r"(?:close[sd]?|clear(?:s|ed)?|fix(?:es|ed)?|resolve[sd]?|"
-    r"remediate[sd]?|address(?:es|ed)?|patch(?:es|ed)?|mitigate[sd]?)"
+    r"remediate[sd]?|address(?:es|ed)?|patch(?:es|ed)?|mitigate[sd]?|"
+    r"correct(?:s|ed)?)"
 )
+
+# Words that assert a gap is STILL THERE without negating anything, so the
+# negated-closure rules never see them. "persists", "carried forward",
+# "awaits an upstream release", "still present" — all reachable paraphrases of
+# the 2026-08-18 breach that the first residual tier let through.
+PERSISTS = (
+    r"(?:unresolved|unaddressed|unremediated|unmitigated|outstanding|"
+    r"persist(?:s|ing|ed)?|carried\s+forward|carries\s+forward|"
+    r"awaits?|awaiting|pending|still\s+(?:there|present|open|unfixed)|"
+    r"remains?\s+(?:as\s+)?(?:recorded|present|unfixed|outstanding))"
+)
+
+# Acquits the negated-closure rules. "does not reopen a closed finding" puts a
+# negation next to a closure verb while asserting the OPPOSITE of a residual.
+#
+# The first version acquitted on a BARE `reopen` anywhere in the +/-80 window,
+# so appending "Nothing was reopened." to a real residual claim switched the
+# rule off — one word, whole rule gone. It also acquitted on
+# CLOSED_GAP + last/final unconditionally, so "clears the last lint warning"
+# (an unrelated sentence) cleared an adjacent residual claim. Both now require
+# the acquitting words to be part of the SAME verb phrase as the negation, and
+# the last/final form must actually be about a vulnerability.
+REOPEN_OR_CLOSED = (
+    r"(?:" + NEG_LOOSE + r"\s+(?:\w+\s+){0,2}?reopen\w*"
+    r"|\breopen\w*\s+(?:a|the|any)\s+(?:\w+\s+){0,2}?"
+    r"(?:closed|resolved|fixed)\b"
+    r"|" + CLOSED_GAP + r"\s+(?:the\s+)?(?:last|final)\s+(?:\w+[-\s]+){0,2}?"
+    + VULN + r")"
+)
+
 
 PATTERNS = [
     (
@@ -184,6 +236,14 @@ PATTERNS = [
     (
         r"\bexploitab\w*\b",
         "exploitability detail",
+        # SOP 2.1 lists "exploitability assessed on the finding record" in the
+        # PUBLISHABLE column, and this rule rejected that exact sentence —
+        # the hook contradicting the policy it enforces, which is the surest
+        # way to train --no-verify. Narrow by construction: it acquits only the
+        # DEFERRAL phrasing (detail lives elsewhere), never an actual
+        # assessment ("exploitability is low because ...").
+        r"(?:exploitab\w*\s+(?:is\s+)?(?:assessed|tracked|recorded|noted)\s+"
+        r"on\s+the\s+finding|on\s+the\s+finding\s+record|security_ref)",
     ),
     (
         r"\b(?:zero|0)[- ]day\b",
@@ -223,15 +283,15 @@ PATTERNS = [
         # "does not close F-xxxxxxxx", "won't clear the finding",
         # "cannot fix the advisory", "fails to resolve the CVE"
         NEG + r"\s+(?:\w+\s+){0,3}?" + CLOSURE_VERB + r"\b"
-        r".{0,60}?" + FINDING_ANCHOR,
+        r".{0,80}?" + FINDING_ANCHOR_WIDE,
         "residual claim — negated closure of a tracked finding",
-        REOPEN_OR_CLOSED,
+        (REOPEN_OR_CLOSED, 0),
     ),
     (
-        FINDING_ANCHOR + r".{0,60}?" + NEG
+        FINDING_ANCHOR_WIDE + r".{0,80}?" + NEG
         + r"\s+(?:\w+\s+){0,3}?" + CLOSURE_VERB + r"\b",
         "residual claim — negated closure of a tracked finding",
-        REOPEN_OR_CLOSED,
+        (REOPEN_OR_CLOSED, 0),
     ),
     (
         # "the finding stays open", "F-xxxxxxxx remains open", "CVE is still open"
@@ -259,7 +319,8 @@ PATTERNS = [
         # vulnerability or the dependency said to carry it.
         r"(?:" + VULN + r"|\bdependenc\w*).{0,60}?"
         r"(?:\b(?:ships?|shipped|shipping|leaves?|left)\s+(?:\w+\s+){0,2}?unchanged\b"
-        r"|\bnot\s+(?:been\s+)?(?:refreshed|rebuilt|bumped|updated)\b)",
+        r"|\b(?:not|yet)\s+(?:been\s+|to\s+)?(?:refreshed|rebuilt|bumped|updated|ship\w*|releas\w*|correct\w*)\b"
+        r"|\bhas\s+yet\s+to\b|\bno\s+(?:corrected|patched|fixed)\s+(?:release|version|build)\b)",
         "residual claim — upstream has not shipped a fix",
         TOOLING_TALK,
     ),
@@ -270,6 +331,28 @@ PATTERNS = [
 # supply-chain prose, so these NAG and never gate. Promoting any of them means
 # re-running the measurement in runbooks/tests/ and showing the FP rate first.
 WARN_PATTERNS = [
+    (
+        # "the driver persists", "carried forward", "awaits an upstream
+        # release" — a live gap asserted without negating anything, so the
+        # negated-closure rules are structurally blind to it. This DOES catch
+        # the fluent paraphrase of the 2026-08-18 breach.
+        #
+        # It warns rather than blocks because measurement said so: it produced
+        # 15 of 25 flips over 4841 commit messages, overwhelmingly on `persist`
+        # in its ordinary software sense ("persist the per-section run record")
+        # and on the generic anchors `issue`/`gap`. Blocking on words this
+        # common trains --no-verify, which costs more than the gap it closes.
+        # Narrow `PERSISTS` enough to measure clean and it can be promoted —
+        # re-run the FP measurement in §2.4 first.
+        FINDING_ANCHOR_WIDE + r".{0,140}?" + PERSISTS,
+        "possible residual claim — gap asserted to persist",
+        (REOPEN_OR_CLOSED, 0),
+    ),
+    (
+        PERSISTS + r".{0,140}?" + FINDING_ANCHOR_WIDE,
+        "possible residual claim — gap asserted to persist",
+        (REOPEN_OR_CLOSED, 0),
+    ),
     (
         BARE_VERSIONED_COMPONENT + r".{0,80}?" + VULN,
         "vulnerability state near a bare-versioned component",
@@ -282,14 +365,29 @@ WARN_PATTERNS = [
     ),
 ]
 
+# Default context width for an acquittal. Rules whose acquittal must belong to
+# the SAME claim pass window=0 instead: an adversarial review showed that a
+# separate neighbouring sentence ("Nothing was reopened.") could otherwise
+# switch off a rule for an adjacent, genuinely-offending claim.
+ACQUITTAL_WINDOW = 80
+
+
 def _compile(rules):
-    """Normalise 2- and 3-tuple rules into (regex, label, acquittal_or_None)."""
+    """Normalise rules into (regex, label, acquittal_or_None, window).
+
+    A rule's acquittal may be a bare pattern (scanned in a +/-ACQUITTAL_WINDOW
+    context) or a (pattern, window) pair. window=0 means the acquittal must
+    appear INSIDE the matched span itself.
+    """
     out = []
     for rule in rules:
         pat, label = rule[0], rule[1]
         acq = rule[2] if len(rule) > 2 else None
+        win = ACQUITTAL_WINDOW
+        if isinstance(acq, tuple):
+            acq, win = acq
         out.append((re.compile(pat, re.IGNORECASE), label,
-                    re.compile(acq, re.IGNORECASE) if acq else None))
+                    re.compile(acq, re.IGNORECASE) if acq else None, win))
     return out
 
 
@@ -299,16 +397,14 @@ _COMPILED3_WARN = _compile(WARN_PATTERNS)
 # Back-compat: historical callers unpack 2-tuples. Keep the old shape exported
 # so an out-of-tree consumer does not break, but note it carries NO acquittal
 # information — anything enforcing policy must go through scan()/scan_warn().
-COMPILED = [(rx, label) for rx, label, _ in _COMPILED3]
-COMPILED_WARN = [(rx, label) for rx, label, _ in _COMPILED3_WARN]
+COMPILED = [(rx, label) for rx, label, _, _ in _COMPILED3]
+COMPILED_WARN = [(rx, label) for rx, label, _, _ in _COMPILED3_WARN]
 
 # `security_ref: F-xxxxxxxx` is the sanctioned reference form — a pointer, not
 # a disclosure.
 SECURITY_REF_LINE = re.compile(r"^\s*[-+#/*\s]*security_ref:\s*F-[0-9a-f]{8}\s*$",
                                re.IGNORECASE)
 
-
-ACQUITTAL_WINDOW = 80
 
 
 def _scan(text: str, rules) -> list[tuple[str, str, str]]:
@@ -326,13 +422,13 @@ def _scan(text: str, rules) -> list[tuple[str, str, str]]:
     rule.
     """
     out, seen = [], set()
-    for rx, label, acquit in rules:
+    for rx, label, acquit, win in rules:
         if label in seen:
             continue
         for m in rx.finditer(text):
             if acquit is not None:
-                lo = max(0, m.start() - ACQUITTAL_WINDOW)
-                hi = min(len(text), m.end() + ACQUITTAL_WINDOW)
+                lo = max(0, m.start() - win)
+                hi = min(len(text), m.end() + win)
                 if acquit.search(text[lo:hi]):
                     continue
             s = max(0, m.start() - 40)
@@ -344,9 +440,25 @@ def _scan(text: str, rules) -> list[tuple[str, str, str]]:
     return out
 
 
+RESIDUAL_PREFIX = "residual claim"
+
+
 def scan(text: str) -> list[tuple[str, str, str]]:
-    """BLOCKING tier — a hit here must stop the commit."""
-    return _scan(text, _COMPILED3)
+    """BLOCKING tier — a hit here must stop the commit.
+
+    An explicit `disclosure-review: tooling-edit` trailer waives the RESIDUAL
+    rules only. That trailer replaced an acquittal keyed on conventional-commit
+    scopes, which handed a free pass to `fix(security):` — the scope a genuine
+    security bump carries, i.e. exactly the commits most likely to hold a
+    residual claim. Waiving now costs a deliberate, greppable line the author
+    has to type, and audits as one:
+        git log --grep='disclosure-review: tooling-edit'
+    The hard rules (advisory IDs, counts, image-tied state) are NEVER waived.
+    """
+    rules = _COMPILED3
+    if TOOLING_OPT_IN.search(text):
+        rules = [r for r in rules if not r[1].startswith(RESIDUAL_PREFIX)]
+    return _scan(text, rules)
 
 
 def scan_warn(text: str) -> list[tuple[str, str, str]]:

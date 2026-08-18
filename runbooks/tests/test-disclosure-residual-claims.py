@@ -121,12 +121,111 @@ class PublishableStaysPublishable(unittest.TestCase):
         self.assertAllowed("Security driver, tracked as F-31327aa9.")
         self.assertTrue(dp.SECURITY_REF_LINE.match("security_ref: F-31327aa9"))
 
-    def test_scanner_tooling_talk_is_acquitted(self):
-        # A commit editing the scanner must be able to name what it matches on.
+    def test_tooling_talk_acquitted_only_by_a_script_path(self):
+        # A commit editing the scanner must be able to name what it matches on
+        # — but the acquittal is now keyed on a FILE PATH, which an author
+        # cannot emit by accident.
         self.assertAllowed(
             "fix(security-check): stop counting kernel-header packages as "
-            "fixable criticals"
+            "fixable criticals in security-check.py"
         )
+
+    def test_bare_scope_no_longer_acquits(self):
+        # Regression for the forgeable-acquittal finding: the conventional
+        # commit SCOPE used to clear the residual tier, which handed a free
+        # pass to exactly the commits most likely to carry a residual claim.
+        hits = dp.scan(norm(
+            "fix(security): fixable CRITICAL driver still present on the edge image"
+        ))
+        self.assertTrue(hits, "a bare fix(security) scope must NOT acquit")
+
+    def test_explicit_trailer_waives_residual_tier_only(self):
+        body = ("fix(security-check): rework the fix-availability vocabulary\n\n"
+                "Counts fixable criticals differently now.\n\n"
+                "disclosure-review: tooling-edit")
+        # Trailer is multiline-anchored, so scan the RAW text, not normalized.
+        self.assertFalse(dp.scan(body), "trailer should waive the residual tier")
+        # ...but never the hard tier.
+        hard = body.replace("Counts fixable criticals differently now.",
+                            "Fixes handling of CVE-2026-99999.")
+        self.assertTrue(dp.scan(hard),
+                        "trailer must NOT waive a CVE identifier")
+
+
+class AdversarialBypassesStayClosed(unittest.TestCase):
+    """Every case here defeated an earlier version of the residual tier.
+
+    Found by an adversarial review of the first patch (2026-08-19), not by the
+    author. Each one is a reminder that this tier is a phrase list: it catches
+    careless disclosure, not fluent paraphrase.
+    """
+
+    def assertBlocked(self, text):
+        self.assertTrue(dp.scan(norm(text)), f"BYPASS regressed: {text!r}")
+
+    def test_conventional_commit_scope_does_not_acquit(self):
+        self.assertBlocked(
+            "fix(security): fixable CRITICAL driver still present on the edge image")
+
+    def test_false_positive_phrase_does_not_acquit(self):
+        # "Not a false positive: ..." is what an honest author writes, and the
+        # first acquittal list treated it as proof of tooling context.
+        self.assertBlocked(
+            "Not a false positive: the fixable CRITICAL driver is still present.")
+
+    def test_neighbouring_reopen_sentence_does_not_acquit(self):
+        self.assertBlocked(
+            "Does not close F-31327aa9. Nothing was reopened; the driver is unchanged.")
+
+    def test_unrelated_closure_sentence_does_not_acquit(self):
+        self.assertBlocked(
+            "Clears the last lint warning. F-31327aa9 does not close yet.")
+
+    def test_full_paraphrase_of_the_original_breach(self):
+        # Blocked via the negated-closure + upstream rules ("is not fixed by
+        # this release", "has yet to ship").
+        self.assertBlocked(
+            "The bundled npm dependency is not fixed by this release; the "
+            "driver persists and upstream has yet to ship a corrected "
+            "library. F-31327aa9 is carried forward to the next cycle.")
+
+    def test_bare_persistence_synonyms_WARN_but_do_not_block(self):
+        """Deliberate, measured limitation — see SOP §2.4.
+
+        A residual claim carrying NO negation and NO scanner vocabulary is
+        only warned about. `persist`/`pending`/`issue`/`gap` are too common in
+        ordinary engineering prose to gate on: they produced 15 of 25 flips
+        over 4841 commit messages, mostly `persist` in its database sense.
+        This test exists so the limitation is explicit rather than discovered.
+        """
+        for t in [
+            "F-1234abcd remains as recorded.",
+            "The issue is still unresolved.",
+            "The gap awaits an upstream release.",
+            "F-1234abcd is carried forward.",
+        ]:
+            with self.subTest(t=t):
+                n = norm(t)
+                self.assertFalse(dp.scan(n), f"should not BLOCK: {t!r}")
+                self.assertTrue(dp.scan_warn(n), f"should WARN: {t!r}")
+
+    def test_does_not_address_the_issue(self):
+        # `issue`/`gap` were accepted by the left-open rule but not by the
+        # negated-closure rules — an inconsistency a paraphrase walked through.
+        self.assertBlocked("This does not address the issue.")
+
+
+class SopPublishableExploitability(unittest.TestCase):
+    """SOP §2.1 publishes the DEFERRAL phrasing; the rule used to reject it."""
+
+    def test_deferral_phrasing_allowed(self):
+        self.assertFalse(dp.scan(norm(
+            "Exploitability assessed on the finding record.")))
+
+    def test_actual_assessment_still_blocked(self):
+        self.assertTrue(dp.scan(norm(
+            "Real-world exploitability is low because the binary is not "
+            "network-reachable.")))
 
 
 class WarnTierNeverGates(unittest.TestCase):
@@ -150,7 +249,7 @@ class LibraryContract(unittest.TestCase):
             self.assertEqual(len(entry), 2)
 
     def test_every_rule_compiles_and_is_labelled(self):
-        for rx, label, _acq in dp._COMPILED3 + dp._COMPILED3_WARN:
+        for rx, label, _acq, _win in dp._COMPILED3 + dp._COMPILED3_WARN:
             self.assertTrue(label and isinstance(label, str))
             self.assertTrue(hasattr(rx, "search"))
 
