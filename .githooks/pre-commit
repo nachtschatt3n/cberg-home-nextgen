@@ -3,10 +3,15 @@
 #
 # Layers (in order):
 #   1. Cluster Secret values — pull every Kubernetes Secret (excluding k8s-internal
-#      types like service-account-token / tls / helm releases) and grep staged
-#      files for any decoded value ≥8 chars. Catches domain leaks, passwords,
-#      API tokens, and anything else stored in-cluster.
-#      Warns and continues if kubectl is unreachable.
+#      types like service-account-token / tls / helm releases) and grep the
+#      STAGED HUNKS (added lines of `git diff --cached -U0`, per file) for any
+#      decoded value ≥8 chars. Catches domain leaks, passwords, API tokens,
+#      and anything else stored in-cluster. Hunk-scoped since 2026-08-18 so
+#      long-committed lines that happen to share a substring with some Secret
+#      (e.g. cluster-local service URLs) cannot re-trip the scanner on every
+#      later edit to the same file; newly ADDED lines are checked at full
+#      strength. Warns and continues if kubectl is unreachable.
+#      NOTE: Layers 2+3 still scan full staged content (`git show ":$file"`).
 #   2. Unencrypted *.sops.yaml — block commits of files matching .sops.yaml
 #      creation_rules paths that lack the top-level `sops:` block.
 #   3. Pattern-based credential detectors — API keys, AWS keys, JWTs, GitHub
@@ -237,12 +242,22 @@ check_file() {
     local content
     content=$(git show ":$file" 2>/dev/null) || return 0
 
-    # Layer 1: literal match against any cluster-secret value
+    # Layer 1: literal match against any cluster-secret value — scanned over
+    # the STAGED HUNKS only (added lines of `git diff --cached -U0`), NOT the
+    # whole file. Pre-existing committed lines that share a substring with a
+    # cluster Secret value (long-committed cluster-local service URLs, most
+    # commonly) used to re-trip the scanner on every unrelated edit to the
+    # same file and force documented --no-verify bypasses; a line you are not
+    # adding in this commit cannot leak anything new. Newly added lines are
+    # matched against the full literal list exactly as before.
     if [ -s "$LITERALS" ]; then
-        local hit
-        hit=$(echo "$content" | grep -F -f "$LITERALS" -m 1 || true)
-        if [ -n "$hit" ]; then
-            violations="${violations}  - Cluster-Secret value literal found in file (rotate if real)\n"
+        local added_lines hit
+        added_lines=$(git diff --cached -U0 -- "$file" | grep '^+' | grep -v '^+++' | cut -c2- || true)
+        if [ -n "$added_lines" ]; then
+            hit=$(echo "$added_lines" | grep -F -f "$LITERALS" -m 1 || true)
+            if [ -n "$hit" ]; then
+                violations="${violations}  - Cluster-Secret value literal found in a staged hunk (rotate if real)\n"
+            fi
         fi
     fi
 

@@ -1,8 +1,8 @@
 # SOP: Pre-Commit Secret Scan Hook
 
-> Description: How the repo-tracked pre-commit hook (`.githooks/pre-commit`) blocks secret leaks into this public repository — its three scan layers, cluster-secret literal matching, known false-positive classes, failure modes, and safe bypass procedure.
-> Version: `2026.07.12`
-> Last Updated: `2026-07-12`
+> Description: How the repo-tracked pre-commit hook (`.githooks/pre-commit`) blocks secret leaks into this public repository — its three scan layers, hunk-scoped cluster-secret literal matching, known false-positive classes, failure modes, and safe bypass procedure.
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `cberg-home operators`
 
 ---
@@ -10,7 +10,9 @@
 ## 1) Description
 
 Every `git commit` in this repository runs a three-layer secret scan against
-the **staged** content (index, via `git show ":$file"` — not the worktree).
+the **staged** content — never the worktree. Layer 1 reads the staged hunks
+(`git diff --cached -U0`, added lines); Layers 2+3 read the full staged file
+(`git show ":$file"`).
 The repo is public, so a single leaked credential, token, or private domain
 is an incident. The hook blocks the commit (`exit 1`) if any layer fires.
 
@@ -30,7 +32,7 @@ is an incident. The hook blocks the commit (`exit 1`) if any layer fires.
 | Active hook | `.githooks/pre-commit` (repo-tracked) |
 | Activation | `git config core.hooksPath .githooks` |
 | Stale copy | `.git/hooks/pre-commit` — legacy pre-layered version, **inactive** (core.hooksPath overrides it); ignore/delete |
-| Layer 1 | Substring match of staged content against decoded cluster Secret values (~175 literals) |
+| Layer 1 | Substring match of the **staged hunks** (added lines of `git diff --cached -U0`, per file) against decoded cluster Secret values (~200 literals) |
 | Layer 1 cache | `${TMPDIR:-/tmp}/cberg-precommit-literals.cache`, TTL 600 s |
 | Layer 2 | `kubernetes/**/*.sops.yaml` + `talos/**/*.sops.yaml` must carry a top-level `sops:` block |
 | Layer 3 | Regex credential detectors (API keys, AWS, JWT, GitHub tokens, private keys, DB DSNs, passwords) |
@@ -41,8 +43,20 @@ is an incident. The hook blocks the commit (`exit 1`) if any layer fires.
 
 The hook pulls **every** Kubernetes Secret (`kubectl get secrets -A -o json`),
 decodes the values, and `grep -F -f <literals>` substring-matches them
-against each staged file. First match blocks the commit with
-`Cluster-Secret value literal found in file (rotate if real)`.
+against **the staged hunks of each file** — the added lines of
+`git diff --cached -U0 -- <file>` — not the whole file content. First match
+blocks the commit with
+`Cluster-Secret value literal found in a staged hunk (rotate if real)`.
+
+**Hunk-scoped since `2026.08.18`.** Previously Layer 1 scanned the entire
+staged file (`git show ":$file"`), so a long-committed line that happens to
+share a substring with some cluster Secret (most commonly a cluster-local
+service URL that a Secret also contains) re-tripped the scanner on **every
+later edit to that file**, forcing documented `--no-verify` bypasses for
+innocent changes. A line you are not adding in this commit cannot leak
+anything new, so pre-existing lines are out of scope; detection strength for
+**newly added lines is unchanged** (same literal list, same filters, same
+`grep -F` substring match). Layers 2 and 3 still scan full staged content.
 
 kubectl is resolved in order: `PATH` → `~/.local/share/mise/shims/kubectl`
 → `mise exec -- kubectl`.
@@ -66,7 +80,8 @@ embedded Python in `.githooks/pre-commit`):
 **FQDN false-positive gotcha:** the `SVC_DNS` skip only covers `.svc`
 in-cluster names. A Secret value that is an **external FQDN** (e.g.
 `host.<private-domain>`) stays in the literal list and substring-matches any
-doc or manifest mentioning that hostname. **Prefer short hostnames over
+**newly added** doc or manifest line mentioning that hostname (since
+`2026.08.18` pre-existing lines no longer re-trip it). **Prefer short hostnames over
 FQDNs** in committed docs/manifests to dodge this. (For our private domain
 the block is correct behavior — the domain must never be committed.)
 
@@ -153,11 +168,11 @@ git push
 ```bash
 git commit -m "docs: add service URL"
 # ✗ docs/applications.md
-#   - Cluster-Secret value literal found in file (rotate if real)
+#   - Cluster-Secret value literal found in a staged hunk (rotate if real)
 ```
 
-Fix: the doc mentioned `myapp.<private-domain>` which exists verbatim in a
-cluster Secret. Replace with the short hostname `myapp` (or `<DOMAIN>`
+Fix: the **newly added** doc line mentioned `myapp.<private-domain>` which
+exists verbatim in a cluster Secret. Replace with the short hostname `myapp` (or `<DOMAIN>`
 placeholder), re-stage, commit.
 
 ### Example B: stale literal cache after rotating a secret
@@ -218,13 +233,37 @@ Expected:
 If failed:
 - `⚠ kubectl unreachable` means Layer 1 was skipped — check kubeconfig/VPN
 
+### Test 4: Layer 1 is hunk-scoped (pre-existing lines don't re-trip)
+
+Run in a **throwaway repo** with the hook copied in — never plant real
+literals in this repo's history:
+
+```bash
+T=$(mktemp -d) && cd "$T" && git init -q .   && cp /Users/mu/code/cberg-home-nextgen/.githooks/pre-commit hook.sh
+LIT=$(awk 'NR==5' "${TMPDIR:-/tmp}/cberg-precommit-literals.cache")  # never echo it
+printf 'pre-existing: x%sx\n' "$LIT" > doc.md && git add doc.md   && git commit -q --no-verify -m base
+echo "innocent new line" >> doc.md && git add doc.md
+bash hook.sh; echo "A exit=$? (want 0)"          # pre-existing literal: pass
+printf 'leak: %s\n' "$LIT" > leak.md && git add leak.md
+bash hook.sh; echo "B exit=$? (want 1)"          # newly added literal: block
+cd / && rm -rf "$T"
+```
+
+Expected:
+- `A exit=0` (innocent edit next to an old literal-bearing line passes)
+- `B exit=1` (a newly added line containing a literal is blocked)
+
+If failed:
+- Layer 1 regressed to whole-file scanning, or the literal cache is
+  empty/stale — check `.githooks/pre-commit` `check_file()` and Test 3
+
 ---
 
 ## 7) Troubleshooting
 
 | Symptom | Likely Cause | First Fix |
 |---------|--------------|-----------|
-| `Cluster-Secret value literal found` on an innocent doc | FQDN/identifier stored in some cluster Secret substring-matches your text | Use short hostname or placeholder; if the value is genuinely public, add its key to `SKIP_KEY_NAMES` or an anchored shape regex in the hook |
+| `Cluster-Secret value literal found` on an innocent doc | FQDN/identifier stored in some cluster Secret substring-matches a line you are ADDING (pre-existing lines no longer trip it) | Use short hostname or placeholder; if the value is genuinely public, add its key to `SKIP_KEY_NAMES` or an anchored shape regex in the hook |
 | `⚠ kubectl unreachable — skipping Layer 1` | No cluster access (VPN down, kubeconfig missing, off-LAN) | Restore access and re-commit; Layer 1 **fails open**, so treat the commit as unscanned against cluster literals |
 | `Password pattern` on a SOPS file | Missing `ENC[` guard match — value after `password:` is plaintext | Encrypt the file with SOPS; if it is ciphertext and still flagged, the file lost its `sops:` block |
 | `Unencrypted .sops.yaml file` | File decrypted in place and staged before re-encrypting | `sops -e -i <file>` in the repo path, re-stage |
@@ -244,9 +283,11 @@ git show ":path/to/file" | head
 ### Diagnose Example 1: which cluster literal matched my file?
 
 ```bash
-# Rebuild the literal list the hook uses, then find the exact match:
+# Rebuild the literal list the hook uses, then find the exact match among
+# the ADDED lines (what Layer 1 actually scans since 2026.08.18):
 CACHE="${TMPDIR:-/tmp}/cberg-precommit-literals.cache"
-git show ":docs/applications.md" | grep -F -f "$CACHE" | head -3
+git diff --cached -U0 -- docs/applications.md | grep '^+' | grep -v '^+++' \
+  | cut -c2- | grep -F -f "$CACHE" | head -3
 ```
 
 Expected:
@@ -337,7 +378,8 @@ git config --unset core.hooksPath      # re-enable: git config core.hooksPath .g
 - Memory note `feedback_precommit_cluster_secret_match` — prefer short
   hostnames over FQDNs to dodge Layer 1 collisions
 - Commits: `60293d0e` (ENC[ exemption), `62f4c27c` (OAuth scope phrases),
-  `7e217387` (in-cluster service DNS skip)
+  `7e217387` (in-cluster service DNS skip); hunk-scoped Layer 1 landed
+  `2026-08-18` (see `git log -- .githooks/pre-commit`)
 
 ---
 
