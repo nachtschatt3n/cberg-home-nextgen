@@ -485,6 +485,12 @@ kubectl get pods -n <ns> -l app.kubernetes.io/instance=<hr>        # Ready, rest
 
 Per tier before closing the window: `flux get hr -A | awk 'NR==1||$5!="True"'`
 and the all-pods-healthy one-liner; every ingressed app's URL + Homepage tile.
+**Plus (added after tier 1): Recreate-strategy survival** — every
+single-replica-RWO wrapper in the tier must still render
+`strategy: Recreate` under 5.1.0
+(`kubectl get deploy -n <ns> <d> -o jsonpath='{.spec.strategy.type}'`) —
+the longhorn-rwo-multi-attach guard must not silently revert; and **PVC name
+continuity** — `kubectl get pvc -n <ns>` shows only original names, all Bound.
 
 Targeted (the ones the audit says can regress):
 - **mosquitto:** all 3 services exist with old names; external ServiceMonitor
