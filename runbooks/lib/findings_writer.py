@@ -45,8 +45,20 @@ partial users of the writer such as auto-update.py, which emits a single
 version finding and must never conclude anything about the version section.
 A section that ran but knows its coverage degraded calls `mark_incomplete()`.
 
-Env escape hatches: SWEEP_AUTOCLOSE=0 disables; SWEEP_AUTOCLOSE_DRYRUN=1
-prints what WOULD close and writes nothing.
+Auto-close additionally requires an ORCHESTRATED run (a cycle id handed
+down by sweep-run.py / the daily-operation fan-out). A hand-run check
+script mints its own cycle id and closes nothing — an ad-hoc run may be
+scoped or degraded, and a conclusion drawn from absence would be wrong.
+
+It never resolves a row last seen at or after the moment this section
+started, so a concurrent run of the same section cannot eat the other's
+rows. And it REFUSES outright when the run emitted zero findings but has
+rows to close — that is a failed run far more often than a newly clean
+section (SWEEP_AUTOCLOSE_FORCE=1 overrides).
+
+Env escape hatches: SWEEP_AUTOCLOSE=0 disables; SWEEP_AUTOCLOSE=1 forces it
+on for an ad-hoc run; SWEEP_AUTOCLOSE_DRYRUN=1 prints what WOULD close and
+writes nothing; SWEEP_AUTOCLOSE_FORCE=1 overrides the zero-emit refusal.
 """
 
 from __future__ import annotations
@@ -229,6 +241,17 @@ class FindingsWriter:
         self._cycle_id = (
             cycle_id or os.environ.get("SWEEP_CYCLE_ID") or str(uuid.uuid4())
         )
+        # Did this run join an ORCHESTRATED cycle, or mint its own?
+        # sweep-run.py and the daily-operation fan-out always hand the cycle
+        # id down (arg or SWEEP_CYCLE_ID); an operator running a check script
+        # by hand does not. Auto-close defaults to firing only in the
+        # orchestrated case, because only there is "the section ran to
+        # completion, in full, as part of a sweep" a safe reading of a run
+        # that emitted fewer findings than last time. An ad-hoc run may well
+        # be scoped, exploratory, or degraded — see close().
+        self._orchestrated = bool(
+            cycle_id or os.environ.get("SWEEP_CYCLE_ID")
+        )
         # Cycle-row metadata is stashed for the LAZY insert (see _ensure_cycle_row).
         self._trigger = trigger
         self._git_head = git_head
@@ -247,6 +270,7 @@ class FindingsWriter:
         # authority for stale-finding auto-close: a row that this section
         # owns and did NOT re-emit is, by definition, no longer firing.
         self._emitted_fps: set[str] = set()
+        self._run_started = None
         # Set by mark_incomplete() when the section knows its coverage was
         # partial (a scanner failed, a port-forward died). Auto-close is a
         # conclusion drawn from ABSENCE, so it must never run on a partial
@@ -260,6 +284,17 @@ class FindingsWriter:
         # findings. If the DB is genuinely down this still raises — callers
         # that want to fail BEFORE doing the work should call preflight().
         self._conn = _connect_with_retry(self.dsn, autocommit=False)
+        # The DB's own clock at the moment this section STARTED. Auto-close
+        # only ever resolves rows last seen BEFORE this — so a concurrent or
+        # out-of-band run of the same section (an operator running the script
+        # by hand while a sweep is mid-flight) cannot have its just-written
+        # rows resolved by the other run. Taken from the server, not the
+        # local host, so clock skew between the Mac and the cluster cannot
+        # widen the window.
+        with self._conn.cursor() as _cur:
+            _cur.execute("SELECT now()")
+            self._run_started = _cur.fetchone()[0]
+        self._conn.commit()
 
     def _ensure_cycle_row(self, cur) -> None:
         """Create the shared sweep_cycles row on demand (first emit).
@@ -439,6 +474,7 @@ class FindingsWriter:
              WHERE resolved_at IS NULL
                AND section = %s
                AND NOT (fingerprint = ANY(%s))
+               AND last_seen < %s
         """
         with self._conn.cursor() as cur:
             if dry_run:
@@ -446,7 +482,7 @@ class FindingsWriter:
                     "SELECT finding_id, severity, title, last_seen "
                     "FROM sweep_findings" + sql_where +
                     " ORDER BY severity, finding_id",
-                    (self.section, fps),
+                    (self.section, fps, self._run_started),
                 )
             else:
                 cur.execute(
@@ -458,7 +494,7 @@ class FindingsWriter:
                                NULLIF(%s, ''), resolved_commit)
                     """ + sql_where +
                     " RETURNING finding_id, severity, title, last_seen",
-                    (self._git_head or "", self.section, fps),
+                    (self._git_head or "", self.section, fps, self._run_started),
                 )
             rows = cur.fetchall()
         if not dry_run:
@@ -520,7 +556,15 @@ class FindingsWriter:
             partial run, which must NOT conclude anything from absence.
         A section can also veto explicitly via mark_incomplete().
 
+        It also only fires for an ORCHESTRATED run — one that was handed a
+        cycle id by sweep-run.py or the daily-operation fan-out. A check
+        script an operator runs by hand mints its own cycle id and closes
+        nothing, because an ad-hoc run may be scoped, exploratory or
+        degraded, and auto-close reasons from ABSENCE. `SWEEP_AUTOCLOSE=1`
+        opts an ad-hoc run in.
+
         Escape hatches (env): SWEEP_AUTOCLOSE=0 disables it entirely;
+        SWEEP_AUTOCLOSE=1 forces it on even for an ad-hoc run;
         SWEEP_AUTOCLOSE_DRYRUN=1 reports what WOULD close and writes nothing.
         """
         if not self._enabled or self._conn is None:
@@ -529,8 +573,16 @@ class FindingsWriter:
         if section_complete is None:
             section_complete = verdict is not None
 
-        if os.environ.get("SWEEP_AUTOCLOSE", "1") == "0":
+        mode = os.environ.get("SWEEP_AUTOCLOSE", "")
+        if mode == "0":
             pass  # kill-switch: leave stale rows for a human
+        elif mode != "1" and not self._orchestrated:
+            print(f"==> auto-close SKIPPED for section {self.section}: this run "
+                  f"minted its own cycle id, so it is an AD-HOC run, not part of "
+                  f"a sweep — it may be scoped or exploratory, and a smaller "
+                  f"result set would wrongly read as 'fixed'. Set "
+                  f"SWEEP_AUTOCLOSE=1 to opt in, or SWEEP_AUTOCLOSE_DRYRUN=1 to "
+                  f"preview")
         elif self._incomplete_reason:
             print(f"==> auto-close SKIPPED for section {self.section}: run "
                   f"declared INCOMPLETE ({self._incomplete_reason}) — its open "
@@ -542,7 +594,28 @@ class FindingsWriter:
         else:
             dry = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "0") == "1"
             try:
-                rows = self._autoclose_stale(dry_run=dry)
+                # CIRCUIT BREAKER. A section that emitted NOTHING and yet has
+                # open rows to close is the signature of a broken run, not a
+                # clean one: the script fell over before producing findings,
+                # its evidence file was missing or stale, or its data source
+                # was unreachable. A genuinely clean section that just fixed
+                # its last finding is indistinguishable from that at this
+                # layer, so it costs one forced run — cheap next to silently
+                # resolving a whole section. Not a substitute for
+                # mark_incomplete(); a backstop for the scripts that do not
+                # yet call it.
+                probe = self._autoclose_stale(dry_run=True) if not self._emitted_fps else None
+                if probe and os.environ.get("SWEEP_AUTOCLOSE_FORCE", "0") != "1":
+                    print(f"==> auto-close REFUSED for section {self.section}: the "
+                          f"run emitted 0 findings but {len(probe)} would close. "
+                          f"A section that produced nothing has almost certainly "
+                          f"failed rather than gone clean. Verify, then re-run "
+                          f"with SWEEP_AUTOCLOSE_FORCE=1 if the section really is "
+                          f"clean. Would have closed:")
+                    self._report_autoclose(probe, dry_run=True)
+                    rows = []
+                else:
+                    rows = self._autoclose_stale(dry_run=dry)
                 if rows:
                     self._report_autoclose(rows, dry_run=dry)
             except Exception as e:  # noqa: BLE001 — never lose the cycle close

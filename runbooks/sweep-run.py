@@ -2,14 +2,20 @@
 """sweep-run — single entry point for the daily sweep.
 
 This is the only path that runs the audit scripts. Use it either:
-  * scheduled — from a Claude CLI `/loop` job at the daily cadence
-    (per docs/sops/scheduled-sweeps in CLAUDE.md; session-local cron
-    via CronCreate). The daily-operation agent dispatches the six
-    specialists, each of whom invokes its `runbooks/X-check.py`; this
-    script handles the port-forward + DSN derivation those scripts need.
+  * scheduled — triggered by the in-cluster OpenClaw cron ("Daily
+    Operation Sweep Every 2 Days", id `8163c139`), which drives the Mac
+    mini `daily-operation` Claude session via the `operation sweep`
+    skill. The sweep still EXECUTES on the Mac (local SOPS age key +
+    mise toolchain); the cluster cron is only the trigger. See
+    "Scheduled Sweeps" in CLAUDE.md. Do NOT create a session-local
+    `/loop` or `CronCreate` sweep — the old 8:17am `/loop` is retired
+    and a local one double-runs against the cluster-driven sweep.
+    The daily-operation agent dispatches the six specialists, each of
+    whom invokes its `runbooks/X-check.py`; this script handles the
+    port-forward + DSN derivation those scripts need.
   * ad-hoc — `python3 runbooks/sweep-run.py` from the operator's
     session when you've just shipped something and want a fresh DB
-    reading without waiting for the next /loop tick.
+    reading before the next scheduled trigger.
 
 Findings land in the sweep_history Postgres on the cluster, keyed by
 a per-invocation SWEEP_CYCLE_ID so every specialist in the run groups
@@ -457,7 +463,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--cycle-id",
         default=os.environ.get("SWEEP_CYCLE_ID"),
-        help="Shared SWEEP_CYCLE_ID. Auto-generated if unset.",
+        help=(
+            "Shared SWEEP_CYCLE_ID. Auto-generated if unset — EXCEPT with "
+            "--reconcile-only, which REQUIRES it (or SWEEP_CYCLE_ID in the "
+            "env): reconciling against a freshly-minted id would auto-close "
+            "every open finding in the --ran sections."
+        ),
     )
     parser.add_argument(
         "--ran",

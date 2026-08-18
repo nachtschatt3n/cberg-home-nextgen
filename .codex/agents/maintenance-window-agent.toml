@@ -83,8 +83,13 @@ fetch what's approved-and-pending:
 
 ```bash
 kubectl -n ai exec deploy/openclaw -c app -- \
-  /home/node/.openclaw/bin/home-operation decisions --json --pending-exec
+  /home/node/.openclaw/bin/home-operation --json decisions --pending-exec
 ```
+
+`--json` here is the **global** output switch and MUST precede the subcommand —
+after it you get `error: unrecognized arguments: --json`. The only `--json` that
+follows a subcommand is `ingest --json '<payload>'` above, which is a different
+flag entirely (the required issue payload, not an output mode).
 
 Execute only plans that are either in this cleared-to-run set or passed the
 autonomy bar.

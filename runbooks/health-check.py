@@ -22,6 +22,7 @@ import glob
 import os
 import re
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -140,6 +141,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
+    # Set to a reason string when this run's coverage is NOT trustworthy.
+    # A partial run must not let auto-close read "absent" as "resolved".
+    incomplete: str | None = None
+
     if args.issues_file:
         issues_path = Path(args.issues_file)
         exit_code = 0
@@ -148,9 +153,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {BASH_SCRIPT} not found", file=sys.stderr)
             return 2
         # Run the bash script with its output streaming to our stdout.
+        run_started = time.time()
         proc = subprocess.run(["bash", str(BASH_SCRIPT)], check=False)
         exit_code = proc.returncode
         issues_path = _newest_issues_file()
+        # health-check.sh writes its issues file only near the END of the run.
+        # If it died earlier there is no file for THIS run, and the glob in
+        # _newest_issues_file() happily returns a STALE one from a previous
+        # run (or None). Either way the parse below yields a wrong finding
+        # set — and since FindingsWriter.close(verdict=...) now auto-closes
+        # the findings this section did not re-emit, a crashed run with no
+        # file would compute verdict="green" and silently resolve EVERY open
+        # health finding, stamped with the current git HEAD as though a code
+        # change had fixed them. Detect both cases and veto the auto-close.
+        if issues_path and issues_path.stat().st_mtime < run_started:
+            incomplete = (f"health-check.sh produced no issues file this run; "
+                          f"{issues_path.name} is stale (written before the run "
+                          f"started)")
+            issues_path = None
+        elif issues_path is None:
+            incomplete = "health-check.sh produced no issues file this run"
+        elif exit_code not in (0, 1):
+            incomplete = (f"health-check.sh exited {exit_code} — coverage may be "
+                          f"partial")
 
     findings: list[tuple[str, str]] = []
     if issues_path and issues_path.is_file():
@@ -174,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
         git_head=git_head(),
     ) as writer:
         evidence_path = str(issues_path) if issues_path else None
+        if incomplete:
+            writer.mark_incomplete(incomplete)
         if writer.enabled:
             for sev, msg in findings:
                 writer.emit(

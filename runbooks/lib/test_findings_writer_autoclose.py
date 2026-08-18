@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -70,16 +71,24 @@ class FakeConn:
         pass
 
 
-def _writer(section="version"):
+def _writer(section="version", orchestrated=True):
     """A writer wired to a fake connection, as if a DSN had been given.
 
     Returns (writer, conn) — close() nulls the writer's own `_conn`, so the
     test has to keep its own handle on the statement log.
+
+    `orchestrated` mirrors reality: sweep-run.py / the daily-operation
+    fan-out always hand a cycle id down, a hand-run script does not.
     """
-    w = fw.FindingsWriter(dsn=None, section=section)
+    cid = "11111111-2222-3333-4444-555555555555" if orchestrated else None
+    w = fw.FindingsWriter(dsn=None, section=section, cycle_id=cid)
     conn = FakeConn()
     w._conn = conn
     w._enabled = True
+    w._run_started = datetime(2026, 8, 18, 13, 0, tzinfo=timezone.utc)
+    # Most tests exercise the gate, not the circuit breaker, so give the run
+    # a plausible emitted set unless the test overrides it.
+    w._emitted_fps = {"deadbeef" * 8}
     return w, conn
 
 
@@ -138,11 +147,89 @@ def test_mark_incomplete_vetoes_autoclose():
     assert not _autoclose_stmts(conn), "auto-close ran on a declared-partial run"
 
 
+def test_adhoc_run_does_not_autoclose_by_default():
+    """A hand-run check script minted its own cycle id — it may be scoped,
+    exploratory or degraded, so absence must not read as resolution."""
+    _clear_env()
+    w, conn = _writer(orchestrated=False)
+    w.close(verdict="red")
+    assert not _autoclose_stmts(conn), "an ad-hoc run auto-closed findings"
+
+
+def test_adhoc_run_can_opt_in():
+    _clear_env()
+    os.environ["SWEEP_AUTOCLOSE"] = "1"
+    try:
+        w, conn = _writer(orchestrated=False)
+        w.close(verdict="red")
+        assert _autoclose_stmts(conn), "SWEEP_AUTOCLOSE=1 did not opt the run in"
+    finally:
+        _clear_env()
+
+
+def test_orchestrated_via_env_cycle_id_autocloses():
+    """The fan-out exports SWEEP_CYCLE_ID rather than passing the arg."""
+    _clear_env()
+    os.environ["SWEEP_CYCLE_ID"] = "99999999-8888-7777-6666-555555555555"
+    try:
+        w, conn = _writer(orchestrated=False)   # no arg — env supplies it
+        w.close(verdict="red")
+        assert _autoclose_stmts(conn), "an env-orchestrated run did not auto-close"
+    finally:
+        os.environ.pop("SWEEP_CYCLE_ID", None)
+        _clear_env()
+
+
+def test_zero_emit_run_is_refused():
+    """Emitted nothing but has rows to close = a failed run, not a clean one."""
+    _clear_env()
+    w, conn = _writer()
+    w._emitted_fps = set()
+
+    closed = []
+
+    def fake(*, dry_run):
+        return closed if dry_run else [("F-1", "critical", "t", "2026-08-17")]
+    closed.append(("F-1", "critical", "t", "2026-08-17"))
+    w._autoclose_stale = fake
+    w.close(verdict="green")
+    # the breaker probes with dry_run=True and must not proceed to the write
+    assert not _autoclose_stmts(conn)
+
+
+def test_zero_emit_refusal_can_be_forced():
+    _clear_env()
+    os.environ["SWEEP_AUTOCLOSE_FORCE"] = "1"
+    try:
+        w, conn = _writer()
+        w._emitted_fps = set()
+        w.close(verdict="green")
+        assert _autoclose_stmts(conn), "SWEEP_AUTOCLOSE_FORCE=1 did not override"
+    finally:
+        os.environ.pop("SWEEP_AUTOCLOSE_FORCE", None)
+        _clear_env()
+
+
+def test_autoclose_never_touches_rows_seen_since_the_run_started():
+    """Guards against a concurrent run of the same section eating its rows."""
+    _clear_env()
+    w, conn = _writer()
+    w.close(verdict="red")
+    sql, params = next((s, p) for s, p in conn.log
+                       if "resolved_at = now()" in s and "sweep_findings" in s)
+    assert "last_seen < %s" in sql, "no run-start guard in the auto-close clause"
+    assert params[3] == w_run_started_expected(), "wrong run-start bound"
+
+
+def w_run_started_expected():
+    return datetime(2026, 8, 18, 13, 0, tzinfo=timezone.utc)
+
+
 def test_kill_switch_disables_autoclose():
     _clear_env()
     os.environ["SWEEP_AUTOCLOSE"] = "0"
     try:
-        w, conn = _writer()
+        w, conn = _writer()          # orchestrated: only the switch can stop it
         w.close(verdict="red")
         assert not _autoclose_stmts(conn)
     finally:
@@ -170,6 +257,7 @@ def test_dry_run_issues_no_update():
 def test_autoclose_is_scoped_to_this_section_and_spares_emitted():
     _clear_env()
     w, conn = _writer("version")
+    w._emitted_fps.clear()          # drop the helper's sentinel
     w.emit("critical", "nocodb: image nocodb/nocodb 0.301.5 → 2026.08.0 (major)")
     w.emit("monitor", "cilium: chart 1.20.0 → 1.20.1 (patch)")
     emitted = set(w._emitted_fps)
@@ -195,10 +283,14 @@ def test_emitted_fingerprints_are_stable_across_a_reword():
     2026-08-18 hand-resolve did) blinds a cycle_id comparison, but cannot
     forge a fingerprint.
     """
-    a = fw.fingerprint("security", None, "`postgres:17.11-bookworm`: 1 fixable CRITICAL CVE(s)")
-    b = fw.fingerprint("security", None, "`postgres:17.11-bookworm`: 4 fixable CRITICAL CVE(s) — bump it")
+    # Neutral placeholders on purpose: this repo is public and a fixture
+    # naming a real in-use image alongside a vulnerability count would state
+    # currently-unfixed exposure (CLAUDE.md, docs/sops/vulnerability-disclosure.md).
+    # The assertions only need two rewordings of one identifier.
+    a = fw.fingerprint("security", None, "`example/app:1.2.3`: 1 finding of some kind")
+    b = fw.fingerprint("security", None, "`example/app:1.2.3`: 4 findings of some kind — act")
     assert a == b, "a reworded/recounted title forked a new fingerprint"
-    c = fw.fingerprint("security", None, "`postgres:18.6-bookworm`: 1 fixable CRITICAL CVE(s)")
+    c = fw.fingerprint("security", None, "`example/app:4.5.6`: 1 finding of some kind")
     assert a != c, "a different image version collapsed onto the same fingerprint"
 
 
