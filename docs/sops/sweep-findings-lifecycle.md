@@ -1,0 +1,496 @@
+# SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the incomplete-run veto
+
+> Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the four independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
+> Owner: `homelab-sre`
+
+---
+
+## 1) Description
+
+The sweep does not just report; it maintains a **stateful finding register** in
+the `sweep_history` Postgres. Every audit script writes findings there, and a
+finding that a section **stops emitting** is automatically resolved. That single
+sentence carries all the risk in this system, because auto-close is a conclusion
+drawn from **ABSENCE** — and absence has two causes:
+
+1. the problem was fixed (correct to close), or
+2. the check could not run (catastrophic to close).
+
+This SOP is the contract that keeps those apart. It exists because the rules
+previously lived only in a module docstring, three commit messages, and a skill
+file — and we hit three separate production failure modes in one day (§7).
+
+- Scope: `runbooks/lib/findings_writer.py`, `runbooks/sweep-run.py`, and the
+  audit scripts `runbooks/{security,check-all-versions,doc,health}-check.py`
+- Prerequisites: `SWEEP_PG_DSN` (set automatically by `runbooks/sweep-run.py`),
+  repo-pinned tooling via `mise exec --`
+- Out of scope: AR suppression semantics (`docs/sops/policy-cli.md`), the
+  vulnerability-disclosure boundary (`docs/sops/vulnerability-disclosure.md`),
+  and the maintenance-window pipeline (`docs/sops/maintenance-windows.md`)
+
+---
+
+## 2) Overview
+
+| Setting | Value |
+|---------|-------|
+| Namespace | `databases` (sweep-history Postgres) |
+| Source of truth (code) | `runbooks/lib/findings_writer.py` |
+| Schema | `kubernetes/apps/databases/sweep-history/app/schema-configmap.yaml` |
+| Orchestrator | `runbooks/sweep-run.py` |
+| Tables | `sweep_cycles`, `sweep_findings` |
+| Board | `https://sweep.<DOMAIN>/` |
+| Valid sections | `health, security, version, doc, media, smarthome, slo, infra, carry` |
+| Auto-close owner | `FindingsWriter.close()` (primary) + `sweep-run.py --reconcile-only` (backstop) |
+
+**The four gates.** Auto-close only fires when ALL of these hold:
+
+| # | Gate | Trips when | Where |
+|---|------|-----------|-------|
+| 1 | `section_complete` | no verdict was computed (crash path / `__exit__`) | `close()` |
+| 2 | Orchestrated-run | the run minted its own cycle id (ad-hoc) | `close()` |
+| 3 | **Incomplete veto** | the section called `mark_incomplete()` | `close()` |
+| 4 | Zero-emit breaker | run emitted 0 findings but has rows to close | `close()` |
+
+Plus two always-on scoping invariants that are not gates but bounds:
+**section scoping** (never touches another section's rows) and the
+**run-start bound** (never resolves a row last seen at/after this run's start).
+
+---
+
+## 3) Blueprints
+
+Source of truth is code, not YAML. The declarative surface is the writer's
+public API — treat these five calls as the contract:
+
+```python
+from runbooks.lib.findings_writer import (
+    FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
+)
+
+DEGRADED = DegradationLog("security", printer=warn)   # module-level recorder
+
+# ...deep inside a section function, on a graceful-degradation path:
+except Exception as e:
+    DEGRADED.record("s6_attack_patterns", "Elasticsearch", repr(e))
+    return OK, findings, body        # section still completes and reports
+
+# ...at the end of main():
+with FindingsWriter(dsn=dsn, section="security",
+                    cycle_id=cycle_id_from_env(),
+                    trigger=trigger_from_env(), git_head=git_head()) as writer:
+    _emit_findings(writer, results, scored)
+    DEGRADED.apply(writer)           # -> writer.mark_incomplete(...) if degraded
+    writer.close(verdict=verdict)
+```
+
+Environment escape hatches (all read in `close()`):
+
+| Var | Effect |
+|-----|--------|
+| `SWEEP_AUTOCLOSE=0` | kill switch — never auto-close |
+| `SWEEP_AUTOCLOSE=1` | opt an **ad-hoc** run in (overrides gate 2 only) |
+| `SWEEP_AUTOCLOSE_DRYRUN=1` | print what WOULD close, write nothing |
+| `SWEEP_AUTOCLOSE_FORCE=1` | override the zero-emit breaker (gate 4 only) |
+
+There is **no** env override for gate 3. A degraded run cannot be talked into
+auto-closing; fix the dependency and re-run.
+
+---
+
+## 4) Operational Instructions
+
+### 4.1 Lifecycle of one finding
+
+1. **Emit.** A section calls `writer.emit(severity, title, subsection=…,
+   evidence_path=…, metadata=…)`. Severity accepts the emoji constants
+   (`🔴🟡🟢🛡️`) or the strings `critical|warning|clean|accepted|monitor|deferred`.
+2. **Fingerprint.** `fingerprint(section, subsection, title)` produces the
+   stable identity. It is **not** a hash of the rendered prose:
+   - If the title contains backticked spans, identity = those spans **verbatim**
+     (version digits included — `postgres:17.10` and `postgres:17.11` are
+     genuinely different findings) + the sorted set of `[AR-0NN]` tags.
+   - Otherwise it falls back to the normalized title, with timestamps, UUIDs,
+     IPv4s, MACs, SHAs and bare digits substituted out.
+   - Rationale: rewording a message must not fork a new row for an unchanged
+     problem (a 2026-08 reword split 20 image findings into 39 rows). The AR-tag
+     set is what keeps two *distinct* findings about the *same* object apart.
+3. **Upsert.** Same fingerprint → same `finding_id`, `last_seen` bumped, row
+   stays open. New fingerprint → new row.
+4. **Cycle row is LAZY.** `sweep_cycles` is inserted on the **first** `emit()`,
+   never at construction — a writer that emits nothing leaves no row. This is
+   what killed the "5 empty cycle rows per run" orphan problem (N-20).
+5. **Auto-close.** `close(verdict=…)` resolves every open row of **this
+   section** whose fingerprint this run did **not** re-emit — subject to the
+   four gates. Closed rows get `resolved_at=now()`, `status='resolved'`,
+   `resolved_commit=<git HEAD>`.
+6. **Report.** Closures print per-row, and AR-tagged/accepted closures print in
+   their own block — an operator-accepted risk disappearing must never be
+   silent.
+
+### 4.2 Section scoping
+
+A `FindingsWriter` is constructed **per section**, and every auto-close
+statement carries `AND section = %s`. A section can only ever resolve its own
+rows. This is also why the incomplete veto is section-scoped: one degraded
+dependency suppresses auto-close for the **whole** section, not for a
+subsection. That is deliberate — auto-close operates at section granularity, so
+a finer veto would be unenforceable. Over-suppressing costs one stale row until
+the next clean run; under-suppressing loses a real finding.
+
+### 4.3 The incomplete-run veto (gate 3)
+
+Audit scripts **degrade gracefully by design**: if Elasticsearch is unreachable
+the run must still complete and report the twelve sections that did work. That
+design is correct for reporting and lethal for auto-close — the degraded
+section emits nothing, and absence reads as "fixed".
+
+Every graceful-degradation path must therefore call, directly or via
+`DegradationLog.record()`:
+
+```python
+writer.mark_incomplete("<scope>: <dependency> unavailable (<detail>)")
+```
+
+`mark_incomplete()` **accumulates** (deduped, first-occurrence order), so a run
+that trips four dependencies reports four reasons rather than one arbitrary
+survivor.
+
+**Conditions that trip the veto** (as wired 2026-08-18):
+
+| Script | Section | Tripped by |
+|--------|---------|-----------|
+| `health-check.py` | `health` | no issues file this run; stale issues file (mtime < run start); `health-check.sh` exit code outside `{0,1}` |
+| `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
+| `check-all-versions.py` | `version` | registry unreachable/timeout; **HTTP 429 registry rate-limit**; registry auth/token failure; Helm repo index fetch failure; GitHub API failure or rate-limit; per-item failures swallowed inside the thread pool |
+| `doc-check.py` | `doc` | **Shared primitives**: `run()` exception path and `rc != 0` with empty stdout (scoped call sites only — an unscoped grep returning nothing is a legitimate clean result); `run_cmd()` exception path; `read_file()` on PermissionError / IsADirectoryError / decode error (unreadable is never a legitimate clean result), and on FileNotFoundError only where a call site passes an explicit scope. **Named sites**: `kubectl version` / node list / ingress / `sops-age` secret unavailable; `talosctl version` unavailable; `unifictl` VLAN + WLAN JSON unparsable or rc≠0; helmfile / homepage / renovate / ollama / blueprint / SOP / Taskfile / `.gitignore` / `.sops.yaml` / `CLAUDE.md` unreadable; `age-keygen` missing (silently downgrades a wrong-key CRITICAL to a green line); a regex that no longer matches a reworded doc |
+
+> **Not all degradation is silence — some of it is an affirmative green.**
+> Several paths do not merely stop emitting; they print a PASS manufactured
+> from the failed dependency: an unreadable (or still-encrypted) Authentik
+> blueprint yields an empty string, the violation regex matches nothing, and
+> the run asserts "N blueprint(s) use UUIDs". An NVD outage returns `[]` and
+> the run prints "no open CVEs found". Under auto-close that is an
+> affirmative "fixed" claim, not an absence — which is why the veto is wired
+> at the dependency, not inferred from the emitted-finding count.
+>
+> **The rate-limit case is the sharpest.** A Docker Hub anonymous pull that
+> returns 429 under concurrency yields the *same* Python value as "no newer tag
+> exists". On 2026-08-18 that produced ~40 bogus "up to date" answers that only
+> a serial re-check caught. A rate-limited lookup is **incomplete**, never
+> "no update available" — otherwise it auto-closes real version findings.
+
+### 4.4 The orchestrated-vs-ad-hoc gate (gate 2)
+
+`sweep-run.py` and the daily-operation fan-out hand every specialist one shared
+`SWEEP_CYCLE_ID`. A check script an operator runs by hand does **not** receive
+one and mints its own UUID; `self._orchestrated` is False and auto-close is
+skipped with an explanatory line. Reason: an ad-hoc run may be scoped,
+exploratory, or pointed at a subset — a smaller result set would wrongly read
+as "fixed". Opt in with `SWEEP_AUTOCLOSE=1` when you *know* the run was full.
+
+### 4.5 The zero-emit circuit breaker (gate 4)
+
+If a run emitted **zero** findings but has open rows that would close, `close()`
+refuses, prints what it would have closed, and continues. A section that
+produced nothing has almost certainly failed rather than gone clean. It is a
+**backstop, not a substitute** for `mark_incomplete()` — it only catches a
+*total* wipeout, so partial degradation must still be declared explicitly. A
+genuinely newly-clean section costs one forced re-run with
+`SWEEP_AUTOCLOSE_FORCE=1`.
+
+### 4.6 The run-start bound
+
+At construction the writer reads the **DB's** clock (`SELECT now()`, not the
+local host — clock skew between the Mac and the cluster must not widen the
+window) and stores it. Auto-close adds `AND last_seen < <run_start>`, so a
+concurrent or out-of-band run of the same section cannot resolve rows the other
+run just wrote.
+
+### 4.7 What `--ran` means
+
+`sweep-run.py --reconcile-only --ran doc,version,security,health,slo` is the
+**backstop** auto-close path, used by the fan-out to finalize the shared cycle.
+`--ran` declares which sections **actually ran**, and it is authoritative
+because **the schema has no per-section run record**: a section that ran and
+found nothing writes no rows and is indistinguishable from a section that never
+ran. Without `--ran`, the scope is *inferred* from rows written under this
+cycle id — which silently drops any clean section.
+
+The declared set is persisted to `sweep_cycles.notes` as `{"ran": [...]}`, which
+is what lets the board render "ran clean" instead of a false "DID NOT REPORT".
+
+Sections in the candidate list that did not report are skipped with an explicit
+log line — no report is not a resolution.
+
+---
+
+## 5) Examples
+
+### Example A: normal orchestrated sweep (auto-close active)
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/sweep-run.py all
+```
+
+Each specialist inherits `SWEEP_CYCLE_ID`; each section's `close(verdict=…)`
+auto-closes its own stale rows; the final `--reconcile-only` pass recomputes the
+verdict.
+
+### Example B: preview closures without writing
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  SWEEP_AUTOCLOSE_DRYRUN=1 mise exec -- python3 runbooks/security-check.py
+```
+
+### Example C: ad-hoc run you know was complete
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  SWEEP_AUTOCLOSE=1 mise exec -- python3 runbooks/doc-check.py
+```
+
+### Example D: reconcile a specific cycle (the ONLY safe form)
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/sweep-run.py \
+  --reconcile-only --cycle-id "$SWEEP_CYCLE_ID" --ran doc,version,security,health,slo
+```
+
+Never omit `--cycle-id` here — see §7.2.
+
+---
+
+## 6) Verification Tests
+
+### Test 1: the veto fires and is visible
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+```
+
+Expected:
+- All tests pass, including the degraded-dependency cases.
+- Output contains `auto-close SKIPPED for section <x>: run declared INCOMPLETE`.
+
+If failed:
+- Check `close()` still evaluates `self._incomplete_reason` **before** the
+  `section_complete` branch — order matters for the log message.
+
+### Test 2: a healthy run still auto-closes
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py -v 2>&1 | grep -i autoclose
+```
+
+Expected:
+- An `UPDATE sweep_findings ... SET resolved_at = now()` statement is issued
+  when no degradation was recorded.
+
+If failed:
+- Confirm the fixture marks the run orchestrated (gate 2) and emits ≥1 finding
+  (gate 4) — either alone suppresses the close.
+
+### Test 3: a degraded live run completes and reports
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  SWEEP_ES_HOST=127.0.0.1 SWEEP_ES_PORT=1 mise exec -- python3 runbooks/security-check.py; echo "exit=$?"
+```
+
+Expected:
+- Run finishes, report written, `exit=0` or `1` (never a traceback).
+- `⚠ DEGRADED — …: Elasticsearch unavailable` appears.
+
+If failed:
+- A degrade path is raising instead of recording — that is a bug in the
+  section, not in the writer.
+
+---
+
+## 7) Troubleshooting
+
+| Symptom | Likely Cause | First Fix |
+|---------|--------------|-----------|
+| Findings stayed open after the fix shipped | Auto-close never ran — section was ad-hoc (gate 2) or degraded (gate 3) | Read the `auto-close SKIPPED` line; it names the gate |
+| A whole section's findings resolved at once | A dependency was down and its degrade path is **not** wired to `mark_incomplete()` | Re-open the rows, wire the path, add a test |
+| `auto-close REFUSED … emitted 0 findings` | Zero-emit breaker (gate 4) | Verify the section really is clean, then `SWEEP_AUTOCLOSE_FORCE=1` |
+| Board shows a section as "DID NOT REPORT" but it ran clean | `--ran` not passed to `--reconcile-only` | Re-run reconcile with the explicit `--ran` list |
+| `--reconcile-only` exits with a `SystemExit` about `--cycle-id` | Working as designed (§7.2) | Supply the real cycle id |
+| Findings duplicated after a message reword | Title has no backticked anchor, so identity fell back to prose | Put the object identifier in backticks |
+
+```bash
+# What is currently open, by section
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 - <<'PY'
+import os, psycopg
+with psycopg.connect(os.environ["SWEEP_PG_DSN"]) as c, c.cursor() as cur:
+    cur.execute("SELECT section, count(*) FROM sweep_findings "
+                "WHERE resolved_at IS NULL GROUP BY section ORDER BY 1")
+    for r in cur.fetchall(): print(r)
+PY
+```
+
+### 7.1 Failure mode: auto-close never ran
+
+Auto-close originally lived **only** in the orchestrator's separately-sequenced
+reconcile step. On 2026-08-18 the version section completed at 13:52 having
+stopped emitting 78 obsolete `chart 3.7.3 → 5.1.0` criticals — but the only
+reconcile passes that day ran at 13:33 and 13:37, i.e. **before** it finished. A
+human hand-resolved 82 rows. Fix: auto-close moved **into the writer**, which is
+the only component that always knows the section, the exact fingerprint set just
+emitted, and whether the run completed. The orchestrator pass remains as a
+backstop.
+
+### 7.2 Failure mode: `--reconcile-only` without `--cycle-id`
+
+Without `--cycle-id` (and without `SWEEP_CYCLE_ID` in the env), `sweep-run.py`
+mints a **fresh** UUID. The backstop auto-close then evaluates
+`cycle_id != <fresh-uuid>`, which is true for **every** row — so it would
+resolve every open finding in every `--ran` section, including ones a specialist
+had re-confirmed minutes earlier. This is not hypothetical: an un-scoped
+reconcile minted a stray cycle on 2026-08-18 at 13:56. `--reconcile-only` now
+**refuses to start** without an explicit cycle id.
+
+### 7.3 Failure mode: out-of-band writes blind the `cycle_id` key
+
+The backstop's scope was once hardcoded to six sections including `media` — but
+`sweep-run.py` has **no media step**; the media-manager agent writes findings
+out-of-band, under no cycle id the reconcile knows about. Every
+`--reconcile-only` run therefore auto-closed every open media finding, including
+four the agent had just re-confirmed. Any section that writes outside the
+orchestrated cycle is invisible to a `cycle_id`-keyed close. Fix: scope is now
+derived from what actually reported this cycle, or declared explicitly with
+`--ran` — and a section that did not report is skipped, loudly.
+
+---
+
+## 8) Diagnose Examples
+
+### Diagnose Example 1: "a finding vanished and I don't think it was fixed"
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 - <<'PY'
+import os, psycopg
+with psycopg.connect(os.environ["SWEEP_PG_DSN"]) as c, c.cursor() as cur:
+    cur.execute("SELECT finding_id, section, severity, resolved_at, resolved_commit, "
+                "left(title,90) FROM sweep_findings "
+                "WHERE resolved_at > now() - interval '2 days' ORDER BY resolved_at DESC")
+    for r in cur.fetchall(): print(r)
+PY
+```
+
+Expected:
+- A cluster of same-`section` rows resolved at the identical timestamp is the
+  signature of an unguarded degrade path, not of real fixes.
+
+If unclear:
+- Pull that run's stdout and grep for `auto-close` and `DEGRADED`.
+
+### Diagnose Example 2: "did the veto actually arm?"
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  mise exec -- python3 runbooks/security-check.py 2>&1 | grep -E "DEGRADED|auto-close"
+```
+
+Expected:
+- Either `auto-close SKIPPED … declared INCOMPLETE (<reasons>)`, or no
+  `DEGRADED` lines at all and a normal close.
+
+If unclear:
+- Re-run with `SWEEP_AUTOCLOSE_DRYRUN=1` to see the candidate set without
+  writing.
+
+---
+
+## 9) Health Check
+
+```bash
+# 1) Unit contract still holds
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+
+# 2) No section has been fully wiped in the last day
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 - <<'PY'
+import os, psycopg
+with psycopg.connect(os.environ["SWEEP_PG_DSN"]) as c, c.cursor() as cur:
+    cur.execute("SELECT section, count(*) FROM sweep_findings "
+                "WHERE resolved_at > now() - interval '1 day' GROUP BY section")
+    print(cur.fetchall())
+PY
+```
+
+Expected:
+- Tests green.
+- No section shows a mass-resolution burst that does not correspond to a known
+  remediation commit.
+
+---
+
+## 10) Security Check
+
+```bash
+# The veto must have NO env override — a degraded security run must never auto-close
+cd /Users/mu/code/cberg-home-nextgen && \
+  grep -n "_incomplete_reason" runbooks/lib/findings_writer.py
+
+# Every degrade path in the security audit records a reason
+cd /Users/mu/code/cberg-home-nextgen && \
+  grep -c "DEGRADED.record" runbooks/security-check.py
+```
+
+Expected:
+- `_incomplete_reason` is consulted in `close()` and is **not** gated behind any
+  `SWEEP_*` env var.
+- The `DEGRADED.record` count matches the number of degrade paths documented in
+  §4.3 for that script.
+- No CVE IDs, per-image vulnerability counts, or unfixed-exposure detail appear
+  in any committed artifact — those belong on the `sweep_findings` row in
+  Postgres with a `security_ref: F-xxxxxxxx` pointer
+  (`docs/sops/vulnerability-disclosure.md`).
+
+---
+
+## 11) Rollback Plan
+
+The wiring is additive and GitOps-safe (repo scripts only, no cluster mutation).
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+git revert <sha>            # never reset --hard, never force-push
+git push
+```
+
+Immediate mitigation without a revert — disable auto-close entirely for the next
+run:
+
+```bash
+SWEEP_AUTOCLOSE=0 mise exec -- python3 runbooks/sweep-run.py all
+```
+
+To re-open findings that were wrongly auto-closed:
+
+```sql
+-- inspect first; run inside a transaction and verify the count before COMMIT
+UPDATE sweep_findings
+   SET resolved_at = NULL, status = 'open', resolved_commit = NULL
+ WHERE section = '<section>'
+   AND resolved_at BETWEEN '<start>' AND '<end>';
+```
+
+---
+
+## 12) References
+
+- `runbooks/lib/findings_writer.py` — writer, gates, `DegradationLog`
+- `runbooks/lib/test_findings_writer_autoclose.py` — the executable contract
+- `runbooks/sweep-run.py` — orchestrator, `--ran`, `--reconcile-only`
+- `runbooks/{security,doc,health}-check.py`, `runbooks/check-all-versions.py`
+- `docs/sops/audit-script-correctness.md`
+- `docs/sops/vulnerability-disclosure.md`
+- `docs/sops/policy-cli.md`
+- `runbooks/health-check.md`, `runbooks/version-check.md`, `runbooks/doc-check.md`
