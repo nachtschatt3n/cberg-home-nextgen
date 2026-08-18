@@ -187,9 +187,18 @@ git log --all --oneline -p \
   | grep -v 'sops\|ENC\[AES\|secretKeyRef\|valueFrom\|EXAMPLE\|your_\|placeholder\|changeme' \
   | head -30
 
-echo "=== Domain literal in git history (non-sops files) ==="
-git log --all -p -S "$DOMAIN" -- $(git ls-files | grep -v '\.sops\.yaml$') 2>/dev/null \
-  | head -50 \
+echo "=== Domain literal ADDED to git history since the redaction cutoff ==="
+# Scoped to what is still actionable. Everything at or before 84b81004
+# ("chore(docs): redact literal domain to ${SECRET_DOMAIN} placeholder",
+# 2026-05-09) is the accepted, unrewritable past — AR-001 / AR-016 — and
+# re-reporting it every cycle only buried real findings. The cutoff is applied
+# BOTH topologically and by date: `--not` alone still admits stale side
+# branches cut from main before the redaction, and `--since` alone would
+# re-report the accepted past if such a branch were ever rebased forward.
+CUTOFF=84b81004
+git log --all --not $CUTOFF --since="$(git show -s --format=%cI $CUTOFF)" \
+  -p -S "$DOMAIN" -- $(git ls-files | grep -v '\.sops\.yaml$') 2>/dev/null \
+  | grep '^+' | head -50 \
   | sed "s/$DOMAIN/[DOMAIN]/g"
 
 echo "=== Secret/password filenames ever committed outside .sops.yaml ==="
@@ -201,12 +210,14 @@ git log --all --diff-filter=A --name-only --pretty=format: \
 
 **Expected results:**
 - No plaintext credential patterns in history (`.sops.yaml` additions are expected and safe)
-- No literal domain in non-sops file history
+- No literal domain **added** to non-sops file history since the redaction
+  cutoff `84b81004`. Pre-cutoff hits are expected to stay non-zero forever
+  (accepted as AR-001 / AR-016) and are deliberately out of scope.
 - No plaintext secret filenames ever added
 
 **Severity:**
 - 🔴 Critical if plaintext credentials found in history (requires git history rewrite + secret rotation)
-- 🟡 Warning if domain literal appears in deleted content — assess exposure window
+- 🟡 Warning if a domain literal was ADDED after the cutoff — a new leak; assess exposure window (the pipeline greps `^+`, so these are added lines, not deleted ones; the label said "deleted" until 2026-08-18)
 
 ---
 

@@ -261,7 +261,7 @@ survivor.
 |--------|---------|-----------|
 | `health-check.py` | `health` | no issues file this run; stale issues file (mtime < run start); `health-check.sh` exit code outside `{0,1}` |
 | `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a running image still unscannable after retry — including a private one whenever the run HOLDS registry credentials — and any scannable running image that got no scan attempt at all (s4; the one exclusion is a private image on a credential-less run: see the worked example below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
-| `check-all-versions.py` | `version` | registry unreachable/timeout; **HTTP 429 registry rate-limit**; OCI tag-listing truncation; Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi. Gated by `_is_transient()` + `_is_real_downgrade()` — see the transitions rule below |
+| `check-all-versions.py` | `version` | registry unreachable/timeout; **HTTP 429 registry rate-limit**; OCI tag-listing truncation; Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi. Gated by `_is_transient()` + `_is_real_downgrade()` + `_is_structurally_slow()` — the last one measures avg-seconds-per-page, so a tag listing defeated by a registry's INHERENT pace (docker.elastic.co: ~14.3 s/page, no acceptable budget ever completes) is undeterminable WITHOUT a veto, while the same budget blown at a normal page rate still vetoes — see the transitions rule below |
 | `doc-check.py` | `doc` | **Shared primitives**: `run()` exception path and `rc != 0` with empty stdout (scoped call sites only — an unscoped grep returning nothing is a legitimate clean result); `run_cmd()` exception path; `read_file()` on PermissionError / IsADirectoryError / decode error (unreadable is never a legitimate clean result), and on FileNotFoundError only where a call site passes an explicit scope. **Named sites**: `kubectl version` / node list / ingress / `sops-age` secret unavailable; `talosctl version` unavailable; `unifictl` VLAN + WLAN JSON unparsable or rc≠0; helmfile / homepage / renovate / ollama / blueprint / SOP / Taskfile / `.gitignore` / `.sops.yaml` / `CLAUDE.md` unreadable; `age-keygen` missing (silently downgrades a wrong-key CRITICAL to a green line); a regex that no longer matches a reworded doc |
 
 > **Not all degradation is silence — some of it is an affirmative green.**
@@ -326,6 +326,25 @@ survivor.
 > present the failure is class 3 and vetoes. When you write a steady-state
 > exclusion, state the condition that makes it permanent and assert THAT in
 > code — never infer permanence from the identity of the thing that failed.
+>
+> **Worked example — the image-tag oracle (2026-08-18, e1aae07f).** Same rule,
+> a different kind of discriminator: a MEASUREMENT rather than an environment
+> property. `docker.elastic.co` serves a 1000-tag page in ~14.3s and has
+> thousands of tags, so a tag listing stops in the same place on every run and
+> no acceptable budget would ever finish; recording it kept the security
+> section INCOMPLETE for three consecutive cycles and let 33 stale rows
+> accumulate (~12% estate overstatement). `_is_structurally_slow(elapsed,
+> pages)` therefore asks the "could this differ next run?" question of the
+> observed avg-seconds-per-page: at or above 5.0 s/page the answer is no, so
+> the listing returns undeterminable with NO degradation recorded; below it,
+> a blown budget is a blip and still vetoes. Note what it deliberately is
+> **not** — a host allowlist. A measured verdict re-arms the veto by itself if
+> Elastic speeds up, and covers any other registry that degrades into the same
+> state without a code change. Note also the safety edge: with zero completed
+> pages there is no rate to measure, only one hung request, which is
+> indistinguishable from a network fault — that case stays transient and
+> vetoes. **When permanence is a matter of degree rather than of kind, measure
+> it and assert the measurement; do not name the offender.**
 >
 > **Degradation crosses module boundaries.** `security-check.py`'s s4 decides
 > "is this CVE fixable by a newer tag?" by dynamically loading
