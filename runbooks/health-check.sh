@@ -3740,6 +3740,61 @@ except: print('0')
         log_success "OTel exporter has no failures (5m)"
     fi
 
+    # ES-side per-DOCUMENT rejection rate (added 2026-08-18, closes backlog
+    # item edot-rejection-monitoring-gap). The send_failed_* check above only
+    # counts whole requests the exporter gave up on; during the k8s-Event
+    # managedFields "." incident every bulk request returned 200 while ES
+    # rejected individual documents (document_parsing_exception), so
+    # send_failed stayed 0 through weeks of silent telemetry loss. The
+    # elasticsearchexporter labels every document's outcome on
+    # otelcol.elasticsearch.docs.processed_total:
+    #   success | failed_client (per-doc 4xx mapping/parse rejection — the
+    #   incident class) | failed_server | too_many | retried.
+    # Failure-outcome series are only born on the first rejection, so an empty
+    # increase() result means 0 (healthy) — while an ABSENT success series
+    # means the SLI itself is blind (edot self-telemetry not scraped), which
+    # is a warning, not a pass. Complements the log-grep in this section:
+    # that covers 1h of the CURRENT pod's logs only; this counter survives
+    # pod restarts and covers 6h. SOP: monitoring.md 'ES Rejected Documents'.
+    ES_DOC_REJECTS=$(prom_query 'sum by (outcome) (increase({__name__="otelcol.elasticsearch.docs.processed_total",outcome!~"success|retried"}[6h]))')
+    ES_DOC_PROCESSED=$(prom_query 'sum(rate({__name__="otelcol.elasticsearch.docs.processed_total"}[15m]))')
+    REJECT_SUMMARY=$(echo "$ES_DOC_REJECTS" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    total = sum(float(x['value'][1]) for x in r)
+    parts = ', '.join(f\"{x['metric'].get('outcome','?')}={float(x['value'][1]):.0f}\" for x in r if float(x['value'][1]) > 0)
+    print(f'{total:.0f}|{parts}')
+except: print('0|')
+" 2>/dev/null)
+    REJECT_TOTAL=${REJECT_SUMMARY%%|*}
+    REJECT_PARTS=${REJECT_SUMMARY#*|}
+    REJECT_TOTAL=${REJECT_TOTAL:-0}
+    PROCESSED_RATE=$(echo "$ES_DOC_PROCESSED" | python3 -c "
+import sys, json
+try:
+    r = json.load(sys.stdin)['data']['result']
+    print(f'{float(r[0][\"value\"][1]):.1f}' if r else 'absent')
+except: print('absent')
+" 2>/dev/null)
+    echo "ES per-doc rejections (6h, docs.processed outcome!=success): ${REJECT_TOTAL} (ingest rate: ${PROCESSED_RATE} docs/sec)"
+    if [ "$PROCESSED_RATE" = "absent" ]; then
+        log_warning "otelcol.elasticsearch.docs.processed absent from Prometheus — the ES rejection SLI is blind (edot self-telemetry not scraped)"
+        add_minor_issue "edot ES rejection SLI blind: docs.processed metric absent from Prometheus (SOP: monitoring.md 'ES Rejected Documents')"
+    elif [ "${REJECT_TOTAL}" -gt 3000 ]; then
+        # ≈500 docs/h sustained. The managedFields incident ran at ~750
+        # rejected docs/h, so it trips this within ~4h instead of after weeks;
+        # normal state is exactly 0, so no false-positive headroom is needed.
+        log_critical "ES rejecting documents at incident scale: ${REJECT_TOTAL} docs in 6h [${REJECT_PARTS}] — telemetry silently lost (SOP: monitoring.md 'ES Rejected Documents')"
+        add_critical_issue "edot ES per-doc rejections: ${REJECT_TOTAL}/6h [${REJECT_PARTS}] (SOP: monitoring.md 'ES Rejected Documents')"
+    elif [ "${REJECT_TOTAL}" -gt 60 ]; then
+        # ≥10/h — same sensitivity as the 1h log-grep parse threshold above
+        log_warning "ES rejecting documents: ${REJECT_TOTAL} docs in 6h [${REJECT_PARTS}]"
+        add_minor_issue "edot ES per-doc rejections: ${REJECT_TOTAL}/6h [${REJECT_PARTS}] (SOP: monitoring.md 'ES Rejected Documents')"
+    else
+        log_success "ES per-doc rejection rate healthy (${REJECT_TOTAL} non-success docs in 6h, ingest ${PROCESSED_RATE} docs/sec)"
+    fi
+
     # Queue saturation (any exporter >80% full)
     OTEL_QUEUE=$(prom_query 'max(otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8')
     if [ -n "$OTEL_QUEUE" ]; then

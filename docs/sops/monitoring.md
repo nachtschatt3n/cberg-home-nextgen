@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -259,6 +259,45 @@ Two rejection classes (both in `kubectl logs -n monitoring deploy/edot-collector
    kubectl logs -n monitoring deploy/edot-collector --since=1h \
      | grep -oE 'histogram \\"[a-zA-Z0-9_]+' | sed 's/^histogram \\"//' | sort -u
    ```
+
+### Metric-based rejection assertion (Prometheus, since 2026-08-18)
+
+The log-grep checks above only see **1h of the current pod's logs** — a
+restart wipes the evidence, and `otelcol_exporter_send_failed_*` stays at 0
+during per-doc rejections because the bulk *request* returns 200 while ES
+rejects individual *documents* inside it. That combination is exactly how the
+managedFields incident stayed invisible for weeks. `health-check.sh`
+(Section 34, "OTel Pipeline Metrics") therefore also asserts on the
+elasticsearchexporter's own per-document outcome counter, which survives pod
+restarts:
+
+```promql
+# every exported document, labeled by outcome:
+#   success | failed_client (per-doc 4xx mapping/parse rejection — the
+#   incident class) | failed_server | too_many | retried
+sum by (outcome) (increase({__name__="otelcol.elasticsearch.docs.processed_total",outcome!~"success|retried"}[6h]))
+```
+
+Thresholds (6h window):
+
+- **> 3000 rejected docs → CRITICAL** (≈500/h sustained; the managedFields
+  incident ran at ~750 rejected docs/h, so it trips within ~4h). Normal state
+  is exactly 0 — matching `docs.received_total` — so no headroom is needed.
+- **> 60 → WARNING** (≥10/h, same sensitivity as the 1h log-grep threshold).
+- **Metric entirely absent → WARNING** ("rejection SLI blind"): failure-outcome
+  series are only born on the first rejection, so *empty* means 0 (healthy),
+  but a missing `success` series means edot self-telemetry itself is broken
+  and the assertion is blind.
+
+Triage on a trip: identify the rejected doc class via the failure store
+(subsection 1 above) or the collector logs, then fix at the transform/filter
+processor in `kubernetes/apps/monitoring/edot-collector/app/configmap.yaml`.
+Distinguish from the *ingestion-stall* mode: a stalled TSDB rollover
+(`timestamp_error` outside the write window, see
+`docs/troubleshooting`/memory `project_es_otel_tsdb_recovery`) halts metric
+ingestion and is handled by the **obs-recovery CronJob** + ingestion-stall
+alerts — that shows up as `failed_client` rejections on the metrics stream
+too, so check `_data_stream` rollover state before hunting for a mapping bug.
 
 Always validate an edot config change before rolling (throwaway pod:
 `otel/opentelemetry-collector-contrib:<ver> validate --config=...`, dummy
