@@ -63,59 +63,69 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
             fsGroup: 1000
-          containers:
+          initContainers:
+            # bitnamilegacy is an ARCHIVED registry (last push 2025-08-28, no
+            # future security fixes) and docker.io/bitnami/kubectl publishes no
+            # semver tags. Security driver tracked as F-2d25e586.
+            # registry.k8s.io/kubectl is distroless (entrypoint /bin/kubectl,
+            # NO shell), so the old single bash container is split by
+            # capability: kubectl steps use the k8s image, the file cleanup
+            # uses busybox and needs no cluster credentials at all.
+            # Ordering is the safety net: k8s runs initContainers to
+            # completion, in order, before the main container — so `scale-up`
+            # as the MAIN container replaces the old `trap restore EXIT`.
+            - name: scale-down
+              image: registry.k8s.io/kubectl:v1.36.0
+              args: ["scale", "deployment/paperclip", "-n", "ai", "--replicas=0"]
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
+            - name: wait-terminated
+              image: registry.k8s.io/kubectl:v1.36.0
+              args:
+                - "wait"
+                - "--for=delete"
+                - "pod"
+                - "-n"
+                - "ai"
+                - "-l"
+                - "app.kubernetes.io/name=paperclip"
+                - "--timeout=120s"
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
             - name: cleanup
-              image: docker.io/bitnamilegacy/kubectl:1.33.4
+              image: busybox:stable
               command:
-                - /bin/bash
+                - /bin/sh
                 - -c
                 - |
-                  set -euo pipefail
-
-                  DEPLOY="paperclip"
-                  NS="ai"
-
-                  # Always restore the deployment on exit
-                  restore() {
-                    echo "Scaling $DEPLOY back to 1..."
-                    kubectl scale deployment "$DEPLOY" -n "$NS" --replicas=1
-                    echo "Waiting for $DEPLOY pod to be ready..."
-                    kubectl rollout status deployment "$DEPLOY" -n "$NS" --timeout=300s || true
-                    echo "Restore complete"
-                  }
-                  trap restore EXIT
-
-                  # Scale down and wait for pod termination
-                  echo "Scaling $DEPLOY to 0..."
-                  kubectl scale deployment "$DEPLOY" -n "$NS" --replicas=0
-                  echo "Waiting for pods to terminate..."
-                  kubectl wait --for=delete pod -n "$NS" -l app.kubernetes.io/name=paperclip --timeout=120s 2>/dev/null || true
-
-                  # Run backup cleanup
-                  echo "Starting backup cleanup..."
-                  cd /paperclip/instances/default/data/backups 2>/dev/null || { echo "No backups directory, nothing to clean"; exit 0; }
-                  cutoff=$(date -d "7 days ago" +%Y%m%d)
-                  deleted=0
-                  for f in *.sql; do
-                    [ -f "$f" ] || continue
-                    fdate=$(echo "$f" | sed 's/paperclip-\([0-9]*\)-.*/\1/')
-                    if [ "$fdate" -lt "$cutoff" ] 2>/dev/null; then
-                      rm "$f"
-                      deleted=$((deleted + 1))
-                    fi
-                  done
-                  remaining=$(ls -1 *.sql 2>/dev/null | wc -l)
-                  echo "Cleaned $deleted backups older than $cutoff, $remaining remaining"
+                  # Never fail: a cleanup error must not block scale-up.
+                  DIR=/paperclip/instances/default/data/backups
+                  if [ ! -d "$DIR" ]; then
+                    echo "No backups directory, nothing to clean"
+                    exit 0
+                  fi
+                  before=$(find "$DIR" -maxdepth 1 -name '*.sql' | wc -l)
+                  find "$DIR" -maxdepth 1 -name '*.sql' -mtime +7 -print -delete || true
+                  after=$(find "$DIR" -maxdepth 1 -name '*.sql' | wc -l)
+                  echo "backups: $before -> $after (removed $((before - after)) older than 7 days)"
+                  exit 0
               resources:
-                requests:
-                  cpu: 10m
-                  memory: 32Mi
-                limits:
-                  cpu: 100m
-                  memory: 64Mi
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
               volumeMounts:
                 - name: data
                   mountPath: /paperclip
+          containers:
+            # Runs ONLY after every initContainer succeeded — this is the
+            # guaranteed restore of paperclip's replica count.
+            - name: scale-up
+              image: registry.k8s.io/kubectl:v1.36.0
+              args: ["scale", "deployment/paperclip", "-n", "ai", "--replicas=1"]
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits:   {cpu: 100m, memory: 64Mi}
           volumes:
             - name: data
               persistentVolumeClaim:
