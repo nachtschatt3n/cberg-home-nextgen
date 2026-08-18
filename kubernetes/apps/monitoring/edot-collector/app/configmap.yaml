@@ -166,6 +166,9 @@ data:
             - resource_delete_duration_seconds
             - status_update_duration_seconds
             - watchable_subscribe_duration_seconds
+            # xDS stream-duration histogram (EG-native #5) — first seen dropping
+            # 2026-08-18 at ~120 points/h, same cumulative-temporality rejection.
+            - xds_stream_duration_seconds
             - rest_client_rate_limiter_duration_seconds
             - rest_client_request_duration_seconds
             - rest_client_request_size_bytes
