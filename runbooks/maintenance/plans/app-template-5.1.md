@@ -87,6 +87,8 @@ status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, 
                                     # mosquitto-first broker cutover verified — z2m+HA reconnected,
                                     # LB IPs stable, trmnl-ha suffix same-commit, PVC uid intact).
                                     # 52/78 live @5.1.0. Alexa E2E stream check -> operator.
+                                    # tier 5 COMPLETE 2026-08-18 (f4ea4e0c; iobroker STS + pairs +
+                                    # jobLabels unchanged + otbr/_template file-bumps). 60/78.
                                     # Supersedes app-template-5.0.md (deleted in same commit).
 window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
                                     # continue same run or fall back to the 8-window schedule:
