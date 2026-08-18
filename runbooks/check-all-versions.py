@@ -34,7 +34,7 @@ from packaging import version
 # Make `runbooks/lib/...` importable when invoked from any CWD.
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.findings_writer import (  # noqa: E402
-    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+    FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
 )
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
@@ -56,6 +56,57 @@ _activate_mise()
 
 # Module-level cache for bjw-s chart latest versions (keyed by chart name)
 _BJW_S_CHART_CACHE: Dict[str, Optional[str]] = {}
+
+# THE degradation log for this run — exactly one, shared by the module-level
+# resolvers (which have no `self`) and by VersionChecker, which adopts it in
+# __init__. main() hands it to writer.mark_incomplete() before close().
+#
+# Why this section needs it more than any other: a failed version lookup is
+# INDISTINGUISHABLE from "no newer version available". Both end up as
+# `latest_version = None` / `latest_tag = None`, no `update_assessment`, and
+# therefore no finding — and the downgrade suppressors go further, rewriting
+# `latest = current` so a truncated tag list renders as a positive
+# "✅ up-to-date". Under writer-side auto-close, that silence resolves the
+# section's open version findings as if they had been fixed. Docker Hub
+# anonymous pulls are rate-limited per egress IP and the sweep runs six
+# specialists concurrently behind one IP — on 2026-08-18 that produced ~40
+# bogus "no newer tag" answers that only a serial re-check caught. A
+# rate-limited lookup is INCOMPLETE, never "up to date".
+_DEGRADED = DegradationLog(
+    "version",
+    printer=lambda msg: print(f"{Colors.YELLOW}{msg}{Colors.RESET}"),
+)
+
+
+def _dep(name: str, status: Optional[int] = None) -> str:
+    """Name a failed dependency, calling out throttling explicitly.
+
+    429 (and GitHub's 403-means-rate-limit) get their own wording because they
+    are the failure an operator is most likely to dismiss as "nothing to
+    report": the lookup came back, it just came back empty.
+    """
+    if status == 429:
+        return f"{name} (HTTP 429 rate limit)"
+    if status == 403:
+        return f"{name} (HTTP 403 — forbidden or rate-limited)"
+    if status is not None:
+        return f"{name} (HTTP {status})"
+    return name
+
+
+def _is_transient(status: Optional[int]) -> bool:
+    """Is this HTTP status a TRANSIENT outage rather than a steady state?
+
+    The veto must only fire on conditions that could differ between two runs.
+    A permanent one — 401 on a private ghcr repo we never authenticate to, 404
+    for an image that does not exist — is the same on every run, so recording
+    it would arm the veto forever and auto-close would simply never run again.
+    A veto that always fires is a veto that protects nothing.
+
+    Measured on a healthy 2026-08-18 run: 4 genuine 429s against 63
+    steady-state conditions. Only the 429s belong here.
+    """
+    return status is not None and (status in (408, 425, 429, 403) or status >= 500)
 
 
 def resolve_bjw_s_chart_latest(chart_name: str) -> Optional[str]:
@@ -113,8 +164,18 @@ def resolve_bjw_s_chart_latest(chart_name: str) -> Optional[str]:
                         return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
                     ver_list.sort(key=_key, reverse=True)
                     latest = ver_list[0]
-        except Exception:
-            pass
+        except Exception as e:
+            _DEGRADED.record(f"chart bjw-s/{chart_name}",
+                             'bjw-s-labs.github.io Helm index',
+                             f"{type(e).__name__}: {e}")
+
+    if latest is None:
+        # Both strategies failed. The None is cached below, so ONE transient
+        # failure here silently fans out across every app-template HelmRelease
+        # in the repo — which is most of it.
+        _DEGRADED.record(f"chart bjw-s/{chart_name}", 'bjw-s chart index',
+                         "helm search and index.yaml fallback both failed; "
+                         "result is negative-cached for the rest of this run")
 
     _BJW_S_CHART_CACHE[chart_name] = latest
     return latest
@@ -145,6 +206,11 @@ class VersionChecker:
         if self.github_token:
             self.github_headers['Authorization'] = f'token {self.github_token}'
         
+        # Adopt the module-level log so the module-level resolvers
+        # (resolve_bjw_s_chart_latest) and every method here record into ONE
+        # place. main() applies it to the writer before close().
+        self.degraded = _DEGRADED
+
         # Check if gh CLI is available
         self.use_gh_cli = self._check_gh_available()
         self.renovate_prs: List[Dict] = []
@@ -186,6 +252,11 @@ class VersionChecker:
                             'name': name
                         }
             except Exception as e:
+                # Cascades: every chart sourced from this repo now fails the
+                # `repo_name not in self.helm_repositories` check.
+                self.degraded.record(f"helm repo {repo_file.name}",
+                                     'HelmRepository manifest',
+                                     f"{type(e).__name__}: {e}")
                 print(f"{Colors.YELLOW}Warning: Could not load {repo_file}: {e}{Colors.RESET}")
     
     def parse_helmrelease(self, file_path: Path) -> Optional[Dict]:
@@ -221,6 +292,12 @@ class VersionChecker:
                 'images': images
             }
         except Exception as e:
+            # The HelmRelease is dropped from self.helmreleases entirely, so
+            # the whole app vanishes from this run — and with it every finding
+            # it would have re-emitted.
+            self.degraded.record(f"helmrelease {file_path.name}",
+                                 'HelmRelease manifest',
+                                 f"{type(e).__name__}: {e}")
             print(f"{Colors.RED}Error parsing {file_path}: {e}{Colors.RESET}")
             return None
     
@@ -364,7 +441,15 @@ class VersionChecker:
                     url, headers={'User-Agent': 'cberg-version-check/1.0'})
                 with urllib.request.urlopen(req, timeout=20) as r:
                     entries = (yaml.safe_load(r.read()) or {}).get('entries')
-            except Exception:
+            except Exception as e:
+                # Recorded ONCE per repo, because the None is negative-cached
+                # below and every later chart on this repo inherits it.
+                # An unreachable index is otherwise reported as
+                # `unverifiable` — the exact same state as an OCI repo that
+                # has no dates by design — so the frozen-upstream detector
+                # cannot tell its own blind spot from a 20s timeout.
+                self.degraded.record(f"helm repo {repo_url}", 'Helm index.yaml',
+                                     f"{type(e).__name__}: {e}")
                 entries = None
         # oci:// indexes carry no per-version created dates — unverifiable here.
         self._index_cache[repo_url] = entries
@@ -414,8 +499,12 @@ class VersionChecker:
     def get_latest_chart_version(self, repo_name: str, chart_name: str) -> Optional[str]:
         """Get latest chart version from Helm repository."""
         if repo_name not in self.helm_repositories:
+            # NOT recorded as degradation: most charts here are sourced from
+            # OCIRepository CRs, which load_helmrepositories never collects, so
+            # this is the steady state for them rather than an outage. A repo
+            # CR that genuinely failed to PARSE is recorded there instead.
             return None
-        
+
         repo = self.helm_repositories[repo_name]
         repo_url = repo['url']
         repo_type = repo.get('type', 'default')
@@ -428,6 +517,8 @@ class VersionChecker:
                 # Traditional Helm repository
                 return self.get_helm_repo_chart_version(repo_url, chart_name)
         except Exception as e:
+            self.degraded.record(f"chart {chart_name}", f"Helm repo {repo_name}",
+                                 f"{type(e).__name__}: {e}")
             print(f"{Colors.YELLOW}Warning: Could not check chart version for {chart_name} from {repo_name}: {e}{Colors.RESET}")
             return None
     
@@ -451,11 +542,16 @@ class VersionChecker:
                 for line in result.stdout.splitlines():
                     if line.startswith('version:'):
                         return line.split(':', 1)[1].strip().strip('"\'')
-        except Exception:
-            pass
+            else:
+                self.degraded.record(
+                    f"chart {chart_name}", f"OCI registry {repo_url}",
+                    f"helm show chart exited {result.returncode}")
+        except Exception as e:
+            self.degraded.record(f"chart {chart_name}", f"OCI registry {repo_url}",
+                                 f"{type(e).__name__}: {e}")
 
         return None
-    
+
     def get_helm_repo_chart_version(self, repo_url: str, chart_name: str) -> Optional[str]:
         """Get latest version from traditional Helm repository."""
         try:
@@ -478,9 +574,14 @@ class VersionChecker:
                     versions = [item.get('version', '') for item in data]
                     if versions:
                         return versions[0]
-        except Exception:
-            pass
-        
+            else:
+                self.degraded.record(
+                    f"chart {chart_name}", f"Helm repo {repo_url}",
+                    f"helm search repo exited {result.returncode}")
+        except Exception as e:
+            self.degraded.record(f"chart {chart_name}", f"Helm repo {repo_url}",
+                                 f"{type(e).__name__}: {e}")
+
         return None
     
     # Shared semver tag pattern + picker, used by BOTH the GHCR and Docker Hub
@@ -655,6 +756,8 @@ class VersionChecker:
             # proposals — 2026-08-03 regression).
             return self.get_registry_image_tag(repository, current_tag)
         except Exception as e:
+            self.degraded.record(f"image {repository}", 'container registry',
+                                 f"{type(e).__name__}: {e}")
             print(f"{Colors.YELLOW}Warning: Could not check image tag for {repository}: {e}{Colors.RESET}")
             return None
     
@@ -714,6 +817,7 @@ class VersionChecker:
         still correctly resolves to None instead of a fabricated version.
         """
         import time as _time
+        _scope = f"image {host}/{image_path}"
         tags: List[str] = []
         token: Optional[str] = None
         url: Optional[str] = f"https://{host}/v2/{image_path}/tags/list?n={page_size}"
@@ -723,6 +827,10 @@ class VersionChecker:
             with requests.Session() as sess:
                 while url:
                     if pages >= max_pages or _time.monotonic() > deadline:
+                        self.degraded.record(
+                            _scope, host,
+                            f"tag listing truncated after {pages} page(s) "
+                            f"(page cap {max_pages} / {budget_s}s budget)")
                         return None  # incomplete -> undeterminable, never partial
                     headers = {'Authorization': f'Bearer {token}'} if token else {}
                     resp = sess.get(url, headers=headers, timeout=15)
@@ -731,19 +839,34 @@ class VersionChecker:
                             resp.headers.get('WWW-Authenticate', ''))
                         realm = chal.get('realm')
                         if not realm:
-                            return None
+                            return None  # malformed challenge: structural, not transient
                         params = {'scope': chal.get('scope') or f'repository:{image_path}:pull'}
                         if chal.get('service'):
                             params['service'] = chal['service']
                         tok_resp = sess.get(realm, params=params, timeout=15)
                         if tok_resp.status_code != 200:
+                            # 401/403-for-auth is the STEADY state for a private
+                            # repo we never authenticate to — not a coverage
+                            # regression. Only throttling/5xx vetoes.
+                            if _is_transient(tok_resp.status_code):
+                                self.degraded.record(
+                                    _scope, _dep(host, tok_resp.status_code),
+                                    f"token endpoint returned HTTP {tok_resp.status_code}")
                             return None
                         body = tok_resp.json()
                         token = body.get('token') or body.get('access_token')
                         if not token:
+                            self.degraded.record(
+                                _scope, host,
+                                "token endpoint returned no token/access_token")
                             return None
                         continue  # retry the SAME url, now authenticated
                     if resp.status_code != 200:
+                        # 404 (no such repo) is steady state; 429/5xx is not.
+                        if _is_transient(resp.status_code):
+                            self.degraded.record(
+                                _scope, _dep(host, resp.status_code),
+                                f"tags/list returned HTTP {resp.status_code}")
                         return None  # e.g. 404/403 -> can't determine, don't guess
                     tags.extend(resp.json().get('tags') or [])
                     pages += 1
@@ -753,7 +876,8 @@ class VersionChecker:
                         break  # natural end of pagination -> list is COMPLETE
                     nxt = m.group(1)
                     url = f"https://{host}{nxt}" if nxt.startswith('/') else nxt
-        except Exception:
+        except Exception as e:
+            self.degraded.record(_scope, host, f"{type(e).__name__}: {e}")
             return None  # partial oldest-first list would fabricate a downgrade
         return tags
 
@@ -776,6 +900,7 @@ class VersionChecker:
         is always represented regardless of how much CI noise sits on top.
         """
         tags: List[str] = []
+        _scope = f"image docker.io/{image_name}"
         base = f"https://hub.docker.com/v2/repositories/{image_name}/tags"
         try:
             with requests.Session() as sess:
@@ -788,6 +913,14 @@ class VersionChecker:
                     if r.status_code == 200:
                         tags.extend(t.get('name', '')
                                     for t in r.json().get('results', []))
+                    elif _is_transient(r.status_code):
+                        # Losing the targeted query means the CURRENT release
+                        # line may be absent from the push-ordered window below,
+                        # so the picker can return None or an older tag.
+                        self.degraded.record(
+                            _scope, _dep('Docker Hub', r.status_code),
+                            f"major-line query (name={major.group(1)}.) returned "
+                            f"HTTP {r.status_code}")
                 # Then a bounded sweep of the most-recent window, which is what
                 # surfaces a NEWER major line than the one we run.
                 url: Optional[str] = f"{base}?page_size=100"
@@ -795,13 +928,26 @@ class VersionChecker:
                 while url and pages < max_pages:
                     r = sess.get(url, timeout=15)
                     if r.status_code != 200:
+                        # Unlike _oci_v2_tags this returns a PARTIAL list rather
+                        # than None, so the damage differs by when it hits: a
+                        # failure on page 1 yields [] -> "could not check", but
+                        # on a later page it yields a truncated push-ordered
+                        # window whose highest tag may be OLDER than what we
+                        # run — which the downgrade suppressor then rewrites
+                        # into a positive "up-to-date". Both are incomplete.
+                        if _is_transient(r.status_code):
+                            self.degraded.record(
+                                _scope, _dep('Docker Hub', r.status_code),
+                                f"tag listing stopped after {pages} page(s) — "
+                                f"HTTP {r.status_code}; tag list is "
+                                f"{'empty' if not tags else 'truncated'}")
                         break
                     body = r.json()
                     tags.extend(t.get('name', '') for t in body.get('results', []))
                     pages += 1
                     url = body.get('next')
-        except Exception:
-            pass
+        except Exception as e:
+            self.degraded.record(_scope, 'Docker Hub', f"{type(e).__name__}: {e}")
         return tags
 
     def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
@@ -825,6 +971,10 @@ class VersionChecker:
                 if response.status_code == 200:
                     tags = [t.get('name', '') for t in response.json().get('tags', [])]
                     return self._pick_latest_semver_tag(tags, current_tag)
+                if _is_transient(response.status_code):
+                    self.degraded.record(
+                        f"image {repo}", _dep('quay.io', response.status_code),
+                        f"tag API returned HTTP {response.status_code}")
                 return None
 
             host = repo.split('/')[0]
@@ -849,8 +999,9 @@ class VersionChecker:
             image_path = repo.split('/', 1)[1].split(':')[0]
             tags = self._oci_v2_tags(host, image_path)
             return self._pick_latest_semver_tag(tags, current_tag) if tags else None
-        except Exception:
-            pass
+        except Exception as e:
+            self.degraded.record(f"image {repository}", 'container registry',
+                                 f"{type(e).__name__}: {e}")
 
         return None
 
@@ -914,6 +1065,26 @@ class VersionChecker:
         # Non-semver on at least one side: keep prior behaviour (surface the
         # difference) so date-tagged / opaque real updates aren't hidden.
         return True
+
+    def _is_real_downgrade(self, older: str, running: str) -> bool:
+        """Is a suppressed 'downgrade' a genuine suspect answer, or just noise?
+
+        The suppressor fires on any pair that `tags_are_equal` rejects, which
+        includes pure formatting differences: `1.16` vs `1.16.0`, `2.13` vs
+        `2.13.0`, and digest-pinned running tags (`1.38.0@sha256:...`). Those
+        are the same release, so vetoing on them would arm the veto on a
+        perfectly healthy run — 7 of 7 downgrade suppressions on 2026-08-18
+        were of exactly this kind. Only a genuine version regression (the
+        truncated-pagination symptom) should count as degraded coverage.
+        """
+        if '@' in running or '@' in older:
+            return False  # digest-pinned: not a version comparison at all
+        a, b = self.parse_version(older), self.parse_version(running)
+        if not a or not b:
+            return False  # unparseable: cannot claim a regression
+        n = max(len(a), len(b))
+        pad = lambda t: tuple(t) + (0,) * (n - len(t))
+        return pad(a) < pad(b)
 
     def parse_version(self, version_str: str) -> Optional[Tuple[int, int, int]]:
         """Parse version string into (major, minor, patch) tuple.
@@ -1124,9 +1295,19 @@ class VersionChecker:
             if result.returncode == 0:
                 # Check if authenticated
                 auth_result = subprocess.run(['gh', 'auth', 'status'], capture_output=True, timeout=5)
-                return auth_result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+                if auth_result.returncode == 0:
+                    return True
+                self.degraded.record(
+                    'github', 'gh CLI authentication',
+                    f"gh auth status exited {auth_result.returncode} — release-note "
+                    f"lookups fall back to the 60 req/h anonymous API and the "
+                    f"Renovate PR section is skipped")
+                return False
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            self.degraded.record('github', 'gh CLI', f"{type(e).__name__}: {e}")
+            return False
+        self.degraded.record('github', 'gh CLI',
+                             f"gh --version exited {result.returncode}")
         return False
     
     def detect_breaking_changes(self, release_notes: str, update_type: str) -> List[str]:
@@ -1380,6 +1561,12 @@ class VersionChecker:
         except Exception:
             pass
 
+        # Recorded here rather than per-attempt: a failure of method 1 is
+        # harmless if method 2 answers. Only exhausting every method means the
+        # version is genuinely unknown — which also makes the NVD CVE match
+        # below best-effort.
+        self.degraded.record('unifi', 'UniFi controller (unifictl + UDM API)',
+                             "Network Application version could not be determined")
         return None
 
     def _nvd_unifi_cves(self, version: Optional[str]) -> List[Dict]:
@@ -1399,7 +1586,11 @@ class VersionChecker:
             req = _ureq.Request(url, headers={"User-Agent": "homelab-version-check/1.0"})
             with _ureq.urlopen(req, timeout=20) as resp:
                 data = json.load(resp)
-        except Exception:
+        except Exception as e:
+            # An NVD outage otherwise renders as a clean CVE bill of health:
+            # [] -> has_critical=False -> "No open CVEs found for this version".
+            self.degraded.record('unifi_cves', 'NVD API 2.0',
+                                 f"{type(e).__name__}: {e}")
             return []
 
         for vuln in data.get("vulnerabilities", []):
@@ -1491,7 +1682,11 @@ class VersionChecker:
                         tag = line.split("Tag:", 1)[1].strip()
                         break
                 versions[node] = tag
-            except Exception:
+            except Exception as e:
+                # A single dead node is rendered as `unreachable` in markdown
+                # but never emitted as a finding.
+                self.degraded.record(f"talos node {node}", 'talosctl',
+                                     f"{type(e).__name__}: {e}")
                 versions[node] = None
         return versions
 
@@ -1516,7 +1711,9 @@ class VersionChecker:
             u = d.get("PIKVM_API_USER")
             p = d.get("PIKVM_API_PASS")
             return (u, p) if u and p else None
-        except Exception:
+        except Exception as e:
+            self.degraded.record('pikvm', 'SOPS-encrypted PiKVM credentials',
+                                 f"{type(e).__name__}: {e}")
             return None
 
     def _get_pikvm_versions(self) -> Dict[str, Optional[str]]:
@@ -1556,7 +1753,9 @@ class VersionChecker:
                         .get("version")
                 )
                 versions[host] = ver
-            except Exception:
+            except Exception as e:
+                self.degraded.record(f"pikvm {host}", 'PiKVM /api/info',
+                                     f"{type(e).__name__}: {e}")
                 versions[host] = None
         return versions
 
@@ -1576,6 +1775,8 @@ class VersionChecker:
                 tag = (data.get("tag_name") or "").lstrip("v")
                 return tag or None
         except Exception as e:
+            self.degraded.record('pikvm', 'GitHub releases API',
+                                 f"{type(e).__name__}: {e}")
             print(f"  {Colors.YELLOW}⚠ Failed to fetch latest kvmd release: {e}{Colors.RESET}")
             return None
 
@@ -1599,7 +1800,9 @@ class VersionChecker:
             if not ver:
                 return None
             return ver.split("-", 1)[0]  # "4.171-1" -> "4.171"
-        except Exception:
+        except Exception as e:
+            self.degraded.record(f"pikvm {host}", 'PiKVM pacman repo (ssh)',
+                                 f"{type(e).__name__}: {e}")
             return None
 
     def check_pikvm_versions(self):
@@ -1644,6 +1847,14 @@ class VersionChecker:
             # them, so GitHub-only versions are not installable and must not
             # produce findings (runbooks/pikvm-update.md pre-flight).
             repo_ver = self._get_pikvm_repo_version(host)
+            if not repo_ver:
+                # The installed version becomes its own upgrade target, so
+                # behind=False and no finding is emitted — a fabricated
+                # "up to date" rather than an honest unknown.
+                self.degraded.record(
+                    f"pikvm {host}", 'PiKVM pacman repo',
+                    "repo version unavailable; treating the installed version "
+                    "as its own upgrade target")
             target = repo_ver or ver  # repo unreachable -> treat as current (not actionable)
             if repo_ver:
                 print(f"  {host} pacman repo: {Colors.CYAN}{repo_ver}{Colors.RESET}")
@@ -1702,6 +1913,8 @@ class VersionChecker:
                 data = json.loads(resp.read().decode())
                 return data.get("tag_name")
         except Exception as e:
+            self.degraded.record('talos', 'GitHub releases API',
+                                 f"{type(e).__name__}: {e}")
             print(f"  {Colors.YELLOW}⚠ Failed to fetch latest Talos release: {e}{Colors.RESET}")
             return None
 
@@ -1747,6 +1960,15 @@ class VersionChecker:
         else:
             # talosctl unreachable — fall back to declared version in talconfig.yaml
             tc_version = self._get_talos_version_from_talconfig()
+            # Every node probe failed. The repo-file fallback makes
+            # current_version non-None, which SUPPRESSES the "probe
+            # unreachable" warning downstream — the cluster is unreachable and
+            # the sweep would otherwise say nothing at all.
+            self.degraded.record(
+                'talos', 'talosctl (all nodes)',
+                "no node answered; "
+                + ("falling back to the version declared in talconfig.yaml"
+                   if tc_version else "and talconfig.yaml gave no version"))
             if tc_version:
                 cluster_version = tc_version
                 cluster_version_source = "from talconfig"
@@ -1811,6 +2033,11 @@ class VersionChecker:
                 data = json.loads(resp.read().decode())
                 return (data.get("dist-tags") or {}).get("latest")
         except Exception as e:
+            # None -> `if latest:` is skipped -> behind=False and current_version
+            # is set, so NO branch of the external-infra emit fires: silently
+            # "up to date".
+            self.degraded.record(f"npm {pkg}", 'registry.npmjs.org',
+                                 f"{type(e).__name__}: {e}")
             print(f"  {Colors.YELLOW}⚠ Failed to fetch npm latest for {pkg}: {e}{Colors.RESET}")
             return None
 
@@ -1821,7 +2048,11 @@ class VersionChecker:
             hr = (self.repo_root / "kubernetes" / "apps" / "ai" / "openclaw"
                   / "app" / "helmrelease.yaml")
             text = hr.read_text()
-        except Exception:
+        except Exception as e:
+            # Empty pins -> check_openclaw_versions returns early and the whole
+            # OpenClaw check, skew detection included, emits nothing.
+            self.degraded.record('openclaw', 'openclaw helmrelease.yaml',
+                                 f"{type(e).__name__}: {e}")
             return pins
         # Matches: install_npm openclaw@2026.5.18 / install_npm @openclaw/discord@2026.5.18
         # (only version-pinned lines; unpinned `install_npm foo` are skipped).
@@ -2014,6 +2245,11 @@ class VersionChecker:
                           f"{hr['chart_name']} running {hr['chart_version']} but "
                           f"index returned OLDER {latest_chart} — treating as "
                           f"up-to-date{Colors.RESET}", file=sys.stderr)
+                    if self._is_real_downgrade(latest_chart, hr['chart_version']):
+                        self.degraded.record(
+                            f"chart {hr['chart_name']}", 'chart index (suspect answer)',
+                            f"returned OLDER {latest_chart} than the running "
+                            f"{hr['chart_version']}; collapsed to current")
                     latest_chart = hr['chart_version']
                     result['chart']['latest_version'] = latest_chart
 
@@ -2052,6 +2288,10 @@ class VersionChecker:
                 elif latest_chart == hr['chart_version']:
                     print(f"  {Colors.GREEN}Chart: {hr['chart_version']} (latest){Colors.RESET}")
                 else:
+                    # Not recorded here: this is the SYMPTOM, and the resolver
+                    # that failed already recorded the cause if it was
+                    # transient. Recording it again would veto on every chart
+                    # that is simply not resolvable by design.
                     print(f"  {Colors.YELLOW}Chart: {hr['chart_version']} (could not check latest){Colors.RESET}")
             
             # Check image versions
@@ -2092,6 +2332,16 @@ class VersionChecker:
                               f"{latest_tag} — treating as up-to-date "
                               f"(suspect registry/repo lookup){Colors.RESET}",
                               file=sys.stderr)
+                        # Worse than None: latest_tag is now non-null and
+                        # everything downstream renders a positive
+                        # "✅ up-to-date". This is the Docker Hub
+                        # truncated-pagination symptom.
+                        if self._is_real_downgrade(latest_tag, img['tag']):
+                            self.degraded.record(
+                                f"image {img['repository']}",
+                                'container registry (suspect answer)',
+                                f"returned OLDER {latest_tag} than the running "
+                                f"{img['tag']}; collapsed to current")
                         latest_tag = img['tag']  # collapse to "current" for all downstream renderers
 
                     img_result = {
@@ -2128,6 +2378,10 @@ class VersionChecker:
                     elif img['tag'] == 'latest' or (latest_tag and self.tags_are_equal(latest_tag, img['tag'])):
                         print(f"  {Colors.GREEN}Image {img['repository']}: {img['tag']} (latest){Colors.RESET}")
                     else:
+                        # Not recorded here: the resolver already recorded the
+                        # cause when it was transient (429/5xx/timeout). This
+                        # line is also the steady state for every private
+                        # ghcr.io repo we do not authenticate to.
                         print(f"  {Colors.YELLOW}Image {img['repository']}: {img['tag']} (could not check){Colors.RESET}")
                     
                     result['images'].append(img_result)
@@ -2151,6 +2405,10 @@ class VersionChecker:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
+                # A fetch failure renders IDENTICALLY to "there genuinely are
+                # no open Renovate PRs" in the report.
+                self.degraded.record('renovate_prs', 'GitHub API (gh pr list)',
+                                     f"exited {result.returncode}")
                 print(f"{Colors.YELLOW}Warning: Could not fetch Renovate PRs{Colors.RESET}")
                 return []
 
@@ -2180,6 +2438,8 @@ class VersionChecker:
             return prs
 
         except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+            self.degraded.record('renovate_prs', 'GitHub API (gh pr list)',
+                                 f"{type(e).__name__}: {e}")
             print(f"{Colors.YELLOW}Warning: Could not fetch Renovate PRs: {e}{Colors.RESET}")
             return []
 
@@ -2964,6 +3224,10 @@ def main(argv: list[str] | None = None):
     ) as writer:
         crit, warn = _emit_findings(writer, checker, evidence_path)
         verdict = "red" if crit > 0 else ("yellow" if warn > 0 else "green")
+        # Veto stale-finding auto-close if ANY lookup degraded this run. The
+        # run still completes and reports everything it could measure — it just
+        # does not get to conclude that what it failed to look up is fixed.
+        checker.degraded.apply(writer)
         writer.close(verdict=verdict)
 
     print(f"\n{Colors.GREEN}=== Report Generated ==={Colors.RESET}")
