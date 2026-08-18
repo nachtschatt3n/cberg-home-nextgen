@@ -25,7 +25,9 @@ GREEN='\033[0;32m'
 DIM='\033[2m'
 NC='\033[0m'
 
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+# ACMR: renamed files (status R, rename+modify above git's similarity
+# threshold) must be scanned too — with ACM only they skipped ALL layers.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -z "$STAGED_FILES" ] && exit 0
 
 VIOLATIONS=$(mktemp)
@@ -252,7 +254,11 @@ check_file() {
     # matched against the full literal list exactly as before.
     if [ -s "$LITERALS" ]; then
         local added_lines hit
-        added_lines=$(git diff --cached -U0 -- "$file" | grep '^+' | grep -v '^+++' | cut -c2- || true)
+        # awk, not `grep -v '^+++'`: content lines only start after the first
+        # @@ hunk header, so an ADDED line whose content begins with '++'
+        # (rendered '+++...') is still scanned instead of being mistaken for
+        # the '+++ b/<file>' header (2026-08-18 security review).
+        added_lines=$(git diff --cached -U0 -- "$file" | awk '/^@@/{h=1;next} h&&/^\+/{print substr($0,2)}' || true)
         if [ -n "$added_lines" ]; then
             hit=$(echo "$added_lines" | grep -F -f "$LITERALS" -m 1 || true)
             if [ -n "$hit" ]; then

@@ -286,8 +286,9 @@ git show ":path/to/file" | head
 # Rebuild the literal list the hook uses, then find the exact match among
 # the ADDED lines (what Layer 1 actually scans since 2026.08.18):
 CACHE="${TMPDIR:-/tmp}/cberg-precommit-literals.cache"
-git diff --cached -U0 -- docs/applications.md | grep '^+' | grep -v '^+++' \
-  | cut -c2- | grep -F -f "$CACHE" | head -3
+git diff --cached -U0 -- docs/applications.md \
+  | awk '/^@@/{h=1;next} h&&/^\+/{print substr($0,2)}' \
+  | grep -F -f "$CACHE" | head -3
 ```
 
 Expected:
@@ -378,8 +379,7 @@ git config --unset core.hooksPath      # re-enable: git config core.hooksPath .g
 - Memory note `feedback_precommit_cluster_secret_match` — prefer short
   hostnames over FQDNs to dodge Layer 1 collisions
 - Commits: `60293d0e` (ENC[ exemption), `62f4c27c` (OAuth scope phrases),
-  `7e217387` (in-cluster service DNS skip); hunk-scoped Layer 1 landed
-  `2026-08-18` (see `git log -- .githooks/pre-commit`)
+  `7e217387` (in-cluster service DNS skip); `036676c5` (hunk-scoped Layer 1, 2026-08-18)
 
 ---
 
@@ -388,3 +388,7 @@ git config --unset core.hooksPath      # re-enable: git config core.hooksPath .g
 - `2026.07.12`: Initial SOP — documents the three-layer scan, Layer 1
   literal filtering and cache, fail-open behavior without kubectl, ENC[
   exemption, FQDN false-positive gotcha, and bypass policy.
+- `2026.08.18`: Layer 1 hunk-scoped — scans only the staged added lines
+  (`git diff --cached -U0`) so pre-existing committed lines can't re-trip
+  the scanner; Verification Test 4 added; troubleshooting/diagnose recipes
+  adjusted to the hunk-scoped flow.

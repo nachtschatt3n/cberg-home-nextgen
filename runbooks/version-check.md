@@ -50,6 +50,12 @@ A comprehensive Python script that:
 
 **Requirements:** Python 3.8+, `pyyaml`, `requests`, `packaging`, Helm CLI, `talosctl` (for Talos version check), `sops` with the age key available (for decrypting the PiKVM API password from `runbooks/operator-tools.sops.yaml` — gracefully marks each PiKVM host "unreachable" if the decrypt fails or the API returns non-200).
 
+**Regression tests:** `runbooks/tests/test-pick-latest-semver-tag.py`
+(`python3 runbooks/tests/test-pick-latest-semver-tag.py`) guards the
+`_pick_latest_semver_tag` selection logic — variant pinning, clean-tag
+tie-break, and the 2026-08-18 same-major masking fix. Run it after any
+change to the tag-selection code.
+
 **GitHub Authentication:**
 - **Preferred:** GitHub CLI (`gh`) - automatically authenticated, no rate limits
 - **Alternative:** GitHub Personal Access Token
@@ -267,24 +273,24 @@ For each chart, the script:
 
 ### 5. Checking Image Tags
 
-The script checks container registries based on the image repository:
+The script lists tags from the image's registry (Docker Hub API v2 for Hub
+images; the anonymous OCI `/v2/<name>/tags/list` endpoint for GHCR, Quay,
+registry.k8s.io, and any other registry that answers unauthenticated —
+complete-or-None pagination, see the docstrings in `check-all-versions.py`),
+then selects the report's "latest" via `_pick_latest_semver_tag`:
 
-**GitHub Container Registry (GHCR):**
-- Uses GitHub Releases API
-- Extracts owner/repo from `ghcr.io/owner/repo`
-- Gets latest release tag
-
-**Docker Hub:**
-- Uses Docker Hub API v2
-- Gets most recently updated tag
-
-**Quay.io:**
-- Uses Quay API
-- Gets latest active tag
-
-**Other registries:**
-- Attempts generic Docker Hub API
-- May not work for all registries
+- Only semver-shaped tags are candidates (rolling tags like `latest`,
+  `edge`, git-sha pins are skipped cleanly, not reported as UNKNOWN)
+- **Build-variant pinning**: an `-alpine` pin only ever proposes `-alpine`
+  tags; crossing variants is a base-image rebase, never proposed as an update
+- **Same-major first, but only if strictly newer**: an in-line bump within
+  the current major is preferred when one exists (postgres `17.10 → 17.11`,
+  not `18.x`). If the current pin is already the HEAD of its major, the
+  picker falls through to the overall newest tag so a full-major-behind
+  component surfaces as a MAJOR update instead of reporting up-to-date
+  (fixed 2026-08-18; previously this masked e.g. redisinsight `2.70.1`
+  against the entire 3.x line — see plan redisinsight-3.8.0 §1.1)
+- Equal versions tie-break to the clean tag over a build-sha-suffixed one
 
 ### 6. Assessing Update Complexity
 
