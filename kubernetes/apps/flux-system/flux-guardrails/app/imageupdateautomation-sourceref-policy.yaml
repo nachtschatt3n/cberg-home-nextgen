@@ -78,10 +78,18 @@ spec:
     - name: allowed_namespaces
       expression: "['my-software-development', 'my-software-production']"
   validations:
+    # The leading `has(object.spec.sourceRef)` is a FAIL-CLOSED guard, not redundancy.
+    # Without it, a future Flux API that renames or relocates sourceRef would make
+    # ref_namespace evaluate to '' and silently allow EVERY request -- a vacuous truth,
+    # not an evaluation error, so `failurePolicy: Fail` would not save us. sourceRef is
+    # required by today's CRD, so denying on its absence costs nothing and turns an API
+    # rename into a loud breakage instead of a silent hole.
     - expression: >-
+        has(object.spec) && has(object.spec.sourceRef) && (
         variables.ref_namespace == '' ||
         variables.ref_namespace == request.namespace ||
         request.namespace in variables.allowed_namespaces
+        )
       reason: Forbidden
       messageExpression: >-
         'ImageUpdateAutomation in namespace ' + request.namespace +

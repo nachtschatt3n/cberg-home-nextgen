@@ -783,7 +783,6 @@ exist and that the Binding still resolves to the policy with `validationActions:
 A policy whose Binding is missing is 100% inert while `kubectl get
 validatingadmissionpolicy` still lists it — "applied" and "effective" are different
 claims, and `prune: true` on the owning Kustomization makes silent removal possible.
-```
 
 - The tell is `lastPushCommit` null while `lastAutomationRunTime` advances. An
   automation that has pushed even once keeps a non-null `lastPushCommit` forever.

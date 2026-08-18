@@ -50,7 +50,7 @@ point-in-time Ready check and is only reliably detectable via `lastPushCommit`.
 | Critical dependency | `image-automation-controller` + a write-capable git credential |
 | Health assertion | `runbooks/health-check.sh` §20 "Flux image automation" + "Flux sync-source credential" |
 | Admission guardrail | `kubernetes/apps/flux-system/flux-guardrails/app/imageupdateautomation-sourceref-policy.yaml` |
-| Credential class | classic PAT, non-expiring, account-wide scope — `security_ref: F-13845dda` |
+| Credential class | see `security_ref: F-13845dda` |
 
 **The tell:** `status.lastAutomationRunTime` advances every interval while
 `status.lastPushCommit` stays `null`. An automation that has pushed even once will
@@ -236,7 +236,20 @@ source resolution. Adding a namespace to `allowed_namespaces` is a reviewable gi
 should be read as "granting git-push capability to this namespace".
 
 Residual after the guardrail: the (Setters-bounded) capability is still reachable from the
-2 allowlisted namespaces. It is no longer reachable from the other ~40.
+2 allowlisted namespaces. It is no longer reachable from the other ~40. Two further limits
+worth knowing before you rely on it: the allowlist pins the *referrer*, not the *target*, so
+an allowlisted namespace may cross-reference any future write-capable source; and
+`spec.git.push.branch` / `push.refspec` are unconstrained, so while the commit *content*
+stays Setters-bounded, the ref it lands on is not.
+
+> **Before you edit `allowed_namespaces`, know the blast radius.** The two automations are
+> not standalone objects — each is owned by its app's own Kustomization
+> (`absenty` in `my-software-development` / `my-software-production`). A denial on that one
+> resource fails the **entire `absenty` Kustomization**, so a namespace rename, a new
+> namespace, or a typo in the allowlist stops the whole application from reconciling, not
+> just its image updates. `runbooks/health-check.sh` §20 asserts that every live
+> `ImageUpdateAutomation` namespace is present in the allowlist, so this drift is caught
+> before Flux hits it — but the coupling is the reason that assertion exists.
 
 ### Availability coupling — the cost of the push-auth fix
 
@@ -246,10 +259,10 @@ set, source-controller authenticates and **does not fall back to anonymous**. A 
 expired token therefore stalls the artifact that all ~136 Kustomizations read from: the
 **entire GitOps loop** stops taking new commits, not just image automation.
 
-The live token happens to be **non-expiring**, so the expiry half of this coupling is latent
-*today* — but it goes live the moment the token is rotated to a fine-grained PAT, which is
-exactly what the scope remediation in §10 requires. **Rotation and the expiry assertion ship
-together, or not at all.**
+The live token's expiry characteristics are recorded on `security_ref: F-13845dda`. If it
+does not expire, this half of the coupling stays latent until rotation — and rotation to a
+fine-grained PAT, which the §10 remediation requires, is exactly what makes it live.
+**Rotation and the expiry assertion ship together, or not at all.**
 
 ---
 
@@ -260,9 +273,10 @@ together, or not at all.**
 > operator-owned.
 >
 > **For the 2026-08-18 incident this is now historical** — step 3b was executed in
-> `505fefa4`. What remains genuinely open is the credential-scope verification in §10
-> (is the live token a fine-grained PAT or an account-wide classic `repo` PAT?) and
-> branch protection on `main`. Do not re-run steps 3–5 for that incident.
+> `505fefa4`, and the confused-deputy consequence was closed in `c24ffb80` (§3). The
+> credential-scope verification called for in §10 has been *performed*; its result and the
+> resulting rotation work are tracked on `security_ref: F-13845dda`, not here. Branch
+> protection on `main` remains open. Do not re-run steps 3–5 for that incident.
 
 1. **Confirm the shape** (read-only) — §8 Diagnose Example 1.
 2. **Confirm which half is missing** (read-only): does the secret exist, and is the
@@ -616,11 +630,9 @@ Expected:
   classic PAT with account-wide `repo` scope is over-privileged for this job — a
   compromised image-automation controller would inherit write access to every
   repository the token can reach.
-- **Measured 2026-08-18: it is not.** The live token was probed (headers only, value never
-  logged) and is the over-privileged class this SOP warned about, now actively mounted and
-  used rather than inert. Scope detail, blast radius, and the rotation steps are on
-  `security_ref: F-13845dda` — deliberately not reproduced in this public repo, per
-  `docs/sops/vulnerability-disclosure.md`. Rotation is operator-owned (GitHub UI).
+- **Measured 2026-08-18: it does not meet this bar.** Detail, blast radius, and rotation
+  steps are on `security_ref: F-13845dda` — deliberately not reproduced in this public repo,
+  per `docs/sops/vulnerability-disclosure.md`. Rotation is operator-owned (GitHub UI).
 - **Cross-namespace push capability is pinned at admission.** See §3 "The guardrail actually
   applied". Any namespace added to that allowlist is being handed git-push capability;
   review it on those terms, not as a routine manifest edit.

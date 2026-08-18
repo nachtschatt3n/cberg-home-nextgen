@@ -2176,12 +2176,28 @@ print('|'.join([
         else
             GH_RESP=$(printf 'header = "Authorization: Bearer %s"\nurl = "https://api.github.com/"\nsilent\noutput = "/dev/null"\ndump-header = "-"\nconnect-timeout = 5\nmax-time = 15\n' "$GH_TOKEN" \
                 | curl -K - 2>/dev/null | tr -d '\r' || echo "")
+            # ^ the 2>/dev/null on curl is LOAD-BEARING, not tidiness. This whole section
+            #   is wrapped in `>> "$OUTPUT_FILE" 2>&1`, and curl's -K config-parse warnings
+            #   quote the offending config line -- i.e. the full Authorization header. Drop
+            #   the suppression and the token lands in the report file.
             unset GH_TOKEN
             # tolower(), not gawk's IGNORECASE: this runs on macOS/BSD awk,
             # where IGNORECASE is silently a no-op. HTTP/2 lowercases header
             # names anyway, but do not depend on the wire version for this.
             GH_CODE=$(echo "$GH_RESP" | awk '/^HTTP\// {c=$2} END {print c+0}')
             GH_EXPIRY=$(echo "$GH_RESP" | awk 'tolower($0) ~ /^github-authentication-token-expiration:/ {sub(/^[^:]*:[ \t]*/, ""); print; exit}')
+            # SCOPE, not just expiry. Only classic PATs advertise x-oauth-scopes; a
+            # fine-grained PAT returns none. A non-empty list therefore means the
+            # credential is account-wide rather than scoped to this repository -- which
+            # matters far more now that it is actually mounted and used. Without this the
+            # finding is undetectable on a recurring basis: the expiry ladder above takes
+            # the "non-expiring" branch and raises nothing at all.
+            GH_SCOPES=$(echo "$GH_RESP" | awk 'tolower($0) ~ /^x-oauth-scopes:/ {sub(/^[^:]*:[ \t]*/, ""); print; exit}')
+            if [ -n "$GH_SCOPES" ]; then
+                SCOPE_N=$(echo "$GH_SCOPES" | tr ',' '\n' | grep -c '[a-z]')
+                log_warning "Sync credential is account-wide scoped (classic PAT, $SCOPE_N scopes) - not repo-scoped"
+                add_major_issue "Flux git credential is an account-wide classic PAT ($SCOPE_N scopes), not a repository-scoped fine-grained PAT. It is now actively mounted and used by source-controller and image-automation-controller. Rotate per security_ref: F-13845dda / docs/sops/flux-image-automation-push-auth.md section 10."
+            fi
             if [ "${GH_CODE:-0}" = "0" ]; then
                 log_info "GitHub unreachable - token-expiry check skipped (not a cluster fault)"
             elif [ "${GH_CODE}" = "401" ] || [ "${GH_CODE}" = "403" ]; then
@@ -2189,6 +2205,7 @@ print('|'.join([
                 add_critical_issue "Flux git credential is rejected by GitHub (HTTP $GH_CODE). Because the sync source no longer falls back to anonymous, the ENTIRE GitOps loop stops taking new commits. Rotate per docs/sops/flux-image-automation-push-auth.md section 10."
             elif [ -z "$GH_EXPIRY" ]; then
                 log_info "Sync credential accepted by GitHub; no expiry advertised (non-expiring credential)"
+                add_minor_issue "Flux git credential does not expire - no natural rotation trigger, and a leak stays valid until manually revoked (security_ref: F-13845dda)"
             else
                 GH_DAYS=$(python3 -c "
 import sys
@@ -2277,6 +2294,38 @@ warns = ((pol.get('status', {}) or {}).get('typeChecking', {}) or {}).get('expre
 if warns:
     print('  CEL-TYPECHECK-WARN: ' + str(warns)[:200])
     bad += 1
+
+# ALLOWLIST DRIFT. The two absenty ImageUpdateAutomations are not standalone -- each is
+# owned by its app's Kustomization, so a denial on the IUA fails the ENTIRE absenty
+# Kustomization, not just its image updates. A namespace rename or a new automation in an
+# unlisted namespace therefore takes down a whole application. Catch it here, before Flux
+# does. Parse the allowlist out of the live policy so this can never disagree with what
+# the apiserver is actually enforcing.
+allowed = []
+for v in (pol.get('spec', {}) or {}).get('variables', []) or []:
+    if v.get('name') == 'allowed_namespaces':
+        # split on the single-quote char (chr(39)); odd-indexed segments are the
+        # quoted namespace literals. Avoids embedding a double quote, which would
+        # terminate the enclosing bash string.
+        allowed = v.get('expression', '').split(chr(39))[1::2]
+if not allowed:
+    print('  ALLOWLIST-UNREADABLE: could not parse allowed_namespaces from the live policy')
+    bad += 1
+else:
+    r = subprocess.run(['kubectl', 'get', 'imageupdateautomation', '-A', '-o', 'json'],
+                       capture_output=True, text=True, timeout=60)
+    try:
+        items = json.loads(r.stdout).get('items', [])
+    except Exception:
+        items = []
+    for it in items:
+        ns = it['metadata']['namespace']
+        ref_ns = ((it.get('spec', {}) or {}).get('sourceRef') or {}).get('namespace') or ns
+        if ref_ns != ns and ns not in allowed:
+            print('  ALLOWLIST-DRIFT: ' + ns + '/' + it['metadata']['name'] +
+                  ' uses a cross-namespace sourceRef but ' + ns + ' is NOT allowlisted -- '
+                  'its OWNING Kustomization will fail entirely, not just image updates')
+            bad += 1
 print(bad)
 " 2>/dev/null || echo "ERR")
     echo "$VAP_OUT" | sed '$d'
