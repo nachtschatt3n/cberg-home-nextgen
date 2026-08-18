@@ -271,6 +271,21 @@ python3 runbooks/doc-check.py 2>/dev/null | tail -20
   reasoning in `justification`.
 - Do not AR-suppress a false positive. Fix the audit logic; the AR register is
   for risks that are real and accepted.
+- **An AR must never suppress a finding about the audit itself.** Findings whose
+  `risk_nature` is audit-integrity (`policy-drift`, `audit-coverage-gap`,
+  `audit-integrity`, `meta`) or whose `subsection` starts `audit_`/`audit-`, and
+  any finding whose `metadata.ar_id` names the AR being applied, are exempt from
+  substring suppression. A finding reporting *"AR-063 no longer suppresses its
+  target"* was tagged `[AR-063] accepted` on 2026-08-18 because it quoted the
+  AR's own description — the detector was switched off by the thing it detects.
+  Guards live in `_apply_ar_suppression` (`runbooks/sweep-run.py`);
+  `Findings.suppress_accepted` does **not** carry them yet — tracked on
+  `F-21ceb683`, and note that `subsection`/`risk_nature` are attached *after*
+  that function runs, so it needs an explicit `meta` flag rather than a copy of
+  the SQL predicate.
+- **Never put a suppression decision inside a finding's identity.** AR tags are
+  presentation; `fingerprint()` strips them. See
+  `docs/sops/sweep-findings-lifecycle.md` §4.1 step 2.
 - Run `runbooks/policy-cli.py risk lint` to find descriptions that are drifting
   or will drift, and `risk edit AR-NNN --description '<drift-stable>'` to fix one
   in place (it refuses a description embedding `x.y.z` or a volatile count).

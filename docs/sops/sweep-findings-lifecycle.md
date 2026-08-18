@@ -26,7 +26,9 @@ file — and we hit three separate production failure modes in one day (§7).
   audit scripts `runbooks/{security,check-all-versions,doc,health}-check.py`
 - Prerequisites: `SWEEP_PG_DSN` (set automatically by `runbooks/sweep-run.py`),
   repo-pinned tooling via `mise exec --`
-- Out of scope: AR suppression semantics (`docs/sops/policy-cli.md`), the
+- Out of scope: AR suppression semantics (`docs/sops/policy-cli.md` — but note
+  suppression must never touch *identity*, §4.1 step 2, nor silence an
+  audit-integrity finding), the
   vulnerability-disclosure boundary (`docs/sops/vulnerability-disclosure.md`),
   and the maintenance-window pipeline (`docs/sops/maintenance-windows.md`)
 
@@ -111,16 +113,54 @@ auto-closing; fix the dependency and re-run.
    (`🔴🟡🟢🛡️`) or the strings `critical|warning|clean|accepted|monitor|deferred`.
 2. **Fingerprint.** `fingerprint(section, subsection, title)` produces the
    stable identity. It is **not** a hash of the rendered prose:
+   - `[AR-0NN]` tags are **stripped first**, on both paths below.
    - If the title contains backticked spans, identity = those spans **verbatim**
      (version digits included — `postgres:17.10` and `postgres:17.11` are
-     genuinely different findings) + the sorted set of `[AR-0NN]` tags.
+     genuinely different findings) + a **kind token** from `_KIND_MARKERS`.
    - Otherwise it falls back to the normalized title, with timestamps, UUIDs,
      IPv4s, MACs, SHAs and bare digits substituted out.
    - Rationale: rewording a message must not fork a new row for an unchanged
-     problem (a 2026-08 reword split 20 image findings into 39 rows). The AR-tag
-     set is what keeps two *distinct* findings about the *same* object apart.
+     problem (a 2026-08 reword split 20 image findings into 39 rows).
+
+   > **Identity is what a finding is ABOUT, never how it is presented.**
+   > Until 2026-08-18 the second component was the sorted set of `[AR-0NN]`
+   > tags, which put a *suppression decision* inside the *identity*: adding,
+   > removing or re-wording an accepted risk forked a new row for an unchanged
+   > problem and left the old one to be auto-closed as "fixed". Seen live —
+   > F-094be167 was born 08-16, forked to F-e14cda04 on 08-17 when AR-063
+   > started matching, and re-appeared on 08-18 when AR-063's wording lapsed.
+   > One problem, three rows, nothing changed in the world. This is the
+   > absence-means-fixed failure §4.3 exists to prevent, reached through a
+   > *policy edit* rather than a broken check — so none of the four gates see
+   > it coming.
+   >
+   > The tags were doing one real job — separating an image's "there is a fix"
+   > line from its "there is no fix" line, which genuinely IS identity. That is
+   > now explicit in `_KIND_MARKERS` (verbatim marker match, the same discipline
+   > as `risk_model.S4_POLICY_MARKERS`). Measured over all 296 open rows: the
+   > new function reproduces the old discrimination exactly (296 → 296 distinct
+   > fingerprints) with zero sensitivity to AR tagging. Dropping the tags
+   > *without* the kind token would have merged 52 pairs.
+   >
+   > **Editing `_KIND_MARKERS` changes identity.** Run
+   > `runbooks/refingerprint-findings.py` (dry-run first) after any change to
+   > it or to `_stable_anchor`, or every affected finding forks once more on
+   > the next sweep. Tests: `runbooks/lib/test_findings_writer_fingerprint.py`.
+
 3. **Upsert.** Same fingerprint → same `finding_id`, `last_seen` bumped, row
    stays open. New fingerprint → new row.
+
+   > `finding_id` is `F-<first 8 hex of fingerprint>`, so it is **not** globally
+   > unique — a resolved finding that legitimately recurs re-derives its old id,
+   > and the table really does hold repeated ids across history. A partial
+   > UNIQUE index (`uq_findings_open_finding_id`) enforces it among **open**
+   > rows only. **Any consumer that looks a finding up by id must qualify on
+   > `resolved_at IS NULL`** or it can silently return a years-old closed row.
+   >
+   > Because identity changes rename rows, `metadata.prior_finding_ids` records
+   > every id a row has previously answered to and `policy-cli._finding_row`
+   > falls back to it. Committed `security_ref: F-xxxxxxxx` lines and plan files
+   > are immutable; a rename must not orphan them.
 4. **Cycle row is LAZY.** `sweep_cycles` is inserted on the **first** `emit()`,
    never at construction — a writer that emits nothing leaves no row. This is
    what killed the "5 empty cycle rows per run" orphan problem (N-20).
@@ -613,5 +653,11 @@ UPDATE sweep_findings
 - `runbooks/{security,doc,health}-check.py`, `runbooks/check-all-versions.py`
 - `docs/sops/audit-script-correctness.md`
 - `docs/sops/vulnerability-disclosure.md`
-- `docs/sops/policy-cli.md`
+- `docs/sops/policy-cli.md` — AR suppression semantics, incl. the two classes
+  of finding that are **exempt** from it (audit-integrity and self-reference)
+- `runbooks/refingerprint-findings.py` — one-shot migration for any change to
+  the identity function
+- `runbooks/lib/test_findings_writer_fingerprint.py`,
+  `runbooks/lib/test_findings_writer_autoclose.py`,
+  `runbooks/tests/test-ar-suppression-guard.py`
 - `runbooks/health-check.md`, `runbooks/version-check.md`, `runbooks/doc-check.md`

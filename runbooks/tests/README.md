@@ -1,0 +1,61 @@
+# Sweep tooling tests
+
+Plain-Python tests for the audit scripts. **Nothing runs these automatically** —
+there is no CI stage and no pre-commit hook for them, so they are only worth
+anything if you run them in the same commit as a change to the code they cover.
+
+Each file is dual-mode: run it directly for a readable PASS/FAIL list, or under
+pytest.
+
+```bash
+# one file
+python3 runbooks/tests/test-ar-suppression-guard.py
+
+# everything here and in runbooks/lib/
+python3 -m pytest runbooks/tests runbooks/lib -q
+
+# no-pytest fallback
+for t in runbooks/tests/test-*.py runbooks/lib/test_*.py; do
+    echo "== $t"; python3 "$t" || echo "FAILED: $t"
+done
+```
+
+All of them are hermetic: fakes and fixtures only, no cluster, no database, no
+network. Anything that needs the live register is a `--dry-run` script, not a
+test — see `runbooks/refingerprint-findings.py`.
+
+## `runbooks/tests/`
+
+| File | Covers | Run it when you touch |
+|---|---|---|
+| `test-ar-suppression-guard.py` | The two classes of finding exempt from AR substring suppression: audit-integrity (`risk_nature` / `audit_*` subsection) and self-reference (`metadata.ar_id`). Also asserts the operator-facing exemption count is real. | `_apply_ar_suppression` in `sweep-run.py`; anything about AR matching |
+| `test-coverage-plan-match.py` | `coverage.py` ↔ maintenance-plan matching | `runbooks/coverage.py`, plan discovery |
+| `test-osv-coverage.py` | OSV ecosystem mapping and the coverage-gap accounting | OSV lookups in `security-check.py` |
+| `test-pick-latest-semver-tag.py` | `_pick_latest_semver_tag` — variant filtering, cross-variant proposals, downgrade rejection | tag selection in `check-all-versions.py` |
+| `test-trivy-cache-coverage.py` | Trivy cache hit/miss accounting vs the running-image inventory | the s4 scan-target policy or cache logic |
+| `test-trivy-tally.py` | Per-image Trivy tally arithmetic | severity counting in `security-check.py` |
+
+## `runbooks/lib/`
+
+Colocated with the module they cover, per the `lib/` convention.
+
+| File | Covers |
+|---|---|
+| `test_findings_writer_autoclose.py` | The four auto-close safety gates — `section_complete`, orchestrated-run, the incomplete veto, the zero-emit breaker — plus section scoping and the run-start bound |
+| `test_findings_writer_fingerprint.py` | Finding **identity**: AR tags must not affect it, `_KIND_MARKERS` must still separate "there is a fix" from "there is no fix", rewording must not fork, version digits must |
+| `test_risk_model.py` | Every cell of the exposure × exploited × nature matrix, the nature table, and the s4 marker overrides |
+| `test_notify_routing.py` | Tier → channel routing decisions |
+
+## Conventions
+
+- **Fixtures must be publish-safe.** These files are committed to a public repo,
+  so never pair a real deployed image tag with a vulnerability count — use a
+  synthetic repository and an AR id outside the allocated range. See
+  `docs/sops/vulnerability-disclosure.md`; the pre-commit hook checks commit
+  messages, not fixtures, so this one is on you.
+- **Assert the decision, not the SQL.** Where the logic lives in SQL, re-implement
+  the predicate over fakes *and* assert the emitted statement still contains the
+  clauses the re-implementation assumes — otherwise deleting a guard from the SQL
+  silently passes.
+- Name new files `test-<topic>.py` here, `test_<module>.py` in `lib/`, and add a
+  row above.
