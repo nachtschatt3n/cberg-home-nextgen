@@ -151,6 +151,7 @@ spec:
         # The Volume CR is applied manually by the operator, not by Flux.
         storageClass: longhorn-static
         volumeName: zuhause-betreut-uploads
+        suffix: uploads
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:

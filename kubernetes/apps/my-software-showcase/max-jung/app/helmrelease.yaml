@@ -158,6 +158,7 @@ spec:
         # The Volume CR is applied manually by the operator, not by Flux.
         storageClass: longhorn-static
         volumeName: max-jung-csvimport
+        suffix: csvimport
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:

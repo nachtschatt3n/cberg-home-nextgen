@@ -142,6 +142,7 @@ spec:
         type: persistentVolumeClaim
         storageClass: longhorn-static
         volumeName: globalmobility-fileadmin
+        suffix: fileadmin
         accessMode: ReadWriteOnce
         size: 10Gi
         globalMounts:
@@ -151,6 +152,7 @@ spec:
         type: persistentVolumeClaim
         storageClass: longhorn-static
         volumeName: globalmobility-uploads
+        suffix: uploads
         accessMode: ReadWriteOnce
         size: 5Gi
         globalMounts:
