@@ -673,6 +673,22 @@ def _finding_fingerprint(section: str, subsection: str | None, title: str) -> tu
     return fp, fw.finding_id_from_fp(fp)
 
 
+def _redirect_banner(row: dict, asked: str) -> str:
+    """A provenance line for STDOUT when a lookup was redirected.
+
+    The stderr note alone is not enough on the read path: `finding show` writes
+    the private detail to stdout, so anything capturing stdout only — a pipe, a
+    paste into a document, a `2>/dev/null` in a loop — gets the payload with no
+    indication it came from a row the caller did not name.
+    """
+    if row["finding_id"] == asked:
+        return ""
+    adopted = (row.get("metadata") or {}).get("adopted_finding_ids") or []
+    kind = "ADOPTED id" if asked in adopted else "rename"
+    return (f"# NOTE: you asked for {asked}; this is {row['finding_id']} "
+            f"(via {kind}).\n")
+
+
 def _finding_row(cur, finding_id: str):
     """Resolve a finding by id, falling back to its historical ids.
 
@@ -721,9 +737,12 @@ def _finding_row(cur, finding_id: str):
                 # committed ref that was authored without the record ever
                 # being created — F-4c1f9ab2). Claiming "renamed" for the
                 # second kind invents a migration that never happened.
+                adopted = ((row.get("metadata") or {})
+                           .get("adopted_finding_ids") or [])
+                kind = ("an ADOPTED id (the original was never created)"
+                        if finding_id in adopted else "a rename")
                 print(f"note: {finding_id} resolves to {row['finding_id']} "
-                      f"via a recorded prior id; showing that row.",
-                      file=sys.stderr)
+                      f"via {kind}; showing that row.", file=sys.stderr)
             return row
     return None
 
@@ -779,6 +798,8 @@ def cmd_finding_show(args, dsn):
         row = _finding_row(cur, args.finding_id)
         if not row:
             print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+        # On STDOUT, alongside the detail — see _redirect_banner.
+        sys.stdout.write(_redirect_banner(row, args.finding_id))
         meta = row.get("metadata") or {}
         for k, v in row.items():
             if k == "metadata":
@@ -880,22 +901,41 @@ def cmd_finding_detail(args, dsn):
         row = _finding_row(cur, args.finding_id)
         if not row:
             print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
-        # A rename redirect on a WRITE is materially different from one on a
-        # read: `security_detail` is the private vulnerability payload, and
-        # filing it onto the wrong finding loses it from the live register with
-        # no error. Make the operator confirm rather than inferring consent
-        # from a stderr note they may never see.
-        if row["finding_id"] != args.finding_id:
+        # A WRITE is materially different from a read: `security_detail` is the
+        # private vulnerability payload, and filing it somewhere the operator
+        # did not intend loses it from the live register with no error. TWO
+        # independent conditions need explicit consent, and they are checked
+        # separately because either can occur without the other.
+        redirected = row["finding_id"] != args.finding_id
+        dead = row["resolved_at"] is not None
+        if redirected or dead:
             print(f"{args.finding_id} resolves to {row['finding_id']} "
-                  f"(id={row['id']}, "
-                  f"{'open' if row['resolved_at'] is None else 'RESOLVED'}) "
-                  f"via a recorded prior id.", file=sys.stderr)
-            if not args.follow_rename:
-                print(f"refusing to write private detail to a different finding "
-                      f"than the one named. Re-run against {row['finding_id']}, "
-                      f"or pass --follow-rename to accept the redirect.",
-                      file=sys.stderr)
-                return 1
+                  f"(id={row['id']}, {'RESOLVED' if dead else 'open'})"
+                  f"{' via a recorded prior id' if redirected else ''}.",
+                  file=sys.stderr)
+        # (a) The target is not the finding that was named.
+        if redirected and not args.follow_rename:
+            print(f"refusing to write private detail to a different finding "
+                  f"than the one named. Re-run against {row['finding_id']}, "
+                  f"or pass --follow-rename to accept the redirect.",
+                  file=sys.stderr)
+            return 1
+        # (b) The target is CLOSED. Gating this on the id mismatch alone was a
+        # hole: when every row under the named id is resolved, the exact-match
+        # pass returns a closed stub, the ids agree, and the payload was filed
+        # onto a dead row in silence — the precise outcome _finding_row's own
+        # docstring says the liveness ordering exists to prevent. That ordering
+        # only helps when a live row exists SOMEWHERE; it cannot help when none
+        # does. Resolved duplicates are routine here (id groups with a dozen-plus
+        # rows), so which stub wins is a `last_seen DESC, id DESC` tiebreak the
+        # operator never chose.
+        if dead and not args.allow_resolved:
+            print(f"refusing to write private detail to a RESOLVED finding "
+                  f"(id={row['id']}, resolved {row['resolved_at']:%Y-%m-%d}). "
+                  f"Detail filed here is invisible on the board and will not "
+                  f"be carried forward. Pass --allow-resolved if you are "
+                  f"deliberately annotating history.", file=sys.stderr)
+            return 1
         meta = dict(row.get("metadata") or {})
         if detail is not None:
             meta["security_detail"] = detail
@@ -1090,6 +1130,9 @@ def build_parser() -> argparse.ArgumentParser:
     fd.add_argument("--follow-rename", action="store_true",
                     help="accept writing the private detail to the finding this "
                          "id was RENAMED to, rather than refusing")
+    fd.add_argument("--allow-resolved", action="store_true",
+                    help="accept writing the private detail to a RESOLVED "
+                         "finding (deliberately annotating history)")
     fd.set_defaults(handler=cmd_finding_detail)
 
     # cross-table
