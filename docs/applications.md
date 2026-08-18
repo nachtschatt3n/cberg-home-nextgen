@@ -90,7 +90,7 @@
 | pgadmin | pgAdmin — PostgreSQL admin UI | Internal | Databases |
 | redisinsight | RedisInsight — Redis GUI | Internal | Databases |
 | memgraph | Memgraph — in-memory graph database (Cypher/Bolt) with Lab web UI | Internal | Databases |
-| superset | Apache Superset — data exploration and visualization (bundled PG; cache/broker on the standalone `superset-redis-official` Deployment — official `redis:8.10.0-alpine`, bundled bitnamilegacy Redis retired 2026-08-17) | Internal | Databases |
+| superset | Apache Superset — data exploration and visualization (metadata DB still on the bundled bitnamilegacy PG; replacement `superset-pg` Deployment — official `postgres:17.11-alpine`, longhorn-static volume `superset-pg-data` — stood up alongside 2026-08-18, cutover pending per plan `superset-pg-cutover`; cache/broker on the standalone `superset-redis-official` Deployment — official `redis:8.10.0-alpine`, bundled bitnamilegacy Redis retired 2026-08-17) | Internal | Databases |
 | sweep-history | Postgres holding the operator-curated policy tables (`accepted_risks`, `slo_definitions`, `noise_suppressions`, `security_acceptances`) plus sweep findings/cycles. Edited via `runbooks/policy-cli.py`. | None | Databases |
 
 ---
