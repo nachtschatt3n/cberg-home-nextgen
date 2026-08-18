@@ -35,7 +35,7 @@ touches:
 depends_on: []                        # NOT gated by app-template-5.0 — different chart (§1.5)
 conflicts_with: []                    # none hard; §6 lists the soft "do not co-schedule" set
 security_ref: F-5aebd69d
-status: draft
+status: awaiting-go
 window: "tue-early:2026-08-18"        # 60m slot, cap 6, no-reboot. Shares the slot with
                                       # bitnamilegacy-exit-phase1 (low/1, 25m, ns ai+security,
                                       # shared falco) — zero namespace or shared-infra overlap.

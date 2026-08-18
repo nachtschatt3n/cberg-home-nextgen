@@ -21,7 +21,7 @@ touches:
 depends_on: []
 conflicts_with: []                          # do not co-schedule with another falco-rules plan
 security_ref: F-2d25e586                    # see also F-9d9a0018 (same image, fixable class)
-status: draft
+status: awaiting-go
 window: "tue-early:2026-08-18"
 auto_execute: false                         # falco rules + RBAC-bearing CronJob — operator eyes
 sops_refs:
