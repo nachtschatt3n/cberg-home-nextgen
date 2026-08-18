@@ -1,13 +1,28 @@
 # SOP: Longhorn RWO Multi-Attach on Rollout
 
 > Description: Diagnosing and permanently fixing `FailedAttachVolume` / `Multi-Attach error` stalls when a single-replica Deployment that mounts a ReadWriteOnce Longhorn PVC is rolled.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
 
 ## 1) Description
+
+**Two different things produce a `Multi-Attach` event. Read §2.5 BEFORE changing
+any Deployment.** This SOP's headline fix (`strategy: Recreate`) addresses only
+the first:
+
+| | cause A — the `maxSurge` deadlock | cause B — the async-detach race |
+|---|---|---|
+| Deployment strategy | `RollingUpdate` (**wrong**, needs fixing) | already `Recreate` / `maxSurge: 0` (**already correct**) |
+| Old pod | **still `Running`** | **gone** (Terminated) |
+| Clears on its own | only by scheduling lottery (§2.4) | yes, ~1–2 min (§2.5) |
+| Action | fix the manifest (§3) | **none** — do not "fix" a correct Deployment |
+
+Applying the §3 fix to a cause-B stall is a no-op at best: the Deployment is
+already correct, and the operator burns a rollout chasing a race that had
+already cleared. Classify first.
 
 This SOP covers the rollout stall that occurs when a **Deployment with `replicas: 1`
 mounting a ReadWriteOnce (RWO) Longhorn PVC** is updated under the default
@@ -122,6 +137,95 @@ Nothing in the system drives toward the second outcome; it is chance plus whatev
 the scheduler's spread/affinity scoring happens to prefer. That is why the same bug
 looks like "cleared instantly" one week and "hung for ten minutes" the next, and
 why it must be fixed structurally rather than waited out.
+
+### 2.5 Cause B — the async-detach race (the Deployment is already correct)
+
+**Added 2026-08-18 after this was misdiagnosed.** A `Multi-Attach` event does NOT
+prove the Deployment is misconfigured. The same event appears on workloads that
+already have `strategy: Recreate` — `absenty` in `my-software-development` is the
+worked example: correct strategy, still stalled.
+
+**Mechanism.** `Recreate` guarantees the old *pod* is gone before the new one is
+created. It guarantees nothing about the *volume*. Pod deletion and Longhorn
+detach are asynchronous: kubelet unmounts, then the CSI driver detaches, then
+Longhorn's engine tears down the attachment and updates the `VolumeAttachment`.
+The scheduler does not wait for that tail. So the sequence is:
+
+1. Old pod terminates; the Deployment controller is satisfied.
+2. New pod is scheduled immediately — often onto a **different** node.
+3. Longhorn is still finishing the detach from the **old** node.
+4. Attach on the new node is refused → `Multi-Attach`.
+5. Detach completes; the next attach retry succeeds; pod goes Ready.
+
+This is a **timing** race, not a configuration defect. It is self-limiting
+because step 5 is driven by a controller that is actively working, unlike §2.4's
+lottery which is driven by nothing. That difference is why cause B clears in
+**~1–2 minutes** and cause A can hang indefinitely.
+
+**Not a one-off — this is a recurring class.** Observed at least three times on
+2026-08-18 alone: the whiteboard roll, the superset-pg roll, and the absenty-dev
+roll. Expect it on any RWO Longhorn rollout where the replacement pod lands on a
+different node. Do not open an incident per occurrence.
+
+#### Telling B from A in one command
+
+```bash
+eval "$(mise env -s bash)"
+NS=my-software-development; APP=absenty
+kubectl -n $NS get pods -l app.kubernetes.io/name=$APP -o wide
+kubectl -n $NS get deploy $APP -o jsonpath='{.spec.replicas} {.spec.strategy}{"\n"}'
+```
+
+- An **old pod still `Running`** + `RollingUpdate` → **cause A**. Fix per §3.
+- **No old pod** + `Recreate` or `maxSurge: 0` → **cause B**. Do nothing; verify
+  it is clearing (below).
+
+#### Confirming it is CLEARING, not wedged
+
+Do not just re-read the event — a `Multi-Attach` event persists in the event log
+after the condition is gone, which is the trap that makes a cleared race look
+live. Watch **state**, and confirm it is *moving*:
+
+```bash
+eval "$(mise env -s bash)"
+NS=my-software-development; APP=absenty
+PVC=$(kubectl -n $NS get deploy $APP -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim.claimName}')
+PV=$(kubectl -n $NS get pvc $PVC -o jsonpath='{.spec.volumeName}')
+
+# Longhorn's own view -- the authoritative one. Expect state to progress:
+#   attached -> detaching -> detached -> attaching -> attached
+for i in $(seq 1 10); do
+  kubectl -n storage get volume "$PV" \
+    -o jsonpath='{.status.state}{" node="}{.status.currentNodeID}{" robustness="}{.status.robustness}{"\n"}'
+  kubectl -n $NS get pod -l app.kubernetes.io/name=$APP --no-headers
+  sleep 15
+done
+```
+
+**Healthy (clearing):** `state` changes at least once across the samples, and
+`robustness` is `healthy` or `degraded` (degraded is fine mid-detach). The pod
+reaches Ready within ~2 min.
+
+**Wedged (escalate):** any of —
+- `state` is identical across 5+ minutes of samples (nothing is progressing);
+- `state: detaching` stuck with `robustness: faulted`;
+- `currentNodeID` points at a node that is `NotReady` (kubelet is dead, so
+  nothing will ever complete the detach);
+- the pod is still not Ready after 5 minutes.
+
+#### When cause B genuinely warrants action
+
+Almost never. Act only if:
+
+- **>5 min without state progress** → treat as the real storage fault in the §7
+  table's last-but-two row; go to §8.2 and escalate. Do **not** force-detach
+  blindly.
+- **The holding node is `NotReady`** → this will not self-resolve. Longhorn's
+  force-detach path applies; confirm the node is genuinely dead first.
+- **It recurs on every roll of the same app AND exceeds the window that matters
+  for that app** → the remedy is scheduling, not strategy: pin the workload to
+  the volume's node (node affinity) so the replacement cannot land elsewhere.
+  Changing `strategy` will not help, because it is already correct.
 
 ---
 
@@ -430,6 +534,7 @@ too**: any Kustomization with `dependsOn` on the failed one will report
 |---------|--------------|-----------|
 | `Multi-Attach`, old pod still `Running`, minutes elapsed | The Deployment deadlock | **Wait** — it clears on retry. Then apply §3 in git. Never delete the old pod. |
 | `Multi-Attach` cleared in <30 s, preceded by `Killing` | Benign detach transient (StatefulSet or `Recreate`) | None. Expected behaviour. |
+| `Multi-Attach`, **no old pod running**, Deployment already `Recreate`/`maxSurge: 0`, 1–2 min | **Cause B — async-detach race (§2.5)** | **None.** Confirm the Longhorn volume state is *progressing*, then wait. Do NOT change `strategy` — it is already correct. |
 | Fix committed but Deployment still shows `RollingUpdate` | Wrong values path — silently no-oped | Re-run Test 1; grep the chart for `.Values.*Strategy` |
 | Kustomization `Ready=False`: `spec.strategy.rollingUpdate: Forbidden` | SSA cannot drop the unowned defaulted field (§3.2) | Use `maxSurge: 0` / `maxUnavailable: 1` instead of `type: Recreate` |
 | Unrelated apps stall with `dependency '<ns>/<x>' is not ready` | Cascade from the failed Kustomization above | Fix the root Kustomization; dependents recover on their own |
@@ -458,8 +563,10 @@ Expected (confirms the deadlock):
 - `1 {"rollingUpdate":{"maxSurge":"25%","maxUnavailable":"25%"},"type":"RollingUpdate"}`
 
 If unclear:
-- If no old pod is `Running`, this is **not** the deadlock — it is a detach
-  transient or a genuine storage fault. Go to Example 2.
+- If no old pod is `Running`, this is **not** the deadlock. It is cause B, the
+  async-detach race — go to **§2.5** and confirm the volume state is progressing.
+  Only if it is not progressing after ~5 min is it a genuine storage fault
+  (Example 2).
 
 ### Diagnose Example 2: Correlate pod node vs volume attachment node
 
