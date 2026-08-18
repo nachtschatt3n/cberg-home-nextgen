@@ -844,8 +844,16 @@ kubectl exec -n home-automation deployment/mosquitto -c app -- \
   mosquitto_sub -h 127.0.0.1 -p 1883 \
     -t zigbee2mqtt/bridge/devices -t zigbee2mqtt/bridge/info \
     -W 15 -C 2 -v 2>/dev/null
-# Expected baseline: 1 Coordinator + 1 Router + ~21 EndDevices, permit_join=False,
-# 0 devices with interview_completed=false. Deviation → consult docs/sops/zigbee2mqtt.md.
+# ASSERT (not a frozen device census -- a census re-rots on every pairing):
+#   - exactly 1 Coordinator present
+#   - >= 1 Router present  (Routers are the mesh backbone; a drop to 0 is the
+#     2026-06-04 incident shape. Live on 2026-08-18: 4.)
+#   - 0 devices with interview_completed=false
+#   - permit_join=False  (left open after pairing = security finding)
+#   - EndDevice count stable vs. the previous run; a sudden DROP means devices
+#     fell off the mesh, a rise is just new pairings. Live on 2026-08-18: 20.
+# Deviation → consult docs/sops/zigbee2mqtt.md. Device counts above are dated
+# observations for orientation, NOT thresholds -- do not alert on them.
 ```
 
 **AI Analysis**: Verify home automation services, check Zigbee health, ensure MQTT broker is operational. For Z2M anomalies (missing Router type, failed interview, sustained permit_join=open), follow `docs/sops/zigbee2mqtt.md`.
