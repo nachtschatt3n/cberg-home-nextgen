@@ -16,5 +16,12 @@ instance:
     url: "https://github.com/nachtschatt3n/cberg-home-nextgen.git"
     ref: "refs/heads/main"
     path: kubernetes/flux/cluster
-    secretRef:
-      name: flux-system-git-auth
+    # FluxInstance .spec.sync takes `pullSecret` (a STRING), not `secretRef`.
+    # This was `secretRef: {name: ...}` until 2026-08-18: an unknown field, so
+    # the CRD's structural schema PRUNED it silently -- no error, no event. The
+    # generated flux-system GitRepository came out with no credential at all.
+    # Anonymous READ works (public repo) so the GitRepository stayed Ready and
+    # nothing complained, but ImageUpdateAutomation must PUSH: both absenty
+    # automations failed with "authentication required: No anonymous write
+    # access" and never set .status.lastPushCommit.
+    pullSecret: flux-system-git-auth
