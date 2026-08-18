@@ -763,6 +763,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "| grep -vi 'sops\\|ENC\\[AES\\|secretKeyRef\\|valueFrom\\|EXAMPLE\\|your_\\|your-"
         "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file"
         "\\|REPLACE_WITH\\|pullSecret:' "
+        # Placeholder values in ANY case/separator style: the `changeme` filter
+        # above is case-insensitive but NOT separator-insensitive, so
+        # CHANGE_ME_TO_STRONG_PASSWORD / change-me-in-production sailed through
+        # (2026-08-18 false positives F-2bb5cb28 / F-1eea708e):
+        "| grep -viE 'change[_-]?me|replace[_-]?me' "
         # Bare or quoted shell variables like $DB_PASSWORD, "$ICLOUD_PASSWORD":
         # -i: `X-Plex-Token=$TOKEN` must match the token= branch too (2026-08-17
         # false positives); the $[A-Z_]+ var-name part stays effectively case-strict.
@@ -784,8 +789,18 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # Python f-string interpolation (e.g., X-Plex-Token={token}) — variable, not a value:
         "| grep -ivE '(token|password|secret|api.?key)=\\{[a-zA-Z_]+\\}' "
         # Language keyword RHS (`token: Optional[str] = None`) — a declaration
-        # default, structurally never a hardcoded credential:
-        "| grep -ivE '(token|password|secret|api.?key)[^=]*=\\s*(None|null|nil|true|false)\\s*[,;}\\)\\]]*\\s*$' "
+        # default, structurally never a hardcoded credential. POSIX bracket
+        # gotcha (2026-08-18): backslash is NOT an escape inside a POSIX ERE
+        # bracket expression, so the previous `[,;}\\)\\]]*` class was
+        # terminated by the first `]` and required one delimiter — /usr/bin/grep
+        # (BSD) never matched the bare `= None` line and the filter was dead in
+        # production (it only worked under PCRE-style greps). A `]` must be
+        # listed FIRST in the class instead. `:` included for `def f(x:
+        # Optional[str] = None):` signature lines.
+        "| grep -ivE '(token|password|secret|api.?key)[^=]*=\\s*(None|null|nil|true|false)[][:space:]),;}:]*$' "
+        # Type-annotated declarations (`github_token: Optional[str] = ...`) —
+        # an `Optional[` RHS is a type hint, never a literal secret value:
+        "| grep -viE '(token|password|secret|api.?key)[a-z0-9_]*\\s*:\\s*Optional\\[' "
         # sed/awk redaction-or-rotation commands: the matched credential text is a
         # regex SEARCH pattern (a bracket character-class quantified with +/*, e.g.
         # api_key = \"[a-f0-9]+\") and the replacement is a shell $VAR — it can never
@@ -817,9 +832,21 @@ def s3_git_history() -> tuple[str, Findings, str]:
     )
     _candidates = {m.group(1) for h in cred_hits if (m := _ident_rhs.search(h))}
     if _candidates:
+        # Bytes-mode + errors="replace": run_cmd() decodes strictly, and this
+        # repo's history contains binary blobs, so the text-mode call raised
+        # UnicodeDecodeError inside run_cmd, silently returned "", the
+        # `declared` set came back empty, and the whole cross-line filter was
+        # dead in production (2026-08-18 jerryTok false positive F-f88a2a34).
+        try:
+            _hist_raw = subprocess.run(
+                "git log --all -p --no-color", shell=True,
+                capture_output=True, timeout=180,
+            ).stdout or b""
+        except Exception:
+            _hist_raw = b""
         declared = set(re.findall(
             r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
-            run_cmd("git log --all -p --no-color", timeout=180)[1] or "",
+            _hist_raw.decode("utf-8", errors="replace"),
         ))
         if declared:
             cred_hits = [
