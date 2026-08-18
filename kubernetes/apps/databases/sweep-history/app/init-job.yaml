@@ -24,10 +24,15 @@
 #   v3a — pin image to the live digest (float-tag pinning batch); no schema or
 #         bash change. Rename forces prune+recreate (Job spec is immutable);
 #         bootstrap is idempotent.
+#   v3b — pgvector 0.8.1-pg16 -> 0.8.6-pg16 (digest re-pinned). No schema or
+#         bash change. The v3a Job could not be patched in place (Job
+#         .spec.template is immutable), so the rename is the delivery
+#         mechanism — see docs/sops/immutable-job-image-bumps.md. Same image
+#         already validated in-cluster on the shared postgresql Deployment.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v3a
+  name: sweep-history-init-v3b
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history
@@ -44,7 +49,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: pgvector/pgvector:0.8.1-pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
+          image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
           command: ["bash", "/sql/bootstrap.sh"]
           env:
             # Service lives in this same namespace; short name resolves via
