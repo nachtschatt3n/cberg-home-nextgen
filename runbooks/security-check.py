@@ -175,9 +175,15 @@ def _load_accepted_risks_from_markdown() -> dict[str, str]:
     try:
         text = ACCEPTED_RISKS_DOC.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
+        # Must set the flag: returning {} unflagged un-suppresses EVERY accepted
+        # risk while main()'s fail-closed abort stays silent, so the audit
+        # silently widens what it reports without anyone being told the policy
+        # store was never read.
+        _POLICY_LOAD_FAILED = f"could not read {ACCEPTED_RISKS_DOC.name}: {e}"
         cprint(C.YELLOW, f"  ⚠ could not read accepted-risks doc: {e}")
         return {}
     if not text.strip():
+        _POLICY_LOAD_FAILED = f"{ACCEPTED_RISKS_DOC.name} is empty"
         cprint(C.YELLOW, f"  ⚠ accepted-risks doc is empty: {ACCEPTED_RISKS_DOC}")
         return {}
     pattern = re.compile(r"\b(AR-\d{3})\s*[:—\-]\s+(.+?)\s*$")
@@ -961,17 +967,33 @@ def s3_git_history() -> tuple[str, Findings, str]:
 
     # Domain literal in non-sops history
     if domain:
-        non_sops = run("git ls-files | grep -v '\\.sops\\.yaml$'")
-        count = run(f"git log --all -p -S '{domain}' -- {non_sops} 2>/dev/null "
-                    f"| grep '^+.*{domain}' | grep -v 'sops\\|ENC\\[' | wc -l").strip()
+        # The file list MUST be expanded by the shell as arguments, not
+        # interpolated as text. `git ls-files` output is NEWLINE separated, so
+        # embedding it directly made every filename after the first its own
+        # shell COMMAND — ~1000 "command not found"s, one of which blocks on
+        # stdin until the 30s timeout kills the whole thing. The pickaxe then
+        # produced no output, int("") raised, n fell back to 0, and the check
+        # printed "Domain not in non-sops git history" on every run without
+        # ever having searched. Command substitution splits on IFS into
+        # ARGUMENTS, which is what was intended. Measured: ~3s, was timing out.
+        count = run(
+            f"git log --all -p -S '{domain}' -- "
+            f"$(git ls-files | grep -v '\\.sops\\.yaml$') 2>/dev/null "
+            f"| grep '^+.*{domain}' | grep -v 'sops\\|ENC\\[' | wc -l",
+            timeout=120,
+        ).strip()
         try:
             n = int(count)
         except ValueError:
-            n = 0
+            # Distinguish "searched, found none" from "never searched".
+            DEGRADED.record(_scope(), "git history pickaxe (domain literal)",
+                            "scan produced no count — domain-leak history check "
+                            "did not run")
+            n = -1
         if n > 0:
             f.add(WARNING, f"Domain literal found in {n} deleted lines of non-sops history")
             cprint(C.YELLOW, f"  🟡 Domain in {n} lines of non-sops git history (deleted content)")
-        else:
+        elif n == 0:
             cprint(C.GREEN, "  🟢 Domain not in non-sops git history")
 
     # Secret-named files ever committed outside .sops.yaml
@@ -1262,6 +1284,33 @@ def _newer_upstream_tag_exists(image_ref: str):
         return None
 
 
+# Verified OSV coordinates for the components the version snapshot tracks.
+#
+# OSV has NO "Helm" ecosystem — the previous code sent one and was rejected
+# HTTP 400 on every request, so this check reported "no CVEs found" for its
+# entire lifetime without ever querying anything.
+#
+# Entries here must be VERIFIED, not guessed, on two axes:
+#   1. identity   — the OSV package is the same software we actually run.
+#                   `redis` on Packagist is predis, a PHP *client*; Debian's
+#                   `mariadb` is a distro source package. Both are the wrong
+#                   software and would report someone else's CVEs as ours.
+#   2. versioning — OSV's version semantics must match the tag we deploy.
+#                   Distro ecosystems (Debian/Alpine) use epoch-revision
+#                   versions like `1:10.11.6-1`, which cannot be compared
+#                   against an upstream image tag, so they are excluded.
+#
+# A component absent from this table is reported as NOT CHECKED. That is
+# deliberate: OSV answers 200 with an empty vuln list for a package that does
+# not exist, so a wrong guess is indistinguishable from a clean result.
+_OSV_PACKAGES: dict[str, tuple[str, str]] = {
+    "cert-manager": ("Go",   "github.com/cert-manager/cert-manager"),
+    "superset":     ("PyPI", "apache-superset"),
+    "open-webui":   ("PyPI", "open-webui"),
+    "nocodb":       ("npm",  "nocodb"),
+}
+
+
 def s4_cve_check() -> tuple[str, Findings, str]:
     section_header(4, "CVE / Vulnerability Check")
     f = Findings()
@@ -1291,14 +1340,29 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     seen: set[str] = set()
     unique = [(n, v) for n, v in rows if not (n in seen or seen.add(n))]  # type: ignore[func-returns-value]
 
-    cprint(C.CYAN, f"  Checking {min(len(unique), 25)} components against OSV.dev...")
+    candidates = unique[:25]
+    cprint(C.CYAN, f"  Checking {len(candidates)} components against OSV.dev...")
     found_vulns = False
+    osv_ok = 0                 # queries that actually got an answer
     osv_transient = 0          # retry-worthy blips -> veto auto-close
     osv_rejected = 0           # permanent 4xx -> emit a finding instead
     osv_reason = ""
-    for name, ver in unique[:25]:
+    unmapped: list[str] = []
+
+    for name, ver in candidates:
+        coords = _OSV_PACKAGES.get(name)
+        if coords is None:
+            # NOT a pass. We simply have no verified OSV identity for this
+            # component, and guessing one is worse than not checking: `redis`
+            # on Packagist is a PHP client, not the server we run, and OSV
+            # answers 200 with an empty list for a package that does not exist
+            # at all — so a wrong guess is indistinguishable from a clean bill.
+            unmapped.append(name)
+            continue
+        ecosystem, pkg = coords
         clean = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*', '', ver).lstrip('v')
-        payload = json.dumps({"version": clean, "package": {"name": name, "ecosystem": "Helm"}}).encode()
+        payload = json.dumps({"version": clean,
+                              "package": {"name": pkg, "ecosystem": ecosystem}}).encode()
         req = urllib.request.Request(
             "https://api.osv.dev/v1/query", data=payload,
             headers={"Content-Type": "application/json"},
@@ -1306,14 +1370,21 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         try:
             with urllib.request.urlopen(req, timeout=6) as r:
                 data = json.load(r)
+            osv_ok += 1
             vulns = data.get("vulns", [])
             if vulns:
                 ids = [v["id"] for v in vulns]
-                f.add(CRITICAL, f"`{name}` {ver}: {len(vulns)} CVE(s) — {ids}")
-                cprint(C.RED, f"  🔴 {name} {ver}: {ids}")
+                # Cap the ID list: the identity anchor is the backticked
+                # component+version, so a changing tail does not fork the
+                # fingerprint, but an unbounded title is unreadable.
+                shown = ", ".join(ids[:5])
+                more = f" and {len(ids) - 5} more" if len(ids) > 5 else ""
+                f.add(CRITICAL, f"`{name}` {ver} ({ecosystem}/{pkg}): "
+                                f"{len(vulns)} CVE(s) — {shown}{more}")
+                cprint(C.RED, f"  🔴 {name} {ver}: {len(ids)} CVE(s) — {shown}{more}")
                 found_vulns = True
         except Exception as e:
-            # If EVERY lookup fails we still print the green line below, so
+            # If EVERY lookup fails we must not print a green line, so
             # something has to stand between an OSV failure and a manufactured
             # clean bill of health. Which mechanism depends on the failure:
             #
@@ -1333,17 +1404,31 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 osv_reason = f"{type(e).__name__} {getattr(e, 'code', '')}".strip()
         time.sleep(0.15)
 
-    # A check that rejects every single request is not a passing check.
-    if osv_rejected and osv_rejected == len(unique[:25]):
-        f.add(WARNING,
-              f"OSV.dev component scan is inoperative: all {osv_rejected} queries "
-              f"rejected ({osv_reason}) — `ecosystem: \"Helm\"` is not a valid OSV "
-              f"ecosystem, so this check has been reporting a clean result without "
-              f"ever querying anything")
-        cprint(C.YELLOW, f"  🟡 OSV.dev rejected all {osv_rejected} queries "
-                         f"({osv_reason}) — check is inoperative, not clean")
-    elif not found_vulns:
-        cprint(C.GREEN, "  🟢 No CVEs found for checked components")
+    # ─── Coverage accounting ────────────────────────────────────────────────
+    # CONTROL INVARIANT: this check may never report a clean OSV result unless
+    # at least one query actually succeeded. A silent zero is not a pass. The
+    # old code violated this for its entire lifetime — it sent an invalid
+    # `ecosystem: "Helm"`, was rejected 400 on all 25 queries, and printed
+    # "No CVEs found for checked components" every single run.
+    attempted = osv_ok + osv_transient + osv_rejected
+    if attempted and osv_ok == 0:
+        detail = (f"all {attempted} queries rejected ({osv_reason})"
+                  if osv_rejected else
+                  f"all {attempted} queries failed to complete")
+        f.add(WARNING, f"OSV.dev component scan is inoperative: {detail} — "
+                       f"reporting no result, NOT a clean result")
+        cprint(C.YELLOW, f"  🟡 OSV.dev inoperative: {detail}")
+    elif osv_ok and not found_vulns:
+        cprint(C.GREEN, f"  🟢 No CVEs found in {osv_ok} OSV-checked component(s)")
+
+    if unmapped:
+        # Explicit "not checked", never folded into the green above.
+        f.add(WARNING, f"OSV coverage gap: {len(unmapped)} of {len(candidates)} "
+                       f"components not checked — ecosystem undetermined "
+                       f"({', '.join(sorted(unmapped)[:8])}"
+                       f"{', …' if len(unmapped) > 8 else ''})")
+        cprint(C.YELLOW, f"  🟡 {len(unmapped)}/{len(candidates)} components not "
+                         f"checked — no verified OSV package identity")
 
     # ─── Trivy: scan running container images for CRITICAL/HIGH CVEs ────────
     # OSV.dev above is Helm-ecosystem only and limited to the version-check
