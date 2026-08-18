@@ -40,9 +40,9 @@ spec:
           install-openclaw:
             image:
               repository: node
-              # Pinned to the digest that was live on 2026-08-17 (node 22.22.0);
-              # upstream rebuilds 22-bookworm/22.22.0-bookworm in place.
-              tag: 22.22.0-bookworm@sha256:cd7bcd2e7a1e6f72052feb023c7f6b722205d3fcab7bbcbd2d1bfdab10b1e935
+              # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
+              # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
+              tag: 22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
             command:
               - bash
               - -lc
@@ -580,9 +580,9 @@ spec:
           app:
             image:
               repository: node
-              # Pinned to the digest that was live on 2026-08-17 (node 22.22.0);
-              # upstream rebuilds 22-bookworm/22.22.0-bookworm in place.
-              tag: 22.22.0-bookworm@sha256:cd7bcd2e7a1e6f72052feb023c7f6b722205d3fcab7bbcbd2d1bfdab10b1e935
+              # Pinned to the digest that was live on 2026-08-18 (node 22.23.2);
+              # upstream rebuilds 22-bookworm/22.23.2-bookworm in place.
+              tag: 22.23.2-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
               pullPolicy: IfNotPresent
 
             command:
