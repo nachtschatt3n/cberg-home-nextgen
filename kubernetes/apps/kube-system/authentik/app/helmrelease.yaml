@@ -83,7 +83,7 @@ spec:
         # error, enters CrashLoopBackOff, and recovery takes 5+ minutes due to
         # kubelet exponential backoff. See docs/sops/container-dependencies.md.
         - name: wait-for-postgresql
-          image: busybox:1.36.1
+          image: busybox:1.38.0
           command:
             - sh
             - -c
@@ -211,7 +211,7 @@ spec:
         # Wait for the bundled authentik-postgresql StatefulSet to be reachable
         # before starting the worker. See docs/sops/container-dependencies.md.
         - name: wait-for-postgresql
-          image: busybox:1.36.1
+          image: busybox:1.38.0
           command:
             - sh
             - -c
