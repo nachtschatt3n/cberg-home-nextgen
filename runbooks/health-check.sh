@@ -1970,24 +1970,55 @@ print(len(bad))
         IMG_NOT_READY=$(echo "$IMG_NOT_READY_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_NOT_READY" ] && IMG_NOT_READY=0
 
         # (2) SILENT-FAILURE SHAPE: automation runs on schedule but has NEVER
-        #     pushed. lastPushCommit null/absent while lastAutomationRunTime is
-        #     within 24h. Suspended automations are exempt. An automation that is
-        #     not running at all is a different (already visible) problem.
+        #     pushed, AND there is genuinely something for it to push.
+        #
+        #     The second half is load-bearing. "lastPushCommit is null" ALONE is not
+        #     a fault: an automation whose policy tag already matches what is
+        #     deployed has simply never had a change to make, and would report null
+        #     forever while being perfectly healthy. Escalating on that would be the
+        #     same "can never clear" anti-pattern removed from the fatal-log check.
+        #     Verified live 2026-08-18: my-software-production/absenty-image-updates
+        #     is null-but-healthy (policy tag == deployed tag), while
+        #     my-software-development was null-and-broken (policy tag NOT deployed).
+        #
+        #     Note the Ready condition is NOT usable as the discriminator: it flaps
+        #     to True/"repository up-to-date" on every reconcile where the tag has
+        #     not moved since the last failed attempt. See the SOP.
         IMG_SILENT_OUT=$(python3 -c "
 import json, subprocess, sys
 from datetime import datetime, timezone, timedelta
-try:
-    out = subprocess.run(['kubectl', 'get', 'imageupdateautomation', '-A', '-o', 'json'],
-                         capture_output=True, text=True, timeout=60).stdout
-    items = json.loads(out).get('items', [])
-except Exception:
-    items = []
+
+def kget(kind, ns=None):
+    cmd = ['kubectl', 'get', kind] + (['-n', ns] if ns else ['-A']) + ['-o', 'json']
+    try:
+        return json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout).get('items', [])
+    except Exception:
+        return []
+
+# tags actually deployed, per namespace
+deployed = {}
+for kind in ('deployments', 'statefulsets', 'daemonsets'):
+    for w in kget(kind):
+        ns = w['metadata']['namespace']
+        spec = w.get('spec', {}).get('template', {}).get('spec', {})
+        for c in (spec.get('containers') or []) + (spec.get('initContainers') or []):
+            if c.get('image'):
+                deployed.setdefault(ns, set()).add(c['image'])
+
+# policies with an update still pending (resolved tag not deployed anywhere in ns)
+pending = {}
+for pol in kget('imagepolicy'):
+    ns, name = pol['metadata']['namespace'], pol['metadata']['name']
+    ref = (pol.get('status', {}) or {}).get('latestRef') or {}
+    img, tag = ref.get('name'), ref.get('tag')
+    if not img or not tag:
+        continue
+    pending[(ns, name)] = f'{img}:{tag}' not in deployed.get(ns, set())
+
 now = datetime.now(timezone.utc)
-silent = []
-for it in items:
-    m = it['metadata']
-    st = it.get('status', {}) or {}
-    sp = it.get('spec', {}) or {}
+silent, unproven = [], []
+for it in kget('imageupdateautomation'):
+    m, st, sp = it['metadata'], it.get('status', {}) or {}, it.get('spec', {}) or {}
     if sp.get('suspend') is True:
         continue
     run = st.get('lastAutomationRunTime')
@@ -1999,23 +2030,35 @@ for it in items:
         continue
     if now - run_dt > timedelta(hours=24):
         continue
-    if not st.get('lastPushCommit'):
-        src = sp.get('sourceRef', {}) or {}
-        silent.append(
-            f\"{m['namespace']}/{m['name']} ran {run} but lastPushCommit is null \"
-            f\"(sourceRef {src.get('kind', '?')}/{src.get('namespace', m['namespace'])}/{src.get('name', '?')})\")
-for s in silent:
-    print('  SILENT-NO-PUSH: ' + s)
+    if st.get('lastPushCommit'):
+        continue
+    ns = m['namespace']
+    pols = list((st.get('observedPolicies') or {}).keys()) or [p[1] for p in pending if p[0] == ns]
+    blocked = [p for p in pols if pending.get((ns, p))]
+    if blocked:
+        silent.append(f\"{ns}/{m['name']} ran {run}, lastPushCommit null, and policy \"
+                      f\"{','.join(blocked)} resolved a tag that is NOT deployed -- the \"
+                      f\"update is stuck\")
+    else:
+        unproven.append(f'{ns}/{m[\"name\"]} (never pushed, but nothing pending -- push path unproven)')
+for u in unproven:
+    print('  NEVER-PUSHED-BUT-IDLE: ' + u)
+for x in silent:
+    print('  SILENT-NO-PUSH: ' + x)
 print(len(silent))
 " 2>/dev/null || echo "0")
         echo "$IMG_SILENT_OUT" | sed '$d'
         IMG_SILENT=$(echo "$IMG_SILENT_OUT" | tail -1 | tr -cd '0-9'); [ -z "$IMG_SILENT" ] && IMG_SILENT=0
 
         if [ "$IMG_SILENT" -gt 0 ]; then
-            log_warning "Image automations running but never pushing: $IMG_SILENT (lastPushCommit null)"
-            add_major_issue "Flux image automation silently not pushing: $IMG_SILENT automation(s) run on schedule with lastPushCommit null - image updates never reach git (docs/sops/flux-image-automation-push-auth.md)"
+            log_warning "Image automations with a STUCK update: $IMG_SILENT (lastPushCommit null, resolved tag not deployed)"
+            add_major_issue "Flux image automation stuck: $IMG_SILENT automation(s) resolved a new tag but never pushed it (lastPushCommit null) - image updates are not reaching git (docs/sops/flux-image-automation-push-auth.md)"
         else
-            log_success "All active Flux image automations have pushed at least once"
+            if echo "$IMG_SILENT_OUT" | grep -q "NEVER-PUSHED-BUT-IDLE"; then
+                log_info "No stuck image updates (some automations have never had a change to push - push path unproven, see detail above)"
+            else
+                log_success "All active Flux image automations have pushed at least once"
+            fi
         fi
 
         if [ "$IMG_NOT_READY" -gt 0 ]; then

@@ -54,6 +54,21 @@ point-in-time Ready check and is only reliably detectable via `lastPushCommit`.
 `status.lastPushCommit` stays `null`. An automation that has pushed even once will
 have a non-null `lastPushCommit` forever after.
 
+**But `lastPushCommit: null` alone is not a fault.** An automation whose policy tag
+already matches what is deployed has simply never had a change to make, and will report
+null forever while being perfectly healthy. Both shapes exist in this cluster:
+
+| Automation | `lastPushCommit` | policy tag deployed? | Verdict |
+|---|---|---|---|
+| `my-software-development/absenty-image-updates` | null (before fix) | **no** | broken — update stuck |
+| `my-software-production/absenty-image-updates` | null | yes | healthy — nothing to push, push path merely *unproven* |
+
+So the discriminator is `lastPushCommit == null` **AND** the ImagePolicy's resolved tag
+is not deployed in that namespace. Alerting on the null alone would produce a finding
+that can never clear — the same anti-pattern this repo removed from the fatal-log
+assertion. `runbooks/health-check.sh` implements exactly this pair and reports the
+null-but-idle case informationally instead of escalating it.
+
 ---
 
 ## 3) Blueprints
