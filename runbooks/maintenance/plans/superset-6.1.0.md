@@ -45,9 +45,8 @@ window: "sun-window:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECI
                                        # migrations on top of it. If the cutover has a latent
                                        # issue that surfaces in week two, we would be unwinding
                                        # an app major AND a database migration together. The
-                                       # driver is app-level only, on an internal-only service
-                                       # (security_ref: F-9d259837); that does not justify
-                                       # compressing a database soak.
+                                       # driver is app-level (security_ref: F-9d259837);
+                                       # that does not justify compressing a database soak.
                                        # Why 09-20 and not §6's suggested 09-13/09-19: both were
                                        # taken after this plan was written. Needs a SOLO 90-min
                                        # slot (75 min of work), so only sat-early/sun-window
@@ -718,8 +717,8 @@ be used to collapse a soak."* This plan is not independent of that soak.
 **Operator ruling (2026-08-19): Option B.** Option A's 3-day soak on a freshly
 cut-over metadata DB, followed immediately by 13 one-way migrations, risks having to
 unwind an app major *and* a database migration together if a latent cutover issue
-surfaces in week two. An app-level driver on an internal-only service
-(`security_ref: F-9d259837`) does not justify compressing a database soak.
+surfaces in week two. An app-level driver (`security_ref: F-9d259837`) does not
+justify compressing a database soak.
 
 The two slots §6 originally offered as free were both taken between this plan being
 written and being scheduled (`sun-window:2026-09-13` → `grafana-13-app`;

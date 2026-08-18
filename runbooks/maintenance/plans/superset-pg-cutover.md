@@ -70,15 +70,19 @@ an early-morning weekend window with the operator present.
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 
-# --- credentials (run first in EVERY shell that talks to a database) ---------
+# --- how to talk to either database (run first in EVERY shell) ---------------
 # The OLD bundled Postgres rejects passwordless local connections
-# (`fe_sendauth: no password supplied`) — its password lives in a file INSIDE the
-# pod, so fetch it from there rather than from SOPS. Both servers share the same
-# credentials (stage 2), so this one value works against either.
-OLDPW=$(mise exec -- kubectl exec -n databases superset-postgresql-0 -- \
-        cat /opt/bitnami/postgresql/secrets/postgresql-password)
-[ -n "$OLDPW" ] || { echo "FAILED to read the DB password — stop here"; }
+# (`fe_sendauth: no password supplied`), so every psql/pg_dump below MUST supply
+# one. Read it INSIDE the pod: expanded there, the password never enters kubectl
+# argv, the API-server audit log, your process table or your shell history.
+# One expression covers both servers — the old bitnami image exposes
+# $POSTGRES_PASSWORD_FILE + $POSTGRES_DATABASE, the new postgres:17.11-alpine
+# exposes $POSTGRES_PASSWORD + $POSTGRES_DB. Single-quoted on purpose: these
+# variables must reach the pod UNEXPANDED.
+PSQL='PGPASSWORD="${POSTGRES_PASSWORD:-$(cat "$POSTGRES_PASSWORD_FILE")}" psql -U "$POSTGRES_USER" -d "${POSTGRES_DB:-$POSTGRES_DATABASE}"'
+OLD=superset-postgresql-0
 NEW=$(mise exec -- kubectl get pods -n databases -l app=superset-pg -o jsonpath='{.items[0].metadata.name}')
+[ -n "$NEW" ] || { echo "new postgres pod not found — STOP"; exit 1; }
 
 # a) stage 2 landed, and the standby is still healthy
 mise exec -- kubectl get deploy -n databases superset-pg \
@@ -87,23 +91,20 @@ mise exec -- kubectl get pvc -n databases superset-pg-data     # Bound
 mise exec -- kubectl exec -n databases deploy/superset -- printenv DB_HOST    # still the OLD host
 
 # b) both databases answer
-mise exec -- kubectl exec -n databases superset-postgresql-0 -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -c 'select 1;'
-mise exec -- kubectl exec -n databases $NEW -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -c 'select 1;'
+mise exec -- kubectl exec -n databases $OLD -- sh -c "$PSQL -c 'select 1;'"
+mise exec -- kubectl exec -n databases $NEW -- sh -c "$PSQL -c 'select 1;'"
 
 # c) record the inventory you must see again after the cutover (this IS the acceptance test)
-mise exec -- kubectl exec -n databases superset-postgresql-0 -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -At -c "
-  select 'dashboards='||count(*) from dashboards
-  union all select 'slices='||count(*) from slices
-  union all select 'saved_query='||count(*) from saved_query
-  union all select 'dbs='||count(*) from dbs
-  union all select 'ab_user='||count(*) from ab_user
-  union all select 'ab_user_role='||count(*) from ab_user_role;"
-mise exec -- kubectl exec -n databases superset-postgresql-0 -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -At -c \
-  "select version_num from alembic_version;"       # must match on the new DB afterwards
+mise exec -- kubectl exec -i -n databases $OLD -- sh -c "$PSQL -At -f -" <<'SQL'
+select 'dashboards='||count(*) from dashboards
+union all select 'slices='||count(*) from slices
+union all select 'saved_query='||count(*) from saved_query
+union all select 'dbs='||count(*) from dbs
+union all select 'ab_user='||count(*) from ab_user
+union all select 'ab_user_role='||count(*) from ab_user_role;
+SQL
+mise exec -- kubectl exec -n databases $OLD -- \
+  sh -c "$PSQL -At -c 'select version_num from alembic_version;'"   # must match on the new DB afterwards
 
 # d) FRESH Longhorn backup of the OLD volume before touching anything
 mise exec -- kubectl get volume -n storage superset-postgresql-data \
@@ -130,11 +131,11 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    it is stale by design):
    ```bash
    STAMP=$(date +%F-%H%M)
-   mise exec -- kubectl exec -n databases superset-postgresql-0 -- env PGPASSWORD="$OLDPW" \
-     pg_dump -U superset -Fc superset > /tmp/superset-cutover-$STAMP.dump
+   mise exec -- kubectl exec -n databases $OLD -- \
+     sh -c 'PGPASSWORD=$(cat "$POSTGRES_PASSWORD_FILE") pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DATABASE"' \
+     > /tmp/superset-cutover-$STAMP.dump
    ls -l /tmp/superset-cutover-$STAMP.dump                              # not zero bytes
 
-   NEW=$(mise exec -- kubectl get pods -n databases -l app=superset-pg -o jsonpath='{.items[0].metadata.name}')
    # start from a clean schema so a partial stage-2 restore cannot masquerade as success
    mise exec -- kubectl exec -n databases $NEW -- \
      sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "drop schema public cascade; create schema public;"'
@@ -152,17 +153,17 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    # new one — i.e. the comparison would report a total mismatch on two identical
    # databases and abort a correct cutover. query_to_xml counts rows for real, and
    # runs on both PG14 and PG17.
-   COUNTSQL="select c.relname||'='||(xpath('/row/c/text()',
+   for POD in $OLD $NEW; do
+     mise exec -- kubectl exec -i -n databases $POD -- sh -c "$PSQL -At -f -" <<'SQL' > /tmp/pgcompare-$POD.txt
+   select c.relname||'='||(xpath('/row/c/text()',
        query_to_xml(format('select count(*) as c from %I.%I', n.nspname, c.relname),
                     false, true, '')))[1]::text::bigint
      from pg_class c join pg_namespace n on n.oid = c.relnamespace
-     where c.relkind = 'r' and n.nspname = 'public' order by c.relname;"
-   for POD in superset-postgresql-0 $NEW; do
-     mise exec -- kubectl exec -n databases $POD -- env PGPASSWORD="$OLDPW" \
-       psql -U superset -d superset -At -c "$COUNTSQL" > /tmp/pgcompare-$POD.txt
+     where c.relkind = 'r' and n.nspname = 'public' order by c.relname;
+SQL
      echo "--- $POD  ($(wc -l < /tmp/pgcompare-$POD.txt) tables)"
    done
-   diff /tmp/pgcompare-superset-postgresql-0.txt /tmp/pgcompare-$NEW.txt \
+   diff /tmp/pgcompare-$OLD.txt /tmp/pgcompare-$NEW.txt \
      && echo "IDENTICAL — safe to repoint"
    # `diff` must be silent (47 tables as of 2026-08-18). Any output: STOP — do not repoint.
    ```
@@ -193,15 +194,19 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 
-# --- credentials (run first in EVERY shell that talks to a database) ---------
+# --- how to talk to either database (run first in EVERY shell) ---------------
 # The OLD bundled Postgres rejects passwordless local connections
-# (`fe_sendauth: no password supplied`) — its password lives in a file INSIDE the
-# pod, so fetch it from there rather than from SOPS. Both servers share the same
-# credentials (stage 2), so this one value works against either.
-OLDPW=$(mise exec -- kubectl exec -n databases superset-postgresql-0 -- \
-        cat /opt/bitnami/postgresql/secrets/postgresql-password)
-[ -n "$OLDPW" ] || { echo "FAILED to read the DB password — stop here"; }
+# (`fe_sendauth: no password supplied`), so every psql/pg_dump below MUST supply
+# one. Read it INSIDE the pod: expanded there, the password never enters kubectl
+# argv, the API-server audit log, your process table or your shell history.
+# One expression covers both servers — the old bitnami image exposes
+# $POSTGRES_PASSWORD_FILE + $POSTGRES_DATABASE, the new postgres:17.11-alpine
+# exposes $POSTGRES_PASSWORD + $POSTGRES_DB. Single-quoted on purpose: these
+# variables must reach the pod UNEXPANDED.
+PSQL='PGPASSWORD="${POSTGRES_PASSWORD:-$(cat "$POSTGRES_PASSWORD_FILE")}" psql -U "$POSTGRES_USER" -d "${POSTGRES_DB:-$POSTGRES_DATABASE}"'
+OLD=superset-postgresql-0
 NEW=$(mise exec -- kubectl get pods -n databases -l app=superset-pg -o jsonpath='{.items[0].metadata.name}')
+[ -n "$NEW" ] || { echo "new postgres pod not found — STOP"; exit 1; }
 
 # a) THE first check — the app really is talking to the new host
 mise exec -- kubectl exec -n databases deploy/superset -- printenv DB_HOST         # superset-pg
@@ -216,23 +221,22 @@ mise exec -- kubectl logs -n databases deploy/superset --since=15m \
 mise exec -- kubectl logs -n databases deploy/superset-worker --since=15m | tail -20
 
 # c) data intact — compare against the pre-check inventory, on the NEW database
-mise exec -- kubectl exec -n databases $NEW -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -At -c "
-  select 'dashboards='||count(*) from dashboards
-  union all select 'slices='||count(*) from slices
-  union all select 'saved_query='||count(*) from saved_query
-  union all select 'dbs='||count(*) from dbs
-  union all select 'ab_user='||count(*) from ab_user
-  union all select 'ab_user_role='||count(*) from ab_user_role;"
-mise exec -- kubectl exec -n databases $NEW -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -At -c \
-  "select version_num from alembic_version;"      # identical to pre-check
+mise exec -- kubectl exec -i -n databases $NEW -- sh -c "$PSQL -At -f -" <<'SQL'
+select 'dashboards='||count(*) from dashboards
+union all select 'slices='||count(*) from slices
+union all select 'saved_query='||count(*) from saved_query
+union all select 'dbs='||count(*) from dbs
+union all select 'ab_user='||count(*) from ab_user
+union all select 'ab_user_role='||count(*) from ab_user_role;
+SQL
+mise exec -- kubectl exec -n databases $NEW -- \
+  sh -c "$PSQL -At -c 'select version_num from alembic_version;'"    # identical to pre-check
 
 # d) the old DB is still running and now IDLE (it is the rollback — do not stop it)
 mise exec -- kubectl get pods -n databases | grep superset-postgresql
-mise exec -- kubectl exec -n databases superset-postgresql-0 -- env PGPASSWORD="$OLDPW" \
-  psql -U superset -d superset -At -c \
-  "select count(*) from pg_stat_activity where datname='superset' and state='active';"   # ~0
+mise exec -- kubectl exec -i -n databases $OLD -- sh -c "$PSQL -At -f -" <<'SQL'
+select count(*) from pg_stat_activity where datname='superset' and state='active';   -- ~0
+SQL
 
 # e) THE load-bearing check is human. A restored-but-wrong metadata DB is invisible
 #    at pod level and empty in the UI:
@@ -265,7 +269,7 @@ DOM=$(mise exec -- kubectl get secret -n flux-system cluster-secrets -o jsonpath
 curl -s -o /dev/null -w '%{http_code}\n' --max-time 20 "https://superset.$DOM/health"   # 200
 ```
 Then re-run the pre-check inventory query against `superset-postgresql-0` (with the
-`$OLDPW` preamble from §2 — a bare `psql` in that pod fails `fe_sendauth: no password
+`$PSQL` preamble from §2 — a bare `psql` in that pod fails `fe_sendauth: no password
 supplied`) and confirm it matches what you recorded before the window.
 
 **Anything written to the new DB after the cutover is lost by this revert.** Within a
