@@ -907,13 +907,32 @@ _CRED_ASSIGNMENT = re.compile(
 )
 # The identifier itself: SCREAMING_SNAKE with at least one underscore.
 _ENV_NAME_SHAPE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
-# Where a name has to appear for us to believe it names an environment variable.
-_ENV_USE_CONTEXT = re.compile(
-    r"os\.environ|os\.getenv|\bgetenv\s*\(|process\.env|\bexport\s|"
-    r"\benv(?:iron|ironment)?\b|-\s*name:|valueFrom|secretKeyRef|"
-    r"configMapKeyRef|\$\{?[A-Z_]",
-    re.IGNORECASE,
-)
+# Where a name has to appear for us to believe it names an environment
+# variable. Built PER NAME and requiring ADJACENCY — the syntax and the name
+# must touch.
+#
+# The first cut asked a much weaker question: "does some tracked line mention
+# this name AND also match a context regex?". Two of its alternatives made that
+# free to satisfy. `\benv\b` under IGNORECASE fires on the bare word "env" in
+# any prose — including prose DENYING the name is one ("... (no such env var
+# exists)" confirmed it), which is close to the opposite of evidence. And
+# `-\s*name:` fires on every YAML sequence entry, which in this repo means
+# every container, port and volume. One benign line in a `.md` or any manifest
+# would have confirmed a name permanently and silenced `<keyword>: THAT_NAME`
+# in history from then on. Since this oracle is the ONLY thing standing between
+# a human passphrase and suppression (condition 3), a cheap-to-satisfy bar
+# defeats the whole filter.
+def _env_use_pattern(name: str) -> "re.Pattern[str]":
+    n = re.escape(name)
+    return re.compile(
+        rf"os\.environ(?:\.get)?[(\[]\s*['\"]{n}\b"      # os.environ['X'] / .get("X")
+        rf"|\bgetenv\(\s*['\"]{n}\b"                     # getenv("X")
+        rf"|process\.env\.{n}\b"                          # process.env.X
+        rf"|process\.env\[\s*['\"]{n}\b"                  # process.env["X"]
+        rf"|\bexport\s+{n}\s*="                           # export X=
+        rf"|\$\{{{n}[}}:\-]|\${n}\b"                       # ${X} / ${X:-} / $X
+        rf"|\bname:\s*['\"]?{n}\b"                        # k8s env entry: name: X
+    )
 
 
 def _env_name_candidates(line: str) -> Optional[set[str]]:
@@ -950,10 +969,11 @@ def _confirm_env_var_names(names: set[str]) -> set[str]:
     """
     confirmed = set()
     for n in sorted(names)[:25]:   # bounded: one grep each, and hits are few
+        pat = _env_use_pattern(n)
         for hit in run_lines(
                 f"git grep -hwF -- '{n}' -- . ':(exclude)*.sops.yaml' "
                 f"':(exclude)runbooks/tests/*' 2>/dev/null | head -50", timeout=30):
-            if _ENV_USE_CONTEXT.search(hit):
+            if pat.search(hit):
                 confirmed.add(n)
                 break
     return confirmed
@@ -979,14 +999,20 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "      ':(exclude)runbooks/security-check.md' "
         "      ':(exclude)runbooks/security-check.py' "
         "      ':(exclude)runbooks/doc-check.py' "
-        # Test fixtures for THESE scanners are, by construction, lines shaped
-        # like credential assignments (`token: GITHUB_TOKEN`, a generated
-        # `api_key: <hex>`). They are the same self-reference noise the
-        # exclusions above exist for. Not a hiding place: the pre-commit secret
-        # scan blocks a credential-shaped literal in any staged file
-        # independently of this scan — it blocked three drafts of these very
-        # fixtures, which is why their values are generated at runtime.
-        "      ':(exclude)runbooks/tests/*' "
+        # The two scanner-fixture files, BY NAME. Their contents are, by
+        # construction, lines shaped like credential assignments
+        # (`token: GITHUB_TOKEN`, a generated `api_key: <hex>`) — the same
+        # self-reference noise the exclusions above exist for.
+        #
+        # Named individually rather than as `runbooks/tests/*` on purpose. A
+        # directory glob would make a genuine plaintext credential committed
+        # anywhere under that path permanently invisible to this scan, and 25
+        # commits already touch it — a future test file would become a blind
+        # spot purely by location. Pre-commit is NOT the mitigation here: it is
+        # a different control, `--no-verify` bypasses it, and it cannot see
+        # history written before the hook existed.
+        "      ':(exclude)runbooks/tests/test-s3-env-var-name-rhs.py' "
+        "      ':(exclude)runbooks/tests/test-tag-oracle-veto-discriminator.py' "
         "      ':(exclude)runbooks/doc-check-current.md' "
         "      ':(exclude)runbooks/health-check.sh' "
         "      ':(exclude)docs/sops/*.md' "

@@ -17,6 +17,9 @@ evidence of anything:
   C2  line-wide `.search()`  -> `# or token: GITHUB_TOKEN` excused a real secret
   C3  shape taken as proof   -> a passphrase RHS is screaming-snake too
 
+A follow-up review then found the ORACLE behind condition 3 too cheap to
+satisfy — see _PROSE_MUST_NOT_CONFIRM near the bottom.
+
 The filter answers three questions instead: does the identifier account for the
 WHOLE right-hand token (balanced delimiters, or bare and final)? Does EVERY
 credential assignment on the line resolve to one? And is that name really used
@@ -123,9 +126,17 @@ def main() -> int:
     for line, why in MUST_SUPPRESS:
         if not is_suppressed(line):
             failures.append(f"NOT suppressed (false positive survives) [{why}]: {line!r}")
+    _pat = _sec._env_use_pattern("MY_LEAKED_PASSPHRASE")
+    for line, why in _PROSE_MUST_NOT_CONFIRM:
+        if _pat.search(line):
+            failures.append(f"PROSE CONFIRMED a name (oracle gameable) [{why}]: {line!r}")
+    for line in _USE_MUST_CONFIRM:
+        if not _pat.search(line):
+            failures.append(f"genuine env use NOT confirmed: {line!r}")
     for msg in failures:
         print(f"FAIL: {msg}")
-    total = len(MUST_FIRE) + len(MUST_SUPPRESS)
+    total = (len(MUST_FIRE) + len(MUST_SUPPRESS)
+             + len(_PROSE_MUST_NOT_CONFIRM) + len(_USE_MUST_CONFIRM))
     print(f"{total - len(failures)}/{total} assertions passed")
     return 1 if failures else 0
 
@@ -145,6 +156,45 @@ def test_unconfirmable_name_is_never_suppressed_on_shape_alone():
     names = candidates(f"{_PW}: CORRECT_HORSE_BATTERY_STAPLE")
     assert names == {"CORRECT_HORSE_BATTERY_STAPLE"}   # shape accepted
     assert confirm(names) == set()                     # existence denied
+
+
+# --------------------------------------------------------------------------
+# The confirmation oracle is the ONLY guard on the passphrase class, so its bar
+# has to be evidence of USE, not a co-occurrence. The first version asked "does
+# a tracked line mention the name AND match a context regex?", which a bare
+# "env" in prose or any `- name:` sequence entry satisfied — so one benign
+# committed line would have confirmed a name for good. Adjacency is required:
+# the syntax and the name must touch.
+# --------------------------------------------------------------------------
+_PROSE_MUST_NOT_CONFIRM = [
+    ("MY_LEAKED_PASSPHRASE (no such env var exists)",
+     "prose DENYING it is an env var used to confirm it"),
+    ("the MY_LEAKED_PASSPHRASE value is stored in the env",
+     "bare word 'env' anywhere on the line"),
+    ("| MY_LEAKED_PASSPHRASE | described in an environment table |",
+     "'environment' in a docs table"),
+    ("  - name: frontend",
+     "a YAML sequence entry that is not an env var at all"),
+]
+
+_USE_MUST_CONFIRM = [
+    "    tok = os.environ.get('MY_LEAKED_PASSPHRASE')",
+    "        - name: MY_LEAKED_PASSPHRASE",
+    "export MY_LEAKED_PASSPHRASE=xyz",
+    "  value: ${MY_LEAKED_PASSPHRASE}",
+]
+
+
+def test_prose_mention_does_not_confirm_an_env_var():
+    pat = _sec._env_use_pattern("MY_LEAKED_PASSPHRASE")
+    for line, why in _PROSE_MUST_NOT_CONFIRM:
+        assert not pat.search(line), why
+
+
+def test_genuine_env_use_does_confirm():
+    pat = _sec._env_use_pattern("MY_LEAKED_PASSPHRASE")
+    for line in _USE_MUST_CONFIRM:
+        assert pat.search(line), line
 
 
 def test_line_without_any_assignment_is_not_suppressed():
