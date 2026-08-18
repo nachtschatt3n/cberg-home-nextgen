@@ -294,6 +294,90 @@ def test_emitted_fingerprints_are_stable_across_a_reword():
     assert a != c, "a different image version collapsed onto the same fingerprint"
 
 
+# --------------------------------------------------------------------------
+# The incomplete veto: a degraded dependency must not let absence read as fixed
+# --------------------------------------------------------------------------
+
+def test_mark_incomplete_vetoes_autoclose():
+    """The core security property: degraded coverage never resolves anything."""
+    _clear_env()
+    w, conn = _writer(section="security")
+    w.mark_incomplete("s6_attack_patterns: Elasticsearch unavailable")
+    w.close(verdict="green")
+    assert not _autoclose_stmts(conn), (
+        "auto-close ran on a run that declared itself incomplete — a monitoring "
+        "outage would silently clear the finding backlog")
+
+
+def test_mark_incomplete_accumulates_every_reason():
+    """A run that trips four dependencies must report four, not the last one."""
+    w, _ = _writer(section="security")
+    w.mark_incomplete("s5: Elasticsearch unavailable")
+    w.mark_incomplete("s11: UniFi controller unavailable")
+    w.mark_incomplete("s5: Elasticsearch unavailable")     # duplicate collapses
+    w.mark_incomplete("")                                   # empty is ignored
+    w.mark_incomplete("s13: Wazuh indexer unavailable")
+    assert w._incomplete_reason == (
+        "s5: Elasticsearch unavailable; s11: UniFi controller unavailable; "
+        "s13: Wazuh indexer unavailable"), w._incomplete_reason
+
+
+def test_veto_reports_the_reason_to_the_operator():
+    """An operator must be able to see WHICH dependency armed the veto."""
+    _clear_env()
+    import io, contextlib
+    w, conn = _writer(section="security")
+    w.mark_incomplete("s13_wazuh_siem: Wazuh indexer unavailable")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        w.close(verdict="yellow")
+    out = buf.getvalue()
+    assert "auto-close SKIPPED" in out and "INCOMPLETE" in out, out
+    assert "Wazuh indexer unavailable" in out, out
+    assert "security" in out, out
+
+
+def test_healthy_run_still_autocloses():
+    """The veto must not be a blanket off-switch — a clean run still resolves."""
+    _clear_env()
+    w, conn = _writer(section="security")
+    log = fw.DegradationLog("security", printer=lambda m: None)
+    assert not log, "a fresh DegradationLog must be falsy"
+    assert log.apply(w) is False, "apply() vetoed with nothing recorded"
+    w.close(verdict="green")
+    assert _autoclose_stmts(conn), (
+        "auto-close did not run on a fully-healthy completed section")
+
+
+def test_degradation_log_applies_and_dedups():
+    _clear_env()
+    log = fw.DegradationLog("version", printer=lambda m: None)
+    log.record("dockerhub", "Docker Hub (HTTP 429 rate limit)", "redis")
+    log.record("dockerhub", "Docker Hub (HTTP 429 rate limit)", "redis")  # dup
+    log.record("helm_index", "Helm repo index", "timeout")
+    assert len(log) == 2, log.reasons
+    w, conn = _writer(section="version")
+    assert log.apply(w) is True
+    w.close(verdict="green")
+    assert not _autoclose_stmts(conn), (
+        "a rate-limited registry lookup auto-closed real version findings")
+
+
+def test_veto_survives_the_force_and_autoclose_env_overrides():
+    """There is deliberately NO escape hatch for a degraded run."""
+    w, conn = _writer(section="security")
+    os.environ["SWEEP_AUTOCLOSE"] = "1"
+    os.environ["SWEEP_AUTOCLOSE_FORCE"] = "1"
+    try:
+        w.mark_incomplete("s4_cve_check: trivy binary unavailable")
+        w.close(verdict="green")
+        assert not _autoclose_stmts(conn), (
+            "an env override defeated the incomplete veto")
+    finally:
+        os.environ.pop("SWEEP_AUTOCLOSE", None)
+        os.environ.pop("SWEEP_AUTOCLOSE_FORCE", None)
+
+
 def test_disabled_writer_never_touches_the_db():
     _clear_env()
     w = fw.FindingsWriter(dsn=None, section="version")   # markdown-only mode

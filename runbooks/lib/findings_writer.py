@@ -457,8 +457,20 @@ class FindingsWriter:
         knows it degraded (a scanner errored, a port-forward died, an API
         rate-limited) must say so — otherwise the missing findings look
         fixed. Call this and close() will skip auto-close and say why.
+
+        ACCUMULATES. security-check.py alone has a dozen independent
+        degrade paths, and a run that hits four of them must report four
+        reasons — last-write-wins would show the operator one arbitrary
+        dependency and hide the rest, which is exactly the diagnosis they
+        need. Duplicate reasons collapse; order of first occurrence is kept.
         """
-        self._incomplete_reason = reason
+        reason = (reason or "").strip()
+        if not reason:
+            return
+        if self._incomplete_reason is None:
+            self._incomplete_reason = reason
+        elif reason not in self._incomplete_reason.split("; "):
+            self._incomplete_reason += f"; {reason}"
 
     def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str]]:
         """Resolve open findings THIS section owns that it did not re-emit.
@@ -684,3 +696,107 @@ def git_head() -> str | None:
         return out.decode().strip() or None
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Degraded-coverage recorder
+# ---------------------------------------------------------------------------
+
+
+class DegradationLog:
+    """Collects graceful-degradation events during a run, then vetoes auto-close.
+
+    This is NOT a second mechanism — it is a collection point that terminates
+    in `FindingsWriter.mark_incomplete()`. health-check.py can get away with a
+    single local `incomplete` variable because it has exactly one degrade
+    path (a missing/stale issues file). The other three audit scripts degrade
+    gracefully in a dozen independent places, buried inside section functions
+    that have no access to the writer (it is only constructed at the very end
+    of main()). They record here as they go; main() calls `apply(writer)` once.
+
+    Why any of this matters: auto-close reasons from ABSENCE. If Elasticsearch
+    is unreachable, the attack-pattern section emits nothing — and without a
+    veto, `close(verdict=...)` reads that silence as "every one of those
+    findings got fixed" and resolves them. A monitoring outage would quietly
+    clear the security backlog. The zero-emit circuit breaker only catches a
+    TOTAL wipeout; partial degradation has to be declared explicitly.
+
+    The veto is SECTION-scoped, because that is the granularity auto-close
+    itself works at: one degraded dependency suppresses auto-close for the
+    whole section, and the section still completes and reports everything it
+    *could* measure. Over-suppressing costs a stale row until the next clean
+    run; under-suppressing loses real findings.
+
+    Usage:
+        DEGRADED = DegradationLog("security", printer=warn)
+        ...
+        except Exception as e:
+            DEGRADED.record("s6_attack_patterns", "Elasticsearch", repr(e))
+            return OK, findings, body
+        ...
+        with FindingsWriter(...) as writer:
+            emit(...)
+            DEGRADED.apply(writer)
+            writer.close(verdict=verdict)
+    """
+
+    def __init__(self, section: str, printer=None):
+        self.section = section
+        self._reasons: list[str] = []
+        # Default printer keeps this usable from scripts with no colour helper.
+        self._printer = printer or (lambda msg: print(msg))
+
+    def record(self, scope: str, dependency: str, detail: str = "") -> None:
+        """Note that `scope` could not fully run because `dependency` failed.
+
+        `scope` should be the subsection slug / function name the operator
+        would grep for; `dependency` the external thing that was unavailable.
+        Logged immediately — the operator must be able to see the veto being
+        armed at the moment it happens, not only in the summary at the end.
+        """
+        reason = f"{scope}: {dependency} unavailable"
+        if detail:
+            reason += f" ({_truncate(str(detail), 160)})"
+        if reason in self._reasons:
+            return
+        self._reasons.append(reason)
+        self._printer(
+            f"  ⚠ DEGRADED — {reason}. Coverage for this check is partial, so "
+            f"stale-finding auto-close will be VETOED for the entire "
+            f"'{self.section}' section (a coverage gap is not a fix)."
+        )
+
+    @property
+    def reasons(self) -> list[str]:
+        return list(self._reasons)
+
+    def __bool__(self) -> bool:
+        return bool(self._reasons)
+
+    def __len__(self) -> int:
+        return len(self._reasons)
+
+    def reason_text(self) -> str:
+        return "; ".join(self._reasons)
+
+    def apply(self, writer: "FindingsWriter") -> bool:
+        """Hand the accumulated reasons to the writer. Returns True if vetoed.
+
+        Safe to call unconditionally; a run with no degradation is a no-op and
+        auto-close proceeds normally.
+        """
+        if not self._reasons:
+            return False
+        writer.mark_incomplete(self.reason_text())
+        self._printer(
+            f"  ⚠ {len(self._reasons)} degraded dependency/dependencies this run "
+            f"— auto-close vetoed for section '{self.section}':"
+        )
+        for r in self._reasons:
+            self._printer(f"      • {r}")
+        return True
+
+
+def _truncate(s: str, n: int) -> str:
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[: n - 1] + "…"
