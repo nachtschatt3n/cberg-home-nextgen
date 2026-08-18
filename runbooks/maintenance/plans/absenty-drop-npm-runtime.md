@@ -32,7 +32,7 @@ generated: "2026-08-18"
 ## 1) Summary & why held
 
 The 2026-08-18 promotion to `production-20260818155406` cleared the
-lockfile-pinned gem items. A small set of npm-attributed items survived it, and
+lockfile-pinned gem items. npm-attributed items survived it (F-fec7ea4b), and
 the premise recorded in the Dockerfile for why they would clear was wrong.
 
 > **Security driver — detail withheld from this public repo.**
@@ -45,10 +45,10 @@ the premise recorded in the Dockerfile for why they would clear was wrong.
 > Convention: `docs/sops/vulnerability-disclosure.md`.
 
 **Why the version-bump remedy is a dead end** (plain dependency-resolution
-fact, safe to state): the surviving items are attributed to npm's OWN bundled
-dependency tree — the `node_modules` that ships *inside* the globally-installed
-npm, not the application's `node_modules`. `npm ci` never touches the global
-install, so no application dependency change or lockfile refresh can move them.
+fact, safe to state): the driver attributes to npm's OWN bundled dependency
+tree — the `node_modules` that ships *inside* the globally-installed npm, not
+the application's `node_modules`. `npm ci` never touches the global install, so
+no application dependency change or lockfile refresh can reach that tree.
 
 The Dockerfile asserted that upgrading the global npm to 12.0.2 would move
 them. **Verified 2026-08-18: it does not.** npm 12.0.2 and npm 11.19.0 bundle
@@ -247,11 +247,13 @@ in `production` — is **rejected**, for three reasons:
   `test:prepare`-style rake path) to the runtime CMD will fail with
   `npx: not found` — by design.
 - Re-evaluate the CI image-scan step. `.github/workflows/ci.yml` currently
-  runs Trivy non-gating (`exit-code: 0`), and part of the stated justification
-  is that the scanned image carries an item from npm's own bundled modules that
-  cannot be fixed. Once npm leaves the runtime layer that justification no
-  longer holds for the production target, and the step may be able to gate
-  again. **Do not flip it to gating in the same change** — land the Dockerfile
+  runs Trivy non-gating (`exit-code: 0`), and part of its stated justification
+  no longer holds once npm leaves the runtime layer (see F-fec7ea4b), so the
+  step may be able to gate again. **That comment is itself a disclosure-boundary
+  problem** — it states current scan results inline rather than by reference —
+  so rewrite it to a `security_ref` pointer in the same pass, and move its
+  present wording onto the finding record.
+  **Do not flip it to gating in the same change** — land the Dockerfile
   restructure first, observe one clean scan, then flip it in a follow-up so a
   newly-red CI is unambiguously attributable.
 
