@@ -50,6 +50,13 @@ spec:
             secretKeyRef:
               name: paperless-ngx-secret
               key: redis-password
+        # redis-cli reads REDISCLI_AUTH from the environment — keeps the
+        # password out of the probe command line (visible via /proc argv).
+        - name: REDISCLI_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: paperless-ngx-secret
+              key: redis-password
         ports:
         - containerPort: 6379
           name: redis
@@ -62,18 +69,16 @@ spec:
         readinessProbe:
           exec:
             command:
-            - /bin/sh
-            - -c
-            - redis-cli -a "$REDIS_PASSWORD" ping
+            - redis-cli
+            - ping
           initialDelaySeconds: 5
           timeoutSeconds: 2
           periodSeconds: 10
         livenessProbe:
           exec:
             command:
-            - /bin/sh
-            - -c
-            - redis-cli -a "$REDIS_PASSWORD" ping
+            - redis-cli
+            - ping
           initialDelaySeconds: 15
           timeoutSeconds: 2
           periodSeconds: 10

@@ -50,17 +50,24 @@ spec:
               secretKeyRef:
                 name: superset-secrets
                 key: redis-password
+          # redis-cli reads REDISCLI_AUTH from the environment — keeps the
+          # password out of the probe command line (visible via /proc argv).
+          - name: REDISCLI_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: superset-secrets
+                key: redis-password
         ports:
           - containerPort: 6379
             name: redis
         livenessProbe:
           exec:
-            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+            command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
           initialDelaySeconds: 5
           periodSeconds: 10
         readinessProbe:
           exec:
-            command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+            command: ["sh", "-c", "redis-cli ping | grep -q PONG"]
           initialDelaySeconds: 2
           periodSeconds: 5
         resources:
