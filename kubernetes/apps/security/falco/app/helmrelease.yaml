@@ -226,7 +226,7 @@ spec:
         - macro: user_known_contact_k8s_api_server_activities
           condition: >
             (container.image.repository = ghcr.io/nachtschatt3n/ai-sre or
-             container.image.repository = docker.io/bitnamilegacy/kubectl or
+             container.image.repository = registry.k8s.io/kubectl or
              container.image.repository startswith docker.io/longhornio/)
           override:
             condition: replace
