@@ -88,6 +88,16 @@ spec:
           secretKeyRef:
             name: paperless-ngx-secret
             key: PAPERLESS_EMAIL_PASSWORD
+      # With redis.enabled: false the chart no longer templates these two
+      # (chart 0.24.1 templates/common.yaml emits them only inside
+      # `if .Values.redis.enabled`), so they must be declared explicitly.
+      # $(A_REDIS_PASSWORD) is container-runtime env interpolation — keep it.
+      A_REDIS_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: paperless-ngx-secret
+            key: redis-password
+      PAPERLESS_REDIS: "redis://:$(A_REDIS_PASSWORD)@paperless-redis:6379"
     service:
       # -- Configures service settings for the chart.
       # @default -- See [values.yaml](./values.yaml)
@@ -182,38 +192,13 @@ spec:
           limits:
             cpu: 500m
             memory: 1Gi
+    # Bundled Bitnami redis retired 2026-08-18: bitnamilegacy is an ARCHIVED
+    # registry (last push 2025-08-28, no future security fixes) and
+    # docker.io/bitnami/redis publishes no semver tags. Security driver
+    # tracked as F-d62ac46a. Paperless now uses the official redis image
+    # deployed by redis-deployment.yaml in this folder.
     redis:
-      enabled: true
-      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/redis
-        tag: latest
-      auth:
-      #  password: changeme
-        enabled: true
-      master:
-        persistence:
-          enabled: true
-          existingClaim: paperless-redis
-          size: 5Gi
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
-      replica:
-        enabled: false
-        replicaCount: 0
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
+      enabled: false
     resources:
       requests:
         cpu: 1000m
@@ -264,8 +249,8 @@ spec:
           - sh
           - -c
           - |
-            until nc -z paperless-ngx-redis-master 6379; do
-              echo "waiting for paperless-ngx-redis-master:6379..."
+            until nc -z paperless-redis 6379; do
+              echo "waiting for paperless-redis:6379..."
               sleep 2
             done
 

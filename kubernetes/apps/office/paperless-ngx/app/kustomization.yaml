@@ -5,6 +5,7 @@ resources:
   - secret.sops.yaml
   - pvc.yaml
   - storageclass.yaml
+  - redis-deployment.yaml
   - helmrelease.yaml
   - validator-configmap.yaml
   - validator-deployment.yaml
