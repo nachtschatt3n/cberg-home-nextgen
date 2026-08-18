@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -62,13 +63,24 @@ HELD = {
     "@openclaw/discord": "moves in lockstep with the held openclaw host",
 }
 # Self-built images we own — remediation is a rebuild in the source repo, not a
-# cluster tag bump. (Matched against the component name.)
-# NOTE the matching key: this is compared against the COMPONENT name (the app /
-# HelmRelease name), NOT the image name. `harness-home-frontend` was listed here
-# and never matched, because that app's component is `ha-ai-harness` — so a
-# self-built image with no upstream was being routed to the AUTO lane, where the
-# auto-updater would try to "bump" it to a tag that can never exist. `ai-sre`
-# only worked by coincidence: its app and image names happen to be identical.
+# cluster tag bump.
+#
+# MATCHED ON THE IMAGE, NOT THE COMPONENT (fixed 2026-08-18, F-62007db7). The
+# lane is a property of the IMAGE (who builds it), never of the app that happens
+# to mount it, so the set below is only a FALLBACK for items whose image
+# repository could not be resolved from version-check-current.md; whenever the
+# repo IS known, `_is_self_built_repo()` decides. Both directions were wrong
+# before:
+#   • under-capture (fixed 2026-08-15): `harness-home-frontend` was listed here
+#     and never matched, because that app's component is `ha-ai-harness` — a
+#     self-built image was routed to AUTO, where the auto-updater would try to
+#     "bump" it to a tag that can never exist;
+#   • over-capture (this fix): `paperclip` is listed here but owns NO self-built
+#     image — its four images (busybox, debian, reeoss/paperclipai-paperclip,
+#     ubuntu) are all third-party and CAN be tag-bumped, yet both of its updates
+#     were parked in REBUILD, a lane whose remedy (rebuild in our source repo)
+#     can never bump them. Parked in the wrong lane == uncovered, dressed as
+#     covered.
 # Verified 2026-08-15 against the running inventory of ghcr.io/nachtschatt3n/*.
 SELF_BUILT = {
     "ai-sre", "ha-ai-harness", "sure", "sweep-dashboard", "arag-web",
@@ -79,6 +91,130 @@ SELF_BUILT = {
     "zero-export-controller", "gas-price-monitor", "rainbow-rescue",
 }
 RANK = {"patch": 0, "minor": 1, "major": 2}
+
+# Registries/namespaces we build ourselves. An image from one of these can only
+# move by a rebuild in its source repo.
+SELF_BUILT_REPO_PREFIXES = ("ghcr.io/nachtschatt3n/",)
+
+# ── Upstream release CHANNELS ───────────────────────────────────────────────
+# A semver LABEL does not prove a tag is a stable successor. Some upstreams push
+# pre-release builds to the SAME docker repo, with a HIGHER version number than
+# their newest stable release — so the tag oracle reports "minor update
+# available" and, on the label alone, `assign_lane()` routed it to AUTO, which
+# the maintenance window APPLIES unattended at Step 0 (window-agent hybrid
+# direct-bump). That is how a beta build reaches the cluster with nobody in the
+# loop.
+#
+# scrypted is the live example (2026-08-18): upstream cuts GitHub releases on
+# ODD minors only — v0.143.0 is the newest with prerelease=false, v0.144.x has
+# NO GitHub release at all, and the v0.144.0 docker tag was pushed 2025-10-31,
+# i.e. BEFORE stable v0.143.0 (2025-11-16). v0.144.x is a parallel beta channel,
+# not a successor. AR-081 says so in as many words — but an AR only suppresses
+# the FINDING on the board, it does not stop the AUTO lane, and the workload is
+# a PRIVILEGED NVR (privileged: true, SYS_ADMIN, i915 device).
+#
+# These rules are CHANNEL predicates, not version pins: they keep holding as
+# upstream ships 0.145 (stable) / 0.146.x (beta), so they can't drift the way a
+# pinned AR description does (memory: feedback_sweep_ar_version_drift).
+CHANNEL_RULES = {
+    "scrypted": {
+        "stable": "odd-minor",
+        "ar": "AR-081",
+        "why": ("upstream releases stable on ODD minors only; even minors "
+                "(v0.144.x) are the beta channel — no GitHub release, and "
+                "v0.144.0 predates stable v0.143.0"),
+        "workload": "privileged NVR (privileged: true, SYS_ADMIN, i915)",
+    },
+}
+
+# Explicit pre-release markers in a tag — universal, no per-component rule
+# needed. Never AUTO, whatever the semver delta says.
+_PRERELEASE_TAG = re.compile(
+    r"(?:^|[-_.])(?:alpha|beta|rc\d*|pre|preview|dev|nightly|snapshot|canary|"
+    r"unstable|test)(?:[-_.]|\d|$)", re.IGNORECASE)
+
+_AR_PRERELEASE_PHRASES = (
+    "pre-release channel", "prerelease channel", "beta channel",
+    "pre-release build", "not an acceptable channel",
+)
+
+
+def _is_self_built_repo(repo: str) -> bool:
+    return any(str(repo).lower().startswith(p) for p in SELF_BUILT_REPO_PREFIXES)
+
+
+def _stable_by_rule(rule: str, version: str) -> bool:
+    """Is `version` on the component's STABLE channel per `rule`?
+    Unparseable / unknown rule → treat as stable (never invent a hold)."""
+    t = _ver_tuple(version)
+    if not t:
+        return True
+    if rule == "odd-minor":
+        return t[1] % 2 == 1
+    if rule == "even-minor":
+        return t[1] % 2 == 0
+    return True
+
+
+def channel_hold(comp: str, item: dict, ar_holds: dict | None = None) -> str | None:
+    """Reason why `item`'s TARGET is not a stable-channel successor, else None.
+
+    Three independent sources, any one of which disqualifies AUTO:
+      1. an explicit pre-release marker in the tag (-beta/-rc/-nightly/…);
+      2. a git-tracked CHANNEL_RULES predicate (works offline — the window agent
+         runs coverage.py without SWEEP_PG_DSN, so a DB-only gate would
+         fail OPEN exactly where it matters);
+      3. an ACTIVE accepted risk that declares the component's pre-release
+         channel unacceptable (`ar_holds`, best-effort from the policy DB).
+    """
+    tgt = str(item.get("target") or "")
+    if _PRERELEASE_TAG.search(tgt):
+        return f"target {tgt} is an explicit pre-release tag — never unattended"
+    rule = CHANNEL_RULES.get(comp)
+    if rule and not _stable_by_rule(rule["stable"], tgt):
+        ar = f" ({rule['ar']}: unacceptable for a {rule['workload']})" if rule.get("ar") else ""
+        return (f"{tgt} is on upstream's PRE-RELEASE channel — {rule['why']}{ar}. "
+                f"Needs an assessed window plan, never an unattended bump")
+    if ar_holds and comp in ar_holds:
+        return (f"{ar_holds[comp]} declares this component's pre-release channel "
+                f"unacceptable — {tgt} needs operator assessment, not AUTO")
+    return None
+
+
+_AR_HOLDS_CACHE = None
+
+
+def ar_prerelease_holds() -> dict:
+    """{component: AR-ID} for ENABLED accepted risks whose justification says the
+    component's pre-release channel is unacceptable. Best-effort: needs
+    SWEEP_PG_DSN + psycopg. This is layer 3 — it can only ADD holds, so an
+    unreachable DB degrades to the git-tracked CHANNEL_RULES above rather than
+    silently re-opening the AUTO lane."""
+    global _AR_HOLDS_CACHE
+    if _AR_HOLDS_CACHE is not None:
+        return _AR_HOLDS_CACHE
+    _AR_HOLDS_CACHE = {}
+    dsn = os.environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        return _AR_HOLDS_CACHE
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute("SELECT ar_id, description, justification FROM accepted_risks "
+                        "WHERE enabled = true AND status = 'accepted'")
+            rows = cur.fetchall()
+    except Exception:
+        return _AR_HOLDS_CACHE
+    for ar_id, desc, just in rows:
+        blob = (just or "").lower()
+        if not any(p in blob for p in _AR_PRERELEASE_PHRASES):
+            continue
+        # the description names the image/component, e.g. `koush/scrypted`
+        for tok in re.split(r"[\s/:,]+", str(desc or "")):
+            tok = tok.strip().lower()
+            if len(tok) > 3:
+                _AR_HOLDS_CACHE.setdefault(tok, ar_id)
+    return _AR_HOLDS_CACHE
 
 
 def _match_anywhere(name: str, pat: str) -> bool:
@@ -176,7 +312,10 @@ def parse_actionable():
                     items.append({"component": comp, "namespace": ns, "kind": kind,
                                   "current": am.group(1), "target": am.group(2),
                                   "type": st if st != "unknown" else row_type,
-                                  "cell": cell.strip()})
+                                  "cell": cell.strip(),
+                                  # the table carries tags only, never the image
+                                  # repo — resolved later from the detail index
+                                  "image_repo": None})
     return items
 
 
@@ -190,8 +329,13 @@ _EXT_HEAD = re.compile(r"^### (.+?) \(`[^`]+`\)\s*$")
 _EXT_VER = re.compile(r"^- \*\*Version:\*\* `([^`]+)`.*?(?:→|->) `([^`]+)`")
 
 
-def parse_detail_images():
+def parse_detail_images(repo_index=None):
     """Every image update from the PER-APP detail sections.
+
+    `repo_index` (optional dict) is filled with {component: {image repos}} for
+    EVERY app in the report, update or not — the overview table lists tags
+    without their repository, so this is how an overview row learns which image
+    it is talking about (needed to decide REBUILD on the image, not the app).
 
     The Quick Overview Table carries ONE image per app, so init containers,
     sidecars and base images never reached the crack detector at all — for
@@ -211,26 +355,36 @@ def parse_detail_images():
         return []
     items, ns, comp, pending_app = [], None, None, None
     repo = cur = None
+    in_images = False           # `#### Container Images` vs `#### Chart`
     for line in VERSION_MD.read_text().splitlines():
         m = _NS_HEAD.match(line)
         if m:
-            ns, comp, pending_app = m.group(1), None, None
+            ns, comp, pending_app, in_images = m.group(1), None, None, False
             continue
         if line.startswith("## "):          # left the namespace sections
             ns = comp = pending_app = None
+            in_images = False
             continue
         m = _APP_HEAD.match(line)
         if m and ns:
             pending_app = m.group(1).strip().strip("`")
             continue
         if pending_app and line.startswith("- **File:**"):
-            comp, pending_app = pending_app, None
+            comp, pending_app, in_images = pending_app, None, False
             continue
         if not comp:
+            continue
+        if line.startswith("#### "):
+            # the CHART block carries a `Repository:` line too (`bjw-s`); only
+            # the image block may feed the repo index, or every app-template
+            # app would look like it mounts a non-self-built image.
+            in_images = line.startswith("#### Container Images")
             continue
         m = _REPO_LINE.match(line)
         if m:
             repo, cur = m.group(1), None
+            if in_images and repo_index is not None:
+                repo_index.setdefault(comp.lower(), set()).add(repo)
             continue
         m = _CURTAG_LINE.match(line)
         if m:
@@ -243,7 +397,7 @@ def parse_detail_images():
                 items.append({"component": comp, "namespace": ns, "kind": "image",
                               "current": cur, "target": tgt,
                               "type": _semver_type(cur, tgt), "cell": f"{repo} {cur} → {tgt}",
-                              "source": f"detail:{repo}"})
+                              "source": f"detail:{repo}", "image_repo": repo})
     return items
 
 
@@ -405,7 +559,28 @@ def match_plan(item, keys, plans):
     return drifted if drifted else (None, None)
 
 
-def assign_lane(item, policy, prs, plans):
+def is_self_built(item, comp) -> bool:
+    """Is THIS item's image one we build ourselves?
+
+    Decided on the IMAGE repository whenever it is known — a component name only
+    says which app mounts the image, not who builds it (F-62007db7: paperclip is
+    in SELF_BUILT but every one of its four images is third-party). The
+    component set is the fallback for items whose repo the version report does
+    not carry (e.g. overview-table rows for apps with no detail section).
+    """
+    if item["kind"] != "image":
+        return False                       # a chart is never a self-built image
+    repos = [r for r in ([item.get("image_repo")] if item.get("image_repo")
+                         else item.get("image_repos") or []) if r]
+    if repos:
+        # ALL of them, not ANY: on a multi-image row we cannot attribute the
+        # bump, and calling a third-party image "self-built" parks a bumpable
+        # update in a lane that can never bump it.
+        return all(_is_self_built_repo(r) for r in repos)
+    return comp in SELF_BUILT
+
+
+def assign_lane(item, policy, prs, plans, ar_holds=None):
     """(lane, reason, drift) for one actionable update."""
     comp = item["component"].lower()
     utype = item["type"]
@@ -415,12 +590,18 @@ def assign_lane(item, policy, prs, plans):
 
     if comp in HELD or key in HELD:
         return "HELD", HELD.get(comp) or HELD.get(key, "held"), None
-    if comp in SELF_BUILT:
+    if is_self_built(item, comp):
         return "REBUILD", "self-built image — rebuild in its source repo (not a cluster tag bump)", None
     plan, drift = match_plan(item, {comp, key}, plans)
     if plan:
         return "PLAN", f"plan exists: {plan['plan_id']} ({plan['status']})", (
             f"{plan['file']}: {drift}" if drift else None)
+    # CHANNEL GATE — must sit ABOVE both AUTO exits (the Renovate-PR shortcut and
+    # the safe patch/minor default): a pre-release target is not made safe by a
+    # PR existing for it, and the window applies the AUTO lane unattended.
+    ch = channel_hold(comp, item, ar_holds)
+    if ch:
+        return "PLAN", ch, None
     if prs.get(comp) or prs.get(key):
         return "AUTO", f"Renovate PR #{prs.get(comp) or prs.get(key)}", None
     dn = denied(policy, key, utype)
@@ -431,6 +612,69 @@ def assign_lane(item, policy, prs, plans):
     return "CRACK", "actionable but unclassifiable — MUST be triaged", None
 
 
+_TRUNC = re.compile(r"(?:\.{3}|…)\s*$")
+
+
+def _is_truncated(v) -> bool:
+    """The overview table clips long cells; the detail sections do not."""
+    return bool(v) and bool(_TRUNC.search(str(v)))
+
+
+def _dedupe_tag(v) -> str:
+    """Canonical form of a tag for DEDUPE only — the leading version core.
+
+    `v0.144.1-noble-ful...` (table, truncated) and `v0.144.1-noble-full`
+    (detail) are the same bump; comparing the raw strings said otherwise and
+    double-counted the item in its lane.
+    """
+    s = _TRUNC.sub("", str(v or "").strip()).lstrip("vV")
+    m = re.match(r"\d+(?:\.\d+)*", s)
+    return m.group(0) if m else s.lower()
+
+
+def _apply_lockstep(lanes, needs_plan):
+    """Pull an AUTO item back to PLAN when a SIBLING of the same component is held.
+
+    A chart and the image it deploys are ONE deployable unit. unpoller made the
+    hazard concrete (2026-08-18): chart `2.1.0 → 2.4.0` scored a safe minor and
+    landed in AUTO, while the image `v2.39.0 → v3.5.0` is PLAN-held for
+    mon-early 2026-08-24 — so the next window would have moved the chart (whose
+    appVersion is v3.5.0, i.e. it crosses the held image's major) while
+    `image.tag` stayed pinned at v2.39.0: a v3-aware chart driving a v2 image,
+    unattended, with none of the plan's vetting.
+
+    The rule deliberately does NOT try to read appVersion (the version report
+    does not carry it, and a rule that needs data we may not have fails open).
+    Same component + a held sibling is sufficient and strictly safer: it can
+    only ever move work OUT of the unattended lane, and it self-clears the
+    moment the plan executes and the hold disappears.
+    """
+    holders = {}
+    for lane in ("PLAN", "HELD"):
+        for e in lanes[lane]:
+            holders.setdefault(str(e.get("component", "")).lower(), (lane, e))
+    moved = []
+    for e in list(lanes["AUTO"]):
+        comp = str(e.get("component", "")).lower()
+        held = holders.get(comp)
+        if not held:
+            continue
+        hlane, he = held
+        e["lane"] = "PLAN"
+        e["lockstep_with"] = f"{he['kind']} {he['current']}→{he['target']} [{hlane}]"
+        e["reason"] = (f"lockstep — the {comp} {he['kind']} is {hlane} "
+                       f"({str(he.get('reason', ''))[:60]}); a {e['kind']} bump must move "
+                       f"WITH it in the same window, never unattended ahead of it")
+        lanes["AUTO"].remove(e)
+        lanes["PLAN"].append(e)
+        moved.append(e)
+        # covered by the sibling's plan / planner dispatch — but that plan must
+        # now describe BOTH halves, so flag it for the operator.
+        if any(n.get("component", "").lower() == comp for n in needs_plan) and e not in needs_plan:
+            needs_plan.append(e)
+    return moved
+
+
 def reconcile():
     policy = load_policy()
     actionable = parse_actionable()
@@ -439,22 +683,48 @@ def reconcile():
                 "cracks": [{"component": "version-check", "reason": "no version data"}]}
     # Widen the universe beyond the one-image-per-app overview table, then
     # dedupe: the table row and the detail block describe the SAME bump.
-    seen = {(i["component"].lower(), i["kind"], i["current"], i["target"])
-            for i in actionable}
-    for extra in parse_detail_images() + parse_external_infra():
-        k = (extra["component"].lower(), extra["kind"], extra["current"], extra["target"])
-        if k not in seen:
-            seen.add(k)
+    #
+    # Dedupe on a NORMALISED target. The overview table TRUNCATES long cells
+    # (`v0.143.0-noble-full → v0.144.1-noble-ful...`), so an exact-string key
+    # never matched its own detail row and scrypted was counted twice — AUTO
+    # read 4 when it was really 3. A lane count that overstates itself is the
+    # same class of bug as CRACK 0 meaning "never looked at".
+    repo_index: dict = {}
+    detail = parse_detail_images(repo_index)
+    by_key: dict = {}
+    for i in actionable:
+        by_key[(i["component"].lower(), i["kind"], _dedupe_tag(i["current"]),
+                _dedupe_tag(i["target"]))] = i
+    for extra in detail + parse_external_infra():
+        k = (extra["component"].lower(), extra["kind"], _dedupe_tag(extra["current"]),
+             _dedupe_tag(extra["target"]))
+        dup = by_key.get(k)
+        if (dup is not None and dup.get("image_repo") and extra.get("image_repo")
+                and dup["image_repo"] != extra["image_repo"]):
+            # two genuinely different images that merely share a version pair
+            dup, k = None, k + (extra["image_repo"],)
+        if dup is None:
+            by_key[k] = extra
             actionable.append(extra)
+        elif _is_truncated(dup.get("target")) and not _is_truncated(extra.get("target")):
+            # same bump, but the detail row has the UNTRUNCATED tag and the
+            # image repo — keep the better record in place.
+            dup.update({kk: vv for kk, vv in extra.items() if vv is not None})
+    # Attach the component's image repos to rows that carry tags only, so the
+    # REBUILD decision can be made on the IMAGE (see is_self_built).
+    for i in actionable:
+        if i["kind"] == "image" and not i.get("image_repo"):
+            i["image_repos"] = sorted(repo_index.get(i["component"].lower(), ()))
     prs = parse_renovate_prs()
     plans = load_plans()
+    ar_holds = ar_prerelease_holds()
 
     lanes = {"AUTO": [], "PLAN": [], "REBUILD": [], "HELD": [], "CRACK": []}
     needs_plan = []  # PLAN-lane items with NO plan file yet → sweep must dispatch a planner
     plan_drift = []  # live plans whose target has fallen behind upstream
     seen_app_template = False
     for it in actionable:
-        lane, reason, drift = assign_lane(it, policy, prs, plans)
+        lane, reason, drift = assign_lane(it, policy, prs, plans, ar_holds)
         # dedupe the ~40 app-template rows into one PLAN item
         if it["kind"] == "chart" and it["target"].startswith("5."):
             if seen_app_template:
@@ -469,8 +739,11 @@ def reconcile():
         if lane == "PLAN" and not reason.startswith("plan exists"):
             needs_plan.append(entry)
 
+    lockstep = _apply_lockstep(lanes, needs_plan)
+
     return {
         "counts": {k: len(v) for k, v in lanes.items()},
+        "lockstep": lockstep,               # AUTO items pulled back to PLAN
         "lanes": lanes,
         "needs_plan": needs_plan,           # dispatch an upgrade-planner for each
         "plan_drift": plan_drift,           # plan exists but its target is stale
@@ -490,6 +763,12 @@ def human(r):
         L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner for each:")
         for e in r["needs_plan"]:
             L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}] — {e['reason'][:70]}")
+    if r.get("lockstep"):
+        L.append(f"\nLOCKSTEP HOLDS ({len(r['lockstep'])}) — pulled OUT of AUTO: a sibling of the "
+                 f"same component is held, so this must move with it, not before it:")
+        for e in r["lockstep"]:
+            L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}] "
+                     f"— held sibling: {e.get('lockstep_with')}")
     if r.get("plan_drift"):
         L.append(f"\nPLAN TARGET DRIFT ({len(r['plan_drift'])}) — covered, but the plan needs a refresh:")
         for e in r["plan_drift"]:
