@@ -760,6 +760,31 @@ for i in json.load(sys.stdin)['items']:
           'push=', st.get('lastPushCommit'), 'run=', st.get('lastAutomationRunTime'))"
 ```
 
+**Flux sync-source credential** — three signals, added 2026-08-18 (`c24ffb80`). A
+SEPARATE block from the two above; it is not about image automation at all.
+
+Since the `sync.pullSecret` fix the `flux-system` GitRepository authenticates and does
+**not** fall back to anonymous, so losing the credential now halts **all 136
+Kustomizations**, not just image automation. That coupling is what this asserts on.
+
+| Signal | Shape | Severity |
+|---|---|---|
+| (a) structural | `secretRef` silently vanished from the GitRepository again — the `FluxInstance` pruning trap recurring | MAJOR |
+| (b) reactive | source already failing auth (Ready message matches `auth\|credential\|401\|403\|unauthorized\|denied`) | **CRITICAL** — whole GitOps loop stalled |
+| (c) proactive | credential expiry, read from GitHub's `github-authentication-token-expiration` header | 45d minor / 14d major / expired critical |
+
+Signal (c) is the one that most needs documenting: expiry is otherwise **completely
+silent**, because `lastPushCommit` stays non-null from the pre-expiry pushes and the
+image-automation assertion above keeps reading green straight through the outage.
+
+**Flux guardrail binding** — added 2026-08-18 (`c24ffb80`). Asserts the
+`flux-imageupdateautomation-sourceref` ValidatingAdmissionPolicy **and its Binding** both
+exist and that the Binding still resolves to the policy with `validationActions: [Deny]`.
+A policy whose Binding is missing is 100% inert while `kubectl get
+validatingadmissionpolicy` still lists it — "applied" and "effective" are different
+claims, and `prune: true` on the owning Kustomization makes silent removal possible.
+```
+
 - The tell is `lastPushCommit` null while `lastAutomationRunTime` advances. An
   automation that has pushed even once keeps a non-null `lastPushCommit` forever.
 - **`lastPushCommit: null` alone is NOT a fault.** An automation whose policy tag already

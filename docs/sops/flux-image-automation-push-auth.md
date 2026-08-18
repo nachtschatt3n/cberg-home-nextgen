@@ -243,7 +243,7 @@ Residual after the guardrail: the (Setters-bounded) capability is still reachabl
 Before `505fefa4` the GitRepository had no credential and cloned this **public** repo
 anonymously. Credential problems could only ever stop *push*. Now that `sync.pullSecret` is
 set, source-controller authenticates and **does not fall back to anonymous**. A revoked or
-expired token therefore stalls the artifact that all ~135 Kustomizations read from: the
+expired token therefore stalls the artifact that all ~136 Kustomizations read from: the
 **entire GitOps loop** stops taking new commits, not just image automation.
 
 The live token happens to be **non-expiring**, so the expiry half of this coupling is latent
@@ -309,8 +309,13 @@ together, or not at all.**
 
    ```bash
    cd /Users/mu/code/cberg-home-nextgen
-   mise exec -- task template:configure -- --strict
-   mise exec -- kubeconform -summary -fail-on error kubernetes/apps/flux-system/flux-operator
+   # NOTE: `task template:configure` was deleted in d12ca558 (2025-10-05) and no longer
+   # exists, despite still being cited in several docs. The live target is `task
+   # kubeconform` -- but mind its own caveat (new-deployment-blueprint.md): kubeconform
+   # SKIPS every CRD kind, so it can validate nothing and still exit 0. It cannot see a
+   # bad FluxInstance value at all; only the live read-back in section 6 can.
+   mise exec -- task kubeconform
+   mise exec -- kubeconform -summary -exit-on-error -ignore-missing-schemas -strict kubernetes/apps/flux-system/flux-operator
    git add kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml
    git commit -m "fix(flux): sync credential is pullSecret, not secretRef — silently pruned"
    git pull --rebase && git push

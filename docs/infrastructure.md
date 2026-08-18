@@ -21,6 +21,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Storage | Longhorn v1.11.2 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
+| Admission Control | Native `ValidatingAdmissionPolicy` (CEL, in-apiserver — no webhook, no Kyverno/Gatekeeper/OPA). 2 policies: `flux-imageupdateautomation-sourceref` (house-owned confused-deputy guardrail, `failurePolicy: Fail`, see `docs/sops/flux-image-automation-push-auth.md`) and `safe-upgrades.gateway.networking.k8s.io` (shipped inside the Gateway API bundle). Separately, 8 `ValidatingWebhookConfiguration` + 5 `MutatingWebhookConfiguration` come from vendor charts (cert-manager, longhorn, kube-prometheus-stack, elastic-operator, otel-operator, intel device plugins, ingress-nginx). |
 | Auth | Authentik |
 
 ---
@@ -188,7 +189,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | cert-manager | TLS certificate management | 1 |
 | network | Ingress controllers, DNS, networking | 6 |
 | default | Dashboard (Homepage) + utilities | 2 |
-| flux-system | Flux GitOps operator | 1 |
+| flux-system | Flux GitOps operator + admission guardrails | 2 |
 | backup | External backup integrations | 1 |
 | my-software-development | Custom app development | 3 |
 | my-software-production | Custom app production | 4 |

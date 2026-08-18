@@ -22,13 +22,13 @@
 | cert-manager | 1 |
 | network | 8 |
 | default | 2 |
-| flux-system | 1 |
+| flux-system | 2 |
 | backup | 2 |
 | security | 2 |
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **122** |
+| **Total** | **123** |
 
 ---
 
@@ -231,6 +231,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | flux-operator | Flux GitOps operator + webhook receiver | Internal (webhook) | — |
+| flux-guardrails | Policy-only, deploys no workload. Cluster-scoped `ValidatingAdmissionPolicy` + Binding pinning which namespaces may cross-reference the write-capable `flux-system` GitRepository from an `ImageUpdateAutomation` (confused-deputy guardrail, `failurePolicy: Fail`). Its `ks.yaml` deliberately carries **no** `targetNamespace` — both objects are cluster-scoped. See `docs/sops/flux-image-automation-push-auth.md`. | None | — |
 
 ---
 

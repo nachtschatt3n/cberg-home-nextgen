@@ -2222,6 +2222,77 @@ print(int((d - datetime.now(timezone.utc)).total_seconds() // 86400))
     fi
     echo ""
 
+    # -----------------------------------------------------------------------
+    # (4) IS THE CONFUSED-DEPUTY GUARDRAIL STILL EFFECTIVE?
+    #
+    #     A ValidatingAdmissionPolicy with no ValidatingAdmissionPolicyBinding is
+    #     100% inert -- and `kubectl get validatingadmissionpolicy` still lists it,
+    #     cheerfully, forever. "Applied" and "effective" are different claims. This
+    #     is the same silent-no-op class as the pruned FluxInstance field that
+    #     started this whole incident, which is exactly why it gets an assertion
+    #     rather than a line in a SOP: the owning Kustomization runs prune: true,
+    #     so the Binding can disappear without anything going red.
+    #
+    #     Deliberately asserts the LINKAGE (binding.policyName resolves, action is
+    #     Deny), not merely that two objects exist.
+    echo "Flux confused-deputy guardrail:"
+    VAP_OUT=$(python3 -c "
+import json, subprocess
+
+NAME = 'flux-imageupdateautomation-sourceref'
+
+def get(kind, name):
+    r = subprocess.run(['kubectl', 'get', kind, name, '-o', 'json'],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        return None
+
+pol = get('validatingadmissionpolicy', NAME)
+bnd = get('validatingadmissionpolicybinding', NAME)
+
+if pol is None:
+    print('  MISSING-POLICY: ValidatingAdmissionPolicy ' + NAME + ' is absent')
+    print(1); raise SystemExit
+if bnd is None:
+    print('  INERT-POLICY: ' + NAME + ' exists but has NO Binding -- it enforces NOTHING')
+    print(1); raise SystemExit
+
+bad = 0
+bspec = bnd.get('spec', {}) or {}
+if bspec.get('policyName') != NAME:
+    print('  BROKEN-LINK: Binding.policyName=' + str(bspec.get('policyName')) + ' does not resolve to ' + NAME)
+    bad += 1
+actions = bspec.get('validationActions') or []
+if 'Deny' not in actions:
+    print('  NOT-ENFORCING: Binding validationActions=' + str(actions) + ' (Audit/Warn does not block)')
+    bad += 1
+if (pol.get('spec', {}) or {}).get('failurePolicy') != 'Fail':
+    print('  FAIL-OPEN: policy failurePolicy is not Fail')
+    bad += 1
+warns = ((pol.get('status', {}) or {}).get('typeChecking', {}) or {}).get('expressionWarnings')
+if warns:
+    print('  CEL-TYPECHECK-WARN: ' + str(warns)[:200])
+    bad += 1
+print(bad)
+" 2>/dev/null || echo "ERR")
+    echo "$VAP_OUT" | sed '$d'
+    if echo "$VAP_OUT" | tail -1 | grep -q ERR; then
+        log_warning "Guardrail query failed - assertion did NOT run"
+        add_major_issue "Flux confused-deputy guardrail assertion did not run (kubectl/python failure)"
+    else
+        VAP_BAD=$(echo "$VAP_OUT" | tail -1 | tr -cd '0-9'); [ -z "$VAP_BAD" ] && VAP_BAD=0
+        if [ "$VAP_BAD" -gt 0 ]; then
+            log_error "Confused-deputy guardrail is NOT effective ($VAP_BAD problem(s))"
+            add_critical_issue "Flux cross-namespace image-automation guardrail is not enforcing - any namespace can again reference the write-capable flux-system GitRepository and drive a git push (docs/sops/flux-image-automation-push-auth.md section 3)"
+        else
+            log_success "Cross-namespace image-automation guardrail bound and enforcing (Deny)"
+        fi
+    fi
+    echo ""
     echo "Flux controllers status:"
     kubectl get pods -n flux-system
     echo ""
