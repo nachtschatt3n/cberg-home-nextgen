@@ -29,7 +29,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/absenty
-              tag: production-20260818183804 # {"$imagepolicy": "my-software-production:absenty:tag"}
+              tag: production-20260818185444 # {"$imagepolicy": "my-software-production:absenty:tag"}
               pullPolicy: IfNotPresent
             env:
               - name: TZ
