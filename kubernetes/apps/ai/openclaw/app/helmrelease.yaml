@@ -1038,6 +1038,30 @@ spec:
                     });
                     cfg.bindings = specB.concat(rest);
                   }
+                  // REPAIR (2026-08-18): the PVC config keeps whatever was set on a
+                  // previous boot, so removing the ElevenLabs block above is not
+                  // enough — cfg.talk.provider stayed 'elevenlabs' and Discord voice
+                  // stayed enabled, both pointing at a provider that no longer exists.
+                  // Actively strip them.
+                  if (cfg.talk && cfg.talk.provider === 'elevenlabs') {
+                    delete cfg.talk.provider;
+                    if (cfg.talk.providers) delete cfg.talk.providers.elevenlabs;
+                    if (!cfg.talk.providers || !Object.keys(cfg.talk.providers).length) {
+                      delete cfg.talk.providers;
+                    }
+                    if (!Object.keys(cfg.talk).length) delete cfg.talk;
+                  }
+                  try {
+                    const dv = cfg.channels && cfg.channels.discord && cfg.channels.discord.voice;
+                    if (dv && (
+                      (dv.tts && dv.tts.provider === 'elevenlabs') ||
+                      (dv.realtime && dv.realtime.provider === 'elevenlabs'))) {
+                      dv.enabled = false;
+                      if (dv.tts) delete dv.tts.provider;
+                      if (dv.realtime) delete dv.realtime.provider;
+                    }
+                  } catch (e) { /* discord block absent — nothing to repair */ }
+
                   // Voice notes are produced by the `say` skill (self-hosted Qwen3-TTS on
                   // the Mac mini). ElevenLabs was removed 2026-08-18 — it was metered,
                   // effectively unused, and its budget guard once blocked a whole morning
