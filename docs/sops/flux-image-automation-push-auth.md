@@ -373,7 +373,7 @@ the same two objects within 22 minutes on 2026-08-18, with no intervening change
 At 16:35 the object is `Ready=True`, `reason=Succeeded`, message `repository
 up-to-date` — indistinguishable from healthy by every ordinary Flux signal — while
 `lastPushCommit` is still `null` and not one commit has ever been pushed (duration
-and affected workloads: `security_ref: F-4c1f9ab2`). "Up-to-date" here means *the controller compared and found nothing it was able
+and affected workloads: `security_ref: F-8d4645f6`). "Up-to-date" here means *the controller compared and found nothing it was able
 to write*, not *the cluster is running the latest image*.
 
 **Consequence for any check you write:** a not-Ready assertion alone MISSES this most
@@ -730,7 +730,7 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
 - `2026.08.18`: Initial version. Written from the 2026-08-18 sweep finding: both
   `absenty-image-updates` automations had `lastPushCommit: null` since creation
   because the `flux-system` GitRepository carried no `secretRef` (duration and
-  affected workloads: `security_ref: F-4c1f9ab2`). Root cause
+  affected workloads: `security_ref: F-8d4645f6`). Root cause
   traced to `FluxInstance.spec.sync` accepting `pullSecret` (string) while the repo
   declared `secretRef` (object), which the apiserver pruned silently. Remediation
   documented, not executed — the PAT scope is operator-owned. Also records the

@@ -715,8 +715,14 @@ def _finding_row(cur, finding_id: str):
             if row is None:
                 continue
             if row["finding_id"] != finding_id:
-                print(f"note: {finding_id} was renamed to {row['finding_id']} "
-                      f"(fingerprint migration); showing the current row.",
+                # Deliberately does NOT assert a cause. prior_finding_ids
+                # holds two kinds of entry: ids a row was RENAMED from (a
+                # fingerprint migration), and ids a row has ADOPTED (a
+                # committed ref that was authored without the record ever
+                # being created — F-4c1f9ab2). Claiming "renamed" for the
+                # second kind invents a migration that never happened.
+                print(f"note: {finding_id} resolves to {row['finding_id']} "
+                      f"via a recorded prior id; showing that row.",
                       file=sys.stderr)
             return row
     return None
@@ -880,10 +886,10 @@ def cmd_finding_detail(args, dsn):
         # no error. Make the operator confirm rather than inferring consent
         # from a stderr note they may never see.
         if row["finding_id"] != args.finding_id:
-            print(f"{args.finding_id} resolved to {row['finding_id']} "
+            print(f"{args.finding_id} resolves to {row['finding_id']} "
                   f"(id={row['id']}, "
                   f"{'open' if row['resolved_at'] is None else 'RESOLVED'}) "
-                  f"via a rename.", file=sys.stderr)
+                  f"via a recorded prior id.", file=sys.stderr)
             if not args.follow_rename:
                 print(f"refusing to write private detail to a different finding "
                       f"than the one named. Re-run against {row['finding_id']}, "
