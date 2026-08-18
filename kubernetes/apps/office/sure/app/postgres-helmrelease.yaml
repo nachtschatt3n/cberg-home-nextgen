@@ -36,8 +36,8 @@ spec:
           main:
             image:
               repository: pgvector/pgvector
-              # Digest-pinned: upstream rebuilds pg16/0.8.1-pg16 in place (PG 16.11 + pgvector 0.8.1)
-              tag: 0.8.1-pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
+              # Digest-pinned: upstream rebuilds pg16 tags in place (PG 16.x + pgvector 0.8.6)
+              tag: 0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
               pullPolicy: IfNotPresent
             env:
               - name: POSTGRES_USER
