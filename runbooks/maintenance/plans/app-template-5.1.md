@@ -76,8 +76,9 @@ conflicts_with:                     # never share a window with:
 security_ref: null
 status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, operator-approved
                                     # standing GO). Progress: Step 0 DONE (cb242c1a); tier 0
-                                    # canary DONE (f01aadeb, echo-server 5.1.0 verified); tier 1
-                                    # IN PROGRESS (c5365e63 + PVC-naming defect fix — see §1a).
+                                    # canary DONE (f01aadeb); tier 1 COMPLETE 2026-08-18
+                                    # (c5365e63 bump + 87fc44fe §1a suffix fix; 15/15 Ready@5.1.0,
+                                    # 12/12 PVCs bound orig names, HTTP all non-5xx, no rollbacks).
                                     # Supersedes app-template-5.0.md (deleted in same commit).
 window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
                                     # continue same run or fall back to the 8-window schedule:
@@ -248,7 +249,7 @@ bump + standard Step D delete.
 | absenty (msd + msp) | Recreate; **live ImageUpdateAutomation writes its helmrelease.yaml every ~20-30 min**; multi generated PVCs | CARE — suspend both automations for tier 2, restore same window (§3 Step B'); add explicit `suffix` per PVC (§1a) |
 | andreamosteller (msd+msp), opencode-andreamosteller (msd) | multi-container/multi-svc (opencode) | ok |
 | gas-price-monitor, rainbow-rescue (msp) | caps add (NET_BIND_SERVICE etc.) | ok |
-| showcase ×15 (my-software-showcase) | uniform: Recreate + ingress(homepage); 10 wrappers carry chart-generated longhorn-static PVCs; uzeit-de/globalmobility are TYPO3+external MariaDB | **hit §1a live** — `suffix` fix landed with tier 1; uzeit-de has 15m HR timeout (152cb651) |
+| showcase ×15 (my-software-showcase) | uniform: Recreate + ingress(homepage); 10 wrappers carry chart-generated longhorn-static PVCs; uzeit-de/globalmobility are TYPO3+external MariaDB | **hit §1a live** — `suffix` fix landed with tier 1; uzeit-de 15m-HR-timeout fear was a NON-ISSUE in execution (2026-08-18) |
 | cloudflared (network) | **serviceMonitor**; RollingUpdate; the external tunnel itself | CARE — LAST, alone (tier 7); `job=` flip |
 | affine(+pg,+redis) (office) | initContainers, dependsOn ×2, Recreate | CARE — pg+redis → affine |
 | sure-pg, sure-redis (office) | Recreate (the `sure` app itself is NOT app-template) | ok — verify Sure reconnects |

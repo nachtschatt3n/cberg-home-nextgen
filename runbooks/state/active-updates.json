@@ -1,3 +1,39 @@
 {
-  "active": []
+  "active": [
+    {
+      "app": "app-template",
+      "namespace": "my-software-development",
+      "until": "2026-08-18T10:56:25Z",
+      "note": "app-template 3.7.3->5.1.0 tier 2",
+      "started": "2026-08-18T06:56:25Z"
+    },
+    {
+      "app": "app-template",
+      "namespace": "my-software-production",
+      "until": "2026-08-18T10:56:26Z",
+      "note": "app-template 3.7.3->5.1.0 tier 2",
+      "started": "2026-08-18T06:56:26Z"
+    },
+    {
+      "app": "app-template",
+      "namespace": "backup",
+      "until": "2026-08-18T10:56:26Z",
+      "note": "app-template 3.7.3->5.1.0 tier 2",
+      "started": "2026-08-18T06:56:26Z"
+    },
+    {
+      "app": "app-template",
+      "namespace": "databases",
+      "until": "2026-08-18T10:56:26Z",
+      "note": "app-template 3.7.3->5.1.0 tier 2",
+      "started": "2026-08-18T06:56:26Z"
+    },
+    {
+      "app": "app-template",
+      "namespace": "media",
+      "until": "2026-08-18T10:56:26Z",
+      "note": "app-template 3.7.3->5.1.0 tier 2",
+      "started": "2026-08-18T06:56:26Z"
+    }
+  ]
 }
