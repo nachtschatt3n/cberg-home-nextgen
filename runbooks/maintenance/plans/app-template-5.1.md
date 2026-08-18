@@ -77,8 +77,10 @@ security_ref: null
 status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, operator-approved
                                     # standing GO). Progress: Step 0 DONE (cb242c1a); tier 0
                                     # canary DONE (f01aadeb); tier 1 COMPLETE 2026-08-18
-                                    # (c5365e63 bump + 87fc44fe §1a suffix fix; 15/15 Ready@5.1.0,
-                                    # 12/12 PVCs bound orig names, HTTP all non-5xx, no rollbacks).
+                                    # (c5365e63 + 87fc44fe §1a suffix fix; 15/15 Ready@5.1.0).
+                                    # tier 2 COMPLETE 2026-08-18 (66ca4616; 12 wrappers + _template
+                                    # file-bump, absenty suffix same-commit, PVC uids unchanged,
+                                    # automations resumed). 28/78 live @5.1.0.
                                     # Supersedes app-template-5.0.md (deleted in same commit).
 window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
                                     # continue same run or fall back to the 8-window schedule:
