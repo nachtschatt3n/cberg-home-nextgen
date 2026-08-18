@@ -149,7 +149,7 @@ class TestVersionSnapshotParser(unittest.TestCase):
 """
 
     def test_extracts_app_version_not_namespace(self):
-        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        rows = dict(sc._parse_version_snapshot(self.TABLE)[0])
         self.assertEqual(rows.get("open-webui"), "0.11.0")
         self.assertEqual(rows.get("superset"), "5.0.0")
         for name, ver in rows.items():
@@ -157,17 +157,57 @@ class TestVersionSnapshotParser(unittest.TestCase):
                              f"{name}: namespace leaked through as the version")
 
     def test_drops_uncomparable_versions(self):
-        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        rows = dict(sc._parse_version_snapshot(self.TABLE)[0])
         self.assertNotIn("librechat", rows, "'-' is not a comparable version")
         self.assertNotIn("mcpo", rows, "'git-<sha>' is not a comparable version")
 
     def test_strips_variant_suffix_and_digest(self):
-        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        rows = dict(sc._parse_version_snapshot(self.TABLE)[0])
         self.assertEqual(rows.get("openclaw"), "22.23.2")
 
     def test_header_row_is_not_a_component(self):
-        rows = dict(sc._parse_version_snapshot(self.TABLE))
+        rows = dict(sc._parse_version_snapshot(self.TABLE)[0])
         self.assertNotIn("Deployment", rows)
+
+    def test_dropped_rows_are_reported_not_swallowed(self):
+        """A mapped component with no comparable version must not vanish.
+
+        cert-manager's App cell is `-` (its version is in the Chart column), so
+        it is dropped by the version filter. It was then in NEITHER `candidates`
+        NOR `unmapped`, so it was never queried and never reported as
+        unchecked — the same silently-folded-into-a-green shape one layer down.
+        """
+        table = self.TABLE + "| `cert-manager` | `cert-manager` | 1.21.1 | x | - | - |\n"
+        rows, dropped = sc._parse_version_snapshot(table)
+        self.assertIn("cert-manager", dropped)
+        self.assertNotIn("cert-manager", dict(rows))
+        self.assertIn("cert-manager", sc._OSV_PACKAGES,
+                      "fixture assumes cert-manager IS mapped")
+
+
+class TestTransientClassifier(unittest.TestCase):
+
+    def _http(self, code):
+        return urllib.error.HTTPError("u", code, "m", None, None)
+
+    def test_cloudflare_and_5xx_range_are_transient(self):
+        for code in (500, 502, 503, 504, 507, 508, 509, 520, 521, 522, 524, 527):
+            self.assertTrue(sc._is_transient(self._http(code)),
+                            f"HTTP {code} must veto — misfiling it loses findings")
+
+    def test_throttle_codes_are_transient(self):
+        for code in (403, 408, 425, 429):
+            self.assertTrue(sc._is_transient(self._http(code)))
+
+    def test_client_errors_are_permanent(self):
+        for code in (400, 401, 404, 410, 422):
+            self.assertFalse(sc._is_transient(self._http(code)))
+
+    def test_non_numeric_code_does_not_raise(self):
+        class Weird(Exception):
+            code = "not-a-number"
+        self.assertTrue(sc._is_transient(Weird()),
+                        "unknown shape must fail SAFE (veto), not raise")
 
 
 class TestOsvLive(unittest.TestCase):

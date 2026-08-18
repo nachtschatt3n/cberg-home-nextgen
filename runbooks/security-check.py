@@ -236,14 +236,27 @@ def _scope() -> str:
 # nothing for auto-close to wrongly resolve — and vetoing on it would keep
 # auto-close switched off forever, protecting nothing. Steady-state breakage is
 # reported as a FINDING instead, which is how it gets fixed.
-_TRANSIENT_HTTP = {408, 425, 429, 500, 502, 503, 504}
+# 403 is included because rate limiters (GitHub, some registries) signal
+# throttling with it. 5xx is a RANGE, not an enumeration: the Cloudflare family
+# (520-527, esp. 521 origin-down / 522 / 524 timeout) and 507/508/509 are
+# textbook transient, and misfiling them as permanent is the direction that
+# LOSES data — no veto, real findings auto-close during an edge outage. Matches
+# check-all-versions.py's classifier; the two must not drift.
+_TRANSIENT_HTTP = {408, 425, 429, 403}
 
 
 def _is_transient(exc: Exception) -> bool:
     """True when `exc` is a retry-worthy blip rather than a permanent defect."""
     code = getattr(exc, "code", None)
     if code is not None:
-        return int(code) in _TRANSIENT_HTTP
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            # A non-numeric .code must not raise out of an except: block and
+            # abort the section. Unknown shape -> treat as transient (the
+            # fail-safe direction: veto rather than auto-close on doubt).
+            return True
+        return code in _TRANSIENT_HTTP or code >= 500
     # Timeouts / DNS / connection resets have no status code.
     return isinstance(exc, (TimeoutError, OSError))
 
@@ -265,8 +278,11 @@ def run(cmd: str, timeout: int = 30) -> str:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip()
     except Exception as e:
+        # redact(): the s3 history pickaxe carries the secret DOMAIN inside
+        # the command string, well within cmd[:90], and this reason is printed
+        # to stdout and repeated in close()'s auto-close SKIPPED line.
         DEGRADED.record(_scope(), f"command failed ({cmd.split()[0]})",
-                        f"{type(e).__name__} after {timeout}s: {cmd[:90]}")
+                        redact(f"{type(e).__name__} after {timeout}s: {cmd[:90]}"))
         return ""
 
 
@@ -276,8 +292,11 @@ def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:
+        # redact(): the s3 history pickaxe carries the secret DOMAIN inside
+        # the command string, well within cmd[:90], and this reason is printed
+        # to stdout and repeated in close()'s auto-close SKIPPED line.
         DEGRADED.record(_scope(), f"command failed ({cmd.split()[0]})",
-                        f"{type(e).__name__} after {timeout}s: {cmd[:90]}")
+                        redact(f"{type(e).__name__} after {timeout}s: {cmd[:90]}"))
         return 1, "", str(e)
 
 
@@ -1284,7 +1303,7 @@ def _newer_upstream_tag_exists(image_ref: str):
         return None
 
 
-def _parse_version_snapshot(content: str) -> list[tuple[str, str]]:
+def _parse_version_snapshot(content: str) -> tuple[list[tuple[str, str]], list[str]]:
     """Extract (deployment, app_version) from version-check-current.md.
 
     The table is `| Deployment | Namespace | Chart | Image | App | Complexity |`.
@@ -1299,9 +1318,13 @@ def _parse_version_snapshot(content: str) -> list[tuple[str, str]]:
     app-template 5.1.0, which is not the software under test). Rows whose App
     cell is not a comparable version — `-`, `latest`, `git-<sha>`, a bare
     digest — are dropped: OSV cannot match them, and guessing is worse than
-    not checking.
+    not checking. Returns (rows, dropped_names) — the caller MUST account for
+    the dropped set, or a component with a verified mapping but no comparable
+    version (cert-manager, whose App cell is `-`) lands in neither the checked
+    list nor the unmapped list and is silently folded into a green.
     """
     out: list[tuple[str, str]] = []
+    dropped: list[str] = []
     seen: set[str] = set()
     for line in content.splitlines():
         if not line.startswith("|"):
@@ -1318,10 +1341,12 @@ def _parse_version_snapshot(content: str) -> list[tuple[str, str]]:
         app = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*',
                      '', app).lstrip("v")
         if not re.fullmatch(r'\d+(\.\d+)*', app):
+            seen.add(name)
+            dropped.append(name)
             continue
         seen.add(name)
         out.append((name, app))
-    return out
+    return out, dropped
 
 
 # Verified OSV coordinates for the components the version snapshot tracks.
@@ -1376,14 +1401,18 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     content = version_file.read_text()
-    unique = _parse_version_snapshot(content)
+    unique, no_version = _parse_version_snapshot(content)
 
     # Spend the query budget on components we can ACTUALLY check. Capping the
     # raw list at 25 first meant the cap was consumed by unmapped components
     # and dropped mapped ones (cert-manager) off the end without checking them.
     candidates = [(n, v) for n, v in unique if n in _OSV_PACKAGES][:25]
     unmapped = [n for n, _v in unique if n not in _OSV_PACKAGES]
-    cprint(C.CYAN, f"  Checking {len(candidates)} of {len(unique)} components "
+    # Mapped, but the snapshot carries no comparable version. These are the
+    # dangerous ones: they LOOK covered by the table and are not.
+    mapped_no_version = [n for n in no_version if n in _OSV_PACKAGES]
+    total = len(unique) + len(no_version)
+    cprint(C.CYAN, f"  Checking {len(candidates)} of {total} components "
                    f"against OSV.dev ({len(unmapped)} have no verified OSV "
                    f"package identity)...")
     found_vulns = False
@@ -1452,16 +1481,33 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         f.add(WARNING, f"OSV.dev component scan is inoperative: {detail} — "
                        f"reporting no result, NOT a clean result")
         cprint(C.YELLOW, f"  🟡 OSV.dev inoperative: {detail}")
+    elif osv_rejected:
+        # PARTIAL rejection is still a hole. Firing only on TOTAL failure meant
+        # osv_ok=2 / osv_rejected=1 printed a green covering two thirds of the
+        # table, with no finding and no veto for the third.
+        f.add(WARNING, f"OSV coverage gap: {osv_rejected} of {attempted} queries "
+                       f"rejected ({osv_reason}) — those components were not checked")
+        cprint(C.YELLOW, f"  🟡 OSV: {osv_rejected}/{attempted} queries rejected "
+                         f"({osv_reason}) — partial coverage")
     elif osv_ok and not found_vulns:
         cprint(C.GREEN, f"  🟢 No CVEs found in {osv_ok} OSV-checked component(s)")
 
+    if mapped_no_version:
+        # Has a verified OSV package, but nothing comparable to query with.
+        f.add(WARNING, f"OSV coverage gap: {len(mapped_no_version)} mapped "
+                       f"component(s) have no comparable version in the snapshot "
+                       f"and were NOT checked "
+                       f"({', '.join(sorted(mapped_no_version))})")
+        cprint(C.YELLOW, f"  🟡 {len(mapped_no_version)} mapped component(s) have "
+                         f"no comparable version — not checked")
+
     if unmapped:
         # Explicit "not checked", never folded into the green above.
-        f.add(WARNING, f"OSV coverage gap: {len(unmapped)} of {len(unique)} "
+        f.add(WARNING, f"OSV coverage gap: {len(unmapped)} of {total} "
                        f"components not checked — ecosystem undetermined "
                        f"({', '.join(sorted(unmapped)[:8])}"
                        f"{', …' if len(unmapped) > 8 else ''})")
-        cprint(C.YELLOW, f"  🟡 {len(unmapped)}/{len(unique)} components not "
+        cprint(C.YELLOW, f"  🟡 {len(unmapped)}/{total} components not "
                          f"checked — no verified OSV package identity")
 
     # ─── Trivy: scan running container images for CRITICAL/HIGH CVEs ────────
