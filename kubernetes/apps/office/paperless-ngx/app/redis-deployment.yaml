@@ -69,16 +69,18 @@ spec:
         readinessProbe:
           exec:
             command:
-            - redis-cli
-            - ping
+            - /bin/sh
+            - -c
+            - redis-cli ping | grep -q PONG
           initialDelaySeconds: 5
           timeoutSeconds: 2
           periodSeconds: 10
         livenessProbe:
           exec:
             command:
-            - redis-cli
-            - ping
+            - /bin/sh
+            - -c
+            - redis-cli ping | grep -q PONG
           initialDelaySeconds: 15
           timeoutSeconds: 2
           periodSeconds: 10
