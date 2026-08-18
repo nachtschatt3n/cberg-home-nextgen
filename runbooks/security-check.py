@@ -1149,7 +1149,14 @@ def _trivy_has_private_creds() -> bool:
     security section forever, veto-never lets an expired token silently
     resolve every private image's open CVE findings at once.
     """
-    return bool(os.environ.get("TRIVY_PASSWORD") or os.environ.get("TRIVY_USERNAME"))
+    # A SECRET is what authenticates: trivy needs TRIVY_PASSWORD (with the
+    # username) or a bearer TRIVY_REGISTRY_TOKEN. A username with no secret
+    # cannot authenticate, so ORing the username in would have called those
+    # failures transient and armed the veto on an environment where the scan
+    # can never succeed — the same permanent-condition mistake this function
+    # exists to avoid, just one level up. sweep-run.py always sets both.
+    return bool(os.environ.get("TRIVY_PASSWORD")
+                or os.environ.get("TRIVY_REGISTRY_TOKEN"))
 
 
 def _is_permanently_unscannable(img: str) -> bool:
@@ -1820,8 +1827,8 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # can overlap — so write atomically. A torn file would be discarded by
     # load_trivy_cache() and merely cost a full rescan, but a rescan of the
     # whole fleet is not a cost to incur by accident.
+    tmp_cache = trivy_cache.with_suffix(f".{os.getpid()}.tmp")
     try:
-        tmp_cache = trivy_cache.with_suffix(f".{os.getpid()}.tmp")
         tmp_cache.write_text(json.dumps({
             "parser_version": _TRIVY_TALLY_VERSION,
             "created_at": cache_created if cache_created is not None else time.time(),
@@ -1831,7 +1838,12 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         }))
         os.replace(tmp_cache, trivy_cache)
     except Exception:
-        pass
+        # A half-written temp file is never loadable (wrong name), but it
+        # would sit in TMPDIR forever. Clean it up.
+        try:
+            tmp_cache.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     # ─── Coverage accounting ────────────────────────────────────────────────
     # What did this run actually LOOK AT? Everything downstream (the tallies,

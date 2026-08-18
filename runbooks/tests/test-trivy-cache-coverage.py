@@ -126,7 +126,8 @@ class ScannabilityClassificationTest(unittest.TestCase):
 
     def setUp(self):
         self._old = {k: os.environ.pop(k, None)
-                     for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD")}
+                     for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD",
+                               "TRIVY_REGISTRY_TOKEN")}
 
     def tearDown(self):
         for k, v in self._old.items():
@@ -142,6 +143,22 @@ class ScannabilityClassificationTest(unittest.TestCase):
         os.environ["TRIVY_PASSWORD"] = "x"
         self.assertFalse(_mod._is_permanently_unscannable(
             _mod._PRIVATE_REGISTRY_PREFIX + "app:1"))
+
+    def test_username_without_a_secret_is_still_permanent(self):
+        """A username alone cannot authenticate, so the scan can never succeed
+        on such a run — classifying it transient would arm the veto on a
+        permanent condition."""
+        os.environ["TRIVY_USERNAME"] = "someone"
+        self.assertTrue(_mod._is_permanently_unscannable(
+            _mod._PRIVATE_REGISTRY_PREFIX + "app:1"))
+
+    def test_bearer_registry_token_counts_as_credentials(self):
+        os.environ["TRIVY_REGISTRY_TOKEN"] = "x"
+        try:
+            self.assertFalse(_mod._is_permanently_unscannable(
+                _mod._PRIVATE_REGISTRY_PREFIX + "app:1"))
+        finally:
+            os.environ.pop("TRIVY_REGISTRY_TOKEN", None)
 
     def test_public_is_never_permanent(self):
         self.assertFalse(_mod._is_permanently_unscannable("docker.io/x:1"))
@@ -228,7 +245,8 @@ class DegradationClassificationTest(unittest.TestCase):
         # No registry credentials by default -> private images are permanently
         # unscannable on this run. Individual tests set them to flip the class.
         self._old_creds = {k: os.environ.pop(k, None)
-                           for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD")}
+                           for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD",
+                                     "TRIVY_REGISTRY_TOKEN")}
         self._saved = {n: getattr(_mod, n) for n in
                        ("run_lines", "kubectl", "run_cmd", "_newer_upstream_tag_exists")}
         _mod.run_lines = lambda *a, **k: []          # no gh PR lookup
