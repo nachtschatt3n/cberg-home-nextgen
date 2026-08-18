@@ -561,9 +561,23 @@ class VersionChecker:
             if same_variant:
                 version_tags = same_variant
         version_tags.sort(key=self._semver_tag_key, reverse=True)
+        # Prefer an update WITHIN the current major (an in-line bump is the
+        # actionable next step when one exists, mirroring Renovate's
+        # separate-major behaviour) — but ONLY if that same-major candidate is
+        # actually NEWER than the current pin. The old unconditional preference
+        # returned the head of a STALE major (often the very tag we run) for
+        # any component a full major behind, so it reported as up-to-date and
+        # the CVE sweep filed its findings as "no fix available upstream"
+        # (2026-08-15: redisinsight pinned 2.70.1 = head of 2.x, masked the
+        # entire 3.x line for ~7 months; see plan redisinsight-3.8.0 §1.1).
+        # When the current major is exhausted, fall through to the overall
+        # newest tag so the major-behind state surfaces as a MAJOR update.
         cp = self.parse_version(current_tag) if current_tag else None
         if cp:
-            same_major = [t for t in version_tags if self._semver_tag_key(t)[0] == cp[0]]
+            cur_key = self._semver_tag_key(current_tag)[:4]
+            same_major = [t for t in version_tags
+                          if self._semver_tag_key(t)[0] == cp[0]
+                          and self._semver_tag_key(t)[:4] > cur_key]
             if same_major:
                 return same_major[0]
         return version_tags[0]
