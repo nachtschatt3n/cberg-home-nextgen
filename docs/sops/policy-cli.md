@@ -201,6 +201,10 @@ https://sweep.<DOMAIN>/policies/security
 
 **"permission denied for table accepted_risks"** on a write — `sweep_writer` should have DML. Verify with `psql -c '\dp accepted_risks'`. If grants are missing, re-run the init Job (bump to v3 or higher).
 
+**"must be owner of table sweep_findings"** on DDL — expected. `sweep_writer` has DML but not ownership, so `CREATE INDEX` / `ALTER TABLE` cannot come from the CLI or from a migration script. Ship the DDL in `schema-configmap.yaml` and bump the init Job suffix (`docs/sops/immutable-job-image-bumps.md`), which runs as the owner.
+
+**`note: F-xxxxxxxx was renamed to F-yyyyyyyy (fingerprint migration)`** — not an error. `finding_id` is derived from the fingerprint, so it is re-derived whenever the identity function changes; the id you passed is a historical alias recorded in `metadata.prior_finding_ids`, and the CLI resolved it to the row that owns it today. Use the new id going forward. The full procedure for such a change is [sweep-findings-lifecycle.md](sweep-findings-lifecycle.md) §4.1b.
+
 ---
 
 ## 8) Diagnose Examples
@@ -257,6 +261,7 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 - `kubernetes/apps/databases/sweep-history/app/schema-configmap.yaml` — the four table schemas
 - `containers/sweep-dashboard/app/main.py` — read-only `/policies/*` and `/api/policies/*` route handlers
 - [vulnerability-disclosure.md](vulnerability-disclosure.md) — the `finding` namespace and the public-repo boundary
+- [sweep-findings-lifecycle.md](sweep-findings-lifecycle.md) — finding identity (§4.1 step 2: AR tags are stripped from the fingerprint, so a policy edit must never rename a finding), the `resolved_at`/`status` invariant, and §4.1b for changing the identity function
 
 ---
 

@@ -158,9 +158,24 @@ auto-closing; fix the dependency and re-run.
    > `resolved_at IS NULL`** or it can silently return a years-old closed row.
    >
    > Because identity changes rename rows, `metadata.prior_finding_ids` records
-   > every id a row has previously answered to and `policy-cli._finding_row`
-   > falls back to it. Committed `security_ref: F-xxxxxxxx` lines and plan files
-   > are immutable; a rename must not orphan them.
+   > every id a row has previously answered to. Committed `security_ref:`
+   > lines, plan front-matter and published dashboard links are frozen forever,
+   > so **every by-id consumer must carry the fallback**. All three do:
+   > `policy-cli._finding_row` (which also prefers a LIVE row over a resolved
+   > stub, because `finding detail` writes to the row it returns),
+   > `render-board.planned_findings()` (without it a renamed finding stops
+   > being recognised as planned and resurfaces as un-planned board noise —
+   > this really happened to one plan ref on 2026-08-18), and the dashboard's
+   > `/findings/<F-id>` route. A fourth consumer must add it too.
+   >
+   > **`resolved_at` and `status` must move together.** The writer and every
+   > fingerprint query test `resolved_at IS NULL`; `render-board.py` and the
+   > dashboard filter on `status != 'resolved'`. Setting one alone produces a
+   > row that auto-close treats as closed while the board renders it as a live
+   > action item — and which sits outside `uq_findings_open_finding_id`, so a
+   > later sweep can open a SECOND row with the same id. Two separate resolve
+   > paths got this wrong on 2026-08-18, so `ck_findings_resolved_status`
+   > (init Job v5) now makes it impossible rather than merely documented.
 4. **Cycle row is LAZY.** `sweep_cycles` is inserted on the **first** `emit()`,
    never at construction — a writer that emits nothing leaves no row. This is
    what killed the "5 empty cycle rows per run" orphan problem (N-20).
@@ -171,6 +186,31 @@ auto-closing; fix the dependency and re-run.
 6. **Report.** Closures print per-row, and AR-tagged/accepted closures print in
    their own block — an operator-accepted risk disappearing must never be
    silent.
+
+### 4.1b Changing the identity function
+
+Editing `_KIND_MARKERS` or `_stable_anchor` renames findings. The steps are
+order-dependent and the ordering is not guessable, so follow it exactly:
+
+1. **Measure before designing.** Recompute the candidate fingerprint over all
+   open rows and count how many groups would MERGE. A merge means two distinct
+   findings collapse into one row and one of them stops being reported — the
+   naive "just drop the AR tags" variant merged 52 pairs.
+2. `python3 runbooks/refingerprint-findings.py` — dry run. Confirm
+   `MERGING groups: 0` and no warnings.
+3. `python3 runbooks/refingerprint-findings.py --apply`. Takes a
+   transaction-scoped advisory lock, so it is safe against a concurrent sweep.
+4. Re-run the dry run: it must now report `identity changes to write: 0`.
+5. **Only then** bump the sweep-history init Job suffix if the change also needs
+   DDL. The script connects as `sweep_writer`, which does **not** own the table,
+   so `CREATE INDEX` / `ALTER TABLE` must ship via the Job
+   (`docs/sops/immutable-job-image-bumps.md`). Running the Job first can fail
+   its index build on duplicate open ids.
+6. Verify: `SELECT finding_id, count(*) FROM sweep_findings WHERE resolved_at
+   IS NULL GROUP BY 1 HAVING count(*) > 1` → no rows.
+
+Skipping step 3 is the expensive mistake: every affected finding forks once
+more on the next sweep, and the abandoned rows auto-close as "fixed".
 
 ### 4.1a Never emit a PASS confirmation as a finding
 
@@ -635,8 +675,12 @@ To re-open findings that were wrongly auto-closed:
 
 ```sql
 -- inspect first; run inside a transaction and verify the count before COMMIT
+-- `status` MUST move with `resolved_at` — ck_findings_resolved_status enforces
+-- it, and the two columns feed different consumers (see §4.1 step 3). The live
+-- vocabulary is new | unchanged | resolved; 'open' is NOT a value this table
+-- uses and nothing downstream understands it.
 UPDATE sweep_findings
-   SET resolved_at = NULL, status = 'open', resolved_commit = NULL
+   SET resolved_at = NULL, status = 'new', resolved_commit = NULL
  WHERE section = '<section>'
    AND resolved_at BETWEEN '<start>' AND '<end>';
 ```

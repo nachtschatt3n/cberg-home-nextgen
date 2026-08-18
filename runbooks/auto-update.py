@@ -534,7 +534,9 @@ def main(argv=None):
         reconcile(all_apps)  # push cluster back to reverted state
         title = f"Auto-update reverted: {len(reverted)} merge(s) regressed the cluster"
         # Emit the sweep finding first so we can key the OpenClaw issue on its
-        # stable finding_id (the fingerprint id, same across cycles).
+        # finding_id. Stable across cycles, but fingerprint-DERIVED: it is
+        # re-derived if the identity function changes, so a long-lived issue key
+        # can go stale (see docs/sops/sweep-findings-lifecycle.md §4.1b).
         fid = None
         if w:
             with w:

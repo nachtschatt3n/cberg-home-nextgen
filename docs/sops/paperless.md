@@ -260,3 +260,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 |---------|------|--------|
 | `2026.07.13` | 2026-07-13 | Initial SOP — pipeline, OCR/force+6Gi, email inline-PDF fix, vision-OCR + rotate-both-tesseract, health/security/rollback. |
 | `2026.07.13` | 2026-07-13 | Add troubleshooting for hOCR crash on near-blank duplex backs (force-mode wedge in `/consume`) and the DOB date-misparse on medical/insurance docs (surfaced in the 64-doc scan-batch audit). |
+| `2026.08.18` | 2026-08-18 | Record that `scan-inbox-validator` reuses the app's image tag (bump both in one commit); add image-parity and heartbeat-advances verification tests. |

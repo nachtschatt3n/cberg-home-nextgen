@@ -93,6 +93,10 @@ Source of truth for the convention is the Job manifest's own header comment.
 #         bash change. Rename forces prune+recreate (Job spec is immutable);
 #         bootstrap is idempotent.
 #   v3b — <one line: what changed and why, and that the bootstrap is idempotent>
+#   v4  — partial UNIQUE index on sweep_findings(finding_id) WHERE
+#         resolved_at IS NULL.
+#   v5  — CHECK ck_findings_resolved_status (resolved_at IS NULL OR
+#         status='resolved').
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -558,3 +562,26 @@ runbooks/policy-cli.py slo list
   live-database safety checklist (idempotency audit, hard-stop statements,
   widening-vs-narrowing `ALTER`, per-table `pg_dump`, row-count before/after),
   and the revert-only rollback path.
+
+## DDL that a migration script cannot ship
+
+A one-shot Python migration under `runbooks/` connects as the app role
+(`sweep_writer` for sweep-history), which holds DML but **not table ownership**.
+`CREATE INDEX`, `ALTER TABLE` and `ADD CONSTRAINT` therefore fail with
+`must be owner of table <t>` — as `runbooks/refingerprint-findings.py` did on
+2026-08-18, correctly rolling its whole transaction back rather than
+half-applying.
+
+Split the work by privilege, not by convenience:
+
+| Change | Ships via |
+|---|---|
+| Row rewrites, backfills, dedupe | the migration script (app role) |
+| Index / constraint / column DDL | `schema-configmap.yaml` + an init-Job suffix bump (owner) |
+
+**Order matters and is not guessable: run the data migration FIRST.** A
+constraint or unique index build fails the Job if any row still violates it, so
+a Job-first sequence turns a clean migration into a failed reconcile. Have the
+migration script attempt the DDL opportunistically inside a `SAVEPOINT` (so an
+owner-DSN run lands it immediately) and report it as delivered-elsewhere on
+failure, rather than aborting the data half over a missing grant.

@@ -340,6 +340,55 @@ print(f\"Ready: {ready['status'] if ready else 'Unknown'}\")
 
 ## Grafana
 
+### Image variants: plain vs `-slim` — do NOT use `-slim` on 13.x
+
+Tested and rejected 2026-08-18. Recording it because the reasoning is not
+derivable from the manifests and will otherwise be re-litigated at the next
+Grafana CVE bump. Scan figures stay on the finding record: `security_ref:
+F-de4d92cd`.
+
+- **`-slim` ships `data/plugins-bundled` EMPTY.** That is its entire difference
+  from the plain tag (`SLIM=true` in the upstream `grafana-plugins` build
+  stage). Same base image, same Grafana build.
+- **Those binaries are not redundant.** From 13.2.0, upstream expanded the
+  bundled catalog-plugin set from 2 entries to 13 (prep for extracting core
+  datasources from the monolith, PR #129593). The bundled binary **is** the
+  delivery mechanism for the core datasource — it is not a duplicate of a
+  compiled-in one. On the slim pod `/api/plugins?type=datasource` returned 6
+  plugins against 18 on plain, all 6 being leftovers persisted on the
+  `grafana-config` PVC, and Grafana logged
+  `reason="plugin prometheus not found"`. Six of seven provisioned datasources
+  would have been dead.
+- **`GF_PLUGINS_PREINSTALL_DISABLED=true` is load-bearing if you ever do try
+  slim.** Upstream also grew `defaultPreinstallPlugins` from 6 to 18, so
+  without it the container re-downloads the identical binaries from grafana.com
+  at startup: the image scans clean while the runtime is unchanged. That is
+  worse than not making the change, because it manufactures a false green — and
+  it adds an egress dependency on grafana.com at pod start.
+- **`-slim` / `-distroless` are published for every 13.x but are UNDOCUMENTED
+  upstream** (the v13.2.0 docs describe only Alpine and Ubuntu variants), so any
+  future attempt needs its own datasource re-verification, not a one-time sign-off.
+- **Rollback direction:** plain `13.2.0`, never a chart revert or a downgrade to
+  13.1.x — Grafana 13 migrates the sqlite schema on boot and that is
+  forward-only. (Both the slim boot and the revert boot logged
+  `migrations completed performed=0` and left `grafana.db` byte-identical, so
+  the migration risk did not materialise — but it is the reason a version
+  rollback is the wrong lever.)
+
+**Verification gate for any Grafana image change** — every provisioned
+datasource must resolve *and return data* before the change is considered done:
+
+```bash
+kubectl -n monitoring port-forward svc/grafana 33001:80 &
+# health API per datasource
+curl -su "$U:$P" -X POST localhost:33001/api/datasources/uid/<uid>/health
+# alertmanager implements no backend health check — use the proxy instead
+curl -su "$U:$P" localhost:33001/api/datasources/proxy/uid/alertmanager/api/v2/status
+# and a real query through the data path
+curl -su "$U:$P" -X POST localhost:33001/api/ds/query -H 'Content-Type: application/json' \
+  -d '{"queries":[{"refId":"A","datasource":{"uid":"prometheus","type":"prometheus"},"expr":"count(kube_pod_info)","instant":true}]}'
+```
+
 ### Access
 
 ```bash
