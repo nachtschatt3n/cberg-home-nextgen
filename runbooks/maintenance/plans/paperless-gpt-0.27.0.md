@@ -18,8 +18,8 @@ touches:
 depends_on: []
 conflicts_with: []
 security_ref: null
-status: draft
-window: null
+status: executed                  # 2026-08-18, commit 264b6064
+window: "2026-08-18"
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
