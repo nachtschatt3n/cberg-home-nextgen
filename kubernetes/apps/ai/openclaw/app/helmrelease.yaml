@@ -1715,11 +1715,21 @@ spec:
                 # Bumped 2Gi -> 4Gi on 2026-06-06 after an OOMKill (exit
                 # 137) wedged the Telegram dispatcher mid-reply. We crawl
                 # toward 2GiB over ~40h (heartbeat dream-narrative jobs
-                # accumulate; not a hard leak). 4GiB gives us a couple
-                # of weeks before the next risk. Investigate the actual
-                # growth source if this still bites.
+                # accumulate; not a hard leak).
+                #
+                # BAND-AID 2026-08-18: 4Gi -> 10Gi to break an OOMKill
+                # crashloop. A queued inbound Discord/Telegram voice note is
+                # transcribed at boot by the LOCAL `whisper --model turbo`
+                # CLI (openai-whisper, installed by this init script). The
+                # turbo weights are ~1.6GB and load fp32 on CPU (~3-4GiB
+                # peak) INSIDE this same cgroup, on top of the ~1GiB gateway
+                # heap -> instant OOM ~35s after boot. The media item is
+                # never acked, so every restart re-transcribes it: a poison
+                # pill. This limit is headroom to break the loop only.
+                # REMOVE once the transcription path is bounded (see the
+                # audio.transcription block below).
                 cpu: 2
-                memory: 4Gi
+                memory: 10Gi
 
             securityContext:
               runAsNonRoot: true
