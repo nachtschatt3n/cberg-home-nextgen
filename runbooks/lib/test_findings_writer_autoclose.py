@@ -337,6 +337,41 @@ def test_veto_reports_the_reason_to_the_operator():
     assert "security" in out, out
 
 
+def test_veto_is_persisted_so_the_orchestrator_can_honour_it():
+    """The veto must survive the process boundary, or it does nothing.
+
+    sweep-run.py runs its OWN auto-close SQL after every step — a separate
+    implementation that shares none of these gates and cannot see an
+    in-memory `_incomplete_reason`. Before this, the writer printed
+    "auto-close SKIPPED ... INCOMPLETE" and the orchestrator closed exactly
+    those rows seconds later in the same sweep, making the veto inoperative
+    in the only mode where auto-close is armed at all.
+    """
+    _clear_env()
+    w, conn = _writer(section="security")
+    w.mark_incomplete("s6_attack_patterns: Elasticsearch unavailable")
+    w.close(verdict="green")
+    notes_writes = [(sql, params) for sql, params in conn.log
+                    if "UPDATE sweep_cycles" in sql and "notes" in sql]
+    assert notes_writes, "incomplete state was never persisted to the cycle row"
+    payload = notes_writes[-1][1][0]
+    assert "incomplete" in payload, payload
+    assert "security" in payload, payload
+    assert "Elasticsearch unavailable" in payload, payload
+    # And it must still refuse to close locally.
+    assert not _autoclose_stmts(conn)
+
+
+def test_complete_run_persists_no_incomplete_marker():
+    """A healthy section must not poison the shared cycle row."""
+    _clear_env()
+    w, conn = _writer(section="security")
+    w.close(verdict="green")
+    notes_writes = [sql for sql, _p in conn.log
+                    if "UPDATE sweep_cycles" in sql and "notes" in sql]
+    assert not notes_writes, "a complete run wrote an incomplete marker"
+
+
 def test_healthy_run_still_autocloses():
     """The veto must not be a blanket off-switch — a clean run still resolves."""
     _clear_env()

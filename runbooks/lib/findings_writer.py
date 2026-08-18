@@ -472,6 +472,65 @@ class FindingsWriter:
         elif reason not in self._incomplete_reason.split("; "):
             self._incomplete_reason += f"; {reason}"
 
+    def _persist_incomplete(self) -> None:
+        """Record this section's incompleteness on the shared cycle row.
+
+        The veto is worthless if only this process knows about it.
+        sweep-run.py runs its OWN auto-close SQL after every step
+        (_auto_close_stale_findings), which is a separate implementation that
+        cannot see our in-memory `_incomplete_reason` — so the writer would
+        print "auto-close SKIPPED ... INCOMPLETE" and the orchestrator would
+        close exactly those rows seconds later, in the same sweep. Persisting
+        here is what makes the veto survive process boundaries.
+
+        `notes` is TEXT, and up to five specialists finish concurrently, so the
+        read-modify-write is done under a row lock in one transaction.
+        """
+        if self._conn is None:
+            return
+        try:
+            with self._conn.cursor() as cur:
+                # Guarantee the row exists (a clean-but-degraded section may
+                # never have emitted, so the lazy insert never fired).
+                cur.execute(
+                    "INSERT INTO sweep_cycles (cycle_id, started_at, trigger, "
+                    "git_head) VALUES (%s, now(), %s, %s) "
+                    "ON CONFLICT (cycle_id) DO NOTHING",
+                    (self._cycle_id, self._trigger, self._git_head),
+                )
+                cur.execute(
+                    "SELECT notes FROM sweep_cycles WHERE cycle_id = %s FOR UPDATE",
+                    (self._cycle_id,),
+                )
+                row = cur.fetchone()
+                notes: dict = {}
+                if row and row[0]:
+                    try:
+                        notes = json.loads(row[0])
+                        if not isinstance(notes, dict):
+                            notes = {"legacy_notes": row[0]}
+                    except (ValueError, TypeError):
+                        notes = {"legacy_notes": row[0]}
+                incomplete = notes.get("incomplete")
+                if not isinstance(incomplete, dict):
+                    incomplete = {}
+                incomplete[self.section] = self._incomplete_reason
+                notes["incomplete"] = incomplete
+                cur.execute(
+                    "UPDATE sweep_cycles SET notes = %s WHERE cycle_id = %s",
+                    (json.dumps(notes), self._cycle_id),
+                )
+            self._conn.commit()
+            print(f"==> recorded section {self.section} as INCOMPLETE on cycle "
+                  f"{self._cycle_id} — the orchestrator's auto-close will skip it too")
+        except Exception as e:  # noqa: BLE001 — never lose the cycle close
+            print(f"==> WARNING: could not persist incomplete state for "
+                  f"{self.section}: {type(e).__name__}: {e}")
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str]]:
         """Resolve open findings THIS section owns that it did not re-emit.
 
@@ -599,6 +658,7 @@ class FindingsWriter:
             print(f"==> auto-close SKIPPED for section {self.section}: run "
                   f"declared INCOMPLETE ({self._incomplete_reason}) — its open "
                   f"findings are left untouched, a coverage gap is not a fix")
+            self._persist_incomplete()
         elif not section_complete:
             print(f"==> auto-close SKIPPED for section {self.section}: run did "
                   f"not complete (no verdict) — its open findings are left "

@@ -286,6 +286,25 @@ def _sections_reporting_this_cycle(dsn: str, cycle_id: str) -> set:
         return set()
 
 
+def _incomplete_sections_from_notes(notes: str | None) -> dict:
+    """Sections that declared themselves INCOMPLETE, from sweep_cycles.notes.
+
+    Pure so it can be tested without a database. Any shape we do not recognise
+    yields {} — the caller treats a READ FAILURE as fail-closed separately;
+    this only distinguishes "no veto recorded" from "veto recorded".
+    """
+    if not notes:
+        return {}
+    try:
+        parsed = json.loads(notes)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    incomplete = parsed.get("incomplete")
+    return incomplete if isinstance(incomplete, dict) else {}
+
+
 def _auto_close_stale_findings(
     dsn: str, cycle_id: str, sections: list[str]
 ) -> list[tuple[str, str, str]]:
@@ -311,6 +330,38 @@ def _auto_close_stale_findings(
         ).strip()[:40]
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         pass
+
+    # HONOUR THE INCOMPLETE VETO. This is a SECOND, independent auto-close
+    # implementation: it does not share FindingsWriter's gates, cannot see a
+    # specialist's in-memory `_incomplete_reason`, and runs AFTER every step.
+    # Without this, a section that degraded, vetoed its own close and printed
+    # "auto-close SKIPPED ... INCOMPLETE" would have exactly those rows closed
+    # here seconds later, in the same sweep — making the veto inoperative in
+    # the only mode where auto-close is armed at all. The writer persists the
+    # veto onto sweep_cycles.notes.incomplete so it survives the process
+    # boundary; read it back and drop those sections from scope.
+    try:
+        with psycopg.connect(dsn) as _c, _c.cursor() as _cur:
+            _cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s",
+                         (cycle_id,))
+            _row = _cur.fetchone()
+        _incomplete = _incomplete_sections_from_notes(_row[0] if _row else None)
+        _vetoed = [sec for sec in sections if sec in _incomplete]
+        if _vetoed:
+            for sec in _vetoed:
+                print(f"==> auto-close SKIPPED for section {sec}: the run declared "
+                      f"itself INCOMPLETE ({_incomplete[sec]}) — a coverage gap is "
+                      f"not a fix")
+            sections = [sec for sec in sections if sec not in _incomplete]
+        if not sections:
+            print("==> auto-close: no sections left in scope after the incomplete "
+                  "veto — nothing closed")
+            return []
+    except Exception as e:  # noqa: BLE001 — fail CLOSED: never close on doubt
+        print(f"==> auto-close ABORTED: could not read the incomplete veto "
+              f"({type(e).__name__}: {e}). Refusing to auto-close rather than "
+              f"risk resolving findings from a degraded section.")
+        return []
 
     try:
         with psycopg.connect(dsn) as conn:
