@@ -121,3 +121,23 @@ Never run destructive operations (`kubectl delete pv`, `--force`, `talosctl rese
 - Never create a new namespace, storage class, or top-level doc without checking the matching SOP first.
 - Always ask before destructive or shared-state actions (`delete`, `reset`, `force-push`, node reboot, secret rotation that invalidates active sessions).
 - After any non-trivial investigation or incident, always review `docs/sops/` and create or update a SOP if the learning is reusable. Use `docs/sops/SOP-TEMPLATE.md`. No SOP = the knowledge disappears after the session.
+
+## Disclosure boundary in commit messages (commit-msg hook, since 2026-08-18)
+
+A `commit-msg` hook blocks vulnerability disclosure in commit messages: advisory
+IDs, quantified counts, and **residual claims** ("still open", "does not close",
+"remains present") tied to a named component. Reference the finding instead —
+`security_ref: F-xxxxxxxx` — and keep the detail on the DB record.
+
+If you are editing the audit tooling itself and must describe a detector defect
+in prose, add the trailer:
+
+```
+disclosure-review: tooling-edit
+```
+
+It waives the residual tier only, and is greppable
+(`git log --grep='disclosure-review: tooling-edit'`) so the waivers stay
+auditable. **Do not reach for `--no-verify`** — if the hook blocks something you
+believe is publishable, that is a hook defect worth reporting, not a bypass
+worth taking. Full boundary: `docs/sops/vulnerability-disclosure.md`.

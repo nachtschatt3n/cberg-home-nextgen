@@ -44,3 +44,22 @@ Operating rules:
   threat. High-severity SIEM alerts (level ≥ 12) bypass the accepted-risk
   filter — surface verbatim with agent and rule context.
 
+## Disclosure boundary in commit messages (commit-msg hook, since 2026-08-18)
+
+A `commit-msg` hook blocks vulnerability disclosure in commit messages: advisory
+IDs, quantified counts, and **residual claims** ("still open", "does not close",
+"remains present") tied to a named component. Reference the finding instead —
+`security_ref: F-xxxxxxxx` — and keep the detail on the DB record.
+
+If you are editing the audit tooling itself and must describe a detector defect
+in prose, add the trailer:
+
+```
+disclosure-review: tooling-edit
+```
+
+It waives the residual tier only, and is greppable
+(`git log --grep='disclosure-review: tooling-edit'`) so the waivers stay
+auditable. **Do not reach for `--no-verify`** — if the hook blocks something you
+believe is publishable, that is a hook defect worth reporting, not a bypass
+worth taking. Full boundary: `docs/sops/vulnerability-disclosure.md`.
