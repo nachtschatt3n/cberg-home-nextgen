@@ -24,7 +24,7 @@ conflicts_with: []                 # keep out of the same window as any plan res
                                    # deployment/postgresql or the shared-PG movers (see Interference)
 security_ref: F-f376ab55
 status: draft
-window: null                       # any no-reboot slot; attended preferred (one-way migration)
+window: "tue-early:2026-08-25"                 # SCHEDULED 2026-08-18: medium 35m; one-way migration, mandatory pre-dump; no interference with neighbours
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

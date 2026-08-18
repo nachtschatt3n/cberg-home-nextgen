@@ -33,7 +33,7 @@ conflicts_with: [grafana-chart-11]    # scheduled fri-early:2026-08-21. Verifica
                                       # provisioning) makes an empty panel unattributable.
 security_ref: null                    # version-currency driver, not a security fix
 status: draft
-window: null
+window: "mon-early:2026-08-24"                 # SCHEDULED 2026-08-18: medium risk 30m; monitoring-only; conflicts_with grafana-chart-11 (fri 08-21) respected — 3 days apart
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

@@ -21,8 +21,8 @@ touches:
     - deployment/paperless-ngx                  # full restart onto the new DB
     - pvc/paperless-mariadb                     # orphaned, Retain — the rollback data
   shared: [storage]                             # allocates a new 2-replica Longhorn volume
-depends_on: [paperless-ngx-3.0.5]  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 (2dcbfad2) — dependency satisfied
-conflicts_with: [longhorn-1.12.1-engine, paperless-ngx-3.0.5, bitnamilegacy-exit-nextcloud-db, ]  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 — dead ref removed
+depends_on: []  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 (2dcbfad2) — dependency satisfied  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
+conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-nextcloud-db, ]  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 — dead ref removed  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
 status: draft
 window: "sun-window:2026-09-06"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence

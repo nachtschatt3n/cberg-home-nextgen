@@ -32,7 +32,7 @@ conflicts_with: [longhorn-1.12.1-engine]   # DB standup/restore must not run und
 security_ref: F-94ee84b5              # the held-update finding (version currency /
                                       # EOL runway driver — no CVE detail belongs here)
 status: draft
-window: null
+window: "sat-early:2026-09-19"                 # SCHEDULED 2026-08-18: HIGH risk 60-90m, operator-present weekend slot; cluster-wide SSO outage during quiesce — clear of every plan needing a login to verify
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md

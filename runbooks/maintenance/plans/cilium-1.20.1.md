@@ -26,7 +26,7 @@ conflicts_with:                    # SOLO window slot — never alongside anythi
   # phases — nothing else network/cluster-wide may share this window.
 security_ref: null
 status: draft
-window: null                       # any no-reboot slot, but as the ONLY plan in it
+window: "thu-early:2026-09-03"                 # SCHEDULED 2026-08-18: SOLO slot — CNI, cluster-wide; deliberately clear of longhorn-1.12.1-engine (sat 08-22), superset-pg-cutover (wed 08-26) and multus work
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
