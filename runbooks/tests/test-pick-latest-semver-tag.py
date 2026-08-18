@@ -117,6 +117,46 @@ class PickLatestSemverTagTest(unittest.TestCase):
         self.assertEqual(self.pick(tags, "v0.143.0-noble-full"),
                          "v0.143.0-noble-full")
 
+    # ── Digest-pinned current tags (2026-08-18, openclaw) ──────────────
+    DIGEST = "@sha256:" + "b" * 64
+
+    def test_digest_pinned_variant_keeps_its_variant(self):
+        """THE defect: every tag helper anchors on `$`, so an unstripped
+        `@sha256:…` hid the `-bookworm` suffix of the CURRENT pin and the
+        picker proposed a bare cross-variant tag — a silent distro rebase.
+        Reproduced live on openclaw (22.23.2-bookworm@sha256:… → 26.7.0)."""
+        tags = ["22.23.2", "22.23.2-bookworm", "26.6.0-bookworm",
+                "26.7.0", "26.7.0-bookworm", "26.7.0-alpine"]
+        self.assertEqual(self.pick(tags, "22.23.2-bookworm" + self.DIGEST),
+                         "26.7.0-bookworm")
+        # …and identical to the answer for the same pin without the digest.
+        self.assertEqual(self.pick(tags, "22.23.2-bookworm" + self.DIGEST),
+                         self.pick(tags, "22.23.2-bookworm"))
+
+    def test_digest_pinned_plain_tag_stays_plain(self):
+        """The converse must hold too: a digest-pinned NON-variant pin must
+        not start collecting variant tags."""
+        tags = ["1.25", "1.26", "1.26-alpine", "1.27-alpine"]
+        self.assertEqual(self.pick(tags, "1.25" + self.DIGEST), "1.26")
+
+    def test_digest_pinned_compound_variant(self):
+        tags = ["v0.143.0-noble-full", "v0.144.1-noble-full",
+                "v0.144.1-noble-lite", "v0.144.1"]
+        self.assertEqual(self.pick(tags, "v0.143.0-noble-full" + self.DIGEST),
+                         "v0.144.1-noble-full")
+
+    def test_digest_pinned_prerelease_still_detected(self):
+        """`_is_prerelease_tag` anchors on `$` as well."""
+        self.assertTrue(
+            _mod.VersionChecker._is_prerelease_tag("0.18.0-beta1" + self.DIGEST))
+        self.assertFalse(
+            _mod.VersionChecker._is_prerelease_tag("0.17.2-noble" + self.DIGEST))
+
+    def test_digest_pinned_sort_key_matches_undigested(self):
+        k = _mod.VersionChecker._semver_tag_key
+        self.assertEqual(k("22.23.2-bookworm" + self.DIGEST),
+                         k("22.23.2-bookworm"))
+
     def test_compound_variant_does_not_swallow_prerelease(self):
         self.assertTrue(_mod.VersionChecker._is_prerelease_tag("0.18.0-beta1-tensorrt"))
         self.assertFalse(_mod.VersionChecker._is_prerelease_tag("v0.144.1-noble-full"))

@@ -633,10 +633,12 @@ class VersionChecker:
     def _is_prerelease_tag(cls, tag: str) -> bool:
         """True for `0.18.0-beta3`, `2.0.0-rc.1`, `1.4.0-b2`, … .
 
-        Variant suffixes are stripped first so `0.18.0-beta1-tensorrt` is still
-        recognised as a pre-release rather than as a plain variant build.
+        Digest pins and variant suffixes are stripped first so
+        `0.18.0-beta1-tensorrt` and `0.18.0-beta1@sha256:…` are both still
+        recognised as pre-releases rather than as plain variant builds.
         """
-        return bool(cls._PRERELEASE_TAG_RE.search(cls._VARIANT_RE.sub('', str(tag or ''))))
+        return bool(cls._PRERELEASE_TAG_RE.search(
+            cls._VARIANT_RE.sub('', cls._strip_digest(tag))))
     # Current-tag shapes that are unverifiable by design (rolling / self-built):
     # git-sha pins and floating tags. We skip these cleanly instead of emitting
     # a meaningless "could not check" / "→ latest ⚪ UNKNOWN".
@@ -649,10 +651,27 @@ class VersionChecker:
         re.IGNORECASE,
     )
 
+    # Renovate-style digest pin appended to a real tag: `1.2.3-bookworm@sha256:…`.
+    # EVERY tag-shape helper below must strip this first. All of them anchor on
+    # `$`, so an un-stripped digest makes the variant suffix invisible: the
+    # picker saw no variant on the CURRENT pin and therefore proposed a
+    # CROSS-VARIANT tag as an upgrade (2026-08-18: openclaw pinned
+    # `22.23.2-bookworm@sha256:…` was offered bare `26.7.0`, i.e. a silent base
+    # -image/distro rebase). Because float-tag policy digest-pins broadly, this
+    # hit many components at once, and an auto-applied bump would have swapped
+    # the distro underneath the app. Same reason `_is_prerelease_tag` and
+    # `_semver_tag_key` normalise here rather than each fixing it locally.
+    _DIGEST_SUFFIX_RE = re.compile(r'@sha256:[0-9a-f]{64}$', re.IGNORECASE)
+
+    @classmethod
+    def _strip_digest(cls, tag: str) -> str:
+        """`1.2.3-bookworm@sha256:…` → `1.2.3-bookworm`; other tags unchanged."""
+        return cls._DIGEST_SUFFIX_RE.sub('', str(tag or ''))
+
     @classmethod
     def _tag_variant(cls, tag: str) -> str:
         """The OS/variant suffix of a tag ('alpine', 'slim', …), '' if none."""
-        m = cls._VARIANT_RE.search(str(tag or ''))
+        m = cls._VARIANT_RE.search(cls._strip_digest(tag))
         return m.group(1).lower() if m else ''
 
     @classmethod
@@ -663,14 +682,15 @@ class VersionChecker:
         plain tag outranks a build-sha-suffixed one (2026-08-03: n8n 2.33.3 →
         2.33.3-12d3f08 was a false positive — same release, sha-pinned build,
         and the equal-key stable sort picked it arbitrarily)."""
-        name = cls._VARIANT_RE.sub('', str(tag)).lstrip('vV').split('-', 1)[0]
+        tag = cls._strip_digest(tag)
+        name = cls._VARIANT_RE.sub('', tag).lstrip('vV').split('-', 1)[0]
         try:
             nums = [int(p) for p in name.split('.')]
         except ValueError:
             return (0, 0, 0, 0, 0)
         while len(nums) < 4:
             nums.append(0)
-        has_build_suffix = bool(re.search(r'-[0-9a-f]+$', cls._VARIANT_RE.sub('', str(tag))))
+        has_build_suffix = bool(re.search(r'-[0-9a-f]+$', cls._VARIANT_RE.sub('', tag)))
         return tuple(nums[:4]) + (0 if has_build_suffix else 1,)
 
     def _pick_latest_semver_tag(self, tags: list, current_tag: str = '') -> Optional[str]:
