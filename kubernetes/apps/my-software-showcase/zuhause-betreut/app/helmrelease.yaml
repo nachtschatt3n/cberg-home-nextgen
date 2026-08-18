@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/zuhause-betreut-caretakermanager
-              tag: production-20260818065012
+              tag: production-20260818110306
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the

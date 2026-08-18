@@ -41,7 +41,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/uzeit-de
-              tag: sha-bbc7758b451a20867608ed637755b63f9f3acf4b
+              tag: sha-18a2a69a1636d55e12f6eee908a4be7397520d9e
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the
