@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/kfa_medienarchiv
-              tag: production-20260818073327
+              tag: production-20260818104740
               pullPolicy: IfNotPresent
             env:
               # Showcase deployment opts in: the sign-in form arrives with the
