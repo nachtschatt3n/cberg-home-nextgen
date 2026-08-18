@@ -4,7 +4,10 @@
 The auto-updater only ever sees OPEN Renovate PRs, so an actionable fix with no
 PR and no plan silently falls through. This reconciler closes that hole: it
 enumerates the FULL actionable universe from `runbooks/version-check-current.md`
-(every chart/image with a newer version available), assigns each update to a
+— the Quick Overview Table (charts + the primary image), the PER-APP detail
+sections (init containers, sidecars and base images, which the table cannot
+express) and the External Infrastructure section (Talos, npm, UniFi, PiKVM) —
+assigns each update to a
 LANE, checks it has a concrete ARTIFACT proving it's being handled, and emits a
 CRITICAL finding for anything uncovered. That CRACK detector is what makes
 "nothing falls between the cracks" enforceable instead of aspirational.
@@ -21,6 +24,13 @@ Lanes (operator policy, 2026-08-02):
             silently dropped.
   HELD    — explicitly held/accepted (e.g. openclaw node 22). No action.
   CRACK   — actionable but in NONE of the above. MUST never happen → CRITICAL.
+
+CRACK==0 is only a safety property if the UNIVERSE is complete. Until
+2026-08-18 it was not: the detector read the overview table alone, which lists
+ONE image per app, so every init/sidecar/base image and every non-HelmRelease
+component was invisible and `CRACK 0` / `HELD 0` meant "never looked at". If a
+future source of updates is added to version-check-current.md, it MUST be added
+to the universe here as well — an honest metric matters more than a clean one.
 
 Read-only. Run in the sweep (report + drive planner dispatch) and before a
 window (confirm coverage). Usage:
@@ -167,6 +177,103 @@ def parse_actionable():
                                   "current": am.group(1), "target": am.group(2),
                                   "type": st if st != "unknown" else row_type,
                                   "cell": cell.strip()})
+    return items
+
+
+_APP_HEAD = re.compile(r"^### (.+?)\s*$")
+_NS_HEAD = re.compile(r"^## Namespace: `([^`]+)`")
+_REPO_LINE = re.compile(r"^- \*\*Repository:\*\* `([^`]+)`")
+_CURTAG_LINE = re.compile(r"^\s+- \*\*Current Tag:\*\* `([^`]+)`")
+_LATESTTAG_LINE = re.compile(r"^\s+- \*\*Latest Tag:\*\* `([^`]+)`(.*)$")
+_UPDTYPE_LINE = re.compile(r"^\s+- \*\*Update Type:\*\*.*\*\*([A-Z]+)\*\*")
+_EXT_HEAD = re.compile(r"^### (.+?) \(`[^`]+`\)\s*$")
+_EXT_VER = re.compile(r"^- \*\*Version:\*\* `([^`]+)`.*?(?:→|->) `([^`]+)`")
+
+
+def parse_detail_images():
+    """Every image update from the PER-APP detail sections.
+
+    The Quick Overview Table carries ONE image per app, so init containers,
+    sidecars and base images never reached the crack detector at all — for
+    those, `CRACK 0` meant "not looked at", not "none uncovered", while the
+    sweep contract reads CRACK==0 as a hard safety property. The detail
+    sections list every container, so this closes the universe instead of
+    merely documenting the hole. Today it adds e.g. mcpo's `python` base image
+    and paperclip's `ubuntu`/`debian` tool+init images, none of which the table
+    can express.
+
+    `### <app>` is only trusted as an app heading when a `- **File:**` line
+    follows it: upstream changelogs are dumped verbatim into this document and
+    their own `###` headings (`### Backend`, `### Availability`) would
+    otherwise be read as apps.
+    """
+    if not VERSION_MD.exists():
+        return []
+    items, ns, comp, pending_app = [], None, None, None
+    repo = cur = None
+    for line in VERSION_MD.read_text().splitlines():
+        m = _NS_HEAD.match(line)
+        if m:
+            ns, comp, pending_app = m.group(1), None, None
+            continue
+        if line.startswith("## "):          # left the namespace sections
+            ns = comp = pending_app = None
+            continue
+        m = _APP_HEAD.match(line)
+        if m and ns:
+            pending_app = m.group(1).strip().strip("`")
+            continue
+        if pending_app and line.startswith("- **File:**"):
+            comp, pending_app = pending_app, None
+            continue
+        if not comp:
+            continue
+        m = _REPO_LINE.match(line)
+        if m:
+            repo, cur = m.group(1), None
+            continue
+        m = _CURTAG_LINE.match(line)
+        if m:
+            cur = m.group(1)
+            continue
+        m = _LATESTTAG_LINE.match(line)
+        if m and repo and cur and "UPDATE AVAILABLE" in m.group(2):
+            tgt = m.group(1)
+            if _is_strictly_newer(cur, tgt):
+                items.append({"component": comp, "namespace": ns, "kind": "image",
+                              "current": cur, "target": tgt,
+                              "type": _semver_type(cur, tgt), "cell": f"{repo} {cur} → {tgt}",
+                              "source": f"detail:{repo}"})
+    return items
+
+
+def parse_external_infra():
+    """Updates for the non-HelmRelease components (Talos, the npm packages,
+    UniFi, PiKVM). These live in their own section and were likewise outside
+    the detector's universe — which is why the HELD lane read 0 even though
+    both of its entries (openclaw / @openclaw/discord) are npm components."""
+    if not VERSION_MD.exists():
+        return []
+    items, name, in_ext = [], None, False
+    for line in VERSION_MD.read_text().splitlines():
+        if line.startswith("## External Infrastructure"):
+            in_ext = True
+            continue
+        if in_ext and line.startswith("## "):
+            break
+        if not in_ext:
+            continue
+        m = _EXT_HEAD.match(line)
+        if m:
+            # `openclaw (npm)` is the component `openclaw`
+            name = re.sub(r"\s*\((?:npm|pypi|helm)\)\s*$", "", m.group(1)).strip()
+            continue
+        m = _EXT_VER.match(line)
+        if m and name and _is_strictly_newer(m.group(1), m.group(2)):
+            items.append({"component": name, "namespace": "external", "kind": "image",
+                          "current": m.group(1), "target": m.group(2),
+                          "type": _semver_type(m.group(1), m.group(2)),
+                          "cell": f"{m.group(1)} → {m.group(2)}", "source": "external"})
     return items
 
 
@@ -330,6 +437,15 @@ def reconcile():
     if actionable is None:
         return {"error": "version-check-current.md missing — run version-check first",
                 "cracks": [{"component": "version-check", "reason": "no version data"}]}
+    # Widen the universe beyond the one-image-per-app overview table, then
+    # dedupe: the table row and the detail block describe the SAME bump.
+    seen = {(i["component"].lower(), i["kind"], i["current"], i["target"])
+            for i in actionable}
+    for extra in parse_detail_images() + parse_external_infra():
+        k = (extra["component"].lower(), extra["kind"], extra["current"], extra["target"])
+        if k not in seen:
+            seen.add(k)
+            actionable.append(extra)
     prs = parse_renovate_prs()
     plans = load_plans()
 
