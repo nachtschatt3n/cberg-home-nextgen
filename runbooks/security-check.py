@@ -222,6 +222,26 @@ def _scope() -> str:
     return _CURRENT_SECTION
 
 
+# Transient vs steady-state. A veto is only meaningful for a condition that
+# CHANGES between runs: that is the case where findings existed yesterday, the
+# dependency broke today, and absence would be misread as "fixed". A permanent
+# condition (an API we have always called wrongly, an endpoint this firmware
+# has never supported) never produced findings in the first place, so there is
+# nothing for auto-close to wrongly resolve — and vetoing on it would keep
+# auto-close switched off forever, protecting nothing. Steady-state breakage is
+# reported as a FINDING instead, which is how it gets fixed.
+_TRANSIENT_HTTP = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _is_transient(exc: Exception) -> bool:
+    """True when `exc` is a retry-worthy blip rather than a permanent defect."""
+    code = getattr(exc, "code", None)
+    if code is not None:
+        return int(code) in _TRANSIENT_HTTP
+    # Timeouts / DNS / connection resets have no status code.
+    return isinstance(exc, (TimeoutError, OSError))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1273,6 +1293,9 @@ def s4_cve_check() -> tuple[str, Findings, str]:
 
     cprint(C.CYAN, f"  Checking {min(len(unique), 25)} components against OSV.dev...")
     found_vulns = False
+    osv_transient = 0          # retry-worthy blips -> veto auto-close
+    osv_rejected = 0           # permanent 4xx -> emit a finding instead
+    osv_reason = ""
     for name, ver in unique[:25]:
         clean = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*', '', ver).lstrip('v')
         payload = json.dumps({"version": clean, "package": {"name": name, "ecosystem": "Helm"}}).encode()
@@ -1290,18 +1313,36 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 cprint(C.RED, f"  🔴 {name} {ver}: {ids}")
                 found_vulns = True
         except Exception as e:
-            # Every OSV lookup can fail this way (timeout, 429, non-200).
-            # If they ALL fail we still print the green line below, so the
-            # veto is the only thing standing between an OSV outage and a
-            # clean bill of health.
-            # Deliberately component-agnostic so an outage collapses into ONE
-            # reason instead of one per component — the operator needs "OSV is
-            # down", not 25 copies of it. DegradationLog dedups exact strings.
-            DEGRADED.record(_scope(), "OSV.dev API",
-                            f"component lookups failing ({type(e).__name__})")
+            # If EVERY lookup fails we still print the green line below, so
+            # something has to stand between an OSV failure and a manufactured
+            # clean bill of health. Which mechanism depends on the failure:
+            #
+            #  * transient (timeout, 429, 5xx) -> veto auto-close. Findings
+            #    existed before and would wrongly resolve. Component-agnostic
+            #    text so one outage collapses into ONE reason, not 25.
+            #  * permanent (4xx) -> a defect in how WE call the API, not an
+            #    outage. It has never returned results, so no finding can
+            #    wrongly close; vetoing would disable auto-close forever.
+            #    Emit a finding instead so the dead check gets fixed.
+            if _is_transient(e):
+                osv_transient += 1
+                DEGRADED.record(_scope(), "OSV.dev API",
+                                f"component lookups failing ({type(e).__name__})")
+            else:
+                osv_rejected += 1
+                osv_reason = f"{type(e).__name__} {getattr(e, 'code', '')}".strip()
         time.sleep(0.15)
 
-    if not found_vulns:
+    # A check that rejects every single request is not a passing check.
+    if osv_rejected and osv_rejected == len(unique[:25]):
+        f.add(WARNING,
+              f"OSV.dev component scan is inoperative: all {osv_rejected} queries "
+              f"rejected ({osv_reason}) — `ecosystem: \"Helm\"` is not a valid OSV "
+              f"ecosystem, so this check has been reporting a clean result without "
+              f"ever querying anything")
+        cprint(C.YELLOW, f"  🟡 OSV.dev rejected all {osv_rejected} queries "
+                         f"({osv_reason}) — check is inoperative, not clean")
+    elif not found_vulns:
         cprint(C.GREEN, "  🟢 No CVEs found for checked components")
 
     # ─── Trivy: scan running container images for CRITICAL/HIGH CVEs ────────
