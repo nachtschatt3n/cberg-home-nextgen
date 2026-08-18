@@ -140,7 +140,40 @@ def list_renovate_prs():
     return json.loads(out or "[]")
 
 
-_TITLE_RE = re.compile(r"update\s+(?P<dep>.+?)\s+\(\s*(?P<cur>\S+)\s*(?:→|->|to)\s*(?P<new>\S+)\s*\)")
+# Renovate emits two title shapes in this repo, both of which must be
+# attributable to exactly ONE component and ONE full target version.
+#
+#  (A) SPANNED — `.github/renovate.json5` sets a custom `commitMessageExtra`
+#      of "( {{currentVersion}} → {{newVersion}} )" for the docker/helm/
+#      github-release packageRules. Example:
+#          feat(container): update postgres ( 17.9 → 17.11 )
+#
+#  (B) BARE — any dep NOT covered by one of those packageRules falls back to
+#      Renovate's DEFAULT commitMessageExtra, which renders
+#      "to {{newValue}}" (or "to v{{newMajor}}" for a major). Example:
+#          feat(container): update busybox to v1.38.0
+#      PR #205 was a genuine, green, version-only patch bump that got held
+#      purely because shape (B) has no "( x → y )" span. The current version
+#      is simply not in the title for this shape — that is a Renovate
+#      rendering fact, not a signal that the bump is unattributable.
+#
+# SAFETY (memory: feedback_version_attribution — never bump from an unlabeled
+# version line). Shape (B) is only accepted when BOTH hold:
+#   1. the dep is a SINGLE token (no spaces) — so a grouped title such as
+#      "update Flux Operator group to v1.2.3" can never match, and
+#   2. the target is a FULL version with at least one dot ("1.38.0", "v1.38"),
+#      never a bare major ("v2"). Renovate renders majors as "to v<major>",
+#      which names no concrete target — exactly the unattributable case, and
+#      majors are held by the update_type gate anyway.
+# `cur` is therefore UNKNOWN for shape (B); it is reported as such rather
+# than guessed, and nothing downstream gates on it (the safe/unsafe decision
+# comes from the PR's update-type LABEL, not from diffing cur→new).
+_TITLE_RE = re.compile(
+    r"update\s+(?P<dep>.+?)\s+\(\s*(?P<cur>\S+)\s*(?:→|->|to)\s*(?P<new>\S+)\s*\)"
+)
+_TITLE_BARE_RE = re.compile(
+    r"update\s+(?P<dep>\S+)\s+to\s+(?P<new>v?\d+(?:\.\d+)+[\w.+-]*)\s*$"
+)
 
 
 def parse_pr(pr):
@@ -163,13 +196,29 @@ def parse_pr(pr):
         utype = "unknown"
 
     m = _TITLE_RE.search(title)
-    if not m:
-        return {"parse_error": "title not in `update <dep> ( x → y )` shape"}
-    dep = m.group("dep").strip()
+    cur = None
+    if m:
+        dep, cur, new = m.group("dep").strip(), m.group("cur"), m.group("new")
+    else:
+        m = _TITLE_BARE_RE.search(title)
+        if not m:
+            return {"parse_error": (
+                "title not in `update <dep> ( x → y )` nor "
+                "`update <dep> to <x.y.z>` shape"
+            )}
+        dep, new = m.group("dep").strip(), m.group("new")
     # grouped PRs update several deps ("... group") — never auto-merge blind
     if " group" in dep or "," in dep or "and " in dep:
         return {"parse_error": f"grouped/multi-dep PR ({dep!r}) — manual"}
-    return {"dep": dep, "cur": m.group("cur"), "new": m.group("new"), "update_type": utype}
+    return {
+        "dep": dep,
+        # None (not "") when Renovate did not render the current version, so
+        # the report shows "?" instead of implying a known 0-length version.
+        "cur": cur if cur is not None else "?",
+        "cur_known": cur is not None,
+        "new": new,
+        "update_type": utype,
+    }
 
 
 # ── G3 breaking-change scan (best-effort, reuses version engine) ─────────────
@@ -240,6 +289,7 @@ def classify(pr, policy, checker):
     if "parse_error" in parsed:
         return {**r, "verdict": "hold", "gate": "parse", "reason": parsed["parse_error"]}
     r.update(dep=parsed["dep"], cur=parsed["cur"], new=parsed["new"],
+             cur_known=parsed.get("cur_known", True),
              update_type=parsed["update_type"])
 
     # G1 type
