@@ -60,8 +60,14 @@ elif command -v mise >/dev/null 2>&1; then
 fi
 
 if [ -z "$PY" ]; then
-    echo -e "${YELLOW}⚠️  commit-msg: python3 not found — disclosure scan SKIPPED${NC}" >&2
-    exit 0
+    # FAIL CLOSED. This guards against a permanent, unrewritable disclosure on
+    # a public repo; silently skipping the scan because an interpreter is
+    # missing is the wrong trade. Skipping must be a deliberate act.
+    echo -e "${RED}✖ commit-msg: python3 not found — disclosure scan cannot run.${NC}" >&2
+    echo -e "  Install python3 (or run inside mise), or bypass deliberately with" >&2
+    echo -e "  ${DIM}git commit --no-verify${NC} if you have checked the message yourself." >&2
+    echo -e "  Policy: ${YELLOW}docs/sops/vulnerability-disclosure.md${NC}" >&2
+    exit 1
 fi
 
 $PY - "$MSG_FILE" <<'PYEOF'
@@ -113,7 +119,15 @@ if not any(ln.strip() for ln in lines):
 # "criticals"/"highs" can never match (the trailing "s" is a word char and
 # trips the lookahead), which silently defeats every counted-phrasing rule.
 SEV = r"(?:critical|high|medium|low)s?(?![-\w])"
-VULN = r"(?:" + SEV + r"|vulnerabilit\w*|advisor(?:y|ies)|cves?)"
+# "vulns" is included because the abbreviation is at least as common as the
+# full word in practice, and omitting it left an accidental bypass.
+# "will_not_fix" lives here rather than as a standalone reject: bare, it is
+# legitimate tooling talk ("the parser should honour will_not_fix"), but tied
+# to a count, a quantifier or a named image it states unfixed fleet state.
+VULN = (
+    r"(?:" + SEV + r"|vulns?\b|vulnerabilit\w*|advisor(?:y|ies)|cves?"
+    r"|will[_ -]not[_ -]fix)"
+)
 
 # A literal 0 is explicitly NOT a disclosure — the SOP (§2.1) lists
 # "post-rebuild: 0 fixable CRITICAL" as publishable, because it states a
@@ -157,6 +171,16 @@ PATTERNS = [
         "unfixed-vulnerability statement",
     ),
     (
+        r"\bunfixed\b",
+        "unfixed-vulnerability statement",
+    ),
+    (
+        # "the remaining issues have no upstream fix" — a paraphrase that says
+        # exactly what the scanner vocabulary would have said.
+        r"\bno\s+(?:\w+\s+){0,2}?upstream\s+fix\b",
+        "unfixed-vulnerability statement",
+    ),
+    (
         r"\bexploitab\w*\b",
         "exploitability detail",
     ),
@@ -193,21 +217,45 @@ PATTERNS = [
 
 COMPILED = [(re.compile(p, re.IGNORECASE), label) for p, label in PATTERNS]
 
+# `security_ref: F-xxxxxxxx` is the sanctioned reference form — a pointer,
+# not a disclosure. Drop those lines before scanning.
+scannable = [
+    ln
+    for ln in lines
+    if not re.match(r"^\s*security_ref:\s*F-[0-9a-f]{8}\s*$", ln, re.IGNORECASE)
+]
+
+# Scan a WHITESPACE-NORMALIZED single string, not line by line. Commit bodies
+# here are hard-wrapped at ~72 chars, so a multi-word pattern like "13 fixable
+# criticals" routinely straddles a line break — per-line matching would miss it
+# by accident, with no one trying to evade. Joining first closes that hole.
+normalized = re.sub(r"\s+", " ", " ".join(scannable)).strip()
+
+
+def sanitize(text):
+    """Strip ANSI/CSI and other control characters before echoing back.
+
+    The rejection banner exists to be READ by a human; a message containing
+    e.g. an erase-display escape must not be able to repaint their terminal.
+    """
+    text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text)
+    text = re.sub(r"\x1b[@-_]", "", text)
+    return "".join(ch if ch.isprintable() or ch == " " else "?" for ch in text)
+
+
 violations = []
 seen = set()
-for idx, line in enumerate(lines, start=1):
-    # `security_ref: F-xxxxxxxx` is the sanctioned reference form — it is a
-    # pointer, not a disclosure, and must never be flagged.
-    if re.match(r"^\s*security_ref:\s*F-[0-9a-f]{8}\s*$", line, re.IGNORECASE):
+for rx, label in COMPILED:
+    m = rx.search(normalized)
+    if not m:
         continue
-    for rx, label in COMPILED:
-        m = rx.search(line)
-        if m:
-            key = (idx, label)
-            if key in seen:
-                continue
-            seen.add(key)
-            violations.append((idx, line.rstrip(), m.group(0), label))
+    if label in seen:
+        continue
+    seen.add(label)
+    start = max(0, m.start() - 40)
+    end = min(len(normalized), m.end() + 40)
+    excerpt = ("…" if start else "") + normalized[start:end] + ("…" if end < len(normalized) else "")
+    violations.append((excerpt, m.group(0), label))
 
 if not violations:
     sys.exit(0)
@@ -241,10 +289,10 @@ print(
 )
 print("", file=out)
 print(f"  {RED}Offending content:{NC}", file=out)
-for idx, line, hit, label in violations:
+for excerpt, hit, label in violations:
     print("", file=out)
-    print(f"    {DIM}line {idx}:{NC} {line}", file=out)
-    print(f"    {RED}  ^ matched {hit!r} — {label}{NC}", file=out)
+    print(f"    {DIM}…{sanitize(excerpt)}{NC}", file=out)
+    print(f"    {RED}  ^ matched {sanitize(repr(hit))} — {label}{NC}", file=out)
 print("", file=out)
 print(f"  {GREEN}How to fix:{NC}", file=out)
 print("", file=out)

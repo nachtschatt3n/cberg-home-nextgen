@@ -1,8 +1,8 @@
 # SOP: policy-cli — operator interface for sweep_history policy tables
 
 > Description: How to edit the four operator-curated policy tables that back the daily sweep (accepted_risks, slo_definitions, noise_suppressions, security_acceptances) from the operator's local Claude CLI / mise session.
-> Version: `2026.05.27`
-> Last Updated: `2026-05-27`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `homelab-operator`
 
 ---
@@ -28,7 +28,9 @@ The four tables and their CLI namespaces:
 | `noise_suppressions` | `policy-cli noise …` | `runbooks/noise_allowlist.yaml` |
 | `security_acceptances` | `policy-cli sec …` | `runbooks/security_check_acceptances.py` |
 
-Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`).
+Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification **in place** — the only way to change an AR without losing `accepted_at`), and `lint` (reports AR descriptions that have drifted out of matching). SLO also has `update` (patch numerator/denominator/target/window in place).
+
+**AR descriptions are substring matchers, so they must be drift-stable.** `risk edit` REFUSES a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
 
 A fifth namespace, `policy-cli finding …`, reads/writes the **`sweep_findings`**
 table. It is not a policy table — it is where **vulnerability detail lives instead
@@ -138,8 +140,14 @@ python3 runbooks/policy-cli.py <ns> list              # newly-added row visible
 For accepted_risks: rerun security-check.py end-to-end and confirm the matching finding is now tagged `🛡️ [AR-NNN]` instead of being flagged critical/warning:
 
 ```bash
-SWEEP_PG_DSN=... python3 runbooks/security-check.py | grep -F "[AR-028]" || echo "AR-028 not yet matching anything"
+# Verification runs must NOT auto-close: a partial rerun would resolve every
+# security finding it did not re-emit (auto-close is section-scoped, not
+# cycle-scoped — see runbooks/lib/findings_writer.py).
+SWEEP_AUTOCLOSE=0 SWEEP_PG_DSN=... python3 runbooks/security-check.py \
+  | grep -F "[AR-028]" || echo "AR-028 not yet matching anything"
 ```
+
+To preview what a full run *would* close without writing, use `SWEEP_AUTOCLOSE_DRYRUN=1` instead.
 
 For SLOs: rerun slo-check.py:
 
@@ -233,3 +241,4 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 | Date | Version | Change |
 |---|---|---|
 | 2026-05-27 | 2026.05.27 | Initial — Phase 3 of policy-in-DB migration |
+| 2026-08-18 | 2026.08.18 | Documented `risk edit` / `risk lint` / `slo update`; drift-stable AR description rule; made the §6 verification rerun non-destructive (`SWEEP_AUTOCLOSE=0`) |
