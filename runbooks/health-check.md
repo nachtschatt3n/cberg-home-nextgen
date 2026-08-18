@@ -1475,17 +1475,41 @@ for b in data['aggregations']['by_pod']['buckets'][:10]:
     print(f'  {b[\"key\"]}: {b[\"doc_count\"]}')
 "
 
-# 7. FATAL/OOMKilled check
+# 7. Fatal-level log text (NOT "FATAL/OOM" — OOM is measured separately, see step 8)
+#
+# The benign must_not classes below are load-bearing. Without them this query is
+# ~93% false positive and can never reach zero: measured 2026-08-18, 215 raw hits
+# were 100 Rails empty-message FATAL headers, 50 clean-shutdown SIGTERM lines,
+# 36 restart-tied "too many clients already", 16 hits on the GIF FILENAME
+# "icon_fatalerror.gif", 9 probe-misconfig role errors, 1 real auth failure and
+# ZERO "out of memory". Excluding them leaves 14.
+#
+# `*FATAL -- :` is END-ANCHORED on purpose: Rails logs the FATAL header and the
+# message as separate records, so the bare header carries no information, while a
+# real "FATAL -- : SomeError ..." still matches and is still counted.
 curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-default/_search" -H 'Content-Type: application/json' -d '{
   "size": 5,
+  "track_total_hits": true,
   "query": {
     "bool": {
       "should": [
-        {"wildcard": {"body.text": "*FATAL*"}},
-        {"wildcard": {"body.text": "*OOMKilled*"}},
-        {"wildcard": {"body.text": "*out of memory*"}}
+        {"wildcard": {"body.text": {"value": "*fatal*", "case_insensitive": true}}}
       ],
       "minimum_should_match": 1,
+      "must_not": [
+        {"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
+        {"wildcard": {"body.text": {"value": "*database system is shutting down*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*terminating connection due to administrator command*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*not a git repository*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*fatal_neterrors=*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*icon_fatalerror*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*SignalException: SIGTERM*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*FATAL SIGTERM*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*FATAL -- :", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*too many clients already*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*too many connections*", "case_insensitive": true}}},
+        {"wildcard": {"body.text": {"value": "*remaining connection slots*", "case_insensitive": true}}}
+      ],
       "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
     }
   },
@@ -1494,7 +1518,7 @@ curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/logs-generic-de
 }' | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-print(f'FATAL/OOM hits (24h): {data[\"hits\"][\"total\"][\"value\"]}')
+print(f'Fatal-level log lines, benign classes excluded (24h): {data[\"hits\"][\"total\"][\"value\"]}')
 for hit in data['hits']['hits']:
     src = hit['_source']
     ts  = src.get('@timestamp', 'N/A')
@@ -1503,6 +1527,25 @@ for hit in data['hits']['hits']:
     msg = str(src.get('body', {}).get('text', src.get('body', 'N/A')))[:120]
     print(f'  {ts} [{ns}/{pod}]: {msg}')
 "
+
+# 8. OOM — the AUTHORITATIVE controls are pod state, not log text.
+# OOMKilled is a pod-status reason and NEVER appears as a log line, so grepping
+# logs for it always returns 0 and proves nothing. Use these two instead:
+kubectl get events -A --field-selector reason=OOMKilled
+kubectl get pods -A -o json | python3 -c "
+import sys, json
+n = 0
+for p in json.load(sys.stdin)['items']:
+    for cs in (p.get('status', {}).get('containerStatuses') or []):
+        if (cs.get('lastState', {}).get('terminated', {}) or {}).get('reason') == 'OOMKilled':
+            n += 1
+            print(p['metadata']['namespace'], p['metadata']['name'], cs['name'])
+print('pods with OOMKilled lastState:', n)"
+
+# Log-text OOM is only a CORROBORATING signal (catches in-process OOM that never
+# produces an OOMKilled pod status: JVM heap, ffmpeg allocation failures). Exclude
+# the mosquitto line "Client <id> disconnected due to out of memory" — that is the
+# IoT client device's memory, not ours.
 
 kill $PF_PID 2>/dev/null || true
 wait $PF_PID 2>/dev/null || true
@@ -1544,14 +1587,30 @@ for i in json.load(sys.stdin):
 - Verify edot-collector deployment is 1/1 ready and DaemonSet covers all 3 nodes
 - Confirm both OTel data streams have documents and recent ingestion is active (>0 in last 5 min)
 - Aggregate error counts by namespace and pod using OTel field names
-- Flag any FATAL/OOMKilled `body.text` wildcard matches for immediate investigation (not `severity_text` — see the OTel Field Reference above)
+- Fatal-level `body.text` matches are only meaningful **after** the benign must_not classes above (not `severity_text` — see the OTel Field Reference above). A raw `*fatal*` count is not a finding.
+- Judge OOM from the two pod-state controls, never from a log-text count
 - `external-dns` FATAL log entries (Cloudflare sync failures) are a **known false positive** — classify as MINOR; it auto-recovers
 
 **Error Rate Thresholds:**
 - **Normal**: <1000 errors/day (mostly benign)
 - **Monitor**: 1000-5000 errors/day (review error patterns)
 - **Warning**: 5000-10000 errors/day (investigate top error sources)
-- **Critical**: >10000 errors/day or any FATAL/OOMKilled errors (excluding external-dns)
+- **Critical**: >10000 errors/day
+
+**Fatal-level thresholds** (post-exclusion count; tiered so that ordinary pod-restart
+noise cannot pin a permanent CRITICAL — the pre-2026-08-18 rule was `>0 ⇒ CRITICAL`,
+which structurally could never clear):
+- **Normal**: 0
+- **Monitor**: 1–24 (below the action floor; measured baseline is ~14/day)
+- **Warning**: 25–99
+- **Critical**: ≥100
+
+**Connection-exhaustion thresholds** (own assertion — these arrive in restart-tied
+bursts and are a pool/capacity signal, not a fatal-error signal):
+- **Monitor**: 1–99 · **Minor**: 100–499 · **Major**: ≥500
+
+**OOM**: any OOMKilled event or pod `lastState` ⇒ CRITICAL. Log-text OOM without an
+OOMKilled event ⇒ warning (in-process OOM).
 
 ---
 

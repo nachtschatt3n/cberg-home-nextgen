@@ -4100,40 +4100,119 @@ except:
             echo ""
         fi
 
-          # Critical pattern check -- fatal/OOM log TEXT via body.text wildcard.
-          # severity_text is dead (see §34); `match` on the `body` object matched 0.
-          # AUTHORITATIVE OOM count is OOM_COUNT above (events reason=OOMKilled);
-          # OOMKilled is a pod-status reason, not a log line. This catches fatal text only.
+          # --- Fatal / connection-exhaustion / OOM log TEXT via body.text wildcard ---
+          #
+          # severity_text is dead (see §34); `match` on the `body` object matched 0,
+          # so wildcards on body.text are the only working path.
+          #
+          # REWRITTEN 2026-08-18 (finding F-d97cfe78). The old single "FATAL/OOM"
+          # counter was ~93% false positive and STRUCTURALLY COULD NEVER CLEAR: its
+          # threshold was `>0 => CRITICAL`, but its match set was dominated by
+          # noise that recurs on every ordinary pod restart. Measured composition of
+          # the 215 hits in the 24h window on 2026-08-18:
+          #     100  Rails empty-message FATAL headers ("... FATAL -- :", no message)
+          #      50  "FATAL SignalException: SIGTERM"  (clean shutdown, showcase pods)
+          #      36  postgres "sorry, too many clients already" (restart-tied bursts)
+          #      16  "GET /typo3/gfx/icon_fatalerror.gif" -- a GIF FILENAME that
+          #          happens to contain the substring "fatalerror". Not an error at all.
+          #       9  role/database "... does not exist" (probe misconfiguration)
+          #       1  password authentication failed (real, minor)
+          #       0  "out of memory"
+          # Two authoritative controls both read 0 at the same instant:
+          #   kubectl get events -A --field-selector reason=OOMKilled  -> 0
+          #   pods with containerStatuses[].lastState.terminated.reason=OOMKilled -> 0
+          # i.e. the assertion titled "FATAL/OOM" was reporting a CRITICAL OOM
+          # condition while zero OOMs existed. The title was also wrong: OOM is
+          # measured separately and authoritatively (OOM_COUNT, §above).
+          #
+          # It is now THREE independent assertions with honest titles and floors:
+          #   A) FATAL_TEXT_COUNT  - fatal-level log text, benign classes excluded,
+          #                          tiered thresholds (pod-restart noise can no
+          #                          longer pin a permanent CRITICAL)
+          #   B) CONN_EXHAUST_COUNT- DB connection-exhaustion, its own lower severity
+          #   C) OOM_TEXT_COUNT    - out-of-memory log text, corroborates OOM_COUNT
+          #
+          # Exclusion classes and WHY each is safe (validated 2026-08-18):
+          #   *icon_fatalerror*        filename substring collision, never an error
+          #   *SignalException: SIGTERM* / *FATAL SIGTERM*   clean shutdown signal
+          #   *FATAL -- :  (END-ANCHORED, no trailing *)     Rails logger emits the
+          #       FATAL header and the message on separate records; the header alone
+          #       carries ZERO information. End-anchoring is load-bearing: a real
+          #       "FATAL -- : ActionView::Template::Error ..." still matches and is
+          #       still counted. Do NOT add a trailing wildcard here.
+          # Deliberately NOT excluded (genuine signals that must still surface):
+          #   out of memory / OutOfMemoryError / Cannot allocate memory
+          #   password authentication failed, role/database does not exist
         echo "Checking for critical error patterns..."
-        FATAL_COUNT=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
-          "size": 0,
-          "query": {
-            "bool": {
-              "should": [
-                  {"wildcard": {"body.text": {"value": "*fatal*", "case_insensitive": true}}},
-                  {"wildcard": {"body.text": {"value": "*out of memory*", "case_insensitive": true}}}
-                ],
-              "minimum_should_match": 1,
-              "must_not": [
+
+        # Shared benign-class exclusions (see rationale above)
+        BENIGN_EXCL='
                   {"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
                   {"wildcard": {"body.text": {"value": "*database system is shutting down*", "case_insensitive": true}}},
                   {"wildcard": {"body.text": {"value": "*terminating connection due to administrator command*", "case_insensitive": true}}},
                   {"wildcard": {"body.text": {"value": "*not a git repository*", "case_insensitive": true}}},
-                  {"wildcard": {"body.text": {"value": "*fatal_neterrors=*", "case_insensitive": true}}}
-                ],
-                "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]
-            }
-          }
-        }' 2>/dev/null | python3 -c "
+                  {"wildcard": {"body.text": {"value": "*fatal_neterrors=*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*icon_fatalerror*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*SignalException: SIGTERM*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*FATAL SIGTERM*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*FATAL -- :", "case_insensitive": true}}}'
+
+        # Connection-exhaustion class (counted separately in B, excluded from A)
+        CONN_EXCL='
+                  {"wildcard": {"body.text": {"value": "*too many clients already*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*too many connections*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*remaining connection slots*", "case_insensitive": true}}}'
+
+        es_count() {
+            # $1 = should-clause JSON array body, $2 = must_not-clause JSON array body
+            curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" \
+              -H 'Content-Type: application/json' -d "{
+              \"size\": 0,
+              \"track_total_hits\": true,
+              \"query\": {
+                \"bool\": {
+                  \"should\": [ $1 ],
+                  \"minimum_should_match\": 1,
+                  \"must_not\": [ $2 ],
+                  \"filter\": [{\"range\": {\"@timestamp\": {\"gte\": \"now-24h\"}}}]
+                }
+              }
+            }" 2>/dev/null | python3 -c "
 import sys, json
 try:
-    data = json.load(sys.stdin)
-    print(data['hits']['total']['value'])
-except:
+    print(json.load(sys.stdin)['hits']['total']['value'])
+except Exception:
     print('0')
-" || echo "0")
+" || echo "0"
+        }
 
-        echo "  FATAL/OOMKilled errors (last 24h): $FATAL_COUNT"
+        # A) Fatal-level log text, benign + connection-exhaustion classes removed
+        FATAL_TEXT_COUNT=$(es_count \
+            '{"wildcard": {"body.text": {"value": "*fatal*", "case_insensitive": true}}}' \
+            "${BENIGN_EXCL},${CONN_EXCL}")
+
+        # B) DB connection exhaustion (own assertion, lower severity)
+        CONN_EXHAUST_COUNT=$(es_count "$CONN_EXCL" \
+            '{"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
+             {"wildcard": {"body.text": {"value": "*database system is shutting down*", "case_insensitive": true}}}')
+
+        # C) Out-of-memory log text. Corroborates the AUTHORITATIVE OOM_COUNT
+        # (events reason=OOMKilled) -- OOMKilled is a pod-status reason, never a
+        # log line, so this is a second, independent view. The mosquitto
+        # "Client <id> disconnected due to out of memory" line is about the IoT
+        # CLIENT device's memory, not ours -- excluded (498 vs 501 over 30d).
+        OOM_SHOULD='
+                  {"wildcard": {"body.text": {"value": "*out of memory*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*OutOfMemoryError*", "case_insensitive": true}}},
+                  {"wildcard": {"body.text": {"value": "*Cannot allocate memory*", "case_insensitive": true}}}'
+        OOM_TEXT_COUNT=$(es_count "$OOM_SHOULD" \
+            '{"term": {"resource.attributes.k8s.namespace.name": "flux-system"}},
+             {"wildcard": {"body.text": {"value": "*disconnected due to out of memory*", "case_insensitive": true}}}')
+
+        echo "  Fatal-level log lines, benign classes excluded (24h): $FATAL_TEXT_COUNT"
+        echo "  DB connection-exhaustion log lines (24h):             $CONN_EXHAUST_COUNT"
+        echo "  Out-of-memory log lines (24h):                        $OOM_TEXT_COUNT"
+        echo "  (authoritative OOM control, events reason=OOMKilled:  ${OOM_COUNT:-0})"
         echo ""
 
         kill $PF_PID 2>/dev/null || true
@@ -4141,13 +4220,60 @@ except:
 
         TOTAL_ERRORS_INT=$(echo "$TOTAL_ERRORS" | tr -cd '0-9' || echo "0")
         [ -z "$TOTAL_ERRORS_INT" ] && TOTAL_ERRORS_INT=0
-        FATAL_COUNT_INT=$(echo "$FATAL_COUNT" | tr -cd '0-9' || echo "0")
-        [ -z "$FATAL_COUNT_INT" ] && FATAL_COUNT_INT=0
+        FATAL_TEXT_INT=$(echo "$FATAL_TEXT_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$FATAL_TEXT_INT" ] && FATAL_TEXT_INT=0
+        CONN_EXHAUST_INT=$(echo "$CONN_EXHAUST_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$CONN_EXHAUST_INT" ] && CONN_EXHAUST_INT=0
+        OOM_TEXT_INT=$(echo "$OOM_TEXT_COUNT" | tr -cd '0-9' || echo "0")
+        [ -z "$OOM_TEXT_INT" ] && OOM_TEXT_INT=0
 
-        if [ "$FATAL_COUNT_INT" -gt 0 ]; then
-            log_critical "FATAL/OOM errors detected in logs: $FATAL_COUNT_INT"
-            add_critical_issue "FATAL/OOM errors in Elasticsearch logs: $FATAL_COUNT_INT"
-        elif [ "$TOTAL_ERRORS_INT" -gt 10000 ]; then
+        # A) Fatal-level text -- TIERED, not >0. Floors chosen against the measured
+        # 24h baseline of 14 residual hits so ordinary pod-restart noise cannot pin
+        # a permanent CRITICAL, while a genuine fatal storm still escalates.
+        if [ "$FATAL_TEXT_INT" -ge 100 ]; then
+            log_critical "Fatal-level log lines (excl. benign classes): $FATAL_TEXT_INT in 24h"
+            add_critical_issue "Fatal-level log lines in Elasticsearch: $FATAL_TEXT_INT in 24h"
+        elif [ "$FATAL_TEXT_INT" -ge 25 ]; then
+            log_warning "Elevated fatal-level log lines: $FATAL_TEXT_INT in 24h"
+            add_major_issue "Elevated fatal-level log lines: $FATAL_TEXT_INT in 24h"
+        elif [ "$FATAL_TEXT_INT" -gt 0 ]; then
+            log_info "Fatal-level log lines: $FATAL_TEXT_INT in 24h (below action floor of 25)"
+        else
+            log_success "No fatal-level log lines in 24h"
+        fi
+
+        # B) Connection exhaustion -- its own, lower-severity assertion. These come
+        # in restart-tied bursts (a pool reconnecting), so they are a capacity/pool
+        # signal, not a fatal-error signal.
+        if [ "$CONN_EXHAUST_INT" -ge 500 ]; then
+            log_warning "DB connection exhaustion sustained: $CONN_EXHAUST_INT in 24h"
+            add_major_issue "DB connection exhaustion: $CONN_EXHAUST_INT log lines in 24h"
+        elif [ "$CONN_EXHAUST_INT" -ge 100 ]; then
+            log_warning "DB connection-exhaustion bursts: $CONN_EXHAUST_INT in 24h"
+            add_minor_issue "DB connection-exhaustion bursts: $CONN_EXHAUST_INT log lines in 24h"
+        elif [ "$CONN_EXHAUST_INT" -gt 0 ]; then
+            log_info "DB connection-exhaustion log lines: $CONN_EXHAUST_INT in 24h (restart-tied burst range)"
+        else
+            log_success "No DB connection-exhaustion log lines in 24h"
+        fi
+
+        # C) OOM log text. The CRITICAL OOM verdict belongs to OOM_COUNT (events)
+        # above; this corroborates it and catches in-process OOM that never
+        # produces an OOMKilled pod status (JVM heap, ffmpeg allocation failures).
+        if [ "$OOM_TEXT_INT" -gt 0 ] && [ "${OOM_COUNT:-0}" -gt 0 ]; then
+            log_critical "OOM confirmed by both controls: $OOM_COUNT OOMKilled events, $OOM_TEXT_INT log lines"
+            add_critical_issue "OOM: $OOM_COUNT OOMKilled events and $OOM_TEXT_INT OOM log lines in 24h"
+        elif [ "$OOM_TEXT_INT" -ge 100 ]; then
+            log_warning "In-process OOM log lines (no OOMKilled events): $OOM_TEXT_INT in 24h"
+            add_major_issue "In-process OOM log lines: $OOM_TEXT_INT in 24h"
+        elif [ "$OOM_TEXT_INT" -gt 0 ]; then
+            log_warning "OOM log lines present (no OOMKilled events): $OOM_TEXT_INT in 24h"
+            add_minor_issue "OOM log lines: $OOM_TEXT_INT in 24h"
+        else
+            log_success "No out-of-memory log lines in 24h (OOMKilled events: ${OOM_COUNT:-0})"
+        fi
+
+        if [ "$TOTAL_ERRORS_INT" -gt 10000 ]; then
             log_warning "High error count in logs: $TOTAL_ERRORS_INT (>10,000 threshold)"
             add_major_issue "High error count in logs: $TOTAL_ERRORS_INT"
         elif [ "$TOTAL_ERRORS_INT" -gt 5000 ]; then
