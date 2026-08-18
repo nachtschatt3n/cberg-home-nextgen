@@ -826,11 +826,19 @@ class VersionChecker:
         try:
             with requests.Session() as sess:
                 while url:
-                    if pages >= max_pages or _time.monotonic() > deadline:
-                        self.degraded.record(
-                            _scope, host,
-                            f"tag listing truncated after {pages} page(s) "
-                            f"(page cap {max_pages} / {budget_s}s budget)")
+                    over_budget = _time.monotonic() > deadline
+                    if pages >= max_pages or over_budget:
+                        # Only the TIME BUDGET can differ between runs. Hitting
+                        # the page cap is structural: a registry with thousands
+                        # of tags (docker.elastic.co) truncates on every single
+                        # run, so vetoing on it would pin auto-close off
+                        # forever — and since that image has never yielded a
+                        # version finding, there is nothing to wrongly resolve.
+                        if over_budget:
+                            self.degraded.record(
+                                _scope, host,
+                                f"tag listing exceeded the {budget_s}s budget "
+                                f"after {pages} page(s)")
                         return None  # incomplete -> undeterminable, never partial
                     headers = {'Authorization': f'Bearer {token}'} if token else {}
                     resp = sess.get(url, headers=headers, timeout=15)
