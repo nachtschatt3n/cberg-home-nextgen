@@ -1,0 +1,60 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master/configmap.json
+# Static, PHP-free health endpoint for readiness + startup.
+#
+# WHY THIS EXISTS
+# ---------------
+# `/health` is a CakePHP ROUTE. php-fpm boots the whole CakePHP 1.x framework on
+# EVERY request, and CakePHP 1.x calls a long list of methods statically that
+# modern PHP flags as E_STRICT/E_DEPRECATED, so a single framework boot emits
+# ~370 `PHP Strict Standards:` notices to stderr. Each is then double-logged
+# (php-fpm "child N said into stderr" + the nginx FastCGI error_log).
+#
+# With readiness at 10s + liveness at 30s + startup at 5s, the kubelet alone
+# drives ~480 framework boots/hour == ~179,000 log lines/hour == ~4.35M/24h.
+# Measured 2026-08-18: that was 58% of the ENTIRE cluster's log ingest and 98.8%
+# of the "error" metric (the substring "Error" appears inside the method name
+# `CakeLog::handleError`, so a deprecation notice scores as an error).
+#
+# This adds a SECOND nginx server on :8080 whose only job is to answer /healthz
+# from nginx itself -- it never reaches php-fpm, so it boots nothing and emits
+# nothing (`access_log off`). Readiness and startup point here.
+#
+# LIVENESS DELIBERATELY STAYS ON THE CakePHP `/health` ROUTE (:80). That route
+# checks the DB connection and TMP writability and returns a real 503; keeping
+# it on liveness preserves the depth 81f78e6e added, at 120 boots/hour instead
+# of 480 -- a ~75% cut with no loss of failure detection.
+#
+# ACCEPTED TRADE-OFF: readiness no longer proves php-fpm is alive, so a dead PHP
+# tier keeps the pod in the Service for up to one liveness window
+# (30s x 3 = 90s) before the restart. With one replica behind the ingress, that
+# window is the same either way -- there is no healthy peer to shift traffic to.
+#
+# This ConfigMap is ADDITIVE: it is mounted as a new file in /etc/nginx/conf.d/
+# via subPath and does not shadow the image's own default.conf.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ibgastro-nginx-healthz
+  namespace: my-software-showcase
+data:
+  healthz.conf: |
+    server {
+        listen 8080;
+        listen [::]:8080;
+        server_name _;
+
+        # The whole point: probes must not produce log lines.
+        access_log off;
+
+        location = /healthz {
+            add_header Content-Type text/plain always;
+            return 200 "ok\n";
+        }
+
+        # Nothing else is served here. This port is probe-only and is not
+        # exposed through the Service or the ingress.
+        location / {
+            return 404;
+        }
+    }

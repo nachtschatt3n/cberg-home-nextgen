@@ -62,6 +62,28 @@ spec:
             # The previous manifest probed "/", which routes to OrderclientsController
             # and 302-redirects to /users/login. Kubernetes scores 3xx as success, so
             # "/" reported Ready even with MySQL completely unreachable.
+            #
+            # PROBE SPLIT (2026-08-18) -- see configmap-nginx-healthz.yaml for the
+            # full rationale and the measured numbers.
+            #
+            # Every request to the CakePHP `/health` ROUTE boots the whole
+            # framework in php-fpm and emits ~370 `PHP Strict Standards:`
+            # deprecation notices. At 480 probes/hour that was ~179,000 log
+            # lines/hour -- 58% of the entire cluster's log ingest.
+            #
+            #   liveness  -> /health  on :80    CakePHP route: DB + TMP writability,
+            #                                   returns a real 503. Kept, because this
+            #                                   is the depth 81f78e6e added and the
+            #                                   only probe that must detect a dead
+            #                                   PHP tier. 120 boots/hour.
+            #   readiness -> /healthz on :8080  static nginx `return 200`, never
+            #   startup   -> /healthz on :8080  reaches php-fpm, `access_log off`,
+            #                                   so it emits nothing at all.
+            #
+            # Do NOT "fix" this by relaxing the intervals instead -- that is
+            # palliative and costs failure-detection latency. Do NOT drop the
+            # notices at the collector either; the app would then have no way to
+            # report a REAL error.
             probes:
               liveness:
                 enabled: true
@@ -79,8 +101,8 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /health
-                    port: 80
+                    path: /healthz
+                    port: 8080
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 5
@@ -90,8 +112,8 @@ spec:
                 custom: true
                 spec:
                   httpGet:
-                    path: /health
-                    port: 80
+                    path: /healthz
+                    port: 8080
                   initialDelaySeconds: 5
                   periodSeconds: 5
                   timeoutSeconds: 5
@@ -140,6 +162,17 @@ spec:
           - hosts:
               - *host
     persistence:
+      # Additive nginx snippet: a probe-only :8080 server that answers /healthz
+      # from nginx itself. subPath keeps the image's own conf.d/default.conf
+      # intact -- this adds a file, it does not shadow the directory.
+      nginx-healthz:
+        enabled: true
+        type: configMap
+        name: ibgastro-nginx-healthz
+        globalMounts:
+          - path: /etc/nginx/conf.d/healthz.conf
+            subPath: healthz.conf
+            readOnly: true
       uploads:
         enabled: true
         type: persistentVolumeClaim
