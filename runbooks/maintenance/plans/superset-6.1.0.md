@@ -135,23 +135,49 @@ removed). Our live DB is at 5.0.0's head `74ad1125881c`; `94e7a3499973` (the fir
 6.x migration) has exactly that as its `down_revision`, and the chain terminates at
 **`4b2a8c9d3e1f`** (`create_tasks_table`) — the value §4c must see afterwards.
 
-At least one of them does not reverse. `363a9b1e8992_convert_metric_currencies_from_str_to_json`:
+The schema changes themselves are **purely additive** — no `drop_table` or
+`drop_column` appears in any `upgrade()`; every drop lives in a `downgrade()`. New
+columns (`tables.folders`, `table_columns.datetime_format`, `dashboards.theme_id`),
+new tables (`theme`, `tasks`, `task_subscribers`), a widened
+`ab_user.username` VARCHAR(64)→(128), and FAB FKs recreated with `ON DELETE CASCADE`.
+
+**What makes it one-way is the data reshaping, not the DDL.** Two of the revisions
+document their own irreversibility:
 
 ```python
+# 363a9b1e8992_convert_metric_currencies_from_str_to_json
 def downgrade():
     """
     No op downgrade.
     ...
     """
     pass
+
+# f5b5f88d8526_fix_form_data_string_in_query_context
+#   "This migration fixes data corruption, downgrade is not meaningful"
 ```
 
-Others reshape data in place (`378cecfdba9f_merge_x_axis_sort_series_with_x_axis_`,
-`f1edd4a4d4f2_metric_currency_should_be_json`,
-`f5b5f88d8526_fix_form_data_string_in_query_context`) or widen columns
-(`x2s8ocx6rto6_expand_username_field_to_128_chars`). **`superset db downgrade` is
-not the rollback path and must not be attempted.** A pre-upgrade `pg_dump` is a
-hard gate (§3 step 3): without it there is no way back.
+Plus `f1edd4a4d4f2` casts `sql_metrics.currency` TEXT → JSON and `378cecfdba9f`
+rewrites `slices.params` row by row. **`superset db downgrade` is not the rollback
+path and must not be attempted.**
+
+Upstream publishes no downgrade guarantee either way — the only official word is on
+[admin-docs/installation/upgrading-superset](https://superset.apache.org/admin-docs/installation/upgrading-superset/):
+
+> While upgrading superset should not delete your charts and dashboards, we
+> recommend following best practices and to **backup your metadata database before
+> upgrading**.
+
+So a pre-upgrade `pg_dump` is a hard gate (§3 step 3): without it there is no way
+back. (No minimum PostgreSQL version is published for 6.x — the docs say only that
+Superset "is tested to work with PostgreSQL and MySQL" as the metadata DB. PG 17.11
+is well inside what SQLAlchemy 1.4.54 + psycopg2 2.9.9 support.)
+
+> **Read UPDATING.md at the `6.1.0` tag, not at `master`.** master's `## 6.1.0`
+> section has been retro-edited with post-6.1.0 items — most alarmingly a
+> "composite primary keys on many-to-many association tables" block. Its migration
+> (`2bee73611e32_composite_pk_association_tables`) is **absent from the 6.1.0 tag**
+> and exists only on master. It is not in scope and must not be planned around.
 
 ### Two 6.x breaking changes that turned out NOT to apply to us — verified, not assumed
 
@@ -197,7 +223,33 @@ The 6.1.0 MCP service, WebSocket/GAQ config, `APP_NAME`/`CUSTOM_FONT_URLS`
 theming changes, `ENVIRONMENT_TAG_CONFIG` colours and ClickHouse driver floor are
 all **not applicable**: chart 0.22.4 defaults `supersetMcp.enabled`,
 `supersetWebsockets.enabled` and `supersetCeleryFlower.enabled` to `false`, and we
-set none of those config keys.
+set none of those config keys. Across 5.0.0 → 6.1.0 exactly **one** feature flag is
+removed (`HORIZONTAL_FILTER_BAR`, unused here) and exactly **one** top-level config
+key (`THEME_OVERRIDES`, unset here); no default flag flips, and no API endpoint or
+CLI command is removed.
+
+> ⚠️ **Do NOT set `THEME_DEFAULT` while fixing anything in this window.** UPDATING.md
+> pushes you toward it (for `brandAppName`, `fontUrls`), but a *partial*
+> `THEME_DEFAULT` white-screens the frontend on 6.1.0 —
+> [apache/superset#40375](https://github.com/apache/superset/issues/40375):
+> `Cannot read properties of undefined (reading 'startsWith')`, including on the
+> login page. We set no theme keys today; **leave it that way.** If theming is ever
+> wanted, it needs a complete token set and its own plan.
+
+**One verified chart/app divergence — non-blocking for us, but record it.** Superset
+6.x added `superset/tasks/slack.py` and lists it in `config.py:1368`'s
+`CeleryConfig.imports`. Chart 0.22.4's `_helpers.tpl` (line 325, the `cache.enabled`
+branch — our path) hardcodes its own `CeleryConfig` and sets
+`CELERY_CONFIG = CeleryConfig`, replacing Superset's default wholesale with only
+four imports: `superset.sql_lab`, `superset.tasks.scheduler`,
+`superset.tasks.thumbnails`, `superset.tasks.cache`. So `superset.tasks.slack`
+never registers with our workers. **Impact today: none** — 0 report schedules, no
+Slack notification config, and a missing `imports` entry does not fail startup (it
+only raises `NotRegistered` if such a task is dispatched). Upstream fixed it in
+chart **0.22.5** (#42945), which is **not yet in the published Helm index** — the
+index tops out at 0.22.4, so Flux cannot pull it regardless. If Slack report
+notifications are ever enabled, add `superset.tasks.slack` via `configOverrides`
+rather than chasing a chart bump.
 
 **Insights / local-LLM path: NOT WIRED.** Checked — Superset has no Ollama or
 OpenAI configuration in this repo. Our whole feature-flag surface is
@@ -255,6 +307,10 @@ curl -s "https://hub.docker.com/v2/repositories/apache/superset/tags/6.1.0" |
   python3 -c "import sys,json;d=json.load(sys.stdin);print(d['last_updated'],d['digest'])"
 #    expect digest sha256:08e3be59a16ef196aa6d65c8ac561ba53e5b463b972cd697d841adccc6d389bc
 #    If it differs, upstream rebuilt the tag — use the CURRENT digest and say so.
+#    EXPECT THIS TO HAPPEN. The 6.1.0 git tag is dated 2026-05-01 but the image was
+#    last re-pushed 2026-08-17: upstream rebuilds this tag in place. That mutability
+#    is exactly why the tag is digest-pinned in step 4 — see
+#    docs/sops/application-update.md §Step 0b.
 
 # e) Superset's only data source is up (else §4i/§4j fail for the wrong reason)
 mise exec -- kubectl get deploy -n databases postgresql
@@ -488,6 +544,11 @@ perfectly healthy at pod level and useless in the browser.**
   that your role is Admin and that `ab_user_role` did not grow. *This is the check
   for the FAB 4→5 major (§1b); if it fails, nothing else matters.*
   See `docs/sops/authentik.md` if the provider side needs inspecting.
+  *(6.x hardcodes the Security / List Users / List Roles menu to the Admin role and
+  adds `SUPERSET_SECURITY_VIEW_MENU = True` — see
+  [#37097](https://github.com/apache/superset/issues/37097). Our
+  `superset-admins` → Admin mapping covers it; if that menu is missing, the role
+  mapping is what failed, which is exactly what this test exists to catch.)*
 - **(i) A dashboard renders WITH DATA.** Open the one dashboard; every panel must
   paint real numbers, not "No results" and not an error card. This exercises the
   6.x chart-params migrations end to end.
@@ -503,8 +564,15 @@ perfectly healthy at pod level and useless in the browser.**
 6.1.0's lean image has no browser — §1), the Insights/local-LLM path (not wired to
 Superset at all), Flower/WebSocket/MCP (chart-disabled).
 
-**Expected and NOT a regression:** the first dashboard load is slow (SHA-256 cache
-key change invalidated the cache, §1).
+**Expected and NOT a regression:**
+- The first dashboard load is slow (SHA-256 cache key change invalidated the cache, §1).
+- A **repeating** `WARNING … Could not load default spinner SVG: … loading.svg` in
+  the webserver log. Known 6.1.0 cosmetic bug
+  ([#40478](https://github.com/apache/superset/issues/40478)) — harmless, but it is
+  high-volume and will look like a new error signal to log-based alerting. The §4e
+  grep is deliberately `-iE 'traceback|error|…'` so this WARNING does not match; if
+  it starts showing up on the sweep's log-noise board afterwards, suppress it via
+  `runbooks/policy-cli.py noise` rather than treating it as an upgrade failure.
 
 ## 5) Rollback
 
@@ -651,10 +719,17 @@ why the trade is surfaced rather than decided here. **Operator call.**
 0.22.4 already targets appVersion 6.1.0, so there is nothing to gain, and a chart
 bump would drag in the immutable-selector delete-recreate dance
 (`project_superset_chart_020_redis_auth`) on top of a one-way schema migration —
-two independent failure modes in one window. If the window agent's Step-0 safe-update
-pass has moved the chart past 0.22.4 by the time this runs, **re-verify the rendered
-`spec.selector` and this plan's assumptions before executing**; do not proceed on
-the assumption that the chart is where this plan left it.
+two independent failure modes in one window. As of writing, 0.22.4 is also the
+**newest installable** chart: 0.22.5 and 0.22.6 have GitHub release tags but are
+**absent from `https://apache.github.io/superset/index.yaml`**, so Flux cannot
+resolve them. If they land in the index before this executes, the window agent's
+Step-0 safe-update pass may bump the chart on its own — in that case **re-verify the
+rendered `spec.selector` and this plan's assumptions before executing**; do not
+proceed on the assumption that the chart is where this plan left it. (For the
+record, the diff from 0.20.0 → 0.22.4 is additive-only — the sole removals are five
+`maxUnavailable: 1` PDB defaults — and the bundled bitnami subcharts are pinned
+identically at `postgresql 16.7.27` / `redis 17.9.4`. The immutable-selector break
+was chart **0.19.0**, which is behind us; selectors carry no version component.)
 
 **Post-execution follow-ups (not part of this window):**
 - Retire or re-scope **AR-052** — operator action, `runbooks/policy-cli.py risk`.
