@@ -110,19 +110,34 @@ def get_held():
     return data.get("held", []), None
 
 
-def next_occurrence(day_name, start_hhmm, today):
+def next_occurrence(day_name, start_hhmm, today, now=None):
+    """The next date this window runs — TIME-AWARE (fixed 2026-08-18, F-f95a8b52).
+
+    `start_hhmm` was accepted and ignored, so a same-weekday window was always
+    scheduled for TODAY regardless of the clock: at 23:17 on a Tuesday the tool
+    announced "next window: tue-early 2026-08-18 05:00", ~18h in the PAST. That
+    is not a cosmetic slip — the window agent and the sweep both read this to
+    decide what is due, and a window in the past reads as "now".
+    """
     wd = _WD[day_name.lower()]
     delta = (wd - today.weekday()) % 7
-    # if it's the same weekday, still schedule the upcoming one (today counts as 0)
     d = today + timedelta(days=delta)
+    if delta == 0:
+        now = now or datetime.now()
+        try:
+            hh, mm = (int(x) for x in str(start_hhmm).split(":")[:2])
+        except (TypeError, ValueError):
+            return d                      # unparseable start → keep old behaviour
+        if now.date() == today and (now.hour, now.minute) >= (hh, mm):
+            d += timedelta(days=7)        # today's slot has already started
     return d
 
 
-def upcoming_windows(cfg, today, horizon_days=14):
+def upcoming_windows(cfg, today, horizon_days=14, now=None):
     """List concrete window occurrences within the horizon, soonest first."""
     occ = []
     for w in cfg["windows"]:
-        d = next_occurrence(w["day"], w["start"], today)
+        d = next_occurrence(w["day"], w["start"], today, now)
         for bump in (0, 7):  # this week + next, to fill the horizon
             dd = d + timedelta(days=bump)
             if (dd - today).days <= horizon_days:
