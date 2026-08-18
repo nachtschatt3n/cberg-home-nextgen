@@ -6,7 +6,10 @@ pr: null                              # no Renovate PR open (image lives in char
                                       # F-a5ceabc1 (section: version) — direct bump.
 kind: image
 current: "v2.39.0"
-target: "v3.4.1"
+target: "v3.5.0"                      # RETARGETED 2026-08-18 from v3.4.1: v3.5.0 published
+                                      # the same day and fixes an input-plugin panic reported
+                                      # on our exact controller version (see §1.3). Delta is
+                                      # 12 commits / 6 files — fully enumerated below.
 update_type: major
 risk: medium
 est_duration_min: 30                  # + a 24h metric-continuity soak before the
@@ -40,13 +43,14 @@ sops_refs:
   - docs/sops/unifi-controller-rate-limit.md
   - docs/sops/monitoring.md
 generated: "2026-08-18"
+retargeted: "2026-08-18"              # v3.4.1 -> v3.5.0; analysis re-verified against the v3.4.1...v3.5.0 diff
 ---
 
-# unpoller v2.39.0 → v3.4.1 (image major)
+# unpoller v2.39.0 → v3.5.0 (image major)
 
 ## 1. Summary & why held
 
-Bump `ghcr.io/unpoller/unpoller` from v2.39.0 to v3.4.1 in the unpoller
+Bump `ghcr.io/unpoller/unpoller` from v2.39.0 to v3.5.0 in the unpoller
 HelmRelease values (chart stays `unpoller@2.1.0` — the upstream helm-chart repo
 has published **no v3-aware chart**; 2.1.0 is its newest and is a thin
 deployment+secret chart, expected to run the v3 image unchanged).
@@ -64,18 +68,53 @@ finding `F-a5ceabc1`):
    (enumerated below).
 2. **v3.2.0 — Prometheus behavior change (quoted breaking change):** *"Unpoller
    now background refreshes data by default every 60s instead of polling the
-   unifi API on-demand per prometheus scrape"* (`interval = 0` restores the old
-   per-scrape behavior). Two consequences for us:
+   unifi API on-demand per prometheus scrape"*. **Correction (2026-08-18, read
+   from the code, not the release note):** upstream says `interval = 0` restores
+   the old per-scrape behaviour — it does not, at v3.4.1 or v3.5.0.
+   `normalizeInterval` maps any value `<= 0` to the 60s default and clamps
+   anything below the 15s floor upward, so per-scrape polling **cannot be
+   restored at all in v3.x**. Keeping `interval = "2m"` is still the right
+   action; the reason previously given for it was wrong. Two consequences:
    - **`UnifiControllerUnreachable` changes meaning.** It fires on
      `up{job="unpoller"} == 0`, which today works because unpoller polls the
      controller inline per scrape (the alert annotation says exactly that).
      With v3's cached background refresh, a controller outage no longer fails
      the scrape — `up` stays 1 and the exporter serves stale data. Post-upgrade
      this alert only detects exporter death, not controller unreachability.
+        **The replacement signal already exists** and needs no research:
+     `unpoller_prometheus_cache_age_seconds` (v3.2.0+) reports seconds since
+     the last successful background refresh, or `-1` if none has ever
+     succeeded. That is the correct basis for the follow-up alert, and it
+     doubles as the empty-exporter detector described in point 3.
    - The **unifi-device-availability SLO's present-gating** shifts the same
      way: a controller-unreachable episode may serve cached "up" devices
      instead of absent series. Slightly *more* forgiving, never a false
      burn — acceptable, but record it.
+
+3. **v3.5.0 (2026-08-18) — why this plan was retargeted off v3.4.1.** The
+   delta is 12 commits over 6 files and changes nothing this plan relied on:
+   `pkg/promunifi/collector.go` is byte-identical between the two tags, so the
+   background-refresh analysis in point 2 holds verbatim, and the `unifi/v5`
+   library stays at v5.30.0 (no further API rebase). Three things matter:
+   - **Input-plugin panic recovery.** v3.x could exit (code 2, no error text)
+     while polling the Site Speed Test `aggregated-dashboard` endpoint,
+     crashlooping before `:9130` ever opened. It was reported against UniFi
+     Network **10.4.57 — the version our controller runs** (recorded in
+     `runbooks/version-check-current.md`), which makes v3.5.0 strictly safer
+     for us than v3.4.1, and is the whole reason to retarget.
+   - **…but recovery is not a root-cause fix.** The panic is converted to an
+     error for the whole collection cycle. With the unifi input as our ONLY
+     input, a recurring panic means the background refresh never succeeds:
+     `/metrics` goes empty, `unpoller_prometheus_cache_age_seconds` reads `-1`,
+     and **`up` stays 1**. The crashloop becomes a silent empty exporter, which
+     neither `up` nor HelmRelease-Ready can see. §4 now tests for it directly.
+   - **One label added:** `unpoller_wan_interface_state` gains a `state` label,
+     changing that series' identity. No consumer in this repo references it
+     (grepped across `kubernetes/`, `runbooks/`, `docs/`) — zero impact. No
+     metric was added, removed or renamed otherwise, so the 7,886-series
+     baseline and the ±20% band in §4 stand unchanged.
+   - Not applicable to us: the `alarms` endpoint 400 fix — our config sets
+     `save_alarms = false`.
 
 ### Blast radius enumeration (what queries unpoller metric names)
 
@@ -99,11 +138,11 @@ its own follow-up finding/plan after the v3 metric surface has soaked 24h.
 kubectl get hr -n monitoring unpoller -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} chart={.status.history[0].chartVersion}{"\n"}'
 kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller   # 1/1, 0 recent restarts
 
-# b. target image published (verified 2026-08-18: HTTP 200)
+# b. target image published (v3.5.0 verified 2026-08-18: HTTP 200)
 TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:unpoller/unpoller:pull" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/vnd.oci.image.index.v1+json" \
-  https://ghcr.io/v2/unpoller/unpoller/manifests/v3.4.1        # expect 200
+  https://ghcr.io/v2/unpoller/unpoller/manifests/v3.5.0        # expect 200
 
 # c. controller Network application on the newer 10.x APIs that v3 targets
 #    (v3.x tracks unifi lib v5.26.0→v5.30.0; older 10.x/9.x network APIs are
@@ -126,26 +165,38 @@ flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
 1. Drop the active-update marker + a 4h alert silence for the monitoring
    rollout noise (SOP `application-update.md` §4 Step 1):
    ```bash
-   runbooks/update-marker.sh add unpoller monitoring 4 "v2.39.0->v3.4.1 major"
+   runbooks/update-marker.sh add unpoller monitoring 4 "v2.39.0->v3.5.0 major"
    ```
 2. Edit `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`:
    ```yaml
        image:
          repository: ghcr.io/unpoller/unpoller
          pullPolicy: IfNotPresent
-         tag: v3.4.1        # was v2.39.0
+         tag: v3.5.0        # was v2.39.0
    ```
    **Do not touch `secret.sops.yaml`.** The existing `up.conf` TOML
    (`[unifi]`/`[[unifi.controller]]` user+pass, `[prometheus]`, `[influxdb]`)
    remains valid in v3; v3's Integration-API/api-key auth is additive, not
    required. Keep `[prometheus] interval = "2m"` — under v3 it governs the
    background-refresh cadence (a gentle 0.5 login/min against the 429-throttled
-   `/api/auth/login`; setting `interval = 0` to restore v2 per-scrape behavior
-   is explicitly NOT wanted here, per `unifi-controller-rate-limit.md`).
+   `/api/auth/login`). v2's per-scrape behaviour is **not recoverable** in v3:
+   `interval = 0` silently becomes the 60s default rather than disabling the
+   background refresh. That is fine — a 2m cadence is exactly what
+   `unifi-controller-rate-limit.md` wants — but do not lower it expecting the
+   old semantics back.
+
+   **One decision to take at the window (new at v3.4.1):** the
+   `save_speedtest` toggle (`[[unifi.controller]]`, `*bool`, defaults **true**)
+   gates the Site Speed Test `aggregated-dashboard` poll that triggers the
+   §1.3 panic. Setting `save_speedtest = false` is the belt-and-braces
+   mitigation, but it is the ONLY reason to touch `secret.sops.yaml` in this
+   plan. Default: leave the secret alone and rely on v3.5.0's panic recovery;
+   if the pod panics or serves an empty `/metrics` at step 4, add
+   `save_speedtest = false` as the first remediation before rolling back.
 3. Commit + push (hunk-scoped, this file only):
    ```bash
    git add kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml
-   git commit -m "feat(unpoller)!: v2.39.0 -> v3.4.1 (plan unpoller-v3, F-a5ceabc1)"
+   git commit -m "feat(unpoller)!: v2.39.0 -> v3.5.0 (plan unpoller-v3, F-a5ceabc1)"
    git push
    ```
 4. Watch the rollout — startup log is the config-compat gate (no local way to
@@ -188,6 +239,12 @@ curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=count(count 
 # last 15m. Data freshness: series timestamps advance every <=2m (background
 # refresh), while the 60s ServiceMonitor scrape keeps `up` green.
 
+# NEW at v3.5.0 — the silent-empty-exporter mode that `up` and HR-Ready both
+# miss (see §1.3): the background refresh must have succeeded recently.
+curl -sG http://localhost:9090/api/v1/query --data-urlencode 'query=unpoller_prometheus_cache_age_seconds'
+# expect >= 0 (never -1) AND < 360 (3x the 2m interval)
+kubectl logs -n monitoring deployment/unpoller --since=15m | grep -ci 'panic' || true   # expect 0
+
 # influxdb output still writing (no error lines in the last 10m of logs)
 kubectl logs -n monitoring deployment/unpoller --since=10m | grep -ci 'influx.*err' || true   # expect 0
 ```
@@ -195,8 +252,9 @@ kubectl logs -n monitoring deployment/unpoller --since=10m | grep -ci 'influx.*e
 Soak 24h (daily sweep + SLO burn-rate windows cover it), then delete this plan
 file per the plans README and file the follow-up finding for the dead
 `unifipoller_*` alert rules + the degraded `UnifiControllerUnreachable`
-semantics (needs a staleness/exporter-internal-error based replacement) + the
-stale `docs/sops/sli-catalog.md` line 62.
+semantics (replace it with a `unpoller_prometheus_cache_age_seconds` staleness
+rule — see §1.3, the metric already exists) + the stale
+`docs/sops/sli-catalog.md` line 62.
 
 ## 5. Rollback
 
@@ -205,6 +263,7 @@ git revert <bump-commit-sha> && git push     # single-file revert of the tag bum
 flux reconcile kustomization unpoller -n flux-system --with-source   # optional: skip the 30m wait
 kubectl rollout status deployment/unpoller -n monitoring --timeout=120s
 # confirm back: image v2.39.0, up{job="unpoller"} == 1, series count back at baseline
+# (v2 has no cache-age metric — its absence after a rollback is expected)
 kubectl get deploy -n monitoring unpoller -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
