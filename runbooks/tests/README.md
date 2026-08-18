@@ -29,6 +29,7 @@ test — see `runbooks/refingerprint-findings.py`.
 | File | Covers | Run it when you touch |
 |---|---|---|
 | `test-ar-suppression-guard.py` | The two classes of finding exempt from AR substring suppression: audit-integrity (`risk_nature` / `audit_*` subsection) and self-reference (`metadata.ar_id`). Also asserts the operator-facing exemption count is real. | `_apply_ar_suppression` in `sweep-run.py`; anything about AR matching |
+| `test-coverage-lane-safety.py` | The AUTO-lane safety rules in `coverage.py` — pre-release/beta channels, 0.x release-line moves, chart↔image lockstep, image-matched REBUILD, and the truncated-tag dedupe | `assign_lane` / `channel_hold` / `_apply_lockstep` / `is_self_built` in `runbooks/coverage.py` |
 | `test-coverage-plan-match.py` | `coverage.py` ↔ maintenance-plan matching | `runbooks/coverage.py`, plan discovery |
 | `test-osv-coverage.py` | OSV ecosystem mapping and the coverage-gap accounting | OSV lookups in `security-check.py` |
 | `test-pick-latest-semver-tag.py` | `_pick_latest_semver_tag` — variant filtering, cross-variant proposals, downgrade rejection | tag selection in `check-all-versions.py` |
