@@ -3,7 +3,7 @@
 Covers every cell of the exposure × exploited × nature matrix, the fail-soft
 UNKNOWN behaviour, the exposure classifier (incl. the AR-059 Authentik-outpost
 detection and AR-004 self-auth override), KEV membership, and the four
-ground-truth scenarios the operator named (uptime-kuma, absenty, a pure policy
+ground-truth scenarios the operator named (auth-gated external, plain external, a pure policy
 finding, an internal DB image).
 
 Run:  python3 -m pytest runbooks/lib/test_risk_model.py -q
@@ -126,6 +126,26 @@ def _sample_index():
         _ing("open-webui", "ai", "open-webui.d", "open-webui"),
         # an internal ingress
         _ing("grafana", "monitoring", "grafana.internal", "grafana", cls="internal"),
+
+        # --- synthetic entries for the SCORING tests below ---
+        # The classifier tests above name real services on purpose: which
+        # ingress class a service uses is topology, already public in the
+        # manifests and docs/infrastructure.md, and they assert nothing about
+        # its vulnerability state.
+        #
+        # The scoring tests are different — they combine a component with a
+        # severity and an exposure tier, and "exposure combined with unfixed
+        # state" is the not-publishable cell in
+        # docs/sops/vulnerability-disclosure.md §2.1. They therefore run
+        # against these synthetic services, which reproduce the same four
+        # shapes without naming anything we run.
+        _ing("svc-ext-auth", "example", "auth.example",
+             "svc-ext-auth-authentik-outpost"),
+        _ing("svc-ext-auth-authentik-outpost", "example", "auth.example",
+             "svc-ext-auth-authentik-outpost", path="/outpost.goauthentik.io"),
+        _ing("svc-ext-unauth", "example", "open.example", "svc-ext-unauth"),
+        _ing("svc-internal", "example", "internal.example", "svc-internal",
+             cls="internal"),
     ]
     return rm.build_exposure_index(items, [])
 
@@ -194,11 +214,11 @@ def _kev(*cves):
     return rm.KevIndex(cve_ids=set(cves), loaded=True, source="test")
 
 
-def test_ground_truth_uptime_kuma_not_critical():
+def test_ground_truth_external_auth_gated_is_not_critical():
     """external BUT Authentik-gated, unpatchable, not in KEV → MEDIUM (not critical)."""
     idx = _sample_index()
     f = rm.Finding("s4_cve_check",
-                   "`uptime-kuma:1`: 3 CRITICAL CVE(s)", component="uptime-kuma",
+                   "`svc-ext-auth:1`: CRITICAL CVE(s)", component="svc-ext-auth",
                    cve_ids=["CVE-9999-1"], intrinsic_severity="critical")
     r = rm.score(f, exposure_index=idx, kev_index=_kev("CVE-2099-0001"))
     assert r.exposure == rm.EXTERNAL_AUTH
@@ -207,26 +227,27 @@ def test_ground_truth_uptime_kuma_not_critical():
     assert r.tier == rm.MEDIUM   # external-auth + not-KEV → MEDIUM
 
 
-def test_ground_truth_uptime_kuma_if_kev_is_high_not_critical():
+def test_ground_truth_external_auth_gated_in_kev_is_high_not_critical():
     """Honest argument: even if its CVE were in KEV, an auth-gated external
     service is HIGH, not the 3am CRITICAL page."""
     idx = _sample_index()
-    f = rm.Finding("s4_cve_check", "`uptime-kuma:1`", component="uptime-kuma",
+    f = rm.Finding("s4_cve_check", "`svc-ext-auth:1`", component="svc-ext-auth",
                    cve_ids=["CVE-2099-0001"])
     r = rm.score(f, exposure_index=idx, kev_index=_kev("CVE-2099-0001"))
     assert r.tier == rm.HIGH
 
 
-def test_ground_truth_absenty_external_unauth():
+def test_ground_truth_external_unauth_is_high_and_kev_makes_it_critical():
     idx = _sample_index()
     # not in KEV → external-unauth + real vuln + not-exploited → HIGH
-    f = rm.Finding("s4_cve_check", "`absenty:1`: 40 CRITICAL", component="absenty",
+    f = rm.Finding("s4_cve_check", "`svc-ext-unauth:1`: CRITICAL",
+                   component="svc-ext-unauth",
                    cve_ids=["CVE-9999-2"], intrinsic_severity="critical")
     r = rm.score(f, exposure_index=idx, kev_index=_kev("CVE-2099-0001"))
     assert r.exposure == rm.EXTERNAL_UNAUTH
     assert r.tier == rm.HIGH
     # and if KEV moved it → CRITICAL
-    f2 = rm.Finding("s4_cve_check", "`absenty:1`", component="absenty",
+    f2 = rm.Finding("s4_cve_check", "`svc-ext-unauth:1`", component="svc-ext-unauth",
                     cve_ids=["CVE-2099-0001"])
     assert rm.score(f2, exposure_index=idx, kev_index=_kev("CVE-2099-0001")).tier == rm.CRITICAL
 
@@ -239,10 +260,11 @@ def test_ground_truth_policy_finding_is_low():
     assert r.tier == rm.LOW
 
 
-def test_ground_truth_internal_db_criticals_is_medium():
-    """internal-only DB image, fixable criticals, not exploited → MEDIUM."""
+def test_ground_truth_internal_criticals_is_medium():
+    """internal-only service, fixable criticals, not exploited → MEDIUM."""
     idx = _sample_index()
-    f = rm.Finding("s4_cve_check", "`postgres:17.10`: 5 CRITICAL", component="postgres",
+    f = rm.Finding("s4_cve_check", "`svc-internal:1`: CRITICAL",
+                   component="svc-internal",
                    cve_ids=["CVE-9999-3"], intrinsic_severity="critical")
     r = rm.score(f, exposure_index=idx, kev_index=_kev("CVE-2099-0001"))
     assert r.exposure == rm.INTERNAL
