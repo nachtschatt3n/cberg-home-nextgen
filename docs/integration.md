@@ -59,12 +59,16 @@ Endpoints: /v1/chat/completions
 - Google Generative AI: conversation, TTS, AI task, STT
 - Google Translate: TTS
 
-**OpenClaw voice synthesis (say.py):** ElevenLabs (primary) with a local
-Qwen3-TTS fallback at `http://192.168.30.111:8000/v1` (mini, Trusted VLAN),
-env `OPENCLAW_TTS_FALLBACK_URL` (from SOPS secret `openclaw-secret`). The
-fallback is triggered when ElevenLabs returns HTTP 401/429 (quota) and
-returns WAV, which say.py converts to OGG/Opus via the existing ffmpeg path
-before `sendVoice` — keeping the voice flow unchanged.
+**OpenClaw voice synthesis (say.py):** self-hosted **Qwen3-TTS** (mlx-audio)
+on the Mac mini, Trusted VLAN. The base URL comes from the
+`OPENCLAW_TTS_FALLBACK_URL` key (name is legacy) in the `openclaw-secret` SOPS
+secret — never hard-code it here. This is the **only** provider — ElevenLabs was removed on
+2026-08-18 (metered, effectively unused, and its character guard once blocked a
+whole morning briefing). Qwen3 returns WAV, which say.py converts to OGG/Opus
+via ffmpeg before `sendVoice`. Voice/seed are pinned so multi-chunk briefings
+keep one consistent voice; a dead-air guard re-synthesises any chunk whose
+speech rate collapses. If the local server is down there is NO fallback — the
+openclaw-probe CronJob pages critical.
 
 ### Testing Endpoints
 

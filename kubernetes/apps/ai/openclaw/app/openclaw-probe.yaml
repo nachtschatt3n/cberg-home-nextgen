@@ -1,6 +1,6 @@
 ---
 # Real-time, laptop-independent voice probe for OpenClaw. Checks the local
-# Qwen3-TTS server and the ElevenLabs fallback quota, and fires/resolves an alert
+# Qwen3-TTS server (the only voice provider) and fires/resolves an alert
 # via the Alertmanager v2 API so it flows through the existing Telegram receiver.
 # HTTP-only — no kubectl/exec, so the Job needs no RBAC/ServiceAccount perms.
 apiVersion: v1
@@ -15,8 +15,6 @@ data:
     AM = os.environ.get("ALERTMANAGER_URL",
                         "http://kube-prometheus-stack-alertmanager.monitoring.svc:9093")
     TTS_URL = os.environ.get("OPENCLAW_TTS_FALLBACK_URL", "")
-    EL_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
-    BRIEFING_CHARS = 3500  # one morning briefing ~= 3000-3500 chars
 
     def _get(url, headers=None, timeout=8):
         req = urllib.request.Request(url, headers=headers or {})
@@ -32,17 +30,6 @@ data:
         except Exception as e:
             print("tts health error:", e)
             return False
-
-    def el_remaining():
-        if not EL_KEY:
-            return None
-        try:
-            d = json.loads(_get("https://api.elevenlabs.io/v1/user/subscription",
-                                headers={"xi-api-key": EL_KEY}))
-            return int(d["character_limit"]) - int(d["character_count"])
-        except Exception as e:
-            print("elevenlabs error:", e)
-            return None
 
     def _ts(offset=0):
         return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() + offset))
@@ -63,22 +50,17 @@ data:
             print("alertmanager POST", r.status, "firing=%s severity=%s" % (firing, severity))
 
     def main():
+        # ElevenLabs was removed 2026-08-18, so the self-hosted Qwen3-TTS server
+        # is the ONLY voice provider: if it is unreachable there is no fallback
+        # and the morning briefing has no audio at all. That makes it critical
+        # rather than the old "degrade to the paid provider" warning.
         ok = tts_ok()
-        rem = el_remaining()
-        el_low = (rem is None) or (rem < BRIEFING_CHARS)
-        print("local_tts_ok=%s elevenlabs_remaining=%s el_low=%s" % (ok, rem, el_low))
-        if not ok and el_low:
+        print("local_tts_ok=%s" % ok)
+        if not ok:
             post_alert(True, "critical",
-                       "OpenClaw voice down: local Qwen3-TTS unreachable AND ElevenLabs "
-                       "fallback quota exhausted — morning briefing voice will fail")
-        elif not ok:
-            post_alert(True, "warning",
-                       "OpenClaw local Qwen3-TTS unreachable — voice on ElevenLabs "
-                       "paid fallback (quota-limited)")
+                       "OpenClaw voice down: local Qwen3-TTS unreachable — "
+                       "morning briefing voice will fail (no fallback provider)")
         else:
-            # Healthy: resolve both possible firing severities. EL-low while local TTS
-            # is healthy is only a minor condition (handled by the daily sweep), not a
-            # real-time page.
             post_alert(False, "critical", "OpenClaw voice healthy")
             post_alert(False, "warning", "OpenClaw voice healthy")
 
@@ -118,11 +100,6 @@ spec:
                     secretKeyRef:
                       name: openclaw-secret
                       key: OPENCLAW_TTS_FALLBACK_URL
-                - name: ELEVENLABS_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: openclaw-secret
-                      key: ELEVENLABS_API_KEY
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

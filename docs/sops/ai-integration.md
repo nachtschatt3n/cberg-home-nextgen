@@ -189,15 +189,20 @@ kubectl get pods -n ai -l app.kubernetes.io/name=openclaw
 ```
 
 **Voice / TTS:** `say.py` uses the local **Qwen3-TTS** (mlx-audio,
-OpenAI-compatible) on the mini (`192.168.30.111`, port 8000) as the
-**PRIMARY** provider, with **ElevenLabs as the fallback** — reversed from the
-earlier ElevenLabs-primary setup so the default is free local TTS and cloud is
-used only when the local server is unavailable (verified deployed 2026-08-01).
-The local base URL comes from the `OPENCLAW_TTS_FALLBACK_URL` key (name is
-legacy, from when Qwen3 was the fallback) in the `openclaw-secret` SOPS secret
-(`kubernetes/apps/ai/openclaw/app/secret.sops.yaml`); `ELEVENLABS_API_KEY`
-provides the fallback. Qwen3 returns WAV, which `say.py` converts to OGG/Opus
-via the existing ffmpeg path — the `sendVoice` flow is unchanged.
+OpenAI-compatible) on the mini (`192.168.30.111`, port 8000) as the **only**
+provider. ElevenLabs was removed on 2026-08-18 (operator decision): it was
+metered, effectively unused (318 of 59k chars), and its budget guard silently
+refused a 4366-char morning briefing so no voice note was sent at all. The base
+URL comes from the `OPENCLAW_TTS_FALLBACK_URL` key (name is legacy, from when
+Qwen3 was the fallback) in the `openclaw-secret` SOPS secret. Qwen3 returns WAV,
+converted to OGG/Opus via ffmpeg — the `sendVoice` flow is unchanged.
+
+Because Qwen3-TTS is a VoiceDesign model, `say` pins `voice` + `seed` on every
+request: without them each chunk of a multi-chunk briefing generated a
+different random voice, and unlucky generations padded dead air (97s of audio
+for 874 chars). A dead-air guard re-synthesises any chunk whose speech rate
+falls below 70% of the batch median. With no cloud fallback left, the
+`openclaw-probe` CronJob treats an unreachable local server as **critical**.
 
 **HA Assist fallback (conversation agent):** The gateway's OpenAI-compatible
 `/v1/chat/completions` endpoint is enabled (config-guard block in

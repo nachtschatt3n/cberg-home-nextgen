@@ -1038,28 +1038,10 @@ spec:
                     });
                     cfg.bindings = specB.concat(rest);
                   }
-
-                  // Talk voice (classic batch TTS). ElevenLabs picks up
-                  // ELEVENLABS_API_KEY from env. modelId / voiceId can be
-                  // overridden via OPENCLAW_TALK_MODEL / OPENCLAW_TALK_VOICE
-                  // env vars; runtime `/voice` slash command persists
-                  // user-set values into the same block.
-                  cfg.talk = cfg.talk || {};
-                  cfg.talk.provider = 'elevenlabs';
-                  cfg.talk.providers = cfg.talk.providers || {};
-                  cfg.talk.providers.elevenlabs = {
-                    modelId: process.env.OPENCLAW_TALK_MODEL || 'eleven_flash_v2_5',
-                    voiceId: process.env.OPENCLAW_TALK_VOICE || 'ZQFCSsF1tIcjtMZJ6VCA',
-                    // ElevenLabs optimize_streaming_latency: 0=quality, 4=fastest.
-                    // 4 cuts ~500ms off time-to-first-audio at minor quality cost.
-                    latencyTier: 4,
-                    // "Enhance" toggle from the ElevenLabs playground —
-                    // sharper diction, slightly more processing per chunk.
-                    voiceSettings: {
-                      useSpeakerBoost: true,
-                    },
-                    ...(cfg.talk.providers.elevenlabs || {}),
-                  };
+                  // Voice notes are produced by the `say` skill (self-hosted Qwen3-TTS on
+                  // the Mac mini). ElevenLabs was removed 2026-08-18 — it was metered,
+                  // effectively unused, and its budget guard once blocked a whole morning
+                  // briefing. No cfg.talk provider is configured.
 
                   // Discord channel — strict schema, key is `token` (not
                   // `botToken`), and several nested schemas (markdown,
@@ -1075,31 +1057,15 @@ spec:
                       dmPolicy: prev.dmPolicy || 'pairing',
                       groupPolicy: prev.groupPolicy || 'allowlist',
                       streaming: prev.streaming || { mode: 'progress' },
-                      // Voice — stt-tts mode using ElevenLabs for both
-                      // transcription (Scribe) and synthesis. Same API
-                      // key the `say` / talk skills already use.
-                      // Voice config — merge defaults under any prior
-                      // values so we can roll new keys (like bargeIn or
-                      // captureSilenceGraceMs) into an existing setup
-                      // without wiping user-set overrides.
+                      // Discord voice (stt-tts) is DISABLED since 2026-08-18:
+                      // it ran on ElevenLabs for both Scribe transcription and
+                      // synthesis, and ElevenLabs was removed (metered, and the
+                      // counter showed 318 of 59k chars used — effectively
+                      // unused). Re-enable by configuring a provider for
+                      // voice.realtime + voice.tts and restoring the API key.
                       voice: {
-                        enabled: true,
-                        mode: 'stt-tts',
-                        // Trim default ~1s silence-detection wait before
-                        // STT fires (snappier turn-taking).
-                        captureSilenceGraceMs: 400,
+                        enabled: false,
                         ...(prev.voice || {}),
-                        realtime: {
-                          provider: 'elevenlabs',
-                          bargeIn: true,           // user can interrupt the bot
-                          minBargeInAudioEndMs: 200,
-                          debounceMs: 250,
-                          ...((prev.voice || {}).realtime || {}),
-                        },
-                        tts: {
-                          provider: 'elevenlabs',
-                          ...((prev.voice || {}).tts || {}),
-                        },
                       },
                       intents: prev.intents || { voiceStates: true },
                       // Guild/voice-channel allowlist. groupPolicy=allowlist
