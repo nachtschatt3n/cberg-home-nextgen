@@ -41,9 +41,22 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 128Mi
-          limits:
             memory: 256Mi
+            ephemeral-storage: 256Mi
+          limits:
+            # 1Gi is upstream's sizing for ~50 users; the image bundles ffmpeg
+            # for server-side recording since v1.5.5, so 256Mi risked OOM.
+            memory: 1Gi
+            # Recording/temp output goes to the writable layer without this cap,
+            # which is a node-disk-pressure risk, not just a pod-local one.
+            ephemeral-storage: 2Gi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 2Gi
 ---
 apiVersion: v1
 kind: Service
