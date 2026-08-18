@@ -5,7 +5,7 @@ metadata:
   name: kube-prometheus-stack
 spec:
   interval: 30m
-  timeout: 25m
+  timeout: 15m
   chart:
     spec:
       chart: kube-prometheus-stack
@@ -23,8 +23,7 @@ spec:
     cleanupOnFail: true
     crds: CreateReplace
     remediation:
-      retries: 0
-      remediateLastFailure: false
+      retries: 3
   uninstall:
     keepHistory: false
   valuesFrom:
