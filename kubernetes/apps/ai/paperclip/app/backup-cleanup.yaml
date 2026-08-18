@@ -1,37 +1,4 @@
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: paperclip-backup-cleanup
-  namespace: ai
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: paperclip-backup-cleanup
-  namespace: ai
-rules:
-  - apiGroups: ["apps"]
-    resources: ["deployments/scale", "deployments"]
-    verbs: ["get", "list", "watch", "patch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: paperclip-backup-cleanup
-  namespace: ai
-subjects:
-  - kind: ServiceAccount
-    name: paperclip-backup-cleanup
-    namespace: ai
-roleRef:
-  kind: Role
-  name: paperclip-backup-cleanup
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -47,8 +14,18 @@ spec:
       ttlSecondsAfterFinished: 86400
       template:
         spec:
-          serviceAccountName: paperclip-backup-cleanup
           restartPolicy: Never
+          # Paperclip creates its OWN backups in-app (config.json
+          # backup.intervalMinutes: 1440, firing ~04:00Z). The old
+          # scale-down → cleanup → scale-up choreography here raced that
+          # timer: scaling to 0 at 04:00:00Z killed the pod mid-backup
+          # every night, so no new backup ever landed. Deleting week-old
+          # .sql files needs NO downtime — the app never rewrites old
+          # backups — so this job now ONLY deletes, never touches the
+          # Deployment (and needs no ServiceAccount/RBAC at all).
+          # podAffinity stays: it co-schedules onto paperclip's node,
+          # which is sufficient to mount the RWO Longhorn volume
+          # alongside the running app.
           affinity:
             podAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -63,44 +40,13 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
             fsGroup: 1000
-          initContainers:
-            # bitnamilegacy is an ARCHIVED registry (last push 2025-08-28, no
-            # future security fixes) and docker.io/bitnami/kubectl publishes no
-            # semver tags. Security driver tracked as F-2d25e586.
-            # registry.k8s.io/kubectl is distroless (entrypoint /bin/kubectl,
-            # NO shell), so the old single bash container is split by
-            # capability: kubectl steps use the k8s image, the file cleanup
-            # uses busybox and needs no cluster credentials at all.
-            # Ordering is the safety net: k8s runs initContainers to
-            # completion, in order, before the main container — so `scale-up`
-            # as the MAIN container replaces the old `trap restore EXIT`.
-            - name: scale-down
-              image: registry.k8s.io/kubectl:v1.36.0
-              args: ["scale", "deployment/paperclip", "-n", "ai", "--replicas=0"]
-              resources:
-                requests: {cpu: 10m, memory: 32Mi}
-                limits:   {cpu: 100m, memory: 64Mi}
-            - name: wait-terminated
-              image: registry.k8s.io/kubectl:v1.36.0
-              args:
-                - "wait"
-                - "--for=delete"
-                - "pod"
-                - "-n"
-                - "ai"
-                - "-l"
-                - "app.kubernetes.io/name=paperclip"
-                - "--timeout=120s"
-              resources:
-                requests: {cpu: 10m, memory: 32Mi}
-                limits:   {cpu: 100m, memory: 64Mi}
+          containers:
             - name: cleanup
               image: busybox:stable
               command:
                 - /bin/sh
                 - -c
                 - |
-                  # Never fail: a cleanup error must not block scale-up.
                   DIR=/paperclip/instances/default/data/backups
                   if [ ! -d "$DIR" ]; then
                     echo "No backups directory, nothing to clean"
@@ -117,15 +63,6 @@ spec:
               volumeMounts:
                 - name: data
                   mountPath: /paperclip
-          containers:
-            # Runs ONLY after every initContainer succeeded — this is the
-            # guaranteed restore of paperclip's replica count.
-            - name: scale-up
-              image: registry.k8s.io/kubectl:v1.36.0
-              args: ["scale", "deployment/paperclip", "-n", "ai", "--replicas=1"]
-              resources:
-                requests: {cpu: 10m, memory: 32Mi}
-                limits:   {cpu: 100m, memory: 64Mi}
           volumes:
             - name: data
               persistentVolumeClaim:
