@@ -857,6 +857,46 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+# Env-var-NAME RHS filter (prose naming a variable, not quoting a value).
+#
+# 2026-08-18 false positive F-8a52ddd9: a Python DOCSTRING added by this
+# repo's own commit f1698df5 —
+#     """A GitHub API bearer token: `GITHUB_TOKEN`, `GH_TOKEN`, else the
+# — matched the `token\s*[:=]\s*\S{8,}` regex. There is no secret on that
+# line; it is documentation naming the environment variables the lookup
+# reads. It was the only new non-accepted finding of the whole cycle, so it
+# sat at the top of the operator's list as pure noise.
+#
+# Two ways to kill it, and only one keeps the detector strong:
+#
+#   * Suppress "docstring/comment context" — REJECTED. The pipeline sees
+#     single diff lines out of `git log -p`; a docstring's SECOND line
+#     carries no marker at all, so the test is unimplementable without
+#     re-parsing history, and any heuristic ("line starts with quotes")
+#     hands an attacker a trivial way to hide a real secret behind a `"""`.
+#
+#   * Require the RHS to be VALUE-shaped, not a bare identifier — TAKEN.
+#     `GITHUB_TOKEN` is an environment-variable NAME: SCREAMING_SNAKE with
+#     at least one underscore. Real credential material is random —
+#     base64/hex/JWT, i.e. mixed case, digits, `-_./+=` — and structurally
+#     never all-caps-with-underscores. This is the same class of reasoning
+#     the pipeline already applies to `SECRET_`, `${...}` and `$[A-Z_]+`,
+#     just generalised from "starts with SECRET_" to "IS an env-var name".
+#
+# Deliberately NARROW so detection strength is preserved: the underscore is
+# REQUIRED (a hypothetical literal `password: SUPERSECRET` still fires), and
+# the keyword half stays case-insensitive while the RHS half is
+# case-SENSITIVE (`token: Abc_Def123` — mixed case — still fires).
+_ENV_VAR_NAME_RHS = re.compile(
+    r"(?i:password|secret|token|api.?key|private.?key)"  # == stage-0 grep keywords
+    r"\s*[:=]\s*"
+    r"[`'\"]?"
+    r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
+    r"[`'\"]?"
+    r"(?![A-Za-z0-9_])"
+)
+
+
 def s3_git_history() -> tuple[str, Findings, str]:
     section_header(3, "Git History Secret Scan")
     f = Findings()
@@ -975,7 +1015,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
                 if not ((m := _ident_rhs.search(h)) and m.group(1) in declared)
             ]
 
-    # Filter accepted risks
+    # Drop hits whose RHS is an environment-variable NAME, not a value
+    # (see _ENV_VAR_NAME_RHS above for the full rationale).
+    cred_hits = [h for h in cred_hits if not _ENV_VAR_NAME_RHS.search(h)]
+
+# Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
     if cred_hits:
         for h in cred_hits[:5]:
