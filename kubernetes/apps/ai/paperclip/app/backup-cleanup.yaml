@@ -50,7 +50,7 @@ spec:
             fsGroup: 1000
           containers:
             - name: cleanup
-              image: busybox:stable
+              image: busybox:stable@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662  # digest-pinned 2026-08-18 (float-tag policy); == busybox:1.36.1 already cached on the nodes; re-pin deliberately
               command:
                 - /bin/sh
                 - -c

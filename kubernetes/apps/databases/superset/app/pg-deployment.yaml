@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: postgres:17.11-alpine
+        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73  # digest-pinned to the RUNNING image 2026-08-18 (float-tag policy); re-pin deliberately
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5432
