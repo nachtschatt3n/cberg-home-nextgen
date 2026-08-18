@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.08.18"
+version: "2026.08.18.2"
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
@@ -66,6 +66,22 @@ deny:
     reason: "third-party MCP bridge; upstream ships BREAKING-tagged releases on minor hops (0.176.0 removed the webhook registration API and dropped its table; 0.177.0 tightened create_share). Read the release notes per hop — never an unattended bump."
   - match: "*nextcloud*"
     reason: "chart+image must bump together and run occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised only."
+  # Pre-release CHANNEL, not a version pin. Upstream cuts GitHub releases on ODD
+  # minors only: v0.143.0 is the newest with prerelease=false, v0.144.x has NO
+  # release at all, and the v0.144.0 tag was pushed 2025-10-31 — BEFORE stable
+  # v0.143.0 (2025-11-16). So a "minor" bump here moves the cluster onto a beta
+  # build of a PRIVILEGED NVR (privileged: true, SYS_ADMIN, i915). AR-081 rules
+  # that channel unacceptable for this workload. Belt-and-braces: coverage.py's
+  # channel gate already keeps it out of the AUTO lane's direct-bump path; this
+  # rule closes the OTHER door, an open Renovate PR auto-merging at Step 0.
+  - match: "*scrypted*"
+    reason: "v0.144.x is upstream's PRE-RELEASE channel (stable = odd minors; no GitHub release for 144, and v0.144.0 predates stable v0.143.0). Beta builds are not acceptable on a privileged NVR — AR-081. A stable odd-minor bump is planned in a window, never unattended."
+  # Chart and image are ONE deployable unit here. Chart 2.4.0 ships appVersion
+  # v3.5.0 while `image.tag` is pinned at v2.39.0 and held in plan unpoller-v3
+  # (mon-early 2026-08-24) — auto-merging the chart alone would run a v3-aware
+  # chart against a v2 image. Remove this rule when unpoller-v3 has executed.
+  - match: "*unpoller*"
+    reason: "chart 2.4.0 (appVersion v3.5.0) must land together with the v2.39.0 -> v3.5.0 image major in plan unpoller-v3 — never a chart-only unattended merge."
   - match: "*openclaw*"
     reason: "held at 2026.6.11 pending the Memory Core→SQLite migration (2026.7.1 blocked)."
   - match: "*@openclaw/*"
