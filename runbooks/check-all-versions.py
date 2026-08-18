@@ -1240,7 +1240,12 @@ class VersionChecker:
                     body = r.json()
                     tags.extend(t.get('name', '') for t in body.get('results', []))
                     pages += 1
-                    url = body.get('next')
+                    # `next` is SERVER-supplied and the auth header is re-sent
+                    # on every hop, so a cross-host `next` would forward the
+                    # bearer off-host. Pin it.
+                    nxt = body.get('next')
+                    url = (nxt if nxt and urlparse(nxt).netloc == 'hub.docker.com'
+                           else None)
         except Exception as e:
             self.degraded.record(_scope, 'Docker Hub', f"{type(e).__name__}: {e}")
         return tags

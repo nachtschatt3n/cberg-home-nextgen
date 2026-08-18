@@ -859,42 +859,104 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
 
 # Env-var-NAME RHS filter (prose naming a variable, not quoting a value).
 #
-# 2026-08-18 false positive F-8a52ddd9: a Python DOCSTRING added by this
-# repo's own commit f1698df5 —
-#     """A GitHub API bearer token: `GITHUB_TOKEN`, `GH_TOKEN`, else the
-# — matched the `token\s*[:=]\s*\S{8,}` regex. There is no secret on that
-# line; it is documentation naming the environment variables the lookup
-# reads. It was the only new non-accepted finding of the whole cycle, so it
-# sat at the top of the operator's list as pure noise.
+# 2026-08-18 false positive F-8a52ddd9: a Python DOCSTRING added by this repo's
+# own commit f1698df5 — prose naming `GITHUB_TOKEN` / `GH_TOKEN` — matched the
+# stage-0 `token\s*[:=]\s*\S{8,}` grep. No secret is on that line, and it was
+# the only new non-accepted finding of the cycle, so it led the operator's list
+# as pure noise.
 #
-# Two ways to kill it, and only one keeps the detector strong:
+# Suppressing "docstring context" was rejected: the pipeline sees single diff
+# lines, a docstring's SECOND line carries no marker, and any "starts with
+# quotes" heuristic hands an attacker a trivial way to hide a real secret.
+# The RHS must instead be shown to be an environment-variable NAME. Three
+# independent conditions, because the first cut of this filter (a bare
+# `.search()` for a SCREAMING_SNAKE run) failed all three and the security
+# review found real credentials it would have deleted:
 #
-#   * Suppress "docstring/comment context" — REJECTED. The pipeline sees
-#     single diff lines out of `git log -p`; a docstring's SECOND line
-#     carries no marker at all, so the test is unimplementable without
-#     re-parsing history, and any heuristic ("line starts with quotes")
-#     hands an attacker a trivial way to hide a real secret behind a `"""`.
+#   1. WHOLE-RHS MATCH. `token: ABC_DEF-9f2a7c4e1b8d3050` starts with an
+#      env-var-shaped run, and an unanchored search is happy with that — so a
+#      real secret carrying an uppercase prefix vanished. The identifier must
+#      account for the ENTIRE right-hand token, either inside BALANCED
+#      delimiters or as the final token on the line. `token: "ABC_DEF` (an
+#      unbalanced quote) is therefore not a reference, and neither is
+#      `password: MY_KEY s3cr3tvalue`, where the real value follows a space.
 #
-#   * Require the RHS to be VALUE-shaped, not a bare identifier — TAKEN.
-#     `GITHUB_TOKEN` is an environment-variable NAME: SCREAMING_SNAKE with
-#     at least one underscore. Real credential material is random —
-#     base64/hex/JWT, i.e. mixed case, digits, `-_./+=` — and structurally
-#     never all-caps-with-underscores. This is the same class of reasoning
-#     the pipeline already applies to `SECRET_`, `${...}` and `$[A-Z_]+`,
-#     just generalised from "starts with SECRET_" to "IS an env-var name".
+#   2. EVERY ASSIGNMENT ON THE LINE. Matching anywhere let one env-var mention
+#      excuse the whole line, so appending `# or token: GITHUB_TOKEN` to a line
+#      holding a real secret disabled the scanner for it — reintroducing, in a
+#      different shape, exactly the hiding place the docstring heuristic was
+#      rejected for. A line is dropped only if EVERY credential assignment on
+#      it resolves to an env-var name.
 #
-# Deliberately NARROW so detection strength is preserved: the underscore is
-# REQUIRED (a hypothetical literal `password: SUPERSECRET` still fires), and
-# the keyword half stays case-insensitive while the RHS half is
-# case-SENSITIVE (`token: Abc_Def123` — mixed case — still fires).
-_ENV_VAR_NAME_RHS = re.compile(
-    r"(?i:password|secret|token|api.?key|private.?key)"  # == stage-0 grep keywords
-    r"\s*[:=]\s*"
-    r"[`'\"]?"
-    r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
-    r"[`'\"]?"
-    r"(?![A-Za-z0-9_])"
+#   3. THE NAME MUST REALLY BE AN ENV VAR. "Credential material is never
+#      all-caps-with-underscores" is true of machine-generated tokens and false
+#      of human passphrases: `password: CORRECT_HORSE_BATTERY_STAPLE` and
+#      `secret: PROD_DB_PASS_9X2K` are the shape. Shape alone therefore cannot
+#      decide it. Each candidate name must also be USED as an environment
+#      variable somewhere in the tracked tree (`os.environ`, `getenv`,
+#      `process.env`, `${VAR}`, a k8s `name:` under an env block, `export`).
+#      This mirrors the cross-line `declared` check below, and rests on the
+#      same asymmetry: a reference has a definition elsewhere, a literal
+#      secret has none.
+#
+# Verified still firing after all three: AWS `AKIA…` IDs, base32 (RFC 4648 has
+# no underscore), uppercase UUID/ULID (leading digit), uppercase hex without
+# underscores, all-caps without an underscore, mixed case, base64, JWTs.
+_CRED_ASSIGNMENT = re.compile(
+    r"(?i:password|secret|token|api.?key|private.?key)\s*[:=]\s*(\S+)"
 )
+# The identifier itself: SCREAMING_SNAKE with at least one underscore.
+_ENV_NAME_SHAPE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+# Where a name has to appear for us to believe it names an environment variable.
+_ENV_USE_CONTEXT = re.compile(
+    r"os\.environ|os\.getenv|\bgetenv\s*\(|process\.env|\bexport\s|"
+    r"\benv(?:iron|ironment)?\b|-\s*name:|valueFrom|secretKeyRef|"
+    r"configMapKeyRef|\$\{?[A-Z_]",
+    re.IGNORECASE,
+)
+
+
+def _env_name_candidates(line: str) -> Optional[set[str]]:
+    """Names referenced on `line`, or None if any assignment holds a real value.
+
+    None is the "do not suppress" answer, and it is returned for a line with no
+    credential assignment at all — such a line never reached this filter, so
+    silently dropping it would be a bug, not a no-op.
+    """
+    names: set[str] = set()
+    found = False
+    for m in _CRED_ASSIGNMENT.finditer(line):
+        found = True
+        rhs = m.group(1).rstrip(",;.)]}")
+        inner = None
+        if len(rhs) >= 3 and rhs[0] in "`'\"" and rhs[-1] == rhs[0]:
+            inner = rhs[1:-1]                      # balanced delimiters
+        elif line.rstrip().endswith(m.group(1)):
+            inner = rhs                            # bare AND final on the line
+        if inner is None or not _ENV_NAME_SHAPE.fullmatch(inner):
+            return None                            # a real value is present
+        names.add(inner)
+    return names if found else None
+
+
+def _confirm_env_var_names(names: set[str]) -> set[str]:
+    """Subset of `names` actually used as environment variables in the tree.
+
+    `runbooks/tests/` is excluded from the evidence, not just from the scan.
+    Those files enumerate names precisely BECAUSE they are contested, and their
+    prose says things like "no such env var" — which matches the context regex
+    and confirmed every counter-example into silence. A scanner's own fixtures
+    must never be evidence about the tree they test.
+    """
+    confirmed = set()
+    for n in sorted(names)[:25]:   # bounded: one grep each, and hits are few
+        for hit in run_lines(
+                f"git grep -hwF -- '{n}' -- . ':(exclude)*.sops.yaml' "
+                f"':(exclude)runbooks/tests/*' 2>/dev/null | head -50", timeout=30):
+            if _ENV_USE_CONTEXT.search(hit):
+                confirmed.add(n)
+                break
+    return confirmed
 
 
 def s3_git_history() -> tuple[str, Findings, str]:
@@ -917,6 +979,14 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "      ':(exclude)runbooks/security-check.md' "
         "      ':(exclude)runbooks/security-check.py' "
         "      ':(exclude)runbooks/doc-check.py' "
+        # Test fixtures for THESE scanners are, by construction, lines shaped
+        # like credential assignments (`token: GITHUB_TOKEN`, a generated
+        # `api_key: <hex>`). They are the same self-reference noise the
+        # exclusions above exist for. Not a hiding place: the pre-commit secret
+        # scan blocks a credential-shaped literal in any staged file
+        # independently of this scan — it blocked three drafts of these very
+        # fixtures, which is why their values are generated at runtime.
+        "      ':(exclude)runbooks/tests/*' "
         "      ':(exclude)runbooks/doc-check-current.md' "
         "      ':(exclude)runbooks/health-check.sh' "
         "      ':(exclude)docs/sops/*.md' "
@@ -1015,11 +1085,18 @@ def s3_git_history() -> tuple[str, Findings, str]:
                 if not ((m := _ident_rhs.search(h)) and m.group(1) in declared)
             ]
 
-    # Drop hits whose RHS is an environment-variable NAME, not a value
-    # (see _ENV_VAR_NAME_RHS above for the full rationale).
-    cred_hits = [h for h in cred_hits if not _ENV_VAR_NAME_RHS.search(h)]
+    # Drop hits where EVERY credential assignment on the line names an
+    # environment variable that the tree really uses (see the three conditions
+    # above _CRED_ASSIGNMENT). The confirmation grep only runs when there are
+    # candidates left to confirm.
+    _per_hit = {h: _env_name_candidates(h) for h in cred_hits}
+    _wanted = {n for v in _per_hit.values() if v for n in v}
+    if _wanted:
+        _confirmed = _confirm_env_var_names(_wanted)
+        cred_hits = [h for h in cred_hits
+                     if not (_per_hit[h] and _per_hit[h] <= _confirmed)]
 
-# Filter accepted risks
+    # Filter accepted risks
     cred_hits = [h for h in cred_hits if not any(a in h for a in ACCEPTED_CRED_PATTERNS)]
     if cred_hits:
         for h in cred_hits[:5]:
@@ -1071,6 +1148,14 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # read off the cutoff commit rather than hard-coded, so the two can
         # never drift apart.
         #
+        # Known residual: `--since` filters on COMMITTER date, so a commit
+        # forged with `GIT_COMMITTER_DATE` set before the cutoff evades the
+        # date half (author-date backdating does not; orphan branches and tags
+        # are both caught). Accepted: that is deliberate tampering, not an
+        # accident shape, and anyone able to do it can rewrite the branch
+        # outright — a date bound cannot defend against an author who controls
+        # the dates.
+        #
         # If the cutoff commit is absent (shallow clone / fresh mirror), fall
         # back to full history rather than silently reporting 0 — under-
         # reporting a domain leak is the one outcome worse than repeating it.
@@ -1079,9 +1164,14 @@ def s3_git_history() -> tuple[str, Findings, str]:
         _have_cutoff = bool(_cutoff_date)
         _range = (f"--all --not {_cutoff} --since='{_cutoff_date}'"
                   if _have_cutoff else "--all")
+        # Pathspec by PATTERN, not by `git ls-files`. The old command listed
+        # files tracked in HEAD, so a domain leaked in one post-cutoff commit
+        # and deleted in a follow-up was invisible to the check entirely —
+        # precisely the exposure that matters most, since git history keeps it.
+        # `:(exclude)` matches on path, so a deleted file is still searched.
         count = run(
-            f"git log {_range} -p -S '{domain}' -- "
-            f"$(git ls-files | grep -v '\\.sops\\.yaml$') 2>/dev/null "
+            f"git log {_range} -p -S '{domain}' "
+            f"-- . ':(exclude)*.sops.yaml' 2>/dev/null "
             f"| grep '^+.*{domain}' | grep -v 'sops\\|ENC\\[' | wc -l",
             timeout=120,
         ).strip()
