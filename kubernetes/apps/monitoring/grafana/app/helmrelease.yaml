@@ -32,6 +32,30 @@ spec:
     # Note kube-prometheus-stack sets `grafana.enabled: false`, so this release
     # alone owns Grafana. Rollback: chart revert + grafana-config Longhorn
     # backup (03:00 daily) — Grafana 13 migrates the sqlite schema on boot.
+    #
+    # NO `image.tag` PIN HERE, AND THAT IS DELIBERATE — the image follows the
+    # chart default (13.2.0). Do not "fix" this by pinning `13.2.0-slim`:
+    # it was tried on 2026-08-18 (c8a1f6e9) and reverted 4 minutes later
+    # (f08a32e9, whose message is bare because it was an emergency revert).
+    #
+    # What failed, and at which check: the pod started fine and 13.2.0-slim
+    # exists — the DATASOURCE gate failed. `-slim` ships
+    # data/plugins-bundled EMPTY, and from 13.2.0 upstream that directory is
+    # the delivery mechanism for the CORE datasource backends, not a
+    # duplicate of compiled-in ones (upstream grew the bundled catalog set
+    # from 2 entries to 13; see PR #129593). On the slim pod
+    # `/api/plugins?type=datasource` returned 6 plugins against 18 on plain —
+    # and those 6 were only leftovers persisted on the grafana-config PVC.
+    # Grafana logged `reason="plugin prometheus not found"`. Six of our seven
+    # provisioned datasources would have been dead.
+    #
+    # GF_PLUGINS_PREINSTALL_DISABLED (which slim needs, or it re-downloads the
+    # same binaries at startup) is what closes the last escape hatch: the tag
+    # and that env var are each individually correct and jointly fatal.
+    #
+    # Full evidence + the remaining options: security_ref: F-de4d92cd
+    # Gate to re-run before ANY grafana image change (not just slim):
+    # docs/sops/monitoring.md → "Image variants: plain vs -slim".
     deploymentStrategy:
       type: Recreate
     admin:
