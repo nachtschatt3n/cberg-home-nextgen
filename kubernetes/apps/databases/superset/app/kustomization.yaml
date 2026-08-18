@@ -16,3 +16,8 @@ resources:
   - helmrelease.yaml
   - redis-deployment.yaml
   - ingress.yaml
+  # Replacement metadata DB (plan superset-pg-standup); pg-longhorn-volume.yaml
+  # is deliberately NOT listed — apply it manually (see NOTE above).
+  - pg-pv.yaml
+  - pg-pvc.yaml
+  - pg-deployment.yaml

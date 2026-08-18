@@ -1,0 +1,18 @@
+---
+# Replacement metadata-DB volume (postgres:17.11-alpine, plan superset-pg-standup).
+# NOT registered in kustomization.yaml — Flux `targetNamespace: databases` would
+# override `namespace: storage` and create a broken duplicate. Apply by hand once:
+#   kubectl apply -f pg-longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: superset-pg-data
+  namespace: storage
+spec:
+  size: "21474836480"   # 20 Gi
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
