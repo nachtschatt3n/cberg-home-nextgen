@@ -89,6 +89,12 @@ status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, 
                                     # 52/78 live @5.1.0. Alexa E2E stream check -> operator.
                                     # tier 5 COMPLETE 2026-08-18 (f4ea4e0c; iobroker STS + pairs +
                                     # jobLabels unchanged + otbr/_template file-bumps). 60/78.
+                                    # tier 6 COMPLETE 2026-08-18 (f1ad7cd8; 17 stateful-data wrappers,
+                                    # penpot-db STS + §1a suffix same-commit — PVC penpot-db-data uid
+                                    # unchanged; immich-pg/ta-es uids unchanged; owner apps (penpot,
+                                    # sure, immich, affine, tube-archivist) reconnect-verified; all
+                                    # PVCs Bound under original names). 77/78 — tier 7 (cloudflared)
+                                    # remains, alone in its own window.
                                     # Supersedes app-template-5.0.md (deleted in same commit).
 window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
                                     # continue same run or fall back to the 8-window schedule:
