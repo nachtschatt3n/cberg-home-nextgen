@@ -1127,9 +1127,34 @@ def _is_mutable_tag_ref(image_ref: str) -> bool:
 _UNBUMPABLE_CRIT_ESCALATE = 50
 
 # Our own applications' registry namespace. Images here are built and published
-# by the operator's own app repos; the cluster sweep holds no pull credentials
-# for them by deliberate policy, so trivy cannot scan them from here.
+# by the operator's own app repos and are PRIVATE.
 _PRIVATE_REGISTRY_PREFIX = "ghcr.io/nachtschatt3n/"
+
+
+def _trivy_has_private_creds() -> bool:
+    """Can trivy authenticate to our own registry on this run?
+
+    This is the discriminator between a STEADY STATE and a TRANSITION for a
+    private-image scan failure, and it is NOT a property of the registry — it
+    is a property of the environment. `runbooks/sweep-run.py` passes a
+    `gh auth token` through as TRIVY_USERNAME/TRIVY_PASSWORD, so under the
+    orchestrated sweep these images ARE scannable and DO carry real findings.
+    A failure then is a credential/registry blip that could be different next
+    run, and its silence would auto-close those findings -> veto.
+
+    Only with no credentials at all is the failure permanent-by-construction
+    (a standalone run outside the orchestrator), and only then may it be
+    reported as a finding without arming the veto. Getting this backwards in
+    either direction is costly: veto-always disables auto-close for the whole
+    security section forever, veto-never lets an expired token silently
+    resolve every private image's open CVE findings at once.
+    """
+    return bool(os.environ.get("TRIVY_PASSWORD") or os.environ.get("TRIVY_USERNAME"))
+
+
+def _is_permanently_unscannable(img: str) -> bool:
+    """True only for a private image on a run that holds no registry creds."""
+    return img.startswith(_PRIVATE_REGISTRY_PREFIX) and not _trivy_has_private_creds()
 
 
 # ---------------------------------------------------------------------------
@@ -1302,9 +1327,10 @@ def collect_trivy_results(scan_targets: list[str], cached: dict | None, scan_fn,
     fleet bumped during the day fell into that hole.
 
     So the cache is now a per-image memo, not a per-run switch: whatever it
-    covers is reused (that is the whole performance benefit, and an image whose
-    ref has not changed genuinely has not changed), and everything else is
-    scanned now.
+    covers is reused (that is the whole performance benefit; for a pinned ref
+    that is exact, and for a floating tag it is the same TTL-bounded staleness
+    the cache always had — which s4 reports separately as a posture-unknowable
+    finding), and everything else is scanned now.
 
     `scanned_ok` is the set of images with a real verdict — INCLUDING the clean
     ones. It cannot be derived from `results`, which only holds images that had
@@ -1630,7 +1656,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # Renovate would track only after a release, and Bitnami/distro CVEs
     # that OSV doesn't carry.
     #
-    # Cached 24h in $TMPDIR/cberg-trivy-cve-cache.json — Trivy DB pulls take
+    # Cached 24h in $TMPDIR/cberg-trivy-cve-cache-v4.json — Trivy DB pulls take
     # ~30-60s and we don't need fresh-every-run. The previous Renovate +
     # OSV blocks above run uncached for daily-fresh signal.
     import shutil
@@ -1775,11 +1801,13 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # every image running NOW that it does not cover is scanned NOW (F-8cdf8719
     # — a cache hit used to skip the scan entirely, so 27% of running images
     # went unscanned while their stale numbers were reported as current).
-    # Cached failures on our own private registry are NOT retried: no pull
-    # credentials by policy, so the retry cannot succeed (steady state).
+    # Cached failures are retried EXCEPT the permanently-unscannable ones
+    # (private registry AND no credentials this run) — that retry cannot
+    # succeed and only costs wall-clock. With credentials present a private
+    # image is an ordinary target and its failure is retried like any other.
     findings_per_image, scan_failed, scanned_ok, topped_up = collect_trivy_results(
         scan_targets, cached, _scan_and_report,
-        retry_failed=lambda img: not img.startswith(_PRIVATE_REGISTRY_PREFIX),
+        retry_failed=lambda img: not _is_permanently_unscannable(img),
     )
     if cached is not None:
         cprint(C.CYAN, f"  · cache covered {len(scan_targets) - len(topped_up)}/{len(scan_targets)} "
@@ -1788,14 +1816,20 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # Persist the merged state. `created_at` is carried over from the cache we
     # topped up, so a daily top-up cannot keep pushing the TTL out and leave
     # day-0 images permanently un-rescanned.
+    # Written on EVERY run now (a warm hit used to write nothing), and sweeps
+    # can overlap — so write atomically. A torn file would be discarded by
+    # load_trivy_cache() and merely cost a full rescan, but a rescan of the
+    # whole fleet is not a cost to incur by accident.
     try:
-        trivy_cache.write_text(json.dumps({
+        tmp_cache = trivy_cache.with_suffix(f".{os.getpid()}.tmp")
+        tmp_cache.write_text(json.dumps({
             "parser_version": _TRIVY_TALLY_VERSION,
             "created_at": cache_created if cache_created is not None else time.time(),
             "results": findings_per_image,
             "failed": scan_failed,
             "scanned": sorted(scanned_ok),
         }))
+        os.replace(tmp_cache, trivy_cache)
     except Exception:
         pass
 
@@ -1809,6 +1843,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                    f"({len(distinct_images) - len(scan_targets)} skipped by policy, "
                    f"{len([i for i in scan_failed if i in scan_targets])} unscannable)")
     if unattempted:
+        # Defensive: with the current control flow every scan target ends up
+        # scanned or failed, so this should stay empty. It exists so that a
+        # future path which drops targets on the floor degrades loudly instead
+        # of silently narrowing the denominator — the defect this commit fixes.
         # TRANSIENT by construction: these were in scope and simply did not get
         # a scan attempt this run (an aborted top-up, an exception in the pool).
         # Next run can be different -> veto, per the transitions rule in
@@ -1940,8 +1978,13 @@ def s4_cve_check() -> tuple[str, Findings, str]:
         # must stay visible. Blending them meant accepting the private-image
         # blindness would also have silently swallowed, e.g., a public image
         # timing out — a different problem with a different fix.
-        private = sorted(i for i in scan_failed if i.startswith(_PRIVATE_REGISTRY_PREFIX))
-        other = sorted(i for i in scan_failed if not i.startswith(_PRIVATE_REGISTRY_PREFIX))
+        # The split is by SCANNABILITY, not by registry: a private image on a
+        # run that HAS credentials (the orchestrated sweep injects a gh token
+        # as TRIVY_USERNAME/TRIVY_PASSWORD) is an ordinary target whose failure
+        # is a blip, and it belongs in `other` so it vetoes. Only a private
+        # image on a credential-less run is permanent-by-construction.
+        private = sorted(i for i in scan_failed if _is_permanently_unscannable(i))
+        other = sorted(i for i in scan_failed if not _is_permanently_unscannable(i))
         if private:
             # Stable, drift-free wording (no counts, no versions) so both the
             # finding fingerprint and any accepted-risk substring survive the
@@ -1949,15 +1992,17 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             f.add(WARNING, f"Trivy scan coverage gap: private {_PRIVATE_REGISTRY_PREFIX.rstrip('/')} images unscannable by the cluster sweep (no registry credentials) — CVE status UNKNOWN for our own applications; scanning belongs in each app repo's own CI")
             cprint(C.YELLOW, f"  🟡 {len(private)} private image(s) unscannable (no registry creds): "
                               + ", ".join(i.split('@')[0].split('/')[-1] for i in private[:8]))
-            # DELIBERATELY NO DEGRADED.record() here. This is a STEADY STATE:
-            # the sweep holds no credentials for our own registry BY POLICY, so
-            # the condition is identical on every run and cannot be different
-            # tomorrow. Per docs/sops/sweep-findings-lifecycle.md §4.3, vetoing
-            # on it would disable auto-close for the entire security section
-            # forever while protecting nothing — these images never produced a
-            # CVE finding that absence could wrongly resolve. It is reported as
-            # a FINDING (above), which is the auto-close-safe channel and the
-            # way it actually gets fixed.
+            # DELIBERATELY NO DEGRADED.record() here — and ONLY because
+            # _is_permanently_unscannable() already established that this run
+            # holds no registry credentials at all. That makes the failure a
+            # STEADY STATE: identical on every credential-less run, so these
+            # images never produced a CVE finding that absence could wrongly
+            # resolve, and per docs/sops/sweep-findings-lifecycle.md §4.3 a
+            # veto here would disable auto-close for the entire security
+            # section while protecting nothing (there are ~30 such images).
+            # It is reported as a FINDING instead — the auto-close-safe channel.
+            # The moment credentials ARE present the same failure is classified
+            # transient and lands in `other` below, which DOES veto.
         if other:
             # Message kept byte-identical to the pre-split wording so the
             # existing finding fingerprint stays stable across this refactor.

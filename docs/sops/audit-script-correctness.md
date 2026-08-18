@@ -12,7 +12,7 @@
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-18, **fourteen** defects across five audit scripts
+Between 2026-07-30 and 2026-08-18, **sixteen** defects across five audit scripts
 shared one root cause: an unmeasured, failed or absent probe was reported as a
 definite outcome. Four of them were introduced *while fixing the others*.
 
@@ -68,6 +68,8 @@ signal.
 | `health-check.sh` | `grep -c … \|\| echo "0"` → `"0\n0"`, aborting the `-gt` test | pass (guard never ran) |
 | `security-check.py` | image dedup on raw string, same image counted twice | double-fail |
 | `security-check.py` | `None` (undeterminable) newer-tag lookup worded as "newer upstream tag available" | fail |
+| `security-check.py` | a Trivy cache HIT short-circuited the running-image scan entirely, so the CACHE's image set silently defined coverage instead of the RUNNING set: images started after the cache was written were never scanned while the cached numbers were reported as current. Name the denominator — coverage is a property of what is running, never of what the memo happens to hold (2026-08-18, `cfebb329`, F-8cdf8719) | pass (stale numbers reported as current) |
+| `security-check.py` | same cache, second mechanism: a tally-logic fix (kernel-header exclusion, `abb12fda`) could not take effect until the 24h TTL expired, because the cache written before it kept serving pre-fix arithmetic. A cached RESULT must be invalidated by the version of the LOGIC that produced it, not only by age — `_TRIVY_TALLY_VERSION` (2026-08-18, `cfebb329`) | pass (fixed logic, stale output) |
 | `sweep-run.py` | auto-close resolved findings for sections that never ran | pass (false resolution) |
 | `health-check.sh` | counted batched `validation errors` LINES; ~18 drops per line, so the counter sat flat at ~362/h while loss grew 8x to 6720 points/h (`1482de6a`) | pass |
 | `health-check.sh` | §34 + fatal/OOM ES queries: `match` on the `body.text` KEYWORD is exact-equality, so "error logs 24h: 0" while `wildcard *error*` found 63,559 — hid two DNS outages; `severity_text` clause was dead too (`a54e88d8`) | pass |

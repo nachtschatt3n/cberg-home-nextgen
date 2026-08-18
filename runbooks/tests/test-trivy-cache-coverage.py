@@ -121,6 +121,44 @@ class TopUpCoverageTest(unittest.TestCase):
         self.assertIn("public:1", scanned_ok)     # recovered
 
 
+class ScannabilityClassificationTest(unittest.TestCase):
+    """The steady-state predicate depends on the ENVIRONMENT, not the registry."""
+
+    def setUp(self):
+        self._old = {k: os.environ.pop(k, None)
+                     for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD")}
+
+    def tearDown(self):
+        for k, v in self._old.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+    def test_private_without_creds_is_permanent(self):
+        self.assertTrue(_mod._is_permanently_unscannable(
+            _mod._PRIVATE_REGISTRY_PREFIX + "app:1"))
+
+    def test_private_with_creds_is_not_permanent(self):
+        os.environ["TRIVY_PASSWORD"] = "x"
+        self.assertFalse(_mod._is_permanently_unscannable(
+            _mod._PRIVATE_REGISTRY_PREFIX + "app:1"))
+
+    def test_public_is_never_permanent(self):
+        self.assertFalse(_mod._is_permanently_unscannable("docker.io/x:1"))
+        os.environ["TRIVY_USERNAME"] = "x"
+        self.assertFalse(_mod._is_permanently_unscannable("docker.io/x:1"))
+
+    def test_credentialled_private_failure_is_retried(self):
+        os.environ["TRIVY_PASSWORD"] = "x"
+        priv = _mod._PRIVATE_REGISTRY_PREFIX + "app:1"
+        cache = {"results": {}, "failed": [priv], "scanned": []}
+        seen = []
+        _mod.collect_trivy_results(
+            [priv], cache, lambda t: (seen.extend(t), ({}, []))[1],
+            retry_failed=lambda i: not _mod._is_permanently_unscannable(i))
+        self.assertEqual(seen, [priv])
+
+
 class TallyVersionInvalidationTest(unittest.TestCase):
     """Part 3 — a tally-logic change must invalidate the cache immediately."""
 
@@ -187,6 +225,10 @@ class DegradationClassificationTest(unittest.TestCase):
         _mod.SCRIPT_DIR = Path(tmpdir)
         (Path(tmpdir) / "version-check-current.md").write_text("# empty\n")
 
+        # No registry credentials by default -> private images are permanently
+        # unscannable on this run. Individual tests set them to flip the class.
+        self._old_creds = {k: os.environ.pop(k, None)
+                           for k in ("TRIVY_USERNAME", "TRIVY_PASSWORD")}
         self._saved = {n: getattr(_mod, n) for n in
                        ("run_lines", "kubectl", "run_cmd", "_newer_upstream_tag_exists")}
         _mod.run_lines = lambda *a, **k: []          # no gh PR lookup
@@ -194,6 +236,10 @@ class DegradationClassificationTest(unittest.TestCase):
         _mod.DEGRADED._reasons = []
 
     def tearDown(self):
+        for k, v in self._old_creds.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
         for n, v in self._saved.items():
             setattr(_mod, n, v)
         _mod.SCRIPT_DIR = self._old_script_dir
@@ -225,6 +271,19 @@ class DegradationClassificationTest(unittest.TestCase):
         self.assertEqual(self._reasons(), [], "steady state must not veto")
         titles = " ".join(m for _s, m, _meta in findings._items)
         self.assertIn("no registry credentials", titles)  # reported as a FINDING
+
+    def test_private_image_WITH_credentials_arms_the_veto(self):
+        """The orchestrated sweep injects a gh token as TRIVY_USERNAME/PASSWORD
+        (runbooks/sweep-run.py), so private images ARE scannable and DO carry
+        real findings. A failure then is a transition, not a steady state —
+        otherwise an expired token silently auto-closes all of them at once."""
+        os.environ["TRIVY_PASSWORD"] = "x"  # not a real credential
+        priv = _mod._PRIVATE_REGISTRY_PREFIX + "own-app:1.2.3"
+        _sev, findings, _md = self._run_section(["public:1", priv], failing=[priv])
+        self.assertTrue(self._reasons(), "credentialled private failure must veto")
+        titles = " ".join(m for _s, m, _meta in findings._items)
+        self.assertNotIn("no registry credentials", titles)
+        self.assertIn("unscannable after retry", titles)
 
     def test_transient_public_failure_arms_the_veto(self):
         _sev, findings, _md = self._run_section(

@@ -176,7 +176,7 @@ survivor.
 | Script | Section | Tripped by |
 |--------|---------|-----------|
 | `health-check.py` | `health` | no issues file this run; stale issues file (mtime < run start); `health-check.sh` exit code outside `{0,1}` |
-| `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a public running image still unscannable after retry, and any scannable running image that got no scan attempt at all (s4 — **not** the private-registry images, which are steady state: see below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
+| `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a running image still unscannable after retry — including a private one whenever the run HOLDS registry credentials — and any scannable running image that got no scan attempt at all (s4; the one exclusion is a private image on a credential-less run: see the worked example below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
 | `check-all-versions.py` | `version` | registry unreachable/timeout; **HTTP 429 registry rate-limit**; OCI tag-listing truncation; Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi. Gated by `_is_transient()` + `_is_real_downgrade()` — see the transitions rule below |
 | `doc-check.py` | `doc` | **Shared primitives**: `run()` exception path and `rc != 0` with empty stdout (scoped call sites only — an unscoped grep returning nothing is a legitimate clean result); `run_cmd()` exception path; `read_file()` on PermissionError / IsADirectoryError / decode error (unreadable is never a legitimate clean result), and on FileNotFoundError only where a call site passes an explicit scope. **Named sites**: `kubectl version` / node list / ingress / `sops-age` secret unavailable; `talosctl version` unavailable; `unifictl` VLAN + WLAN JSON unparsable or rc≠0; helmfile / homepage / renovate / ollama / blueprint / SOP / Taskfile / `.gitignore` / `.sops.yaml` / `CLAUDE.md` unreadable; `age-keygen` missing (silently downgrades a wrong-key CRITICAL to a green line); a regex that no longer matches a reworded doc |
 
@@ -220,15 +220,28 @@ survivor.
 > split three ways, and only one of them vetoes. (1) Images excluded by the
 > scan-target policy (Bitnami, Wazuh internals): permanent by construction,
 > reported in the coverage line, no veto and no finding. (2) Images in our own
-> private registry: the sweep holds no pull credentials **by policy**, so the
-> scan fails identically on every run — steady state, reported as a standing
-> FINDING, no veto (there are ~30 of them, so vetoing here would switch
-> auto-close off for the whole security section permanently). (3) A public
-> image that failed after retry, or any scannable image that got no scan
-> attempt this run: could succeed tomorrow, had findings yesterday — **veto**.
-> The cached failure list is retried on the next run for class 3 and not for
-> class 2, so a transient blip cannot keep the veto armed for the full cache
-> TTL.
+> private registry **on a run that holds no registry credentials**: the scan
+> fails identically every time — steady state, reported as a standing FINDING,
+> no veto (there are ~30 of them, so vetoing here would switch auto-close off
+> for the whole security section permanently). (3) Anything else that failed
+> after retry, or any scannable image that got no scan attempt this run: could
+> succeed tomorrow, had findings yesterday — **veto**. The cached failure list
+> is retried on the next run for class 3 and not for class 2, so a transient
+> blip cannot keep the veto armed for the full cache TTL.
+>
+> **The discriminator in (2) is the ENVIRONMENT, not the registry** — and
+> getting that wrong is how a steady-state exclusion becomes the very
+> false-negative it was meant to avoid. `runbooks/sweep-run.py` passes a
+> `gh auth token` through as `TRIVY_USERNAME`/`TRIVY_PASSWORD`, so under the
+> orchestrated sweep those private images ARE scanned and DO carry real
+> findings. Classifying them "steady state" unconditionally would mean an
+> expired or under-scoped token fails all ~30 at once, records no degradation,
+> and lets auto-close resolve every one of their open findings on a run that
+> never looked at them. `_is_permanently_unscannable()` therefore requires
+> BOTH the private prefix AND the absence of credentials; with credentials
+> present the failure is class 3 and vetoes. When you write a steady-state
+> exclusion, state the condition that makes it permanent and assert THAT in
+> code — never infer permanence from the identity of the thing that failed.
 >
 > **Degradation crosses module boundaries.** `security-check.py`'s s4 decides
 > "is this CVE fixable by a newer tag?" by dynamically loading
@@ -516,6 +529,7 @@ If unclear:
 # 1) Unit contract still holds
 cd /Users/mu/code/cberg-home-nextgen && cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-osv-coverage.py
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-trivy-cache-coverage.py
 
 # 2) No section has been fully wiped in the last day
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 - <<'PY'
@@ -594,6 +608,7 @@ UPDATE sweep_findings
 - `runbooks/lib/findings_writer.py` — writer, gates, `DegradationLog`
 - `runbooks/lib/test_findings_writer_autoclose.py` — the executable contract
 - `runbooks/tests/test-osv-coverage.py` — OSV coverage + transient-classifier contract
+- `runbooks/tests/test-trivy-cache-coverage.py` — Trivy cache top-up coverage, tally-version invalidation, and the steady-state-vs-transient split above
 - `runbooks/sweep-run.py` — orchestrator, `--ran`, `--reconcile-only`
 - `runbooks/{security,doc,health}-check.py`, `runbooks/check-all-versions.py`
 - `docs/sops/audit-script-correctness.md`
