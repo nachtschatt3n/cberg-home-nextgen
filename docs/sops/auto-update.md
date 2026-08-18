@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.08.09`
-> Last Updated: `2026-08-09`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 
 ## 1) Description
 
@@ -13,15 +13,17 @@ is actually breaking) is still held for review.
 The engine is `runbooks/auto-update.py`. It is **strict deny-by-default**: a PR
 merges only when every gate passes. **Where it APPLIES (updated 2026-07-31):**
 safe updates land in the **maintenance windows** — the `maintenance-window-agent`
-runs `AUTO_UPDATE_APPLY=1 auto-update.py --apply` at Step 0 of every tue/thu/sun
-window. The daily **sweep is read-only** and only DRY-RUNS the engine (rule 4c)
-to report what will land next window. This split keeps observability read-only
+runs `AUTO_UPDATE_APPLY=1 auto-update.py --apply` at Step 0 of every maintenance
+window (daily since 2026-08-16 — `runbooks/maintenance-windows.yaml`). The
+daily **sweep is read-only** and only DRY-RUNS the engine (rule 4c) to report
+what will land next window. This split keeps observability read-only
 while safe patch/minor bumps still flow automatically on the window cadence.
 
-The core requirement — *"assess the safe level correctly"* — is met by four
-independent gates, not the semver label alone: the label is necessary but not
-sufficient (affine `0.27.3` is a "patch" that ships a breaking `env→config.json`
-change; it is caught by both the deny-list and the release-notes scan).
+The core requirement — *"assess the safe level correctly"* — is met by the parse
+gate plus four independent gates, not the semver label alone: the label is
+necessary but not sufficient (affine `0.27.3` is a "patch" that ships a
+breaking `env→config.json` change; it is caught by both the deny-list and the
+release-notes scan).
 
 Related: `runbooks/version-check.md`, `.github/renovate.json5`,
 `docs/sops/monitoring.md` (alert authoring), `docs/sops/new-deployment-blueprint.md`.
@@ -31,7 +33,23 @@ Related: `runbooks/version-check.md`, `.github/renovate.json5`,
 - **What runs:** `runbooks/auto-update.py` (+ `runbooks/auto-update-policy.yaml`).
 - **Who runs it:** the `daily-operation` sweep orchestrator, rule 4c, after the
   version specialist finishes and the verdict is reconciled.
-- **The four gates (ALL must pass):**
+- **The parse gate + four gates (ALL must pass):**
+  0. **G0 parse** — the PR title must attribute the bump to exactly ONE
+     component and ONE full target version. Two shapes are accepted:
+     - **spanned** — `update <dep> ( <cur> → <new> )`, from the custom
+       `commitMessageExtra` on the docker/helm/github-release `packageRules`
+       in `.github/renovate.json5`.
+     - **bare** — `update <dep> to <x.y.z>`, Renovate's DEFAULT extra for any
+       dep NOT matched by those rules. Accepted only when the dep is a SINGLE
+       token (so `update <groupName> group to vX` can never match) and the
+       target is a FULL dotted version (so a major rendered as `to v2`, or
+       `to latest`, is still refused). `cur` is reported as `?` with
+       `cur_known=false` — nothing gates on it; safe/unsafe comes from the
+       PR's update-type LABEL.
+
+     Anything else → `gate=parse` hold. A `gate=parse` hold is now a genuine
+     attribution failure, not a rendering artifact (memory:
+     `feedback_version_attribution`).
   1. **G1 type** — `update_type ∈ {patch, minor}` (from the Renovate label).
      major / digest / unknown / security → hold.
   2. **G2 policy** — depName not blocked by a `deny` rule in
@@ -144,8 +162,10 @@ Talos, nextcloud, openclaw) MUST appear in `held`.
 ### Test 2: policy + parse gates (offline unit check)
 
 Run the synthetic matrix (affine/app-template/mariadb/Talos/nextcloud/openclaw →
-held; cloudflared/redis → allowed; grouped/unparseable PR → held). Any mismatch
-means a deny glob is wrong — fix before the next scheduled run.
+held; cloudflared/redis → allowed; grouped/unparseable PR → held; bare
+`update busybox to v1.38.0` → parses; `update Flux Operator group to v1.2.3`
+and `update foo to v2` → still refused). Any mismatch means a deny glob or the
+title parser is wrong — fix before the next scheduled run.
 
 ### Test 3: apply guard holds on manual runs
 
@@ -164,6 +184,7 @@ means a deny glob is wrong — fix before the next scheduled run.
 | `--apply` merged nothing on cron | no PR passed all four gates | expected; check the held reasons in `--json` |
 | Merge happened but no reconcile | `flux`/`kubectl` not on PATH in the sweep env | run under `sweep-run.py`/mise so tooling resolves |
 | Batch reverted repeatedly | a bump genuinely breaks the app | add it to the deny-list until fixed upstream |
+| A version-only patch bump held with `gate=parse` | Title matches neither the spanned nor the bare shape (grouped PR, hand-authored `bump image to sha-…`, major rendered `to v2`) | Expected — it is genuinely unattributable. Do NOT widen the regex to make one PR pass; route it through a maintenance-window plan. |
 
 ## 8) Diagnose Examples
 
@@ -229,4 +250,5 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.08.18 | 2026-08-18 | Documented the G0 parse gate; added Renovate's bare `update <dep> to <x.y.z>` shape (PR #205 held on `gate=parse` despite being a green version-only patch); corrected the window cadence to daily. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. Sweep-driven, health-gated auto-merge of patch+minor Renovate PRs; deny-by-default policy + release-notes breaking scan; cron-only apply guard; auto-revert on post-apply regression. |
