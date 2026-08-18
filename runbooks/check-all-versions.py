@@ -77,6 +77,10 @@ _DEGRADED = DegradationLog(
     printer=lambda msg: print(f"{Colors.YELLOW}{msg}{Colors.RESET}"),
 )
 
+# "not resolved yet" sentinel — distinct from None, which is a RESOLVED
+# "there is no token" and must not trigger another `gh auth token` shell-out.
+_UNSET = object()
+
 
 def _dep(name: str, status: Optional[int] = None) -> str:
     """Name a failed dependency, calling out throttling explicitly.
@@ -213,6 +217,7 @@ class VersionChecker:
 
         # Check if gh CLI is available
         self.use_gh_cli = self._check_gh_available()
+        self._gh_api_token: Any = _UNSET   # lazily resolved by _github_api_token()
         self.renovate_prs: List[Dict] = []
         self.external_infra_results: List[Dict] = []
 
@@ -1316,6 +1321,29 @@ class VersionChecker:
         
         return None
     
+    def _github_api_token(self) -> Optional[str]:
+        """A GitHub API bearer token: `GITHUB_TOKEN`, `GH_TOKEN`, else the
+        already-authenticated `gh` CLI's token (the same fallback chain
+        `runbooks/sweep-run.py` uses for trivy's GHCR auth).
+
+        The direct-urllib lookups below used to read `GITHUB_TOKEN` ALONE. In
+        the sweep that variable is usually unset — auth comes from `gh` — so
+        those calls ran on the 60/hr ANONYMOUS bucket, and a single 403 there
+        vetoed the whole version section. Cached: `gh auth token` shells out.
+        """
+        if self._gh_api_token is not _UNSET:
+            return self._gh_api_token
+        tok = (self.github_token or os.environ.get('GITHUB_TOKEN')
+               or os.environ.get('GH_TOKEN'))
+        if not tok and self.use_gh_cli:
+            try:
+                tok = subprocess.run(['gh', 'auth', 'token'], capture_output=True,
+                                     text=True, timeout=10).stdout.strip() or None
+            except Exception:  # noqa: BLE001 — no token is a valid outcome
+                tok = None
+        self._gh_api_token = tok
+        return tok
+
     def _check_gh_available(self) -> bool:
         """Check if GitHub CLI (gh) is available and authenticated."""
         try:
@@ -1795,7 +1823,7 @@ class VersionChecker:
                 "https://api.github.com/repos/pikvm/kvmd/releases/latest",
                 headers={"Accept": "application/vnd.github+json", "User-Agent": "cberg-version-check"},
             )
-            token = os.environ.get("GITHUB_TOKEN")
+            token = self._github_api_token()
             if token:
                 req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -1934,7 +1962,7 @@ class VersionChecker:
                 "https://api.github.com/repos/siderolabs/talos/releases/latest",
                 headers={"Accept": "application/vnd.github+json", "User-Agent": "cberg-version-check"},
             )
-            token = os.environ.get("GITHUB_TOKEN")
+            token = self._github_api_token()
             if token:
                 req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=15) as resp:
