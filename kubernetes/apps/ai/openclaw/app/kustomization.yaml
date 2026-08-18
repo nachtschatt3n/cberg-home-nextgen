@@ -9,3 +9,4 @@ resources:
   - ./skills-configmap.sops.yaml
   - ./helmrelease.yaml
   - ./openclaw-probe.yaml
+  - ./ollama-toolfix.yaml

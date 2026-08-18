@@ -1,0 +1,195 @@
+---
+# Translating proxy in front of Ollama.
+#
+# WHY: OpenClaw serialises OpenAI-style tool calls with
+# `messages[].tool_calls[].function.arguments` as a JSON OBJECT. Ollama's
+# OpenAI-compatible endpoint requires that field to be a JSON-encoded STRING
+# (which is what the OpenAI spec actually says) and otherwise returns:
+#
+#   400 json: cannot unmarshal object into Go struct field
+#             .messages.tool_calls.function.arguments of type string
+#
+# Because Juno uses tools in nearly every turn, the "local fallback" never
+# actually worked: when the Codex quota lapsed (2026-08-05 and again
+# 2026-08-18) the whole family went dark even though a healthy local model was
+# sitting right there. This proxy rewrites that one field on the way through,
+# so the fallback genuinely works. Everything else is passed through untouched,
+# including SSE streaming.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ollama-toolfix-script
+  namespace: ai
+data:
+  proxy.py: |
+    """Minimal streaming proxy: fix tool_call argument encoding for Ollama."""
+    import json, os, socket
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import urllib.request, urllib.error
+
+    UPSTREAM = os.environ.get("OLLAMA_UPSTREAM", "http://192.168.30.111:11434").rstrip("/")
+    PORT = int(os.environ.get("PORT", "8080"))
+    HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+           "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
+
+    def _fix_tool_args(payload):
+        """arguments: object -> JSON string, in messages[] and any tool_calls."""
+        changed = 0
+        for msg in payload.get("messages") or []:
+            for call in (msg.get("tool_calls") or []):
+                fn = call.get("function")
+                if isinstance(fn, dict) and isinstance(fn.get("arguments"), (dict, list)):
+                    fn["arguments"] = json.dumps(fn["arguments"], ensure_ascii=False)
+                    changed += 1
+            # some clients put the object on the tool result too
+            if isinstance(msg.get("content"), (dict, list)) and msg.get("role") == "tool":
+                msg["content"] = json.dumps(msg["content"], ensure_ascii=False)
+                changed += 1
+        return changed
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):  # keep pod logs quiet but useful
+            pass
+
+        def _proxy(self, method):
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else b""
+            if body and "chat/completions" in self.path:
+                try:
+                    payload = json.loads(body)
+                    n = _fix_tool_args(payload)
+                    if n:
+                        body = json.dumps(payload).encode()
+                        print(f"toolfix: rewrote {n} tool-call argument(s)", flush=True)
+                except Exception as exc:      # never block a request on the fix
+                    print(f"toolfix: passthrough (unparsed body: {exc})", flush=True)
+
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+            req = urllib.request.Request(UPSTREAM + self.path, data=body or None,
+                                         headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=600) as up:
+                    self.send_response(up.status)
+                    for k, v in up.headers.items():
+                        if k.lower() not in HOP:
+                            self.send_header(k, v)
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    while True:                     # stream SSE straight through
+                        chunk = up.read(8192)
+                        if not chunk:
+                            break
+                        self.wfile.write(b"%X\r\n%s\r\n" % (len(chunk), chunk))
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
+            except urllib.error.HTTPError as e:
+                data = e.read()
+                self.send_response(e.code)
+                self.send_header("Content-Type", e.headers.get("Content-Type", "application/json"))
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except Exception as exc:
+                data = json.dumps({"error": {"message": f"toolfix proxy: {exc}"}}).encode()
+                self.send_response(502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        def do_POST(self):
+            self._proxy("POST")
+
+        def do_GET(self):
+            if self.path == "/healthz":
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            self._proxy("GET")
+
+    if __name__ == "__main__":
+        print(f"ollama-toolfix listening :{PORT} -> {UPSTREAM}", flush=True)
+        ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-toolfix
+  namespace: ai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ollama-toolfix
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ollama-toolfix
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          image: python:3.12-slim
+          command: ["python", "/app/proxy.py"]
+          env:
+            - name: OLLAMA_UPSTREAM
+              value: "http://192.168.30.111:11434"
+            - name: PORT
+              value: "8080"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: ollama-toolfix-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-toolfix
+  namespace: ai
+spec:
+  selector:
+    app.kubernetes.io/name: ollama-toolfix
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

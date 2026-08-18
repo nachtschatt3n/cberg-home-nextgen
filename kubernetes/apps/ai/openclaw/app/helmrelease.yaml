@@ -557,7 +557,7 @@ spec:
                   '{' \
                   '  "ollama": {' \
                   '    "api_key": "ollama",' \
-                  '    "api_base": "http://192.168.30.111:11435/v1"' \
+                  '    "api_base": "http://ollama-toolfix.ai.svc.cluster.local/v1"' \
                   '  }' \
                   '}' > "$AUTH_DIR/auth-profiles.json"
 
@@ -622,7 +622,13 @@ spec:
                   const fs = require('fs');
                   const path = '/home/node/.openclaw/openclaw.json';
                   const modelName = process.env.OLLAMA_MODEL || 'gemma4:26b';
-                  const ollamaBase = process.env.OLLAMA_BASE || 'http://192.168.30.111:11434/v1';
+                  // Route the MODEL PROVIDER through the toolfix proxy: OpenClaw sends
+                  // tool_call arguments as an object, Ollama demands a JSON string, so
+                  // direct calls 400 on every tool-using turn and the local fallback was
+                  // useless whenever Codex hit its quota. Plain-chat consumers (e.g. the
+                  // briefing translator) keep using OLLAMA_BASE directly.
+                  const ollamaBase = process.env.OLLAMA_PROVIDER_BASE
+                    || 'http://ollama-toolfix.ai.svc.cluster.local/v1';
                   const ollamaKey = process.env.OLLAMA_API_KEY || 'ollama';
                   const displayModel = modelName.includes('/') ? modelName : 'ollama/' + modelName;
                   const modelId = displayModel;
@@ -1287,7 +1293,7 @@ spec:
                 AUTH_FILE="$AUTH_DIR/auth-profiles.json"
                 if [ ! -f "$AUTH_FILE" ]; then
                   API_KEY="${OLLAMA_API_KEY:-ollama}"
-                  API_BASE="${OLLAMA_BASE:-http://192.168.30.111:11435/v1}"
+                  API_BASE="${OLLAMA_BASE:-http://ollama-toolfix.ai.svc.cluster.local/v1}"
                   printf '{\n  "ollama": {\n    "api_key": "%s",\n    "api_base": "%s"\n  }\n}\n' "$API_KEY" "$API_BASE" > "$AUTH_FILE"
                 fi
                 chown -R 1000:1000 "$AUTH_DIR"
