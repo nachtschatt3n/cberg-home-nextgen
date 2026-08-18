@@ -2949,15 +2949,37 @@ log_section "Section 24a: Network Infrastructure Services"
         # detection also catches usage errors ("Usage:" / "Try: openclaw" /
         # "unknown option") — a wrong flag must fail loudly, not silently pass.
         # (--light-context is NOT a valid `openclaw agent` flag — do not add it.)
+        # Timeout is 300s, NOT 90s: since the model failover chain landed
+        # (2026-08-18, agents.defaults.model.fallbacks) a codex-side outage
+        # degrades to ollama/gemma4:26b on the Mac mini, and a COLD 26b can
+        # exceed the 120s LLM idle timeout before the chain moves to
+        # gemma4:e2b-mlx. At 90s this reported a false critical while the agent
+        # was in fact answering.
         CANARY_OUT=$(kubectl exec -n ai "$OC_POD" -c app -- bash -lc \
-            'openclaw agent -m "Reply with exactly this token and nothing else: CANARY7F3" --session-id healthcheck-canary --timeout 90 2>&1' 2>/dev/null | tail -4)
-        if printf '%s' "$CANARY_OUT" | grep -qiE 'FailoverError|does not support|provider is not one of|Missing bearer|No API key|Unauthorized|failed before reply|Usage:|Try: openclaw|unknown option'; then
+            'openclaw agent -m "Reply with exactly this token and nothing else: CANARY7F3" --session-id healthcheck-canary --timeout 300 2>&1' 2>/dev/null | tail -4)
+        # Success is checked FIRST. With a fallback chain the run can emit
+        # intermediate failover/auth noise on its way to a good answer, so the
+        # sentinel — not the absence of scary strings — is the pass condition.
+        if printf '%s' "$CANARY_OUT" | grep -q 'CANARY7F3'; then
+            # The chain means "it replied" no longer implies "codex is healthy":
+            # a dead primary is invisible here because the local model answers.
+            # Ask the gateway log which candidate actually served the turn, so a
+            # silent permanent degrade still surfaces.
+            CANARY_SERVED=$(kubectl logs -n ai "$OC_POD" -c app --tail=400 2>/dev/null \
+                | grep 'model-fallback/decision' | grep 'decision=candidate_succeeded' | tail -1)
+            CANARY_REQ=$(printf '%s' "$CANARY_SERVED" | grep -oE 'requested=[^ ]+' | cut -d= -f2)
+            CANARY_CAND=$(printf '%s' "$CANARY_SERVED" | grep -oE 'candidate=[^ ]+' | cut -d= -f2)
+            if [ -n "$CANARY_CAND" ] && [ -n "$CANARY_REQ" ] && [ "$CANARY_CAND" != "$CANARY_REQ" ]; then
+                log_warning "openclaw dispatch canary: agent replied but DEGRADED — served by fallback ${CANARY_CAND} instead of ${CANARY_REQ}"
+                add_major_issue "openclaw is running on model fallback ${CANARY_CAND} (primary ${CANARY_REQ} failing). Chat/skills/briefing still work, but on the local model. Check which codex failure mode: 'codex login status' — 'Logged in using ChatGPT' + 'usage limit' = quota (self-heals at reset); otherwise OAuth refresh drift, needs an operator browser re-login. See docs/sops/ai-integration.md."
+            else
+                log_success "openclaw dispatch canary: agent replied (Codex/OAuth path healthy)"
+            fi
+        elif printf '%s' "$CANARY_OUT" | grep -qiE 'FailoverError|does not support|provider is not one of|Missing bearer|No API key|Unauthorized|failed before reply|Usage:|Try: openclaw|unknown option'; then
             CANARY_ERR=$(printf '%s' "$CANARY_OUT" | grep -oiE 'FailoverError[^<]*|does not support [^.]*|Missing bearer[^,]*|No API key[^"]*|unknown option[^ ]*|Try: openclaw[^|]*' | head -1)
             log_critical "openclaw dispatch canary FAILED: ${CANARY_ERR:-see pod logs}"
-            add_critical_issue "openclaw agent dispatch canary failed — the agent cannot answer (chat, skills, briefing all affected). Reason: ${CANARY_ERR:-unknown}. Catch-all signal for auth/harness/model/provider failure."
+            add_critical_issue "openclaw agent dispatch canary failed — the agent cannot answer (chat, skills, briefing all affected), and the model fallback chain did not save it. Reason: ${CANARY_ERR:-unknown}. Catch-all signal for auth/harness/model/provider failure."
             INFRA_SVC_ISSUES=$((INFRA_SVC_ISSUES + 1))
-        elif printf '%s' "$CANARY_OUT" | grep -q 'CANARY7F3'; then
-            log_success "openclaw dispatch canary: agent replied (Codex/OAuth path healthy)"
         else
             log_warning "openclaw dispatch canary inconclusive: $(printf '%s' "$CANARY_OUT" | tr '\n' ' ' | tail -c 100)"
         fi
