@@ -2104,6 +2104,124 @@ print(len(silent))
     fi
     echo ""
 
+    # -----------------------------------------------------------------------
+    # (3) AVAILABILITY COUPLING introduced by 505fefa4.
+    #
+    #     Before that commit the flux-system GitRepository carried NO credential
+    #     and cloned this public repo anonymously, so a broken token could not
+    #     stop reconciliation -- it could only stop image-automation PUSH. Now
+    #     that sync.pullSecret is set, source-controller authenticates and does
+    #     NOT fall back to anonymous. A revoked or expired PAT therefore halts
+    #     the artifact that all ~135 Kustomizations read from: the WHOLE GitOps
+    #     loop stops taking new commits, not just image automation. Availability
+    #     was traded for the push capability; this asserts on the trade.
+    #
+    #     Three signals, because they fail at different times:
+    #       (a) structural -- the credential silently vanished from the
+    #           GitRepository again (the 505fefa4 pruning trap, recurring)
+    #       (b) reactive   -- the source is already failing to authenticate
+    #       (c) proactive  -- the PAT has an expiry date that is approaching
+    #     (c) is the one that matters most: expiry is otherwise SILENT, because
+    #     lastPushCommit stays non-null from the pre-expiry pushes and so
+    #     assertion (2) above keeps reading healthy right through the outage.
+    echo "Flux sync-source credential (single point of failure for all of GitOps):"
+    GITREPO_STATE=$(kubectl get gitrepository -n flux-system flux-system -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print('QUERY-FAILED||'); raise SystemExit
+conds = ((d.get('status', {}) or {}).get('conditions') or [])
+ready = next((c for c in conds if c.get('type') == 'Ready'), None)
+secret = ((d.get('spec', {}) or {}).get('secretRef') or {}).get('name', '')
+print('|'.join([
+    (ready.get('status') if ready else 'Unknown'),
+    secret,
+    ((ready.get('message') if ready else 'no Ready condition') or '').replace('|', '/')[:200],
+]))
+" 2>/dev/null || echo "QUERY-FAILED||")
+    GITREPO_READY=$(echo "$GITREPO_STATE" | cut -d'|' -f1)
+    GITREPO_SECRET=$(echo "$GITREPO_STATE" | cut -d'|' -f2)
+    GITREPO_MSG=$(echo "$GITREPO_STATE" | cut -d'|' -f3)
+
+    if [ "$GITREPO_READY" = "QUERY-FAILED" ]; then
+        log_warning "flux-system GitRepository query failed - credential assertion did NOT run"
+        add_major_issue "Flux sync-source credential assertion did not run (kubectl/python failure)"
+    elif [ -z "$GITREPO_SECRET" ]; then
+        # This is the 505fefa4 regression shape, and it is INVISIBLE otherwise:
+        # anonymous read keeps the GitRepository Ready=True while every push dies.
+        log_warning "flux-system GitRepository has NO secretRef - git push capability is gone"
+        add_major_issue "Flux sync source has no credential (secretRef empty) - image automation cannot push; check FluxInstance spec.sync.pullSecret was not silently pruned again (docs/sops/flux-image-automation-push-auth.md)"
+    else
+        echo "  secretRef: $GITREPO_SECRET (present)"
+        if [ "$GITREPO_READY" != "True" ] && echo "$GITREPO_MSG" | grep -qiE "auth|credential|401|403|unauthorized|denied"; then
+            log_error "flux-system GitRepository FAILING AUTH: $GITREPO_MSG"
+            add_critical_issue "Flux sync source cannot authenticate to git - the ENTIRE GitOps loop is stalled (no new commits reach the cluster), not just image automation. Rotate the credential per docs/sops/flux-image-automation-push-auth.md section 10."
+        elif [ "$GITREPO_READY" != "True" ]; then
+            log_warning "flux-system GitRepository not Ready: $GITREPO_MSG"
+            add_major_issue "Flux sync source not Ready: $GITREPO_MSG"
+        else
+            log_success "flux-system GitRepository Ready and carrying a credential"
+        fi
+
+        # (c) proactive expiry. GitHub returns the token's expiry on ANY
+        #     authenticated API call via the github-authentication-token-expiration
+        #     header. Absent header => a credential that never expires (classic PAT
+        #     with no expiry, or a deploy key) - good for availability, and the
+        #     scope question is handled in the SOP's Security Check instead.
+        #     Token is piped via `curl -K -` so it never lands in argv/`ps`.
+        GH_TOKEN=$(kubectl get secret -n flux-system flux-system-git-auth -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+        if [ -z "$GH_TOKEN" ]; then
+            log_info "Sync credential secret unreadable from here - skipping token-expiry check"
+        else
+            GH_RESP=$(printf 'header = "Authorization: Bearer %s"\nurl = "https://api.github.com/"\nsilent\noutput = "/dev/null"\ndump-header = "-"\nconnect-timeout = 5\nmax-time = 15\n' "$GH_TOKEN" \
+                | curl -K - 2>/dev/null | tr -d '\r' || echo "")
+            unset GH_TOKEN
+            # tolower(), not gawk's IGNORECASE: this runs on macOS/BSD awk,
+            # where IGNORECASE is silently a no-op. HTTP/2 lowercases header
+            # names anyway, but do not depend on the wire version for this.
+            GH_CODE=$(echo "$GH_RESP" | awk '/^HTTP\// {c=$2} END {print c+0}')
+            GH_EXPIRY=$(echo "$GH_RESP" | awk 'tolower($0) ~ /^github-authentication-token-expiration:/ {sub(/^[^:]*:[ \t]*/, ""); print; exit}')
+            if [ "${GH_CODE:-0}" = "0" ]; then
+                log_info "GitHub unreachable - token-expiry check skipped (not a cluster fault)"
+            elif [ "${GH_CODE}" = "401" ] || [ "${GH_CODE}" = "403" ]; then
+                log_error "Sync credential REJECTED by GitHub (HTTP $GH_CODE) - it is revoked or expired"
+                add_critical_issue "Flux git credential is rejected by GitHub (HTTP $GH_CODE). Because the sync source no longer falls back to anonymous, the ENTIRE GitOps loop stops taking new commits. Rotate per docs/sops/flux-image-automation-push-auth.md section 10."
+            elif [ -z "$GH_EXPIRY" ]; then
+                log_info "Sync credential accepted by GitHub; no expiry advertised (non-expiring credential)"
+            else
+                GH_DAYS=$(python3 -c "
+import sys
+from datetime import datetime, timezone
+raw = sys.argv[1].strip().replace(' UTC', '')
+for f in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%d'):
+    try:
+        d = datetime.strptime(raw, f).replace(tzinfo=timezone.utc); break
+    except ValueError:
+        continue
+else:
+    print('NA'); raise SystemExit
+print(int((d - datetime.now(timezone.utc)).total_seconds() // 86400))
+" "$GH_EXPIRY" 2>/dev/null || echo "NA")
+                if [ "$GH_DAYS" = "NA" ]; then
+                    log_info "Sync credential expiry advertised but unparseable: $GH_EXPIRY"
+                elif [ "$GH_DAYS" -le 0 ]; then
+                    log_error "Sync credential EXPIRED ($GH_EXPIRY)"
+                    add_critical_issue "Flux git credential expired on $GH_EXPIRY - the entire GitOps loop is stalled. Rotate per docs/sops/flux-image-automation-push-auth.md section 10."
+                elif [ "$GH_DAYS" -le 14 ]; then
+                    log_warning "Sync credential expires in $GH_DAYS day(s) ($GH_EXPIRY)"
+                    add_major_issue "Flux git credential expires in $GH_DAYS day(s) ($GH_EXPIRY). On expiry the WHOLE GitOps loop stops, not just image automation - rotate now (docs/sops/flux-image-automation-push-auth.md section 10)."
+                elif [ "$GH_DAYS" -le 45 ]; then
+                    log_warning "Sync credential expires in $GH_DAYS day(s) ($GH_EXPIRY)"
+                    add_minor_issue "Flux git credential expires in $GH_DAYS day(s) ($GH_EXPIRY) - schedule a rotation."
+                else
+                    log_success "Sync credential valid for $GH_DAYS more day(s)"
+                fi
+            fi
+        fi
+    fi
+    echo ""
+
     echo "Flux controllers status:"
     kubectl get pods -n flux-system
     echo ""

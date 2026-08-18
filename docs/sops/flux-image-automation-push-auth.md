@@ -1,7 +1,7 @@
 # SOP: Flux Image Automation Push Authentication
 
 > Description: Diagnose and remediate `ImageUpdateAutomation` objects that scan, resolve, and run on schedule but never push a commit, because their `sourceRef` GitRepository has no write-capable credential. Anonymous HTTPS read succeeds, so every other Flux signal stays green while image updates silently never happen.
-> Version: `2026.08.18`
+> Version: `2026.08.18` (rev 3)
 > Last Updated: `2026-08-18`
 > Owner: `cberg-agent / cluster-ops`
 
@@ -48,7 +48,9 @@ point-in-time Ready check and is only reliably detectable via `lastPushCommit`.
 | Source of truth (sync source) | `kubernetes/apps/flux-system/flux-operator/instance/helm-values.yaml` |
 | Credential secret | `kubernetes/apps/flux-system/flux-operator/instance/git-auth-secret.sops.yaml` → Secret `flux-system/flux-system-git-auth` |
 | Critical dependency | `image-automation-controller` + a write-capable git credential |
-| Health assertion | `runbooks/health-check.sh` §20 "Flux image automation" |
+| Health assertion | `runbooks/health-check.sh` §20 "Flux image automation" + "Flux sync-source credential" |
+| Admission guardrail | `kubernetes/apps/flux-system/flux-guardrails/app/imageupdateautomation-sourceref-policy.yaml` |
+| Credential class | classic PAT, non-expiring, account-wide scope — `security_ref: F-13845dda` |
 
 **The tell:** `status.lastAutomationRunTime` advances every interval while
 `status.lastPushCommit` stays `null`. An automation that has pushed even once will
@@ -62,6 +64,33 @@ null forever while being perfectly healthy. Both shapes exist in this cluster:
 |---|---|---|---|
 | `my-software-development/absenty-image-updates` | null (before fix) | **no** | broken — update stuck |
 | `my-software-production/absenty-image-updates` | null | yes | healthy — nothing to push, push path merely *unproven* |
+
+### The two detection signals this SOP exists to teach
+
+Both are *classes*, not one-off facts. Neither is visible in any `flux get` table.
+
+**Signal 1 — `lastPushCommit == null`. `Ready=True` is worthless for these objects.**
+`ImageUpdateAutomation` reports `Ready=True / "repository up-to-date"` on every reconcile
+where the tag has not moved since its last failed attempt, and only flips to `Ready=False`
+on the subset of reconciles that actually had to write. Both states were observed on the
+same two objects 22 minutes apart with no intervening change (§5 Example B). A
+point-in-time readiness check therefore *misses this most of the time*. `lastPushCommit` is
+the durable evidence. Generalise it: for any controller whose job is a side effect rather
+than a state, assert on the **evidence of the side effect**, never on `Ready`.
+
+**Signal 2 — the silently-pruned field.** A field you set in git that the apiserver drops
+because it is not in the CRD's structural schema. There is **no error, no event, no warning**;
+Helm reports success, the CR reports `Ready=True`, and `kubeconform` cannot see it because
+the offending text is Helm *values*, not a manifest. The only reliable detection is to read
+the **live object back** and diff it against what you sent — never trust the manifest. See
+§8 Diagnose Example 2 for the four-way comparison (git → rendered ConfigMap → live spec →
+CRD schema property list) that localises it in one shot. Anything present in the first two
+and absent from the third was pruned.
+
+> Applied to this change: every setting in this SOP is verified by reading the live object
+> back (§6 Tests 1, 4, 5), and Test 4 additionally proves the guardrail *denies*, because
+> "applied" and "effective" are different claims — a `ValidatingAdmissionPolicy` with no
+> binding is 100% inert and equally silent.
 
 So the discriminator is `lastPushCommit == null` **AND** the ImagePolicy's resolved tag
 is not deployed in that namespace. Alerting on the null alone would produce a finding
@@ -131,6 +160,96 @@ credential at all. `kubeconform` cannot catch this either: the offending text is
 
 **Rule:** for `FluxInstance.spec.sync` the key is `pullSecret: <secret-name>`. Only a
 `GitRepository` resource itself uses `secretRef: {name: ...}`.
+
+### The confused-deputy consequence of fixing it (2026-08-18, same day)
+
+Restoring the credential turned `image-automation-controller` into a **deputy**. It runs
+with `--watch-all-namespaces=true` and *without* `--no-cross-namespace-refs`, so an
+`ImageUpdateAutomation` in **any** namespace may name `flux-system/flux-system` as its
+`sourceRef` — and the referring namespace never needs permission to *read* the credential
+in order to make the controller *push* with it. That was inert while the source carried no
+credential. It is not inert now.
+
+**Do not reach for `--no-cross-namespace-refs` / `cluster.multitenant: true`.** Measured on
+this cluster 2026-08-18:
+
+| Kind | Total | Cross-namespace `sourceRef` → `flux-system` |
+|---|---:|---:|
+| `Kustomization` | 135 | **130** |
+| `HelmRelease` | 125 | **123** (chart `sourceRef` → `flux-system/<vendor>`) |
+| `ImageUpdateAutomation` | 2 | **2** |
+
+Cross-namespace refs are the load-bearing shape of this single-tenant monorepo. The
+lockdown flag would break essentially the whole cluster, and it would break the very
+automations the push-auth fix restored.
+
+**Do not "fix" it with per-namespace GitRepository + `secretRef` either.** That is the
+textbook multi-tenant answer and it is *strictly worse here*: it copies a repo-write PAT
+into `my-software-development` / `my-software-production`, namespaces where application
+workloads actually run. Today the credential exists **only** in `flux-system`, where no app
+workload runs. Cross-namespace referencing is precisely the mechanism that keeps the
+credential out of the app namespace — the referrer never reads the secret, the controller
+does. Moving the credential closer to the workload trades a *confused-deputy* risk for a
+*direct credential-theft* risk, which is a downgrade.
+
+**Bound the severity honestly before you size the fix.** `spec.update.strategy` is an enum
+with exactly one legal value, `Setters` (verified against the live CRD). The deputy can
+therefore only rewrite values already marked `$imagepolicy` in the repo — cluster-wide that
+is **3 sites, all absenty image tags**. An `ImageUpdateAutomation` *cannot* push arbitrary
+manifests. The realistic escalation is "steer the absenty image tag to an attacker-chosen
+image", not "cluster admin". Real, bounded, worth closing — but do not let a review's
+framing of "push to main" drive you into the cluster-breaking fix.
+
+**Reachability, measured:** no principal today can create an `ImageUpdateAutomation` without
+already being cluster-admin. There are **zero** `admin`/`edit` RoleBindings in the cluster,
+and app-namespace default ServiceAccounts get `no` from `kubectl auth can-i`. This is
+therefore *latent* hardening, not a live exploit — but the built-in `edit` ClusterRole
+already carries `image.toolkit.fluxcd.io/*: create`, so the day anyone grants a developer
+`edit` on `my-software-development`, the hole opens with no further change.
+
+### The guardrail actually applied
+
+A native `ValidatingAdmissionPolicy` (GA since k8s 1.30; this cluster runs 1.36 — no new
+controller, no webhook, no new dependency) pins **which namespaces** may make that
+cross-namespace reference:
+
+```yaml
+# kubernetes/apps/flux-system/flux-guardrails/app/imageupdateautomation-sourceref-policy.yaml (abridged)
+kind: ValidatingAdmissionPolicy
+spec:
+  failurePolicy: Fail            # fail CLOSED; this kind is created ~never
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["image.toolkit.fluxcd.io"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["imageupdateautomations"]   # the only Flux kind that WRITES
+  validations:
+    - expression: >-
+        variables.ref_namespace == '' ||
+        variables.ref_namespace == request.namespace ||
+        request.namespace in variables.allowed_namespaces
+```
+
+Deliberately scoped to `imageupdateautomations` only: the 253 read-only cross-namespace
+refs are untouched, so a mistake in this policy **cannot** break Kustomization or HelmRelease
+source resolution. Adding a namespace to `allowed_namespaces` is a reviewable git change and
+should be read as "granting git-push capability to this namespace".
+
+Residual after the guardrail: the (Setters-bounded) capability is still reachable from the
+2 allowlisted namespaces. It is no longer reachable from the other ~40.
+
+### Availability coupling — the cost of the push-auth fix
+
+Before `505fefa4` the GitRepository had no credential and cloned this **public** repo
+anonymously. Credential problems could only ever stop *push*. Now that `sync.pullSecret` is
+set, source-controller authenticates and **does not fall back to anonymous**. A revoked or
+expired token therefore stalls the artifact that all ~135 Kustomizations read from: the
+**entire GitOps loop** stops taking new commits, not just image automation.
+
+The live token happens to be **non-expiring**, so the expiry half of this coupling is latent
+*today* — but it goes live the moment the token is rotated to a fine-grained PAT, which is
+exactly what the scope remediation in §10 requires. **Rotation and the expiry assertion ship
+together, or not at all.**
 
 ---
 
@@ -299,6 +418,55 @@ Expected:
 - A match in §20 (GitOps Status). The sweep raises a MAJOR issue whenever an active
   automation has run in the last 24h with `lastPushCommit` null.
 
+### Test 4: the cross-namespace guardrail is live and discriminating
+
+A policy that denies nothing and a policy that denies everything both look "applied".
+Prove **both** directions with server dry-runs (non-mutating, nothing persists):
+
+```bash
+mise exec -- bash -c '
+  kubectl get validatingadmissionpolicy,validatingadmissionpolicybinding \
+    flux-imageupdateautomation-sourceref
+
+  mk() { cat <<YAML
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata: {name: vap-probe, namespace: $1}
+spec:
+  interval: 30m
+  sourceRef: {kind: GitRepository, name: flux-system, namespace: flux-system}
+YAML
+  }
+  echo "--- ALLOWED namespace (must be accepted) ---"
+  mk my-software-production   | kubectl apply --dry-run=server -f -
+  echo "--- NON-allowlisted namespace (must be DENIED) ---"
+  mk default                  | kubectl apply --dry-run=server -f -'
+```
+
+Expected:
+- allowlisted namespace → `imageupdateautomation.../vap-probe created (server dry run)`
+- any other namespace → `admission webhook denied` / `ValidatingAdmissionPolicy ...
+  denied request`, quoting the confused-deputy message.
+
+If failed:
+- Both accepted → the binding is missing or its `validationActions` is `Audit`/`Warn`
+  rather than `Deny`. A `ValidatingAdmissionPolicy` with no `ValidatingAdmissionPolicyBinding`
+  is completely inert and reports no error — the same "looks applied, does nothing" class as
+  the pruning trap in §3.
+- Both denied → the CEL is wrong; `failurePolicy: Fail` converts an evaluation error into a
+  blanket deny. Check `.status.typeChecking` on the policy object.
+
+### Test 5: the sync-source credential assertion runs
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && grep -n "Flux sync-source credential" runbooks/health-check.sh
+```
+
+Expected:
+- A match in §20. It asserts three things: the `secretRef` has not silently vanished again
+  (the §3 pruning trap, recurring), the source is not currently failing auth, and the token
+  is not expired/expiring (45d minor, 14d major, expired critical).
+
 ---
 
 ## 7) Troubleshooting
@@ -398,7 +566,9 @@ If unclear:
 
 ## 9) Health Check
 
-Automated in `runbooks/health-check.sh` §20 (added 2026-08-18). Manual equivalent:
+Automated in `runbooks/health-check.sh` §20 (added 2026-08-18). Two assertions now live
+there: "Flux image automation" (below) and "Flux sync-source credential" (the availability
+coupling — see §3). Manual equivalent for the first:
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- kubectl get imageupdateautomation -A -o json \
@@ -436,11 +606,19 @@ mise exec -- kubectl get secret sops-age -n flux-system >/dev/null && echo "age 
 
 Expected:
 - `ENCRYPTED OK`, `no plaintext credential`, `age key present`.
-- The credential is **repo-scoped and write-limited**: a fine-grained PAT with
+- The credential **should be repo-scoped and write-limited**: a fine-grained PAT with
   `Contents: Read and write` on this repository only, or a per-repo deploy key. A
-  classic PAT with org-wide `repo` scope is over-privileged for this job — a
+  classic PAT with account-wide `repo` scope is over-privileged for this job — a
   compromised image-automation controller would inherit write access to every
   repository the token can reach.
+- **Measured 2026-08-18: it is not.** The live token was probed (headers only, value never
+  logged) and is the over-privileged class this SOP warned about, now actively mounted and
+  used rather than inert. Scope detail, blast radius, and the rotation steps are on
+  `security_ref: F-13845dda` — deliberately not reproduced in this public repo, per
+  `docs/sops/vulnerability-disclosure.md`. Rotation is operator-owned (GitHub UI).
+- **Cross-namespace push capability is pinned at admission.** See §3 "The guardrail actually
+  applied". Any namespace added to that allowlist is being handed git-push capability;
+  review it on those terms, not as a routine manifest edit.
 - Granting write access to the cluster's git remote widens the blast radius of any
   in-cluster compromise. Prefer a **deploy key** (single repository by construction)
   over a PAT (account-scoped) where GitHub allows it.
@@ -457,12 +635,16 @@ Expected:
   and a secret with `identity` / `identity.pub` / `known_hosts` keys instead of
   `username` / `password`. Following 3a with a deploy key but an https URL produces a
   non-working config with no useful error. Choose one path and change both halves.
-- **Expiry is a silent re-break, and the §9 health check will NOT catch it.** Fine-grained
-  PATs expire; deploy keys do not. When a PAT expires the automation keeps running,
-  keeps resolving tags, and stops pushing — but `lastPushCommit` stays non-null from the
-  pre-expiry pushes, so the "has it ever pushed" assertion reads healthy. If you choose
-  the PAT, record its expiry date in §2 and set a calendar reminder; the durable fix is
-  to assert push *freshness* against a pending ImagePolicy update, not mere presence.
+- **Expiry is a silent re-break that the "has it ever pushed" assertion cannot catch.**
+  Fine-grained PATs expire; classic PATs may; deploy keys do not. When the credential
+  expires the automation keeps running, keeps resolving tags, and stops pushing — but
+  `lastPushCommit` stays non-null from the pre-expiry pushes, so §9's assertion reads
+  healthy straight through the outage. **And since `505fefa4` the damage is no longer
+  confined to image automation**: the sync source authenticates and does not fall back to
+  anonymous, so expiry stalls every Kustomization in the cluster. This is now covered
+  proactively by the "Flux sync-source credential" assertion (§6 Test 5), which queries
+  GitHub's `github-authentication-token-expiration` header and warns at 45d / 14d before
+  escalating. Record any new expiry date in §2 when rotating.
 - **Rotation procedure** (revocation first — a value that reached a public repo cannot be
   recalled from clones): revoke at GitHub → `mise exec -- sops` the new value in-path →
   commit + push → confirm `lastPushCommit` advances on the next pending update.
@@ -504,6 +686,23 @@ are Helm/operator-owned and will be overwritten on the next reconcile.
 
 ## Version History
 
+- `2026.08.18` (rev 3): Closed the confused-deputy exposure that rev 2's fix created.
+  Established by cluster-wide inventory that cross-namespace source refs are load-bearing
+  (130/135 Kustomizations, 123/125 HelmReleases, 2/2 ImageUpdateAutomations point at
+  `flux-system`), so `--no-cross-namespace-refs` / `cluster.multitenant: true` was rejected
+  as cluster-breaking, and per-namespace `GitRepository` + `secretRef` was rejected as
+  strictly worse (it would move a repo-write PAT into namespaces where app workloads run).
+  Applied a narrowly-scoped native `ValidatingAdmissionPolicy` instead, pinning which
+  namespaces may cross-reference the write-capable source. Bounded the severity honestly:
+  `update.strategy` is a one-value enum (`Setters`), so the deputy can only rewrite the 3
+  existing `$imagepolicy` sites, and no non-cluster-admin principal can create the object
+  today (zero `admin`/`edit` RoleBindings). Recorded the availability coupling — the sync
+  source no longer falls back to anonymous, so credential loss now stalls the whole GitOps
+  loop — and added the "Flux sync-source credential" health assertion (vanished-secretRef,
+  live auth failure, token expiry at 45d/14d/expired). Resolved rev 2's OPEN scope question
+  by probing the live token; it is the over-privileged class, tracked as
+  `security_ref: F-13845dda`. Promoted the two detection signals to their own §2 subsection.
+  Branch protection on `main` remains OPEN.
 - `2026.08.18` (rev 2): Remediation executed in `505fefa4` (field-name fix; no new
   credential was needed). Corrected the §3 blueprint from the retired
   `image.toolkit.fluxcd.io/v1beta2` to `v1` — the live CRD serves v1 only since the

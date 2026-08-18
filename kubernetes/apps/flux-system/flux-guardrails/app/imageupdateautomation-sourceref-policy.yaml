@@ -1,0 +1,101 @@
+---
+# Confused-deputy guardrail for Flux image automation.
+#
+# WHY THIS EXISTS
+# ---------------
+# `image-automation-controller` runs with `--watch-all-namespaces=true` and
+# WITHOUT `--no-cross-namespace-refs`, so an ImageUpdateAutomation in ANY
+# namespace may name `flux-system/flux-system` as its sourceRef. Since 505fefa4
+# that GitRepository finally carries a WRITE-capable git credential
+# (`sync.pullSecret: flux-system-git-auth`), which turns the controller into a
+# deputy: the referring namespace never needs permission to READ the credential
+# in order to make the controller PUSH with it.
+#
+# WHY NOT `--no-cross-namespace-refs` / `cluster.multitenant: true`
+# -----------------------------------------------------------------
+# This is a single-tenant monorepo cluster and cross-namespace source refs are
+# load-bearing everywhere: 130/135 Kustomizations point at
+# `flux-system/flux-system`, and 123/125 HelmReleases point at a
+# `flux-system/<vendor>` HelmRepository. The lockdown flag would break the
+# cluster wholesale, and it would break the two absenty automations this
+# guardrail is meant to keep working.
+#
+# WHY NOT PER-NAMESPACE GitRepository + secretRef
+# -----------------------------------------------
+# That is the textbook multi-tenant shape and it is STRICTLY WORSE here: it
+# would copy a repo-write PAT into `my-software-*`, namespaces where actual
+# application workloads run. Today the credential exists only in `flux-system`,
+# where no app workload runs. Cross-namespace referencing is precisely the
+# mechanism that keeps the credential OUT of the app namespace -- the referrer
+# never reads the secret, the controller does. See
+# docs/sops/flux-image-automation-push-auth.md sections 3 and 10.
+#
+# WHAT THIS DOES INSTEAD
+# ----------------------
+# Pin, at the apiserver, WHICH namespaces may make that cross-namespace
+# reference. Native ValidatingAdmissionPolicy (GA since k8s 1.30; cluster runs
+# 1.36) -- no new controller, no webhook, no new dependency. Scoped narrowly to
+# `imageupdateautomations`, the only Flux kind that WRITES; the 253 read-only
+# cross-namespace refs are deliberately untouched, so this policy cannot break
+# them even if it is wrong.
+#
+# RESIDUAL RISK (documented, not eliminated)
+# ------------------------------------------
+# `spec.update.strategy` has exactly one legal value, `Setters`, so this deputy
+# can only rewrite values already marked `$imagepolicy` in the repo -- 3 sites,
+# all absenty image tags. It CANNOT push arbitrary manifests. The realistic
+# escalation is therefore "steer the absenty image tag", not "cluster admin".
+# After this policy that capability remains reachable from the 2 allowlisted
+# namespaces; it is no longer reachable from the other ~40.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: flux-imageupdateautomation-sourceref
+spec:
+  # Fail closed: this kind is created roughly never, so a policy evaluation
+  # error must not become an open door.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["image.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["imageupdateautomations"]
+  variables:
+    # `spec.sourceRef` is required by the CRD (required: [kind, name]) but
+    # `.namespace` is optional; absent/empty means "my own namespace".
+    - name: ref_namespace
+      expression: >-
+        has(object.spec) && has(object.spec.sourceRef) && has(object.spec.sourceRef.namespace)
+        ? object.spec.sourceRef.namespace : ''
+    - name: ref_name
+      expression: >-
+        has(object.spec) && has(object.spec.sourceRef) && has(object.spec.sourceRef.name)
+        ? object.spec.sourceRef.name : '<none>'
+    # The only namespaces permitted to drive the write-capable shared source.
+    # Adding a namespace here is a deliberate, reviewable grant of git-push
+    # capability -- treat it as such.
+    - name: allowed_namespaces
+      expression: "['my-software-development', 'my-software-production']"
+  validations:
+    - expression: >-
+        variables.ref_namespace == '' ||
+        variables.ref_namespace == request.namespace ||
+        request.namespace in variables.allowed_namespaces
+      reason: Forbidden
+      messageExpression: >-
+        'ImageUpdateAutomation in namespace ' + request.namespace +
+        ' references source ' + variables.ref_namespace + '/' + variables.ref_name +
+        ' across namespaces. That source carries the cluster git-write credential, so a' +
+        ' cross-namespace reference lets this namespace push to the GitOps branch without' +
+        ' ever holding the credential (confused deputy). Namespaces allowed to do this:' +
+        ' my-software-development, my-software-production. To add one, amend the' +
+        ' flux-imageupdateautomation-sourceref ValidatingAdmissionPolicy in git.'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: flux-imageupdateautomation-sourceref
+spec:
+  policyName: flux-imageupdateautomation-sourceref
+  validationActions: ["Deny"]

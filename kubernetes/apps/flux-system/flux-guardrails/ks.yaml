@@ -1,0 +1,23 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app flux-guardrails
+  namespace: flux-system
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  interval: 30m
+  path: ./kubernetes/apps/flux-system/flux-guardrails/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  # No targetNamespace: ValidatingAdmissionPolicy and its Binding are
+  # CLUSTER-SCOPED. Setting one here would be at best a no-op and at worst the
+  # same class of silent misconfiguration that caused the 505fefa4 incident.
+  timeout: 5m
+  wait: true
