@@ -74,11 +74,13 @@ conflicts_with:                     # never share a window with:
   # Talos node-reboot roll (drain + ~50 Longhorn replica rebuilds per node). Re-point at the
   # next talos-* plan_id when one exists.
 security_ref: null
-status: draft                       # audit COMPLETE 2026-08-18 (all 80 wrappers value-audited,
-                                    # all 78 live renders validated against the pulled 5.1.0
-                                    # chart) — ready for the vetting pass. Supersedes
-                                    # app-template-5.0.md (deleted in the same commit).
-window: null                        # window agent assigns. Needs 8 windows: 4× weekend 90m
+status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, operator-approved
+                                    # standing GO). Progress: Step 0 DONE (cb242c1a); tier 0
+                                    # canary DONE (f01aadeb, echo-server 5.1.0 verified); tier 1
+                                    # IN PROGRESS (c5365e63 + PVC-naming defect fix — see §1a).
+                                    # Supersedes app-template-5.0.md (deleted in same commit).
+window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
+                                    # continue same run or fall back to the 8-window schedule:
                                     # (tiers 0+1, 3, 4, 6) + 3× weekday 60m (tiers 2, 5, 7).
                                     # Step 0 (repo repoint) can ride ANY earlier window — it is
                                     # provably inert (3.7.3 exists in the new registry too).
@@ -139,7 +141,13 @@ the pulled 5.1.0 chart.
    **deleted so Helm recreates it** (SOP `application-update.md` §7). The one
    cronjob-type controller (`pallet-price-monitor`) is exempt (Jobs are created
    fresh).
-2. Resource naming standardized — **empirically a non-event here**: rendered
+2. Resource naming standardized — ⚠️ **NOT a non-event: see §1a (found live,
+   tier 1, 2026-08-18).** The audit's render-diff checked Services/workloads
+   but missed chart-GENERATED PVCs: 5.x appends the `-<identifier>` suffix to
+   a generated resource name only when the release has **more than one** item
+   of that kind (`itemCount > 1` in `_determineResourceNameFromValues.tpl`),
+   so single-PVC releases get their PVC RENAMED `{app}-{key}` → `{app}`.
+   For Services the old plan text stands — rendered
    3.7.3-vs-5.1.0 diffs for mosquitto (3 services incl. `mosquitto-metrics`),
    echo-server, traccar (`traccar-main`/`traccar-osmand`), home-assistant,
    scrypted, music-assistant-server, iobroker, penpot-db show **identical
@@ -210,7 +218,7 @@ bump + standard Step D delete.
 | mcpo (ai) | `serviceAccount {create:false,name:mcpo}` (SA is kustomize-owned); initContainer | **MIGRATE** — disable default SA (name collision!) + bind by name + automount (§3 Step C2) |
 | openclaw (ai) | initContainer, 6 PVCs, caps drop | ok — no SA/RBAC (verified); verify persona PVCs mount |
 | hermes-agent (ai) | multi-container (gateway+dashboard), initContainer, 2 ingresses | ok — no SA/RBAC |
-| paperclip (ai) | 2 initContainers, multi-container; separate kustomize SA `paperclip-backup-cleanup` | ok — no name collision with new default SA `paperclip` |
+| paperclip (ai) | 2 initContainers, multi-container; separate kustomize SA `paperclip-backup-cleanup`; **generated PVC `paperclip-data` (dynamic, reclaim=Delete)** | **MIGRATE** — `persistence.data.suffix: data` same commit (§1a); no SA collision |
 | next-ai-draw-io (ai) | plain | ok |
 | icloud-docker-mu / -andrea (backup) | Recreate; CIFS persistence | ok — no PVC touched; storage-safety N/A (no deletes) |
 | memgraph (databases) | **multi-controller** (memgraph+lab), 2 services, initContainers, Recreate | CARE — two Deployments to delete in Step D |
@@ -225,7 +233,8 @@ bump + standard Step D delete.
 | matter-server (h-a) | hostNetwork | ok |
 | mosquitto (h-a) | 3 services (`-main` LB+lbipam / `-internal` / `-metrics`), exporter sidecar, initContainer | CARE — FIRST in its tier; render-verified all 3 svc names + `app.kubernetes.io/service` label stable → external ServiceMonitor keeps scraping |
 | music-assistant-server (h-a) | multi-container (app+alexa-skill), hostNetwork, LB+lbipam | CARE — verify Alexa stream URL after (AR-049 context) |
-| node-red, zigbee2mqtt, trmnl-ha, mqttx-web (h-a) | ingress/PVC only | ok — z2m after mosquitto |
+| node-red, zigbee2mqtt, mqttx-web (h-a) | ingress/PVC only | ok — z2m after mosquitto |
+| trmnl-ha (h-a) | **generated PVC `trmnl-ha-data` (dynamic, reclaim=Delete)** | **MIGRATE** — `persistence.data.suffix: data` same commit (§1a) |
 | ha-ai-harness (h-a) | **multi-controller** (server+frontend), 2 services | CARE — two Deployments in Step D |
 | pallet-price-monitor (h-a) | **cronjob-type controller** | ok — **no selector issue, no Step D**; plain bump |
 | scrypted (h-a) | **privileged** + SYS_ADMIN, LB+lbipam | ok — PSA override already namespace-level |
@@ -236,14 +245,14 @@ bump + standard Step D delete.
 | immich-postgres (media) | Recreate, PVC (Deployment, NOT app-template-STS) | ok (stateful tier) |
 | immich-redis, immich-machine-learning (media) | ML: **privileged** + SYS_ADMIN (iGPU) | ok |
 | makemkv (media) | **privileged** + SYS_ADMIN | ok |
-| absenty (msd + msp) | Recreate; **live ImageUpdateAutomation writes its helmrelease.yaml every ~20-30 min** | CARE — suspend both automations for tier 2, restore same window (§3 Step B') |
+| absenty (msd + msp) | Recreate; **live ImageUpdateAutomation writes its helmrelease.yaml every ~20-30 min**; multi generated PVCs | CARE — suspend both automations for tier 2, restore same window (§3 Step B'); add explicit `suffix` per PVC (§1a) |
 | andreamosteller (msd+msp), opencode-andreamosteller (msd) | multi-container/multi-svc (opencode) | ok |
 | gas-price-monitor, rainbow-rescue (msp) | caps add (NET_BIND_SERVICE etc.) | ok |
-| showcase ×15 (my-software-showcase) | uniform: Recreate + ingress(homepage) + uploads/tmp/log PVCs; uzeit-de/globalmobility are TYPO3+external MariaDB | ok — uniform low-risk tier 1; uzeit-de has 15m HR timeout (152cb651) — expect slower reconcile |
+| showcase ×15 (my-software-showcase) | uniform: Recreate + ingress(homepage); 10 wrappers carry chart-generated longhorn-static PVCs; uzeit-de/globalmobility are TYPO3+external MariaDB | **hit §1a live** — `suffix` fix landed with tier 1; uzeit-de has 15m HR timeout (152cb651) |
 | cloudflared (network) | **serviceMonitor**; RollingUpdate; the external tunnel itself | CARE — LAST, alone (tier 7); `job=` flip |
 | affine(+pg,+redis) (office) | initContainers, dependsOn ×2, Recreate | CARE — pg+redis → affine |
 | sure-pg, sure-redis (office) | Recreate (the `sure` app itself is NOT app-template) | ok — verify Sure reconnects |
-| penpot-db (office) | **statefulset**, external PVC, no VCTs (render-verified) | CARE — STS delete safe |
+| penpot-db (office) | **statefulset**, no VCTs; **generated PVC `penpot-db-data` (dynamic, reclaim=Delete — NOT external as previously stated)** | **MIGRATE** — `persistence.data.suffix: data` same commit (§1a); STS delete safe |
 | penpot-cache (office) | completely plain | ok |
 | actual-budget, arag-web, omni-tools, paperless-ai, paperless-gpt, vaultwarden, nextcloud-mcp (office) | ingress/PVC/caps only | ok |
 | otbr (h-a, **repo-only**) | privileged, hostNetwork; ks.yaml disabled (RMA) | file-bump only, no cluster step |
@@ -254,6 +263,55 @@ Fleet-wide re-greps (2026-08-18): `rawResources`, `networkpolicies`,
 the other 4.x/5.x surface applies. All single-replica-RWO wrappers already run
 `strategy: Recreate` (longhorn-rwo-multi-attach rule holds through the
 migration; the chart bump does not touch `strategy` values).
+
+### §1a — PVC-rename defect (found live in tier 1, 2026-08-18) + adopted fix
+
+**Defect:** 5.x renames chart-generated PVCs on single-PVC releases
+(`{app}-{key}` → `{app}`, itemCount naming rule — see breaking-changes 4.0.0
+#2). On upgrade Helm prunes the old-named PVC; the new-named PVC can't bind
+the old PV (stale `claimRef` uid). In tier 1 this broke haarfabrik, ibgastro,
+max-jung, stepbystepguide (all `Retain` → data safe, pods Pending ~outage
+until fixed). **On dynamic `longhorn` PVCs with `reclaim: Delete` the same
+prune DESTROYS the volume** — this would have hit paperclip (tier 3),
+trmnl-ha (tier 4), penpot-db (tier 6).
+
+**Adopted mechanism (Option A, render-verified):** every chart-generated PVC
+gets an explicit `suffix: <identifier>` in its persistence values, **in the
+same commit as that wrapper's version bump** (5.x-only key — do NOT add it
+while a wrapper is still on 3.7.3). The suffix has a `hasSuffix` guard, so
+it is idempotent for multi-PVC releases (names already carry the identifier)
+and pins `{app}-{key}` permanently regardless of future itemCount changes.
+
+**Fleet checklist (chart-generated PVCs only; `existingClaim` wrappers are
+immune):**
+- tier 1 showcase ×10 files (12 PVCs): landed with the tier-1 fix commit.
+- tier 2: `absenty` msd (data/storage/bundle) + msp (data/storage) — names
+  currently safe via itemCount>1, add explicit suffix anyway.
+- tier 3: `paperclip` (data — **reclaim=Delete, mandatory**).
+- tier 4: `trmnl-ha` (data — **reclaim=Delete, mandatory**).
+- tier 6: `penpot-db` (data — **reclaim=Delete, mandatory**; plan previously
+  said "PVC external" — wrong, it is chart-generated dynamic longhorn).
+- file-bumps: `otbr` (data), `_template` (home) — add suffix in the bump.
+
+**RACE lesson (tier 1, 2026-08-18):** a values-fix push does NOT immediately
+change the in-cluster HR spec — an HR mid-retry-loop can still render the
+PRE-fix spec and SSA-swap PVC names back and forth (ordiga/u-zeit/
+zuhause-betreut had PVCs deleted+recreated by exactly this; Retain PVs
+caught them, rebound verified, no data loss). **Rule for every later tier:
+before ANY 5.1.0 retry/force-reconcile of a wrapper with generated PVCs,
+confirm the in-cluster HelmRelease spec already carries the suffix values**
+(`kubectl get hr -n <ns> <hr> -o jsonpath='{.spec.values.persistence}'`
+shows the suffix keys, or compare `flux get ks` revision to the fix commit).
+If a retry loop is live during the push, `flux suspend hr <hr>` across the
+push and resume after the Kustomization is on the fix revision. This is
+doubly mandatory for the reclaim=Delete wrappers (paperclip, trmnl-ha,
+penpot-db) — there a race prune has no Retain net.
+
+**Recovery for an already-orphaned Retain PV** (old PVC pruned, PV
+Released): re-point/clear the stale claimRef —
+`kubectl patch pv <pv> --type json -p '[{"op":"remove","path":"/spec/claimRef/uid"},{"op":"remove","path":"/spec/claimRef/resourceVersion"}]'`
+— the old-named PVC (recreated by remediation or by the fixed render) then
+binds. **Never delete a PV or PVC** (storage-safety SOP).
 
 ## 2) Pre-checks
 
