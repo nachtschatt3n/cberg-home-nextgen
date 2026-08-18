@@ -29,10 +29,20 @@
 #         .spec.template is immutable), so the rename is the delivery
 #         mechanism — see docs/sops/immutable-job-image-bumps.md. Same image
 #         already validated in-cluster on the shared postgresql Deployment.
+#   v4  — partial UNIQUE index uq_findings_open_finding_id on
+#         sweep_findings(finding_id) WHERE resolved_at IS NULL. finding_id is
+#         derived from the fingerprint so it can never be globally unique (a
+#         resolved finding that recurs re-derives its old id), but two OPEN
+#         rows sharing one is always a bug and silently mis-resolves every
+#         by-id lookup. Needs table ownership, which the sweep_writer role
+#         used by runbooks/refingerprint-findings.py does not have — hence
+#         delivery here rather than in that migration. Index creation is
+#         IF NOT EXISTS; run refingerprint-findings.py FIRST if any duplicate
+#         open ids exist, or this Job fails on the index build.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v3b
+  name: sweep-history-init-v4
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

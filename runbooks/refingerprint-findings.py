@@ -34,7 +34,10 @@ WHAT IT DOES
    age of the finding survives), widens its first_seen/last_seen to cover the
    whole group, and resolves the rest as migration duplicates.
 3. Writes the new fingerprint + derived finding_id.
-4. Creates a partial UNIQUE index on `finding_id WHERE resolved_at IS NULL`.
+4. Ensures the partial UNIQUE index on `finding_id WHERE resolved_at IS NULL`
+   — opportunistically, since creating it needs table ownership that the
+   sweep_writer role lacks. Its real home is the sweep-history init Job
+   (schema-configmap.yaml); this is belt-and-braces for an owner-DSN run.
 
 On (4): `finding_id` was never unique — the live table holds two F-094be167
 rows, one resolved and one open, because a recycled fingerprint re-derives the
@@ -211,10 +214,27 @@ def main() -> int:
                             WHERE id = %s""",
                         (u["_new_fp"], new_id, u["_first_seen"], u["_last_seen"],
                          _json.dumps(priors), u["id"]))
-                cur.execute(INDEX_SQL)
+            # The index is owned by the init Job (schema-configmap.yaml), which
+            # runs as the table owner. Attempt it opportunistically: if this
+            # migration is ever run with an owner DSN it lands immediately,
+            # otherwise the Job delivers it. Failing the whole re-fingerprint
+            # over a missing grant would be the wrong trade — the identity fix
+            # is the urgent half.
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SAVEPOINT idx")
+                    cur.execute(INDEX_SQL)
+                    cur.execute("RELEASE SAVEPOINT idx")
+                index_note = "created/verified"
+            except Exception as e:  # noqa: BLE001
+                with conn.cursor() as cur:
+                    cur.execute("ROLLBACK TO SAVEPOINT idx")
+                index_note = (f"NOT created ({type(e).__name__}) — delivered by the "
+                              f"sweep-history init Job instead; verify after it runs")
             conn.commit()
             print(f"\nAPPLIED: {len(changed)} identity change(s), "
-                  f"{len(supersedes)} superseded, unique index ensured.")
+                  f"{len(supersedes)} superseded.")
+            print(f"unique index: {index_note}")
 
             with conn.cursor() as cur:
                 cur.execute("""SELECT finding_id, count(*) n FROM sweep_findings
