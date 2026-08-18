@@ -3,8 +3,8 @@
 > Description: How to clear CVEs on container images we build ourselves, where there is
 > no upstream version to bump to and remediation is a **rebuild in the source repo**
 > followed by a GitOps tag bump — not a version bump.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `homelab-operator`
 
 ---
@@ -96,12 +96,28 @@ These are the mistakes this SOP exists to prevent. Read them before starting.
    exists as a git tag but its build failed in the test job, so no image was pushed.
    Always confirm the tag resolves in GHCR before bumping the HelmRelease — a bump to
    a non-existent tag is an `ImagePullBackOff`, not a CVE fix.
-5. **A rebuild cannot fix a toolchain-pinned transitive binary.** A Go-stdlib
-   critical compiled into the esbuild binary cannot be cleared under vite 6, which
-   pins `esbuild ^0.25.0` (tracked as F-9f752afd). When a survivor needs a framework
-   major, **stop** — split it into its own maintenance-window plan rather than
-   stretching the rebuild's risk envelope
-   (`runbooks/maintenance/plans/harness-frontend-vite7.md` is the worked example).
+5. **Before escalating a survivor to a framework major, establish who actually
+   pins it.** A rebuild cannot fix a toolchain-pinned transitive binary — but a
+   binary vendored into a build tool is only *framework*-pinned if the framework's
+   own dependency range is what blocks the fix. Check in order:
+   (a) is it a **direct** dependency? (`npm ls <pkg>` — if so, bump it and let npm
+   dedupe the nested copies); (b) is the framework **on the build path at all**, or
+   only a test-runner dep?; (c) what version are we *actually* on? Only when the
+   constraint genuinely originates in the framework's range does this become a
+   framework major — then **stop** and split it into its own maintenance-window
+   plan rather than stretching the rebuild's risk envelope.
+   Real framework pin: `runbooks/maintenance/plans/harness-frontend-vite7.md`
+   (F-9f752afd — vite 6 genuinely pins `esbuild ^0.25.0`). Counter-example that
+   looked identical and wasn't: commit `8882e3eb`, where the app was already on
+   vite 7, did not build with vite at all (plain `npx esbuild`; vite was only a
+   vitest dep), and carried esbuild as a direct devDependency — a one-line bump,
+   not a framework major. Skipping this check cost a 45-minute windowed plan for
+   work that needed no vite change.
+
+   **Verify a bundler bump by its artifacts, not its exit code.** A bundler change
+   fails silently as a *different bundle*, not a failed build — diff the emitted
+   artifacts against a pre-bump baseline (in `8882e3eb`: five artifacts within
+   0.1%, `application.css` byte-identical).
 
 6. **The ImagePolicy may be unable to select your rebuild.** Rebuilding is only
    half the job when the image is delivered by Flux image automation: if the

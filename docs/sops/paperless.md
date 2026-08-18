@@ -82,7 +82,7 @@ folder: INBOX
 ## 4) Operational Instructions
 
 **Manifest change (GitOps):** edit under `kubernetes/apps/office/...`, `task
-template:configure -- --strict` + `kubeconform`, commit to **main** (no feature
+kubeconform` + `kubeconform -summary`, commit to **main** (no feature
 branches), push, let Flux reconcile.
 
 **Document / DB / mail operations** run in the paperless shell:
@@ -136,7 +136,7 @@ process_mail_accounts.delay()
 
 ## 6) Verification Tests
 
-1. Manifests: `task template:configure -- --strict` and
+1. Manifests: `task kubeconform` and
    `kubeconform -summary kubernetes/apps/office/paperless-ngx`.
 2. Scanner happy path: run the "paperless" preset on a 2–3 page doc → appears in
    `inbox/`, validator log `moved -> consume` within ~30s, doc created in paperless

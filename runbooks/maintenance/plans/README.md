@@ -73,7 +73,7 @@ pr: 203                           # Renovate PR number (or null if none yet)
 kind: image                       # image | chart | infra
 current: "0.27.1"
 target: "0.27.3"
-update_type: minor                # patch | minor | major
+update_type: minor                # patch | minor | major | security | migration | decommission | install | refactor | pilot | n/a
 risk: medium                      # low | medium | high  (weights 1/2/3)
 est_duration_min: 20
 needs_reboot: false               # true → only a window with allow_reboot:true

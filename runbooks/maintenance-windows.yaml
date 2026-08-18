@@ -8,7 +8,7 @@
 # runs the approved sequence during one of these windows.
 #
 # 7 windows/week — DAILY (2026-08-16). Was 4/week, which stretched the current
-# 23-plan queue to late October. An IDLE window costs nothing: nothing runs
+# plan queue (see `maintenance-plan.py --open` for the live count) to late October. An IDLE window costs nothing: nothing runs
 # unless a plan is slotted, so the extra weekday slots are pure optionality.
 #
 # What daily does NOT buy: chains with a deliberate soak. superset-pg-decommission

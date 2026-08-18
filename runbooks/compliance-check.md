@@ -41,7 +41,7 @@ Run the repository-standard checks first.
 
 ```bash
 # Render templates and strict validation
-task template:configure -- --strict
+task kubeconform   # `task template:configure` was deleted in d12ca558 (2025-10-05)
 
 # Kubernetes schema validation
 kubeconform -summary -fail-on error kubernetes/apps/

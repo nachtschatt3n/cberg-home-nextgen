@@ -62,7 +62,7 @@ For any deployment, upgrade, or non-trivial config change:
 2. **Author manifests**
    - `ks.yaml`, `app/kustomization.yaml`, `app/helmrelease.yaml` (or Deployment), and as needed `secret.sops.yaml`, `pvc.yaml`, ingress, `servicemonitor.yaml`.
    - Always include a PrometheusRule in `kube-prometheus-stack/app/{app}-alerts.yaml`.
-   - Validate locally: `task template:configure -- --strict` and `kubeconform -summary -fail-on error kubernetes/apps/{namespace}/{app}/`.
+   - Validate locally: `task kubeconform` and `kubeconform -summary -fail-on error kubernetes/apps/{namespace}/{app}/`. (`task template:configure` was deleted in d12ca558, 2025-10-05.)
 3. **Encrypt secrets in repo path** per `CLAUDE.md` SOPS workflow. Never `sops -e` a file in `/tmp`.
 4. **Commit and push.** Conventional, scoped messages (`feat(office): ...`, `fix(sure): ...`, `chore(...): ...`). Flux webhook handles reconciliation.
 5. **Verify rollout**

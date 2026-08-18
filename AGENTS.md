@@ -43,7 +43,7 @@ warnings) via `runbooks/maintenance-plan.py`. Non-safe updates are operator
 go/no-go by default — never run fully unattended.
 
 ## Build/Lint/Test Commands
-- Validate cluster manifests: `task template:configure -- --strict`
+- Validate cluster manifests: `task kubeconform` (the old `task template:configure` target was deleted in d12ca558, 2025-10-05)
 - Lint Kubernetes manifests: `kubeconform -summary -exit-on-error -ignore-missing-schemas kubernetes/apps/`
 - Validate Talos configs: `talhelper validate kubernetes/bootstrap/talos/clusterconfig/`
 - Run all tests: `task test` (checks template rendering, config validation)
