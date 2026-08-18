@@ -688,6 +688,49 @@ print(n)
     OOM_LASTSTATE=$((10#$OOM_LASTSTATE))
     echo "OOM kills (pods with OOMKilled lastState): $OOM_LASTSTATE"
 
+    # Third control, added 2026-08-18: OOMKilled lastState RESTRICTED TO THE LAST
+    # 24 HOURS, so it is window-aligned with the 24h Elasticsearch OOM_TEXT query
+    # in Section 34.
+    #
+    # WHY: Section 34's CRITICAL OOM branch corroborates ES log text against a
+    # pod-state control, but the two were measuring different windows.
+    #   OOM_COUNT     - kubectl events, which age out of etcd after ~1h
+    #   OOM_TEXT      - Elasticsearch, 24h
+    #   OOM_LASTSTATE - unbounded, but only for pods that still EXIST
+    # A real OOM 3 hours ago whose pod has since been replaced left the event
+    # expired and no surviving lastState, so a genuine 24h OOM could only ever
+    # reach MINOR. Comparing a 1h control against a 24h query is the same
+    # window-mismatch defect class as the thresholds fixed in 83d97de0.
+    # lastState.terminated.finishedAt is the OOM's own timestamp and survives as
+    # long as the pod object does, so it gives a control on exactly the ES window.
+    OOM_LASTSTATE_24H=$(kubectl get pods -A -o json 2>/dev/null | python3 -c "
+import sys, json
+from datetime import datetime, timedelta, timezone
+cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+n = 0
+try:
+    for p in json.load(sys.stdin).get('items', []):
+        for cs in (p.get('status', {}).get('containerStatuses') or []):
+            t = (cs.get('lastState', {}).get('terminated', {}) or {})
+            if t.get('reason') != 'OOMKilled':
+                continue
+            fin = t.get('finishedAt')
+            if not fin:
+                continue
+            try:
+                when = datetime.fromisoformat(fin.replace('Z', '+00:00'))
+            except Exception:
+                continue
+            if when >= cutoff:
+                n += 1
+except Exception:
+    pass
+print(n)
+" 2>/dev/null || echo "0")
+    OOM_LASTSTATE_24H=$(echo "$OOM_LASTSTATE_24H" | tail -1 | tr -cd '0-9'); [ -z "$OOM_LASTSTATE_24H" ] && OOM_LASTSTATE_24H=0
+    OOM_LASTSTATE_24H=$((10#$OOM_LASTSTATE_24H))
+    echo "OOM kills (OOMKilled lastState finished within 24h): $OOM_LASTSTATE_24H"
+
     EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
     echo "Pod evictions: $EVICTED_COUNT"
 
@@ -4459,6 +4502,9 @@ except: print(0)
         # outages this week. The count is noisy (benign substrings + the Frigate camera,
         # a tracked finding) and is display-only — the per-namespace breakdown is what
         # makes it useful. A clean signal needs the edot severity-parse fix (separate).
+        # As of 2026-08-18 the VERDICT honours that comment: the cluster-wide total no
+        # longer raises an issue on its own; the per-namespace buckets do. See the
+        # rationale block at the verdict itself.
         ERROR_DATA=$(curl -k -u "elastic:$ES_PASSWORD" -X GET "https://localhost:9200/${LOG_DS}/_search" -H 'Content-Type: application/json' -d '{
           "size": 0,
             "track_total_hits": true,
@@ -4477,7 +4523,7 @@ except: print(0)
           },
           "aggs": {
             "by_namespace": {
-              "terms": {"field": "resource.attributes.k8s.namespace.name", "size": 10}
+              "terms": {"field": "resource.attributes.k8s.namespace.name", "size": 25}
             },
             "by_pod": {
               "terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}
@@ -4642,7 +4688,7 @@ except Exception:
         echo "  Fatal-level log lines, benign classes excluded (24h): $FATAL_TEXT_COUNT"
         echo "  DB connection-exhaustion log lines (24h):             $CONN_EXHAUST_COUNT"
         echo "  Out-of-memory log lines (24h):                        $OOM_TEXT_COUNT"
-        echo "  (authoritative OOM controls: events=${OOM_COUNT:-0}, pod lastState=${OOM_LASTSTATE:-0})"
+        echo "  (authoritative OOM controls: lastState within 24h=${OOM_LASTSTATE_24H:-0} [window-aligned], events=${OOM_COUNT:-0} [~1h TTL], pod lastState any age=${OOM_LASTSTATE:-0})"
         echo ""
 
         kill $PF_PID 2>/dev/null || true
@@ -4697,35 +4743,146 @@ except Exception:
         # C) OOM log text. The CRITICAL OOM verdict belongs to OOM_COUNT (events)
         # above; this corroborates it and catches in-process OOM that never
         # produces an OOMKilled pod status (JVM heap, ffmpeg allocation failures).
-        if [ "$OOM_TEXT_INT" -gt 0 ] && { [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; }; then
-            log_critical "OOM confirmed by both controls: $OOM_TEXT_INT log lines, events=${OOM_COUNT:-0} lastState=${OOM_LASTSTATE:-0}"
-            add_critical_issue "OOM: $OOM_TEXT_INT OOM log lines with pod-state confirmation (events=${OOM_COUNT:-0}, lastState=${OOM_LASTSTATE:-0})"
+        # WINDOW ALIGNMENT (2026-08-18). OOM_TEXT_INT is a 24h Elasticsearch count,
+        # so it must be corroborated by a 24h pod-state control. OOM_COUNT reads
+        # kubectl events, which age out of etcd after ~1h; requiring it meant a
+        # genuine OOM older than an hour could only ever reach MINOR here.
+        # OOM_LASTSTATE_24H (lastState.terminated.finishedAt within 24h) is the
+        # window-matched control and is now the primary corroborator; the other two
+        # are kept as additional, narrower evidence.
+        if [ "$OOM_TEXT_INT" -gt 0 ] && { [ "${OOM_LASTSTATE_24H:-0}" -gt 0 ] || [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; }; then
+            log_critical "OOM confirmed by both controls: $OOM_TEXT_INT log lines (24h), lastState24h=${OOM_LASTSTATE_24H:-0} events=${OOM_COUNT:-0} lastState=${OOM_LASTSTATE:-0}"
+            add_critical_issue "OOM: $OOM_TEXT_INT OOM log lines in 24h with window-aligned pod-state confirmation (lastState within 24h=${OOM_LASTSTATE_24H:-0}, events=${OOM_COUNT:-0}, lastState any age=${OOM_LASTSTATE:-0})"
         elif [ "$OOM_TEXT_INT" -ge 100 ]; then
             log_warning "In-process OOM log lines (no OOMKilled events): $OOM_TEXT_INT in 24h"
             add_major_issue "In-process OOM log lines: $OOM_TEXT_INT in 24h"
         elif [ "$OOM_TEXT_INT" -gt 0 ]; then
             log_warning "OOM log lines present (no OOMKilled events): $OOM_TEXT_INT in 24h"
             add_minor_issue "OOM log lines: $OOM_TEXT_INT in 24h"
-        elif [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; then
+        elif [ "${OOM_LASTSTATE_24H:-0}" -gt 0 ] || [ "${OOM_COUNT:-0}" -gt 0 ] || [ "${OOM_LASTSTATE:-0}" -gt 0 ]; then
             # Pod state says OOM, log text does not. Section 1 already raised the
             # CRITICAL; do not print a success line next to a live OOM.
-            log_info "No OOM log text, but the pod-state controls are non-zero (events=${OOM_COUNT:-0}, lastState=${OOM_LASTSTATE:-0}) - see Section 1"
+            log_info "No OOM log text, but a pod-state control is non-zero (lastState24h=${OOM_LASTSTATE_24H:-0}, events=${OOM_COUNT:-0}, lastState=${OOM_LASTSTATE:-0}) - see Section 1"
         else
-            log_success "No out-of-memory log lines in 24h (both pod-state controls also 0)"
+            log_success "No out-of-memory log lines in 24h (all three pod-state controls also 0)"
         fi
 
         fi  # end ES_LOG_ASSERTIONS_FAILED guard
 
-        if [ "$TOTAL_ERRORS_INT" -gt 10000 ]; then
-            log_warning "High error count in logs: $TOTAL_ERRORS_INT (>10,000 threshold)"
-            add_major_issue "High error count in logs: $TOTAL_ERRORS_INT"
-        elif [ "$TOTAL_ERRORS_INT" -gt 5000 ]; then
-            log_warning "Elevated error count in logs: $TOTAL_ERRORS_INT"
-            add_minor_issue "Elevated error count in logs: $TOTAL_ERRORS_INT"
-        elif [ "$TOTAL_ERRORS_INT" -lt 1000 ]; then
-            log_success "Log error count within normal range: $TOTAL_ERRORS_INT"
+        # ------------------------------------------------------------------
+        # Log error-count verdict. REWRITTEN 2026-08-18 (finding F-log-volume).
+        #
+        # THIRD instance of the structurally-unclearable-assertion class, after
+        # the "FATAL/OOM" counter (83d97de0) and icon_fatalerror.gif. Registered
+        # in docs/sops/audit-script-correctness.md.
+        #
+        # What was wrong: `> 10,000 => MAJOR` against a MEASURED 7-day baseline of
+        # 113,571-133,922 hits/day. It could never have gone green — not tonight,
+        # not before the ibgastro storm existed, not on any day in the retained
+        # window. Even with the whole my-software-showcase namespace excluded the
+        # floor is 43,882-44,517/day, still 4.4x the escalation threshold.
+        # Measured over now-7d on 2026-08-18 (per-day, cluster-wide):
+        #     08-12 131,715   08-13 133,922   08-14 132,519   08-15 131,071
+        #     08-16 113,571   08-17 379,367   08-18 4,030,722
+        #   same, excluding my-software-showcase:
+        #     08-16 113,571   08-17  44,517   08-18    43,882
+        # The pre-08-17 113-134k tier was a home-automation storm (151,014 over
+        # 08-14+08-15, ~75k/day) that has since been resolved; steady state is
+        # ~44k/day. The wildcard also over-counts by construction: it matches the
+        # substring "error" anywhere in body.text, so `handleError`,
+        # `icon_fatalerror.gif` and `fatal_neterrors=0` all score.
+        #
+        # Worse, the assertion contradicted its own code comment above, which says
+        # the count is "display-only ... the per-namespace breakdown is what makes
+        # it useful" — and then called add_major_issue on the total anyway.
+        #
+        # What it is now: PER-NAMESPACE-RELATIVE, so one chatty app can no longer
+        # own the whole cluster's verdict. That is the right shape rather than just
+        # a higher floor, because the total is a sum over independent producers —
+        # raising the floor to clear ibgastro would have hidden a genuine 10x
+        # regression in any quieter namespace behind the noise of the loud one.
+        # The cluster-wide total keeps only a BROAD-runaway backstop, and only when
+        # no single namespace already accounts for it.
+        #
+        # Floors, calibrated against the measured window above:
+        #   worst namespace today ...... kube-system 12,530/24h
+        #   worst namespace measured ... home-automation ~75,000/24h (real, fixed)
+        #   the storm .................. my-software-showcase 4,320,202/24h
+        #   40,000  MINOR      3.2x today's worst namespace
+        #   40,000 + >=40% share  MAJOR concentration (catches the ~75k/57% episode)
+        #  100,000  MAJOR
+        #  500,000  CRITICAL   6.6x the worst legitimate namespace-day on record
+        # Every namespace is below 40,000 in the current window, so this CAN and
+        # does read green once the storm is fixed — the property the old one lacked.
+        # ------------------------------------------------------------------
+
+        # A failed ERROR_DATA query must not read as a clean zero (same trap the
+        # es_count ERR guard closes above): the curl fallback is a synthetic
+        # zero-hit document, so detect the missing aggregation rather than
+        # scoring green on a transport failure.
+        HAS_NS_AGG=$(echo "$ERROR_DATA" | python3 -c "
+import sys, json
+try:
+    print(1 if 'by_namespace' in json.load(sys.stdin).get('aggregations', {}) else 0)
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+
+        if [ "$HAS_NS_AGG" != "1" ]; then
+            log_warning "Elasticsearch error-count query failed - the log-volume assertion did NOT run"
+            add_major_issue "Elasticsearch log-volume assertion did not run (query failure) - per-namespace error-volume coverage is blind for this cycle"
         else
-            log_info "Log error count: $TOTAL_ERRORS_INT (monitor for trends)"
+            echo "Cluster-wide error-substring matches (24h, display-only): $TOTAL_ERRORS_INT"
+
+            NS_ERROR_ROWS=$(echo "$ERROR_DATA" | python3 -c "
+import sys, json
+try:
+    for b in json.load(sys.stdin)['aggregations']['by_namespace']['buckets']:
+        print('%s\t%d' % (b['key'], b['doc_count']))
+except Exception:
+    pass
+" 2>/dev/null || echo "")
+
+            NS_FLAGGED=0
+            # here-string, NOT a pipe: a pipeline runs the loop in a subshell and
+            # the add_*_issue bash arrays would be silently discarded.
+            while IFS=$'\t' read -r NS_NAME NS_HITS; do
+                [ -z "$NS_NAME" ] && continue
+                NS_HITS=$((10#${NS_HITS:-0}))
+                if [ "$TOTAL_ERRORS_INT" -gt 0 ]; then
+                    NS_SHARE=$(( NS_HITS * 100 / TOTAL_ERRORS_INT ))
+                else
+                    NS_SHARE=0
+                fi
+
+                if [ "$NS_HITS" -ge 500000 ]; then
+                    NS_FLAGGED=1
+                    log_critical "Log-volume runaway in namespace $NS_NAME: $NS_HITS error-substring matches in 24h (${NS_SHARE}% of cluster)"
+                    add_critical_issue "Log-volume runaway in namespace $NS_NAME: $NS_HITS error-substring matches in 24h (${NS_SHARE}% of the cluster total) - see docs/sops/log-volume-runaway.md"
+                elif [ "$NS_HITS" -ge 100000 ]; then
+                    NS_FLAGGED=1
+                    log_warning "High error-log volume in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of cluster)"
+                    add_major_issue "High error-log volume in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of the cluster total)"
+                elif [ "$NS_HITS" -ge 40000 ] && [ "$NS_SHARE" -ge 40 ]; then
+                    NS_FLAGGED=1
+                    log_warning "Error-log volume concentrated in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of cluster)"
+                    add_major_issue "Error-log volume concentrated in namespace $NS_NAME: $NS_HITS in 24h (${NS_SHARE}% of the cluster total)"
+                elif [ "$NS_HITS" -ge 40000 ]; then
+                    NS_FLAGGED=1
+                    log_warning "Elevated error-log volume in namespace $NS_NAME: $NS_HITS in 24h"
+                    add_minor_issue "Elevated error-log volume in namespace $NS_NAME: $NS_HITS in 24h"
+                fi
+            done <<< "$NS_ERROR_ROWS"
+
+            # Broad backstop: a cluster-wide runaway that no SINGLE namespace
+            # explains. If a namespace already tripped above, that finding is the
+            # honest one and this would only double-count it.
+            if [ "$NS_FLAGGED" -eq 0 ] && [ "$TOTAL_ERRORS_INT" -ge 1000000 ]; then
+                log_critical "Broad cluster-wide log-volume runaway: $TOTAL_ERRORS_INT error-substring matches in 24h across namespaces, none dominant"
+                add_critical_issue "Broad cluster-wide log-volume runaway: $TOTAL_ERRORS_INT error-substring matches in 24h with no single dominant namespace"
+            elif [ "$NS_FLAGGED" -eq 0 ]; then
+                log_success "Error-log volume within range in every namespace (cluster total $TOTAL_ERRORS_INT in 24h; highest namespace below the 40,000 floor)"
+            fi
         fi
     fi
 } >> "$OUTPUT_FILE" 2>&1
