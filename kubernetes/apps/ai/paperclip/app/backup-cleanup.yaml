@@ -15,6 +15,14 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          # Explicit `default` (not just omitted): the old dedicated SA was
+          # pruned, and server-side apply does NOT clear a field the applier
+          # merely stopped setting — the stale paperclip-backup-cleanup
+          # reference would orphan on the live object and fail pod creation
+          # with "serviceaccount not found". Pinning `default` re-takes SSA
+          # ownership. No token is mounted: this job needs zero API access.
+          serviceAccountName: default
+          automountServiceAccountToken: false
           # Paperclip creates its OWN backups in-app (config.json
           # backup.intervalMinutes: 1440, firing ~04:00Z). The old
           # scale-down → cleanup → scale-up choreography here raced that
