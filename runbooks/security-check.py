@@ -1182,6 +1182,22 @@ def _is_kernel_header_pkg(pkg_name: str, result_class: str) -> bool:
     return name in _KERNEL_HEADER_PKGS or name.startswith(_KERNEL_HEADER_PREFIXES)
 
 
+# Version of the TALLY LOGIC below (not of the cache file format). It is
+# written into the Trivy cache and compared on load: a cache produced by a
+# different tally version is DISCARDED, not served.
+#
+# Why: on 2026-08-18 the kernel-header exclusion (abb12fda) changed what
+# counts as a fixable CRITICAL, but the cache written at 00:37 kept serving
+# pre-fix numbers — a logic fix would have taken up to 24h (the TTL) to become
+# visible, and the audit would have reported the old numbers as current the
+# whole time. Renaming the cache FILE on every logic change (…-v3 → -v4) was
+# the previous workaround; it only works when someone remembers.
+#
+# BUMP THIS whenever tally_trivy_report() or the fix/no-fix classification it
+# feeds changes in a way that alters the numbers.
+_TRIVY_TALLY_VERSION = 2  # 2 = kernel-header packages excluded from fixable tallies
+
+
 def tally_trivy_report(report: dict) -> dict | None:
     """Reduce a Trivy JSON report to the CRITICAL/HIGH counts the sweep acts on.
 
@@ -1234,6 +1250,103 @@ def tally_trivy_report(report: dict) -> dict | None:
             "high_fix": hf, "high_nofix": hn,
             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5],
             "fix_ids": fix_ids, "nofix_ids": nofix_ids}
+
+
+def load_trivy_cache(path: Path, ttl_sec: int, now: float | None = None) -> tuple[dict | None, float | None]:
+    """Load the Trivy result cache, or (None, None) if it must not be served.
+
+    Returns (cache_dict, created_at). Three independent reasons to discard:
+
+    1. **Tally version mismatch** — the numbers in the cache were computed by
+       different logic than this run would compute. Serving them reports stale
+       arithmetic as current (see `_TRIVY_TALLY_VERSION`). A cache with no
+       `parser_version` key at all predates the mechanism and is discarded.
+    2. **Age** beyond the TTL.
+    3. **Unreadable / unparsable.**
+
+    Age is measured from the `created_at` INSIDE the file, not the file mtime,
+    because a top-up rewrites the file: keying off mtime would let a cache that
+    is topped up daily push its own expiry out forever, so the images scanned
+    on day 0 would never be re-scanned.
+    """
+    now = time.time() if now is None else now
+    if not path.exists():
+        return None, None
+    try:
+        raw = json.loads(path.read_text())
+    except Exception:
+        return None, None
+    if not isinstance(raw, dict):
+        return None, None
+    if raw.get("parser_version") != _TRIVY_TALLY_VERSION:
+        return None, None
+    try:
+        created = float(raw.get("created_at") or path.stat().st_mtime)
+    except Exception:
+        return None, None
+    if now - created >= ttl_sec:
+        return None, None
+    return raw, created
+
+
+def collect_trivy_results(scan_targets: list[str], cached: dict | None, scan_fn,
+                          retry_failed=None) -> tuple[dict, list, set, list]:
+    """Merge cached Trivy results with a TOP-UP scan of everything they miss.
+
+    Returns `(results, failed, scanned_ok, topped_up)`.
+
+    The defect this fixes (F-8cdf8719): a cache hit used to short-circuit the
+    scan ENTIRELY. Images that started running after the cache was written were
+    therefore never scanned, yet the section reported its numbers as current —
+    and the cache's own image set silently defined "coverage". Every image the
+    fleet bumped during the day fell into that hole.
+
+    So the cache is now a per-image memo, not a per-run switch: whatever it
+    covers is reused (that is the whole performance benefit, and an image whose
+    ref has not changed genuinely has not changed), and everything else is
+    scanned now.
+
+    `scanned_ok` is the set of images with a real verdict — INCLUDING the clean
+    ones. It cannot be derived from `results`, which only holds images that had
+    CVEs; conflating "no entry" with "not scanned" would re-scan every clean
+    image on every run, and conflating it the other way would call an unscanned
+    image clean.
+
+    `retry_failed(img)` decides whether a cached scan FAILURE is worth another
+    attempt. Transient failures (a trivy timeout) should be retried — otherwise
+    one blip keeps the coverage-gap finding and its veto armed for the full
+    TTL. Permanently-unscannable images (our own private registry, which the
+    sweep holds no pull credentials for by policy) should not: the retry cannot
+    succeed and only costs wall-clock.
+    """
+    retry_failed = retry_failed or (lambda img: True)
+    if cached is None:
+        results, failed = scan_fn(scan_targets)
+        return results, failed, set(scan_targets) - set(failed), list(scan_targets)
+
+    results: dict = dict(cached.get("results") or {})
+    cached_failed: list[str] = list(cached.get("failed") or [])
+    # Fallback for a cache written before `scanned` existed: assume only the
+    # images WITH findings were covered. Pessimistic on purpose — it re-scans
+    # the clean ones once rather than claiming coverage it cannot prove.
+    _scanned = cached.get("scanned")
+    scanned_ok: set = set(results.keys() if _scanned is None else _scanned)
+
+    keep_failed = [i for i in cached_failed if not retry_failed(i)]
+    covered = scanned_ok | set(keep_failed)
+    topup = [i for i in scan_targets if i not in covered]
+
+    failed = list(keep_failed)
+    if topup:
+        new_results, new_failed = scan_fn(topup)
+        # A re-scanned image's fresh verdict supersedes its cached one —
+        # including "clean now", which is expressed by ABSENCE from new_results.
+        for img in topup:
+            results.pop(img, None)
+        results.update(new_results)
+        scanned_ok |= set(topup) - set(new_failed)
+        failed += [i for i in new_failed if i not in failed]
+    return results, failed, scanned_ok, topup
 
 
 def _newer_upstream_tag_exists(image_ref: str):
@@ -1529,24 +1642,23 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         "not on PATH — running-image CVE scan skipped entirely")
         return f.worst(), f, f.markdown()
 
-    # -v4: cache schema now also carries the FULL per-image CVE-ID lists
-    # (fix_ids / nofix_ids) that feed metadata.cve_ids + KEV scoring. A v3 cache
-    # lacks those keys, so use a new file rather than serve id-less entries that
-    # would keep findings at exploited=UNKNOWN until the 24h TTL expired.
+    # Cache FILE name is frozen at -v4; logic changes are handled by
+    # `_TRIVY_TALLY_VERSION` inside the file (see load_trivy_cache), not by
+    # renaming it. The -v4 schema carries the FULL per-image CVE-ID lists
+    # (fix_ids / nofix_ids) that feed metadata.cve_ids + KEV scoring, plus (new)
+    # `scanned` — the images that got a real verdict, clean ones INCLUDED —
+    # `parser_version`, and `created_at`.
     trivy_cache = Path(os.environ.get("TMPDIR", "/tmp")) / "cberg-trivy-cve-cache-v4.json"
     cache_age_sec = 86400  # 24h
 
-    cached: dict | None = None
-    if trivy_cache.exists():
-        try:
-            age = time.time() - trivy_cache.stat().st_mtime
-            if age < cache_age_sec:
-                cached = json.loads(trivy_cache.read_text())
-                cprint(C.DIM if hasattr(C, "DIM") else C.CYAN,
-                       f"  · using cached Trivy results "
-                       f"({int(cache_age_sec - age)}s until refresh)")
-        except Exception:
-            cached = None
+    cached, cache_created = load_trivy_cache(trivy_cache, cache_age_sec)
+    if cached is not None:
+        cprint(C.CYAN, f"  · Trivy cache hit "
+                       f"(tally v{_TRIVY_TALLY_VERSION}, "
+                       f"{int(cache_age_sec - (time.time() - cache_created))}s until refresh)")
+    elif trivy_cache.exists():
+        cprint(C.YELLOW, "  · Trivy cache discarded (stale, unreadable, or "
+                         f"built by a different tally version than v{_TRIVY_TALLY_VERSION}) — full rescan")
 
     # Pull every distinct running image once
     images_raw = kubectl(
@@ -1582,54 +1694,56 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         "no running images enumerated — Trivy scan has nothing "
                         "to scan and cached findings are filtered away")
 
-    findings_per_image: dict[str, dict] = {}
-    scan_failed: list[str] = []
-    if cached is not None:
-        findings_per_image = cached.get("results", {})
-        scan_failed = cached.get("failed", [])
-    else:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Skip well-known bases that AR docs accept or that don't add useful
-        # signal (Bitnami images tracked by Renovate; Wazuh internal images).
-        def _should_skip(img: str) -> bool:
-            return any(skip in img.lower() for skip in (
-                "bitnami/", "wazuh/wazuh-",
-            ))
+    # Skip well-known bases that AR docs accept or that don't add useful
+    # signal (Bitnami images tracked by Renovate; Wazuh internal images).
+    # A POLICY exclusion, permanent by construction: it is reported in the
+    # coverage line but never treated as a gap and never vetoes auto-close.
+    def _should_skip(img: str) -> bool:
+        return any(skip in img.lower() for skip in (
+            "bitnami/", "wazuh/wazuh-",
+        ))
 
-        scan_targets = [i for i in distinct_images if not _should_skip(i)]
-        cprint(C.CYAN, f"  Scanning {len(scan_targets)} distinct images "
-                       "with trivy (parallel, cached 24h)...")
+    scan_targets = [i for i in distinct_images if not _should_skip(i)]
 
-        def _scan_one(img: str, trivy_to: str = "30s", proc_to: int = 45) -> tuple[str, dict | None, bool]:
-            # Returns (img, result_or_None, scan_ok). scan_ok=False means the
-            # trivy invocation FAILED (timeout / non-zero rc / empty / unparsable)
-            # — which is NOT the same as "scanned clean". Conflating the two lets
-            # a transient scan failure silently drop a still-running vulnerable
-            # image, after which the orchestrator's auto-close falsely resolves
-            # its open CVE findings (2026-08-12 false-negative fix).
-            rc, stdout, _stderr = run_cmd(
-                f"trivy image --severity CRITICAL,HIGH --exit-code 0 "
-                f"--quiet --format json --timeout {trivy_to} {img}",
-                timeout=proc_to,
-            )
-            if rc != 0 or not stdout:
-                return img, None, False
-            try:
-                report = json.loads(stdout)
-            except Exception:
-                return img, None, False
-            return img, tally_trivy_report(report), True
+    def _scan_one(img: str, trivy_to: str = "30s", proc_to: int = 45) -> tuple[str, dict | None, bool]:
+        # Returns (img, result_or_None, scan_ok). scan_ok=False means the
+        # trivy invocation FAILED (timeout / non-zero rc / empty / unparsable)
+        # — which is NOT the same as "scanned clean". Conflating the two lets
+        # a transient scan failure silently drop a still-running vulnerable
+        # image, after which the orchestrator's auto-close falsely resolves
+        # its open CVE findings (2026-08-12 false-negative fix).
+        rc, stdout, _stderr = run_cmd(
+            f"trivy image --severity CRITICAL,HIGH --exit-code 0 "
+            f"--quiet --format json --timeout {trivy_to} {img}",
+            timeout=proc_to,
+        )
+        if rc != 0 or not stdout:
+            return img, None, False
+        try:
+            report = json.loads(stdout)
+        except Exception:
+            return img, None, False
+        return img, tally_trivy_report(report), True
 
+    def _scan_batch(targets: list[str]) -> tuple[dict, list]:
+        """Scan `targets` in parallel, retry the failures serially.
+
+        Returns (results, still_failed). Used for BOTH the cold-cache full scan
+        and the warm-cache top-up, so a topped-up image gets exactly the same
+        treatment — including the retry — as one from a full run.
+        """
+        results: dict[str, dict] = {}
+        failed_scans: list[str] = []
         # 6 parallel scans is enough to overlap registry latency without
         # hammering the local Trivy DB lock.
-        failed_scans: list[str] = []
         with ThreadPoolExecutor(max_workers=6) as ex:
-            futures = {ex.submit(_scan_one, img): img for img in scan_targets}
+            futures = {ex.submit(_scan_one, img): img for img in targets}
             for fut in as_completed(futures):
                 img, result, ok = fut.result()
                 if result:
-                    findings_per_image[img] = result
+                    results[img] = result
                 elif not ok:
                     failed_scans.append(img)
 
@@ -1645,15 +1759,63 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             for img in failed_scans:
                 _img, result, ok = _scan_one(img, trivy_to="90s", proc_to=120)
                 if result:
-                    findings_per_image[img] = result
+                    results[img] = result
                 elif not ok:
                     still.append(img)
             failed_scans = still
-        scan_failed = failed_scans
-        try:
-            trivy_cache.write_text(json.dumps({"results": findings_per_image, "failed": scan_failed}))
-        except Exception:
-            pass
+        return results, failed_scans
+
+    def _scan_and_report(targets: list[str]) -> tuple[dict, list]:
+        if not targets:
+            return {}, []
+        cprint(C.CYAN, f"  Scanning {len(targets)} image(s) with trivy (parallel)...")
+        return _scan_batch(targets)
+
+    # Cache-as-memo, not cache-as-switch. Whatever the cache covers is reused;
+    # every image running NOW that it does not cover is scanned NOW (F-8cdf8719
+    # — a cache hit used to skip the scan entirely, so 27% of running images
+    # went unscanned while their stale numbers were reported as current).
+    # Cached failures on our own private registry are NOT retried: no pull
+    # credentials by policy, so the retry cannot succeed (steady state).
+    findings_per_image, scan_failed, scanned_ok, topped_up = collect_trivy_results(
+        scan_targets, cached, _scan_and_report,
+        retry_failed=lambda img: not img.startswith(_PRIVATE_REGISTRY_PREFIX),
+    )
+    if cached is not None:
+        cprint(C.CYAN, f"  · cache covered {len(scan_targets) - len(topped_up)}/{len(scan_targets)} "
+                       f"scannable images; topped up {len(topped_up)}")
+
+    # Persist the merged state. `created_at` is carried over from the cache we
+    # topped up, so a daily top-up cannot keep pushing the TTL out and leave
+    # day-0 images permanently un-rescanned.
+    try:
+        trivy_cache.write_text(json.dumps({
+            "parser_version": _TRIVY_TALLY_VERSION,
+            "created_at": cache_created if cache_created is not None else time.time(),
+            "results": findings_per_image,
+            "failed": scan_failed,
+            "scanned": sorted(scanned_ok),
+        }))
+    except Exception:
+        pass
+
+    # ─── Coverage accounting ────────────────────────────────────────────────
+    # What did this run actually LOOK AT? Everything downstream (the tallies,
+    # the green "no CVEs" line, and auto-close) is a claim about the running
+    # image set, so the claim is only as good as this number.
+    covered = (scanned_ok | set(scan_failed)) & set(scan_targets)
+    unattempted = [i for i in scan_targets if i not in covered]
+    cprint(C.CYAN, f"  Trivy coverage: {len(covered)}/{len(scan_targets)} scannable images "
+                   f"({len(distinct_images) - len(scan_targets)} skipped by policy, "
+                   f"{len([i for i in scan_failed if i in scan_targets])} unscannable)")
+    if unattempted:
+        # TRANSIENT by construction: these were in scope and simply did not get
+        # a scan attempt this run (an aborted top-up, an exception in the pool).
+        # Next run can be different -> veto, per the transitions rule in
+        # docs/sops/sweep-findings-lifecycle.md §4.3.
+        DEGRADED.record(_scope(), "trivy running-image coverage",
+                        f"{len(unattempted)} of {len(scan_targets)} scannable running "
+                        f"image(s) got no scan attempt this run")
 
     # Drop any cached findings whose image:tag is no longer running in the
     # cluster. Without this, fixed/replaced images linger as findings until
@@ -1787,12 +1949,31 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             f.add(WARNING, f"Trivy scan coverage gap: private {_PRIVATE_REGISTRY_PREFIX.rstrip('/')} images unscannable by the cluster sweep (no registry credentials) — CVE status UNKNOWN for our own applications; scanning belongs in each app repo's own CI")
             cprint(C.YELLOW, f"  🟡 {len(private)} private image(s) unscannable (no registry creds): "
                               + ", ".join(i.split('@')[0].split('/')[-1] for i in private[:8]))
+            # DELIBERATELY NO DEGRADED.record() here. This is a STEADY STATE:
+            # the sweep holds no credentials for our own registry BY POLICY, so
+            # the condition is identical on every run and cannot be different
+            # tomorrow. Per docs/sops/sweep-findings-lifecycle.md §4.3, vetoing
+            # on it would disable auto-close for the entire security section
+            # forever while protecting nothing — these images never produced a
+            # CVE finding that absence could wrongly resolve. It is reported as
+            # a FINDING (above), which is the auto-close-safe channel and the
+            # way it actually gets fixed.
         if other:
             # Message kept byte-identical to the pre-split wording so the
             # existing finding fingerprint stays stable across this refactor.
             f.add(WARNING, "Trivy scan coverage gap: one or more running images unscannable after retry — CVE status UNKNOWN (may hide fixable criticals); investigate trivy timeouts/registry access")
             cprint(C.YELLOW, f"  🟡 {len(other)} running image(s) unscannable after retry: "
                               + ", ".join(sorted(i.split('@')[0] for i in other)[:8]))
+            # TRANSIENT: a trivy timeout or a registry blip on an image we CAN
+            # normally pull. It scanned yesterday and may scan again tomorrow,
+            # so its open findings exist and would be wrongly auto-closed by
+            # this run's silence. Veto. (run_cmd() already records the subset
+            # that raised a process timeout; DegradationLog dedupes, and a
+            # non-zero rc — the registry-error path — raises nothing at all, so
+            # this is the only record for it.)
+            DEGRADED.record(_scope(), "trivy image scan",
+                            f"{len(other)} public/running image(s) still unscannable "
+                            f"after retry — CVE status unknown for them")
 
     # AR-029 ("HIGH CVEs") is now applied PRECISELY above by fix-availability
     # (no-upstream-fix → accepted, fixable → surfaced regardless of severity),
