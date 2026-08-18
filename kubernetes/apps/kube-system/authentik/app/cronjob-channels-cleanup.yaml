@@ -22,12 +22,11 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: cleanup
-              # Alpine variant: the Debian base carries a long tail of
-              # will_not_fix OS-package findings that upstream Debian will not
-              # patch, while the alpine base reports none. Only psql is used
-              # here, so the base is interchangeable. Digest-pinned to the
-              # alpine manifest-list digest (verified against the registry
-              # 2026-08-18); re-pin deliberately on any tag move.
+              # Alpine variant: the alpine base reports no OS-package findings,
+              # and only psql is used here, so the base is interchangeable.
+              # Digest-pinned to the alpine manifest-list digest (verified
+              # against the registry 2026-08-18); re-pin deliberately on any
+              # tag move. security_ref: F-31aadd6f
               # NOTE: alpine has no bash — the script below is POSIX sh and
               # must stay that way (no [[ ]], no arrays, no local).
               image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73

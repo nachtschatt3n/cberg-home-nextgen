@@ -389,7 +389,15 @@ mise exec -- crane digest docker.io/library/postgres:18.6-bookworm
        (it is the rollback) but note "SUPERSEDED by authentik-pg
        (postgres 18.6) since <date>; decommission = follow-up plan"
    - `kubernetes/apps/kube-system/authentik/app/cronjob-channels-cleanup.yaml`:
-     - `image: postgres:18.6-bookworm`
+     - `image: postgres:18.6-alpine@sha256:<resolve + verify at execution time>`
+       **Keep the ALPINE base and the digest pin** — this job was deliberately
+       moved off the Debian base in `99640b4c` (`security_ref: F-31aadd6f`), and
+       every image in this repo is digest-pinned (float-tag batch `cfda3ea8`).
+       Writing `18.6-bookworm` here would silently revert both.
+     - **Do NOT change `command:`** — it is `/bin/sh` and the script is POSIX
+       sh. Alpine ships no bash; reverting the base or the interpreter breaks
+       the job. Only the MAJOR/MINOR tracks the server; the base intentionally
+       diverges (see the comment in the manifest and in `helmrelease.yaml`).
      - `DB_HOST: "authentik-pg"`
    ```bash
    git add -p kubernetes/apps/kube-system/authentik/app/helmrelease.yaml \
