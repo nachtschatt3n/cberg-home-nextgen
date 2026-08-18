@@ -28,7 +28,7 @@ from pathlib import Path
 # Make `runbooks/lib/...` importable when the script is invoked from any CWD.
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.findings_writer import (  # noqa: E402
-    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+    FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
 )
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
@@ -85,24 +85,77 @@ REPO_ROOT  = SCRIPT_DIR.parent
 OUTPUT     = Path(os.environ.get("SWEEP_SNAPSHOTS_DIR", str(SCRIPT_DIR))) / "doc-check-current.md"
 
 # ---------------------------------------------------------------------------
+# Degraded-coverage recorder
+# ---------------------------------------------------------------------------
+#
+# This script degrades gracefully almost everywhere: an unreachable cluster or
+# an unreadable file leaves a check with nothing to compare and it moves on.
+# That is right for reporting and lethal for stale-finding auto-close, which
+# reads "the section stopped emitting this" as "it got fixed". Worse here than
+# elsewhere, because several doc-check paths do not merely go quiet — they
+# print a GREEN pass line built from a failed dependency (an unreadable
+# blueprint file yields "N Authentik blueprint(s) use UUIDs").
+#
+# Every such path records below; main() hands the accumulated reasons to
+# writer.mark_incomplete(), which vetoes auto-close for the whole `doc`
+# section while still letting the run finish and report. Contract:
+# docs/sops/sweep-findings-lifecycle.md.
+#
+# A module-level singleton is the right hook because all eight sN_*() take no
+# arguments and there is no shared context object to thread one through.
+DEGRADED = DegradationLog("doc", printer=lambda msg: cprint(C.YELLOW, msg))
+
+
+def _rel(path: Path) -> str:
+    """Repo-relative path for a degradation reason, absolute if outside."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def run(cmd: str, timeout: int = 30) -> str:
-    """Run a shell command, return stdout (empty string on error)."""
+def run(cmd: str, timeout: int = 30, *, scope: str | None = None,
+        dep: str | None = None) -> str:
+    """Run a shell command, return stdout (empty string on error).
+
+    When `scope` is given, an unambiguous failure — an exception (timeout,
+    missing binary) or a non-zero exit that produced no stdout — is recorded
+    as degraded coverage for that check. Empty stdout with rc=0 is NOT
+    recorded: most callers here are grep-shaped, where "no output" is a
+    legitimate clean result rather than a failure.
+    """
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return r.stdout.strip()
-    except Exception:
+    except Exception as e:
+        if scope:
+            DEGRADED.record(scope, dep or cmd.split()[0], repr(e))
         return ""
+    out = r.stdout.strip()
+    if scope and r.returncode != 0 and not out:
+        err = r.stderr.strip().splitlines()
+        DEGRADED.record(scope, dep or cmd.split()[0],
+                        err[-1] if err else f"exit {r.returncode}")
+    return out
 
 
-def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
-    """Run command and return (returncode, stdout, stderr)."""
+def run_cmd(cmd: str, timeout: int = 30, *, scope: str | None = None,
+            dep: str | None = None) -> tuple[int, str, str]:
+    """Run command and return (returncode, stdout, stderr).
+
+    Callers branch on rc themselves, so only the exception path (timeout,
+    spawn failure) is recorded here when `scope` is given — the rc!=0 cases
+    are recorded at the call site, where the reason is known.
+    """
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:
+        if scope:
+            DEGRADED.record(scope, dep or cmd.split()[0], repr(e))
         return 1, "", str(e)
 
 
@@ -129,11 +182,29 @@ def run_lines(cmd: str, timeout: int = 30) -> list[str]:
     return [l for l in out.splitlines() if l.strip()]
 
 
-def read_file(path: Path) -> str:
-    """Read file content, return empty string on error."""
+def read_file(path: Path, *, scope: str | None = None) -> str:
+    """Read file content, return empty string on error.
+
+    Two failure classes, deliberately treated differently:
+
+    * MISSING is often the finding itself — the s1-s6 "`docs/x.md` is
+      missing" CRITICALs report it correctly, and recording those would veto
+      auto-close on a working run. So an absent file is recorded only when
+      the call site passes a `scope`, i.e. declares that an empty read
+      silently disables its check instead of producing a finding.
+    * UNREADABLE is never a legitimate clean result — permission denied, a
+      directory where a file was expected, a decode failure. The check that
+      follows then runs against "" and can print a false PASS, so this is
+      recorded whether or not a scope was supplied.
+    """
     try:
         return path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+    except FileNotFoundError:
+        if scope:
+            DEGRADED.record(scope, _rel(path), "file not found")
+        return ""
+    except Exception as e:
+        DEGRADED.record(scope or "read_file", _rel(path), repr(e))
         return ""
 
 
@@ -273,14 +344,18 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     # Check Kubernetes server version
-    k8s_json = run("kubectl version -o json 2>/dev/null", timeout=15)
+    k8s_json = run("kubectl version -o json 2>/dev/null", timeout=15,
+                   scope="s1_infrastructure_docs", dep="kubectl (server version)")
     k8s_version = ""
     if k8s_json:
         try:
             d = json.loads(k8s_json)
             k8s_version = d.get("serverVersion", {}).get("gitVersion", "")
-        except Exception:
-            pass
+        except Exception as e:
+            DEGRADED.record("s1_infrastructure_docs", "kubectl version JSON", repr(e))
+    else:
+        DEGRADED.record("s1_infrastructure_docs", "kubectl (server version)",
+                        "no output — K8s version drift cannot be evaluated")
 
     if k8s_version:
         # Extract major.minor from version (e.g., v1.34.0 → 1.34)
@@ -297,6 +372,12 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
 
     # Check Talos version (prefer server/cluster version)
     talos_server_out = run("talosctl version 2>/dev/null | grep -A2 'Server:' | grep 'Tag:' | head -1", timeout=15)  # -A2, not -A1: a NODE: line sits between "Server:" and "Tag:", so -A1 can NEVER match.
+    if not talos_server_out:
+        # The README-badge fallback below is a PROXY for the live version, not
+        # a substitute: it can agree with the doc while the cluster has drifted.
+        # Either way the server was not read, so coverage is partial.
+        DEGRADED.record("s1_infrastructure_docs", "talosctl (server version)",
+                        "server unreachable — falling back to the README badge")
     if talos_server_out:
         talos_ver = talos_server_out.replace("Tag:", "").strip()
         if talos_ver and talos_ver not in content:
@@ -318,7 +399,8 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
             cprint(C.CYAN, "  Talos server unreachable and no README badge found — skipping Talos version check")
 
     # Check node names
-    nodes_out = run("kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null", timeout=15)
+    nodes_out = run("kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null", timeout=15,
+                    scope="s1_infrastructure_docs", dep="kubectl (node list)")
     if nodes_out:
         node_names = nodes_out.split()
         for node in node_names:
@@ -328,6 +410,10 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
             else:
                 cprint(C.GREEN, f"  {OK} Node {node} documented")
     else:
+        # Prints a 🟡 but never calls f.add — every "Node X not documented"
+        # finding vanishes with no trace in the report or the DB.
+        DEGRADED.record("s1_infrastructure_docs", "kubectl (node list)",
+                        "no output — node-name drift cannot be evaluated")
         cprint(C.YELLOW, f"  {WARNING} Could not check live node names")
 
     # Check key IPs
@@ -339,11 +425,17 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
             cprint(C.GREEN, f"  {OK} {label} IP {ip} documented")
 
     # Check bootstrap chart versions match helmfile.yaml
-    helmfile = read_file(REPO_ROOT / "kubernetes" / "bootstrap" / "apps" / "helmfile.yaml")
+    helmfile = read_file(REPO_ROOT / "kubernetes" / "bootstrap" / "apps" / "helmfile.yaml",
+                         scope="s1_infrastructure_docs")
     if helmfile:
         # Parse only the releases: section to avoid mixing repository names with versions
         releases_m = re.search(r'^releases:\n(.*)', helmfile, re.MULTILINE | re.DOTALL)
         releases_text = releases_m.group(1) if releases_m else ""
+        if not releases_m:
+            # File read fine but its shape changed — the loop below then runs
+            # zero times and prints nothing at all.
+            DEGRADED.record("s1_infrastructure_docs", "helmfile.yaml releases: block",
+                            "regex found no releases: section — chart versions not compared")
         bootstrap_versions: dict[str, str] = {}
         for block in re.split(r'^\s*-\s*name:', releases_text, flags=re.MULTILINE):
             name_m = re.match(r'\s*(\S+)', block)
@@ -410,10 +502,15 @@ def s2_network_docs() -> tuple[str, Findings, str]:
                 cprint(C.GREEN, f"  {OK} All {len(live_vlan_ids)} live VLANs documented (bidirectional)")
             lines.append(f"Live VLANs: {sorted(live_vlan_ids)}\n")
         except Exception as e:
+            DEGRADED.record("s2_network_docs", "unifictl network list (JSON)", repr(e))
             f.add(WARNING, f"Could not parse UniFi networks response: {e}")
             cprint(C.YELLOW, f"  {WARNING} Could not parse UniFi networks JSON")
     else:
         err_l = vlan_err.lower()
+        # These branches DO emit a substitute WARNING, but the bidirectional
+        # VLAN drift check they replace never ran — coverage is still partial.
+        DEGRADED.record("s2_network_docs", "unifictl network list",
+                        (vlan_err.splitlines()[-1] if vlan_err else f"exit {vlan_rc}"))
         if vlan_rc == 127 or "command not found" in err_l:
             f.add(WARNING, f"Could not fetch live VLAN data from `{vlan_cmd}` — unifictl not installed")
             cprint(C.YELLOW, f"  {WARNING} unifictl not installed — skipping live VLAN check")
@@ -446,10 +543,15 @@ def s2_network_docs() -> tuple[str, Findings, str]:
                 else:
                     cprint(C.GREEN, f"  {OK} SSID {ssid} documented")
             lines.append(f"Live SSIDs: {live_ssids}\n")
-        except Exception:
+        except Exception as e:
+            DEGRADED.record("s2_network_docs", "unifictl wlan list (JSON)", repr(e))
             cprint(C.YELLOW, f"  {WARNING} Could not parse UniFi wlans response")
     else:
         err_l = wlan_err.lower()
+        # Unlike the VLAN branches above, NONE of these call f.add — the whole
+        # live-SSID check disappears with only a console line to show for it.
+        DEGRADED.record("s2_network_docs", "unifictl wlan list",
+                        (wlan_err.splitlines()[-1] if wlan_err else f"exit {wlan_rc}"))
         if wlan_rc == 127 or "command not found" in err_l:
             cprint(C.YELLOW, "  Skipping live SSID check (unifictl unavailable)")
         elif "login failed" in err_l or "unauthorized" in err_l:
@@ -588,9 +690,14 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     ):
         dp = REPO_ROOT / doc_name
         if not dp.exists():
+            DEGRADED.record("s3_application_docs", _rel(dp),
+                            "absent — stated-namespace-total drift not checked")
             continue
         m = re.search(pat, dp.read_text())
         if not m:
+            # Rewording the doc makes the drift check silently disappear.
+            DEGRADED.record("s3_application_docs", f"{doc_name} 'across N namespaces'",
+                            "phrase not found — stated total not compared")
             continue
         stated = int(m.group(1))
         if stated != actual:
@@ -640,9 +747,14 @@ def s4_security_docs() -> tuple[str, Findings, str]:
         return f.worst(), f, f.markdown()
 
     # Check age key consistency: .sops.yaml ↔ docs/security.md
-    sops_yaml = read_file(REPO_ROOT / ".sops.yaml")
+    sops_yaml = read_file(REPO_ROOT / ".sops.yaml", scope="s4_security_docs")
     sops_key_m = re.search(r'age1[a-z0-9]+', sops_yaml)
     doc_key_m  = re.search(r'age1[a-z0-9]+', content)
+    if not sops_key_m:
+        # Without the reference key the CRITICAL mismatch branch is
+        # unreachable and the finding downgrades to a generic WARNING.
+        DEGRADED.record("s4_security_docs", ".sops.yaml age key",
+                        "not extractable — age-key mismatch cannot be detected")
 
     if sops_key_m and doc_key_m:
         sops_key = sops_key_m.group()
@@ -688,7 +800,10 @@ def s4_security_docs() -> tuple[str, Findings, str]:
     KNOWN_FLOW_UUIDS = {"0cdf1b8c", "b8a97e00", "162f6c4f"}
     slug_violations: list[str] = []
     for bp in blueprint_files:
-        bp_content = read_file(bp)
+        # An unreadable (or still-encrypted) blueprint yields "" — the regex
+        # then matches nothing and the run prints a GREEN "N blueprint(s) use
+        # UUIDs" pass built entirely on a failed read.
+        bp_content = read_file(bp, scope="s4_security_docs")
         # Check authorization_flow and invalidation_flow values for slug strings
         for m in re.finditer(r'(authorization_flow|invalidation_flow|service_connection):\s*"([^"]+)"', bp_content):
             val = m.group(2)
@@ -709,7 +824,7 @@ def s4_security_docs() -> tuple[str, Findings, str]:
     # Check Flux sops-age secret exists and contains the correct key
     rc, flux_secret, flux_err = run_cmd(
         "kubectl get secret sops-age -n flux-system -o jsonpath='{.data.age\\.agekey}'",
-        timeout=15,
+        timeout=15, scope="s4_security_docs", dep="kubectl (flux sops-age secret)",
     )
     err_l = flux_err.lower()
     api_unreachable = any(x in err_l for x in (
@@ -727,6 +842,12 @@ def s4_security_docs() -> tuple[str, Findings, str]:
             decoded = base64.b64decode(flux_secret).decode().strip()
             # Derive public key from the stored private key using age-keygen -y
             derived_pub = run(f"echo '{decoded}' | age-keygen -y 2>/dev/null", timeout=5).strip()
+            if not derived_pub:
+                # Falls through to the "valid format (key match skipped)" GREEN
+                # line below, which is where a WRONG key would have been a
+                # CRITICAL. Missing age-keygen silently downgrades it.
+                DEGRADED.record("s4_security_docs", "age-keygen",
+                                "public key not derivable — Flux key match skipped")
             if sops_key_m and derived_pub == sops_key_m.group():
                 cprint(C.GREEN, f"  {OK} Flux sops-age secret matches .sops.yaml public key")
             elif sops_key_m and derived_pub:
@@ -736,15 +857,20 @@ def s4_security_docs() -> tuple[str, Findings, str]:
                 cprint(C.GREEN, f"  {OK} Flux sops-age secret exists and has valid format (key match skipped)")
             else:
                 f.add(WARNING, "Flux `sops-age` secret has unexpected format")
-        except Exception:
+        except Exception as e:
+            DEGRADED.record("s4_security_docs", "sops-age secret decode", repr(e))
             cprint(C.CYAN, "  Could not decode sops-age secret")
     elif "notfound" in err_l or "not found" in err_l:
         f.add(WARNING, "Flux `sops-age` secret not found in `flux-system` — SOPS decryption will fail")
         cprint(C.YELLOW, f"  {WARNING} Flux sops-age secret missing from flux-system")
     elif api_unreachable:
+        DEGRADED.record("s4_security_docs", "kubectl (flux sops-age secret)",
+                        f"cluster/API unreachable: {flux_err}")
         f.add(WARNING, f"Could not verify Flux `sops-age` secret (cluster/API unreachable: {flux_err})")
         cprint(C.YELLOW, f"  {WARNING} Could not verify Flux sops-age secret (cluster/API unreachable)")
     else:
+        DEGRADED.record("s4_security_docs", "kubectl (flux sops-age secret)",
+                        flux_err or "unknown kubectl error")
         f.add(WARNING, f"Could not verify Flux `sops-age` secret (kubectl error: {flux_err or 'unknown'})")
         cprint(C.YELLOW, f"  {WARNING} Could not verify Flux sops-age secret (kubectl error)")
 
@@ -790,7 +916,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
     # Check Homepage groups in helmrelease match integration doc
     hr_path = REPO_ROOT / "kubernetes" / "apps" / "default" / "homepage" / "app" / "helmrelease.yaml"
-    hr_content = read_file(hr_path)
+    hr_content = read_file(hr_path, scope="s5_integration_docs")
 
     # Extract group names ONLY from the services: section (not bookmarks or widgets)
     # Find the services: block — everything between "services:" and the next same-level key
@@ -802,6 +928,10 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
         hr_groups = [g.strip() for g in hr_groups_raw
                      if g.strip() and len(g.strip()) > 2 and len(g.strip()) < 40]
     else:
+        # No services: block parsed — the Homepage-group check below is skipped
+        # entirely, with no print and no finding.
+        DEGRADED.record("s5_integration_docs", "homepage helmrelease services: block",
+                        "regex found no services: section — Homepage groups not compared")
         hr_groups = []
 
     if hr_groups:
@@ -812,8 +942,11 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
     # Check Renovate schedule documented
     renovate_path = REPO_ROOT / ".github" / "renovate.json5"
-    renovate_content = read_file(renovate_path)
+    renovate_content = read_file(renovate_path, scope="s5_integration_docs")
     schedule_m = re.search(r'"schedule":\s*\[.*?"([^"]+)"', renovate_content, re.DOTALL)
+    if not schedule_m:
+        DEGRADED.record("s5_integration_docs", ".github/renovate.json5 schedule",
+                        "not parseable — Renovate schedule drift not checked")
     if schedule_m:
         schedule = schedule_m.group(1)
         cprint(C.CYAN, f"  Renovate schedule: {schedule}")
@@ -836,8 +969,12 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
     bad_model_format: list[str] = []
     for app_path in ollama_apps:
         if not app_path.exists():
+            # Collecting nothing prints a GREEN "model name formats are
+            # correct" — a pass asserted over files that were never read.
+            DEGRADED.record("s5_integration_docs", _rel(app_path),
+                            "absent — Ollama model-name format not checked")
             continue
-        app_content = read_file(app_path)
+        app_content = read_file(app_path, scope="s5_integration_docs")
         # Slash-format model names like "openai/gpt-oss-20b" would be wrong
         for m in re.finditer(r'(?:LLM_MODEL|OLLAMA_MODEL|CUSTOM_MODEL|VISION_LLM_MODEL):\s*"([^"]+)"', app_content):
             model = m.group(1)
@@ -853,8 +990,14 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
     # Check Homepage ingress annotations: both annotation AND label must have enabled=true
     ingress_raw = run(
-        "kubectl get ingress -A -o json 2>/dev/null", timeout=20
+        "kubectl get ingress -A -o json 2>/dev/null", timeout=20,
+        scope="s5_integration_docs", dep="kubectl (ingress list)",
     )
+    if not ingress_raw:
+        # There is no else branch below: on an empty read this check produces
+        # no print, no finding, nothing at all.
+        DEGRADED.record("s5_integration_docs", "kubectl (ingress list)",
+                        "no output — Homepage annotation/label mismatches not checked")
     if ingress_raw:
         try:
             ingresses = json.loads(ingress_raw).get("items", [])
@@ -880,6 +1023,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
                 if homepage_enabled:
                     cprint(C.GREEN, f"  {OK} All {len(homepage_enabled)} Homepage-enabled ingresses have matching label")
         except Exception as e:
+            DEGRADED.record("s5_integration_docs", "kubectl ingress list (JSON)", repr(e))
             cprint(C.CYAN, f"  Could not parse ingress list: {e}")
 
     lines.append(f.markdown())
@@ -901,7 +1045,11 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
     readme_k8s_m = re.search(r'Kubernetes-v?([\d.]+)', readme)
     readme_talos_m = re.search(r'Talos-v?([\d.]+)', readme)
 
-    k8s_json = run("kubectl version -o json 2>/dev/null", timeout=15)
+    k8s_json = run("kubectl version -o json 2>/dev/null", timeout=15,
+                   scope="s6_readme_claude_currency", dep="kubectl (server version)")
+    if not k8s_json:
+        DEGRADED.record("s6_readme_claude_currency", "kubectl (server version)",
+                        "no output — README K8s badge not verified")
     if k8s_json:
         try:
             d = json.loads(k8s_json)
@@ -915,8 +1063,8 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
                     cprint(C.YELLOW, f"  {WARNING} README K8s badge {badge_ver} vs server {server_ver}")
                 else:
                     cprint(C.GREEN, f"  {OK} README K8s badge matches server ({server_ver})")
-        except Exception:
-            pass
+        except Exception as e:
+            DEGRADED.record("s6_readme_claude_currency", "kubectl version JSON", repr(e))
 
     # Check Talos badge against server version (if reachable)
     talos_server_out = run("talosctl version 2>/dev/null | grep -A2 'Server:' | grep 'Tag:' | head -1", timeout=15)  # -A2, not -A1: a NODE: line sits between "Server:" and "Tag:", so -A1 can NEVER match.
@@ -929,6 +1077,8 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
         elif talos_ver:
             cprint(C.GREEN, f"  {OK} README Talos badge matches server ({talos_ver})")
     elif readme_talos_m:
+        DEGRADED.record("s6_readme_claude_currency", "talosctl (server version)",
+                        "server unreachable — README Talos badge not verified")
         cprint(C.CYAN, f"  Talos server unreachable — badge shows v{readme_talos_m.group(1)} (cannot verify against server)")
 
     # Check README covers major application categories
@@ -961,9 +1111,14 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
 
     # Check AGENTS.md (canonical) age key matches .sops.yaml
     # CLAUDE.md should be a symlink to AGENTS.md
-    sops_yaml = read_file(REPO_ROOT / ".sops.yaml")
+    sops_yaml = read_file(REPO_ROOT / ".sops.yaml", scope="s6_readme_claude_currency")
     sops_key_m = re.search(r'age1[a-z0-9]+', sops_yaml)
     sops_key = sops_key_m.group() if sops_key_m else None
+    if not sops_key:
+        # Both AGENTS.md age-key branches below are gated on sops_key with no
+        # else — the CRITICAL mismatch check just disappears.
+        DEGRADED.record("s6_readme_claude_currency", ".sops.yaml age key",
+                        "not extractable — AGENTS.md age-key check skipped")
 
     agents_path = REPO_ROOT / "AGENTS.md"
     claude_path = REPO_ROOT / "CLAUDE.md"
@@ -985,8 +1140,11 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
         cprint(C.YELLOW, f"  {WARNING} CLAUDE.md missing")
 
     # Check AGENTS.md age key (authoritative source)
+    if not agents_path.exists():
+        DEGRADED.record("s6_readme_claude_currency", "AGENTS.md",
+                        "absent — age-key check skipped entirely")
     if agents_path.exists():
-        agents_content = read_file(agents_path)
+        agents_content = read_file(agents_path, scope="s6_readme_claude_currency")
         agents_key_m = re.search(r'age1[a-z0-9]+', agents_content)
         if sops_key and agents_key_m:
             agents_key = agents_key_m.group()
@@ -1009,7 +1167,9 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
     f = Findings()
     lines: list[str] = []
 
-    claude = read_file(REPO_ROOT / "CLAUDE.md")
+    # Unreadable (as opposed to missing — main() already exits on that) empties
+    # task_refs and silently skips the whole Taskfile-reference check.
+    claude = read_file(REPO_ROOT / "CLAUDE.md", scope="s7_coding_guidelines")
 
     # Check required tools are in PATH
     required_tools = ["task", "kubeconform", "talhelper", "kubectl", "sops", "flux", "talosctl"]
@@ -1033,14 +1193,16 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
     if task_refs:
         # Build list of defined tasks from Taskfile.yaml and .taskfiles/
         defined_tasks: set[str] = set()
-        taskfile_content = read_file(REPO_ROOT / "Taskfile.yaml")
+        # Inverse degrade: an unreadable Taskfile empties defined_tasks and
+        # reports EVERY documented `task X` as undefined.
+        taskfile_content = read_file(REPO_ROOT / "Taskfile.yaml", scope="s7_coding_guidelines")
         # Match task definitions: "  taskname:" at 2-space indent
         defined_tasks.update(re.findall(r'^  ([\w:]+):', taskfile_content, re.MULTILINE))
 
         taskfiles_dir = REPO_ROOT / ".taskfiles"
         if taskfiles_dir.is_dir():
             for tf in taskfiles_dir.rglob("*.yaml"):
-                tf_content = read_file(tf)
+                tf_content = read_file(tf, scope="s7_coding_guidelines")
                 defined_tasks.update(re.findall(r'^  ([\w:]+):', tf_content, re.MULTILINE))
 
         # Also accept namespace:task format by checking both parts
@@ -1076,9 +1238,16 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
 
     # Dynamically discover all SOPs (any .md not the template)
     discovered_sops = sorted(p for p in sops_dir.glob("*.md") if p.name != "SOP-TEMPLATE.md")
+    if not discovered_sops:
+        # Path.glob on a missing/unreadable directory yields empty WITHOUT
+        # raising, so both loops below vanish — an entire check family (44
+        # SOPs) goes silent behind a single missing-template WARNING.
+        DEGRADED.record("s7_coding_guidelines", "docs/sops/",
+                        "no SOPs discovered — compliance + path-reference checks did not run")
     for sop_path in discovered_sops:
         rel = f"docs/sops/{sop_path.name}"
-        content = read_file(sop_path)
+        # Inverse degrade: "" means all 11 required sections report missing.
+        content = read_file(sop_path, scope="s7_coding_guidelines")
 
         # Extract ## headings, strip optional "N) " numbering prefix
         headings = []
@@ -1127,7 +1296,8 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
     # Check kubernetes/ paths referenced in SOPs actually exist in repo
     sop_path_issues: list[str] = []
     for sop_path in discovered_sops:
-        sop_content = read_file(sop_path)
+        # "" yields no refs, which prints a GREEN "all path references exist".
+        sop_content = read_file(sop_path, scope="s7_coding_guidelines")
         refs = re.findall(r'`(kubernetes/[^`\s]+)`', sop_content)
         for ref in refs:
             ref_path = REPO_ROOT / ref
@@ -1163,6 +1333,9 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
 
     # Check *-current.md file ages
     output_files = sorted(runbooks_dir.glob("*-current.md"))
+    if not output_files:
+        DEGRADED.record("s8_runbook_coverage", "runbooks/*-current.md",
+                        "none discovered — snapshot freshness not evaluated")
     lines.append("**Runbook output freshness:**\n")
     for output_file in output_files:
         try:
@@ -1174,8 +1347,8 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
             else:
                 cprint(C.GREEN, f"  {OK} {output_file.name}: {age_days:.1f}d old")
                 lines.append(f"- {OK} `{output_file.name}`: {age_days:.1f}d old\n")
-        except Exception:
-            pass
+        except Exception as e:
+            DEGRADED.record("s8_runbook_coverage", _rel(output_file), repr(e))
 
     # Check runbook-script pairings
     lines.append("\n**Runbook-script pairs:**\n")
@@ -1243,7 +1416,8 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
                     lines.append(f"- {WARNING} `{runbook.name}`: no script found\n")
 
     # Check sensitive output files are gitignored (security/doc audit outputs)
-    gitignore = read_file(REPO_ROOT / ".gitignore")
+    # Inverse degrade: "" reports both sensitive outputs as un-gitignored.
+    gitignore = read_file(REPO_ROOT / ".gitignore", scope="s8_runbook_coverage")
     lines.append("\n**Gitignore coverage:**\n")
     # These outputs contain sensitive infrastructure findings and must never be committed
     sensitive_outputs = ["security-check-current.md", "doc-check-current.md"]
@@ -1284,6 +1458,9 @@ def s8_runbook_coverage() -> tuple[str, Findings, str]:
     lines.append("\n**SOP file freshness:**\n")
     sop_dir = REPO_ROOT / "docs" / "sops"
     sop_files = sorted(p for p in sop_dir.glob("*.md") if p.name != "SOP-TEMPLATE.md")
+    if not sop_files:
+        DEGRADED.record("s8_runbook_coverage", "docs/sops/",
+                        "no SOPs discovered — SOP freshness not evaluated")
     for sop_path in sop_files:
         rel = sop_path.relative_to(REPO_ROOT)
         if not sop_path.exists():
@@ -1487,6 +1664,8 @@ def main(argv: list[str] | None = None) -> int:
         git_head=git_head(),
     ) as writer:
         _emit_findings(writer, results)
+        # A degraded run must not let auto-close read "absent" as "resolved".
+        DEGRADED.apply(writer)
         writer.close(verdict=verdict)
 
     print()
