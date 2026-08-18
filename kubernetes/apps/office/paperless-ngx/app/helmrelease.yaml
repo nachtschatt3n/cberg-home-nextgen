@@ -21,7 +21,8 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 1
+      retries: 0
+      remediateLastFailure: false
   uninstall:
     keepHistory: false
   values:
@@ -30,7 +31,7 @@ spec:
         allowInsecureImages: true
     image:
       repository: ghcr.io/paperless-ngx/paperless-ngx
-      tag: "2.20.15"
+      tag: "3.0.5"
       pullPolicy: IfNotPresent
     env:
       TZ: UTC
@@ -64,11 +65,17 @@ spec:
       PAPERLESS_CONSUMER_DELETE_DUPLICATES: true
       PAPERLESS_CONSUMER_RECURSIVE: true
       PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS: true
-      PAPERLESS_CONSUMER_POLLING: 10
+      # Renamed in v3 (was PAPERLESS_CONSUMER_POLLING). MUST stay > 0: /consume is a
+      # CIFS mount written by the validator pod, and native fs events never fire for
+      # a remote SMB write — interval 0 would silently stop all scanner ingestion.
+      PAPERLESS_CONSUMER_POLLING_INTERVAL: 10
+      # v3 decoupled archive generation from OCR mode; v2 default always created an
+      # archive. Set explicitly to preserve that behaviour (migration guide).
+      PAPERLESS_ARCHIVE_FILE_GENERATION: "always"
+      # ZXING is the only barcode backend as of v3 (pyzbar removed upstream) —
+      # PAPERLESS_CONSUMER_BARCODE_SCANNER no longer exists. PATCHT splitting is
+      # unchanged. See docs/sops/paperless.md.
       PAPERLESS_CONSUMER_ENABLE_BARCODES: true
-      # ZXING detects the PATCHT separator barcode far more reliably than the
-      # default pyzbar, especially on 300dpi duplex scans from the ES-580W.
-      PAPERLESS_CONSUMER_BARCODE_SCANNER: "ZXING"
       # Organize stored media by year/correspondent. REMOVE_NONE drops the path
       # segment when a field is unset (paperless-ai assigns the correspondent
       # only after ingest, so fresh docs are briefly None — without this they'd
