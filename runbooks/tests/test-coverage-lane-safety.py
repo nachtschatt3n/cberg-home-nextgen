@@ -183,6 +183,11 @@ class DedupeTest(unittest.TestCase):
         self.assertTrue(cov._is_truncated("v0.144.1-noble-ful..."))
         self.assertFalse(cov._is_truncated("v0.144.1-noble-full"))
 
+    def test_prerelease_marker_survives_dedupe(self):
+        """A dedupe that erases the marker would re-open the AUTO lane."""
+        self.assertNotEqual(cov._dedupe_tag("1.2.3"), cov._dedupe_tag("1.2.3-beta"))
+        self.assertEqual(cov._dedupe_tag("1.2.3-alpine"), cov._dedupe_tag("1.2.3"))
+
     def test_different_versions_still_differ(self):
         self.assertNotEqual(cov._dedupe_tag("v0.144.1-noble-full"),
                             cov._dedupe_tag("v0.144.2-noble-full"))

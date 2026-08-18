@@ -209,10 +209,18 @@ def ar_prerelease_holds() -> dict:
         blob = (just or "").lower()
         if not any(p in blob for p in _AR_PRERELEASE_PHRASES):
             continue
-        # the description names the image/component, e.g. `koush/scrypted`
-        for tok in re.split(r"[\s/:,]+", str(desc or "")):
-            tok = tok.strip().lower()
-            if len(tok) > 3:
+        # The description names the image, e.g. `koush/scrypted` — take the
+        # IMAGE NAME (last path segment, version suffix dropped), not every
+        # word in it. Splitting on all separators registered generic tokens
+        # ("image", "chart", "nvr") as component keys and could attach a
+        # confusing hold reason to an unrelated app.
+        for chunk in str(desc or "").split():
+            chunk = chunk.strip().strip(",;")
+            # image-ish only: a bare prose word is never a component key
+            if not any(ch in chunk for ch in "/-."):
+                continue
+            tok = chunk.split(":")[0].rstrip("/").split("/")[-1].lower()
+            if len(tok) > 3 and re.fullmatch(r"[a-z0-9][a-z0-9._-]*", tok):
                 _AR_HOLDS_CACHE.setdefault(tok, ar_id)
     return _AR_HOLDS_CACHE
 
@@ -640,7 +648,12 @@ def _dedupe_tag(v) -> str:
     """
     s = _TRUNC.sub("", str(v or "").strip()).lstrip("vV")
     m = re.match(r"\d+(?:\.\d+)*", s)
-    return m.group(0) if m else s.lower()
+    core = m.group(0) if m else s.lower()
+    # A pre-release marker must SURVIVE dedupe. Without this, `1.2.3` (table)
+    # and `1.2.3-beta` (detail) collide on one key, the beta record loses the
+    # merge, and the surviving row has no marker left for the channel gate to
+    # see — the dedupe would quietly re-open the very door this file closes.
+    return core + ("-pre" if _PRERELEASE_TAG.search(s) else "")
 
 
 def _apply_lockstep(lanes, needs_plan):
