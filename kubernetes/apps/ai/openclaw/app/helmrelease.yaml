@@ -706,6 +706,36 @@ spec:
                   // dispatch on the OAuth path.
                   const chosenModel = process.env.OPENCLAW_DEFAULT_MODEL || displayModel;
                   cfg.agents.defaults.model.primary = chosenModel;
+                  // MODEL FAILOVER CHAIN (2026-08-18). agents.defaults.model is
+                  // AgentModelSchema = union([string, {primary, fallbacks[]}]).strict()
+                  // (dist/zod-schema.agent-runtime-*.js) — the key is `fallbacks`
+                  // (PLURAL, ordered array); a singular `fallback` is REJECTED by
+                  // .strict(). Consumed by resolveAgentModelFallbackValues() in
+                  // dist/model-input-*.js, read from agents.defaults.model in
+                  // dist/model-fallback-*.js.
+                  //
+                  // WHY: codex has TWO independent failure modes that both kill
+                  // every turn when there is no chain — (1) ChatGPT OAuth refresh
+                  // drift ("No API key for provider openai"), (2) Codex subscription
+                  // quota exhaustion ("You've reached your Codex subscription usage
+                  // limit", classified reason=rate_limit). On 2026-08-18 mode (2)
+                  // took chat + skills + the morning briefing down for ~2 days.
+                  //
+                  // The harness is resolved PER CANDIDATE, so the chain legitimately
+                  // switches from the codex plugin harness to the embedded openclaw
+                  // runtime for the ollama rungs. Verified live: fallback decision
+                  // candidate_failed(gpt-5.6-terra, rate_limit) -> candidate_succeeded
+                  // (ollama/gemma4:26b).
+                  //
+                  // Only models present in models.providers.ollama.models[] AND
+                  // pulled on the Mac mini are valid rungs. gemma4:e2b is NOT pulled
+                  // (host has gemma4:26b + gemma4:e2b-mlx only) — do not add it, a
+                  // dead rung just burns a retry.
+                  //
+                  // rate_limit is a cooldown-probeable reason, so the primary is
+                  // re-probed automatically and traffic returns to codex on its own
+                  // once quota resets. No manual revert needed.
+                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b', 'ollama/gemma4:e2b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
                   if (chosenModel.startsWith('openai/')) {
                     cfg.agents.defaults.models = cfg.agents.defaults.models || {};

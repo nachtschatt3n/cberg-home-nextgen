@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.07.12`
-> Last Updated: `2026-07-12`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -186,6 +186,82 @@ AI agent platform.
 ```bash
 kubectl get pods -n ai -l app.kubernetes.io/name=openclaw
 # Access: https://openclaw.${SECRET_DOMAIN}
+```
+
+#### Model failover chain (added 2026-08-18)
+
+The primary model runs through the **Codex harness on ChatGPT OAuth**, which has
+two independent ways to fail — both of which took *every* turn down (chat,
+skills, cron dispatch) while `agents.defaults.model` carried a bare `primary`
+and no fallbacks. It now degrades to the local Ollama models instead:
+
+```jsonc
+// ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
+"agents": { "defaults": { "model": {
+  "primary":   "openai/gpt-5.6-terra",              // Codex harness / ChatGPT OAuth
+  "fallbacks": ["ollama/gemma4:26b",                // quality tier, 131k ctx
+                "ollama/gemma4:e2b-mlx"]            // small/fast last resort
+}}}
+```
+
+Schema facts (verified against the installed 2026.6.11 bundle, not guessed):
+
+- The validator is `AgentModelSchema = union([string(), object({primary, fallbacks:
+  array(string())}).strict()])` in `dist/zod-schema.agent-runtime-*.js`. The key is
+  **`fallbacks` — plural, an ordered array**. Because the object is `.strict()`, a
+  singular `fallback` key is **rejected** and the gateway fails config validation.
+- Consumed by `resolveAgentModelFallbackValues()` (`dist/model-input-*.js`), read
+  from `agents.defaults.model` in `dist/model-fallback-*.js`.
+- **The harness is resolved per candidate**, so the chain legitimately switches
+  from the codex plugin harness to the embedded OpenClaw runtime for the Ollama
+  rungs. This is the whole point — a codex-side outage does not strand the agent.
+- **Crons inherit the chain even though they pin a model.** A cron payload model
+  sets `modelOverrideSource="auto"`, which is explicitly *not* the `return []`
+  branch in `resolveEffectiveModelFallbacks` (`dist/agent-scope-*.js`); it falls
+  through to `defaultFallbacks`. So the morning briefing and the sweep cron are
+  covered.
+- Changing `fallbacks` is **hot-reloaded** — no pod roll needed. Watch for
+  `[reload] config hot reload applied (agents.defaults.model.fallbacks)`.
+- Only models that are BOTH in `models.providers.ollama.models[]` AND pulled on
+  the Mac mini are valid rungs. `gemma4:e2b` is **not** pulled (the host has
+  `gemma4:26b` and `gemma4:e2b-mlx`); a dead rung only burns a retry.
+
+The init script sets `model.primary` unconditionally from `OPENCLAW_DEFAULT_MODEL`
+on every boot but never touched `fallbacks`, so the chain is now written there too
+— a PVC rebuild cannot silently lose it.
+
+##### Which codex failure mode am I in?
+
+Both present as "the agent answers nothing", so check auth **before** blaming the
+quota — the ChatGPT *app* quota is separate from the Codex CLI quota:
+
+```bash
+OC=$(kubectl -n ai get pod -l app.kubernetes.io/instance=openclaw -o jsonpath='{.items[0].metadata.name}')
+kubectl -n ai exec "$OC" -c app -- codex login status
+```
+
+| Signal | Mode 1 — OAuth refresh drift | Mode 2 — subscription quota |
+|---|---|---|
+| `codex login status` | NOT logged in / errors | `Logged in using ChatGPT` |
+| Dispatch error | `No API key for provider openai` | `You've reached your Codex subscription usage limit. Next reset in N days` |
+| Classified reason | `auth` / `auth_permanent` | `rate_limit` |
+| Fix | operator must re-login in a browser: `kubectl exec -it -n ai deploy/openclaw -c app -- codex login --device-auth` | none — wait for the reset |
+| Self-heals? | No | **Yes** |
+
+`rate_limit` is a cooldown-probeable reason (`shouldAllowCooldownProbeForReason`
+in `dist/model-fallback-*.js`), so the primary is periodically re-probed and
+traffic returns to codex automatically once quota resets. **No manual revert is
+required after a quota window** — the chain is permanent config, not a temporary
+model switch.
+
+Confirm a failover actually happened (rather than a silent total failure):
+
+```bash
+kubectl -n ai logs "$OC" -c app --tail=400 | grep "model-fallback/decision"
+# healthy degrade looks like:
+#   decision=candidate_failed  requested=openai/gpt-5.6-terra reason=rate_limit next=ollama/gemma4:26b
+#   decision=candidate_succeeded requested=openai/gpt-5.6-terra candidate=ollama/gemma4:26b
+# "next=none" means NO fallbacks are configured — the chain is missing.
 ```
 
 **Voice / TTS:** `say.py` uses the local **Qwen3-TTS** (mlx-audio,
