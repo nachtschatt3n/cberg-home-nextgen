@@ -31,7 +31,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: validator
-          image: ghcr.io/paperless-ngx/paperless-ngx:2.20.15
+          image: ghcr.io/paperless-ngx/paperless-ngx:3.0.5
           imagePullPolicy: IfNotPresent
           command: ["python3", "/scripts/validator.py"]
           env:
