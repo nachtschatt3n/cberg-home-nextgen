@@ -285,25 +285,74 @@ safe_count() {
     fi
 }
 
-# Authoritative backup-freshness signal: the newest lastBackupAt across all
-# Longhorn volumes, in whole hours. Used when the backup Job object has been
-# TTL-reaped (expected after a successful run) so absence of the Job doesn't
-# read as "no backups". Prints an integer hour count, or "NONE" if no volume
-# has ever recorded a backup timestamp. See docs/sops/monitoring.md.
+# Authoritative backup-freshness signal, judged PER VOLUME. For each Longhorn
+# volume the freshest evidence wins: the newest Completed Backup CR carrying
+# its backup-volume label OR volume.status.lastBackupAt — whichever is newer.
+# Why: under parallel backup load the CIFS backup store's volume.cfg rewrite
+# can be lost, so lastBackupAt lags a full backup cycle even though the
+# Backup CR Completed; the status only self-corrects at the NEXT backup.
+# Judging from lastBackupAt alone therefore produces false "stale backup"
+# findings (2026-08-18: 16/93 volumes lagged a day). See docs/sops/backup.md.
+# Default output: age in whole hours of the STALEST volume's freshest signal
+# (any volume without a recent backup drives the number up), or "NONE" if no
+# volume has any backup evidence at all. Used when the backup Job object has
+# been TTL-reaped (expected after a successful run) so absence of the Job
+# doesn't read as "no backups". With --per-volume, prints one line per volume
+# instead: "<volume> <age>h <FRESH|STALE> (<source>)" against a 25h cutoff —
+# for standalone verification.
 longhorn_backup_age_hours() {
-    kubectl get volumes -n storage -o json 2>/dev/null | python3 -c "
+    local mode="${1:-}"
+    { kubectl get volumes -n storage -o json 2>/dev/null; \
+      kubectl get backups -n storage -o json 2>/dev/null; } | python3 -c "
 import sys, json, datetime
+mode = '$mode'
+raw = sys.stdin.read()
+dec = json.JSONDecoder()
+docs, idx = [], 0
 try:
-    items = json.load(sys.stdin).get('items', [])
+    while idx < len(raw):
+        while idx < len(raw) and raw[idx].isspace():
+            idx += 1
+        if idx >= len(raw):
+            break
+        obj, idx = dec.raw_decode(raw, idx)
+        docs.append(obj)
 except Exception:
+    pass
+vols = docs[0].get('items', []) if len(docs) > 0 else []
+backups = docs[1].get('items', []) if len(docs) > 1 else []
+now = datetime.datetime.now(datetime.timezone.utc)
+def age_h(ts):
+    t = datetime.datetime.fromisoformat(ts.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
+    return (now - t).total_seconds() / 3600.0
+newest_cr = {}
+for b in backups:
+    if b.get('status', {}).get('state') != 'Completed':
+        continue
+    vol = b.get('metadata', {}).get('labels', {}).get('backup-volume')
+    ts = b.get('metadata', {}).get('creationTimestamp')
+    if not vol or not ts:
+        continue
+    if ts > newest_cr.get(vol, ''):
+        newest_cr[vol] = ts
+rows = []
+for v in vols:
+    name = v.get('metadata', {}).get('name', '')
+    cands = []
+    if name in newest_cr:
+        cands.append((age_h(newest_cr[name]), 'backup-cr'))
+    lb = v.get('status', {}).get('lastBackupAt')
+    if lb:
+        cands.append((age_h(lb), 'lastBackupAt'))
+    if cands:
+        rows.append((name,) + min(cands))
+if not rows:
     print('NONE'); sys.exit()
-times = [v.get('status', {}).get('lastBackupAt') for v in items
-         if v.get('status', {}).get('lastBackupAt')]
-if not times:
-    print('NONE'); sys.exit()
-latest = max(times)
-t = datetime.datetime.fromisoformat(latest.rstrip('Z')).replace(tzinfo=datetime.timezone.utc)
-print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() // 3600))
+if mode == '--per-volume':
+    for name, a, srcname in sorted(rows, key=lambda r: -r[1]):
+        print(f'{name} {int(a)}h ' + ('FRESH' if a < 25 else 'STALE') + f' ({srcname})')
+else:
+    print(int(max(r[1] for r in rows)))
 " 2>/dev/null || echo "NONE"
 }
 
@@ -700,10 +749,10 @@ print(b[0]['metadata']['name'] if b else '')
             log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
             add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
         elif [ "$BACKUP_AGE_H" -gt 48 ]; then
-            log_warning "Backup job reaped; latest Longhorn backup is stale: ${BACKUP_AGE_H}h ago"
-            add_major_issue "Backup stale: latest Longhorn lastBackupAt was ${BACKUP_AGE_H}h ago (expected daily)"
+            log_warning "Backup job reaped; stalest Longhorn volume's newest backup is ${BACKUP_AGE_H}h old"
+            add_major_issue "Backup stale: stalest Longhorn volume's newest backup evidence (Backup CR / lastBackupAt) was ${BACKUP_AGE_H}h ago (expected daily)"
         else
-            log_success "Backup job reaped (TTL) but Longhorn backups fresh (latest: ${BACKUP_AGE_H}h ago)"
+            log_success "Backup job reaped (TTL) but Longhorn backups fresh (stalest volume: ${BACKUP_AGE_H}h ago)"
         fi
     fi
 
@@ -1514,10 +1563,10 @@ print(b[0]['metadata']['name'] if b else '')
             log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
             add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
         elif [ "$BACKUP_AGE_H" -gt 48 ]; then
-            log_warning "Backup job reaped; latest Longhorn backup is stale: ${BACKUP_AGE_H}h ago"
-            add_major_issue "Backup stale: latest Longhorn lastBackupAt was ${BACKUP_AGE_H}h ago (expected daily)"
+            log_warning "Backup job reaped; stalest Longhorn volume's newest backup is ${BACKUP_AGE_H}h old"
+            add_major_issue "Backup stale: stalest Longhorn volume's newest backup evidence (Backup CR / lastBackupAt) was ${BACKUP_AGE_H}h ago (expected daily)"
         else
-            log_success "Backup job reaped (TTL) but Longhorn backups fresh (latest: ${BACKUP_AGE_H}h ago)"
+            log_success "Backup job reaped (TTL) but Longhorn backups fresh (stalest volume: ${BACKUP_AGE_H}h ago)"
         fi
     fi
 

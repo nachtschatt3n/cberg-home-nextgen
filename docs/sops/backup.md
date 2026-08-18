@@ -3,8 +3,8 @@
 > Standard Operating Procedures for cluster backup management.
 > Covers Longhorn volume backups and external backup integrations.
 > Description: Running, validating, and restoring Longhorn/iCloud backup workflows.
-> Version: `2026.08.08`
-> Last Updated: `2026-08-08`
+> Version: `2026.08.18`
+> Last Updated: `2026-08-18`
 > Owner: `Platform`
 
 ---
@@ -65,6 +65,10 @@ kubectl get volumes -n storage \
   -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt --no-headers
 ```
 
+> **Caveat:** `lastBackupAt` can lag a full backup cycle even when the backup
+> succeeded — cross-check the volume's Backup CRs before declaring it stale
+> (see Troubleshooting: "lastBackupAt Can Lag").
+
 ---
 
 ## Verification Tests
@@ -93,7 +97,10 @@ Expected:
 - Critical volumes have recent backup timestamps.
 
 If failed:
-- Check backup target configuration and Longhorn manager logs.
+- First rule out the `lastBackupAt` status lag: check the volume's newest
+  Completed Backup CR (see Troubleshooting: "lastBackupAt Can Lag") — a fresh
+  Completed CR with an old `lastBackupAt` means the backup DID run.
+- Otherwise check backup target configuration and Longhorn manager logs.
 
 ---
 
@@ -138,10 +145,19 @@ kubectl get volumes -n storage \
   -o custom-columns=NAME:.metadata.name,SIZE:.spec.size,LAST_BACKUP:.status.lastBackupAt \
   --no-headers | sort
 
+# Ground truth per volume: the newest Completed Backup CR (lastBackupAt can lag)
+kubectl get backups -n storage -l backup-volume=<volume> \
+  --sort-by=.metadata.creationTimestamp \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.state,CREATED:.metadata.creationTimestamp | tail -3
+
 # Via Longhorn UI
 kubectl port-forward -n storage svc/longhorn-frontend 8080:80 &
 # Open http://localhost:8080 → Backup → verify volumes listed with recent timestamps
 ```
+
+> **Caveat:** `lastBackupAt` can lag a full backup cycle even when the backup
+> succeeded — cross-check the volume's Backup CRs before declaring it stale
+> (see Troubleshooting: "lastBackupAt Can Lag").
 
 ---
 
@@ -264,6 +280,9 @@ kubectl wait --for=condition=complete \
   -n storage --timeout=3600s
 
 # 3. Verify all volumes backed up
+#    NOTE: lastBackupAt can lag one cycle — for any volume that looks stale,
+#    cross-check its newest Completed Backup CR before re-running the backup
+#    (see Troubleshooting: "lastBackupAt Can Lag")
 kubectl get volumes -n storage \
   -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt \
   --no-headers | awk '{ print $1, $2 }'
@@ -288,6 +307,10 @@ kubectl get jobs -n storage --sort-by='.status.startTime' | tail -5
 kubectl get jobs -n storage | grep -i fail
 
 # 4. Are volumes backing up?
+#    NOTE: a STALE hit here is not proof of a failed backup — lastBackupAt can
+#    lag one cycle; confirm via the volume's Completed Backup CRs first.
+#    runbooks/health-check.sh longhorn_backup_age_hours() already judges
+#    per-volume freshness Backup-CR-first with lastBackupAt as fallback.
 kubectl get volumes -n storage \
   -o custom-columns=NAME:.metadata.name,LAST_BACKUP:.status.lastBackupAt \
   --no-headers | awk -v cutoff="$(date -d '2 days ago' -Iseconds 2>/dev/null || date -v-2d -Iseconds)" \
@@ -297,6 +320,33 @@ kubectl get volumes -n storage \
 ---
 
 ## Troubleshooting
+
+### lastBackupAt Can Lag — Verify via Backup CRs
+
+`volume.status.lastBackupAt` is derived from the per-volume `volume.cfg` file
+in the backup store, which Longhorn rewrites after every backup. Under
+parallel backup load (the nightly all-volumes job) that rewrite on the CIFS
+backup target can get lost (soft/cache=loose mount semantics), so
+`lastBackupAt` keeps the PREVIOUS backup's timestamp even though the new
+backup completed — and it only self-corrects at the NEXT successful backup.
+Observed 2026-08-18: 16/93 volumes showed a day-old `lastBackupAt` despite
+same-day Completed Backup CRs. This is a status-reporting lag, not a failed
+backup — do NOT change the CIFS mount options for it, and do not re-trigger
+backups based on `lastBackupAt` alone.
+
+Ground truth is the Backup CR:
+
+```bash
+# Newest Backup CRs for one volume — a Completed CR <25h old means the
+# backup ran, regardless of what lastBackupAt says
+kubectl get backups -n storage -l backup-volume=<volume> \
+  --sort-by=.metadata.creationTimestamp \
+  -o custom-columns=NAME:.metadata.name,STATE:.status.state,CREATED:.metadata.creationTimestamp | tail -3
+```
+
+`runbooks/health-check.sh` (`longhorn_backup_age_hours`, incl.
+`--per-volume`) implements this judgment: newest Completed Backup CR per
+volume first, `lastBackupAt` as fallback.
 
 ### Backup Job Failing
 
