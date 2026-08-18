@@ -95,7 +95,9 @@ spec:
                 memory: 1Gi
             securityContext:
               allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: false
+              # All write paths are mounted: /app/{prompts,config,db} +
+              # /home/paperless-gpt + /tmp emptyDirs (see persistence below).
+              readOnlyRootFilesystem: true
               capabilities: { drop: ["ALL"] }
 
         pod:
@@ -166,6 +168,12 @@ spec:
           main:
             main:
               - path: /home/paperless-gpt
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /tmp
       # Override only the OCR prompt (the shipped default encourages
       # hallucination). subPath leaves the other templates on the emptyDir,
       # which paperless-gpt populates with its defaults on startup.
