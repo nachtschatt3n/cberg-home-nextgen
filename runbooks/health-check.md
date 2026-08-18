@@ -33,6 +33,15 @@ If this runbook uncovers a reusable fix and no SOP exists yet:
 # - Issues only: /tmp/health-check-issues-YYYYMMDD-HHMMSS.txt
 ```
 
+The script also writes findings to sweep-history Postgres when
+`--postgres-dsn`/`SWEEP_PG_DSN` is set. **A complete run auto-closes this
+section's open findings that it did not re-emit.** Auto-close is section-scoped
+and fires only on an ORCHESTRATED run (`SWEEP_CYCLE_ID` present in the env —
+i.e. launched by `runbooks/sweep-run.py` or the daily-operation fan-out); an
+ad-hoc standalone run does NOT auto-close unless you opt in with
+`SWEEP_AUTOCLOSE=1`. Set `SWEEP_AUTOCLOSE=0` to always disable it, or
+`SWEEP_AUTOCLOSE_DRYRUN=1` to see what would close without writing.
+
 **What the script checks (automatically):**
 - Cluster events, failed jobs, certificate readiness and 14-day expiry
 - DaemonSet, Deployment, StatefulSet, and Pod health
