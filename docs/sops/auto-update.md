@@ -161,7 +161,13 @@ print('held:', [(c['dep'],c['gate']) for c in d['held']])"
 
 Every `safe` entry MUST be patch/minor, absent from the deny-list, and have
 green CI. Every known-risky component (affine, app-template, mariadb-minor,
-Talos, nextcloud, openclaw) MUST appear in `held`.
+Talos, nextcloud, openclaw, scrypted, unpoller) MUST appear in `held`.
+
+Note there are now TWO safe definitions, deliberately: G1 above governs the
+PR-MERGE half, while the no-PR **direct-bump** half reads `coverage.py`'s AUTO
+lane, which is stricter — it also excludes pre-release channels, 0.x
+release-line moves and lockstep-coupled items. See
+`docs/sops/maintenance-windows.md` §Coverage guarantee → AUTO disqualifiers.
 
 ### Test 2: policy + parse gates (offline unit check)
 

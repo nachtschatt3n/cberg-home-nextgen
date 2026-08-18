@@ -51,6 +51,19 @@ PR exists (CI-gated), direct-bump when it doesn't — so **no safe update ever
 stalls waiting on Renovate.** REBUILD-lane items (self-built) and PLAN-lane items
 are NOT touched here — they go through their source-repo rebuild / vetted plans.
 
+**The AUTO lane you read is already post-gate — never re-promote a PLAN item
+into this batch.** Since 2026-08-18 `assign_lane()` also keeps out of AUTO:
+pre-release/beta channels (an explicit tag marker, a `CHANNEL_RULES` predicate
+such as scrypted's odd-minor stable channel, or an active AR declaring the
+channel unacceptable — the gate sits ABOVE the Renovate-PR shortcut, so a PR
+does not launder a beta), 0.x release-line moves (at major 0 the minor is the
+breaking axis), and anything lockstep-coupled to a held sibling of the same
+component (`lockstep` in the `--json` output — e.g. a chart whose image major
+is PLAN-held; its plan must describe BOTH halves). Note you run `coverage.py`
+WITHOUT `SWEEP_PG_DSN`, so only the tag-marker and git-tracked `CHANNEL_RULES`
+layers gate here — that offline property is exactly why the rule lives in git
+and not in the policy DB.
+
 Report what merged, what was direct-bumped, and any revert. This runs in EVERY
 window (incl. no-reboot tue/thu), so safe bumps flow automatically without an
 operator asking. Auto-reverts are already surfaced via OpenClaw — note and

@@ -206,8 +206,10 @@ needs their decision, and what got auto-fixed.
         .venv/bin/python3 runbooks/coverage.py --json
 
     Lanes: **AUTO** (safe → applied in the window, rule 4c/window Step 0),
-    **PLAN** (major/deny-listed → needs an assessed window plan), **REBUILD**
-    (self-built `ghcr.io/nachtschatt3n/*` → rebuild in its source repo),
+    **PLAN** (major / deny-listed / pre-release channel / 0.x release-line move /
+    lockstep-coupled to a held sibling → needs an assessed window plan),
+    **REBUILD** (image repo is `ghcr.io/nachtschatt3n/*` → rebuild in its source
+    repo; matched on the IMAGE, not the app name),
     **HELD** (explicitly accepted), **CRACK** (unclassifiable — must be zero).
     Then:
     - **For EVERY `needs_plan` item, dispatch an `upgrade-planner-agent`** (one
@@ -223,13 +225,16 @@ needs their decision, and what got auto-fixed.
       in the summary. **REBUILD** items are a ⚠️ human action-row ("rebuild
       `<img>` in its source repo → new tag → cberg-agent bump"), since the
       cluster pipeline can't tag-bump them.
+    - **Surface `lockstep`** from `--json`: items pulled OUT of AUTO because a
+      sibling of the same component is held. They are covered by that sibling's
+      plan, which must now describe BOTH halves — say so in the summary.
     - The **AUTO lane applies in the maintenance WINDOW** (window-agent Step 0,
       hybrid: merge the Renovate PR if present, else direct-bump), NOT in this
       read-only sweep.
 
 4d. **Check the maintenance-window schedule + keep held updates planned.**
     Everything the auto-updater HELD (rule 4c) is a non-safe update that flows
-    to a scheduled maintenance window (`runbooks/maintenance-windows.yaml`, 3/
+    to a scheduled maintenance window (`runbooks/maintenance-windows.yaml`, 7/
     week). Run the reconciler:
 
         .venv/bin/python3 runbooks/maintenance-plan.py --json

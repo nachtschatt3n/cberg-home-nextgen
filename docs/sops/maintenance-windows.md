@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 
 ## 1) Description
 
@@ -66,6 +66,21 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
     (window-agent Step 0, **hybrid** — merge the Renovate PR if one exists, else
     **direct-bump** the manifest tag, so a safe update never stalls waiting on
     Renovate's schedule).
+    **AUTO disqualifiers (2026-08-18)** — a safe-looking semver label is not
+    sufficient; `assign_lane()` also routes to PLAN when:
+    1. the target is a **pre-release**: an explicit tag marker (`-beta`, `-rc`,
+       `-nightly`, …), a `CHANNEL_RULES` predicate for an upstream that pushes
+       betas to the stable repo (scrypted cuts stable on ODD minors only, so
+       v0.144.x is beta), or an active AR declaring the component's pre-release
+       channel unacceptable. The gate sits ABOVE the Renovate-PR shortcut — an
+       open PR does not launder a beta. Layers 1-2 are git-tracked on purpose:
+       the window agent runs `coverage.py` without `SWEEP_PG_DSN`, so a DB-only
+       gate would fail OPEN exactly where it matters.
+    2. it is a **0.x release-line move** (`0.175 → 0.178`): at major 0 the minor
+       is the breaking axis (same doctrine as `_release_line`).
+    3. it is **lockstep-coupled**: a sibling of the same component is PLAN/HELD,
+       so a chart must not move ahead of its held image (or vice versa). These
+       appear under the `lockstep` key in `coverage.py --json`.
   - **PLAN** — major/deny-listed: needs an assessed window plan. The sweep (rule
     4d0) dispatches an `upgrade-planner-agent` for **every** `needs_plan` item —
     the whole non-safe universe, not just deny-listed open PRs — so the PLAN lane
@@ -227,6 +242,8 @@ unresolved `INTERFERENCE` for any window with a date in the future.
 | Plan marked STALE | PR target moved / >stale_after_days old | re-run the planner; supersede the old file |
 | ORPHAN plan | PR merged/closed elsewhere | set `status: superseded` or delete the file |
 | MISSED window warning | window date passed, plans unexecuted | run `maintenance-window-agent` for the next slot; investigate why it didn't fire |
+| `next window` shows a time already in the PAST | `next_occurrence()` ignored `start_hhmm`, so a same-weekday window was always dated TODAY (F-f95a8b52, fixed 2026-08-18) | today's slot now rolls +7d once its start time has passed; re-check with `maintenance-plan.py --json` |
+| A beta/pre-release tag appears in the AUTO lane | a `CHANNEL_RULES` entry is missing for an upstream that pushes pre-releases to the stable repo | add the component to `CHANNEL_RULES` in `runbooks/coverage.py` (a channel PREDICATE, e.g. `odd-minor`, not a version pin) and a deny rule for the Renovate-PR path; see §Coverage guarantee → AUTO disqualifiers |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
 | Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |
@@ -312,4 +329,5 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 |---|---|---|
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |
+| 2026.08.19 | 2026-08-19 | Documented the **AUTO-lane disqualifiers** (pre-release channel gate incl. `CHANNEL_RULES`, 0.x release-line moves, chart↔image lockstep) and the two troubleshooting rows for them + the past-dated `next window` bug (F-f95a8b52). |
 | 2026.08.16 | 2026-08-16 | Cadence 4 windows/week -> **7 (daily)**: added Mon/Wed/Fri 05:00 60m no-reboot slots, all windows at `capacity_risk: 6`. Drains the plan queue to 2026-09-13 instead of late October. Soaks are NOT compressible by the extra slots. |

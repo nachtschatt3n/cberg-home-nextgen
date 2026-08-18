@@ -23,7 +23,12 @@ because the fix lives in a *different* repo. It has recurred (absenty 2026-08-14
 ha-ai-harness 2026-08-15) and will recur on every first-party image as its base drifts.
 
 - Scope: every `ghcr.io/nachtschatt3n/*` image referenced by a HelmRelease in
-  `kubernetes/apps/**`. Current set is tracked in `runbooks/coverage.py` (`SELF_BUILT`).
+  `kubernetes/apps/**`. The REBUILD lane is decided on the **image repository**
+  (`SELF_BUILT_REPO_PREFIXES` / `_is_self_built_repo()` in `runbooks/coverage.py`),
+  NOT on the app name; the `SELF_BUILT` component set is only a fallback for rows
+  whose image repo the version report does not carry. Adding an app name to
+  `SELF_BUILT` because it *hosts* third-party images is the over-capture bug
+  F-62007db7 (paperclip owns no self-built image).
 - Prerequisites: push access to the source repo, `gh auth token` (GHCR read for trivy),
   `mise exec -- trivy`, `kubectl`, `flux`.
 - Out of scope: third-party image bumps (`docs/sops/application-update.md`), chart
@@ -38,7 +43,7 @@ ha-ai-harness 2026-08-15) and will recur on every first-party image as its base 
 | Namespace | varies (the app's own) |
 | Source of truth (cluster) | `kubernetes/apps/{ns}/{app}/app/helmrelease.yaml` |
 | Source of truth (image) | the app's own GitHub repo under `nachtschatt3n/` |
-| Self-built inventory | `runbooks/coverage.py` → `SELF_BUILT` |
+| Self-built inventory | `runbooks/coverage.py` → `SELF_BUILT_REPO_PREFIXES` (image-matched); `SELF_BUILT` = component fallback |
 | Coverage lane | `REBUILD` (see `docs/sops/maintenance-windows.md` §lanes) |
 | Critical dependency | GHCR auth — trivy cannot scan these images without a token |
 
@@ -400,7 +405,7 @@ reconcile — never patch the Deployment directly (GitOps rule).
   on schedule while pushing nothing, if its GitRepository has no write credential.
   Check `lastPushCommit` before assuming a published tag was rolled out.
 - `docs/sops/vulnerability-disclosure.md` — **read before writing any CVE detail into a committed file**
-- `runbooks/coverage.py` — `SELF_BUILT` inventory and lane assignment
+- `runbooks/coverage.py` — image-matched REBUILD lane (`SELF_BUILT_REPO_PREFIXES`), `SELF_BUILT` fallback set
 - `runbooks/maintenance/plans/harness-frontend-vite7.md` — worked example of trap 5
 - Commits: `fb821821` (harness rebuild), `10adb8d6` (absenty plan),
   `1e160d5e` (GHCR token for trivy — the scan blind spot that hid all of this)
