@@ -342,6 +342,11 @@ print(f\"Ready: {ready['status'] if ready else 'Unknown'}\")
 
 ### Image variants: plain vs `-slim` — do NOT use `-slim` on 13.x
 
+> **Changing the Grafana image?** The reusable pre-flight gate — including the
+> throwaway-pod check that the PVC-leftover trap cannot fool — is
+> [grafana-image-changes.md](grafana-image-changes.md). This section is the
+> evidence for one rejected variant; that SOP is the procedure for any change.
+
 Tested and rejected 2026-08-18. Recording it because the reasoning is not
 derivable from the manifests and will otherwise be re-litigated at the next
 Grafana CVE bump. Scan figures stay on the finding record: `security_ref:
