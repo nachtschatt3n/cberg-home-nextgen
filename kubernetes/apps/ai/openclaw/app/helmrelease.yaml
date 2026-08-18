@@ -1157,6 +1157,57 @@ spec:
                     delete cfg.channels.discord;
                   }
 
+                  // Audio understanding — PIN whisper to `tiny`.
+                  //
+                  // 2026-08-18 outage: with no tools.media.audio.models
+                  // configured, openclaw falls through to resolveAutoEntries()
+                  // -> resolveLocalAudioEntry() -> resolveLocalWhisperEntry(),
+                  // which HARDCODES `whisper --model turbo` whenever a
+                  // `whisper` binary is on PATH (it is — init installs
+                  // openai-whisper). There is no env override for that model.
+                  //
+                  // large-v3-turbo is 1.6GB of weights and torch holds the
+                  // state_dict AND the instantiated model at once, in fp32 on
+                  // CPU ("FP16 is not supported on CPU"). Measured in-pod:
+                  //   turbo -> cgroup peak 8.36 GiB, never finished (60s cap)
+                  //   tiny  -> peak 846 MiB, finished in 7s, correct German
+                  // So turbo NEVER produced a transcript here; it only
+                  // OOMKilled the 4Gi container. A single unacked 2.4s
+                  // Telegram voice note then replayed on every boot and turned
+                  // that into a self-sustaining crashloop.
+                  //
+                  // An explicitly configured entry short-circuits the auto
+                  // resolver entirely (resolveModelEntries() wins; the auto
+                  // path only runs when the list is empty), so this is the
+                  // supported fix rather than hiding the binary from PATH.
+                  // Default timeout is 60s per capability — raised so a longer
+                  // note cannot silently fail the way turbo did.
+                  cfg.tools = cfg.tools || {};
+                  cfg.tools.media = cfg.tools.media || {};
+                  // Bound parallel transcodes; each whisper run is ~850MiB.
+                  cfg.tools.media.concurrency = 1;
+                  cfg.tools.media.audio = {
+                    ...(cfg.tools.media.audio || {}),
+                    enabled: true,
+                    timeoutSeconds: 300,
+                    models: [{
+                      type: 'cli',
+                      command: 'whisper',
+                      capabilities: ['audio'],
+                      timeoutSeconds: 300,
+                      // Keep BOTH --output_format txt and --output_dir:
+                      // resolveWhisperOutputPath() needs the pair to read the
+                      // .txt sidecar, else it falls back to timestamped stdout.
+                      args: [
+                        '--model', 'tiny',
+                        '--output_format', 'txt',
+                        '--output_dir', '{{OutputDir}}',
+                        '--verbose', 'False',
+                        '{{MediaPath}}',
+                      ],
+                    }],
+                  };
+
                   // Enable the coding-agent skill — all binaries (claude,
                   // codex, opencode, pi) are present; just needs config
                   // opt-in.
@@ -1717,19 +1768,16 @@ spec:
                 # toward 2GiB over ~40h (heartbeat dream-narrative jobs
                 # accumulate; not a hard leak).
                 #
-                # BAND-AID 2026-08-18: 4Gi -> 10Gi to break an OOMKill
-                # crashloop. A queued inbound Discord/Telegram voice note is
-                # transcribed at boot by the LOCAL `whisper --model turbo`
-                # CLI (openai-whisper, installed by this init script). The
-                # turbo weights are ~1.6GB and load fp32 on CPU (~3-4GiB
-                # peak) INSIDE this same cgroup, on top of the ~1GiB gateway
-                # heap -> instant OOM ~35s after boot. The media item is
-                # never acked, so every restart re-transcribes it: a poison
-                # pill. This limit is headroom to break the loop only.
-                # REMOVE once the transcription path is bounded (see the
-                # audio.transcription block below).
+                # 2026-08-18: briefly 10Gi as a band-aid during the
+                # whisper-turbo OOMKill crashloop; that cause is now fixed at
+                # source (tools.media.audio pins whisper to `tiny`, measured
+                # 846MiB peak vs turbo's 8.36GiB), so the band-aid is removed.
+                # Settling at 5Gi rather than the old 4Gi because the measured
+                # steady state has grown to ~2.3GiB (it was 1.1-1.3GiB when
+                # 4Gi was chosen in June), and a transcription adds ~850MiB on
+                # top -> 4Gi would leave under 1GiB of headroom.
                 cpu: 2
-                memory: 10Gi
+                memory: 5Gi
 
             securityContext:
               runAsNonRoot: true
