@@ -50,10 +50,15 @@
 #         `psql -f` without --single-transaction, so the two statements
 #         autocommitted independently: a failed ADD would have left the table
 #         with NO constraint. SQL-delivery fix only; resulting schema identical.
+#   v5b — make ck_findings_resolved_status SYMMETRIC and add lock_timeout. v5's
+#         one-directional CHECK still allowed resolved_at IS NULL AND
+#         status='resolved' — an open row the board HIDES, which is the more
+#         dangerous half of the split. Also bounds ACCESS EXCLUSIVE lock
+#         acquisition so a stuck connection cannot stall the sweep.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v5a
+  name: sweep-history-init-v5b
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

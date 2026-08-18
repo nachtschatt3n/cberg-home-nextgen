@@ -142,6 +142,21 @@ def main() -> int:
     try:
         with pc._connect(dsn) as conn:
             with conn.cursor() as cur:
+                # Taken BEFORE the plan-feeding SELECT, not after the plan is
+                # built: under READ COMMITTED a lock acquired later would be
+                # protecting a snapshot that is already stale.
+                #
+                # HONEST SCOPE: pg_advisory_xact_lock is COOPERATIVE, and this
+                # script is currently its only caller — findings_writer.py does
+                # NOT request it. So this serialises concurrent runs of THIS
+                # script and nothing else; it does not block a concurrent
+                # sweep. The real protection against a sweep inserting a
+                # colliding row mid-migration is uq_findings_open_finding_id,
+                # which is enforced by the database. To make the lock actually
+                # mutual, FindingsWriter.close()/emit() would have to take the
+                # same key.
+                cur.execute("SELECT pg_advisory_xact_lock("
+                            "hashtext('sweep_findings_refingerprint'))")
                 cur.execute("""
                     SELECT id, finding_id, fingerprint, section, title, metadata,
                            first_seen, last_seen, resolved_at, action
@@ -182,13 +197,6 @@ def main() -> int:
                 return 0
 
             with conn.cursor() as cur:
-                # Serialise against a concurrently running sweep. Without this
-                # the plan is computed from a snapshot, a sweep can insert a
-                # row whose fingerprint collides with one being rewritten, and
-                # the post-check below only REPORTS the collision — it runs
-                # after commit and cannot prevent it. Transaction-scoped, so it
-                # releases on commit or rollback with no cleanup path to miss.
-                cur.execute("SELECT pg_advisory_xact_lock(hashtext('sweep_findings_refingerprint'))")
                 for dup, keep in supersedes:
                     # `status` MUST move with `resolved_at`. The two columns are
                     # read by different consumers — the writer and every

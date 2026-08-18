@@ -198,8 +198,12 @@ order-dependent and the ordering is not guessable, so follow it exactly:
    naive "just drop the AR tags" variant merged 52 pairs.
 2. `python3 runbooks/refingerprint-findings.py` — dry run. Confirm
    `MERGING groups: 0` and no warnings.
-3. `python3 runbooks/refingerprint-findings.py --apply`. Takes a
-   transaction-scoped advisory lock, so it is safe against a concurrent sweep.
+3. `python3 runbooks/refingerprint-findings.py --apply`. It takes a
+   transaction-scoped advisory lock, but that lock is **cooperative and this
+   script is its only caller** — it serialises concurrent runs of the migration
+   itself, NOT a concurrent sweep. What actually protects you from a sweep
+   inserting a colliding row mid-migration is `uq_findings_open_finding_id`,
+   enforced by the database. Prefer to run it outside a sweep anyway.
 4. Re-run the dry run: it must now report `identity changes to write: 0`.
 5. **Only then** bump the sweep-history init Job suffix if the change also needs
    DDL. The script connects as `sweep_writer`, which does **not** own the table,

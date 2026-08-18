@@ -362,9 +362,10 @@ F-de4d92cd`.
 - **`GF_PLUGINS_PREINSTALL_DISABLED=true` is load-bearing if you ever do try
   slim.** Upstream also grew `defaultPreinstallPlugins` from 6 to 18, so
   without it the container re-downloads the identical binaries from grafana.com
-  at startup: the image scans clean while the runtime is unchanged. That is
-  worse than not making the change, because it manufactures a false green — and
-  it adds an egress dependency on grafana.com at pod start.
+  at startup, so the shipped image and the running container no longer match.
+  That is worse than not making the change: the scan would describe something
+  other than what is running. It also adds an egress dependency on grafana.com
+  at pod start.
 - **`-slim` / `-distroless` are published for every 13.x but are UNDOCUMENTED
   upstream** (the v13.2.0 docs describe only Alpine and Ubuntu variants), so any
   future attempt needs its own datasource re-verification, not a one-time sign-off.

@@ -134,11 +134,26 @@ data:
     -- which is the worst possible outcome for a guard rail. Wrapped, a bad row
     -- fails the Job loudly and leaves the existing constraint in place.
     BEGIN;
+    -- ADD CONSTRAINT takes ACCESS EXCLUSIVE. The validation scan is trivial at
+    -- this row count, but ACQUIRING the lock queues behind any open
+    -- transaction and blocks every reader and writer while it waits — one
+    -- stuck dashboard connection would turn a schema bump into a sweep +
+    -- dashboard stall. Fail fast instead; the Job retries.
+    SET lock_timeout = '5s';
     ALTER TABLE sweep_findings
       DROP CONSTRAINT IF EXISTS ck_findings_resolved_status;
+    -- SYMMETRIC on purpose. `resolved_at IS NULL OR status='resolved'` leaves
+    -- the mirror hole open: resolved_at NULL AND status='resolved' passes,
+    -- and that row is worse than the one we already hit — resolved_at-keyed
+    -- consumers (writer, auto-close, dedupe, uq_findings_open_finding_id) see
+    -- it as OPEN while the board and dashboard filter status != 'resolved'
+    -- and hide it. An open finding invisible to the operator. Reachable from
+    -- the reopen recipe in docs/sops/sweep-findings-lifecycle.md by clearing
+    -- resolved_at and forgetting status — which would fail silently, while
+    -- the opposite order fails loudly.
     ALTER TABLE sweep_findings
       ADD CONSTRAINT ck_findings_resolved_status
-      CHECK (resolved_at IS NULL OR status = 'resolved');
+      CHECK ((resolved_at IS NULL) = (status <> 'resolved'));
     COMMIT;
 
     CREATE TABLE IF NOT EXISTS slo_snapshots (

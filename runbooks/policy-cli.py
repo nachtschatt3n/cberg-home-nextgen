@@ -683,7 +683,9 @@ def _finding_row(cur, finding_id: str):
     history silently rots. `runbooks/refingerprint-findings.py` records the old
     ids in `metadata.prior_finding_ids`; this is the read side of that.
 
-    Current id wins; a prior id only resolves when nothing owns it today.
+    Resolution order is (open, exact) -> (open, alias) -> (any, exact) ->
+    (any, alias): a LIVE row always beats a dead one, and within each liveness
+    tier the current id beats an alias.
     """
     # A LIVE row always beats a dead one, whether it is reached by the current
     # id or by an alias. Exact-then-alias alone is not enough: a superseded row
@@ -697,9 +699,16 @@ def _finding_row(cur, finding_id: str):
         for by_alias in (False, True):
             pred = ("metadata->'prior_finding_ids' ? %s" if by_alias
                     else "finding_id = %s")
+            # `id DESC` is the tie-break, not decoration: uq_findings_open_finding_id
+            # bounds the exact/open pass to one row, but NOTHING constrains
+            # `prior_finding_ids` — no index, no uniqueness — and the migration's
+            # union logic makes alias sets grow, so two rows sharing an alias is
+            # an expected future state. `last_seen` ties are routine (a sweep
+            # stamps now() across a batch), which would make the winner
+            # arbitrary.
             cur.execute(
                 f"SELECT * FROM sweep_findings WHERE {pred}{clause} "
-                f"ORDER BY last_seen DESC LIMIT 1",
+                f"ORDER BY last_seen DESC, id DESC LIMIT 1",
                 (finding_id,),
             )
             row = cur.fetchone()
@@ -865,6 +874,22 @@ def cmd_finding_detail(args, dsn):
         row = _finding_row(cur, args.finding_id)
         if not row:
             print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+        # A rename redirect on a WRITE is materially different from one on a
+        # read: `security_detail` is the private vulnerability payload, and
+        # filing it onto the wrong finding loses it from the live register with
+        # no error. Make the operator confirm rather than inferring consent
+        # from a stderr note they may never see.
+        if row["finding_id"] != args.finding_id:
+            print(f"{args.finding_id} resolved to {row['finding_id']} "
+                  f"(id={row['id']}, "
+                  f"{'open' if row['resolved_at'] is None else 'RESOLVED'}) "
+                  f"via a rename.", file=sys.stderr)
+            if not args.follow_rename:
+                print(f"refusing to write private detail to a different finding "
+                      f"than the one named. Re-run against {row['finding_id']}, "
+                      f"or pass --follow-rename to accept the redirect.",
+                      file=sys.stderr)
+                return 1
         meta = dict(row.get("metadata") or {})
         if detail is not None:
             meta["security_detail"] = detail
@@ -880,7 +905,9 @@ def cmd_finding_detail(args, dsn):
         )
         conn.commit()
         row = _finding_row(cur, args.finding_id)
-    print(f"updated {args.finding_id}\n")
+    # Print the id actually WRITTEN. Echoing the requested id concealed the
+    # redirect in exactly the case where it matters.
+    print(f"updated {row['finding_id']}\n")
     print(_ref_block(row))
 
 
@@ -1054,6 +1081,9 @@ def build_parser() -> argparse.ArgumentParser:
     fd.add_argument("--action")
     fd.add_argument("--plan", action="append")
     fd.add_argument("--component")
+    fd.add_argument("--follow-rename", action="store_true",
+                    help="accept writing the private detail to the finding this "
+                         "id was RENAMED to, rather than refusing")
     fd.set_defaults(handler=cmd_finding_detail)
 
     # cross-table

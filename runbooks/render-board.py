@@ -117,23 +117,52 @@ def planned_findings(cur=None) -> dict:
 
     if cur is not None and out:
         # Additive only: the frozen ref keeps its entry, so a ref that was
-        # never renamed behaves exactly as before and a DB hiccup can only
-        # fail to ADD an alias, never drop a real one.
+        # never renamed behaves exactly as before.
+        #
+        # The SAVEPOINT is not optional. By the time this runs, collect() has
+        # already issued queries on a non-autocommit connection, so a
+        # transaction is open — and in psycopg3 a failed statement poisons it.
+        # A bare try/except would swallow the original error and then every
+        # later cur.execute() in collect() would raise InFailedSqlTransaction,
+        # turning a best-effort lookup into a total board failure: the exact
+        # opposite of "never block the board". (The plan-file guard above is
+        # genuinely safe bare, because it predates any DB work.)
         try:
-            cur.execute(
-                "SELECT finding_id, metadata->'prior_finding_ids' AS priors "
-                "  FROM sweep_findings "
-                " WHERE metadata->'prior_finding_ids' ?| %s",
-                (list(out),),
-            )
-            for row in cur.fetchall():
+            with cur.connection.transaction():
+                cur.execute(
+                    "SELECT finding_id, metadata->'prior_finding_ids' AS priors "
+                    "  FROM sweep_findings "
+                    " WHERE metadata->'prior_finding_ids' ?| %s "
+                    # Only LIVE rows may inherit a plan's ref. Nothing enforces
+                    # alias uniqueness, so without this one plan ref could hide
+                    # several findings — and on a board whose whole job is
+                    # surfacing unhandled work, over-hiding is the dangerous
+                    # direction and it fails silently.
+                    "   AND resolved_at IS NULL",
+                    (list(out),),
+                )
+                rows = cur.fetchall()
+            claimed: dict[str, str] = {}
+            for row in rows:
                 cur_id = row[0] if not isinstance(row, dict) else row["finding_id"]
                 priors = row[1] if not isinstance(row, dict) else row["priors"]
-                for old_id in (priors or []):
-                    if old_id in out and cur_id not in out:
-                        out[cur_id] = out[old_id]
-        except Exception:
-            pass  # same contract as above: never block the board
+                if not isinstance(priors, list):
+                    continue  # a scalar/object metadata value is not an alias list
+                for old_id in priors:
+                    if old_id not in out or cur_id in out:
+                        continue
+                    if old_id in claimed:
+                        print(f"warning: plan ref {old_id} is claimed by two live "
+                              f"findings ({claimed[old_id]}, {cur_id}) — not hiding "
+                              f"either; check for a duplicate finding",
+                              file=sys.stderr)
+                        out.pop(claimed[old_id], None)
+                        continue
+                    claimed[old_id] = cur_id
+                    out[cur_id] = out[old_id]
+        except Exception as e:  # noqa: BLE001
+            print(f"warning: plan-ref alias lookup failed ({type(e).__name__}); "
+                  f"renamed findings may show as un-planned", file=sys.stderr)
     return out
 
 def collect(cur, cycle_id: str | None) -> dict:
