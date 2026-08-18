@@ -80,7 +80,10 @@ status: vetted                      # EXECUTION IN PROGRESS (ad-hoc:2026-08-18, 
                                     # (c5365e63 + 87fc44fe §1a suffix fix; 15/15 Ready@5.1.0).
                                     # tier 2 COMPLETE 2026-08-18 (66ca4616; 12 wrappers + _template
                                     # file-bump, absenty suffix same-commit, PVC uids unchanged,
-                                    # automations resumed). 28/78 live @5.1.0.
+                                    # automations resumed). tier 3 COMPLETE 2026-08-18 (4926bfa5;
+                                    # 13 wrappers incl. C1 ai-sre + C2 mcpo SA migrations +
+                                    # paperclip suffix; PVC uid + SA ownership verified).
+                                    # 41/78 live @5.1.0.
                                     # Supersedes app-template-5.0.md (deleted in same commit).
 window: "ad-hoc:2026-08-18"         # started ad-hoc under operator standing GO; remaining tiers
                                     # continue same run or fall back to the 8-window schedule:
@@ -338,7 +341,7 @@ kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP
 
 # 4. RENDER GATE — re-render THIS tier's wrappers against 5.1.0 before touching git
 #    (the full-fleet render already passed 2026-08-18; re-run per tier for drift):
-task template:configure -- --strict
+task kubeconform   # (template:configure removed from Taskfile — stale ref fixed during execution)
 #    plus per-wrapper: helm template <name> oci://ghcr.io/bjw-s-labs/helm/app-template \
 #      --version 5.1.0 -n <ns> -f <extracted values>   # must exit 0
 
