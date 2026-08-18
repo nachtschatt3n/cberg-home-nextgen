@@ -83,6 +83,63 @@ Deployments once so Helm recreates them; do NOT hand-delete pods mid-`Recreate`.
 (`runbooks/update-marker.sh clear <app>`), commit.
 **On failure:** revert (see §11); clear the marker.
 
+### Step 0b — digest-pin drift: when "already on the newest tag" is still actionable
+
+A version bump is not the only actionable update. **Upstream can rebuild a
+release tag in place**, so an image that is digest-pinned to `X.Y.Z@sha256:…`
+can fall behind the very tag it names while every version check reports
+"already on the newest tag". The tag is current; the *pin* is stale. Nothing in
+the manifest changes, so Renovate stays silent and the version report shows no
+gap — the drift is invisible unless you look for it deliberately.
+
+This is not a defect in digest pinning; it is **the thing digest pinning exists
+to make visible**. A float tag hides the same drift completely (see the
+`float-tag-pinning` plan). A pin turns it into a diff you can find.
+
+**Detect it** — compare your pinned digest against the tag's current digest.
+The Hub catalog API is a *separate quota* from registry pulls, so this is safe
+to run even when a scan has exhausted the anonymous pull limit:
+
+```bash
+# Docker Hub (note: official images live under library/<name>)
+curl -s "https://hub.docker.com/v2/repositories/<repo>/tags/<tag>" |
+  python3 -c "import sys,json;d=json.load(sys.stdin);print(d['last_updated'],d['digest'])"
+
+# GHCR — anonymous pull-scope token, works for public packages
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:<owner>/<img>:pull&service=ghcr.io" |
+  python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -sI -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.oci.image.index.v1+json" \
+  "https://ghcr.io/v2/<owner>/<img>/manifests/<tag>" | grep -i docker-content-digest
+```
+
+If that digest differs from the one in the manifest, the pin has drifted.
+
+**Fix it** — replace the digest, keep the version. Pin the **multi-arch index**
+digest (`application/vnd.oci.image.index.v1+json`), not a per-platform manifest
+digest, or you silently pin the cluster to one architecture.
+
+**Say it correctly.** A re-pin is **not** a version bump, and the commit message
+should not imply one — the version is unchanged and the release notes are the
+same notes. Describe it as a re-pin to the current build of the same release,
+and cite the driver with `security_ref:` (never counts or CVE IDs — public repo,
+see `vulnerability-disclosure.md`).
+
+**Prove it moved.** Scan *both* digests with the same scanner and DB, back to
+back, and compare. A re-pin that does not change the numbers is not a fix, and
+should be reported as such rather than claimed as one:
+
+```bash
+trivy image --quiet --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+  -f json -o /tmp/before.json <repo>@sha256:<old>
+trivy image --quiet --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+  -f json -o /tmp/after.json  <repo>@sha256:<new>
+```
+
+Then verify the rollout by **`imageID`**, not by tag — the tag string is
+identical before and after, so `kubectl get pod -o jsonpath='{…imageID}'` is the
+only proof the new bytes are actually running.
+
 ## 5) Examples
 
 ### Example A: low-risk image patch
@@ -199,3 +256,4 @@ flux reconcile helmrelease -n <ns> <app> --force
 | Version | Date | Change |
 |---|---|---|
 | 2026.07.18 | 2026-07-18 | Initial — codifies the superset/openclaw upgrade lessons (silence, disable-rollback, immutable-selector, pending-upgrade recovery, revert). |
+| 2026.08.18 | 2026-08-18 | Added Step 0b — digest-pin drift: how to detect a pin that has fallen behind a rebuilt release tag, how to re-pin (multi-arch index digest), why a re-pin is not a version bump, and the before/after scan + `imageID` proof it actually moved. |

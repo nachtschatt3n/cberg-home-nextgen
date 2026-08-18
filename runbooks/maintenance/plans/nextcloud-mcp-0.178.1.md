@@ -7,7 +7,14 @@ pr: null                              # PLAN lane — coverage.py needs_plan, no
                                       # open). Direct bump in the window.
 kind: image                           # app-template image-tag bump. NOT a chart bump.
 current: "0.175.0"
-target: "0.178.1 (supersedes 0.177.1)" # RETARGETED from the sweep's 0.177.1: 0.177.2, 0.178.0 and
+target: "0.178.1 (supersedes 0.177.1)" # PROSE TARGET IS DELIBERATE — do not "clean up" to a bare
+                                      # version. coverage.py::_release_line treats 0.177 and 0.178 as
+                                      # DIFFERENT breaking lines on the 0.x minor axis, so a bare
+                                      # "0.178.1" makes this plan stop covering the sweep's 0.177.1
+                                      # item and nextcloud-mcp falls back to needs_plan — a false
+                                      # coverage gap. Naming both versions is the sanctioned escape
+                                      # hatch (_plan_delivers scans every version token in this field).
+                                      # RETARGETED from the sweep's 0.177.1: 0.177.2, 0.178.0 and
                                       # 0.178.1 all published 2026-08-18 after the version-check
                                       # snapshot was taken. 0.178.1 verified to exist in GHCR on
                                       # 2026-08-18 (digest 508c62e4... is 0.177.1, edffc044... is
@@ -61,7 +68,7 @@ that upstream itself tagged `BREAKING CHANGE`.
 | Release | Breaking change |
 |---|---|
 | **0.176.0** | Webhook **registration API removed** — `GET/POST /api/v1/webhooks`, `DELETE /api/v1/webhooks/{id}` and the `/app/webhooks` pane now 404, and the `registered_webhooks` **table is dropped**. Delivery config relocates to Astrolabe admin settings. |
-| **0.177.0** | `create_share` / `nc_share_create` now **reject** `shareType=3` (public link) carrying `shareWith`, and reject a recipient-typed call omitting it. Both previously reached the server; the first silently produced an anonymous public link while reporting success. Callers relying on either now get `ValueError` / `ToolError`. |
+| **0.177.0** | `create_share` / `nc_share_create` **argument validation tightened**: a `shareType=3` (public link) call carrying `shareWith`, and a recipient-typed call omitting it, are now rejected. Callers relying on the previous acceptance get `ValueError` / `ToolError` instead of a share. Pre-change behaviour and its assessment: see `security_ref`. |
 
 A dropped table plus a tool-contract tightening is exactly the "breaking-change
 signal in release notes" that the auto-updater's safe-subset gate is there to
@@ -89,16 +96,17 @@ Both breaking changes were checked against what this instance actually runs
 statically.** The only consumer is OpenClaw (`ai` ns) via mcporter. Whether any
 skill calls `nc_share_create` with a `shareType=3` + `shareWith` pairing cannot
 be proven from the manifests — it is agent-authored tool use at runtime. The
-new behaviour is a *rejection where the old behaviour silently produced the
-wrong object*, so the failure mode after the bump is a loud `ToolError` rather
-than a silent bad share. That is a strict improvement, but it is a behaviour
-change an operator should be told about, not one to discover from a confused
-agent.
+new behaviour turns a previously-accepted argument pairing into an explicit
+`ToolError`, so any caller depending on it fails loudly instead of quietly. That
+is a strict improvement, but it is a behaviour change an operator should be told
+about, not one to discover from a confused agent. The pre-change behaviour, and
+why it matters, is recorded on `security_ref` — deliberately not restated here
+(public repo; see docs/sops/vulnerability-disclosure.md).
 
 **Net:** low risk for this deployment, but operator-visible, so `auto_execute:
-false`. The value in the span is real — 0.177.2 fixes Ollama embed retry/batching
-and adds vector dead-lettering; 0.177.1 escapes caller values in WebDAV SEARCH
-predicates.
+false`. The value in the span is real — 0.177.2 fixes Ollama embed retry and
+batching and adds vector dead-lettering, and 0.177.1 carries hardening in the
+WebDAV client path. Details on `security_ref`.
 
 ## 3. Pre-checks
 
@@ -138,7 +146,32 @@ c. Confirm neither `bitnamilegacy-exit-nextcloud-{db,redis}` is running in the
   confirm it succeeds; do **not** treat a rejected `shareType=3 + shareWith`
   call as a regression — that rejection is the intended 0.177.0 behaviour.
 
-## 6. Rollback
+## 6. Interference notes
+
+For the window agent.
+
+- **Shared infrastructure restarted: none.** This rolls one stateless
+  single-replica Deployment in `office`. No PVC, no storage operation, no
+  database, no shared service is mutated. It holds one Ingress on
+  `className: internal` but does **not** restart the ingress controller.
+- **`conflicts_with` is a VERIFICATION CONFOUND, not a danger conflict.**
+  `bitnamilegacy-exit-nextcloud-db` and `bitnamilegacy-exit-nextcloud-redis`
+  both restart the **Nextcloud backend that this bridge proxies**. Nothing
+  breaks if they co-schedule — but §5's tool-surface probe talks *through* that
+  backend, so a backend restart makes the probe flap and an inconclusive probe
+  becomes unattributable between the two changes. Sequence them in separate
+  windows, or run this one **after** the backend work has verified.
+- **Ordering:** the Flux Kustomization carries a standing
+  `dependsOn: nextcloud`. That is a reconcile dependency, not a plan-ordering
+  one — nextcloud is stable and needs no action here. Do not read it as a
+  prerequisite plan.
+- **Consumer to re-check after the roll:** OpenClaw (`ai` ns) via mcporter is
+  the only consumer. It is not restarted by this plan and does not need to be,
+  but it is where a regression would surface.
+- **Reboot:** none. Safe for any no-reboot slot; do not spend a reboot-capable
+  window on it.
+
+## 7. Rollback
 
 `git revert <sha> && git push`. Single tag line; pod rolls back in ~10s. No
 schema to restore (no PVC, no persistent DB), no data migration to unwind.
