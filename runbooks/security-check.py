@@ -102,8 +102,8 @@ ACCEPTED_RISKS_DOC = REPO_ROOT / "docs" / "security-accepted-risks.md"
 # Make `runbooks/lib/...` importable when invoked from any CWD.
 sys.path.insert(0, str(SCRIPT_DIR))
 from lib.findings_writer import (  # noqa: E402
-    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
-    SEVERITY_MAP,
+    FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env,
+    git_head, SEVERITY_MAP,
 )
 from lib import risk_model as rm  # noqa: E402  — contextual tier scorer (Phase 2)
 from lib import notify as _notify  # noqa: E402  — tier-based routing (Phase 2)
@@ -197,15 +197,50 @@ _ACCEPTED_RISKS: dict[str, str] = {}
 _POLICY_LOAD_FAILED: str | None = None
 
 # ---------------------------------------------------------------------------
+# Degraded-coverage recorder
+# ---------------------------------------------------------------------------
+# This audit degrades gracefully in dozens of places: an unreachable
+# Elasticsearch, a throttled NVD, a 401 from the UniFi controller, a missing
+# trivy binary — each one lets the run continue and still produce a verdict.
+# That is right for REPORTING and lethal for AUTO-CLOSE, which resolves any
+# open finding this section did not re-emit. A degraded check emits nothing,
+# and without a veto that silence reads as "all those findings got fixed" —
+# a monitoring outage would quietly clear the security backlog.
+#
+# Every degrade path records here; main() hands the accumulated reasons to
+# writer.mark_incomplete() before close(), which vetoes auto-close for the
+# whole `security` section while still reporting everything we COULD measure.
+# Contract: docs/sops/sweep-findings-lifecycle.md.
+DEGRADED = DegradationLog("security", printer=lambda m: cprint(C.YELLOW, m))
+
+# Which section is executing, so the shared primitives below can attribute a
+# failure without every call site passing a scope. Set by section_header().
+_CURRENT_SECTION: str = "startup"
+
+
+def _scope() -> str:
+    return _CURRENT_SECTION
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def run(cmd: str, timeout: int = 30) -> str:
-    """Run a shell command, return stdout (empty string on error)."""
+    """Run a shell command, return stdout (empty string on error).
+
+    The EXCEPTION path (timeout, missing binary, OSError) is an unambiguous
+    coverage gap and is recorded. A non-zero returncode is NOT recorded here:
+    most callers are greps, where "no match" is rc=1 with empty stdout and a
+    perfectly legitimate clean result. Sites where rc matters record their own
+    reason explicitly.
+    """
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip()
-    except Exception:
+    except Exception as e:
+        DEGRADED.record(_scope(), f"command failed ({cmd.split()[0]})",
+                        f"{type(e).__name__} after {timeout}s: {cmd[:90]}")
         return ""
 
 
@@ -215,6 +250,8 @@ def run_cmd(cmd: str, timeout: int = 30) -> tuple[int, str, str]:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except Exception as e:
+        DEGRADED.record(_scope(), f"command failed ({cmd.split()[0]})",
+                        f"{type(e).__name__} after {timeout}s: {cmd[:90]}")
         return 1, "", str(e)
 
 
@@ -232,6 +269,10 @@ def run_unifictl(cmd: str, timeout: int = 15, retries: int = 2, backoff: float =
             break
         time.sleep(backoff)
         out = run(cmd, timeout=timeout)
+    if not out or "login failed" in out.lower():
+        # Every retry blipped the same way — this is no longer transient.
+        DEGRADED.record(_scope(), "UniFi controller (unifictl)",
+                        f"empty/login-failed after {retries + 1} attempts: {cmd[:80]}")
     return out
 
 
@@ -245,10 +286,19 @@ def kubectl(args: str, timeout: int = 30) -> str:
 
 
 def kubectl_json(args: str, timeout: int = 30) -> dict | list | None:
+    """Parsed `kubectl ... -o json`, or None.
+
+    None is ALWAYS a coverage gap: a working apiserver returns a valid List
+    with an empty `items` for "no such resources". So None means the API was
+    unreachable or the output was unparsable — and every caller guards with
+    `if data:`, silently skipping its whole check. Record it.
+    """
     out = kubectl(args + " -o json", timeout=timeout)
     try:
         return json.loads(out)
-    except Exception:
+    except Exception as e:
+        DEGRADED.record(_scope(), "kubernetes API (kubectl)",
+                        f"no parsable JSON from `{args[:70]}`: {type(e).__name__}")
         return None
 
 
@@ -375,6 +425,11 @@ class Findings:
 # callers don't care.
 # ---------------------------------------------------------------------------
 
+def _indexer_name(index: str) -> str:
+    """Human name for the backing store, for degradation reasons."""
+    return "Wazuh indexer" if index.startswith("wazuh") else "Elasticsearch"
+
+
 def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
                  index: str, body: dict, timeout: int) -> dict | None:
     """Run an _search against the indexer from inside its own pod.
@@ -383,6 +438,8 @@ def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
     quoting of the query. Returns parsed JSON, or None on any failure.
     """
     if not userpass or not pod:
+        DEGRADED.record(_scope(), _indexer_name(index),
+                        "no pod name or no credentials — query not attempted")
         return None
     data = json.dumps(body)
     cmd = [
@@ -400,6 +457,8 @@ def _exec_search(ns: str, pod: str, container: str, userpass: str | None,
             pass
         if attempt < 2:
             time.sleep(2)
+    DEGRADED.record(_scope(), _indexer_name(index),
+                    f"_search against {index} failed on all 3 attempts")
     return None
 
 
@@ -427,8 +486,14 @@ class ElasticPortForward:
         try:
             import base64
             self._password = base64.b64decode(raw.strip("'")).decode()
-        except Exception:
+        except Exception as e:
+            DEGRADED.record("elasticsearch_setup", "Elasticsearch credentials",
+                            f"could not decode elasticsearch-es-elastic-user: "
+                            f"{type(e).__name__}")
             self._password = None
+        if not self._pod:
+            DEGRADED.record("elasticsearch_setup", "Elasticsearch pod",
+                            "no elasticsearch pod found in namespace monitoring")
         return self
 
     def __exit__(self, *_):
@@ -472,7 +537,10 @@ class WazuhPortForward:
         try:
             import base64
             self._password = base64.b64decode(raw.strip("'")).decode()
-        except Exception:
+        except Exception as e:
+            DEGRADED.record("wazuh_setup", "Wazuh indexer credentials",
+                            f"could not decode wazuh-secret INDEXER_PASSWORD: "
+                            f"{type(e).__name__}")
             self._password = None
         return self
 
@@ -492,6 +560,14 @@ class WazuhPortForward:
 # ---------------------------------------------------------------------------
 
 def section_header(n: int, title: str) -> None:
+    # Header numbers are 1..13 and index-align with _SECTION_SLUGS (n=7 is
+    # s6a_error_rate_spikes, n=13 is s13_wazuh_siem), so the slug the writer
+    # uses for `subsection` is also the scope a degraded primitive reports.
+    global _CURRENT_SECTION
+    try:
+        _CURRENT_SECTION = _SECTION_SLUGS[n - 1]
+    except (IndexError, NameError):  # pragma: no cover — defensive
+        _CURRENT_SECTION = f"s{n}"
     cprint(C.BLUE, f"\n[{n}/13] {title}")
 
 
@@ -1184,6 +1260,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     if not version_file.exists():
         cprint(C.YELLOW, "  🟡 version-check-current.md not found — skipping OSV check")
         f.add(WARNING, "version-check-current.md missing — run version-check first")
+        # This early return skips OSV *and* the entire Trivy running-image
+        # scan, i.e. every image CVE finding this section owns.
+        DEGRADED.record(_scope(), "version-check-current.md snapshot",
+                        "absent — OSV and the running-image Trivy scan both skipped")
         return f.worst(), f, f.markdown()
 
     content = version_file.read_text()
@@ -1209,8 +1289,16 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                 f.add(CRITICAL, f"`{name}` {ver}: {len(vulns)} CVE(s) — {ids}")
                 cprint(C.RED, f"  🔴 {name} {ver}: {ids}")
                 found_vulns = True
-        except Exception:
-            pass
+        except Exception as e:
+            # Every OSV lookup can fail this way (timeout, 429, non-200).
+            # If they ALL fail we still print the green line below, so the
+            # veto is the only thing standing between an OSV outage and a
+            # clean bill of health.
+            # Deliberately component-agnostic so an outage collapses into ONE
+            # reason instead of one per component — the operator needs "OSV is
+            # down", not 25 copies of it. DegradationLog dedups exact strings.
+            DEGRADED.record(_scope(), "OSV.dev API",
+                            f"component lookups failing ({type(e).__name__})")
         time.sleep(0.15)
 
     if not found_vulns:
@@ -1229,6 +1317,10 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     import shutil
     if not shutil.which("trivy"):
         cprint(C.YELLOW, "  🟡 trivy not on PATH — skipping running-image CVE scan")
+        # Emits NOTHING and returns: every open image-CVE finding would
+        # auto-close as "fixed" purely because the scanner was absent.
+        DEGRADED.record(_scope(), "trivy binary",
+                        "not on PATH — running-image CVE scan skipped entirely")
         return f.worst(), f, f.markdown()
 
     # -v4: cache schema now also carries the FULL per-image CVE-ID lists
@@ -1275,6 +1367,14 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     distinct_images = sorted({
         _canon_image(i.strip().strip("'")) for i in images_raw.splitlines() if i.strip()
     })
+    if not distinct_images:
+        # An empty inventory does not mean "nothing is running" — it means the
+        # apiserver query returned nothing usable. It also filters the CACHED
+        # results and the scan-failure list to nothing, so the section would
+        # print a green "no CVEs in 0 running images" and emit not one finding.
+        DEGRADED.record(_scope(), "kubernetes API (pod image inventory)",
+                        "no running images enumerated — Trivy scan has nothing "
+                        "to scan and cached findings are filtered away")
 
     findings_per_image: dict[str, dict] = {}
     scan_failed: list[str] = []
@@ -2164,7 +2264,14 @@ def _nvd_unifi_cves(version: str | None) -> list[dict]:
         req = urllib.request.Request(url, headers={"User-Agent": "homelab-security-check/1.0"})
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.load(resp)
-    except Exception:
+    except Exception as e:
+        # `[]` is indistinguishable from "no CVEs affect this version": the
+        # caller prints a green "No NVD CVEs found affecting UniFi <ver>".
+        # NVD throttles anonymous callers hard, so this is a routine outage,
+        # not an exotic one.
+        DEGRADED.record("s11_unifi", "NVD API 2.0",
+                        f"UniFi CVE query failed ({type(e).__name__}) — an empty "
+                        f"result would otherwise read as 'no open CVEs'")
         return []
 
     for vuln in data.get("vulnerabilities", []):
@@ -2482,13 +2589,19 @@ def s11_unifi() -> tuple[str, Findings, str]:
     #                          (hundreds of cars/houses) is expected noise
     #   log admin-activity  -> controller admin-access audit trail (visibility)
     def _unifi_json(cmd: str):
+        # None here silently disables whole checks: IPS/IDS alarms, evil-twin
+        # rogue-AP detection, new/blocked clients. Several of those then print
+        # a GREEN line produced entirely by the failed dependency.
         raw = run_unifictl(f"unifictl local {cmd} -o json 2>/dev/null", timeout=15)
         if not raw.strip():
+            DEGRADED.record(_scope(), f"UniFi `{cmd}`", "empty response")
             return None
         try:
             doc = json.loads(raw)
             return doc.get("data", doc) if isinstance(doc, dict) else doc
-        except Exception:
+        except Exception as e:
+            DEGRADED.record(_scope(), f"UniFi `{cmd}`",
+                            f"unparsable JSON: {type(e).__name__}")
             return None
 
     # IPS/IDS alarms — active threat-management events
@@ -2680,6 +2793,12 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
         "/var/ossec/bin/agent_control -l 2>/dev/null", timeout=10,
     )
     registered: list[str] = []
+    if not agent_list_raw:
+        # No registered-agent list => silent_agents is empty => agent-compromise
+        # detection is off, with no finding emitted to say so.
+        DEGRADED.record(_scope(), "Wazuh manager (agent_control -l)",
+                        "could not enumerate registered agents — silent-agent "
+                        "detection disabled")
     if agent_list_raw:
         # Parse lines like: "   ID: 022, Name: k8s-nuc14-02, IP: any, Active"
         # Use [^,]+? lazy to stop at the first comma after "Name: ".
@@ -2869,8 +2988,14 @@ def _build_indexes() -> tuple["rm.ExposureIndex | None", "rm.KevIndex"]:
         idx = rm.load_exposure_index()
     except Exception as e:  # noqa: BLE001
         cprint(C.YELLOW, f"  · exposure index unavailable ({e}) — findings default to internal")
+        DEGRADED.record("risk_scoring", "exposure index",
+                        f"{type(e).__name__} — every finding defaults to internal "
+                        f"exposure, systematically downgrading tiers")
         idx = None
     kev = rm.KevIndex.load()
+    if not kev.loaded:
+        DEGRADED.record("risk_scoring", "CISA KEV feed",
+                        f"unavailable ({kev.source}) — every exploited-axis is UNKNOWN")
     kw = C.GREEN if kev.loaded else C.RED
     cprint(kw, f"  · KEV feed: {kev.source}"
                + (f" (catalog {kev.catalog_version}, {len(kev.cve_ids)} CVEs)"
@@ -3073,6 +3198,11 @@ def main(argv: list[str] | None = None) -> int:
         git_head=git_head(),
     ) as writer:
         _emit_findings(writer, results, scored)
+        # Veto stale-finding auto-close if ANY dependency degraded this run.
+        # The run still completes and reports everything it could measure —
+        # this only stops the writer reading "absent" as "resolved" for the
+        # checks that could not execute. See docs/sops/sweep-findings-lifecycle.md.
+        DEGRADED.apply(writer)
         writer.close(verdict=verdict)
 
     # Contextual-tier summary to the terminal (intrinsic count secondary).
