@@ -180,7 +180,16 @@ mise exec -- kubectl get sts -n office nextcloud-mariadb \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # bitnamilegacy/mariadb:latest
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- mariadb --version
 
-# c) RECORD THE BASELINE. Note the root password is delivered as a FILE here
+# c) RECORD THE BASELINE.
+#    Every artefact this plan writes goes to ~/db-dumps, NOT /tmp — see 3b.
+#    The row-count baselines are load-bearing (they are diffed before the app is
+#    allowed up) and /tmp on a multi-user Mac is world-readable. The path is
+#    written out literally rather than held in a shell variable, because this
+#    plan is executed in separate blocks and a fresh shell would silently
+#    resolve an unset variable to / .
+umask 077 && mkdir -p ~/db-dumps && chmod 700 ~/db-dumps
+#
+#    Note the root password is delivered as a FILE here
 #    (MARIADB_ROOT_PASSWORD_FILE), not an env var — that is why every command
 #    below uses "$(cat $MARIADB_ROOT_PASSWORD_FILE)".
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
@@ -188,12 +197,12 @@ mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
      select @@version, @@character_set_server, @@collation_server, @@innodb_file_per_table, @@log_bin;
      select table_schema, count(*) from information_schema.tables group by 1;
      select schema_name, default_character_set_name, default_collation_name from information_schema.schemata;
-     select count(*) from mysql.user;"' | tee /tmp/nextcloud-db-baseline.txt
+     select count(*) from mysql.user;"' | tee ~/db-dumps/nextcloud-db-baseline.txt
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
   'mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -e "
      select table_name, table_rows, table_collation from information_schema.tables
-     where table_schema=\"nextcloud\" order by table_name;"' | tee /tmp/nextcloud-db-tables-before.txt
-wc -l /tmp/nextcloud-db-tables-before.txt        # expect 206 rows
+     where table_schema=\"nextcloud\" order by table_name;"' | tee ~/db-dumps/nextcloud-db-tables-before.txt
+wc -l ~/db-dumps/nextcloud-db-tables-before.txt        # expect 206 rows
 
 #    *** EXACT row counts for ALL 206 tables — the binding acceptance test ***
 #    `table_rows` above is an InnoDB ESTIMATE; it is fine for the table LIST and
@@ -208,9 +217,9 @@ mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
   export MYSQL_PWD=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
   for T in $(mariadb -uroot -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
     printf "%s=%s\n" "$T" "$(mariadb -uroot -N -B nextcloud -e "select count(*) from \`$T\`")"
-  done' > /tmp/nextcloud-rows-before.txt
-wc -l /tmp/nextcloud-rows-before.txt            # expect 206
-awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/nextcloud-rows-before.txt
+  done' > ~/db-dumps/nextcloud-rows-before.txt
+wc -l ~/db-dumps/nextcloud-rows-before.txt            # expect 206
+awk -F= '{s+=$2} END {print "total rows:", s}' ~/db-dumps/nextcloud-rows-before.txt
 #    Record that total. It is the number the restore must reproduce.
 
 # d) SIZE THE WORK — this decides whether 85 min is right
@@ -224,10 +233,10 @@ mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- df -h /bit
 
 # e) APPLICATION baseline — the numbers Verification must reproduce exactly
 mise exec -- kubectl exec -n office deploy/nextcloud -- \
-  su -s /bin/sh www-data -c 'php occ status' | tee /tmp/nextcloud-app-baseline.txt
+  su -s /bin/sh www-data -c 'php occ status' | tee ~/db-dumps/nextcloud-app-baseline.txt
 mise exec -- kubectl exec -n office deploy/nextcloud -- \
   su -s /bin/sh www-data -c 'php occ user:list | wc -l; php occ app:list | head -60' \
-  | tee -a /tmp/nextcloud-app-baseline.txt
+  | tee -a ~/db-dumps/nextcloud-app-baseline.txt
 # `occ app:list` MUST show openclaw_mail under Enabled — that is the custom app
 # whose loss is the documented Nextcloud-upgrade failure mode.
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
@@ -235,7 +244,7 @@ mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
      select (select count(*) from nextcloud.oc_filecache),
             (select count(*) from nextcloud.oc_users),
             (select count(*) from nextcloud.oc_share),
-            (select count(*) from nextcloud.oc_mail_accounts);"' | tee -a /tmp/nextcloud-app-baseline.txt
+            (select count(*) from nextcloud.oc_mail_accounts);"' | tee -a ~/db-dumps/nextcloud-app-baseline.txt
 
 # f) Longhorn backup of the source volume — the disaster floor. The logical dump
 #    in step 2 is the WORKING rollback; this is the layer beneath it.
@@ -352,6 +361,51 @@ Row counts alone will not catch this class of failure — see
 `docs/sops/verification-contents-not-shape.md`, which this plan already applies
 to the restore itself. The same principle applies to the *ordering*: a correct
 final row count does not prove the app never touched the database first.
+
+## 3b) SENSITIVE ARTEFACTS — what this plan writes to disk, and where it goes
+
+Added 2026-08-19 after a security review of the plan files. The handling below is
+now an explicit decision; previously it was simply unexamined.
+
+**What the dump contains.** A `mysqldump` of the `nextcloud` database includes
+`oc_users`, whose `password` column holds every user's password hash. It also
+carries app credential and token tables. This is not an ordinary data export —
+treat the file as a credential store.
+
+**Decision: the dump is RETAINED as the recovery floor.** §5 Rollback step 1
+depends on it, and `docs/sops/mariadb-major-upgrade.md` is explicit that the
+logical dump is the only rollback that works for this class of change. So it is
+deliberately kept, not deleted at the end of the window.
+
+Because it is retained, its handling is stated rather than left implicit:
+
+| | |
+|---|---|
+| **Location** | `~/db-dumps/nextcloud-<date>.sql` on the operator's Mac — **never** a git-tracked path, never inside a container image, never a shared `/tmp` |
+| **Created with** | `umask 077`, in a directory pre-created `chmod 700`, file `chmod 600` (already in step 2 — keep it) |
+| **Copied into the pod** | **Never.** Step 7 streams it over stdin; no second copy exists |
+| **Removed when** | the migration has soaked and the new volume has its own verified Longhorn backup — i.e. after the first successful nightly `daily-backup-all-volumes` run covering `nextcloud-db-data`, confirmed present. Until then it is the only floor and must not be deleted |
+| **Removed how** | `rm -P ~/db-dumps/nextcloud-<date>.sql` (overwrite before unlink), then confirm the directory is empty |
+
+**Do not** move it to cloud storage, attach it to an issue, or paste any part of
+it into a report. If it must be inspected, `grep` for schema/structure only.
+
+**Also note the baseline files.** Steps in §2 and §4 `tee` several artefacts to
+the operator's `/tmp` — `nextcloud-db-baseline.txt`, `nextcloud-db-tables-*.txt`,
+`nextcloud-rows-*.txt`, `nextcloud-app-baseline.txt`. These hold row counts and
+schema names, **not** credentials, so they are a much lower grade of exposure —
+but `/tmp` on a multi-user Mac is world-readable, and these must be diffed
+before the app comes up, so they are load-bearing for the window. **The plan's
+commands have been changed to write them under `~/db-dumps/`** alongside the
+dump (already `chmod 700`) rather than `/tmp`; remove them with the dump. The
+path is written out literally in each command rather than held in a shell
+variable, because this plan is run in separate blocks and an unset variable in a
+fresh shell would silently resolve to `/`.
+
+> This is a recurring shape in this repo, not a one-off: the same review found
+> an SOP instructing operators to decode an Elasticsearch superuser password to
+> `/tmp` with no cleanup step. When a procedure writes a secret to disk, the
+> location, the mode, and the removal all belong in the procedure.
 
 ## 3) Steps
 
@@ -498,16 +552,38 @@ final row count does not prove the app never touched the database first.
    > Do not proceed past this point until `replicas: 0` is the state Flux is
    > actively converging TO, not a manual override it is about to undo.
 
-7. **Restore into the new server** before letting Nextcloud near it:
+7. **Restore into the new server** before letting Nextcloud near it.
+
+   **Stream the dump over stdin — do NOT `kubectl cp` it into the pod.** See
+   §3b: this dump contains `oc_users` password hashes, and streaming means no
+   plaintext copy is ever written to a second disk, so there is no file to
+   permission and none to forget to delete.
    ```bash
    mise exec -- kubectl rollout status deploy/nextcloud-db -n office --timeout=900s
    NEW=$(mise exec -- kubectl get pods -n office -l app=nextcloud-db -o jsonpath='{.items[0].metadata.name}')
-   mise exec -- kubectl cp "$D" office/$NEW:/tmp/restore.sql
-   mise exec -- kubectl exec -n office $NEW -- sh -c \
-     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" < /tmp/restore.sql' 2>&1 | tail -30
+
+   # -i streams $D into the client's stdin; nothing lands on the pod filesystem.
+   mise exec -- kubectl exec -i -n office $NEW -- sh -c \
+     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' < "$D" 2>&1 | tail -30
    # Read every warning. Grant/definer warnings are benign; ERROR lines are not.
-   mise exec -- kubectl exec -n office $NEW -- rm -f /tmp/restore.sql
+
+   # prove nothing was left behind by an earlier/aborted attempt:
+   mise exec -- kubectl exec -n office $NEW -- sh -c 'ls -l /tmp/*.sql 2>/dev/null || echo "no dump on pod fs (expected)"'
    ```
+   > **Fallback, only if streaming is impractical** (very large dump timing out
+   > the exec): copy it, but then the file is your responsibility —
+   > ```bash
+   > mise exec -- kubectl cp "$D" office/$NEW:/tmp/restore.sql
+   > mise exec -- kubectl exec -n office $NEW -- chmod 600 /tmp/restore.sql
+   > # ... restore ...
+   > mise exec -- kubectl exec -n office $NEW -- rm -f /tmp/restore.sql
+   > mise exec -- kubectl exec -n office $NEW -- sh -c 'ls /tmp/restore.sql 2>/dev/null && echo "STILL PRESENT — remove it" || echo removed'
+   > ```
+   > `kubectl cp` does not guarantee a restrictive mode, so `chmod` explicitly,
+   > and **verify** the removal rather than assuming the `rm` ran — if the
+   > restore errors or you abort between the two commands, the file survives.
+   > Note the pod filesystem is ephemeral (a restart discards it), which limits
+   > but does not eliminate the exposure.
    **Run Verification (a)–(d) here, with Nextcloud still at 0 replicas.** Do not
    bring the app up onto an unverified restore.
 
@@ -573,7 +649,7 @@ mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_RO
   select @@version, @@character_set_server, @@collation_server, @@innodb_file_per_table, @@transaction_isolation;
   select schema_name, default_character_set_name, default_collation_name
     from information_schema.schemata where schema_name=\"nextcloud\";"'
-# MUST read utf8mb3 / utf8mb3_general_ci — compare to /tmp/nextcloud-db-baseline.txt.
+# MUST read utf8mb3 / utf8mb3_general_ci — compare to ~/db-dumps/nextcloud-db-baseline.txt.
 
 # d) THE load-bearing check — the restore is COMPLETE, not merely "successful".
 #    *** CONTENTS ASSERTION: exact row counts for ALL 206 tables, diffed against
@@ -590,21 +666,21 @@ mise exec -- kubectl exec -n office $NEW -- sh -c '
   export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
   for T in $(mariadb -uroot -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
     printf "%s=%s\n" "$T" "$(mariadb -uroot -N -B nextcloud -e "select count(*) from \`$T\`")"
-  done' > /tmp/nextcloud-rows-after.txt
-wc -l /tmp/nextcloud-rows-after.txt                                  # 206
-diff /tmp/nextcloud-rows-before.txt /tmp/nextcloud-rows-after.txt \
+  done' > ~/db-dumps/nextcloud-rows-after.txt
+wc -l ~/db-dumps/nextcloud-rows-after.txt                                  # 206
+diff ~/db-dumps/nextcloud-rows-before.txt ~/db-dumps/nextcloud-rows-after.txt \
   && echo "ALL 206 TABLE COUNTS IDENTICAL — restore is complete"
 # `diff` MUST be silent. ANY output: STOP, do not bring nextcloud up, roll back
 # (§5). An all-zero right-hand side is the paperless signature — a perfect,
 # empty schema. A silent diff over 206 tables is what makes every later check
 # meaningful; without it they are all shape.
-awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/nextcloud-rows-after.txt
+awk -F= '{s+=$2} END {print "total rows:", s}' ~/db-dumps/nextcloud-rows-after.txt
 #   must equal the pre-check total, and must not be ~0.
 
 mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "
   select table_name, table_rows, table_collation from information_schema.tables
-  where table_schema=\"nextcloud\" order by table_name;"' > /tmp/nextcloud-db-tables-after.txt
-diff /tmp/nextcloud-db-tables-before.txt /tmp/nextcloud-db-tables-after.txt
+  where table_schema=\"nextcloud\" order by table_name;"' > ~/db-dumps/nextcloud-db-tables-after.txt
+diff ~/db-dumps/nextcloud-db-tables-before.txt ~/db-dumps/nextcloud-db-tables-after.txt
 # `table_rows` is an InnoDB ESTIMATE and will differ — the TABLE LIST and the
 # COLLATIONS must match exactly. 206 tables before, 206 after.
 mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "
@@ -612,7 +688,7 @@ mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_RO
          (select count(*) from nextcloud.oc_users),
          (select count(*) from nextcloud.oc_share),
          (select count(*) from nextcloud.oc_mail_accounts);"'
-# MUST match /tmp/nextcloud-app-baseline.txt exactly. oc_filecache is the file
+# MUST match ~/db-dumps/nextcloud-app-baseline.txt exactly. oc_filecache is the file
 # index — a short count here means a partial restore, and Nextcloud would happily
 # start and simply not show your files.
 
@@ -645,7 +721,7 @@ mise exec -- kubectl exec -n office deploy/nextcloud -- \
   su -s /bin/sh www-data -c 'php occ status'                       # maintenance: false, no "upgrade needed"
 mise exec -- kubectl exec -n office deploy/nextcloud -- \
   su -s /bin/sh www-data -c 'php occ user:list | wc -l; php occ app:list | head -60'
-# Diff against /tmp/nextcloud-app-baseline.txt. openclaw_mail MUST still be
+# Diff against ~/db-dumps/nextcloud-app-baseline.txt. openclaw_mail MUST still be
 # Enabled — the install-openclaw-mail initContainer re-materializes it on every
 # boot, so a missing app means that initContainer failed, not the DB.
 mise exec -- kubectl exec -n office deploy/nextcloud -- \
