@@ -20,6 +20,7 @@ Run:  python3 runbooks/lib/test_findings_writer_autoclose.py
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -68,14 +69,20 @@ class FakeCursor:
         return []
 
     def fetchone(self):
+        # `SELECT notes FROM sweep_cycles ... FOR UPDATE` is the read half of
+        # the veto-note read-modify-write. Defaults to None, so every test
+        # written before the notes were readable behaves exactly as it did.
+        if self._last.startswith("SELECT notes") and self.conn.notes is not None:
+            return (self.conn.notes,)
         return None
 
 
 class FakeConn:
     """Records every statement; commit/close are inert."""
 
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, notes=None):
         self.log: list = []
+        self.notes = notes
         self.rows: list = [DEFAULT_CANDIDATE] if rows is None else list(rows)
 
     def cursor(self):
@@ -398,6 +405,112 @@ def test_complete_run_persists_no_incomplete_marker():
     notes_writes = [sql for sql, _p in conn.log
                     if "UPDATE sweep_cycles" in sql and "notes" in sql]
     assert not notes_writes, "a complete run wrote an incomplete marker"
+
+
+# --------------------------------------------------------------------------
+# Retracting the veto: the notes were write-only, so a section that recovered
+# went on broadcasting the previous pass's reason
+# --------------------------------------------------------------------------
+
+def _notes_payload(conn):
+    """The JSON handed to the last `UPDATE sweep_cycles ... notes` statement."""
+    writes = [p for sql, p in conn.log
+              if "UPDATE sweep_cycles" in sql and "notes" in sql]
+    return json.loads(writes[-1][0]) if writes else None
+
+
+def test_clean_run_clears_its_own_stale_incomplete_note():
+    """The bug: `_persist_incomplete` only ever ADDED.
+
+    A cycle is shared and outlives one run of one specialist, so a section
+    that was degraded earlier and clean later kept the old reason on the row:
+    the orchestrator went on skipping auto-close for a section that had since
+    answered in full, and the board kept rendering the cycle incomplete.
+    Observed on cycle 2d6b4635, which carried a prior degraded run's reasons
+    verbatim through a 185/185, no-veto security run.
+    """
+    _clear_env()
+    w, conn = _writer(section="security")
+    conn.notes = json.dumps(
+        {"incomplete": {"security": "s4_cve_check: trivy could not reach ghcr"}})
+    w.close(verdict="green")
+    assert _autoclose_stmts(conn), "precondition: this run must actually close"
+    payload = _notes_payload(conn)
+    assert payload is not None, "the stale note was never retracted"
+    assert "incomplete" not in payload, (
+        f"the last incomplete key must be dropped whole, got {payload}")
+
+
+def test_clean_run_clears_only_its_own_section_note():
+    """Scoped hard: a clean security run says nothing about the other sections.
+
+    Clearing a sibling's key would turn this fix into the very fail-open it
+    repairs — the orchestrator would close rows for a section that never got
+    its answers.
+    """
+    _clear_env()
+    w, conn = _writer(section="security")
+    conn.notes = json.dumps({"incomplete": {
+        "security": "s6_attack_patterns: Elasticsearch unavailable",
+        "version": "renovate API unreachable",
+    }})
+    w.close(verdict="green")
+    payload = _notes_payload(conn)
+    assert payload["incomplete"] == {"version": "renovate API unreachable"}, payload
+
+
+def test_full_coverage_clears_its_own_stale_uncovered_note():
+    """`_persist_uncovered` had the identical write-only defect.
+
+    It returned early when nothing was uncovered, so a component that
+    resolved on a later pass stayed vetoed forever.
+    """
+    _clear_env()
+    w, conn = _writer(section="security")
+    conn.notes = json.dumps(
+        {"uncovered": {"security": {"ghcr.io/example/app": "manifest unreadable"}}})
+    assert not w._uncovered, "precondition: this run covered everything"
+    w.close(verdict="green")
+    payload = _notes_payload(conn)
+    assert payload is not None and "uncovered" not in payload, payload
+
+
+def test_clean_run_leaves_a_cycle_with_no_notes_untouched():
+    """No stale note means no write at all — not an empty-dict rewrite."""
+    _clear_env()
+    w, conn = _writer(section="security")
+    conn.notes = json.dumps({"incomplete": {"version": "renovate unreachable"}})
+    w.close(verdict="green")
+    assert _notes_payload(conn) is None, (
+        "a section with nothing of its own to retract still rewrote the row")
+
+
+def test_refused_autoclose_does_not_clear_the_note():
+    """The circuit breaker is the one gate that says 'this did not really run'.
+
+    Clearing there would hand the orchestrator — which has no breaker of its
+    own — permission to close exactly the rows the writer just refused.
+    """
+    _clear_env()
+    w, conn = _writer(section="version")
+    w._emitted_fps = set()          # zero-emit: trips the breaker
+    conn.notes = json.dumps({"incomplete": {"version": "scraper fell over"}})
+    w.close(verdict="green")
+    assert not _autoclose_stmts(conn), "precondition: the breaker must refuse"
+    assert _notes_payload(conn) is None, "a refused run retracted the veto anyway"
+
+
+def test_dry_run_clears_nothing():
+    """SWEEP_AUTOCLOSE_DRYRUN writes nothing — the note is a write."""
+    _clear_env()
+    os.environ["SWEEP_AUTOCLOSE_DRYRUN"] = "1"
+    try:
+        w, conn = _writer(section="security")
+        conn.notes = json.dumps({"incomplete": {"security": "trivy unavailable"}})
+        w.close(verdict="green")
+        assert _notes_payload(conn) is None, "a dry run mutated the cycle row"
+    finally:
+        _clear_env()
 
 
 def test_healthy_run_still_autocloses():

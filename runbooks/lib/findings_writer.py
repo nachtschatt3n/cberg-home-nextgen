@@ -712,6 +712,68 @@ class FindingsWriter:
             return
         self._uncovered.setdefault(component, reason)
 
+    def _clear_cycle_note(self, kind: str) -> None:
+        """Drop THIS section's key from `notes[kind]` on the shared cycle row.
+
+        The veto notes are write-only without this: `_persist_incomplete` and
+        `_persist_uncovered` only ever add. A cycle is shared by every
+        specialist and outlives a single run of any one of them, so a section
+        that was degraded on an earlier pass and clean on a later one kept
+        broadcasting the OLD pass's reason — the orchestrator went on skipping
+        auto-close for a section that had since answered in full, and the
+        board went on rendering the cycle as incomplete. Observed on cycle
+        2d6b4635, which carried a prior degraded run's reasons verbatim
+        through a 185/185, no-veto security run.
+
+        Scoped hard to `self.section`: a clean security run says nothing about
+        whether the version or media sections got their answers, and clearing
+        their keys would turn this fix into the very fail-open it repairs. If
+        the section's key is already absent the row is left untouched, so a
+        healthy section on a healthy cycle still writes nothing at all.
+        """
+        if self._conn is None:
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "SELECT notes FROM sweep_cycles WHERE cycle_id = %s FOR UPDATE",
+                    (self._cycle_id,),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    return
+                try:
+                    notes = json.loads(row[0])
+                except (ValueError, TypeError):
+                    return
+                if not isinstance(notes, dict):
+                    return
+                bucket = notes.get(kind)
+                if not isinstance(bucket, dict) or self.section not in bucket:
+                    return
+                stale = bucket.pop(self.section)
+                if bucket:
+                    notes[kind] = bucket
+                else:
+                    notes.pop(kind, None)
+                cur.execute(
+                    "UPDATE sweep_cycles SET notes = %s WHERE cycle_id = %s",
+                    (json.dumps(notes), self._cycle_id),
+                )
+            self._conn.commit()
+            print(f"==> cleared the stale {kind.upper()} note for section "
+                  f"{self.section} on cycle {self._cycle_id} — this run "
+                  f"completed and closed on its own authority, so the earlier "
+                  f"pass's reason no longer holds ({stale})")
+        except Exception as e:  # noqa: BLE001 — never lose the cycle close
+            print(f"==> WARNING: could not clear the {kind} note for "
+                  f"{self.section}: {type(e).__name__}: {e}. The section stays "
+                  f"flagged, which is the safe direction.")
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _persist_uncovered(self) -> None:
         """Publish the per-component scope onto the shared cycle row.
 
@@ -719,8 +781,15 @@ class FindingsWriter:
         auto-close SQL after every step and cannot see our in-memory state, so
         a scope enforced only here would be undone seconds later by the
         orchestrator closing exactly the rows we held back.
+
+        Full coverage this pass is a positive result, not an absence of one:
+        it must RETRACT an earlier pass's scope note rather than leave it
+        standing, or a component resolves and stays vetoed forever.
         """
-        if self._conn is None or not self._uncovered:
+        if self._conn is None:
+            return
+        if not self._uncovered:
+            self._clear_cycle_note("uncovered")
             return
         try:
             with self._conn.cursor() as cur:
@@ -1041,6 +1110,15 @@ class FindingsWriter:
                     rows = []
                 else:
                     rows = self._autoclose_stale(dry_run=dry)
+                    if not dry:
+                        # Reached only when the section ran complete, declared
+                        # no veto, and actually closed on its own authority —
+                        # so an earlier pass's note on this shared cycle is
+                        # now stale. Deliberately NOT hoisted above the
+                        # circuit breaker: a REFUSED close still wants the
+                        # orchestrator held off, and the breaker is the one
+                        # gate that says "this section did not really run".
+                        self._clear_cycle_note("incomplete")
                 if rows:
                     self._report_autoclose(rows, dry_run=dry)
             except Exception as e:  # noqa: BLE001 — never lose the cycle close
