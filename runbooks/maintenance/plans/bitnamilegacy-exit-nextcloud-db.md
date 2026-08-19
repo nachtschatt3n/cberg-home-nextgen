@@ -195,6 +195,21 @@ mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
      where table_schema=\"nextcloud\" order by table_name;"' | tee /tmp/nextcloud-db-tables-before.txt
 wc -l /tmp/nextcloud-db-tables-before.txt        # expect 206 rows
 
+#    *** EXACT row counts for ALL 206 tables — the binding acceptance test ***
+#    `table_rows` above is an InnoDB ESTIMATE; it is fine for the table LIST and
+#    the collations and useless as evidence that data arrived. Generate one
+#    count(*) per table and keep the output:
+#    (single-quoted body: everything runs INSIDE the pod, so the password never
+#     enters kubectl argv, the API-server audit log or your shell history)
+mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
+  P=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
+  for T in $(mariadb -uroot -p"$P" -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
+    printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$P" -N -B nextcloud -e "select count(*) from \`$T\`")"
+  done' > /tmp/nextcloud-rows-before.txt
+wc -l /tmp/nextcloud-rows-before.txt            # expect 206
+awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/nextcloud-rows-before.txt
+#    Record that total. It is the number the restore must reproduce.
+
 # d) SIZE THE WORK — this decides whether 85 min is right
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
   'mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" -N -e "
@@ -248,6 +263,92 @@ curl -s "https://hub.docker.com/v2/repositories/library/mariadb/tags?page_size=1
 mise exec -- kubectl logs -n office deploy/nextcloud --since=10m | grep -iE 'PUT|upload' | tail
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
 ```
+
+## 3a) SEQUENCING ENFORCEMENT — added 2026-08-19, read before §3
+
+**The single most important finding of the 2026-08-19 window**, learned the hard
+way on the paperless sibling (`bitnamilegacy-exit-paperless-db`, commit
+`4604c711`) and confirmed independently during an unrelated containment the same
+day:
+
+> **`kubectl scale ... --replicas=0` DOES NOT HOLD. Flux drift-corrects it back.**
+
+This plan already says the right thing in prose — quiesce, dump, replatform,
+restore, *then* bring the app up. But the mechanism it uses to hold the app down
+(`kubectl scale --replicas=0`) is a manual override of a Flux-managed field, and
+Flux reverts it on its next reconcile. Worse, **the reconcile is not incidental:
+step 6 pushes a commit and deliberately waits for Flux to apply it.** That same
+reconcile restores `replicas: 1`.
+
+The resulting sequence is the failure:
+
+```
+scale to 0  ->  push replatform commit  ->  Flux applies it
+            ->  Flux ALSO restores replicas: 1
+            ->  Nextcloud boots against the EMPTY new datadir
+            ->  it runs its own migrations / init
+            ->  ONLY THEN does step 7's restore run
+```
+
+On paperless this was survivable **only** because `mysqldump --add-drop-table`
+drops every table before recreating it, so the restore steam-rollered whatever
+the app had just created. **Do not rely on that here.** Nextcloud is materially
+worse than paperless in this shape:
+
+- its entrypoint runs schema migrations and can treat an empty database as a
+  **fresh install**;
+- it persists identity and state (`instanceid`, `secret`, `maintenance`) into
+  `config.php` **on the PVC**, which no database restore reverts — the same
+  config-on-PVC trap that bit `notify_push` during the redis cutover
+  (`d6070b82`);
+- a fresh-install path can therefore leave the PVC and the restored database
+  disagreeing about which instance this is, which a row-count check will not
+  detect.
+
+### Required: make `replicas: 0` the DESIRED state, not an override
+
+Preferred, because it is GitOps-native and cannot race:
+
+1. Set the app's replica count to **0 in the HelmRelease values** in the SAME
+   commit as the replatform (step 6). Flux then converges *to* 0; its reconcile
+   becomes harmless instead of hostile.
+
+   Verified available 2026-08-19: `kubernetes/apps/office/nextcloud/app/helmrelease.yaml`
+   carries `replicaCount: 1` at **line 36** (the app's own value — *not* the
+   `replicaCount` further down, which belongs to a subchart), and chart 9.2.5's
+   `templates/deployment.yaml` renders `replicas: {{ .Values.replicaCount }}`
+   directly from it. So `replicaCount: 0` is a one-line, Flux-native hold.
+2. Do the restore (step 7) and run Verification (a)-(d) with the app still down.
+3. Only then, a SECOND commit restores the replica count to 1 (step 8).
+
+Acceptable alternative (kept only as a fallback — the value above IS exposed,
+so prefer it): `flux
+suspend helmrelease -n office nextcloud` **and** `flux suspend kustomization -n
+office nextcloud` before scaling to 0, resuming only after (a)-(d) pass. Note
+this was verified today: suspending the Kustomization alone is **not** enough —
+the HelmRelease-owned Deployment is reconciled back independently, so **both**
+must be suspended. It is the weaker option because a suspended HelmRelease also
+blocks step 6's own apply, so the suspend must be timed around it.
+
+### Verify the hold actually held
+
+Before running the restore, confirm the app did not come up in the gap:
+
+```bash
+mise exec -- kubectl get deploy -n office nextcloud -o jsonpath='{.spec.replicas} {.status.replicas}{"\n"}'   # 0 0
+mise exec -- kubectl get pods -n office -l app.kubernetes.io/component=app        # no pods
+# and prove it never briefly ran against the empty DB:
+mise exec -- kubectl get events -n office --field-selector involvedObject.name=nextcloud --sort-by=.lastTimestamp | tail -20
+```
+
+If the app DID start against the empty datadir, do **not** simply carry on
+because the restore will drop the tables anyway. Stop, and check `config.php` on
+the PVC for a regenerated `instanceid`/`secret` before continuing.
+
+Row counts alone will not catch this class of failure — see
+`docs/sops/verification-contents-not-shape.md`, which this plan already applies
+to the restore itself. The same principle applies to the *ordering*: a correct
+final row count does not prove the app never touched the database first.
 
 ## 3) Steps
 
@@ -389,6 +490,11 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    Flux reconciles: the new MariaDB initialises an empty datadir and the bundled
    StatefulSet is removed. Nextcloud is still scaled to 0 — keep it there.
 
+   > **"Keep it there" is not self-enforcing. See §3a — the commit you just
+   > pushed is exactly what brings the app back up against the empty datadir.**
+   > Do not proceed past this point until `replicas: 0` is the state Flux is
+   > actively converging TO, not a manual override it is about to undo.
+
 7. **Restore into the new server** before letting Nextcloud near it:
    ```bash
    mise exec -- kubectl rollout status deploy/nextcloud-db -n office --timeout=900s
@@ -467,6 +573,31 @@ mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_RO
 # MUST read utf8mb3 / utf8mb3_general_ci — compare to /tmp/nextcloud-db-baseline.txt.
 
 # d) THE load-bearing check — the restore is COMPLETE, not merely "successful".
+#    *** CONTENTS ASSERTION: exact row counts for ALL 206 tables, diffed against
+#    the pre-check baseline, BEFORE nextcloud is allowed back up. ***
+#    This is the check the paperless-db incident (2026-08-19) did not have: a
+#    brand-new database with all 74 tables and ZERO rows passed pod-Ready,
+#    schema-present and HTTP 200 while 714 documents were invisible. Nextcloud
+#    behaves identically — it starts happily on a complete, empty schema and
+#    simply shows you no files. See docs/sops/verification-contents-not-shape.md.
+#    Same form as pre-check (c). NOTE the password source differs between the
+#    two pods: the OLD bitnami STS delivers it as a FILE
+#    ($MARIADB_ROOT_PASSWORD_FILE); the NEW official image as an ENV VAR.
+mise exec -- kubectl exec -n office $NEW -- sh -c '
+  P="$MARIADB_ROOT_PASSWORD"
+  for T in $(mariadb -uroot -p"$P" -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
+    printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$P" -N -B nextcloud -e "select count(*) from \`$T\`")"
+  done' > /tmp/nextcloud-rows-after.txt
+wc -l /tmp/nextcloud-rows-after.txt                                  # 206
+diff /tmp/nextcloud-rows-before.txt /tmp/nextcloud-rows-after.txt \
+  && echo "ALL 206 TABLE COUNTS IDENTICAL — restore is complete"
+# `diff` MUST be silent. ANY output: STOP, do not bring nextcloud up, roll back
+# (§5). An all-zero right-hand side is the paperless signature — a perfect,
+# empty schema. A silent diff over 206 tables is what makes every later check
+# meaningful; without it they are all shape.
+awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/nextcloud-rows-after.txt
+#   must equal the pre-check total, and must not be ~0.
+
 mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "
   select table_name, table_rows, table_collation from information_schema.tables
   where table_schema=\"nextcloud\" order by table_name;"' > /tmp/nextcloud-db-tables-after.txt
@@ -549,7 +680,9 @@ mise exec -- kubectl get volume -n storage nextcloud-mariadb \
 mise exec -- trivy image mariadb:11.8.8 --severity CRITICAL --ignore-unfixed | tail -20
 ```
 
-Success = HR Ready on chart 9.2.5 with `nextcloud:34.0.2` unchanged; no
+Success = **the 206-table exact row-count diff silent before nextcloud comes
+back up** (the binding contents assertion — everything below is the floor);
+HR Ready on chart 9.2.5 with `nextcloud:34.0.2` unchanged; no
 `bitnamilegacy` container on any `office` pod including the Nextcloud
 initContainer list; `nextcloud-db` Ready on `mariadb:11.8.8` with the datadir
 marker reading **11.8.8** and `mariadb-check` all-OK; charset still
