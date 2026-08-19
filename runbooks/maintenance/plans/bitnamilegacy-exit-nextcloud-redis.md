@@ -25,8 +25,15 @@ touches:
 depends_on: []
 conflicts_with: [bitnamilegacy-exit-nextcloud-db]
 security_ref: F-d62ac46a                        # see also F-46597825 (same image, fixable class)
-status: vetted                                  # AMENDED + re-vetted 2026-08-19 against a real
-                                                # `helm template` render of chart 9.2.5
+status: executed                                # EXECUTED 2026-08-19 (d6070b82 cutover,
+                                                # 1dabbefd notify-push follow-up) in the
+                                                # operator-approved ad-hoc window. Was:
+                                                # AMENDED + re-vetted 2026-08-19 against a real
+                                                # `helm template` render of chart 9.2.5.
+# RETAIN, do not delete on the usual executed-plan convention: §5 stays the live
+# rollback while the orphaned PV redis-data-nextcloud-redis-master-0 is still the
+# only way back, i.e. until the "clean for a week" retirement in §6 is done and
+# phase 4 (bitnamilegacy-exit-nextcloud-db) has landed.
 window: "fri-early:2026-08-28"        # MOVED off sat-early:2026-08-22 (2026-08-16): that slot held
                                       # longhorn-1.12.1-engine (60m) + this (30m) = exactly 90m of a
                                       # 90m window. The reconciler flags that TIGHT and it is right —
@@ -458,6 +465,62 @@ any nextcloud pod; `nextcloud-redis` Ready on `redis:8.10.0-alpine`; `occ status
 out of maintenance mode with a filling keyspace; upload/rename/delete/restore all
 working with no lock errors; `status.php` clean; the old PV still present and
 Retain.
+
+## 4b) Execution record — 2026-08-19 (ad-hoc window)
+
+Result: **PASS.** Commits `d6070b82` (cutover) and `1dabbefd` (notify-push
+follow-up; `853bf719` was an intermediate attempt reverted by it).
+
+The §3 pre-commit render gate passed:
+`REDIS_URL = "redis://$(REDIS_HOST):$(REDIS_HOST_PORT)"`, zero
+`nextcloud-redis-master` strings, no redis subchart objects.
+Block 0a-0e all green. A real web session was established end to end through
+the ingress, and an upload/overwrite/rename/read/delete/restore-from-trash
+round trip completed with zero 423s and no `LockedException`.
+
+**One thing the plan did not predict — a THIRD hidden reference.** §1a found
+the two hardcoded `nextcloud-redis-master` strings in the HelmRelease. There is
+a third, and it is not in git at all: Nextcloud's **persisted `config.php` on
+the `nextcloud-config` PVC** carries a literal
+`'redis' => ['host' => ...]`, baked in at install time. The main container is
+immune — the chart's `redis.config.php` overlay is loaded later and its
+`getenv('REDIS_HOST')` wins, so `occ config:system:get redis` reported the new
+host and the release went green. But **`notify_push` parses `config.php`
+directly and ignores that overlay**, so the push channel sat in a
+reconnect loop against a Service that no longer existed
+(`failed to lookup address information`). Nothing in the HelmRelease, the
+rendered Deployment, or the HR Ready status exposes this.
+
+Fix, for the next rename (phase 4 will hit the same trap with `dbhost`):
+
+```bash
+# Nextcloud rewrites config.php from the FULL MERGED config on any write, so a
+# throwaway key round-trip refreshes the stale literal. A plain
+# `occ config:system:set redis host --value=...` is a NO-OP here: it compares
+# against the MERGED value, which the overlay has already made correct.
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ config:system:set zz_touch --value=1'
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ config:system:delete zz_touch'
+# then roll notify-push so notify_push re-parses, and verify:
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ notify_push:self-test'   # must be 6x green
+```
+
+Adding `REDIS_HOST` to the notify-push container does **not** work — tried in
+`853bf719`, disproven on the live pod, reverted in `1dabbefd`, which leaves the
+finding as a comment in `notify-push.yaml`.
+
+**Add `occ notify_push:self-test` to the verification of every plan that
+renames a Nextcloud backing service.** It is the only check that catches this;
+pods Ready, HR Ready and `occ status` are all green while it is broken.
+
+Also worth recording: the subchart-owned `networkpolicy/nextcloud-redis` and
+our replacement share a name, so Helm deleted ours while pruning the subchart,
+*after* kustomize-controller had applied it. One `flux reconcile kustomization
+nextcloud -n office` put it back permanently — the race is one-time, because
+the Helm release no longer tracks that object. A distinct name would avoid it
+entirely.
 
 ## 5) Rollback
 
