@@ -17,12 +17,11 @@ touches:
   shared: []
 depends_on: []
 conflicts_with: []
-status: scheduled
-window: "sat-early:2026-08-29"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
-                                      # (7 windows/week, was 4). Deliberate soaks are
-                                      # preserved, not compressed — see the windows YAML.
-# Scheduled 2026-08-15. 60m in a 90m slot. Not a tue/thu 60m slot: 60-of-60
-# leaves zero rollback time.
+status: executed                      # EXECUTED 2026-08-19 (bec644fe) in the ad-hoc window, STEP 4.
+window: null                          # cleared 2026-08-19: executed ahead of the
+                                      # sat-early:2026-08-29 slot, which is now released.
+# Was scheduled 2026-08-15 for a 90m slot; pulled forward into the 2026-08-19
+# ad-hoc window after the operator smoke-tested the toolchain (see §1a).
 auto_execute: false                   # toolchain major bump on the serving process
 security_ref: F-9f752afd              # security driver; detail is DB-only
 sops_refs:
@@ -210,3 +209,61 @@ is harmless.
 - Highest-risk failure mode is the dev server refusing the ingress Host header
   (`allowedHosts`), which presents as an HTTP 403 from a **Running, Ready** pod.
   Do not trust pod readiness alone — curl it.
+
+## 7) Outcome — EXECUTED 2026-08-19
+
+Executed as STEP 4 of the operator-approved ad-hoc window. **vite 7, not vite 8**,
+per the §1a decision.
+
+| | |
+|---|---|
+| harness repo | `16e588e`, tagged `v0.5.4-alpha` (CI green: tests, build, release) |
+| cberg repo | `bec644fe` — both image tags `0.5.3-alpha` -> `0.5.4-alpha` |
+| resolved | vite **7.3.6**, @vitejs/plugin-vue **6.0.8**, vitest **4.1.11**, esbuild **0.28.2** |
+
+Verified in the **running container**, not just the local tree: esbuild Go binary
+and package both 0.28.2, vite 7.3.6, node v22.23.2 (satisfies vite 7's
+`^20.19.0 || >=22.12.0`).
+
+- trivy CRITICAL: frontend `1 -> 0`, server `0`. Counts and advisory detail on
+  the finding record, not here.
+- Image `created` moved `2026-08-14T23:08` -> `2026-08-19T06:13` — a genuine
+  rebuild, not a re-pointed tag.
+- `allowedHosts` still valid under vite 7 (typed `string[] | true`; runtime still
+  branches on `=== true`). The §6 failure mode was tested directly rather than
+  inferred: a request carrying the **real ingress hostname** as `Host` returns
+  **200**, both against the local dev server and the live pod. End-to-end through
+  the actual ingress: `/` -> 200, `/health` -> 200 proxied to the server, so the
+  vite proxy config survived the major.
+- Pods 1/1 Running, 0 restarts; frontend logs `VITE v7.3.6 ready`, no host-check
+  error.
+
+### Follow-up filed, deliberately NOT fixed here
+
+`npm run test:unit` is red — but red **identically** on vitest 3 and vitest 4
+(5 failed / 6 errors), measured by running both toolchains against the same
+sources. The major therefore introduced no regression. Two pre-existing,
+unrelated defects, left alone to keep this security window narrow:
+
+1. `tests/Chat.spec.ts` mounts a `vue-router`-using component with no router
+   stub (`injection "Symbol(router)" not found`).
+2. `vite.config.ts` names `happy-dom` as the test environment, but `happy-dom`
+   has never been in `devDependencies` — so the suite cannot even start from a
+   clean `npm ci`.
+
+Neither is caught by CI: `build.yml`'s `test` job runs the **server** pytest
+only and never invokes the frontend specs. Worth its own small plan — note that
+adding `happy-dom` puts another package into the shipped image, since the
+Dockerfile `npm ci` installs devDependencies and the image runs the dev server.
+
+### Rejected before execution
+
+The npm `overrides` shortcut (hold vite 6, force esbuild forward) — see §1a. It
+resolves but the vite 6 dev server then fails pre-bundling with 201 transform
+errors and serves nothing (HTTP 000). Do not re-propose.
+
+### Still open
+
+The **vite 8 / rolldown** move remains the better strategic destination — it
+removes esbuild from the tree entirely rather than moving it to a newer version.
+Should be raised as its own plan, justified by removing the dependency outright.
