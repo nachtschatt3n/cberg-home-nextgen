@@ -3,8 +3,8 @@ plan_id: longhorn-1.12.1-engine
 component: longhorn
 pr: null                              # the engine upgrade is a CR operation, not a version bump
 kind: chart
-current: "93 volumes: 72 on engine v1.11.2 + 21 on engine v1.12.0"
-target: "ALL 93 volumes on engine v1.12.1"
+current: "95 volumes (2026-08-19 recount): 72 v1.11.2 + 21 v1.12.0 + 2 v1.12.1"
+target: "every ATTACHED volume on v1.12.1; 2 detached rollback floors explicitly EXCLUDED — see 1c"
 update_type: patch
 risk: medium                          # live engine upgrade touches every attached volume
 est_duration_min: 45                  # ATTENDED portion. The drain itself is ASYNC and
@@ -15,7 +15,7 @@ touches:
   resources:
     - "engineimage/ei-c9fa6d45"        # v1.11.2, refCount 292 — GCs once unreferenced
     - "engineimage/ei-a4d05f02"        # v1.12.0, refCount 84  — GCs once unreferenced
-    - "volume/* (93)"                  # live engine upgrade: 72 on v1.11.2, 21 on v1.12.0
+    - "volume/* (95, of which 92 attached)"   # 72 v1.11.2 + 21 v1.12.0 + 2 v1.12.1
     - daemonset/engine-image-ei-*      # both stale DaemonSets retire with the last reference
     - setting/concurrent-automatic-engine-upgrade-per-node-limit
   shared: [storage]                   # EVERY stateful app rides Longhorn — see §6
@@ -33,7 +33,7 @@ generated: "2026-08-14"
 revised: "2026-08-19"                 # SPLIT from the chart bump + SCOPE CORRECTED
 ---
 
-# Longhorn: finish the engine upgrade — all 93 volumes → v1.12.1
+# Longhorn: finish the engine upgrade — every attached volume → v1.12.1
 
 ## 1) Summary & why held
 
@@ -52,16 +52,18 @@ Security driver on `longhornio/longhorn-engine`.
 "74 of 80 volumes still on v1.11.2". Measured against the live cluster:
 
 ```
-total volumes: 93
+total volumes: 95          # RECOUNTED 2026-08-19 after the day's migrations
   72  docker.io/longhornio/longhorn-engine:v1.11.2
   21  docker.io/longhornio/longhorn-engine:v1.12.0
+   2  docker.io/longhornio/longhorn-engine:v1.12.1   # born on the new default
 ```
 
 Both numerator and denominator were wrong, and — the substantive error — the
 21 volumes on **v1.12.0 are not "already done"**. v1.12.0 carries its own
-finding (**F-6bedee0b**), so it is not a clean destination. **All 93 volumes
-must reach v1.12.1**, not 72 of them. A run that stopped when v1.11.2 hit zero
-would leave 21 volumes on a flagged engine and the sweep still red.
+finding (**F-6bedee0b**), so it is not a clean destination. **Every ATTACHED
+volume must reach v1.12.1**, not just the v1.11.2 ones. A run that stopped when
+v1.11.2 hit zero would leave 21 volumes on a flagged engine and the sweep still
+red. For the detached exclusions, and why the census moved, see §1c.
 
 `EngineImage ei-c9fa6d45` (v1.11.2) has refCount 292 and `ei-a4d05f02`
 (v1.12.0) refCount 84; **both** DaemonSets are still deployed, and both stale
@@ -98,7 +100,7 @@ helm template … --version 1.12.1 --set networkPolicies.restrictInternalTraffic
 `netpol/storage/longhorn-manager` admits only longhorn-internal pods. Prometheus
 is not in the allow-list, so all three `longhorn-backend` scrape targets went
 DOWN (`context deadline exceeded` on `:9500/metrics`) and `LonghornManagerDown`
-×3 + `TargetDown` fired **permanently**. Longhorn itself stayed healthy (93/93
+×3 + `TargetDown` fired **permanently**. Longhorn itself stayed healthy (all
 volumes attached + healthy) — so this was a monitoring blind spot, which is the
 dangerous kind: a standing false alarm masks a real future manager failure.
 
@@ -114,6 +116,61 @@ is still untested. Do not adopt it blind.
 **Lesson for this plan:** verification for a storage-layer change must include
 "Prometheus can still scrape it", not only "the volumes are healthy". §4 below
 inherits that.
+
+## 1c) RECOUNT + EXCLUSIONS — added 2026-08-19, read before the gate
+
+**Do not trust any volume count written in this file. Re-derive it live.** The
+fleet changed under this plan during the 2026-08-19 window:
+
+```
+2026-08-19 recount:  95 volumes  (was 93 when this plan was written)
+  72  v1.11.2      21  v1.12.0      2  v1.12.1
+  92 attached      3 detached
+```
+
+Two volumes were created by the day's migrations (`paperless-db-data`,
+`nextcloud-db-data`), both born on v1.12.1 because the chart bump moved the
+default engine. Neither is pinned — pinning a volume makes it actively resist
+this drain.
+
+### The three detached volumes, and why two are permanent exclusions
+
+| volume | engine | why detached |
+|---|---|---|
+| `paperless-mariadb` | **v1.11.2** | retained rollback floor for the paperless replatform |
+| `redis-data-nextcloud-redis-master-0` | **v1.11.2** | retained rollback floor for the nextcloud redis cutover |
+| `nextcloud-db-data` | v1.12.1 | parked from the rolled-back nextcloud-db attempt; already on target |
+
+**A detached volume cannot be live-upgraded.** Longhorn upgrades the engine of a
+running volume; there is no engine process to swap on a detached one. Attaching
+these two purely to upgrade them would mean attaching a rollback floor — exactly
+what `docs/sops/storage-safety.md` and the retention decisions of this window
+say not to touch. **Do not attach them. Do not delete them.**
+
+### Consequence the success gate must account for
+
+The original gate said "both stale EngineImages unreferenced, then gone; their
+DaemonSets retired". **That is no longer achievable in this run**, and it is
+important not to discover that at the end:
+
+- `ei-c9fa6d45` (v1.11.2) will retain references from the two detached floors,
+  so it will **not** GC and its DaemonSet will **not** retire.
+- `ei-a4d05f02` (v1.12.0) has no such blocker and should GC normally once the
+  attached v1.12.0 volumes drain.
+
+So the honest gate for this run is:
+
+1. every **attached** volume on v1.12.1 (re-derive the count; 92 on 2026-08-19);
+2. `ei-a4d05f02` unreferenced and gone;
+3. `ei-c9fa6d45` still present, referenced **only** by the two excluded floors —
+   assert that its remaining references are exactly those two, not some volume
+   the drain silently skipped. That distinction is the whole point of the check.
+
+**The v1.11.2 finding therefore does not close in this run.** It closes when the
+two floors are retired, which is a separate decision with its own risk (deleting
+a rollback floor), and must not be smuggled into a drain. Record the partial
+outcome on the finding rather than reporting the drain as failed — a drain that
+correctly refuses to touch a rollback floor has succeeded, not fallen short.
 
 ## 2) Pre-checks
 
@@ -166,20 +223,39 @@ kubectl get volumes -n storage -o custom-columns=E:.status.currentImage --no-hea
 ## 4) Verification
 
 ```bash
-# ALL 93 volumes on v1.12.1 — nothing left on v1.11.2 OR v1.12.0
+# Every ATTACHED volume on v1.12.1. Do NOT expect a single-line result —
+# the excluded detached floors (1c) stay on their old engines by design.
 kubectl get volumes -n storage -o custom-columns=E:.status.currentImage --no-headers | sort | uniq -c
-#   expect a single line: 93 ... longhorn-engine:v1.12.1
+#   expect: all ATTACHED volumes on v1.12.1, plus exactly the 1c exclusions
+#   still on v1.11.2. Re-derive the counts live; do not trust a number in this file.
 
-# BOTH stale EngineImages unreferenced, then gone; their DaemonSets retired
+# EngineImages — see 1c, the expectation is ASYMMETRIC now:
+#   ei-a4d05f02 (v1.12.0): must go unreferenced and GC; its DaemonSet retires.
+#   ei-c9fa6d45 (v1.11.2): must REMAIN, referenced ONLY by the two excluded
+#                          detached floors. It will not GC and that is correct.
 kubectl get engineimages -n storage
 kubectl get ds -n storage | grep engine-image
+# Prove c9fa6d45's leftover references are EXACTLY the exclusions and not a
+# volume the drain silently skipped — this is the check that distinguishes
+# "correctly refused to touch a rollback floor" from "missed one":
+kubectl get volumes -n storage -o json | python3 -c "
+import sys, json
+stuck=[(v['metadata']['name'], v['status'].get('state'))
+       for v in json.load(sys.stdin)['items']
+       if 'v1.11.2' in (v['status'].get('currentImage') or '')]
+print('still on v1.11.2:', stuck)
+assert all(st != 'attached' for _, st in stuck), 'an ATTACHED volume was left behind'
+"
 
 # every volume still healthy + attached, no replica rebuild storm
 kubectl get volumes -n storage -o custom-columns=N:.metadata.name,S:.status.state,R:.status.robustness --no-headers | awk '$3!="healthy"'
 
-# finding cleared
-trivy image longhornio/longhorn-engine:v1.12.1 --severity CRITICAL --ignore-unfixed
-# Record the result on F-49f172b9 and F-6bedee0b — not in this file.
+# engine image scan for the record
+trivy image longhornio/longhorn-engine:v1.12.1 --ignore-unfixed
+# Record the outcome on F-49f172b9 and F-6bedee0b — not in this file.
+# Per 1c: F-6bedee0b (v1.12.0) can close in this run; F-49f172b9 (v1.11.2)
+# CANNOT, because the two excluded floors keep that image referenced. Record the
+# partial outcome rather than reporting the drain as failed.
 ```
 
 ### CONTENTS ASSERTIONS — do NOT sign this plan off on the block above
@@ -217,7 +293,8 @@ import sys, json
 r=json.load(sys.stdin)['data']['result']
 assert r, 'EMPTY RESULT — metrics are not arriving. STOP.'
 print('volumes reporting metrics:', r[0]['value'][1])"
-#    must be 93. An empty result array is a FAILURE, not 'no news'.
+#    must equal the LIVE attached count (re-derive it; it was 92 on 2026-08-19).
+#    An empty result array is a FAILURE, not 'no news'.
 
 # c) and no permanently-firing false alarm left behind
 curl -s http://localhost:9090/api/v1/alerts | grep -o '"alertname":"[^"]*"' \
@@ -249,8 +326,10 @@ kubectl get pods -A --field-selector=status.phase!=Running | grep -v Completed
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
 ```
 
-Success = 93/93 on v1.12.1, both stale EngineImages gone, every volume healthy,
-**all three Longhorn scrape targets up with 93 volumes reporting metrics and no
+Success = every ATTACHED volume on v1.12.1 (re-derive the count live), every
+volume healthy,
+**all three Longhorn scrape targets up with the full live volume count reporting
+metrics and no
 LonghornManagerDown firing**, and a byte-level read/write round-trip proven on a
 Longhorn-backed PVC.
 
@@ -282,7 +361,7 @@ If a volume misbehaves mid-drain:
 - **`shared: [storage]` is load-bearing.** Every stateful app rides Longhorn.
 - **The drain is ASYNCHRONOUS and unbounded.** `est_duration_min: 45` covers the
   attended portion (pre-checks, flipping the setting, confirming the drain has
-  started cleanly and is progressing). With concurrency 1 across 93 volumes the
+  started cleanly and is progressing). With concurrency 1 across ~90 volumes the
   tail can run well past the window. **The conflicting plans need the drain
   COMPLETE, not the window ended** — that asymmetry is precisely why this was
   split out of the chart bump, and it is why this plan is scheduled LAST in the
