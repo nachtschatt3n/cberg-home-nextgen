@@ -67,10 +67,10 @@ Each is a throwaway interpreter running a mounted script, so the pin is
 mechanical — but change all sites of one tag in a single commit, or the two
 halves drift apart and the finding never clears.
 
-> Pinning these changes **drift visibility only, not the CVE posture** — a
-> pinned digest carries exactly the CVEs the float carried at pin time. Their
-> CVE findings are accepted under AR-106 / AR-107, which do not lapse when the
-> pin lands; they lapse on a Python minor move.
+> Pinning these changes **drift visibility only, not the security posture** — a
+> pinned digest carries exactly what the float carried at pin time. Their
+> findings are accepted under AR-106 / AR-107, which do not lapse when the pin
+> lands; they lapse on a Python minor move.
 
 **Batch B — stateless apps.** `paperless-ai`, `paperless-gpt`, `trmnl-ha`,
 `hermes-agent`, `paperclip`, `actual-server`, `nocodb`, `makemkv`, `scrypted`.
@@ -82,7 +82,7 @@ risky. `scrypted` and `makemkv` carry user configuration; snapshot first.
 (a major-version alias, not a version)~~ **— DONE, verified 2026-08-19:** all four
 pgvector sites (databases/postgresql, databases/sweep-history, office/sure,
 office/affine) already carry `0.8.6-pg16@sha256:ccc6e83d…`, so there is no
-unpinned alias left to fix. Its residual CVE finding is accepted under AR-104,
+unpinned alias left to fix. Its residual finding is accepted under AR-104,
 because 0.8.6-pg16 is the newest tag upstream publishes on that line. Remaining
 in Batch C: `phpmyadmin:latest`,
 `bitnamilegacy/mariadb:latest`, `bitnamilegacy/redis:latest`. The two
