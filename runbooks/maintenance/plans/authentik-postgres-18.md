@@ -31,8 +31,13 @@ conflicts_with: [longhorn-1.12.1-engine]   # DB standup/restore must not run und
                                            # run attended outside windows but must not overlap either
 security_ref: F-94ee84b5              # the held-update finding (version currency /
                                       # EOL runway driver — no CVE detail belongs here)
-status: draft
-window: "sat-early:2026-09-19"                 # SCHEDULED 2026-08-18: HIGH risk 60-90m, operator-present weekend slot; cluster-wide SSO outage during quiesce — clear of every plan needing a login to verify
+status: vetted                        # RE-VETTED 2026-08-19 against today's cluster
+                                      # (was draft, windowed 09-19). See 1c.
+window: "ad-hoc:2026-08-19"           # MOVED 2026-08-19 from sat-early:2026-09-19 into the
+                                      # operator-approved ad-hoc window. Still HIGH risk, 60-90m,
+                                      # operator-present, cluster-wide SSO outage during quiesce —
+                                      # so it runs LAST among attended work, after everything that
+                                      # verifies through a login has already been verified.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
@@ -95,6 +100,80 @@ and the Django layer is version-agnostic — authentik 2026.5 supports PG 18.
 dump (~10–20 min). Every Authentik-protected app (10+ `ak-outpost-*`
 forward-auth deployments, all OIDC apps) refuses NEW logins during it; existing
 app-side sessions survive. Operator-present weekend window.
+
+## 1c) RE-VET 2026-08-19 — two things found since this plan was written
+
+Re-vetted against the live cluster before execution in the ad-hoc window. The
+plan's mechanics still hold. Two additions:
+
+### (i) REQUIRED CUTOVER STEP — move the AR-080 needle, or the board goes red
+
+The tag change alone does not alter what the scanner reports here. Verified
+2026-08-19: 18.6 carries the **same** gosu residual as 17.11, so the tracked
+record simply **re-fingerprints** under the new tag. Detail lives on the finding
+record, not here.
+
+AR-080's needle is the literal substring **`postgres:17.`**. AR descriptions are
+case-insensitive substrings of finding titles, so the moment the tag becomes
+`postgres:18.6-bookworm` the AR matches nothing, stops suppressing, and the
+finding returns as **CRITICAL**. AR-080 says so itself: it is major-line scoped
+deliberately, and "lapses only at the postgres MAJOR boundary, which is the
+intended re-review trigger". This cutover **is** that trigger.
+
+So the re-review is part of this plan, not a follow-up:
+
+1. Before flipping traffic, Trivy-scan `postgres:18.6-bookworm` and confirm the
+   residual it reports is still the same `stdlib` (gobinary) row on
+   `usr/local/bin/gosu` — i.e. the reachability argument AR-080 records is
+   unchanged, not merely assumed. Compare against AR-080's own text.
+2. If it is unchanged, update AR-080's needle from `postgres:17.` to
+   `postgres:18.` in the SAME session as the cutover:
+   `runbooks/policy-cli.py risk ...` — the needle lives in the policy DB, never
+   in git.
+3. If 18.6's residual is NOT the same shape, do **not** move the needle. Stop and
+   surface it on the finding record: the accepted-risk argument would no longer
+   be the one that was accepted.
+
+Leaving the needle at `postgres:17.` is what produces a red board the morning
+after a successful migration — the AR-030 failure mode (`project_sweep_ar_version_drift`)
+repeating at a major boundary instead of a patch one.
+
+### (ii) LANDMINE — do NOT trip it, and do NOT fix it here
+
+Four of the six blueprint-declared OIDC providers do not set `grant_types` and
+survive only on legacy defaults already in the live Authentik DB. Verified today
+by decrypting `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`:
+
+| provider | `grant_types` in blueprint |
+|---|---|
+| grafana  | **MISSING** |
+| pgadmin  | **MISSING** |
+| superset | **MISSING** |
+| sure     | **MISSING** |
+| immich   | set |
+| librechat | set |
+
+The live server is **2026.5.6**, i.e. already at/above the release where
+blueprint-only OIDC providers get `grant_types: []` and every login fails
+`invalid_request` ("otherwise malformed"). immich and librechat carry an explicit
+comment and the correct list; the other four do not. The landmine is therefore
+**armed**, and it is armed independently of this plan.
+
+**This plan must not fix it** (four provider definitions is its own change, with
+its own verification, and bundling it into an SSO database cutover makes any
+failure unattributable). What this plan MUST do is not trip it, and prove it did
+not:
+
+- Do **not** force a blueprint re-apply as part of the migration, and do not
+  delete/recreate the blueprint ConfigMap.
+- The dump/restore must carry the providers' existing `grant_types` values
+  across. Record them BEFORE the dump and diff them AFTER the restore
+  (§4 gains a check for this).
+- If any of the four comes back with an empty `grant_types`, that is a
+  **rollback trigger**, not a cosmetic issue — grafana, pgadmin, superset and
+  sure logins all break at once.
+
+File the blueprint fix as its own plan.
 
 ## 2) Pre-checks
 
@@ -423,6 +502,30 @@ mise exec -- crane digest docker.io/library/postgres:18.6-bookworm
 11. Clear the marker only after §4 passes: `runbooks/update-marker.sh clear authentik`.
 
 ## 4) Verification
+
+**ADDED 2026-08-19 (see §1c) — run these too:**
+
+```bash
+# (a) the four at-risk providers kept their grant_types across the restore.
+#     Capture the SAME query BEFORE the dump and diff.
+mise exec -- kubectl exec -n kube-system deploy/authentik-server -- \
+  ak shell -c "
+from authentik.providers.oauth2.models import OAuth2Provider
+for p in OAuth2Provider.objects.order_by('name'):
+    print(p.name, sorted(p.grant_types or []))
+"
+#  grafana / pgadmin / superset / sure MUST NOT come back with an empty list.
+#  Empty => ROLLBACK. Their logins break together.
+
+# (b) an actual SSO login works end to end (not just 'authentik pods are Ready').
+#     Exercise one of the four at-risk providers, not immich/librechat —
+#     those two have grant_types set and would pass while the others fail.
+
+# (c) AR-080 needle moved (only after confirming 18.6's residual is the same shape)
+.venv/bin/python3 runbooks/policy-cli.py risk show AR-080 | head -5
+#  description must read postgres:18.  — not postgres:17.
+```
+
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
