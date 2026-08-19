@@ -1,8 +1,8 @@
-# SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the incomplete-run veto
+# SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the coverage veto
 
 > Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the four independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `homelab-sre`
 
 ---
@@ -55,7 +55,8 @@ implementation and honours only gate 3 — see §4.8.
 |---|------|-----------|-------|
 | 1 | `section_complete` | no verdict was computed (crash path / `__exit__`) | `close()` |
 | 2 | Orchestrated-run | the run minted its own cycle id (ad-hoc) | `close()` |
-| 3 | **Incomplete veto** | the section called `mark_incomplete()` | `close()` |
+| 3 | **Incomplete veto** | the section called `mark_incomplete()` — **section-wide** | `close()` |
+| 3b | **Uncovered-component scope** | the section called `mark_uncovered()` — holds back only that component's rows, the section still closes the rest | `close()` |
 | 4 | Zero-emit breaker | run emitted 0 findings but has rows to close | `close()` |
 
 Plus two always-on scoping invariants that are not gates but bounds:
@@ -229,13 +230,64 @@ never as a row in `sweep_findings`.
 
 ### 4.2 Section scoping
 
-A `FindingsWriter` is constructed **per section**, and every auto-close
-statement carries `AND section = %s`. A section can only ever resolve its own
-rows. This is also why the incomplete veto is section-scoped: one degraded
-dependency suppresses auto-close for the **whole** section, not for a
-subsection. That is deliberate — auto-close operates at section granularity, so
-a finer veto would be unenforceable. Over-suppressing costs one stale row until
-the next clean run; under-suppressing loses a real finding.
+A `FindingsWriter` is constructed **per section**, and the auto-close candidate
+query carries `AND section = %s`. A section can only ever resolve its own rows.
+
+**The veto's granularity, revised 2026-08-19.** The veto used to be
+section-wide unconditionally, and that over-suppressed badly: three consecutive
+cycles were vetoed by a SINGLE unresolvable image — `docker.elastic.co`, then
+Docker Hub 429s, then one `public.ecr.aws` 429 — each time suppressing
+auto-close for the other ~180 components the run resolved perfectly, leaving
+~14 confirmed-stale rows open and permanently overstating the estate.
+
+A degradation now declares **what it could not cover**:
+
+* attributable to ONE leaf (an image's tag listing 429'd, enumeration and every
+  other lookup succeeded) → `mark_uncovered(component_key(...), reason)`. The
+  section completes, auto-close runs, and only findings **about that component**
+  are held open.
+* NOT attributable (a Helm repo `index.yaml`, a dead `gh`, an unreachable
+  Elasticsearch) → `mark_incomplete(reason)`, exactly as before. The affected
+  component set is genuinely unknown, so nothing can be scoped around it.
+
+`component=` is therefore **opt-in per call site**, never inferred: only the
+call site knows whether its failure sits at the leaf.
+
+**Bounds on the narrowing.** `DegradationLog.apply()` abandons the
+per-component scope and reverts to the section-wide veto when the uncovered set
+exceeds `MAX_SCOPED_COMPONENTS` (10) or `MAX_UNCOVERED_FRACTION` (10%) of the
+attempted universe (`note_universe(n)`). A broad registry outage stays a broad
+outage however precisely each of its failures was attributed. A **mixed** run —
+one attributable plus one not — falls back to the section-wide veto and reports
+both reasons.
+
+Over-suppressing costs one stale row until the next clean run; under-suppressing
+loses a real finding. Every ambiguity here resolves toward the wider veto: an
+unparseable component key degrades to `mark_incomplete()`, and a failure to
+publish the scope to `sweep_cycles.notes` does too.
+
+**How a stale row is matched to a component.** `finding_matches_component()`
+checks `metadata.component` (stamped at emit time), then
+`metadata.repository`/`chart`/`host`, then the rendered title. The title
+fallback is what covers the rows auto-close actually acts on — stale rows were
+written before the emitter carried a component. The matcher is deliberately
+generous, because a false match costs one surviving stale row and a missed
+match silently resolves an unchecked finding.
+
+**Both auto-close implementations enforce it.** `partition_by_uncovered()` and
+`finding_matches_component()` live at module scope in `findings_writer.py` and
+are imported by `sweep-run.py`'s post-step pass, which reads the scope back
+from `sweep_cycles.notes.uncovered`. A scope enforced in only one of the two
+implementations is no scope at all — the orchestrator would close, seconds
+later, exactly the rows the writer held back. If `sweep-run.py` cannot import
+the matcher while a scope is recorded, it **aborts** rather than close.
+
+**Registry 429s are retried before any of this.** `_get_retry_429()` in
+`check-all-versions.py` retries HTTP 429 **only** (never 5xx/timeouts — those
+can be a registry genuinely falling over), honouring `Retry-After`, with
+bounded total backoff, and hands the last 429 back so the transient
+classification and coverage bookkeeping still run. A component that resolves on
+the retry needs no coverage-gap bookkeeping at all.
 
 ### 4.3 The incomplete-run veto (gate 3)
 
@@ -249,6 +301,11 @@ Every graceful-degradation path must therefore call, directly or via
 
 ```python
 writer.mark_incomplete("<scope>: <dependency> unavailable (<detail>)")
+
+# or, when the failure is attributable to exactly one component:
+DEGRADED.record("image ghcr.io/foo/bar", "ghcr.io (HTTP 429 rate limit)",
+                "tags/list returned HTTP 429",
+                component=component_key("image", "ghcr.io/foo/bar"))
 ```
 
 `mark_incomplete()` **accumulates** (deduped, first-occurrence order), so a run

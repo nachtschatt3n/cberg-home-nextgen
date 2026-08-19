@@ -32,9 +32,25 @@ sys.modules["findings_writer"] = fw
 _spec.loader.exec_module(fw)
 
 
+# One plausible open, stale row for the candidate SELECT to return. Auto-close
+# is now a SELECT-then-filter-then-UPDATE-by-id (the per-component coverage
+# scope is a metadata/title match SQL cannot express without a second, drifting
+# copy of the rule), so a fake that returns no candidates would make every
+# auto-close look like a no-op.
+# Shape: (id, finding_id, severity, title, last_seen, metadata)
+DEFAULT_CANDIDATE = (
+    101, "F-aaaa1111", "critical",
+    "someapp: image ghcr.io/example/app 1.0.0 → 2.0.0 (major)",
+    datetime(2026, 8, 17, 4, 0, tzinfo=timezone.utc),
+    {"namespace": "default", "kind": "image", "repository": "ghcr.io/example/app"},
+)
+
+
 class FakeCursor:
-    def __init__(self, log):
-        self.log = log
+    def __init__(self, conn):
+        self.conn = conn
+        self.log = conn.log
+        self._last = ""
 
     def __enter__(self):
         return self
@@ -43,9 +59,12 @@ class FakeCursor:
         return False
 
     def execute(self, sql, params=None):
-        self.log.append((" ".join(sql.split()), params))
+        self._last = " ".join(sql.split())
+        self.log.append((self._last, params))
 
     def fetchall(self):
+        if self._last.startswith("SELECT") and "FROM sweep_findings" in self._last:
+            return list(self.conn.rows)
         return []
 
     def fetchone(self):
@@ -55,11 +74,12 @@ class FakeCursor:
 class FakeConn:
     """Records every statement; commit/close are inert."""
 
-    def __init__(self):
+    def __init__(self, rows=None):
         self.log: list = []
+        self.rows: list = [DEFAULT_CANDIDATE] if rows is None else list(rows)
 
     def cursor(self):
-        return FakeCursor(self.log)
+        return FakeCursor(self)
 
     def commit(self):
         pass
@@ -94,6 +114,13 @@ def _writer(section="version", orchestrated=True):
 
 def _autoclose_stmts(conn):
     return [s for s, _ in conn.log if "sweep_findings" in s and "resolved_at = now()" in s]
+
+
+def _candidate_query(conn):
+    """The SELECT that decides WHICH rows are eligible — where the scope lives."""
+    return next((s, p) for s, p in conn.log
+                if s.startswith("SELECT id, finding_id, severity")
+                and "sweep_findings" in s)
 
 
 def _clear_env():
@@ -215,10 +242,10 @@ def test_autoclose_never_touches_rows_seen_since_the_run_started():
     _clear_env()
     w, conn = _writer()
     w.close(verdict="red")
-    sql, params = next((s, p) for s, p in conn.log
-                       if "resolved_at = now()" in s and "sweep_findings" in s)
+    sql, params = _candidate_query(conn)
     assert "last_seen < %s" in sql, "no run-start guard in the auto-close clause"
-    assert params[3] == w_run_started_expected(), "wrong run-start bound"
+    # params = (section, fingerprints, run_started)
+    assert params[2] == w_run_started_expected(), "wrong run-start bound"
 
 
 def w_run_started_expected():
@@ -244,7 +271,7 @@ def test_dry_run_issues_no_update():
         w.close(verdict="red")
         assert not _autoclose_stmts(conn), "dry run issued an UPDATE"
         selects = [s for s, _ in conn.log
-                   if s.startswith("SELECT finding_id, severity, title, last_seen")]
+                   if s.startswith("SELECT id, finding_id, severity, title")]
         assert selects, "dry run did not even probe what would close"
     finally:
         _clear_env()
@@ -264,14 +291,15 @@ def test_autoclose_is_scoped_to_this_section_and_spares_emitted():
     assert len(emitted) == 2
     w.close(verdict="red")
 
-    stmt = next((s, p) for s, p in conn.log
-                if "resolved_at = now()" in s and "sweep_findings" in s)
-    sql, params = stmt
+    sql, params = _candidate_query(conn)
     assert "section = %s" in sql, "auto-close is not section-scoped"
     assert "NOT (fingerprint = ANY(%s))" in sql, "auto-close does not spare re-emitted rows"
-    # params = (git_head, section, fingerprints)
-    assert params[1] == "version", f"wrong section scope: {params[1]!r}"
-    assert set(params[2]) == emitted, "the spared set is not what this run emitted"
+    # params = (section, fingerprints, run_started)
+    assert params[0] == "version", f"wrong section scope: {params[0]!r}"
+    assert set(params[1]) == emitted, "the spared set is not what this run emitted"
+    # and the write itself is by primary key, never a re-stated predicate
+    upd = next(st for st in _autoclose_stmts(conn))
+    assert "WHERE id = ANY(%s)" in upd, "auto-close UPDATE re-states its own scope"
 
 
 def test_emitted_fingerprints_are_stable_across_a_reword():

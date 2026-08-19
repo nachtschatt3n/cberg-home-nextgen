@@ -253,6 +253,156 @@ def finding_id_from_fp(fp: str) -> str:
     return f"F-{fp[:8]}"
 
 
+# ---------------------------------------------------------------------------
+# Per-component coverage scope
+# ---------------------------------------------------------------------------
+# A section-wide veto is correct in PRINCIPLE — a coverage gap is not a fix —
+# but wrong in GRANULARITY when the gap is one leaf. Three consecutive cycles
+# were vetoed by a single unresolvable image (docker.elastic.co, then Docker
+# Hub 429s, then a public.ecr.aws 429 on one image), each time suppressing
+# auto-close for the OTHER ~180 components the run resolved perfectly, so ~14
+# confirmed-stale rows stayed open and the board permanently overstated the
+# estate.
+#
+# The fix is to make the veto say WHAT it could not cover, so auto-close can
+# skip exactly those rows and proceed for the rest. That is only sound when
+# the degradation is at LEAF resolution — one image's tag listing failed while
+# enumeration and every other lookup succeeded. A degradation ABOVE the leaf
+# (the HelmRelease parse failed, a Helm repo index is down, `gh` is broken) is
+# not attributable to one component and must stay a section-wide veto; that is
+# why `component=` is opt-in per call site rather than inferred.
+
+COMPONENT_KINDS = ("image", "chart", "host", "app")
+
+
+def component_key(kind: str, ident: str) -> str:
+    """Canonical `kind:ident` component key. Lowercased; tag/digest stripped.
+
+    `ident` is the thing an operator would name — an image repository, a chart
+    name, an external host. Tag and digest are stripped so a component stays
+    the same identity across the very version bump the finding is about.
+    """
+    kind = (kind or "").strip().lower()
+    if kind not in COMPONENT_KINDS:
+        raise ValueError(f"component kind {kind!r} not one of {COMPONENT_KINDS}")
+    ident = (ident or "").strip().lower()
+    ident = ident.split("@", 1)[0]           # drop @sha256:...
+    if "/" in ident:                          # drop :tag, but not a :port host
+        head, _, tail = ident.rpartition("/")
+        if ":" in tail:
+            ident = f"{head}/{tail.split(':', 1)[0]}"
+    elif ":" in ident and not ident.split(":", 1)[1].isdigit():
+        ident = ident.split(":", 1)[0]
+    return f"{kind}:{ident.strip('/')}"
+
+
+def _row_idents(title: str, metadata: dict | None) -> set[str]:
+    """Identifiers a stored finding row can be attributed to.
+
+    Drawn from metadata FIRST (structured, written by the emitter) and from
+    the title second (covers rows written before the emitter carried the
+    component, which is precisely the stale-row population auto-close acts on).
+    """
+    meta = metadata if isinstance(metadata, dict) else {}
+    out: set[str] = set()
+    for key in ("component", "repository", "chart", "host", "image", "name"):
+        val = meta.get(key)
+        if isinstance(val, str) and val.strip():
+            v = val.strip().lower()
+            if key == "component":
+                # Already a `kind:ident` key — compare on the ident half, or a
+                # row stamped by the current emitter would fail to match the
+                # very component key that stamped it.
+                v = v.partition(":")[2] or v
+            out.add(v.split("@", 1)[0])
+            out.add(v.split("@", 1)[0].rsplit(":", 1)[0] if "/" in v or ":" in v else v)
+    if title:
+        t = title.strip().lower()
+        # `name: image repo tag -> tag` / `name (host): ...` / `name: chart ...`
+        head = t.split(":", 1)[0].split(" (", 1)[0].strip()
+        if head:
+            out.add(head)
+        for span in _RE_BACKTICK.findall(title):
+            out.add(span.strip().lower())
+    return {o for o in out if o}
+
+
+def finding_matches_component(component: str, title: str,
+                              metadata: dict | None) -> bool:
+    """Is this stored finding row ABOUT `component`?
+
+    Deliberately generous: a false positive costs one stale row surviving to
+    the next clean run, a false negative silently resolves a finding whose
+    component was never actually checked. Erring toward "keep it open" is the
+    only safe direction here.
+    """
+    _, _, ident = component.partition(":")
+    ident = ident.strip().lower()
+    if len(ident) < 3:
+        return False
+    idents = _row_idents(title, metadata)
+    if ident in idents:
+        return True
+    # Structured miss -> fall back to the rendered title. Bounded by the
+    # length guard above so a short ident cannot match half the estate.
+    if ident in (title or "").lower():
+        return True
+    # `library/redis` in the uncovered set should also hold a row that only
+    # ever recorded `redis`.
+    tail = ident.rsplit("/", 1)[-1]
+    return len(tail) >= 4 and tail in idents
+
+
+def partition_by_uncovered(rows, uncovered, *, title_idx: int = 2,
+                           meta_idx: int = 4):
+    """Split candidate auto-close rows into (closeable, held).
+
+    `rows` are tuples shaped (finding_id, severity, title, last_seen, metadata).
+    `held` rows belong to a component this run could not resolve, so their
+    absence proves nothing and they stay open. Returned as
+    (closeable, [(row, component), ...]).
+
+    Lives here, at module scope, because there are TWO auto-close
+    implementations — this writer's and sweep-run.py's post-step SQL — and a
+    scope rule enforced in only one of them is no scope rule at all.
+    """
+    uncovered = list(uncovered or [])
+    if not uncovered:
+        return list(rows), []
+    closeable, held = [], []
+    for r in rows:
+        meta = r[meta_idx] if len(r) > meta_idx else None
+        hit = next(
+            (c for c in uncovered
+             if finding_matches_component(c, r[title_idx], meta)),
+            None,
+        )
+        (held.append((r, hit)) if hit else closeable.append(r))
+    return closeable, held
+
+
+def uncovered_from_notes(notes_json) -> dict[str, dict[str, str]]:
+    """Read `notes.uncovered` -> {section: {component: reason}} defensively."""
+    if not notes_json:
+        return {}
+    try:
+        notes = json.loads(notes_json) if isinstance(notes_json, str) else notes_json
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(notes, dict):
+        return {}
+    unc = notes.get("uncovered")
+    if not isinstance(unc, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for sec, comps in unc.items():
+        if isinstance(comps, dict):
+            out[sec] = {str(k): str(v) for k, v in comps.items()}
+        elif isinstance(comps, list):
+            out[sec] = {str(k): "" for k in comps}
+    return out
+
+
 class FindingsWriter:
     """Append-or-update findings into sweep-history Postgres.
 
@@ -332,6 +482,12 @@ class FindingsWriter:
         # loss this whole mechanism exists to prevent.
         self._incomplete_reasons: list[str] = []
         self._incomplete_reason: str | None = None
+        # Set by mark_uncovered() when the section knows EXACTLY WHICH
+        # components it failed to resolve. Unlike _incomplete_reasons (which
+        # vetoes the whole section), this narrows the veto to the named
+        # components: the section still completed, so absence is a valid
+        # "resolved" signal for everything it DID cover. component -> reason.
+        self._uncovered: dict[str, str] = {}
 
         if not self._enabled:
             return
@@ -528,6 +684,90 @@ class FindingsWriter:
         self._incomplete_reasons.append(reason)
         self._incomplete_reason = "; ".join(self._incomplete_reasons)
 
+    def mark_uncovered(self, component: str, reason: str) -> None:
+        """Declare that THIS COMPONENT could not be resolved, but the rest could.
+
+        The narrow sibling of `mark_incomplete()`. Use it when the failure is
+        attributable to one leaf — a single image's tag listing 429'd — and the
+        section's enumeration and every other lookup completed. close() then
+        auto-closes normally EXCEPT for findings about the named components,
+        which are left open because their absence is a coverage gap, not a fix.
+
+        Do NOT use it for a failure above the leaf (a Helm repo index, a broken
+        `gh`, a dead port-forward): those degrade an unknown set of components,
+        and the honest answer there is still `mark_incomplete()`.
+
+        ACCUMULATES, first reason per component wins.
+        """
+        component = (component or "").strip().lower()
+        reason = (reason or "").strip()
+        if not component or ":" not in component:
+            # An unparseable key would silently scope-match NOTHING and quietly
+            # widen auto-close. Degrade to the safe, section-wide veto instead.
+            self.mark_incomplete(reason or f"unattributable coverage gap ({component!r})")
+            return
+        self._uncovered.setdefault(component, reason)
+
+    def _persist_uncovered(self) -> None:
+        """Publish the per-component scope onto the shared cycle row.
+
+        Same reason `_persist_incomplete` exists: sweep-run.py runs its own
+        auto-close SQL after every step and cannot see our in-memory state, so
+        a scope enforced only here would be undone seconds later by the
+        orchestrator closing exactly the rows we held back.
+        """
+        if self._conn is None or not self._uncovered:
+            return
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO sweep_cycles (cycle_id, started_at, trigger, "
+                    "git_head) VALUES (%s, now(), %s, %s) "
+                    "ON CONFLICT (cycle_id) DO NOTHING",
+                    (self._cycle_id, self._trigger, self._git_head),
+                )
+                cur.execute(
+                    "SELECT notes FROM sweep_cycles WHERE cycle_id = %s FOR UPDATE",
+                    (self._cycle_id,),
+                )
+                row = cur.fetchone()
+                notes: dict = {}
+                if row and row[0]:
+                    try:
+                        notes = json.loads(row[0])
+                        if not isinstance(notes, dict):
+                            notes = {"legacy_notes": row[0]}
+                    except (ValueError, TypeError):
+                        notes = {"legacy_notes": row[0]}
+                unc = notes.get("uncovered")
+                if not isinstance(unc, dict):
+                    unc = {}
+                merged = dict(unc.get(self.section) or {}) if isinstance(
+                    unc.get(self.section), dict) else {}
+                merged.update(self._uncovered)
+                unc[self.section] = merged
+                notes["uncovered"] = unc
+                cur.execute(
+                    "UPDATE sweep_cycles SET notes = %s WHERE cycle_id = %s",
+                    (json.dumps(notes), self._cycle_id),
+                )
+            self._conn.commit()
+            print(f"==> recorded {len(self._uncovered)} UNCOVERED component(s) for "
+                  f"section {self.section} on cycle {self._cycle_id} — the "
+                  f"orchestrator's auto-close will hold those rows back too")
+        except Exception as e:  # noqa: BLE001 — never lose the cycle close
+            print(f"==> WARNING: could not persist uncovered scope for "
+                  f"{self.section}: {type(e).__name__}: {e}. Falling back to a "
+                  f"SECTION-WIDE veto rather than closing rows the orchestrator "
+                  f"cannot hold back.")
+            self.mark_incomplete(
+                f"could not publish per-component coverage scope "
+                f"({len(self._uncovered)} uncovered)")
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _persist_incomplete(self) -> None:
         """Record this section's incompleteness on the shared cycle row.
 
@@ -587,46 +827,78 @@ class FindingsWriter:
             except Exception:  # noqa: BLE001
                 pass
 
-    def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str]]:
+    def _autoclose_stale(self, *, dry_run: bool) -> list[tuple[str, str, str, str, dict]]:
         """Resolve open findings THIS section owns that it did not re-emit.
 
-        Returns (finding_id, severity, title, last_seen) for each row closed
-        (or, under dry_run, that WOULD close). Never touches another
+        Returns (finding_id, severity, title, last_seen, metadata) for each row
+        closed (or, under dry_run, that WOULD close). Never touches another
         section's rows, and never touches a row this run re-emitted.
+
+        Rows about a component recorded via `mark_uncovered()` are HELD: the
+        run never got an answer for that component, so its silence is a
+        coverage gap and closing on it would be exactly the bug the veto
+        exists to prevent. Everything else closes normally — one unresolvable
+        image must not speak for the other ~180.
+
+        Candidates are SELECTed and filtered in Python, then updated by
+        primary key, rather than expressed as one UPDATE ... WHERE. The scope
+        predicate is a metadata-and-title match that SQL cannot state without
+        duplicating `finding_matches_component`, and a second, drifting copy of
+        that rule is precisely what makes a veto stop working.
         """
         if self._conn is None:
             return []
         fps = list(self._emitted_fps)
-        sql_where = """
-             WHERE resolved_at IS NULL
-               AND section = %s
-               AND NOT (fingerprint = ANY(%s))
-               AND last_seen < %s
-        """
         with self._conn.cursor() as cur:
-            if dry_run:
-                cur.execute(
-                    "SELECT finding_id, severity, title, last_seen "
-                    "FROM sweep_findings" + sql_where +
-                    " ORDER BY severity, finding_id",
-                    (self.section, fps, self._run_started),
-                )
-            else:
-                cur.execute(
-                    """
-                    UPDATE sweep_findings
-                       SET resolved_at = now(),
-                           status = 'resolved',
-                           resolved_commit = COALESCE(
-                               NULLIF(%s, ''), resolved_commit)
-                    """ + sql_where +
-                    " RETURNING finding_id, severity, title, last_seen",
-                    (self._git_head or "", self.section, fps, self._run_started),
-                )
-            rows = cur.fetchall()
-        if not dry_run:
-            self._conn.commit()
-        return [(r[0], r[1], r[2], str(r[3])) for r in rows]
+            cur.execute(
+                """
+                SELECT id, finding_id, severity, title, last_seen, metadata
+                  FROM sweep_findings
+                 WHERE resolved_at IS NULL
+                   AND section = %s
+                   AND NOT (fingerprint = ANY(%s))
+                   AND last_seen < %s
+                 ORDER BY severity, finding_id
+                """,
+                (self.section, fps, self._run_started),
+            )
+            candidates = [
+                (r[0], (r[1], r[2], r[3], str(r[4]), r[5] or {}))
+                for r in cur.fetchall()
+            ]
+
+            closeable, held = partition_by_uncovered(
+                [c[1] for c in candidates], sorted(self._uncovered),
+                title_idx=2, meta_idx=4,
+            )
+            if held:
+                print(f"==> auto-close HELD BACK {len(held)} {self.section} "
+                      f"finding(s) whose component this run could not resolve "
+                      f"(a coverage gap is not a fix):")
+                for row, comp in held[:20]:
+                    print(f"      ⏸ kept open {self.section}/{row[0]} [{row[1]}] "
+                          f"— uncovered {comp}: {row[2][:70]}")
+                if len(held) > 20:
+                    print(f"      … and {len(held) - 20} more")
+
+            if dry_run or not closeable:
+                return closeable
+
+            close_fids = {r[0] for r in closeable}
+            ids = [pk for pk, row in candidates if row[0] in close_fids]
+            cur.execute(
+                """
+                UPDATE sweep_findings
+                   SET resolved_at = now(),
+                       status = 'resolved',
+                       resolved_commit = COALESCE(NULLIF(%s, ''), resolved_commit)
+                 WHERE id = ANY(%s)
+                   AND resolved_at IS NULL
+                """,
+                (self._git_head or "", ids),
+            )
+        self._conn.commit()
+        return closeable
 
     def _report_autoclose(self, rows, *, dry_run: bool) -> None:
         """Print what closed and WHY, in the shape the reconcile step uses.
@@ -636,23 +908,32 @@ class FindingsWriter:
         must be visible, never silent.
         """
         verb = "WOULD auto-close" if dry_run else "auto-closed"
-        accepted = [r for r in rows if r[1] == "accepted" or "[AR-" in r[2]]
-        plain = [r for r in rows if r not in accepted]
+        # Rows are (finding_id, severity, title, last_seen[, metadata]) — the
+        # metadata tail is optional so a caller that stubs this out with the
+        # older 4-tuple shape still reports correctly.
+        acc_idx = [i for i, r in enumerate(rows)
+                   if r[1] == "accepted" or "[AR-" in r[2]]
+        accepted = [rows[i] for i in acc_idx]
+        plain = [r for i, r in enumerate(rows) if i not in set(acc_idx)]
+
+        def _line(row) -> str:
+            fid, sev, title, seen = row[0], row[1], row[2], str(row[3])
+            return (f"      ✓ resolved {self.section}/{fid} [{sev}] "
+                    f"(last fired {seen[:19]}): {title[:80]}")
+
         if plain:
             print(f"==> {verb} {len(plain)} {self.section} finding(s) that this "
                   f"run did not re-emit (section completed, so absence == resolved):")
-            for fid, sev, title, seen in plain[:20]:
-                print(f"      ✓ resolved {self.section}/{fid} [{sev}] "
-                      f"(last fired {seen[:19]}): {title[:80]}")
+            for row in plain[:20]:
+                print(_line(row))
             if len(plain) > 20:
                 print(f"      … and {len(plain) - 20} more")
         if accepted:
             print(f"==> {verb} {len(accepted)} ACCEPTED/AR-tagged {self.section} "
                   f"finding(s) — the accepted risk stopped firing, review whether "
                   f"the AR is still needed:")
-            for fid, sev, title, seen in accepted:
-                print(f"      ✓ resolved {self.section}/{fid} [{sev}] "
-                      f"(last fired {seen[:19]}): {title[:80]}")
+            for row in accepted:
+                print(_line(row))
 
     def close(self, *, verdict: str | None = None,
               section_complete: bool | None = None) -> None:
@@ -721,6 +1002,18 @@ class FindingsWriter:
                   f"untouched, a failed run is not a resolution")
         else:
             dry = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "0") == "1"
+            # Publish the per-component scope BEFORE closing anything. If this
+            # fails it converts itself into a section-wide veto, which must be
+            # honoured here rather than discovered after the UPDATE.
+            self._persist_uncovered()
+            if self._incomplete_reason:
+                print(f"==> auto-close SKIPPED for section {self.section}: run "
+                      f"declared INCOMPLETE ({self._incomplete_reason}) — its "
+                      f"open findings are left untouched, a coverage gap is "
+                      f"not a fix")
+                self._persist_incomplete()
+                self._finalise_cycle_row(verdict)
+                return
             try:
                 # CIRCUIT BREAKER. A section that emitted NOTHING and yet has
                 # open rows to close is the signature of a broken run, not a
@@ -754,6 +1047,12 @@ class FindingsWriter:
                 except Exception:  # noqa: BLE001
                     pass
 
+        self._finalise_cycle_row(verdict)
+
+    def _finalise_cycle_row(self, verdict: str | None) -> None:
+        """Stamp finished_at/verdict and tear the connection down. Idempotent."""
+        if self._conn is None:
+            return
         with self._conn.cursor() as cur:
             cur.execute(
                 """
@@ -837,11 +1136,24 @@ class DegradationLog:
     clear the security backlog. The zero-emit circuit breaker only catches a
     TOTAL wipeout; partial degradation has to be declared explicitly.
 
-    The veto is SECTION-scoped, because that is the granularity auto-close
-    itself works at: one degraded dependency suppresses auto-close for the
-    whole section, and the section still completes and reports everything it
-    *could* measure. Over-suppressing costs a stale row until the next clean
-    run; under-suppressing loses real findings.
+    GRANULARITY (revised 2026-08-19). The veto used to be SECTION-scoped
+    unconditionally, and that over-suppressed badly: a single unresolvable
+    image vetoed auto-close for the whole version section for three
+    consecutive cycles, leaving ~14 confirmed-stale rows open while the other
+    ~180 components were resolved perfectly. A call site that can name the ONE
+    component it failed on now passes `component=`, and the veto narrows to
+    that leaf. A call site that cannot — because the failure sits above the
+    leaf (a Helm repo index, a dead `gh`, an unreachable Elasticsearch) —
+    omits it and gets the section-wide veto exactly as before, because there
+    the affected component set is genuinely unknown.
+
+    The narrowing is bounded: past MAX_SCOPED_COMPONENTS, or past
+    MAX_UNCOVERED_FRACTION of the attempted universe, `apply()` abandons the
+    per-component scope and reverts to the section-wide veto. A broad outage
+    stays a broad outage however precisely its individual failures were
+    attributed. Over-suppressing costs a stale row until the next clean run;
+    under-suppressing loses real findings — so every ambiguity resolves toward
+    the wider veto.
 
     Usage:
         DEGRADED = DegradationLog("security", printer=warn)
@@ -850,29 +1162,83 @@ class DegradationLog:
             DEGRADED.record("s6_attack_patterns", "Elasticsearch", repr(e))
             return OK, findings, body
         ...
+        # attributable to one leaf -> narrow scope, section still auto-closes
+        DEGRADED.record("image ghcr.io/foo/bar", "ghcr.io (HTTP 429)",
+                        component=component_key("image", "ghcr.io/foo/bar"))
+        ...
         with FindingsWriter(...) as writer:
             emit(...)
+            DEGRADED.note_universe(len(all_components))
             DEGRADED.apply(writer)
             writer.close(verdict=verdict)
     """
 
+    # A per-component scope is only a narrowing of the veto while the
+    # uncovered set stays SMALL relative to what the section covers. Past
+    # these bounds the run is not "complete except for a leaf" — it is a broad
+    # outage wearing per-component clothing, and the honest answer reverts to
+    # the section-wide veto. Both bounds are checked; the ratio needs a
+    # denominator (`universe`), the absolute cap works without one.
+    MAX_SCOPED_COMPONENTS = 10
+    MAX_UNCOVERED_FRACTION = 0.10
+
     def __init__(self, section: str, printer=None):
         self.section = section
         self._reasons: list[str] = []
+        # component -> reason, for degradations attributable to ONE leaf.
+        self._uncovered: dict[str, str] = {}
+        # How many components this section attempted to resolve. Set by the
+        # caller via note_universe(); None means "unknown", which disables the
+        # ratio bound and leaves only the absolute cap.
+        self._universe: int | None = None
         # Default printer keeps this usable from scripts with no colour helper.
         self._printer = printer or (lambda msg: print(msg))
 
-    def record(self, scope: str, dependency: str, detail: str = "") -> None:
+    def note_universe(self, n: int) -> None:
+        """Record how many components this run attempted (the denominator).
+
+        Without it the coverage FRACTION is unknowable and only the absolute
+        cap applies — which is safe but blunt: 8 uncovered out of 12 would
+        still scope rather than veto.
+        """
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return
+        if n > 0:
+            self._universe = n
+
+    def record(self, scope: str, dependency: str, detail: str = "",
+               *, component: str | None = None) -> None:
         """Note that `scope` could not fully run because `dependency` failed.
 
         `scope` should be the subsection slug / function name the operator
         would grep for; `dependency` the external thing that was unavailable.
         Logged immediately — the operator must be able to see the veto being
         armed at the moment it happens, not only in the summary at the end.
+
+        `component` (a `component_key()` string) narrows the veto to that one
+        leaf. Pass it ONLY when the failure is attributable to a single
+        component and the section's enumeration plus every other lookup
+        completed — a failed image-tag listing qualifies, a dead Helm repo
+        index or a broken `gh` does not, because those degrade an unknown set
+        of components and the honest answer for them is still a section-wide
+        veto. Omitting it keeps the original behaviour exactly.
         """
         reason = f"{scope}: {dependency} unavailable"
         if detail:
             reason += f" ({_truncate(str(detail), 160)})"
+        if component:
+            if component in self._uncovered:
+                return
+            self._uncovered[component] = reason
+            self._printer(
+                f"  ⚠ DEGRADED — {reason}. Coverage is partial for THIS "
+                f"COMPONENT only ({component}); stale-finding auto-close will "
+                f"hold its findings open and proceed for the rest of the "
+                f"'{self.section}' section."
+            )
+            return
         if reason in self._reasons:
             return
         self._reasons.append(reason)
@@ -886,31 +1252,100 @@ class DegradationLog:
     def reasons(self) -> list[str]:
         return list(self._reasons)
 
+    @property
+    def uncovered(self) -> dict[str, str]:
+        return dict(self._uncovered)
+
     def __bool__(self) -> bool:
-        return bool(self._reasons)
+        return bool(self._reasons) or bool(self._uncovered)
 
     def __len__(self) -> int:
-        return len(self._reasons)
+        return len(self._reasons) + len(self._uncovered)
 
     def reason_text(self) -> str:
         return "; ".join(self._reasons)
 
+    def _breaches_coverage_floor(self) -> str | None:
+        """Is the uncovered set too big to still call this run 'complete'?
+
+        Returns the operator-facing explanation, or None when scoping holds.
+        """
+        n = len(self._uncovered)
+        if n > self.MAX_SCOPED_COMPONENTS:
+            return (f"{n} components uncovered (> {self.MAX_SCOPED_COMPONENTS}) "
+                    f"— too many to treat as isolated leaves")
+        if self._universe:
+            frac = n / self._universe
+            if frac > self.MAX_UNCOVERED_FRACTION:
+                return (f"{n}/{self._universe} components uncovered "
+                        f"({frac:.0%} > {self.MAX_UNCOVERED_FRACTION:.0%}) "
+                        f"— coverage fell below the floor")
+        return None
+
     def apply(self, writer: "FindingsWriter") -> bool:
-        """Hand the accumulated reasons to the writer. Returns True if vetoed.
+        """Hand the accumulated degradation to the writer. Returns True if VETOED.
 
         Safe to call unconditionally; a run with no degradation is a no-op and
         auto-close proceeds normally.
+
+        Three outcomes, in order of severity:
+          * any UNATTRIBUTABLE degradation -> section-wide veto (unchanged
+            behaviour: the affected component set is unknown, so nothing can
+            be scoped around it);
+          * an attributable set that breaches the coverage floor -> section-wide
+            veto, with the uncovered components reported. A broad registry
+            outage is a broad registry outage no matter how precisely each of
+            its failures was attributed;
+          * otherwise -> per-component scope. The section completes, auto-close
+            runs, and only the named components' findings are held open.
+        Returns True in the first two cases.
         """
-        if not self._reasons:
+        if not self._reasons and not self._uncovered:
             return False
-        writer.mark_incomplete(self.reason_text())
+
+        if self._reasons:
+            # Mixed run: fold the scoped reasons into the section-wide veto
+            # rather than dropping them, or the operator loses the detail.
+            all_reasons = list(self._reasons) + [
+                f"{c} -> {r}" for c, r in sorted(self._uncovered.items())]
+            writer.mark_incomplete("; ".join(all_reasons))
+            self._printer(
+                f"  ⚠ {len(all_reasons)} degraded dependency/dependencies this run "
+                f"— auto-close vetoed for section '{self.section}':"
+            )
+            for r in all_reasons:
+                self._printer(f"      • {r}")
+            return True
+
+        breach = self._breaches_coverage_floor()
+        if breach:
+            # The full list goes to the operator's console below; the DB-bound
+            # reason stays bounded — a 60-component outage would otherwise
+            # write multiple kilobytes into sweep_cycles.notes.
+            listed = sorted(self._uncovered)[:8]
+            tail = ("" if len(self._uncovered) <= len(listed)
+                    else f" … and {len(self._uncovered) - len(listed)} more")
+            writer.mark_incomplete(f"{breach}: " + ", ".join(listed) + tail)
+            self._printer(
+                f"  ⚠ per-component scope ABANDONED for section "
+                f"'{self.section}' — {breach}. Auto-close is vetoed for the "
+                f"whole section. Uncovered:"
+            )
+            for c, r in sorted(self._uncovered.items()):
+                self._printer(f"      • {c}: {r}")
+            return True
+
+        for comp, reason in sorted(self._uncovered.items()):
+            writer.mark_uncovered(comp, reason)
+        denom = f"/{self._universe}" if self._universe else ""
         self._printer(
-            f"  ⚠ {len(self._reasons)} degraded dependency/dependencies this run "
-            f"— auto-close vetoed for section '{self.section}':"
+            f"  ⚠ {len(self._uncovered)}{denom} component(s) uncovered this run "
+            f"— auto-close proceeds for section '{self.section}' but HOLDS "
+            f"OPEN the findings of:"
         )
-        for r in self._reasons:
-            self._printer(f"      • {r}")
-        return True
+        for c, r in sorted(self._uncovered.items()):
+            self._printer(f"      • {c}: {r}")
+        return False
 
 
 def _truncate(s: str, n: int) -> str:

@@ -373,6 +373,23 @@ def _incomplete_sections_from_notes(notes: str | None) -> dict:
     return incomplete if isinstance(incomplete, dict) else {}
 
 
+def _uncovered_components_from_notes(notes: str | None) -> dict:
+    """Per-component coverage gaps, from sweep_cycles.notes.
+
+    `{section: {component_key: reason}}`. The NARROW sibling of the incomplete
+    veto: the section completed, so absence is a valid resolution signal for
+    everything except findings about these components. Delegates to the
+    writer's parser so the two auto-close implementations cannot drift.
+    """
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    try:
+        from lib.findings_writer import uncovered_from_notes
+    except ImportError:  # pragma: no cover - runbooks/lib not importable
+        return {}
+    return uncovered_from_notes(notes)
+
+
 def _auto_close_stale_findings(
     dsn: str, cycle_id: str, sections: list[str]
 ) -> list[tuple[str, str, str]]:
@@ -413,7 +430,9 @@ def _auto_close_stale_findings(
             _cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s",
                          (cycle_id,))
             _row = _cur.fetchone()
-        _incomplete = _incomplete_sections_from_notes(_row[0] if _row else None)
+        _notes = _row[0] if _row else None
+        _incomplete = _incomplete_sections_from_notes(_notes)
+        _uncovered = _uncovered_components_from_notes(_notes)
         _vetoed = [sec for sec in sections if sec in _incomplete]
         if _vetoed:
             for sec in _vetoed:
@@ -421,6 +440,19 @@ def _auto_close_stale_findings(
                       f"itself INCOMPLETE ({_incomplete[sec]}) — a coverage gap is "
                       f"not a fix")
             sections = [sec for sec in sections if sec not in _incomplete]
+        # Per-component scope: the section COMPLETED but named components it
+        # could not resolve. Those sections stay in scope — one unresolvable
+        # image must not veto the other ~180 — but their uncovered rows are
+        # held back below, using the writer's matcher so the two auto-close
+        # implementations enforce one rule.
+        _uncovered = {sec: comps for sec, comps in _uncovered.items()
+                      if sec in sections and comps}
+        for sec, comps in sorted(_uncovered.items()):
+            print(f"==> auto-close SCOPED for section {sec}: {len(comps)} "
+                  f"component(s) uncovered this run, their findings are held "
+                  f"open, the rest of the section closes normally "
+                  f"({', '.join(sorted(comps)[:5])}"
+                  f"{'…' if len(comps) > 5 else ''})")
         if not sections:
             print("==> auto-close: no sections left in scope after the incomplete "
                   "veto — nothing closed")
@@ -432,20 +464,58 @@ def _auto_close_stale_findings(
         return []
 
     try:
+        from lib.findings_writer import finding_matches_component
+    except ImportError:  # pragma: no cover
+        finding_matches_component = None
+        if _uncovered:
+            print("==> auto-close ABORTED: per-component scope was recorded but "
+                  "the matcher could not be imported. Refusing to close rather "
+                  "than close rows the scope was meant to hold back.")
+            return []
+
+    try:
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, finding_id, section, title, metadata
+                      FROM sweep_findings
+                     WHERE resolved_at IS NULL
+                       AND section = ANY(%s)
+                       AND (cycle_id IS NULL OR cycle_id::text != %s)
+                    """,
+                    (sections, cycle_id),
+                )
+                candidates = cur.fetchall()
+
+                closeable, held = [], []
+                for pk, fid, sec, title, meta in candidates:
+                    comps = _uncovered.get(sec) or {}
+                    hit = next(
+                        (c for c in comps
+                         if finding_matches_component(c, title, meta or {})),
+                        None,
+                    ) if comps else None
+                    (held if hit else closeable).append(
+                        (pk, fid, sec, title, hit))
+                for _pk, fid, sec, title, hit in held[:20]:
+                    print(f"      ⏸ kept open {sec}/{fid} — uncovered {hit}: "
+                          f"{title[:70]}")
+                if len(held) > 20:
+                    print(f"      … and {len(held) - 20} more held open")
+                if not closeable:
+                    return []
                 cur.execute(
                     """
                     UPDATE sweep_findings
                        SET resolved_at = now(),
                            status = 'resolved',
                            resolved_commit = COALESCE(NULLIF(%s, ''), resolved_commit)
-                     WHERE resolved_at IS NULL
-                       AND section = ANY(%s)
-                       AND (cycle_id IS NULL OR cycle_id::text != %s)
+                     WHERE id = ANY(%s)
+                       AND resolved_at IS NULL
                      RETURNING finding_id, section, title
                     """,
-                    (git_head, sections, cycle_id),
+                    (git_head, [c[0] for c in closeable]),
                 )
                 rows = cur.fetchall()
             conn.commit()

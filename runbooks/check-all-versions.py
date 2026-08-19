@@ -39,6 +39,7 @@ from packaging import version
 sys.path.insert(0, str(Path(__file__).parent))
 from lib.findings_writer import (  # noqa: E402
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
+    component_key,
 )
 
 # Self-activate mise toolchain so kubectl/talosctl/flux/sops + KUBECONFIG/etc are
@@ -159,6 +160,67 @@ def _is_structurally_slow(elapsed_s: float, pages: int) -> bool:
     a wrongly-resolved finding.
     """
     return pages >= 1 and (elapsed_s / pages) >= _STRUCTURAL_S_PER_PAGE
+
+
+# ---------------------------------------------------------------------------
+# 429 backoff
+# ---------------------------------------------------------------------------
+# A 429 is the one transient status that ASKS to be retried, and the anonymous
+# allowances that produce it here (public.ecr.aws especially) refill on the
+# order of seconds. Retrying is therefore the difference between "this
+# component is uncovered this cycle" and "covered, two seconds later" — and a
+# component that resolves needs no coverage-gap bookkeeping at all.
+#
+# Deliberately 429-ONLY. A 5xx or a timeout gets no retry: those can be a
+# registry genuinely falling over, and hammering it is both rude and slow. The
+# backoff is bounded so a wedged endpoint cannot eat the caller's wall-clock
+# budget — the total sleep across all attempts is capped, and `Retry-After` is
+# honoured when the server states it (capped the same way, since a server may
+# name minutes).
+_RETRY_429_ATTEMPTS = 3
+_RETRY_429_BASE_S = 2.0
+_RETRY_429_MAX_SLEEP_S = 12.0
+
+
+def _retry_after_seconds(resp) -> Optional[float]:
+    """`Retry-After` in seconds, if the server sent a parseable one."""
+    raw = (getattr(resp, 'headers', {}) or {}).get('Retry-After')
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None  # HTTP-date form: fall back to exponential backoff
+
+
+def _get_retry_429(sess, url, *, attempts: int = _RETRY_429_ATTEMPTS,
+                   base: float = _RETRY_429_BASE_S,
+                   max_total_sleep: float = _RETRY_429_MAX_SLEEP_S,
+                   sleeper=time.sleep, **kwargs):
+    """`sess.get(url, **kwargs)`, retried with backoff on HTTP 429 only.
+
+    Returns the LAST response, so an exhausted retry budget still surfaces the
+    429 to the caller's existing transient/steady-state classification — the
+    retry makes the veto rarer, it never hides one.
+    """
+    resp = sess.get(url, **kwargs)
+    slept = 0.0
+    for attempt in range(1, attempts):
+        if resp.status_code != 429:
+            return resp
+        delay = _retry_after_seconds(resp)
+        if delay is None:
+            delay = base * (2 ** (attempt - 1))
+        delay = min(delay, max_total_sleep - slept)
+        if delay <= 0:
+            break
+        print(f"{Colors.YELLOW}  ⏳ HTTP 429 from {urlparse(url).netloc} — "
+              f"backing off {delay:.1f}s (attempt {attempt + 1}/{attempts})"
+              f"{Colors.RESET}")
+        sleeper(delay)
+        slept += delay
+        resp = sess.get(url, **kwargs)
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1072,8 @@ class VersionChecker:
             return self.get_registry_image_tag(repository, current_tag)
         except Exception as e:
             self.degraded.record(f"image {repository}", 'container registry',
-                                 f"{type(e).__name__}: {e}")
+                                 f"{type(e).__name__}: {e}",
+                                 component=component_key('image', repository))
             print(f"{Colors.YELLOW}Warning: Could not check image tag for {repository}: {e}{Colors.RESET}")
             return None
     
@@ -1027,7 +1090,8 @@ class VersionChecker:
 
     def _oci_v2_tags(self, host: str, image_path: str,
                      max_pages: int = 400, page_size: int = 1000,
-                     budget_s: float = 60.0) -> Optional[List[str]]:
+                     budget_s: float = 60.0,
+                     component: Optional[str] = None) -> Optional[List[str]]:
         """List ALL tags from any OCI-compliant Registry v2, following the
         standard anonymous bearer-token dance and `Link: rel="next"` pagination.
 
@@ -1076,6 +1140,12 @@ class VersionChecker:
         """
         import time as _time
         _scope = f"image {host}/{image_path}"
+        # Every degradation below is a LEAF failure: enumeration already
+        # succeeded upstream and only this one image's tag listing is at risk,
+        # so the coverage gap is attributable and must not veto the whole
+        # section. Caller-supplied so the key matches the repository string the
+        # findings actually carry (`redis`, not `docker.io/library/redis`).
+        _comp = component or component_key('image', f"{host}/{image_path}")
         tags: List[str] = []
         token: Optional[str] = None
         url: Optional[str] = f"https://{host}/v2/{image_path}/tags/list?n={page_size}"
@@ -1103,7 +1173,7 @@ class VersionChecker:
                             self.degraded.record(
                                 _scope, host,
                                 f"tag listing exceeded the {budget_s}s budget "
-                                f"after {pages} page(s)")
+                                f"after {pages} page(s)", component=_comp)
                         return None  # incomplete -> undeterminable, never partial
                     headers = {'Authorization': f'Bearer {token}'} if token else {}
                     # 25s, not 15s: docker.elastic.co serves a page in
@@ -1115,7 +1185,7 @@ class VersionChecker:
                     # deterministically in the budget branch, where it can be
                     # measured and classified. The overall budget still bounds
                     # the call.
-                    resp = sess.get(url, headers=headers, timeout=25)
+                    resp = _get_retry_429(sess, url, headers=headers, timeout=25)
                     if resp.status_code == 401 and token is None:
                         chal = self._parse_www_authenticate(
                             resp.headers.get('WWW-Authenticate', ''))
@@ -1125,7 +1195,8 @@ class VersionChecker:
                         params = {'scope': chal.get('scope') or f'repository:{image_path}:pull'}
                         if chal.get('service'):
                             params['service'] = chal['service']
-                        tok_resp = sess.get(realm, params=params, timeout=15)
+                        tok_resp = _get_retry_429(sess, realm, params=params,
+                                                  timeout=15)
                         if tok_resp.status_code != 200:
                             # 401/403-for-auth is the STEADY state for a private
                             # repo we never authenticate to — not a coverage
@@ -1133,14 +1204,16 @@ class VersionChecker:
                             if _is_transient(tok_resp.status_code):
                                 self.degraded.record(
                                     _scope, _dep(host, tok_resp.status_code),
-                                    f"token endpoint returned HTTP {tok_resp.status_code}")
+                                    f"token endpoint returned HTTP {tok_resp.status_code}",
+                                    component=_comp)
                             return None
                         body = tok_resp.json()
                         token = body.get('token') or body.get('access_token')
                         if not token:
                             self.degraded.record(
                                 _scope, host,
-                                "token endpoint returned no token/access_token")
+                                "token endpoint returned no token/access_token",
+                                component=_comp)
                             return None
                         continue  # retry the SAME url, now authenticated
                     if resp.status_code != 200:
@@ -1148,7 +1221,8 @@ class VersionChecker:
                         if _is_transient(resp.status_code):
                             self.degraded.record(
                                 _scope, _dep(host, resp.status_code),
-                                f"tags/list returned HTTP {resp.status_code}")
+                                f"tags/list returned HTTP {resp.status_code}",
+                                component=_comp)
                         return None  # e.g. 404/403 -> can't determine, don't guess
                     tags.extend(resp.json().get('tags') or [])
                     pages += 1
@@ -1165,12 +1239,14 @@ class VersionChecker:
             if _is_structurally_slow(_time.monotonic() - started, pages):
                 _STRUCTURALLY_SLOW_HOSTS.add(host)
             else:
-                self.degraded.record(_scope, host, f"{type(e).__name__}: {e}")
+                self.degraded.record(_scope, host, f"{type(e).__name__}: {e}",
+                                     component=_comp)
             return None  # partial oldest-first list would fabricate a downgrade
         return tags
 
     def _dockerhub_tags(self, image_name: str, current_tag: str = '',
-                        max_pages: int = 5) -> List[str]:
+                        max_pages: int = 5,
+                        component: Optional[str] = None) -> List[str]:
         """List Docker Hub tags for `library/postgres`-style names.
 
         Two defects fixed here:
@@ -1189,6 +1265,7 @@ class VersionChecker:
         """
         tags: List[str] = []
         _scope = f"image docker.io/{image_name}"
+        _comp = component or component_key('image', f"docker.io/{image_name}")
         base = f"https://hub.docker.com/v2/repositories/{image_name}/tags"
         _auth = _dockerhub_auth_header()
         try:
@@ -1200,8 +1277,9 @@ class VersionChecker:
                 # the line a CVE bump will almost always land on.
                 major = re.match(r'v?(\d+)\.', str(current_tag or ''))
                 if major:
-                    r = sess.get(f"{base}?page_size=100&name={major.group(1)}.",
-                                 headers=_auth, timeout=15)
+                    r = _get_retry_429(
+                        sess, f"{base}?page_size=100&name={major.group(1)}.",
+                        headers=_auth, timeout=15)
                     if r.status_code == 200:
                         tags.extend(t.get('name', '')
                                     for t in r.json().get('results', []))
@@ -1212,7 +1290,7 @@ class VersionChecker:
                         self.degraded.record(
                             _scope, _dep('Docker Hub', r.status_code),
                             f"major-line query (name={major.group(1)}.) returned "
-                            f"HTTP {r.status_code}")
+                            f"HTTP {r.status_code}", component=_comp)
                 # Then a bounded sweep of the most-recent window, which is what
                 # surfaces a NEWER major line than the one we run.
                 url: Optional[str] = f"{base}?page_size=100"
@@ -1221,7 +1299,7 @@ class VersionChecker:
                     # Pace within the lock too — holding the mutex stops
                     # PARALLEL bursts, not a serial one from this loop.
                     time.sleep(_DOCKERHUB_MIN_GAP_S)
-                    r = sess.get(url, headers=_auth, timeout=15)
+                    r = _get_retry_429(sess, url, headers=_auth, timeout=15)
                     if r.status_code != 200:
                         # Unlike _oci_v2_tags this returns a PARTIAL list rather
                         # than None, so the damage differs by when it hits: a
@@ -1235,7 +1313,8 @@ class VersionChecker:
                                 _scope, _dep('Docker Hub', r.status_code),
                                 f"tag listing stopped after {pages} page(s) — "
                                 f"HTTP {r.status_code}; tag list is "
-                                f"{'empty' if not tags else 'truncated'}")
+                                f"{'empty' if not tags else 'truncated'}",
+                                component=_comp)
                         break
                     body = r.json()
                     tags.extend(t.get('name', '') for t in body.get('results', []))
@@ -1247,7 +1326,8 @@ class VersionChecker:
                     url = (nxt if nxt and urlparse(nxt).netloc == 'hub.docker.com'
                            else None)
         except Exception as e:
-            self.degraded.record(_scope, 'Docker Hub', f"{type(e).__name__}: {e}")
+            self.degraded.record(_scope, 'Docker Hub', f"{type(e).__name__}: {e}",
+                                 component=_comp)
         return tags
 
     def get_registry_image_tag(self, repository: str, current_tag: str = '') -> Optional[str]:
@@ -1259,6 +1339,11 @@ class VersionChecker:
         """
         try:
             repo = repository.split('://')[-1].rstrip('/')
+            # The component key is built from the ORIGINAL repository string,
+            # which is exactly what the emitted findings carry in
+            # metadata.repository and in their titles — so a coverage gap
+            # recorded here matches the right rows and only those rows.
+            comp = component_key('image', repository)
 
             # Quay.io — list active tags and pick the highest SEMVER. The API's
             # default ordering is by push time, not version, so the old limit=1
@@ -1267,14 +1352,16 @@ class VersionChecker:
                 image_name = repo[len('quay.io/'):].split(':')[0]
                 api_url = (f"https://quay.io/api/v1/repository/{image_name}"
                            f"/tag?limit=100&onlyActiveTags=true")
-                response = requests.get(api_url, timeout=15)
+                with requests.Session() as _s:
+                    response = _get_retry_429(_s, api_url, timeout=15)
                 if response.status_code == 200:
                     tags = [t.get('name', '') for t in response.json().get('tags', [])]
                     return self._pick_latest_semver_tag(tags, current_tag, repo)
                 if _is_transient(response.status_code):
                     self.degraded.record(
                         f"image {repo}", _dep('quay.io', response.status_code),
-                        f"tag API returned HTTP {response.status_code}")
+                        f"tag API returned HTTP {response.status_code}",
+                        component=comp)
                 return None
 
             host = repo.split('/')[0]
@@ -1289,7 +1376,8 @@ class VersionChecker:
                 image_name = image_name.split(':')[0]
                 if '/' not in image_name:
                     image_name = f"library/{image_name}"
-                tags = self._dockerhub_tags(image_name, current_tag)
+                tags = self._dockerhub_tags(image_name, current_tag,
+                                            component=comp)
                 return self._pick_latest_semver_tag(tags, current_tag, repo) if tags else None
 
             # Everything else (ghcr.io, registry.k8s.io, registry.librechat.ai,
@@ -1297,11 +1385,12 @@ class VersionChecker:
             if '/' not in repo:
                 return None  # a bare host with no image path
             image_path = repo.split('/', 1)[1].split(':')[0]
-            tags = self._oci_v2_tags(host, image_path)
+            tags = self._oci_v2_tags(host, image_path, component=comp)
             return self._pick_latest_semver_tag(tags, current_tag, repo) if tags else None
         except Exception as e:
             self.degraded.record(f"image {repository}", 'container registry',
-                                 f"{type(e).__name__}: {e}")
+                                 f"{type(e).__name__}: {e}",
+                                 component=component_key('image', repository))
 
         return None
 
@@ -3352,6 +3441,27 @@ class VersionChecker:
         return '\n'.join(lines)
 
 
+def _component_universe(checker: 'VersionChecker') -> int:
+    """How many distinct components this run ATTEMPTED to resolve.
+
+    The denominator for DegradationLog's coverage floor. Counts every image
+    repository and chart the HelmRelease walk produced plus each external-infra
+    probe, deduplicated — an image used by three HelmReleases is one component,
+    and one 429 against it is one coverage gap, not three.
+    """
+    seen: set = set()
+    for r in getattr(checker, 'results', []) or []:
+        chart = r.get('chart') or {}
+        if chart.get('name') or r.get('name'):
+            seen.add(('chart', chart.get('name') or r.get('name')))
+        for img in r.get('images') or []:
+            if img.get('repository'):
+                seen.add(('image', str(img['repository']).lower()))
+    for x in getattr(checker, 'external_infra_results', []) or []:
+        seen.add(('host', x.get('name') or x.get('host')))
+    return len(seen)
+
+
 def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_path: str) -> tuple[int, int]:
     """Walk checker.results + external_infra_results and emit notable findings.
 
@@ -3429,6 +3539,10 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     metadata={
                         "namespace": ns, "kind": "image",
                         "repository": img.get('repository'),
+                        # Structured coverage-scope key. Lets auto-close hold a
+                        # row back by exact component match instead of falling
+                        # back to matching the rendered title.
+                        "component": component_key('image', img.get('repository') or ''),
                         "breaking_changes": img.get('breaking_changes') or [],
                     },
                 )
@@ -3442,6 +3556,7 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     metadata={
                         "namespace": ns, "kind": "image",
                         "repository": img.get('repository'),
+                        "component": component_key('image', img.get('repository') or ''),
                     },
                 )
             elif img_ua.get('type') == 'patch':
@@ -3454,6 +3569,7 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
                     metadata={
                         "namespace": ns, "kind": "image",
                         "repository": img.get('repository'),
+                        "component": component_key('image', img.get('repository') or ''),
                     },
                 )
 
@@ -3578,9 +3694,16 @@ def main(argv: list[str] | None = None):
     ) as writer:
         crit, warn = _emit_findings(writer, checker, evidence_path)
         verdict = "red" if crit > 0 else ("yellow" if warn > 0 else "green")
-        # Veto stale-finding auto-close if ANY lookup degraded this run. The
-        # run still completes and reports everything it could measure — it just
+        # Veto stale-finding auto-close for whatever this run failed to look
+        # up. A degradation that named its component narrows the veto to that
+        # component's findings; one that could not stays section-wide. The run
+        # still completes and reports everything it could measure — it just
         # does not get to conclude that what it failed to look up is fixed.
+        #
+        # The denominator is what keeps the narrowing honest: 1 uncovered
+        # image out of ~180 is a leaf, 60 out of 180 is a registry outage
+        # wearing per-component clothing, and only a ratio can tell them apart.
+        checker.degraded.note_universe(_component_universe(checker))
         checker.degraded.apply(writer)
         writer.close(verdict=verdict)
 
