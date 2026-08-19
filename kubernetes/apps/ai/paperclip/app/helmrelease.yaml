@@ -406,7 +406,7 @@ spec:
           tools:
             image:
               repository: ubuntu
-              tag: "24.04"
+              tag: "26.04@sha256:6df9e8dd1eac389ebfef692c9648449adeb815d01e16e29cd6f3e50fe64ba9a6"  # digest-pinned (float-tag policy); security_ref: F-afa93406
             command:
               - /bin/bash
               - -c
