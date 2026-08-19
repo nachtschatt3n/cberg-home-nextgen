@@ -469,7 +469,22 @@ it. It has been removed and replaced with a 4-byte round-trip assertion.
 4. The new volume `nextcloud-db-data` and `deploy/nextcloud-db` (scaled to 0)
    are left in place from attempt 1. **Do not delete them** (storage safety);
    attempt 2 should reuse or explicitly re-initialise them, and must not assume
-   an empty datadir.
+   an empty datadir. A detach alert for that volume is silenced until
+   2026-08-24 — the expiry is deliberate, so the decision cannot rot.
+5. **Rotate the reused database credential as part of attempt 2** (operator
+   decision, 2026-08-19). Four keys in the nextcloud secret share a single
+   value, `mariadb-replication-password` among them. It is **not** present in
+   public git history, which is what makes it materially less urgent than the
+   paperless placeholder rotated the same day — so it was deliberately NOT given
+   its own window. Attempt 2 already stands up a fresh server and re-issues the
+   application account, so it is the cheap moment to stop the reuse: give each
+   key its own generated value. Note the entrypoint will not re-apply a password
+   to an existing datadir, so any account that already exists needs an explicit
+   `ALTER USER` after the Secret lands — the same ordering the paperless
+   rotation used.
+   *Not* in scope: the Nextcloud **admin login** credential. That is the
+   operator's own sign-in, recorded as a finding for them to action, and it must
+   not be rotated by an agent.
 
 ### What did work, and should be kept
 

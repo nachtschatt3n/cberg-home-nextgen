@@ -59,6 +59,41 @@ complete: after it, **no `bitnamilegacy` image may remain in the `databases`
 namespace for Superset**. If `superset-redis-official` (stage 1) has not run, that
 assertion fails — the Redis half is still on the archived registry.
 
+## 1a) FIDELITY AUDIT OF THE CUTOVER — done 2026-08-19, result: CLEAN
+
+This plan deletes the source. Before that is acceptable, the cutover it follows
+has to be shown faithful, not merely complete — see
+`docs/sops/verification-contents-not-shape.md` §2a, added the same day after a
+sibling migration was rolled back for a dump that was lossy while every row
+count matched.
+
+Audited retrospectively against the live pair while both were still up (the old
+server is still running, which is what made a true A/B possible):
+
+| check | old | new |
+|---|---|---|
+| encoding | UTF8 | UTF8 |
+| collation | `en_US.UTF-8` | `en_US.utf8` (same collation, different spelling) |
+| rows carrying multi-byte characters | **3** | **3** |
+| `md5(string_agg(slice_name order by id))` | `7de3fadd…` | `7de3fadd…` — identical |
+| `dashboards` / `tables` text md5 | identical | identical |
+| slice names, row-for-row with ids | byte-identical | byte-identical |
+
+**Conclusion: no transcoding or truncation occurred. The cutover is faithful and
+this plan may proceed on that basis.**
+
+One methodological note, because it nearly produced a false alarm: the first
+comparison used `string_agg(name order by name)` and returned *different*
+hashes over byte-identical data. The two images spell the collation differently,
+so `ORDER BY` on text sorted the multi-byte values differently and changed the
+concatenation order. **Order by the primary key, not by the text you are
+hashing.** A fidelity check that false-alarms costs nearly as much as one that
+misses — it burns the rollback window chasing a phantom.
+
+**Re-run the multi-byte and md5 rows above immediately before the delete**, not
+just once here. They are cheap, and this plan's whole risk is that the source
+disappears afterwards.
+
 ## 2) Pre-checks
 
 ```bash
