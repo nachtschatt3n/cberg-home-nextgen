@@ -42,7 +42,7 @@ touches:
                                       # unifictl security-sweep checks — see
                                       # docs/sops/unifi-controller-rate-limit.md
 depends_on: []
-conflicts_with: [grafana-chart-11]    # scheduled fri-early:2026-08-21. Verification
+conflicts_with: []    # scheduled fri-early:2026-08-21. Verification  # RESOLVED 2026-08-19: grafana-chart-11 retired (chain collapsed+overshot; grafana is on chart 12.11.0/app 13.2.0)
                                       # here is "dashboard panels non-empty"; running
                                       # in the same window as a Grafana chart major
                                       # (which rolls Grafana + re-renders all dashboard
