@@ -194,6 +194,20 @@ class GoPseudoVersionTest(unittest.TestCase):
         self.assertEqual(r["crit_fix"], 0)
         self.assertEqual(r["crit_undet"], 1)
 
+    def test_bare_integer_tag_does_not_clear(self):
+        """A single-component tag is ambiguous in a way that fails dangerously.
+        `:18` is a head-of-line tag, and a date tag `:20260819` would parse as
+        major 20,260,819 and compare greater than every FixedVersion there is —
+        silently clearing every finding on the image."""
+        for tag in ("18", "20260819"):
+            with self.subTest(tag=tag):
+                r = tally(_report(
+                    ("lang-pkgs", [_vuln("TEST-P-20", "github.com/org/app", "CRITICAL",
+                                         "3.0.9", _pseudo("20260101000000"))]),
+                    artifact=f"org/app:{tag}"))
+                self.assertEqual(r["crit_fix"], 0)
+                self.assertEqual(r["crit_undet"], 1)
+
     def test_prerelease_tag_is_not_treated_as_its_release(self):
         """`1.14.0-rc1` is not `1.14.0` — truncating it would assert a version
         that was never measured."""

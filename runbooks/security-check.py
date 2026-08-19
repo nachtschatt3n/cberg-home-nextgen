@@ -1490,7 +1490,7 @@ def _parse_go_pseudo_version(ver: str) -> datetime | None:
         return None
 
 
-def _semver_key(ver: str) -> tuple[int, ...] | None:
+def _semver_key(ver: str, *, require_dotted: bool = False) -> tuple[int, ...] | None:
     """Numeric release key for a plain version string, or None if it isn't one.
 
     Deliberately strict: a leading `v` is tolerated, a trailing pre-release or
@@ -1498,11 +1498,22 @@ def _semver_key(ver: str) -> tuple[int, ...] | None:
     silently truncated to its release part -- `1.14.0-rc1` is not `1.14.0`, and
     treating it as such is the same "assert what you did not measure" mistake
     one level down.
+
+    `require_dotted` additionally rejects a SINGLE numeric component. Callers
+    that read a version off an IMAGE TAG must set it: a bare-integer tag is
+    ambiguous in a way that fails DANGEROUSLY. `postgres:18` is a head-of-line
+    tag, not release 18.0.0, and a date tag like `:20260819` would parse as
+    major version 20,260,819 and compare greater than every FixedVersion in
+    existence -- silently clearing every finding on the image. There is no
+    reading of a bare integer that is worth that, so it declines instead.
     """
     s = (ver or "").strip().lstrip("vV")
     if not s or not re.fullmatch(r"\d+(?:\.\d+)*", s):
         return None
-    return tuple(int(p) for p in s.split("."))
+    parts = tuple(int(p) for p in s.split("."))
+    if require_dotted and len(parts) < 2:
+        return None
+    return parts
 
 
 def _cmp_semver(a: tuple[int, ...], b: tuple[int, ...]) -> int:
@@ -1581,7 +1592,7 @@ def classify_pseudo_version(vuln: dict, result_class: str, artifact_name: str) -
     # -- Route A: the pseudo-versioned module is the image's own program. -----
     pkg_leaf = _module_leaf(vuln.get("PkgName", ""))
     if pkg_leaf and pkg_leaf == _repo_leaf(artifact_name):
-        tag_key = _semver_key(_image_tag(artifact_name))
+        tag_key = _semver_key(_image_tag(artifact_name), require_dotted=True)
         fixed_keys = [k for k in (_semver_key(p) for p in fixed_parts) if k]
         if tag_key and fixed_keys:
             # Cleared if the tag reaches the LOWEST named fix release.
