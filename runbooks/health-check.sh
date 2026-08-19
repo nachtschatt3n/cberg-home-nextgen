@@ -1265,18 +1265,25 @@ log_section "Section 10: Longhorn Storage"
     echo ""
 
     TOTAL_VOLUMES=$(safe_count "kubectl get volumes -n storage --no-headers 2>/dev/null | wc -l")
-    UNHEALTHY_VOLUMES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq '[.items[] | select(.status.state != "attached" or .status.robustness != "healthy")] | length')
+    # A DETACHED volume is idle, not unhealthy: Longhorn reports
+    # robustness=unknown for every detached volume, so the old
+    # `state != attached OR robustness != healthy` test flagged each
+    # intentionally-unmounted volume (bitnamilegacy migration rollback PVs,
+    # scaled-to-zero apps) as a storage failure. Real replica damage is
+    # degraded/faulted and is still caught while detached; an unexpected
+    # detach is caught by DETACH_EVENTS below and by pod-level assertions.
+    UNHEALTHY_VOLUMES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq '[.items[] | select((.status.robustness == "degraded" or .status.robustness == "faulted") or (.status.state == "attached" and .status.robustness != "healthy"))] | length')
     # Per-volume detail so each unhealthy volume becomes its own finding with
     # the volume name in the title — lets an accepted-risk match a specific
     # volume (e.g. an intentionally scaled-down app's detached session PVC)
     # without masking an unrelated real failure on a different volume.
-    UNHEALTHY_DETAIL=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '.items[] | select(.status.state != "attached" or .status.robustness != "healthy") | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"')
+    UNHEALTHY_DETAIL=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '.items[] | select((.status.robustness == "degraded" or .status.robustness == "faulted") or (.status.state == "attached" and .status.robustness != "healthy")) | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"')
 
     echo "Volumes: $((TOTAL_VOLUMES - UNHEALTHY_VOLUMES))/$TOTAL_VOLUMES healthy"
 
     if [ "$UNHEALTHY_VOLUMES" -gt 0 ]; then
         echo "Unhealthy volumes:"
-        kubectl get volumes -n storage -o json | jq -r '.items[] | select(.status.state != "attached" or .status.robustness != "healthy") | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"'
+        kubectl get volumes -n storage -o json | jq -r '.items[] | select((.status.robustness == "degraded" or .status.robustness == "faulted") or (.status.state == "attached" and .status.robustness != "healthy")) | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"'
     fi
 
     echo ""
@@ -1295,7 +1302,7 @@ log_section "Section 10: Longhorn Storage"
     echo "Volume replica mismatches (non-healthy robustness):"
     REPLICA_MISMATCHES=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '
         .items[] |
-        select(.status.robustness != null and .status.robustness != "healthy") |
+        select(.status.robustness == "degraded" or .status.robustness == "faulted") |
         "\(.metadata.name): robustness=\(.status.robustness) state=\(.status.state)"
     ' || echo "")
     if [ -n "$REPLICA_MISMATCHES" ]; then
@@ -1330,11 +1337,9 @@ log_section "Section 10: Longhorn Storage"
         if [ "$AUTO_DELETE" != "false" ]; then
             add_minor_issue "AutoDelete setting is $AUTO_DELETE (should be false)"
         fi
-        if [ -n "$REPLICA_MISMATCHES" ]; then
-            while IFS= read -r vline; do
-                [ -n "$vline" ] && add_minor_issue "Longhorn volume unhealthy robustness: $vline"
-            done <<< "$REPLICA_MISMATCHES"
-        fi
+        # No finding emitted here: REPLICA_MISMATCHES (degraded/faulted) is a
+        # strict subset of UNHEALTHY_DETAIL above, so emitting it again produced
+        # two findings per volume - one major, one minor - for one condition.
     fi
     if [ "$DETACH_EVENTS" -gt 5 ]; then
         log_warning "High volume detachment event count: $DETACH_EVENTS"
