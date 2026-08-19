@@ -17,7 +17,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Talos Linux | v1.13.8 |
 | Flux | v2.9.3 |
 | Nodes | 3 × Intel NUC14 Pro |
-| CNI | Cilium v1.19.4 |
+| CNI | Cilium v1.20.1 |
 | Storage | Longhorn v1.11.2 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
@@ -107,7 +107,7 @@ Bootstrap order (via `kubernetes/bootstrap/apps/helmfile.yaml`):
 
 | Order | Component | Chart | Version | Namespace |
 |-------|-----------|-------|---------|-----------|
-| 1 | Cilium | `cilium/cilium` | 1.19.4 | kube-system | (bootstrap seed aligned to running v1.19.4; Flux HelmRelease also pins 1.19.4) |
+| 1 | Cilium | `cilium/cilium` | 1.20.1 | kube-system | (bootstrap seed aligned to running v1.20.1; Flux HelmRelease also pins 1.20.1) |
 | 2 | CoreDNS | `oci://ghcr.io/coredns/charts/coredns` | 1.47.0 | kube-system | (image pinned to 1.14.7 in `helm-values.yaml` ahead of the chart's appVersion 1.14.6 — 1.47.0 is the newest chart published; drop the pin once a chart ships appVersion >= the pinned tag) |
 | 3 | cert-manager | `jetstack/cert-manager` | v1.21.0 | cert-manager |
 | 4 | Flux Operator | `oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator` | 0.57.0 | flux-system |
@@ -124,7 +124,7 @@ manages all subsequent deployments including upgrades to these components.
 |-----------|---------|
 | OS | Talos Linux v1.13.8 (immutable, minimal, Kubernetes-focused; kernel 6.18.42, Clang/ThinLTO) |
 | Container Runtime | Containerd 2.2.6 + Spegel (distributed image caching) |
-| CNI | Cilium v1.19.4 (eBPF networking, load balancing, network policies) |
+| CNI | Cilium v1.20.1 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
 | Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
@@ -205,7 +205,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Kubernetes | v1.36.0 | Container orchestration |
 | Talos Linux | v1.13.8 | Cluster OS |
 | Flux | v2.9.3 | GitOps operator |
-| Cilium | v1.19.4 | CNI / network |
+| Cilium | v1.20.1 | CNI / network |
 | Longhorn | v1.11.2 | Distributed storage |
 | cert-manager | v1.21.0 | TLS management |
 | Helm | 3.20.0 | Package manager |

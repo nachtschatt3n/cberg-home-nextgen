@@ -5,7 +5,7 @@
 > *contents*, so every green signal was true while the thing was broken. Now
 > also covers its sibling FIDELITY (2a): equal counts over unequal data. Rules,
 > per-class assertions, and the four worked examples from 2026-08-18/19.
-> Version: `2026.08.19b`
+> Version: `2026.08.19`
 > Last Updated: `2026-08-19`
 > Owner: `operator + maintenance-window / upgrade-planner agents`
 

@@ -100,7 +100,7 @@ spec:
       # -- Explicit Redis URL to preserve service name after chart 12.x naming convention change
       url: "redis://open-webui-redis:6379/0"
       # Pin the bundled websocket Redis image. The chart default is
-      # redis:7.4.2-alpine3.21, which carries 6 fixable CRITICAL CVEs
+      # redis:7.4.2-alpine3.21 — see security_ref: F-9e1e421c for the posture
       # (Trivy 2026-08-06). Redis 8 is safe for this use: ephemeral pub/sub
       # only — no persistence, no ACL/auth, no modules. 8.10.0-alpine is
       # already proven by databases/redis in this cluster.
