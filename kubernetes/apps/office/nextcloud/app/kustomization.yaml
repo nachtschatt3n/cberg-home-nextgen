@@ -4,6 +4,13 @@ kind: Kustomization
 resources:
   - ./secrets.sops.yaml
   - ./pvc.yaml
+  # Replacement database (official mariadb image). db-longhorn-volume.yaml is
+  # deliberately NOT listed: Flux's targetNamespace would override the Volume
+  # CR's `namespace: storage` and create a broken duplicate Longhorn ignores.
+  # It is applied by hand — see the comment in that file.
+  - ./db-pv.yaml
+  - ./db-pvc.yaml
+  - ./db-deployment.yaml
   - ./helmrelease.yaml
   - ./redis-deployment.yaml
   - ./whiteboard-proxy.yaml

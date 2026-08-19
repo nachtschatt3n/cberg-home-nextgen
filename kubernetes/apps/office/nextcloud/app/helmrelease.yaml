@@ -33,7 +33,16 @@ spec:
       repository: nextcloud
       tag: 34.0.3
       pullPolicy: IfNotPresent
-    replicaCount: 1
+    # HOLD — database replatform in progress (plan bitnamilegacy-exit-nextcloud-db).
+    # Deliberately 0, and deliberately here rather than `kubectl scale`: a manual
+    # scale is an override of a Flux-managed field, and the very commit that
+    # replatforms the database is what triggers the reconcile that would undo it.
+    # Nextcloud must NOT boot against the fresh, empty datadir before the dump is
+    # restored — its entrypoint can treat an empty database as a first install and
+    # persists instanceid/secret into config.php on the PVC, which no database
+    # restore reverts. Flux therefore has to converge TO 0, not away from it.
+    # Restored to 1 in the follow-up commit, once the restore is verified.
+    replicaCount: 0
     ingress:
         enabled: true
         className: external
@@ -216,8 +225,8 @@ spec:
             - sh
             - -c
             - |
-              until nc -z nextcloud-mariadb 3306; do
-                echo "waiting for nextcloud-mariadb:3306..."
+              until nc -z nextcloud-db 3306; do
+                echo "waiting for nextcloud-db:3306..."
                 sleep 2
               done
         - name: wait-for-redis
@@ -446,8 +455,12 @@ spec:
       ## Supported database engines: mysql or postgresql
       type: mysql
 
-      ## Database host
-      # host:
+      ## Database host. Points at the Service in db-deployment.yaml.
+      ## From chart 9.2.5 `templates/_helpers.tpl`, MYSQL_HOST is only read
+      ## from this value once `mariadb.enabled` is false — until then the
+      ## `{{- else if .Values.mariadb.enabled }}` branch wins and the host is
+      ## templated from the subchart. Both settings must move together.
+      host: nextcloud-db
 
       ## Database name
       database: nextcloud
@@ -461,52 +474,45 @@ spec:
         # hostKey: db-hostname-or-ip
         # databaseKey: db-name
     ##
-    ## MariaDB chart configuration
-    ## ref: https://github.com/bitnami/charts/tree/main/bitnami/mariadb
+    ## MariaDB subchart — RETIRED 2026-08-19.
     ##
+    # The bundled Bitnami MariaDB is gone. It pinned
+    # docker.io/bitnamilegacy/mariadb:latest, and bitnamilegacy is Bitnami's
+    # ARCHIVED catalog: the free images were moved there on 2025-08-28 and
+    # nothing has been published since — it exists solely to help with
+    # migration. `latest` there is a frozen tag pretending to be a rolling one,
+    # so the pod ran server 11.8.2 and always would have. docker.io/bitnami/
+    # mariadb is not a fallback either (digest-only, no semver stream for
+    # Renovate). Leaving the registry is the only remediation, so no version
+    # bump could ever have resolved this. Driver: security_ref F-cb42f390.
+    #
+    # Nextcloud now uses the official mariadb image deployed by
+    # db-deployment.yaml in this folder, reached via externalDatabase.host
+    # above. Server charset is pinned there to utf8mb3/utf8mb3_general_ci to
+    # match the retired server — utf8mb4 is a separate migration.
+    #
+    # Setting this false ALSO drops the chart's `mariadb-isalive`
+    # initContainer, which was the last bitnamilegacy container on the
+    # nextcloud pod itself.
+    #
+    # Unlike the redis subchart retirement (see the `redis:` block below),
+    # nothing under `mariadb.*` steers the parent chart once the subchart is
+    # off: chart 9.2.5 reads `mariadb.auth.*` and `mariadb.image.*` only inside
+    # `{{- if .Values.mariadb.enabled }}` branches, so the whole values block
+    # is safe to remove rather than retain.
     mariadb:
-      ## Whether to deploy a mariadb server from the bitnami mariab db helm chart
-      # to satisfy the applications database requirements. if you want to deploy this bitnami mariadb, set this and externalDatabase to true
-      # To use an ALREADY DEPLOYED mariadb database, set this to false and configure the externalDatabase parameters
-      enabled: true
-
-      auth:
-        database: nextcloud
-        # Use existing secret (auth.rootPassword, auth.password, and auth.replicationPassword will be ignored).
-        # secret must contain the keys mariadb-root-password, mariadb-replication-password and mariadb-password
-        existingSecret: nextcloud-config
-        usernames:
-          - nextcloud
-
-      architecture: standalone
-
-      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/mariadb
-        tag: latest
-
-      ## Enable persistence using Persistent Volume Claims
-      ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
-      ##
-      primary:
-        persistence:
-          enabled: true
-          # Use an existing Persistent Volume Claim (must be created ahead of time)
-          existingClaim: "nextcloud-mariadb"
-          #storageClass: "local-hostpath"
-          #accessMode: ReadWriteOnce
-          #size: 8Gi
-
-        resources:
-          requests:
-            cpu: 100m
-            memory: 334M
-          limits:
-            memory: 1Gi
+      enabled: false
 
     cronjob:
-      enabled: true
+      # HOLD — see replicaCount above. Scaling the Deployment to 0 does not
+      # quiesce Nextcloud: this CronJob fires `php -f cron.php` every 5 minutes
+      # in a pod carrying the same database env and the same config.php PVC, so
+      # it would keep reaching the database throughout the replatform window and
+      # is a writer to the one file a database restore cannot repair. The chart
+      # exposes no `suspend` field, and `kubectl patch ... suspend=true` is the
+      # same drift-correctable override that replicaCount cannot use, so the
+      # CronJob is removed for the window and restored in the follow-up commit.
+      enabled: false
       type: cronjob
       cronjob:
         schedule: "*/5 * * * *"
