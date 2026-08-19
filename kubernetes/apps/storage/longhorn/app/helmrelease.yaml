@@ -199,3 +199,18 @@ spec:
     persistence:
       defaultClass: true
       defaultClassReplicaCount: 2
+    # Longhorn chart 1.12.1 added networkPolicies.restrictInternalTraffic with a
+    # DEFAULT of true, which renders 6 NetworkPolicies in `storage` even though
+    # networkPolicies.enabled is false. 1.12.0 rendered none. Their allow-list is
+    # longhorn-internal only, so Prometheus could no longer scrape
+    # longhorn-manager:9500 -> LonghornManagerDown fired permanently.
+    # Pinned to false to keep 1.12.1 a true patch bump. Adopting the hardening is
+    # worthwhile but is a separate, vetted change: it must allow-list monitoring
+    # AND be verified against the ~10 nightly storage CronJobs (backups 03:00,
+    # filesystem-trim 02:00, snapshot-cleanup 02:30), none of which have run under
+    # these policies yet.
+    # NOTE: deliberately at the TOP LEVEL of `values:` (alongside `persistence`),
+    # NOT inside the inert `longhorn:` block above — nesting it there would be
+    # silently discarded by Helm and the policies would stay.
+    networkPolicies:
+      restrictInternalTraffic: false
