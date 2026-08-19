@@ -172,7 +172,7 @@ for p in json.load(sys.stdin)['items']:
             bad.append((p['metadata']['name'], c['image']))
 print('bitnamilegacy images still running:', bad or 'NONE')"
 # Expect NONE for the superset stack. (Other apps — nextcloud-mariadb,
-# paperless-ngx-mariadb, the two unpinned office/ images — are out of scope here and
+# paperless-ngx-mariadb, the one unpinned office/ mariadb image — are out of scope here and
 # are their own hygiene item; note them, do not fix them in this window.)
 
 # c) the data is still there and still served
@@ -236,8 +236,9 @@ share-wipe failure mode does not apply, but the data is still gone.
 - **This stage removes the cheap rollback for the cutover.** That is its cost and the
   reason for the 10-day gap. Do not compress it into the cutover window.
 - The `databases` namespace still hosts other `bitnamilegacy` users
-  (`nextcloud-mariadb`, `paperless-ngx-mariadb`, and two unpinned
-  `bitnamilegacy/{redis,mariadb}:latest` floating tags under `office/`). They are
+  (`nextcloud-mariadb`, `paperless-ngx-mariadb`, and one unpinned
+  `bitnamilegacy/mariadb:latest` floating tag under `office/` — both office Redis
+  instances left the registry 2026-08-18/19). They are
   **out of scope** for this plan set and should get their own hygiene item — at
   minimum a pin. Do not opportunistically fix them in this window.
 - Superset's chart stays at 0.22.4. The chart hold (AR-050 class) and its

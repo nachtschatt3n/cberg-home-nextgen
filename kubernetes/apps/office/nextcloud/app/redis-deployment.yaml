@@ -7,15 +7,28 @@
 # and the paperless-redis twin in this namespace.
 #
 # Deliberately NO PVC: this instance holds Nextcloud's distributed cache,
-# transient file locks and sessions only — ~800 keys, ~99% of them with a
-# TTL. Nothing durable. The old longhorn-static PV
+# transient file locks and PHP sessions only — ~140 keys steady state, ~96%
+# of them carrying a TTL (the ~800 in the plan was the retired instance under
+# load; size memory from the live figure, not that one). Nothing durable
+# survives a restart by design. The old longhorn-static PV
 # `redis-data-nextcloud-redis-master-0` is kept (Retain) purely as the
 # rollback path for the bundled chart redis.
 #
 # Deliberately NO --requirepass: parity with the retired instance's
-# `auth.enabled: false` posture. Nextcloud's redis.config.php carries no
-# password either, so introducing auth is a separate change that must edit
-# both sides at once.
+# `auth.enabled: false` posture, so this cutover stays a pure registry move.
+#
+# CORRECTION (2026-08-19, post-execution review): an earlier version of this
+# comment claimed auth was deferred because "redis.config.php carries no
+# password, so both sides must change at once". That is wrong and should not
+# be relied on. The password path already exists upstream on both sides —
+# redis.config.php reads REDIS_HOST_PASSWORD/_FILE, the image entrypoint
+# builds session.save_path with auth from it, and the chart's externalRedis
+# block emits it. Enabling auth is therefore a normal scoped change (SOPS
+# secret + secretKeyRef + `sh -c` wrapper, since redis-server does not expand
+# env in argv + externalRedis.password + flip redis.auth.enabled so
+# _helpers.tpl renders the AUTH form + the hardcoded worker sidecar env +
+# the config.php refresh, see notify-push.yaml). Deferring it here was a
+# SCOPING decision, not a technical blocker.
 #
 # Named `nextcloud-redis`, NOT `nextcloud-redis-master`: reusing the old
 # name would race Helm's own Service of that name during the cutover
@@ -100,10 +113,23 @@ spec:
     app: nextcloud-redis
 ---
 # Replacement for the subchart-owned `networkpolicy/nextcloud-redis`, which
-# disappears together with the subchart when `redis.enabled: false`. Without
-# this the replacement Redis would be the only unguarded datastore in the
-# namespace. Posture mirrored 1:1 from the retired policy: ingress limited to
-# TCP 6379, egress unrestricted.
+# disappears together with the subchart when `redis.enabled: false`.
+#
+# READ THE SEMANTICS BEFORE TRUSTING THIS. It is mirrored 1:1 from the retired
+# subchart policy (and matches the shape of the surviving
+# networkpolicy/nextcloud-mariadb), but "mirrors the old policy" and
+# "restricts access" are different claims and only the first one holds: an
+# ingress rule carrying `ports` and no `from` peer allows ALL sources on that
+# port. What this actually constrains is ports OTHER than 6379 — and redis
+# listens on nothing else. Egress is unrestricted.
+#
+# To make it restrict sources, add a `from:` with podSelectors for the real
+# consumers, which are (verified from CLIENT LIST + pod labels, all in
+# office): the main pod and the cron Jobs, both labelled
+# app.kubernetes.io/instance=nextcloud, and app=nextcloud-notify-push.
+# nextcloud-metrics, -mcp and -whiteboard do not connect. Do it in a window,
+# not casually: a mis-scoped selector surfaces as file-lock timeouts rather
+# than a clean connection error.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

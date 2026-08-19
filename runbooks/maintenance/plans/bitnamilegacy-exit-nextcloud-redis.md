@@ -34,14 +34,11 @@ status: executed                                # EXECUTED 2026-08-19 (d6070b82 
 # rollback while the orphaned PV redis-data-nextcloud-redis-master-0 is still the
 # only way back, i.e. until the "clean for a week" retirement in §6 is done and
 # phase 4 (bitnamilegacy-exit-nextcloud-db) has landed.
-window: "fri-early:2026-08-28"        # MOVED off sat-early:2026-08-22 (2026-08-16): that slot held
-                                      # longhorn-1.12.1-engine (60m) + this (30m) = exactly 90m of a
-                                      # 90m window. The reconciler flags that TIGHT and it is right —
-                                      # a storage-engine upgrade is the last place to have no rollback
-                                      # time. This is the cheaper of the two to move, and an empty
-                                      # weekday slot six days later costs nothing.
-                                      # (7 windows/week, was 4). Deliberate soaks are
-                                      # preserved, not compressed — see the windows YAML.
+window: null                          # cleared 2026-08-19: executed in the ad-hoc window
+                                      # (d6070b82 + 1dabbefd), so the fri-early:2026-08-28 slot is
+                                      # released. maintenance-plan.py buckets by `window` regardless
+                                      # of `status`, so leaving it set would reserve 45m + a medium
+                                      # risk-weight of a 60m window for work already done.
 auto_execute: false                             # *nextcloud* is on the auto-update deny-list
 sops_refs:
   - docs/sops/application-update.md
@@ -586,4 +583,22 @@ Confirmed back = bundled StatefulSet Running, `occ status` maintenance false,
   no schema work at all, which is what keeps it at medium.
 - One orphaned 8Gi Longhorn volume (`redis-data-nextcloud-redis-master-0`)
   remains after this window. It is the rollback path; retire it in a follow-up
-  cleanup once phase 4 is done and Nextcloud has run clean for a week.
+  cleanup once phase 4 is done and Nextcloud has run clean for a week. It also
+  fires a standing `LonghornVolumeDetached` warning for as long as it exists —
+  suppress via `runbooks/policy-cli.py noise` if the soak runs long, so it does
+  not mask a real detach.
+- **Follow-up work this plan deliberately did NOT do**, carried out of the
+  post-execution review so it is not lost:
+  1. **Auth.** The replacement runs without `--requirepass`, inherited verbatim
+     from the retired instance. The review established that the blocker this
+     plan assumed ("Nextcloud carries no password path, so both sides must move
+     together") does **not** exist — the plumbing is already there upstream.
+     Enabling auth is a normal scoped change; the recipe is in the corrected
+     comment at the top of `redis-deployment.yaml`.
+  2. **NetworkPolicy source scoping.** The shipped policy mirrors the retired
+     one 1:1, which means it constrains ports and not sources. The verified
+     consumer selectors for a `from:` block are recorded in the same file.
+  Both are hardening, not cutover work, and neither belongs in a window that
+  was scoped as a registry move — but neither should ride as an untracked
+  implicit acceptance either. Decide between a follow-up plan and an explicit
+  entry in the risk register.

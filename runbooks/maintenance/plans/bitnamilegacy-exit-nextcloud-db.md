@@ -22,7 +22,12 @@ touches:
     - pvc/nextcloud-mariadb                     # orphaned, Retain — the rollback data
   shared: [storage]                             # allocates a new 2-replica Longhorn volume
 depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db]
+                                                # RESOLVED 2026-08-19:
+                                                # bitnamilegacy-exit-nextcloud-redis EXECUTED
+                                                # (d6070b82) — dependency satisfied
 conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis]
+                                                # nextcloud-redis EXECUTED 2026-08-19; the only
+                                                # residual coupling is the shared HelmRelease
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
 status: draft
 window: "sat-early:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
@@ -548,6 +553,45 @@ marker reading **11.8.8** and `mariadb-check` all-OK; charset still
 --dry-run` clean; `status.php` `needsDbUpgrade:false`; `openclaw_mail` Enabled;
 upload/rename/delete/restore and Mail/Calendar/Contacts all working.
 
+### Persisted-config check — MANDATORY (learned 2026-08-19, phase 2b)
+
+**A green HelmRelease is not verification of a hostname change on this app.**
+Phase 2b renamed the redis Service and everything went green — HR Ready, pods
+Ready, `occ config:system:get redis` reporting the NEW host — while
+`nextcloud-notify-push` sat in a reconnect loop against the Service that had
+just been deleted.
+
+Cause: Nextcloud persists backing-service hosts as literals in `config.php` on
+the `nextcloud-config` PVC. The chart's `*.config.php` overlay (a
+`getenv()`-guarded file) is loaded LATER and wins for the main container, which
+is why `occ` reports the correct value and the main app is unaffected.
+`notify_push` parses `config.php` directly and never sees the overlay, so it
+alone keeps the stale literal. This applies to `dbhost` exactly as it applied
+to the redis host.
+
+```bash
+# BEFORE and AFTER the host cut — read the persisted literal, not the merged value
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  sh -c "grep -A5 \"'dbhost'\" /var/www/html/config/config.php"
+
+# If it still shows the retired host, refresh it. A plain
+# `occ config:system:set dbhost --value=...` is a NO-OP: it compares against the
+# MERGED value, which the overlay has already made correct. Nextcloud rewrites
+# config.php from the full merged config on ANY write, so use a throwaway key:
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ config:system:set zz_touch --value=1'
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ config:system:delete zz_touch'
+
+# then roll the consumers that parse config.php themselves, and verify:
+mise exec -- kubectl rollout restart deploy/nextcloud-notify-push -n office
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  su -s /bin/sh www-data -c 'php occ notify_push:self-test'   # must be 6/6 green
+```
+
+Adding the env var to the notify-push container does NOT work — tried and
+disproven on the live pod in phase 2b (`853bf719`, reverted by `1dabbefd`).
+
 ## 5) Rollback
 
 **There is no in-place downgrade of a MariaDB datadir** — but this plan never
@@ -635,10 +679,16 @@ baseline `oc_filecache` count, `status.php` `maintenance:false` /
   rolled back, this plan is invalid until phase 3 is re-planned. One window of
   separation (10-17 → 10-24) is the minimum: phase 3's rollback volume must have
   been observed clean before the same procedure is repeated here.
-- **`depends_on` / `conflicts_with: bitnamilegacy-exit-nextcloud-redis`**
-  (phase 2b, `tue-early:2026-09-08`) — that plan edits the same HelmRelease.
-  Never the same window; and its `redis.enabled: false` should already be
-  settled before this one disables `mariadb`.
+- **`depends_on` / `conflicts_with: bitnamilegacy-exit-nextcloud-redis`** —
+  phase 2b EXECUTED 2026-08-19 (`d6070b82` + `1dabbefd`), so its
+  `redis.enabled: false` / `externalRedis:` wiring is settled and live. The
+  only residual coupling is that both plans edit the same HelmRelease: re-read
+  the current `redis:` and `externalRedis:` blocks before touching `mariadb:`,
+  and do NOT resurrect the subchart values. Note the trap phase 2b hit head-on
+  — `redis.auth.enabled: false` had to be RETAINED after disabling the
+  subchart, because `_helpers.tpl` still reads it to pick the URL form. Check
+  whether any `mariadb.*` value steers the parent chart the same way before
+  deleting that block.
 - **`conflicts_with: longhorn-1.12.1-engine`** — this plan creates a new Longhorn
   volume and depends on healthy replica scheduling. Never pair storage-engine
   work with new-volume creation.

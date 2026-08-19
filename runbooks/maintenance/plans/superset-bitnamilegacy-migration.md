@@ -98,8 +98,9 @@ still prefers CNPG, stage 2 must not run as written.
 - **New datastores are deliberately NOT app-template**, so Superset does not enlarge
   the blast radius of the pending `app-template-5.0` migration.
 - **Same registry, other users** (separate hygiene item, not this plan set):
-  `nextcloud-mariadb`, `paperless-ngx-mariadb`, and two unpinned
-  `bitnamilegacy/{redis,mariadb}:latest` floating tags under `office/`.
+  `nextcloud-mariadb`, `paperless-ngx-mariadb`, and one unpinned
+  `bitnamilegacy/mariadb:latest` floating tag under `office/` (both office Redis
+  instances left the registry 2026-08-18/19).
 
 ## For the window agent
 

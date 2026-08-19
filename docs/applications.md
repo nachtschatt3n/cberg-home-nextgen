@@ -121,7 +121,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | affine | Collaborative knowledge base and workspace | Internal | Office |
-| nextcloud | Self-hosted cloud storage + collaboration | Internal + External | Office |
+| nextcloud | Self-hosted cloud storage + collaboration. Cache, file locks and PHP sessions run on the standalone `nextcloud-redis` Deployment — official `redis:8.10.0-alpine`, no PVC, plain manifests in `redis-deployment.yaml` (the chart-bundled Redis subchart was retired 2026-08-19; its orphaned `longhorn-static` volume `redis-data-nextcloud-redis-master-0` is kept `Retain` as the rollback until its soak ends). Metadata DB is still the bundled MariaDB subchart — replatform tracked as `bitnamilegacy-exit-nextcloud-db`. **A backing-service hostname change does not reach `notify_push` through the HelmRelease** — it reads the host persisted in `config.php`; see the note in `kubernetes/apps/office/nextcloud/app/notify-push.yaml`. | Internal + External | Office |
 | paperless-ngx | Document management with OCR | Internal | Office |
 | paperless-ai | AI document classification (Ollama backend) | None | — |
 | paperless-gpt | AI tagging/summarization for Paperless | None | — |
