@@ -45,8 +45,8 @@ Go 1.26.6. No Talos API or machine-config breaking changes.
 > combined OS + Kubernetes + performance-tuning sweep. They are independent
 > knobs in `talconfig.yaml`: `talosVersion` picks the installer image,
 > `kubernetesVersion` picks the kubelet. Bumping the kubelet is a **separate
-> decision with its own blast radius** and is not required to clear this
-> finding. Do not let the SOP's example line pull it in.
+> decision with its own blast radius** and is out of scope here. Do not let
+> the SOP's example line pull it in.
 
 Likewise **skip SOP Steps 2–6** (sysctls, kubelet patch, RPS mask, intelgpu,
 udev). Those are the tuning sweep; none of them change for a patch bump. This
