@@ -56,6 +56,21 @@ deny:
     max: patch
   - match: "*mcpo*"
     reason: "python init base image major (3.11→3.14) rides these tags."
+  # Added 2026-08-19 with the 0.301.5 -> 2026.08.0 execution. NocoDB left semver
+  # for calver, so the classifier's tuple comparison reads a routine month hop
+  # (2026.08.0 -> 2026.09.0) as major=equal / minor=greater, i.e. "minor" — which
+  # G1 admits for unattended apply. That inference is wrong for this component:
+  # every monthly release runs knex schema migrations, on boot, into nocodb's
+  # database inside the SHARED postgresql instance, and upstream documents no
+  # downgrade — so the migration is one-way and a pre-dump is the only rollback.
+  # An unattended Step-0 apply would perform exactly that with no dump taken.
+  - match: "*nocodb*"
+    reason: "calver — month bumps parse as `minor` but are FEATURE releases that run
+      one-way knex schema migrations into the shared postgresql instance on boot.
+      Upstream documents no downgrade, so rollback is restore-from-dump only.
+      Never unattended: needs the mandatory pre-dump + operator acceptance gate
+      from runbooks/maintenance/plans/nocodb-calver.md."
+    max: patch
   # MUST stay above "*nextcloud*": first match wins, and the glob below would
   # otherwise swallow nextcloud-mcp and justify holding it with the Nextcloud
   # SERVER's occ/maintenance-mode reason. nextcloud-mcp is a standalone

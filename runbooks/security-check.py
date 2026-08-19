@@ -1719,7 +1719,15 @@ _OSV_PACKAGES: dict[str, tuple[str, str]] = {
     "cert-manager": ("Go",   "github.com/cert-manager/cert-manager"),
     "superset":     ("PyPI", "apache-superset"),
     "open-webui":   ("PyPI", "open-webui"),
-    "nocodb":       ("npm",  "nocodb"),
+    # nocodb REMOVED 2026-08-19 on axis 2 (versioning), when the image moved from
+    # 0.301.5 to the calver line 2026.08.0. The npm package did NOT follow: it is
+    # still 295 all-0.x releases, dist-tag latest 0.301.3, zero calver versions.
+    # So npm/nocodb@2026.08.0 matches no affected range and OSV answers 200 with an
+    # empty list — indistinguishable from clean, while the same query at 0.301.5
+    # returned 16. Keeping the entry would have turned a real signal into a silent
+    # false-clean the moment the version snapshot refreshed. Per this table's rule,
+    # absent = NOT CHECKED, which is the honest answer. Restore only if npm starts
+    # publishing calver, or re-add against a coordinate that tracks the IMAGE.
 }
 
 

@@ -59,7 +59,8 @@ window: "sun-window:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECI
                                        # (this plan = 3), no reboot plan competing for it.
                                        # Interference surface clear: cutover wed 08-26,
                                        # decommission sat 09-05, longhorn-1.12.1-engine sat
-                                       # 08-22, nocodb-calver (shared: postgresql) tue 08-25.
+                                       # 08-22. nocodb-calver (shared: postgresql) EXECUTED
+                                       # 2026-08-19, so its 08-25 slot is released.
                                        # WATCH: authentik-postgres-18 (sat 09-19) migrates the
                                        # SSO database the DAY BEFORE, and §4's acceptance test
                                        # is an Authentik OIDC login. Confirm an OIDC login works
@@ -736,7 +737,8 @@ Authentik-adjacency pre-flight note.
   the metadata PVC lives on Longhorn and a schema migration must not run under
   storage-engine work.
 - **Not in `conflicts_with`, but do not co-schedule:** any plan declaring
-  `shared: [postgresql]` (today: `nocodb-calver`, `tue-early:2026-08-25`).
+  `shared: [postgresql]`. (`nocodb-calver` was the standing example; it EXECUTED
+  2026-08-19 and no longer holds a slot, so it is no longer a co-scheduling risk.)
   Superset's sole data-source connection is
   `postgresql.databases.svc.cluster.local:5432/pellets`; if that Deployment is
   bouncing, §4i/§4j fail for a reason that has nothing to do with this upgrade,

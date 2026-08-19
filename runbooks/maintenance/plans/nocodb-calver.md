@@ -23,8 +23,20 @@ depends_on: []
 conflicts_with: []                 # keep out of the same window as any plan restarting
                                    # deployment/postgresql or the shared-PG movers (see Interference)
 security_ref: F-f376ab55
-status: draft
-window: "tue-early:2026-08-25"                 # SCHEDULED 2026-08-18: medium 35m; one-way migration, mandatory pre-dump; no interference with neighbours
+status: executed                   # EXECUTED 2026-08-19 (46fda565 bump, d6cec704 remediation restore)
+                                   # in the operator-approved ad-hoc window, STEP 6.
+# RETAIN, do not delete on the usual executed-plan convention. Two reasons, both
+# time-boxed:
+#   1. The migration is ONE-WAY and the operator acceptance gate in §4 (log in,
+#      open each base, confirm a test edit saves) is still OPEN. Until it passes,
+#      §5 is the live rollback procedure and the dump it names is the only way back.
+#   2. §5's "downgrading across the calver boundary is NOT a rollback" and the
+#      image=calver / npm=semver split are not recorded anywhere else in the repo.
+# Retire once the operator signs off AND the calver facts are folded into
+# docs/sops/auto-update.md (the auto-update-policy.yaml deny rule added
+# 2026-08-19 carries the short version).
+window: null                       # cleared 2026-08-19: executed ahead of the
+                                   # tue-early:2026-08-25 slot, which is now released.
 auto_execute: false
 sops_refs:
   - docs/sops/application-update.md
@@ -231,7 +243,11 @@ instance to 03:03 and is a last resort, coordinate per `docs/sops/backup.md`.)
   tile + Authentik forward-auth unaffected (ingress untouched).
 - One-way boundary: once §4's operator check passes and the window closes,
   **the pre-upgrade dump is the only way back** — keep
-  `~/backups/nocodb/nocodb-pre-2026.08.0-<date>.sql.gz` until at least the next
-  nightly Longhorn backup after sign-off.
+  `~/backups/nocodb/nocodb-pre-2026.08.0-2026-08-19.sql.gz` until at least the next
+  nightly Longhorn backup after sign-off. AS TAKEN 2026-08-19 (mode 0600):
+  13,307,624 B gzip, 797 MB raw, 98,103 lines, verified complete (ends in the
+  pg_dump completion marker, empty stderr log); 116 CREATE TABLE / 116 COPY /
+  116 DROP TABLE IF EXISTS + 1 CREATE SCHEMA, matching the live DB exactly;
+  90,032 data rows incl. the 44,568-row base table.
 - Attended preferred: the acceptance gate (bases/tables render, edit saves) is
   a human check.
