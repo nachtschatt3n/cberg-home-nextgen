@@ -1,7 +1,7 @@
 ---
 plan_id: ibgastro-php-strict
 component: ibgastro
-pr: https://github.com/nachtschatt3n/ibgastro/pull/1
+pr: null                              # upstream PR lives in a DIFFERENT repo; maintenance-plan.py compares `pr:` against THIS repo's Renovate PR numbers, so a URL is permanently "ORPHAN". URL: github.com/nachtschatt3n/ibgastro/pull/1
 kind: image
 current: "sha-73f8d53d8db8a962079d30f38582479f2cb5bff3 — emits ~380 PHP Strict Standards notices per request"
 target: "new sha-<merge-commit> built from the default branch with an integer error-reporting mask in the app config"
@@ -17,7 +17,7 @@ touches:
   shared: []
 depends_on: []
 conflicts_with: []
-status: draft
+status: awaiting-go                   # PR open + CI green; blocked only on operator go/no-go
 window: null
 auto_execute: false                   # changes which PHP diagnostics reach the log stream
 security_ref: null
