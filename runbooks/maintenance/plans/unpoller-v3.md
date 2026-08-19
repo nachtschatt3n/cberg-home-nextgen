@@ -48,7 +48,11 @@ conflicts_with: []    # scheduled fri-early:2026-08-21. Verification  # RESOLVED
                                       # (which rolls Grafana + re-renders all dashboard
                                       # provisioning) makes an empty panel unattributable.
 security_ref: null                    # version-currency driver, not a security fix
-status: draft
+status: executed                      # EXECUTED 2026-08-19 (52b5d62f) in the ad-hoc window.
+                                      # FILE RETAINED ON PURPOSE: this plan mandates a 24h
+                                      # metric-continuity soak before retirement, and the
+                                      # follow-up doc fixes below are not yet filed. Retire it
+                                      # after the soak on 2026-08-20, not today.
 window: "mon-early:2026-08-24"                 # SCHEDULED 2026-08-18: medium risk 30m; monitoring-only; conflicts_with grafana-chart-11 (fri 08-21) respected — 3 days apart
 auto_execute: false
 sops_refs:
