@@ -1,15 +1,16 @@
 ---
-# Official MariaDB image replacing the chart-bundled bitnamilegacy mariadb
-# (archived catalog, frozen at server 11.8.2 — see the retirement comment in
-# helmrelease.yaml and security_ref F-cb42f390). Plain Deployment + Service on
-# purpose (not app-template): keeps the household's file index out of the
-# app-template-5.0 migration blast radius, same as paperless-db and superset-pg.
+# Replacement Nextcloud database on the official mariadb image.
+# Driver and current state: security_ref F-cb42f390.
 #
-# Replatform, not an upgrade: 11.8.2 -> 11.8.8 stays inside the 11.8 LTS
-# series. The datadir moved from /bitnami/mariadb/data to /var/lib/mysql and
-# the runtime uid from 1001 to 999, so the data came across as a logical dump
-# into a fresh volume (nextcloud-db-data). The retired volume nextcloud-mariadb
-# is kept, Retain, as the rollback floor.
+# Plain Deployment + Service on purpose (not app-template): keeps the
+# household's file index out of the app-template-5.0 migration blast radius,
+# same as paperless-db and superset-pg.
+#
+# Moving here is a replatform, not an upgrade. What changes mechanically: the
+# datadir moves from /bitnami/mariadb/data to /var/lib/mysql and the runtime
+# uid from 1001 to 999, so data cannot be carried across on the volume and
+# comes over as a logical dump into a fresh volume (nextcloud-db-data). The
+# previous volume nextcloud-mariadb is kept, Retain, as the rollback floor.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

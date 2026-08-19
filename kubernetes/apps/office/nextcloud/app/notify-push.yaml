@@ -32,9 +32,11 @@ spec:
       containers:
         - name: notify-push
           # Keep in lockstep with the main nextcloud server image
-          # (helmrelease.yaml). It had lagged at 33.0.0 while the server was on
-          # 34.x — the sole source of ~12 "fixable CRITICAL" CVEs from that lag
-          # (2026-07-31). The notify_push binary must match the server version.
+          # (helmrelease.yaml). The notify_push binary must match the server
+          # version, so this tag moves in the SAME commit as the server tag.
+          # Letting it drift behind the server is not just a compatibility
+          # problem — it was the sole driver of a security finding closed on
+          # 2026-07-31. Detail stays on the finding record, not here.
           image: nextcloud:34.0.3
           command:
             - /var/www/html/custom_apps/notify_push/bin/x86_64/notify_push
