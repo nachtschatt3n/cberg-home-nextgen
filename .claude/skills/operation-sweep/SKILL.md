@@ -70,7 +70,13 @@ sections that did not report.
      the writer and this backstop then leave its findings alone (the veto is
      persisted on `sweep_cycles.notes.incomplete` so it survives the process
      boundary). Expect `auto-close SKIPPED … declared INCOMPLETE` in the log
-     — that is the veto working, not an error. Full contract:
+     — that is the veto working, not an error.
+     Since 2026-08-19 a degradation attributable to ONE component instead
+     records a scope on `sweep_cycles.notes.uncovered`: the section still
+     auto-closes, and you will see `⏸ kept open <section>/<F-id> —
+     uncovered <component>` per held row. That is ALSO the veto working.
+     Past 10 components, or 10% of the attempted universe, it reverts to
+     the section-wide form. Full contract:
      `docs/sops/sweep-findings-lifecycle.md`.
    - SLO/SLI snapshots land via slo-agent (`slo-check.py`); confirm rows
      exist in the cycle's time window — a clean SLO run writes snapshots

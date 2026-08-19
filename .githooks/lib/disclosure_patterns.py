@@ -452,7 +452,9 @@ def scan(text: str, *, waived: bool | None = None) -> list[tuple[str, str, str]]
     security bump carries, i.e. exactly the commits most likely to hold a
     residual claim. Waiving now costs a deliberate, greppable line the author
     has to type, and audits as one:
-        git log --grep='disclosure-review: tooling-edit'
+        git log -E --grep='^disclosure-review: tooling-edit$'
+    Anchored: an unanchored grep also matches commits that merely
+    DISCUSS the trailer, which is most commits touching this file.
     The hard rules (advisory IDs, counts, image-tied state) are NEVER waived.
 
     `waived` exists because TOOLING_OPT_IN is LINE-anchored while the

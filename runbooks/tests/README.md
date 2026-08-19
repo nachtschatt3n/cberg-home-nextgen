@@ -29,6 +29,7 @@ test — see `runbooks/refingerprint-findings.py`.
 | File | Covers | Run it when you touch |
 |---|---|---|
 | `test-ar-suppression-guard.py` | The two classes of finding exempt from AR substring suppression: audit-integrity (`risk_nature` / `audit_*` subsection) and self-reference (`metadata.ar_id`). Also asserts the operator-facing exemption count is real. | `_apply_ar_suppression` in `sweep-run.py`; anything about AR matching |
+| `test-autoclose-component-scope.py` | The PER-COMPONENT coverage veto: `component_key` / `finding_matches_component` / `partition_by_uncovered`, one uncovered leaf still letting the section close the rest, a non-attributable failure still vetoing section-wide, the `MAX_SCOPED_COMPONENTS` / `MAX_UNCOVERED_FRACTION` revert, and the 429-only retry backoff | `mark_uncovered` / `DegradationLog.apply` in `findings_writer.py`; the `component=` call sites in `check-all-versions.py`; the backstop in `sweep-run.py` |
 | `test-coverage-lane-safety.py` | The AUTO-lane safety rules in `coverage.py` — pre-release/beta channels, 0.x release-line moves, chart↔image lockstep, image-matched REBUILD, and the truncated-tag dedupe | `assign_lane` / `channel_hold` / `_apply_lockstep` / `is_self_built` in `runbooks/coverage.py` |
 | `test-coverage-plan-match.py` | `coverage.py` ↔ maintenance-plan matching | `runbooks/coverage.py`, plan discovery |
 | `test-osv-coverage.py` | OSV ecosystem mapping and the coverage-gap accounting | OSV lookups in `security-check.py` |
@@ -44,7 +45,7 @@ Colocated with the module they cover, per the `lib/` convention.
 
 | File | Covers |
 |---|---|
-| `test_findings_writer_autoclose.py` | The four auto-close safety gates — `section_complete`, orchestrated-run, the incomplete veto, the zero-emit breaker — plus section scoping and the run-start bound |
+| `test_findings_writer_autoclose.py` | The auto-close safety gates — `section_complete`, orchestrated-run, the incomplete veto, the zero-emit breaker — plus section scoping, the run-start bound, and the uncovered-component scope (gate 3b; narrow contract in `tests/test-autoclose-component-scope.py`) |
 | `test_findings_writer_fingerprint.py` | Finding **identity**: AR tags must not affect it, `_KIND_MARKERS` must still separate "there is a fix" from "there is no fix", rewording must not fork, version digits must |
 | `test_risk_model.py` | Every cell of the exposure × exploited × nature matrix, the nature table, and the s4 marker overrides |
 | `test_notify_routing.py` | Tier → channel routing decisions |

@@ -1,6 +1,6 @@
 # SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the coverage veto
 
-> Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the four independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
+> Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
 > Version: `2026.08.19`
 > Last Updated: `2026-08-19`
 > Owner: `homelab-sre`
@@ -45,11 +45,11 @@ file — and we hit three separate production failure modes in one day (§7).
 | Tables | `sweep_cycles`, `sweep_findings` |
 | Board | `https://sweep.<DOMAIN>/` |
 | Valid sections | `health, security, version, doc, media, smarthome, slo, infra, carry` |
-| Auto-close owner | `FindingsWriter.close()` (primary, all four gates) + `sweep-run.py` (backstop, gate 3 only — §4.8) |
+| Auto-close owner | `FindingsWriter.close()` (primary, all gates) + `sweep-run.py` (backstop, gates 3 and 3b — §4.8) |
 
-**The four gates.** Auto-close **via `FindingsWriter.close()`** only fires
+**The gates.** Auto-close **via `FindingsWriter.close()`** only fires
 when ALL of these hold. The orchestrator's backstop pass is a *separate*
-implementation and honours only gate 3 — see §4.8.
+implementation and honours only gates 3 and 3b — see §4.8.
 
 | # | Gate | Trips when | Where |
 |---|------|-----------|-------|
@@ -68,11 +68,12 @@ Plus two always-on scoping invariants that are not gates but bounds:
 ## 3) Blueprints
 
 Source of truth is code, not YAML. The declarative surface is the writer's
-public API — treat these five calls as the contract:
+public API — treat these calls as the contract:
 
 ```python
 from runbooks.lib.findings_writer import (
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env, git_head,
+    component_key,
 )
 
 DEGRADED = DegradationLog("security", printer=warn)   # module-level recorder
@@ -82,14 +83,22 @@ except Exception as e:
     DEGRADED.record("s6_attack_patterns", "Elasticsearch", repr(e))
     return OK, findings, body        # section still completes and reports
 
+# ...or, when the failure is attributable to EXACTLY ONE component:
+DEGRADED.record("image ghcr.io/foo/bar", "ghcr.io (HTTP 429)", detail,
+                component=component_key("image", "ghcr.io/foo/bar"))
+
 # ...at the end of main():
 with FindingsWriter(dsn=dsn, section="security",
                     cycle_id=cycle_id_from_env(),
                     trigger=trigger_from_env(), git_head=git_head()) as writer:
     _emit_findings(writer, results, scored)
-    DEGRADED.apply(writer)           # -> writer.mark_incomplete(...) if degraded
+    DEGRADED.note_universe(len(all_components))   # denominator; bounds the narrowing
+    DEGRADED.apply(writer)           # -> mark_incomplete(...) or mark_uncovered(...)
     writer.close(verdict=verdict)
 ```
+
+`component=` is **opt-in per call site** — omit it whenever the failure is not
+attributable to exactly one leaf, and the section-wide veto applies as before.
 
 Environment escape hatches (all read in `close()`):
 
@@ -270,9 +279,14 @@ publish the scope to `sweep_cycles.notes` does too.
 checks `metadata.component` (stamped at emit time), then
 `metadata.repository`/`chart`/`host`, then the rendered title. The title
 fallback is what covers the rows auto-close actually acts on — stale rows were
-written before the emitter carried a component. The matcher is deliberately
-generous, because a false match costs one surviving stale row and a missed
-match silently resolves an unchecked finding.
+written before the emitter carried a component. It is **word-bounded**
+(the boundary excludes word chars, `/`, `.` and `-`), so a repository path
+still matches in full while a hyphenated sibling does not: a bare Docker Hub
+ident like `node` must not hold back every row mentioning `node-red`. Within
+that bound the matcher errs generous, because a false match costs one
+surviving stale row and a missed match silently resolves an unchecked
+finding — over-suppression is the safe direction only while it stays
+proportionate.
 
 **Both auto-close implementations enforce it.** `partition_by_uncovered()` and
 `finding_matches_component()` live at module scope in `findings_writer.py` and
@@ -312,13 +326,15 @@ DEGRADED.record("image ghcr.io/foo/bar", "ghcr.io (HTTP 429 rate limit)",
 that trips four dependencies reports four reasons rather than one arbitrary
 survivor.
 
-**Conditions that trip the veto** (as wired 2026-08-18):
+**Conditions that trip the veto** (as wired 2026-08-19). **S** = section-wide
+`mark_incomplete()`, **C** = component-scoped `mark_uncovered()`. S vs C is
+decided at the CALL SITE, never inferred — see §4.2.
 
 | Script | Section | Tripped by |
 |--------|---------|-----------|
 | `health-check.py` | `health` | no issues file this run; stale issues file (mtime < run start); `health-check.sh` exit code outside `{0,1}` |
 | `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a running image still unscannable after retry — including a private one whenever the run HOLDS registry credentials — and any scannable running image that got no scan attempt at all (s4; the one exclusion is a private image on a credential-less run: see the worked example below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
-| `check-all-versions.py` | `version` | registry unreachable/timeout; **HTTP 429 registry rate-limit**; OCI tag-listing truncation; Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi. Gated by `_is_transient()` + `_is_real_downgrade()` + `_is_structurally_slow()` — the last one measures avg-seconds-per-page, so a tag listing defeated by a registry's INHERENT pace (docker.elastic.co: ~14.3 s/page, no acceptable budget ever completes) is undeterminable WITHOUT a veto, while the same budget blown at a normal page rate still vetoes — see the transitions rule below |
+| `check-all-versions.py` | `version` | **(C)** registry unreachable/timeout, **HTTP 429 registry rate-limit** (only after `_get_retry_429()` exhausts its retries) and OCI tag-listing truncation — all attributable to the ONE image whose tag listing failed, so the section still completes and still auto-closes every other component. **(S)** Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi — each degrades an UNKNOWN set of components, so nothing can be scoped around them. Gated by `_is_transient()` + `_is_real_downgrade()` + `_is_structurally_slow()` — the last one measures avg-seconds-per-page, so a tag listing defeated by a registry's INHERENT pace (docker.elastic.co: ~14.3 s/page, no acceptable budget ever completes) is undeterminable and records NOTHING, while the same budget blown at a normal page rate still records a degradation (C) — see the transitions rule below |
 | `doc-check.py` | `doc` | **Shared primitives**: `run()` exception path and `rc != 0` with empty stdout (scoped call sites only — an unscoped grep returning nothing is a legitimate clean result); `run_cmd()` exception path; `read_file()` on PermissionError / IsADirectoryError / decode error (unreadable is never a legitimate clean result), and on FileNotFoundError only where a call site passes an explicit scope. **Named sites**: `kubectl version` / node list / ingress / `sops-age` secret unavailable; `talosctl version` unavailable; `unifictl` VLAN + WLAN JSON unparsable or rc≠0; helmfile / homepage / renovate / ollama / blueprint / SOP / Taskfile / `.gitignore` / `.sops.yaml` / `CLAUDE.md` unreadable; `age-keygen` missing (silently downgrades a wrong-key CRITICAL to a green line); a regex that no longer matches a reworded doc |
 
 > **Not all degradation is silence — some of it is an affirmative green.**
@@ -455,6 +471,7 @@ runs after every step. It therefore does **not** apply:
 | 1 `section_complete` / verdict | yes | **no** |
 | 2 orchestrated-vs-ad-hoc | yes | n/a (it *is* the orchestrator) |
 | 3 incomplete veto | yes | **yes — via `sweep_cycles.notes.incomplete`** |
+| 3b uncovered-component scope | yes | **yes — via `sweep_cycles.notes.uncovered`** |
 | 4 zero-emit breaker | yes | **no** |
 | run-start `last_seen` bound | yes | **no** |
 
@@ -462,9 +479,16 @@ Gate 3 crosses the process boundary because the writer *persists* it:
 `_persist_incomplete()` writes `{section: reason}` into
 `sweep_cycles.notes.incomplete` (under `SELECT … FOR UPDATE`, since several
 specialists finish concurrently), and the backstop reads it back and drops
-those sections, naming each. **If the backstop cannot read the veto it aborts
-without closing anything** — fail-closed, because the alternative is resolving
-findings from a section we cannot prove was healthy.
+those sections, naming each. Gate 3b crosses the same way:
+`_persist_uncovered()` writes `{section: {component: reason}}` into
+`sweep_cycles.notes.uncovered`, and the backstop reads it back, keeps those
+sections IN scope, and holds back only the rows `finding_matches_component()`
+attributes to an uncovered component. **If the backstop cannot read the veto it
+aborts without closing anything** — fail-closed, because the alternative is
+resolving findings from a section we cannot prove was healthy. It aborts the
+same way when a scope IS recorded but `finding_matches_component` cannot be
+imported: a scope enforced in only one of the two implementations is no scope
+at all.
 
 This was not always true. Until 2026-08-18 the backstop honoured nothing: a
 degraded section printed `auto-close SKIPPED … INCOMPLETE` and the orchestrator
@@ -562,6 +586,26 @@ Expected:
 If failed:
 - Confirm the fixture marks the run orchestrated (gate 2) and emits ≥1 finding
   (gate 4) — either alone suppresses the close.
+
+### Test 4: the scope narrows, and the bounds hold
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen && \
+  mise exec -- python3 runbooks/tests/test-autoclose-component-scope.py
+```
+
+Expected — all pass, covering BOTH directions:
+- one uncovered leaf holds back only its own row and the section closes the rest;
+- an unattributable degradation still vetoes the whole section;
+- past `MAX_SCOPED_COMPONENTS` / `MAX_UNCOVERED_FRACTION` the scope is abandoned
+  and the section-wide veto returns;
+- `_get_retry_429()` retries 429 only, honours `Retry-After`, and still surfaces
+  an exhausted budget.
+
+If failed:
+- A `finding_matches_component` change is the usual cause. Check the
+  word-boundary class and the `len(ident) >= 3` guard before widening anything —
+  both exist to stop one uncovered component freezing a whole section.
 
 ### Test 3: a degraded live run completes and reports
 
@@ -687,7 +731,8 @@ If unclear:
 
 ```bash
 # 1) Unit contract still holds
-cd /Users/mu/code/cberg-home-nextgen && cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/lib/test_findings_writer_autoclose.py
+cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-autoclose-component-scope.py
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-osv-coverage.py
 cd /Users/mu/code/cberg-home-nextgen && mise exec -- python3 runbooks/tests/test-trivy-cache-coverage.py
 
@@ -771,6 +816,8 @@ UPDATE sweep_findings
 
 - `runbooks/lib/findings_writer.py` — writer, gates, `DegradationLog`
 - `runbooks/lib/test_findings_writer_autoclose.py` — the executable contract
+- `runbooks/tests/test-autoclose-component-scope.py` — the per-component
+  coverage scope: both veto directions and the bounds that separate them
 - `runbooks/tests/test-osv-coverage.py` — OSV coverage + transient-classifier contract
 - `runbooks/tests/test-trivy-cache-coverage.py` — Trivy cache top-up coverage, tally-version invalidation, and the steady-state-vs-transient split above
 - `runbooks/sweep-run.py` — orchestrator, `--ran`, `--reconcile-only`

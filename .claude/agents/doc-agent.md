@@ -39,7 +39,7 @@ disclosure-review: tooling-edit
 ```
 
 It waives the residual tier only, and is greppable
-(`git log --grep='disclosure-review: tooling-edit'`) so the waivers stay
+(`git log -E --grep='^disclosure-review: tooling-edit$'`) so the waivers stay
 auditable. **Do not reach for `--no-verify`** — if the hook blocks something you
 believe is publishable, that is a hook defect worth reporting, not a bypass
 worth taking. Full boundary: `docs/sops/vulnerability-disclosure.md`.

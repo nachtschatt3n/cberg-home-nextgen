@@ -155,7 +155,12 @@ Since 2026-08-18 auto-close lives primarily in the **writer**:
    `close()` on the exception path, and partial writer users like
    `auto-update.py`, conclude nothing. A section that ran but knows its coverage
    degraded (scanner errored, port-forward died, API rate-limited) **must** call
-   `mark_incomplete(reason)`; a coverage gap is not a fix.
+   `mark_incomplete(reason)`; a coverage gap is not a fix. When the gap is
+   attributable to exactly ONE component — an API rate-limit on a single image
+   is the common case — call `mark_uncovered(component_key(...), reason)`
+   instead: it holds that component's findings open while the rest of the
+   section still closes. Never INFER attribution; only the call site knows
+   whether its failure sits at the leaf or above it.
    `sweep-run.py --reconcile-only --ran <sections>` remains as a backstop.
    Kill switches: `SWEEP_AUTOCLOSE=0`, `SWEEP_AUTOCLOSE_DRYRUN=1`.
    **Auto-close is section-scoped and fires only on an ORCHESTRATED run**
