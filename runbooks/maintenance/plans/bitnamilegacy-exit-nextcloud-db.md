@@ -29,7 +29,10 @@ conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-paperless-db, bitnam
                                                 # nextcloud-redis EXECUTED 2026-08-19; the only
                                                 # residual coupling is the shared HelmRelease
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
-status: draft
+status: blocked                                 # ROLLED BACK 2026-08-19 (revert d1dbbdd1).
+                                                # Root cause + required fix in 3c. Do not
+                                                # re-run until the dump is proven to carry
+                                                # 4-byte characters.
 window: "sat-early:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
@@ -407,6 +410,74 @@ fresh shell would silently resolve to `/`.
 > `/tmp` with no cleanup step. When a procedure writes a secret to disk, the
 > location, the mode, and the removal all belong in the procedure.
 
+## 3c) WHY THIS PLAN IS BLOCKED — the dump was lossy (2026-08-19)
+
+Attempt 1 was **rolled back mid-restore, before the app was allowed up**
+(replatform `c01b71e2`, revert `d1dbbdd1`). Nextcloud is serving from the
+untouched bundled volume. **No data was lost** — the app never came up against
+the new server, so nothing was written anywhere but the new, otherwise-unused
+volume.
+
+### Root cause
+
+`mariadb-dump` was invoked without `--default-character-set`. The connection
+therefore negotiated the **server default**, `utf8mb3`. But the server default
+is not what the data is stored in:
+
+- all 206 tables are **`utf8mb4_bin`**
+- only the **server and schema DEFAULTS** are `utf8mb3`
+
+So the server transcoded **every 4-byte character to `?` on its way out** into
+the dump. Filenames, comments, calendar and contact fields containing emoji or
+any other 4-byte codepoint would have been permanently flattened.
+
+### Why it was caught — and how nearly it wasn't
+
+The restore failed with a **duplicate-key error on `oc_reactions`**: two rows
+differing only in a 4-byte character had both become `?` and collided on a
+UNIQUE index. That error is also the *proof* of corruption — a running server
+cannot hold rows that violate its own unique index, so the dump could not have
+been a faithful copy.
+
+**Had `oc_reactions` carried no unique index, the restore would have completed
+and passed every check this plan defines**: 206/206 tables, 1,816,443/1,816,443
+rows, matching per-table collations, `occ status` clean. The corruption is
+invisible to row counts *because the rows are all there* — only their contents
+are damaged, and the source would then have been decommissioned.
+
+This is the contents-not-shape failure class
+(`docs/sops/verification-contents-not-shape.md`) one level deeper than row
+counts: **a correct row count, on a correct table count, with correct
+collations, over silently transcoded content.**
+
+### The plan's own check pointed the wrong way
+
+Step 2 previously asserted `CREATE DATABASE` in the dump "must carry utf8mb3 /
+utf8mb3_general_ci". That is the schema *default*, and it is exactly what a
+lossy utf8mb3 dump looks like — the check confirmed the bug instead of catching
+it. It has been removed and replaced with a 4-byte round-trip assertion.
+
+### Required before attempt 2
+
+1. `--default-character-set=utf8mb4` on the dump (now in step 2).
+2. The 4-byte round-trip assertion (now in step 2): count source rows where
+   `char_length <> octet_length`, and confirm the dump still contains real
+   `\xf0-\xf4` lead bytes. On 2026-08-19 the source had **6** such rows in
+   `oc_reactions` alone; a dump with zero 4-byte sequences is lossy.
+3. Re-verify after restore that those same rows still differ in
+   `char_length` vs `octet_length` on the TARGET — not just that they exist.
+4. The new volume `nextcloud-db-data` and `deploy/nextcloud-db` (scaled to 0)
+   are left in place from attempt 1. **Do not delete them** (storage safety);
+   attempt 2 should reuse or explicitly re-initialise them, and must not assume
+   an empty datadir.
+
+### What did work, and should be kept
+
+The two guards added earlier the same day both held: the Flux-native replica
+hold (§3a) kept the app at `0 0` through the reconcile, and the
+contents-before-shape discipline is what turned a silent corruption into a
+loud, attributable failure at the safest possible moment.
+
 ## 3) Steps
 
 1. **Marker + silence.** Nextcloud is fully down for most of this window:
@@ -434,13 +505,26 @@ fresh shell would silently resolve to `/`.
    D=~/db-dumps/nextcloud-$(date +%F).sql
    mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
      'mariadb-dump -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" \
+        --default-character-set=utf8mb4 \
         --single-transaction --routines --triggers --events \
         --databases nextcloud' > "$D"
    chmod 600 "$D"
    ls -l "$D"                       # must NOT be zero bytes
    tail -1 "$D"                     # must read "-- Dump completed"
    grep -c 'CREATE TABLE' "$D"      # expect 206
-   grep -m1 'CREATE DATABASE' "$D"  # must carry utf8mb3 / utf8mb3_general_ci
+
+   # *** THE CHECK THAT MATTERS — see 3c. Row counts cannot see this. ***
+   # Every table is utf8mb4_bin; only the server/schema DEFAULTS are utf8mb3.
+   # Without --default-character-set=utf8mb4 the connection negotiates utf8mb3
+   # and the server transcodes every 4-byte character to '?' ON THE WAY OUT.
+   # Prove the dump round-trips 4-byte data before you trust it:
+   SRC4=$(mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c \
+     'mariadb -uroot -p"$(cat $MARIADB_ROOT_PASSWORD_FILE)" --default-character-set=utf8mb4 -N -B nextcloud -e \
+        "select count(*) from oc_reactions where char_length(reaction) <> octet_length(reaction);"')
+   echo "source rows with multi-byte data: $SRC4"     # 2026-08-19: 6
+   # the dump must still contain real multi-byte bytes, not '?'
+   LC_ALL=C grep -c $'[\xf0-\xf4]' "$D" || echo "NO 4-BYTE SEQUENCES IN DUMP — ABORT"
+   #    ^ if SRC4 > 0 and this is 0, the dump is LOSSY. Do not restore it.
    ```
    We dump **only the `nextcloud` schema**, not `mysql` — the new server's
    entrypoint creates the user from `MARIADB_USER`/`MARIADB_PASSWORD`, and a
