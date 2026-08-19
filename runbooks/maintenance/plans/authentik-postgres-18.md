@@ -439,10 +439,31 @@ mise exec -- crane digest docker.io/library/postgres:18.6-bookworm
    PGPOD=$(mise exec -- kubectl get pods -n kube-system -l app=authentik-pg -o jsonpath='{.items[0].metadata.name}')
    mise exec -- kubectl exec -n kube-system $PGPOD -- sh -c \
      'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h authentik-postgresql -U authentik -Fc authentik -f /tmp/ak17.dump && ls -l /tmp/ak17.dump'
-   # not zero bytes. Off-pod safety copy:
-   mise exec -- kubectl cp kube-system/$PGPOD:/tmp/ak17.dump /tmp/authentik-pg17-$(date +%F).dump
-   ls -l /tmp/authentik-pg17-*.dump
+   # not zero bytes. Off-pod safety copy — NOT to shared /tmp (see 3d):
+   umask 077 && mkdir -p ~/db-dumps && chmod 700 ~/db-dumps
+   mise exec -- kubectl cp kube-system/$PGPOD:/tmp/ak17.dump ~/db-dumps/authentik-pg17-$(date +%F).dump
+   chmod 600 ~/db-dumps/authentik-pg17-*.dump
+   ls -l ~/db-dumps/authentik-pg17-*.dump
    ```
+
+   **Then assert LOCALE COMPATIBILITY before you restore (3c).** `-Fc` records
+   the encoding, so a MariaDB-style transcode is not the risk here — the
+   PostgreSQL analogue is a *collation* mismatch, which silently invalidates
+   text index ordering rather than changing the bytes:
+   ```bash
+   # source (17) and target (18) must agree, or you must reconcile deliberately
+   for target in authentik-postgresql $PGPOD; do
+     mise exec -- kubectl exec -n kube-system $target -- \
+       psql -U authentik -d authentik -tAc \
+       "select current_setting('server_version_num')||' enc='||pg_encoding_to_char(encoding)
+        ||' collate='||datcollate||' ctype='||datctype||' provider='||datlocprovider
+        from pg_database where datname='authentik'"
+   done
+   ```
+   `datlocprovider` is the one to watch: PostgreSQL 18 can initdb with a
+   different locale provider than 17 used, and a provider change reorders text
+   comparisons. If it differs, **REINDEX every text index after the restore**
+   and say so in the report — do not just note it and move on.
 
 7. **Restore into 18** from a clean schema:
    ```bash
@@ -454,6 +475,14 @@ mise exec -- crane digest docker.io/library/postgres:18.6-bookworm
    **Read the output.** Ownership/extension warnings are benign; any `error:`
    line is not — **stop and roll back** (§5, cheap path: just scale authentik
    back up; nothing has been repointed yet).
+
+   **Then remove the in-pod dump** — it holds password hashes, MFA secrets and
+   session tokens (3d), and `pg_restore` does not clean up after itself:
+   ```bash
+   mise exec -- kubectl exec -n kube-system $PGPOD -- rm -f /tmp/ak17.dump
+   mise exec -- kubectl exec -n kube-system $PGPOD -- sh -c \
+     'ls /tmp/ak17.dump 2>/dev/null && echo "STILL PRESENT — remove it" || echo removed'
+   ```
 
 8. **Compare old vs new before repointing anything.** This is the step the
    paperless-db incident (2026-08-19) skipped: Django populated a brand-new
@@ -558,6 +587,65 @@ SQL
     env — no manual scale-up needed. SSO outage ends here.
 
 11. Clear the marker only after §4 passes: `runbooks/update-marker.sh clear authentik`.
+
+## 3c) FIDELITY + 3d) DUMP HANDLING — added 2026-08-19 after the nextcloud incident
+
+### 3c) Row counts are not enough — assert FIDELITY
+
+`bitnamilegacy-exit-nextcloud-db` was rolled back the same day because its dump
+was **lossy while every count matched**. See
+`docs/sops/verification-contents-not-shape.md` §2a. A UNIQUE index is the only
+reason it was caught, and that was luck: without it the restore would have
+completed and passed 206/206 tables and 1,816,443/1,816,443 rows.
+
+This plan's §4 contents assertion (exact row counts for every table, both
+servers, before repointing) is **necessary and not sufficient** — it is exactly
+the check that would have passed on a corrupted nextcloud restore.
+
+The PostgreSQL risk profile differs from MariaDB's and it is worth being precise
+rather than copying the mitigation across:
+
+- `pg_dump -Fc` records the source encoding and `pg_restore` sets
+  `client_encoding` to match, so the *byte-transcoding* failure is unlikely
+  here. Do not assume unlikely means impossible — assert it (below).
+- The real PostgreSQL analogue is **collation**: if source and target disagree
+  on `datcollate`/`datctype`/`datlocprovider`, the bytes are preserved but text
+  **index ordering** is not. Queries then miss rows that are present. That is a
+  fidelity failure with a perfect row count, and PostgreSQL 18 is precisely
+  where a provider default can change under you.
+
+Add to §4, alongside the row-count diff:
+
+```bash
+# multi-byte content survived, source vs target
+Q="select count(*) from (
+     select name       t from authentik_core_user       union all
+     select name       t from authentik_core_application union all
+     select name       t from authentik_core_group
+   ) x where octet_length(t) <> char_length(t)"
+# run on BOTH; the numbers must match
+
+# byte-identical over the text columns — ORDER BY A STABLE KEY, NOT THE TEXT.
+# Ordering by the text itself gives false alarms when the two servers spell
+# their collation differently (observed on the superset cutover, same day).
+Q2="select md5(string_agg(name, '|' order by pk)) from authentik_core_application"
+# run on BOTH; the hashes must match
+```
+
+### 3d) The dump holds credentials — handle it explicitly
+
+The authentik database is the cluster's identity provider: password hashes, MFA
+device secrets, tokens and sessions. The dump is a credential store.
+
+- **Off-pod copy goes to `~/db-dumps`** (`umask 077`, dir `0700`, file `0600`),
+  **never shared `/tmp`**. A world-readable dump of another app's database was
+  found sitting in `/tmp` during this same window; do not add to it.
+- **Remove the in-pod `/tmp/ak17.dump` after the restore** and verify the
+  removal — `pg_restore` leaves it behind, and the pod filesystem being
+  ephemeral only limits the exposure, it does not end it.
+- **Retention:** keep the off-pod copy as the recovery floor until the new
+  volume has its own verified backup, then `rm -P` it. Do not leave it
+  indefinitely and do not copy it anywhere else.
 
 ## 4) Verification
 

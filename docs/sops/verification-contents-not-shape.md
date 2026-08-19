@@ -2,9 +2,10 @@
 
 > Description: A named failure class for change verification — the plan checked
 > the *shape* of a thing (it exists, it is Ready, it answers 200) instead of its
-> *contents*, so every green signal was true while the thing was broken. Rules,
-> per-class assertions, and the three worked examples from 2026-08-18/19.
-> Version: `2026.08.19`
+> *contents*, so every green signal was true while the thing was broken. Now
+> also covers its sibling FIDELITY (2a): equal counts over unequal data. Rules,
+> per-class assertions, and the four worked examples from 2026-08-18/19.
+> Version: `2026.08.19b`
 > Last Updated: `2026-08-19`
 > Owner: `operator + maintenance-window / upgrade-planner agents`
 
@@ -93,6 +94,72 @@ report healthy — the framework has done exactly its job. Every structural sign
 is therefore not merely uninformative but **actively misleading**: the emptier
 the target, the more cleanly the migration runs.
 
+## 2a) The THIRD class: FIDELITY — equal counts, unequal data
+
+Added 2026-08-19, the same day, after a fourth incident that **this SOP as
+written would not have caught.** That is the reason it gets its own name rather
+than a footnote.
+
+The progression:
+
+| class | the check that passes | what it cannot see |
+|---|---|---|
+| **SHAPE** | it exists, it is Ready, it answers 200 | whether it holds anything |
+| **CONTENTS** | the rows/series/documents are there, and the counts match | whether the *values* are the same values |
+| **FIDELITY** | — | nothing left, because the counts are perfect |
+
+> **The rule: equal counts do not mean equal data. Assert a byte-level
+> round-trip of the most demanding value class the store actually holds.**
+
+A contents check compares *how many*. A fidelity check compares *what*. A
+transcoding, truncation, precision-loss or normalisation bug changes every value
+and no count.
+
+### The worked example — nextcloud-db, 2026-08-19
+
+`mariadb-dump` was run without `--default-character-set`, so the connection
+negotiated the **server default**, `utf8mb3`. That is not the storage encoding:
+**all 206 tables were `utf8mb4_bin`** — only the server and schema *defaults*
+were utf8mb3. The server therefore transcoded **every 4-byte character to `?` on
+the way out of the dump**.
+
+The plan's pre-check read `@@character_set_server` and
+`information_schema.schemata`. Both reported utf8mb3, both were correct, and
+both were **the wrong objects** — the value that decides this is
+`information_schema.tables.table_collation`, which the plan captured and never
+asserted on.
+
+**A UNIQUE index is what caught it, and that was luck.** The restore failed on a
+duplicate key in `oc_reactions`: two rows differing only by an emoji had both
+become `?` and collided. That error is also the proof of corruption — a running
+server cannot hold rows violating its own unique index, so the dump could not
+have been faithful.
+
+**Had that table carried no unique index, the restore would have completed and
+passed every check the plan defined** — 206/206 tables, 1,816,443/1,816,443
+rows, matching per-table collations, `occ status` clean — while permanently
+flattening every emoji in the household's file index, with the source volume due
+for retirement a week later. Note what that list contains: a full CONTENTS check,
+passing. The rows were all present. Only their bytes were wrong.
+
+Worse, the plan's own step asserted the dump "must carry utf8mb3" — which is
+exactly what a lossy utf8mb3 dump looks like. **The check confirmed the bug.**
+
+### Where else this class lives
+
+Fidelity is not a MySQL/charset problem; that was just the instance. Ask, for any
+store you are copying: *what is the most demanding value it holds, and did that
+value survive?*
+
+- **charset / collation** — 4-byte characters (emoji, some CJK), and any
+  `utf8mb3` in the path
+- **timezone / precision** — `TIMESTAMP` vs `DATETIME`, fractional seconds
+  truncated to whole seconds, UTC offsets silently reinterpreted
+- **numeric precision** — `NUMERIC`/`DECIMAL` through a float, money rounding
+- **binary / BLOB** — a text-mode transfer mangling `\r\n` or high bytes
+- **NULL vs empty string** — round-tripped through a CSV or a naive exporter
+- **JSON key order / unicode escaping** — where a checksum is taken over the text
+
 ## 3) Blueprints
 
 Write the assertion explicitly in the plan, in this form, so a vetting agent can
@@ -171,6 +238,61 @@ redis-cli -a "$PW" dbsize                   # non-zero where the app has live st
 redis-cli -a "$PW" del __verify_$$
 # and the CONSUMER reconnected — e.g. `celery … inspect ping`, or a job delivered
 ```
+
+### Blueprint E — dump/restore FIDELITY (mandatory for any logical migration)
+
+Shape says the server is up. Contents says the rows are all there. Neither can
+see a transcode. Add all three:
+
+```bash
+# 1. Set the client charset EXPLICITLY. Never inherit the server default —
+#    the server default is frequently NOT the storage encoding.
+mariadb-dump --default-character-set=utf8mb4 ...        # MariaDB/MySQL
+# pg_dump is UTF-8 end-to-end by default; the equivalent trap there is
+# --encoding= plus lc_collate differences between source and target.
+
+# 2. Assert on the TABLE collation, not the server/schema default.
+#    This is the object that decides what is stored.
+mariadb -N -B -e "select distinct table_collation
+                  from information_schema.tables
+                  where table_schema='<db>';"
+#    Compare to what you passed in step 1. If a table is utf8mb4_* and your
+#    connection is utf8mb3, STOP — the dump will be lossy and will look fine.
+
+# 3. Round-trip the most demanding value the store holds. For text, that is a
+#    4-byte character. Count them at SOURCE...
+mariadb -N -B <db> -e "select count(*) from <table>
+                       where char_length(<col>) <> octet_length(<col>);"
+#    ...prove the dump still contains real 4-byte lead bytes...
+LC_ALL=C grep -c $'[\xf0-\xf4]' "$DUMP"     # 0 here + non-zero above = LOSSY
+#    ...and re-assert the SAME rows still differ at the TARGET after restore.
+#    Not "the rows exist" — that they still differ in char_length vs
+#    octet_length. That is the byte-level round-trip.
+```
+
+**Failure mode to design against:** the corruption is invisible to row counts
+*because every row is present*. If your only post-restore gate is a count diff,
+you will ship it.
+
+**Trap when you build the comparison — order by a STABLE KEY, not by the text.**
+Auditing the superset cutover on 2026-08-19 with
+
+```sql
+select md5(string_agg(name, '|' order by name)) from t;   -- WRONG
+```
+
+produced *different* hashes on source and target over byte-identical data. The
+two images spell the same collation differently (`en_US.UTF-8` vs `en_US.utf8`),
+so `ORDER BY` on text sorted multi-byte values differently and changed the
+concatenation order. Ordering by the primary key instead:
+
+```sql
+select md5(string_agg(name, '|' order by id)) from t;     -- RIGHT
+```
+
+matched exactly. A fidelity check that false-alarms is nearly as costly as one
+that misses — it burns the rollback window on a phantom. Also diff row-for-row
+with the key included, so a real difference tells you *which* row.
 
 ## 4) Operational Instructions
 
