@@ -162,6 +162,15 @@ _KIND_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nofix",   ("with no upstream fix",)),
     ("rebuild", ("but already on the newest upstream tag",
                  "already the newest upstream tag")),
+    # A third answer to "what is this finding about this image?": the fix
+    # status could not be DECIDED (Go pseudo-version, security-check.py
+    # classify_pseudo_version). It is neither "there is a fix" nor "there is
+    # no fix", so it needs its own identity. Without this marker the class
+    # separated from the fixable line only because its prose happens to carry
+    # a second backticked span — identity by accident of wording, which the
+    # next reword would break. Added 2026-08-19 BEFORE the class had ever been
+    # emitted, so it re-fingerprints exactly zero existing rows.
+    ("undet",   ("whose fix-status could not be determined",)),
 )
 
 

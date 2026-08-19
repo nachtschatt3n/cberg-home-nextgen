@@ -144,8 +144,12 @@ auto-closing; fix the dependency and re-run.
    > *policy edit* rather than a broken check — so none of the four gates see
    > it coming.
    >
-   > The tags were doing one real job — separating an image's "there is a fix"
-   > line from its "there is no fix" line, which genuinely IS identity. That is
+   > The tags were doing one real job — separating the DIFFERENT ANSWERS an
+   > image's findings can give about the same question, which genuinely IS
+   > identity. There are now three: "there is a fix", "there is no fix", and
+   > (since 2026-08-19) "we could not determine which" — the Go pseudo-version
+   > class, marker `undet`, added before it had ever been emitted so it
+   > re-fingerprinted nothing. That is
    > now explicit in `_KIND_MARKERS` (verbatim marker match, the same discipline
    > as `risk_model.S4_POLICY_MARKERS`). Measured over all 296 open rows: the
    > new function reproduces the old discrimination exactly (296 → 296 distinct

@@ -445,6 +445,17 @@ class Findings:
         new_items: list[tuple[str, str, dict]] = []
         for sev, msg, meta in self._items:
             matched_id: str | None = None
+            # Some findings must never be absorbed by a description-substring
+            # match. ~15 live ARs are bare image-name prefixes ("longhornio/",
+            # "registry.k8s.io/kube-"), so ANY message naming such an image
+            # matches them — including one that says we could not determine
+            # whether the image is vulnerable. An AR accepting "fixable CVEs we
+            # cannot bump" carries no operator decision about an UNKNOWN, and
+            # laundering the unknown into `accepted` is exactly the failure the
+            # undetermined bucket exists to prevent. Opt out at the call site.
+            if meta.get("no_ar_suppress"):
+                new_items.append((sev, msg, meta))
+                continue
             haystack = msg.lower()
             for ar_id, desc in accepted_risks.items():
                 needle = desc.lower().strip()
@@ -1432,10 +1443,12 @@ def _is_kernel_header_pkg(pkg_name: str, result_class: str) -> bool:
 # (the code is vulnerable, and a bump fixes it) from a comparison that could
 # not distinguish either way.
 #
-# Measured on the running fleet 2026-08-19: 44 fixable CRITICAL/HIGH findings
-# across 4 of 206 scanned images sit on a pseudo-version. It is not a coredns
-# quirk — any Go binary can carry one, for its own main module or for a
-# dependency pinned at a commit rather than a release.
+# Scoped by measurement rather than by the image that surfaced it: the whole
+# scanned fleet was re-scanned raw and the affected set enumerated. It is not
+# one image's quirk — any Go binary can carry a pseudo-version, for its own
+# main module or for a dependency pinned at a commit rather than a release.
+# Which images, in what shape, and how many findings each: security_ref
+# F-9e1e421c (DB-only, docs/sops/vulnerability-disclosure.md).
 #
 # Three routes, tried in order, then an explicit unknown. Each route either
 # ESTABLISHES a real comparison or declines; nothing is dropped on a hunch.
@@ -1524,14 +1537,48 @@ def _cmp_semver(a: tuple[int, ...], b: tuple[int, ...]) -> int:
     return (a > b) - (a < b)
 
 
-def _repo_leaf(image_ref: str) -> str:
-    """Last path element of an image reference's repository, lowercased."""
+def _is_calendar_major(n: int) -> bool:
+    """Does this leading component read as a YEAR rather than a major version?
+
+    CalVer and semver are different numbering universes and comparing across
+    them is meaningless in a way that fails DANGEROUSLY in one direction: a
+    `2026.08.19` tag parses as major 2,026 and compares greater than every
+    semver FixedVersion in existence, clearing an image wholesale. Some
+    projects genuinely version in CalVer (authentik's 2026.5.6), and there the
+    advisory's FixedVersion is CalVer too -- so the test is not "is this
+    CalVer?" but "are BOTH sides on the same scale?".
+    """
+    return 1990 <= n <= 2100
+
+
+def _fix_bar(installed: tuple[int, ...],
+             fixed_keys: list[tuple[int, ...]]) -> tuple[int, ...]:
+    """Which FixedVersion must `installed` reach to be considered patched?
+
+    Advisories routinely name a fix PER MAINTAINED BRANCH ("1.2.3, 2.0.1").
+    Taking the lowest is wrong: a 2.0.0 build clears by beating the 1.x fix
+    while its own branch's fix (2.0.1) is still ahead of it. The bar is the
+    lowest fix on the INSTALLED version's own major line; only when the
+    advisory names no fix on that line does the highest apply (a build above
+    every branch is genuinely past them all).
+    """
+    same = [k for k in fixed_keys if k[0] == installed[0]]
+    pool = same if same else fixed_keys
+    best = pool[0]
+    for k in pool[1:]:
+        if (_cmp_semver(k, best) < 0) if same else (_cmp_semver(k, best) > 0):
+            best = k
+    return best
+
+
+def _repo_path(image_ref: str) -> str:
+    """An image reference's repository path, without tag or digest, lowercased."""
     ref = (image_ref or "").split("@")[0]
     # Strip the tag, but not a registry port (`host:5000/repo`).
     head, _, tail = ref.rpartition(":")
     if head and "/" not in tail:
         ref = head
-    return ref.rstrip("/").rpartition("/")[2].lower()
+    return ref.rstrip("/").lower()
 
 
 def _image_tag(image_ref: str) -> str:
@@ -1543,14 +1590,32 @@ def _image_tag(image_ref: str) -> str:
     return tail
 
 
-def _module_leaf(pkg_name: str) -> str:
-    """Last path element of a Go module path, with a /vN major suffix removed."""
+def _module_tail(pkg_name: str) -> tuple[str, ...]:
+    """Last up-to-two path elements of a Go module path, /vN suffix removed."""
     parts = [p for p in (pkg_name or "").lower().split("/") if p]
-    if not parts:
-        return ""
     if len(parts) > 1 and re.fullmatch(r"v[2-9]\d*", parts[-1]):
         parts.pop()
-    return parts[-1]
+    return tuple(parts[-2:])
+
+
+def _is_same_program(pkg_name: str, image_ref: str) -> bool:
+    """Is this Go module the image's OWN program, rather than a dependency?
+
+    Matched on OWNER + NAME, not name alone. Leaf-only matching is far too
+    loose for Go: `cli`, `agent`, `operator`, `controller`, `exporter` and
+    `kubelet` are all common module leaves AND common image names, so
+    `github.com/urfave/cli` would have been treated as the program of
+    `ghcr.io/org/cli:3.5.0` and handed that image's tag as its version --
+    clearing a real dependency finding on a coincidence of naming.
+    """
+    mod = _module_tail(pkg_name)
+    repo = tuple(p for p in _repo_path(image_ref).split("/") if p)[-2:]
+    if not mod or not repo or mod[-1] != repo[-1]:
+        return False
+    # Both sides carry an owner segment -> it must agree too.
+    if len(mod) > 1 and len(repo) > 1:
+        return mod[-2] == repo[-2]
+    return True
 
 
 def _parse_trivy_date(s: str | None) -> datetime | None:
@@ -1590,20 +1655,31 @@ def classify_pseudo_version(vuln: dict, result_class: str, artifact_name: str) -
     fixed_parts = [p.strip() for p in re.split(r"[,\s]+", fixed_raw) if p.strip()]
 
     # -- Route A: the pseudo-versioned module is the image's own program. -----
-    pkg_leaf = _module_leaf(vuln.get("PkgName", ""))
-    if pkg_leaf and pkg_leaf == _repo_leaf(artifact_name):
+    # Trivy marks the main module with Relationship=root where it emits the
+    # field. Honour it when present (authoritative) and fall back to the
+    # owner+name match when absent, as it is on this scanner's output today.
+    rel = vuln.get("Relationship")
+    if (rel in (None, "", "root")) and _is_same_program(vuln.get("PkgName", ""), artifact_name):
         tag_key = _semver_key(_image_tag(artifact_name), require_dotted=True)
         fixed_keys = [k for k in (_semver_key(p) for p in fixed_parts) if k]
-        if tag_key and fixed_keys:
-            # Cleared if the tag reaches the LOWEST named fix release.
-            if any(_cmp_semver(tag_key, fk) >= 0 for fk in fixed_keys):
-                return "fixed"
-            return "fixable"
+        # Both sides must be on the same numbering scale (see
+        # _is_calendar_major); a CalVer tag against semver fixes is not a
+        # comparison, and it fails by clearing everything.
+        scales_agree = bool(tag_key) and bool(fixed_keys) and (
+            _is_calendar_major(tag_key[0])
+            == any(_is_calendar_major(k[0]) for k in fixed_keys))
+        if tag_key and fixed_keys and scales_agree:
+            bar = _fix_bar(tag_key, fixed_keys)
+            return "fixed" if _cmp_semver(tag_key, bar) >= 0 else "fixable"
 
     # -- Route B: FixedVersion is itself a pseudo-version -> compare commits. -
+    # The HIGHEST fix commit is the bar, not the lowest: a multi-value
+    # FixedVersion names one fix per maintained branch, and we cannot tell
+    # which branch this build sits on from a timestamp alone. Taking the max
+    # errs toward keeping the finding, which is the safe direction.
     fixed_stamps = [d for d in (_parse_go_pseudo_version(p) for p in fixed_parts) if d]
     if fixed_stamps:
-        return "fixed" if built_at >= min(fixed_stamps) else "fixable"
+        return "fixed" if built_at >= max(fixed_stamps) else "fixable"
 
     # -- Route C: build time vs advisory publication, outside the margin. -----
     published = _parse_trivy_date(vuln.get("PublishedDate"))
@@ -1631,7 +1707,9 @@ def classify_pseudo_version(vuln: dict, result_class: str, artifact_name: str) -
 #
 # BUMP THIS whenever tally_trivy_report() or the fix/no-fix classification it
 # feeds changes in a way that alters the numbers.
-_TRIVY_TALLY_VERSION = 3  # 3 = Go pseudo-versions re-classified (fixed / fixable /
+_TRIVY_TALLY_VERSION = 4  # 4 = branch-aware fix bar, owner+name main-module match,
+                         #     CalVer/semver scale guard, bare-integer tag guard
+                         # 3 = Go pseudo-versions re-classified (fixed / fixable /
                          #     undetermined) instead of always-fixable
                          # 2 = kernel-header packages excluded from fixable tallies
 
@@ -2415,7 +2493,8 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             # no-upstream-fix class (that would launder an unknown into an
             # accepted risk). WARNING, worded as the unknown it is.
             if r.get("crit_undet", 0) > 0 or r.get("high_undet", 0) > 0:
-                _undet_meta = {"cve_ids": list(r.get("undet_ids", []))}
+                _undet_meta = {"cve_ids": list(r.get("undet_ids", [])),
+                               "no_ar_suppress": True}
                 undet_s = ", ".join(r.get("undet_sample", [])[:3]) + ("…" if len(r.get("undet_sample", [])) > 3 else "")
                 f.add(WARNING, f"`{tag}`: {r['crit_undet']} CRITICAL + {r['high_undet']} HIGH CVE(s) whose fix-status could NOT be determined — the Go binary reports a pseudo-version (`v0.0.0-<commit>`), so neither 'vulnerable' nor 'patched' was established; resolve by hand against the module's actual commit — {undet_s}", meta=_undet_meta)
                 cprint(C.YELLOW, f"  🟡 {tag}: {r['crit_undet']}C/{r['high_undet']}H fix-status UNDETERMINED (Go pseudo-version)")

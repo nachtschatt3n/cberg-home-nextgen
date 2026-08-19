@@ -136,32 +136,36 @@ class KernelHeaderExclusionTest(unittest.TestCase):
 
 class GoPseudoVersionTest(unittest.TestCase):
     """Guards the 2026-08-19 fix: a Go pseudo-version carries no comparable
-    version, so Trivy's `v0.0.0-… < 1.14.3` is arithmetic without meaning and
-    must not be counted as a fixable CVE.
+    version, so comparing its `v0.0.0` placeholder base against a real release
+    is arithmetic without meaning and must not be counted as a fixable CVE.
 
-    Measured on the running fleet the day of the fix: 44 fixable CRITICAL/HIGH
-    findings across 4 of 206 images sat on a pseudo-version. coredns was the
-    loud one (9 of its 11 HIGH findings); the other two affected images were
-    dependency pins that are GENUINELY behind their fix and must keep counting
-    — which is why a blanket "ignore pseudo-versions" rule would be wrong.
+    Two SHAPES matter and pull in opposite directions, which is why a blanket
+    "ignore pseudo-versions" rule would be wrong: a binary stamped with a
+    pseudo-version for its OWN main module is usually current, while a
+    DEPENDENCY pinned at an old commit is usually genuinely behind its fix and
+    must keep counting. The routes below decide which, or decline.
+
+    Fleet measurements, affected image names and per-image counts are DB-only
+    (docs/sops/vulnerability-disclosure.md) — see security_ref F-9e1e421c.
+    Fixtures here are SYNTHETIC.
     """
 
     # -- Route A: the module IS the image's own program -----------------------
 
     def test_main_module_tag_at_or_past_fix_is_not_fixable(self):
-        """The coredns shape. Image tag 1.14.7 >= fix 1.14.3 -> already fixed."""
+        """Image tag 1.14.7 >= fix 1.14.3 -> the fix is already present."""
         r = tally(_report(
-            ("lang-pkgs", [_vuln("TEST-P-1", "github.com/coredns/coredns", "HIGH",
+            ("lang-pkgs", [_vuln("TEST-P-1", "example.org/acme/dnsd", "HIGH",
                                  "1.14.3", _pseudo("20260819003913"))]),
-            artifact="coredns/coredns:1.14.7"))
+            artifact="acme/dnsd:1.14.7"))
         self.assertIsNone(r)
 
     def test_main_module_tag_behind_fix_stays_fixable(self):
         """The route must be able to CONFIRM a finding, not only clear one."""
         r = tally(_report(
-            ("lang-pkgs", [_vuln("TEST-P-2", "github.com/coredns/coredns", "HIGH",
+            ("lang-pkgs", [_vuln("TEST-P-2", "example.org/acme/dnsd", "HIGH",
                                  "1.15.0", _pseudo("20260819003913"))]),
-            artifact="coredns/coredns:1.14.7"))
+            artifact="acme/dnsd:1.14.7"))
         self.assertEqual(r["high_fix"], 1)
         self.assertEqual(r["high_undet"], 0)
 
@@ -174,14 +178,14 @@ class GoPseudoVersionTest(unittest.TestCase):
         self.assertIsNone(r)
 
     def test_dependency_module_does_not_borrow_the_image_tag(self):
-        """golang.org/x/net is not the program, so the image tag says nothing
-        about it. Route A must decline (here it falls through to route C)."""
+        """A dependency is not the program, so the image tag says nothing about
+        it. Route A must decline (here it falls through to route C)."""
         r = tally(_report(
-            ("lang-pkgs", [_vuln("TEST-P-4", "golang.org/x/net", "HIGH",
+            ("lang-pkgs", [_vuln("TEST-P-4", "example.org/dep/netlib", "HIGH",
                                  "0.55.0", _pseudo("20200625001655"),
                                  "2026-05-22T16:16:19Z")]),
-            artifact="sapcc/mosquitto-exporter:0.8.0"))
-        self.assertEqual(r["high_fix"], 1)   # 2020 build, 2026 advisory
+            artifact="example.org/vendor/exporter:0.8.0"))
+        self.assertEqual(r["high_fix"], 1)   # old build, much later advisory
         self.assertEqual(r["high_undet"], 0)
 
     def test_unparsable_image_tag_does_not_clear(self):
@@ -218,6 +222,82 @@ class GoPseudoVersionTest(unittest.TestCase):
         self.assertEqual(r["high_fix"], 0)
         self.assertEqual(r["high_undet"], 1)
 
+    def test_branch_specific_fix_list_uses_the_installed_branch(self):
+        """An advisory naming one fix per maintained branch ("1.2.3, 2.0.1")
+        must be judged on the INSTALLED branch. Taking the lowest cleared a
+        2.0.0 build for beating the 1.x fix while 2.0.1 was still ahead of it."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-21", "example.org/acme/dnsd", "CRITICAL",
+                                 "1.2.3, 2.0.1", _pseudo("20260101000000"))]),
+            artifact="acme/dnsd:2.0.0"))
+        self.assertEqual(r["crit_fix"], 1)
+
+    def test_branch_specific_fix_list_clears_on_its_own_branch(self):
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-22", "example.org/acme/dnsd", "CRITICAL",
+                                 "1.2.3, 2.0.1", _pseudo("20260101000000"))]),
+            artifact="acme/dnsd:2.0.1"))
+        self.assertIsNone(r)
+
+    def test_build_above_every_branch_clears(self):
+        """No fix is named on the 3.x line, and 3.0.0 is past them all."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-23", "example.org/acme/dnsd", "CRITICAL",
+                                 "1.2.3, 2.0.1", _pseudo("20260101000000"))]),
+            artifact="acme/dnsd:3.0.0"))
+        self.assertIsNone(r)
+
+    def test_calver_tag_against_semver_fixes_does_not_clear(self):
+        """A dotted date tag survives require_dotted but is not on the same
+        numbering scale: 2026.08.19 parses as major 2026 and would compare
+        greater than every semver FixedVersion, clearing the whole image."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-24", "example.org/acme/dnsd", "CRITICAL",
+                                 "3.0.0", _pseudo("20260101000000"))]),
+            artifact="acme/dnsd:2026.08.19"))
+        self.assertEqual(r["crit_fix"], 0)
+        self.assertEqual(r["crit_undet"], 1)
+
+    def test_calver_on_both_sides_is_a_real_comparison(self):
+        """Projects that genuinely version in CalVer get their advisories in
+        CalVer too — same scale, so the comparison is meaningful."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-25", "example.org/acme/dnsd", "CRITICAL",
+                                 "2026.5.6", _pseudo("20260101000000"))]),
+            artifact="acme/dnsd:2026.8.0"))
+        self.assertIsNone(r)
+
+    def test_dependency_sharing_the_image_name_does_not_borrow_its_tag(self):
+        """Leaf-only matching let a dependency impersonate the main module.
+        `cli`, `agent`, `operator`, `exporter` are common module leaves AND
+        common image names; the owner segment has to agree too."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-26", "example.org/urfave/cli", "CRITICAL",
+                                 "3.9.0", _pseudo("20200101000000"),
+                                 "2026-01-01T00:00:00Z")]),
+            artifact="ghcr.io/acme/cli:3.5.0"))
+        self.assertEqual(r["crit_fix"], 1)   # kept, via route C
+
+    def test_relationship_field_overrides_the_name_match(self):
+        """Where Trivy marks the package as a non-root dependency, believe it
+        even if the names happen to line up."""
+        v = _vuln("TEST-P-27", "example.org/acme/dnsd", "CRITICAL",
+                  "9.9.9", _pseudo("20260101000000"), "2026-01-01T00:00:00Z")
+        v["Relationship"] = "indirect"
+        r = tally(_report(("lang-pkgs", [v]), artifact="acme/dnsd:1.0.0"))
+        # Route A declined, so this is decided by C (inside the margin) -> undet
+        self.assertEqual(r["crit_undet"], 1)
+
+    def test_route_b_multi_value_takes_the_highest_fix_commit(self):
+        """One fix commit per branch; a timestamp cannot say which branch this
+        build is on, so the bar is the highest and the finding survives."""
+        r = tally(_report(
+            ("lang-pkgs", [_vuln("TEST-P-28", "example.org/dep/netlib", "HIGH",
+                                 f"{_pseudo('20210101000000')}, {_pseudo('20230101000000')}",
+                                 _pseudo("20220101000000"))]),
+            artifact="acme/dnsd:1.0.0"))
+        self.assertEqual(r["high_fix"], 1)
+
     # -- Route B: FixedVersion is itself a pseudo-version ---------------------
 
     def test_pseudo_vs_pseudo_newer_build_clears(self):
@@ -228,12 +308,12 @@ class GoPseudoVersionTest(unittest.TestCase):
         self.assertIsNone(r)
 
     def test_pseudo_vs_pseudo_older_build_stays_fixable(self):
-        """The frigate shape: a dep pinned at a 2020 commit against a fix
-        commit from 2021 is genuinely behind, and must keep counting."""
+        """A dependency pinned at an old commit, against a fix commit from a
+        year later, is genuinely behind and must keep counting."""
         r = tally(_report(
             ("lang-pkgs", [_vuln("TEST-P-8", "golang.org/x/crypto", "HIGH",
                                  _pseudo("20211202192323"), _pseudo("20201221181555"))]),
-            artifact="ghcr.io/blakeblackshear/frigate:0.17.2"))
+            artifact="example.org/vendor/app:0.17.2"))
         self.assertEqual(r["high_fix"], 1)
 
     # -- Route C: build time vs advisory publication, outside the margin ------
@@ -277,13 +357,13 @@ class GoPseudoVersionTest(unittest.TestCase):
     # -- Scope: everything else must be untouched ----------------------------
 
     def test_real_semver_installed_version_is_untouched(self):
-        """The control. A normal version string still compares normally — this
-        is the path 102 of 106 gobinary images in the fleet take, and the fix
-        moved none of them."""
+        """The control. A normal version string still compares normally — the
+        path the overwhelming majority of gobinary images take, and one the
+        fix must leave completely alone."""
         r = tally(_report(
-            ("lang-pkgs", [_vuln("TEST-P-13", "golang.org/x/mod", "HIGH",
+            ("lang-pkgs", [_vuln("TEST-P-13", "example.org/dep/modlib", "HIGH",
                                  "0.40.0", "v0.37.0")]),
-            artifact="coredns/coredns:1.14.7"))
+            artifact="acme/dnsd:1.14.7"))
         self.assertEqual(r["high_fix"], 1)
         self.assertEqual(r["high_undet"], 0)
 
@@ -301,9 +381,9 @@ class GoPseudoVersionTest(unittest.TestCase):
         """No FixedVersion means the comparison never happened, so there is
         nothing for this fix to correct — it stays in the AR-029 class."""
         r = tally(_report(
-            ("lang-pkgs", [_vuln("TEST-P-15", "github.com/coredns/coredns", "HIGH",
+            ("lang-pkgs", [_vuln("TEST-P-15", "example.org/acme/dnsd", "HIGH",
                                  None, _pseudo("20260819003913"))]),
-            artifact="coredns/coredns:1.14.7"))
+            artifact="acme/dnsd:1.14.7"))
         self.assertEqual(r["high_nofix"], 1)
         self.assertEqual(r["high_undet"], 0)
 
@@ -332,22 +412,23 @@ class GoPseudoVersionTest(unittest.TestCase):
         self.assertEqual(r["nofix_ids"], ["TEST-P-19"])
         self.assertEqual(r["undet_ids"], ["TEST-P-17"])
 
-    def test_the_real_coredns_shape_end_to_end(self):
-        """The exact 2026-08-19 case, reconstructed: nine advisories against
-        the main module (fixed in 1.11.0 - 1.14.3) plus two against a
-        dependency pinned at a real version. 11 fixable -> 2."""
-        main = [_vuln(f"TEST-P-CD-{i}", "github.com/coredns/coredns", "HIGH",
+    def test_mixed_main_module_and_dependency_end_to_end(self):
+        """The shape that motivated the fix, in synthetic form: several
+        advisories against the pseudo-versioned MAIN MODULE, all of them fixed
+        in releases the image tag has passed, alongside advisories against a
+        DEPENDENCY carrying a real version that is genuinely behind. Only the
+        dependency's should survive."""
+        main = [_vuln(f"TEST-P-M-{i}", "example.org/acme/dnsd", "HIGH",
                       fx, _pseudo("20260819003913"))
                 for i, fx in enumerate(["1.11.0", "1.12.2", "1.14.2", "1.14.2",
                                         "1.14.3", "1.14.3", "1.14.3", "1.14.3",
                                         "1.14.3"])]
-        dep = [_vuln(f"TEST-P-XM-{i}", "golang.org/x/mod", "HIGH", "0.40.0", "v0.37.0")
-               for i in range(2)]
-        r = tally(_report(("lang-pkgs", main + dep),
-                          artifact="coredns/coredns:1.14.7"))
+        dep = [_vuln(f"TEST-P-D-{i}", "example.org/dep/modlib", "HIGH",
+                     "0.40.0", "v0.37.0") for i in range(2)]
+        r = tally(_report(("lang-pkgs", main + dep), artifact="acme/dnsd:1.14.7"))
         self.assertEqual(r["high_fix"], 2)
         self.assertEqual(r["high_undet"], 0)
-        self.assertTrue(all(i.startswith("TEST-P-XM-") for i in r["fix_ids"]))
+        self.assertTrue(all(i.startswith("TEST-P-D-") for i in r["fix_ids"]))
 
 
 if __name__ == "__main__":

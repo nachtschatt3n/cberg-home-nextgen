@@ -2,7 +2,7 @@
 
 > Description: Rules for writing and reviewing the sweep's audit scripts
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
-> `sweep-run.py`, the media `audit.py`), so a check that could not measure
+> `sweep-run.py`, `maintenance-plan.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
 > Version: `2026.08.19`
 > Last Updated: `2026-08-19`
@@ -12,9 +12,12 @@
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-18, **sixteen** defects across five audit scripts
-shared one root cause: an unmeasured, failed or absent probe was reported as a
-definite outcome. Four of them were introduced *while fixing the others*.
+Between 2026-07-30 and 2026-08-19, **thirty-one** defects across six audit
+scripts shared one root cause: an unmeasured, failed or absent probe was
+reported as a definite outcome. Several were introduced *while fixing the
+others* — the table below is the running register, not a closed list, and the
+count moves whenever a row is added, so read the table rather than this
+sentence.
 
 The failure is not a coding slip — it is a modelling error. Audit code naturally
 has three outcomes (pass / fail / could-not-measure) but is usually written with
