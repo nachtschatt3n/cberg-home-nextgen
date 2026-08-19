@@ -5,6 +5,7 @@ resources:
   - ./secrets.sops.yaml
   - ./pvc.yaml
   - ./helmrelease.yaml
+  - ./redis-deployment.yaml
   - ./whiteboard-proxy.yaml
   - ./notify-push.yaml
 configMapGenerator:

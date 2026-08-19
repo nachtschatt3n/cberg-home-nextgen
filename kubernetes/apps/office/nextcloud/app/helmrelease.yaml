@@ -226,8 +226,8 @@ spec:
             - sh
             - -c
             - |
-              until nc -z nextcloud-redis-master 6379; do
-                echo "waiting for nextcloud-redis-master:6379..."
+              until nc -z nextcloud-redis 6379; do
+                echo "waiting for nextcloud-redis:6379..."
                 sleep 2
               done
         # Install our small custom NC app that exposes
@@ -363,8 +363,11 @@ spec:
               value: "drive.${SECRET_DOMAIN} nextcloud.office.svc.cluster.local"
             - name: NEXTCLOUD_DATA_DIR
               value: /var/www/html/data
+            # Hardcoded on purpose: this is the worker sidecar's OWN env, not
+            # nextcloud.extraEnv and not chart-driven — no `externalRedis`
+            # value reaches it. Keep in lockstep with externalRedis.host.
             - name: REDIS_HOST
-              value: nextcloud-redis-master
+              value: nextcloud-redis
             - name: REDIS_HOST_PORT
               value: "6379"
           volumeMounts:
@@ -593,26 +596,34 @@ spec:
           cpu: 10m
           memory: 64M
 
+    # Bundled Bitnami redis retired 2026-08-19: bitnamilegacy is an ARCHIVED
+    # registry (last push 2025-08-28, no future security fixes) and
+    # docker.io/bitnami/redis publishes no semver tags, so no version bump can
+    # ever fix it. Security driver tracked as F-d62ac46a. Nextcloud now uses
+    # the official redis image deployed by redis-deployment.yaml in this
+    # folder, wired in through `externalRedis` below.
     redis:
-      enabled: true
-      architecture: standalone
+      enabled: false
       auth:
+        # DO NOT REMOVE. With the subchart disabled this value still selects
+        # the REDIS_URL form in _helpers.tpl. The chart default is `true` +
+        # password `changeme`, which renders
+        # redis://:$(REDIS_HOST_PASSWORD)@$(REDIS_HOST):$(REDIS_HOST_PORT)
+        # with REDIS_HOST_PASSWORD never emitted — an empty-password AUTH
+        # against a Redis that has no requirepass.
         enabled: false
-      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/redis
-        tag: latest
-      master:
-        persistence:
-          enabled: true
-          size: 1Gi
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            memory: 256Mi
+
+    # The chart's first-class external-Redis path. This is what puts
+    # REDIS_HOST / REDIS_HOST_PORT / REDIS_URL back on the MAIN container
+    # after `redis.enabled: false` strips them — redis.config.php reads them
+    # with getenv() at runtime, and memcache.locking depends on them. Do NOT
+    # hand-inject these through nextcloud.extraEnv.
+    externalRedis:
+      enabled: true
+      host: nextcloud-redis
+      port: "6379"
+      # No password — matches the retired instance's auth-disabled posture;
+      # redis.config.php carries no password either.
 
 
 
