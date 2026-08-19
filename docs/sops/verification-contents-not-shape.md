@@ -215,6 +215,15 @@ in detail and closed with *"verification for a storage-layer change must include
 contain a scrape assertion. Writing the lesson in prose is not writing the
 check; the check has to appear in the section that gets executed.
 
+**Fixed in `0d1b064a`** — that plan's §4 now carries `CONTENTS ASSERTION 1 —
+Prometheus still scrapes Longhorn` (targets up *and* all 93 volumes actually
+reporting series), so read the current file as the *repaired* form, not as the
+defect. The defect is preserved here because it is the most instructive one in
+this SOP: the author had already diagnosed the exact failure, in the same
+document, one section earlier — and the plan still shipped shape-only. **Prose
+about a check is not a check.** Nothing that is not in the section an executor
+runs will be run.
+
 ### Example C — the ceiling with no floor
 
 `runbooks/maintenance/plans/ibgastro-php-strict.md` asserted a log line rate
@@ -326,3 +335,24 @@ paperless recovery worked only because the old volume was on `Retain`; that
 reclaim policy is what buys the time to discover a shape-only pass, and is
 itself part of the mitigation (see
 [`docs/sops/storage-safety.md`](storage-safety.md)).
+
+## 12) References
+
+- [`docs/sops/audit-script-correctness.md`](audit-script-correctness.md) — the
+  same modelling error one layer down, in the sweep's audit code
+- [`runbooks/maintenance/plans/README.md`](../../runbooks/maintenance/plans/README.md)
+  — the plan template, including the per-class exemplar table this SOP backs
+- [`docs/sops/maintenance-windows.md`](maintenance-windows.md) — where the
+  "not vettable if shape-only" gate is enforced
+- [`docs/sops/self-built-image-rebuild.md`](self-built-image-rebuild.md) — the
+  bundler instance ("fails silently as a different bundle, not a failed build")
+- [`docs/sops/vulnerability-disclosure.md`](vulnerability-disclosure.md) — what
+  a contents assertion may and may not say in a public repo
+- [`docs/sops/storage-safety.md`](storage-safety.md) — `Retain` is what buys the
+  time to discover a shape-only pass
+
+## Version History
+
+| Version | Date | Change |
+|---|---|---|
+| `2026.08.19` | 2026-08-19 | Initial. Names the failure class from the three 2026-08-18/19 instances (paperless-db empty restore, Longhorn scrape blocked by a patch-release NetworkPolicy, whiteboard Ready-pod-as-proof); adds the per-class assertions and the two corollaries. |
