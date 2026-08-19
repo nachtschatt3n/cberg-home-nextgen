@@ -245,8 +245,74 @@ def cmd_risk_show(args, dsn):
             print(f"  {k:18s}  {v}")
 
 
-def cmd_risk_add(args, dsn):
+def _would_match(cur, desc: str) -> list:
+    """Open findings an AR description would suppress, as (finding_id, severity,
+    title) — the SAME needle semantics `_apply_ar_suppression` uses in
+    sweep-run.py: a case-insensitive SUBSTRING of the finding title.
+
+    This exists because an AR is written blind otherwise. A description is not
+    prose the operator composes for a reader; it is a needle, and prose is
+    almost never a substring of a generated finding title. AR-080 ("Go stdlib
+    CVEs reported against the bundled gosu binary...") was accepted by `risk
+    add`, linted clean, and suppressed exactly nothing — the third time that
+    shape of mistake shipped. Preview beats intent.
+    """
+    needle = (desc or "").strip().lower()
+    if not needle:
+        return []
+    cur.execute(
+        "SELECT finding_id, severity, title FROM sweep_findings "
+        "WHERE resolved_at IS NULL "
+        "  AND severity IN ('critical', 'warning', 'monitor', 'accepted') "
+        "  AND position(%s in lower(title)) > 0 "
+        "ORDER BY severity, finding_id",
+        (needle,))
+    return [(r["finding_id"], r["severity"], r["title"]) for r in cur.fetchall()]
+
+
+def cmd_risk_match(args, dsn):
+    """Dry-run a candidate AR description against the open findings.
+
+    Write the AR only after this prints the rows you meant to cover, and
+    nothing you did not.
+    """
     with _connect(dsn) as conn, conn.cursor() as cur:
+        hits = _would_match(cur, args.description)
+        warn = _drift_warnings(args.description)
+    print(f"needle: {args.description!r}")
+    for w in warn:
+        print(f"  ! not drift-stable: {w}")
+    if not hits:
+        print("  MATCHES NOTHING — this description would suppress no finding. "
+              "Name the component as it appears in the title (e.g. "
+              "`postgres:17.` / `node:22.`), not the reason.")
+        return 1
+    print(f"  matches {len(hits)} open finding(s):")
+    for fid, sev, title in hits:
+        print(f"    {fid}  {sev:<13} {title[:110]}")
+    return 0
+
+
+def cmd_risk_add(args, dsn):
+    warn = _drift_warnings(args.description)
+    if warn and not args.allow_drift:
+        print("REFUSING: proposed description is not drift-stable:", file=sys.stderr)
+        for w in warn:
+            print(f"  - {w}", file=sys.stderr)
+        print("  (see operator memory project_sweep_ar_version_drift; "
+              "pass --allow-drift to override)", file=sys.stderr)
+        return 2
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        # An AR that matches nothing is inert. Refuse by default rather than
+        # report success on a suppression that will never fire.
+        if not _would_match(cur, args.description) and not args.allow_nomatch:
+            print(f"REFUSING: {args.description!r} is not a substring of any "
+                  f"open finding title, so this AR would suppress nothing.",
+                  file=sys.stderr)
+            print("  Preview with `policy-cli.py risk match --description ...`. "
+                  "Pass --allow-nomatch for a genuinely forward-looking AR.",
+                  file=sys.stderr)
+            return 2
         cur.execute(
             "INSERT INTO accepted_risks (ar_id, severity, description, justification) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT (ar_id) DO NOTHING",
@@ -1017,7 +1083,15 @@ def build_parser() -> argparse.ArgumentParser:
     ra.add_argument("--description", required=True)
     ra.add_argument("--severity", default="informational")
     ra.add_argument("--justification")
+    ra.add_argument("--allow-drift", action="store_true",
+                    help="accept a description that pins a patch version / count")
+    ra.add_argument("--allow-nomatch", action="store_true",
+                    help="accept a description that currently matches no open finding")
     ra.set_defaults(handler=cmd_risk_add)
+    rm = risk.add_parser("match",
+                         help="preview which open findings a description would suppress")
+    rm.add_argument("--description", required=True)
+    rm.set_defaults(handler=cmd_risk_match)
     re_ = risk.add_parser("edit", help="update an existing AR in place")
     re_.add_argument("ar_id")
     re_.add_argument("--description")
