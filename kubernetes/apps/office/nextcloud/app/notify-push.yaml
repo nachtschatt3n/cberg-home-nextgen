@@ -43,25 +43,26 @@ spec:
             - containerPort: 7867
               name: notify-push
               protocol: TCP
+          # NOTE — notify_push does NOT read REDIS_HOST from its own
+          # environment. It parses config.php directly and uses the redis
+          # host PERSISTED there, ignoring the chart's redis.config.php
+          # overlay (which is `if (getenv('REDIS_HOST'))` and is what the
+          # main container follows). So a redis hostname change reaches the
+          # main app through the HelmRelease but reaches notify_push only
+          # once config.php itself is rewritten. Nextcloud rewrites config.php
+          # with the full merged config on ANY `occ config:system:set`, so
+          # after such a rename:
+          #   occ config:system:set  zz_touch --value=1 && \
+          #   occ config:system:delete zz_touch
+          # then roll this Deployment so notify_push re-parses. Verify with
+          # `occ notify_push:self-test` — a green HelmRelease will not catch
+          # it (found the hard way during the 2026-08-19 redis registry move).
+          # Adding REDIS_HOST here does NOT work; it was tried and reverted.
           env:
             - name: PORT
               value: "7867"
             - name: NEXTCLOUD_URL
               value: "http://nextcloud:8080"
-            # REQUIRED, not decorative. notify_push parses the whole config
-            # directory itself and evaluates getenv() against ITS OWN
-            # environment. redis.config.php is `if (getenv('REDIS_HOST'))
-            # {...}`, so without these two the block is skipped and the
-            # STALE literal persisted in config.php
-            # ('redis' => ['host' => ...], written at install time and never
-            # updated since) wins — which is how the 2026-08-19 redis
-            # registry move broke the push channel while the main container
-            # stayed healthy (its own REDIS_HOST made the same overlay win).
-            # Keep in lockstep with externalRedis.host in helmrelease.yaml.
-            - name: REDIS_HOST
-              value: nextcloud-redis
-            - name: REDIS_HOST_PORT
-              value: "6379"
           volumeMounts:
             - name: nextcloud-main
               mountPath: /var/www/
