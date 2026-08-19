@@ -33,7 +33,7 @@ spec:
           app:
             image:
               repository: nocodb/nocodb
-              tag: 2026.08.0
+              tag: 2026.08.1
               pullPolicy: IfNotPresent
 
             envFrom:
