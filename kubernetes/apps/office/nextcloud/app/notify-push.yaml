@@ -48,6 +48,20 @@ spec:
               value: "7867"
             - name: NEXTCLOUD_URL
               value: "http://nextcloud:8080"
+            # REQUIRED, not decorative. notify_push parses the whole config
+            # directory itself and evaluates getenv() against ITS OWN
+            # environment. redis.config.php is `if (getenv('REDIS_HOST'))
+            # {...}`, so without these two the block is skipped and the
+            # STALE literal persisted in config.php
+            # ('redis' => ['host' => ...], written at install time and never
+            # updated since) wins — which is how the 2026-08-19 redis
+            # registry move broke the push channel while the main container
+            # stayed healthy (its own REDIS_HOST made the same overlay win).
+            # Keep in lockstep with externalRedis.host in helmrelease.yaml.
+            - name: REDIS_HOST
+              value: nextcloud-redis
+            - name: REDIS_HOST_PORT
+              value: "6379"
           volumeMounts:
             - name: nextcloud-main
               mountPath: /var/www/
