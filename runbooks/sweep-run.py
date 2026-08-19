@@ -363,12 +363,15 @@ def _incomplete_sections_from_notes(notes: str | None) -> dict:
     """
     if not notes:
         return {}
-    try:
-        parsed = json.loads(notes)
-    except (ValueError, TypeError):
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
+    if isinstance(notes, dict):
+        parsed = notes            # already strict-parsed by _parse_cycle_notes
+    else:
+        try:
+            parsed = json.loads(notes)
+        except (ValueError, TypeError):
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
     incomplete = parsed.get("incomplete")
     return incomplete if isinstance(incomplete, dict) else {}
 
@@ -380,14 +383,34 @@ def _uncovered_components_from_notes(notes: str | None) -> dict:
     veto: the section completed, so absence is a valid resolution signal for
     everything except findings about these components. Delegates to the
     writer's parser so the two auto-close implementations cannot drift.
+
+    RAISES on an unimportable writer rather than returning `{}`. Returning an
+    empty dict there is indistinguishable from "no scope was recorded", which
+    would sail straight past the abort guard below and close exactly the rows a
+    recorded scope existed to hold open — the one direction this design must
+    never fail in. The caller's `except` turns the raise into an abort.
     """
     if str(SCRIPT_DIR) not in sys.path:
         sys.path.insert(0, str(SCRIPT_DIR))
-    try:
-        from lib.findings_writer import uncovered_from_notes
-    except ImportError:  # pragma: no cover - runbooks/lib not importable
-        return {}
+    from lib.findings_writer import uncovered_from_notes  # ImportError -> abort
     return uncovered_from_notes(notes)
+
+
+def _parse_cycle_notes(notes):
+    """`sweep_cycles.notes` as a dict, RAISING if a non-empty blob is unreadable.
+
+    Both veto readers below infer "nothing was recorded" from an empty result,
+    so a blob we cannot parse must abort the pass rather than silently present
+    as a clean cycle. Empty/NULL notes are a genuine "nothing recorded".
+    """
+    if not notes:
+        return {}
+    if isinstance(notes, dict):
+        return notes
+    parsed = json.loads(notes)   # raises -> caller aborts
+    if not isinstance(parsed, dict):
+        raise ValueError("sweep_cycles.notes is not a JSON object")
+    return parsed
 
 
 def _auto_close_stale_findings(
@@ -426,11 +449,22 @@ def _auto_close_stale_findings(
     # veto onto sweep_cycles.notes.incomplete so it survives the process
     # boundary; read it back and drop those sections from scope.
     try:
+        # Resolve the matcher FIRST, and abort if it cannot be imported. Doing
+        # this after the notes read was a fail-OPEN seam: the reader itself
+        # needs the same module, so an unimportable writer produced an empty
+        # scope, the "did we record a scope?" guard saw nothing to protect, and
+        # the pass closed the very rows the scope was holding open.
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        from lib.findings_writer import finding_matches_component
+
         with psycopg.connect(dsn) as _c, _c.cursor() as _cur:
             _cur.execute("SELECT notes FROM sweep_cycles WHERE cycle_id = %s",
                          (cycle_id,))
             _row = _cur.fetchone()
-        _notes = _row[0] if _row else None
+        # Parse ONCE, strictly: an unreadable blob aborts instead of rendering
+        # as a cycle with no veto recorded.
+        _notes = _parse_cycle_notes(_row[0] if _row else None)
         _incomplete = _incomplete_sections_from_notes(_notes)
         _uncovered = _uncovered_components_from_notes(_notes)
         _vetoed = [sec for sec in sections if sec in _incomplete]
@@ -458,20 +492,11 @@ def _auto_close_stale_findings(
                   "veto — nothing closed")
             return []
     except Exception as e:  # noqa: BLE001 — fail CLOSED: never close on doubt
-        print(f"==> auto-close ABORTED: could not read the incomplete veto "
+        print(f"==> auto-close ABORTED: could not read the coverage veto "
               f"({type(e).__name__}: {e}). Refusing to auto-close rather than "
-              f"risk resolving findings from a degraded section.")
+              f"risk resolving findings from a degraded section, or rows a "
+              f"per-component scope was holding open.")
         return []
-
-    try:
-        from lib.findings_writer import finding_matches_component
-    except ImportError:  # pragma: no cover
-        finding_matches_component = None
-        if _uncovered:
-            print("==> auto-close ABORTED: per-component scope was recorded but "
-                  "the matcher could not be imported. Refusing to close rather "
-                  "than close rows the scope was meant to hold back.")
-            return []
 
     try:
         with psycopg.connect(dsn) as conn:
