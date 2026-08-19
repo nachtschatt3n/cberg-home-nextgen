@@ -150,9 +150,55 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    git commit -m "feat(superset): retire bundled bitnamilegacy postgres (metadata DB now postgres 17.11)"
    git push
    ```
-   Flux removes the `superset-postgresql` StatefulSet and Service. Superset itself
-   should **not** restart — its `DB_HOST` did not change. If it does restart, that is
-   the reloader reacting to the release; confirm it comes back on `superset-pg`.
+   Flux removes the `superset-postgresql` StatefulSet and Service. The RUNNING pods do
+   not restart on account of `DB_HOST` — theirs did not change.
+
+   **But the no-restart claim was materially wrong about this plan's blast radius, and
+   was corrected 2026-08-19 (found by the post-cutover doc audit). Do not run this plan
+   until the step below is done.** The chart's `wait-for-postgres` init container gets
+   **only** the chart-generated `superset-env` Secret — `superset-secrets` reaches the
+   main containers, not the init containers — and `superset-env.DB_HOST` is still
+   `superset-postgresql`, because `superset.db.host` in `_helpers.tpl` coalesces
+   `.Values.database.host` first and falls through to `<release>-postgresql`:
+
+   ```bash
+   mise exec -- kubectl get secret -n databases superset-env     -o jsonpath='{.data.DB_HOST}' | base64 -d   # superset-postgresql  <- STALE
+   mise exec -- kubectl get secret -n databases superset-secrets -o jsonpath='{.data.DB_HOST}' | base64 -d   # superset-pg
+   mise exec -- kubectl get deploy -n databases superset -o jsonpath='{.spec.template.spec.initContainers[0].envFrom}'
+   ```
+
+   The init container opens `/dev/tcp/$DB_HOST/$DB_PORT`, loops for 120 s, then
+   `exit 1`. While the old Service exists the gate passes and nothing is visible. **The
+   moment this plan deletes that Service, every subsequent restart of `superset`,
+   `superset-worker` and `superset-celerybeat` fails** — a latent outage armed by the
+   stage-3 cutover, detonated by stage 4. The same init block is injected into the
+   `superset-init-db` post-upgrade hook Job, so the hook that runs *during* this very
+   upgrade is a candidate to hang on it too.
+
+   **Required, BEFORE `postgresql.enabled: false`** — set the DB equivalent of the
+   `cache.host` fix the HelmRelease already carries for Redis (added for exactly this
+   trap during the 2026-08-17 redis cutover):
+
+   ```yaml
+   # kubernetes/apps/databases/superset/app/helmrelease.yaml, under spec.values
+   database:
+     host: superset-pg
+   ```
+
+   Land it as its own commit and let it settle, **not** folded into the decommission
+   commit: it is a `spec.values` change, so it fires the `superset-init-db` post-upgrade
+   hook, and you want that hook to run while the old Service is still up and the
+   rollback is still one revert away. Then assert before proceeding:
+
+   ```bash
+   mise exec -- kubectl get secret -n databases superset-env -o jsonpath='{.data.DB_HOST}' | base64 -d   # superset-pg
+   mise exec -- kubectl delete pod -n databases -l app.kubernetes.io/name=superset   # deliberate restart: prove the init gate passes
+   mise exec -- kubectl rollout status deploy/superset -n databases --timeout=600s
+   ```
+
+   Only once a *deliberately restarted* Superset comes up clean is it safe to remove the
+   old Service. If it does restart during the decommission itself, that is the reloader
+   reacting to the release; confirm it comes back on `superset-pg`.
 6. Clear the marker: `runbooks/update-marker.sh clear superset`.
 
 ## 4) Verification
