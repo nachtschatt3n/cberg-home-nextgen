@@ -23,14 +23,45 @@ component the message happens to name.
 
 ## 2) Overview
 
-Two distinct messages, two distinct meanings:
+**Every Kustomization re-reconciles on every new source revision — including
+the ones you depend on.** While a dependency is mid-reconcile its `Ready`
+condition goes `Unknown`, and any dependent that happens to evaluate the gate
+in that window records a failure. So one push produces a rolling wave of
+not-Ready dependents that has nothing to do with health.
 
-| Message | Meaning | Action |
-|---|---|---|
-| `dependency '<ns>/<name>' is not ready` | the dependency is genuinely unhealthy | investigate the dependency |
-| `dependency '<ns>/<name>' revision is not up to date` | the dependency is *healthy* but has not yet applied the revision this dependent is at | **wait** — this is the revision gate |
+Three states appear during that wave, and **none of them implies a fault**:
 
-The second is the one that gets misread. It names a component that is fine.
+| Status / message | What it means |
+|---|---|
+| `Unknown` — `Reconciliation in progress` | this Kustomization is mid-apply right now |
+| `False` — `dependency '<ns>/<name>' revision is not up to date` | the dependency is healthy but has not yet applied the revision this dependent is at |
+| `False` — `dependency '<ns>/<name>' is not ready` | at the moment this dependent last evaluated the gate, the dependency was not Ready — **usually because the dependency was itself mid-reconcile** |
+
+> **The messages are LAST-ATTEMPT SNAPSHOTS, not live state.** A dependent
+> keeps displaying the conclusion it drew at its last reconcile until its next
+> one. The dependency can be perfectly healthy *now* while a dozen dependents
+> still advertise it as broken.
+>
+> Measured 2026-08-19: `storage/longhorn` went `Ready=True` at **06:17:42Z**;
+> `ai/anythingllm`, `office/nextcloud` and `home-automation/frigate` had
+> concluded `dependency 'storage/longhorn' is not ready` at **06:17:41-42Z** —
+> at or one second *before* the flip. Root demonstrably healthy (webhook
+> endpoints 3/3, DaemonSet 3/3, HelmRelease Ready), messages stale by seconds.
+
+**Therefore `is not ready` does NOT mean "investigate the dependency"** — that
+rule, in the first version of this SOP, produced a false positive within
+minutes of being written. The only sound triage is to ask the named dependency
+its CURRENT state, not to read the dependent's stale opinion of it:
+
+```bash
+# The dependent's message names a dependency. Ask THAT object directly.
+mise exec -- kubectl get kustomization -n storage longhorn \
+  -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status} {.lastTransitionTime} {.message}{"\n"}{end}'
+```
+
+- dependency `Ready=True`, and its `lastTransitionTime` is at or after the
+  dependent's → **stale snapshot, wait**;
+- dependency genuinely not Ready for minutes → **investigate the dependency**.
 
 **Measured, 2026-08-19.** Three commits landed 190 seconds apart during a
 Longhorn chart upgrade. `storage/longhorn` has **36 direct dependents** plus
@@ -50,21 +81,29 @@ N/A — this is Flux behaviour, not a deployable artefact.
 
 **When you see a wide not-Ready fan-out after a push:**
 
-1. Split the messages by kind before doing anything else:
+1. Identify the ROOT the messages point at (usually one or two objects), and
+   ask those objects their current state — do not triage on the dependents'
+   messages, which are stale snapshots. Counting message shapes tells you
+   nothing: in one measured fan-out the split was 0 *revision is not up to
+   date* vs 15 *is not ready*, with the root fully healthy the whole time.
+
+2. Judge recovery by **revision convergence**, measured from the API against
+   the revision the CLUSTER actually fetched — not local `git rev-parse HEAD`
+   (in a shared repo another agent's push moves it under you, and the cluster
+   only knows what its GitRepository pulled), and not by grepping formatted
+   CLI output (`flux get | grep -cv` miscounted 98 where the API showed 89
+   converged of 136):
 
    ```bash
-   mise exec -- flux get kustomizations -A | grep "revision is not up to date" | wc -l
-   mise exec -- flux get kustomizations -A | grep "is not ready"              | wc -l
-   ```
-
-   A population dominated by *revision is not up to date* is the gate, not a
-   fault.
-
-2. Judge recovery by **revision convergence**, which is monotonic per-revision:
-
-   ```bash
-   HEAD=$(git rev-parse --short HEAD)
-   mise exec -- flux get kustomizations -A | grep -cv "$HEAD"   # -> 0 when converged
+   REV=$(mise exec -- kubectl get gitrepository -n flux-system flux-system \
+           -o jsonpath='{.status.artifact.revision}')
+   mise exec -- kubectl get kustomizations -A -o json | mise exec -- python3 -c "
+   import sys, json
+   d = json.load(sys.stdin); rev = '$REV'
+   lag = [i['metadata']['namespace'] + '/' + i['metadata']['name']
+          for i in d['items']
+          if (i.get('status', {}).get('lastAppliedRevision') or '') != rev]
+   print(f'{len(d[\"items\"]) - len(lag)}/{len(d[\"items\"])} converged; lagging: {len(lag)}')"
    ```
 
 3. **Stop pushing while you are measuring.** Each further commit re-arms the
@@ -85,13 +124,17 @@ office  nextcloud-mcp  False  dependency 'office/nextcloud' revision is not up t
 `office/nextcloud` is healthy. `nextcloud-mcp`'s source is at a newer revision
 than nextcloud has applied. Nothing to do.
 
-### Example 2: an actual dependency failure
+### Example 2: the message that looks like a failure and is not
 
 ```
 databases  memgraph  False  dependency 'storage/longhorn' is not ready
 ```
 
-Here `storage/longhorn` really is not Ready — investigate it, not memgraph.
+Do not act on this line. Ask `storage/longhorn` directly. If it reports
+`Ready=True` with a `lastTransitionTime` at or after memgraph's last
+conclusion, memgraph is showing a stale snapshot from while longhorn was
+mid-reconcile — wait for memgraph's next interval. Only if longhorn is *still*
+not Ready, minutes later, is there anything to investigate.
 
 ## 6) Verification Tests
 
@@ -107,8 +150,9 @@ mise exec -- flux get kustomizations -A | awk '$5!="True"' | grep -v "dependency
 ## 7) Troubleshooting
 
 - **Set is static, not rotating** — membership unchanged across several polls
-  with no new commits: that is a stall, not the gate. Investigate the named
-  dependency.
+  *and no new commits landed in that time*: that is a stall, not the gate.
+  Confirm by asking the named dependency its current state; if it has been
+  not-Ready for minutes rather than seconds, investigate it.
 - **A dependency is Ready but its dependents never converge** — check the
   dependency's `status.lastAppliedRevision` against the GitRepository revision;
   a dependency wedged on an *older* revision blocks the whole subtree
@@ -162,6 +206,14 @@ revision, which re-arms the gate again across the same subtree.
 
 ## Version History
 
+- `2026.08.19` (b): Corrected within the hour, by its own diagnostic. The
+  original triage rule ("a population dominated by `is not ready` means
+  investigate the dependency") gave a false positive on a demonstrably healthy
+  `storage/longhorn`: dependents' messages are last-attempt SNAPSHOTS, and a
+  dependency that is merely mid-reconcile makes its dependents record
+  `is not ready`. Also: convergence must be measured from the API against the
+  GitRepository's fetched revision, not by grepping `flux get` output against
+  local `git rev-parse HEAD`.
 - `2026.08.19`: Created. Written after a Longhorn chart upgrade produced ~60
   not-Ready Kustomizations, where the tail turned out to be driven by our own
   commit cadence rather than by storage. Corrects the earlier assumption that

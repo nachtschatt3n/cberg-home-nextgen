@@ -629,11 +629,17 @@ not-Ready set and 12 *different* ones entered it, while the count moved only
 27 → 26. Kustomizations were going not-Ready **while the webhook was already
 healthy**, which is the observation that exposes a second mechanism:
 
-> **Flux's `dependsOn` is revision-gated, not merely readiness-gated.** A
-> dependent will not proceed until its dependency has applied *the same source
-> revision the dependent is at* — the giveaway is the message
-> `dependency 'storage/longhorn' revision is not up to date`, as distinct from
-> `... is not ready`. So **every new commit you push re-arms the gate** for all
+> **Flux's `dependsOn` is revision-gated, not merely readiness-gated**, and a
+> new revision makes every Kustomization re-reconcile — including the ones
+> others depend on. A dependent will not proceed until its dependency has
+> applied *the same source revision the dependent is at*, and any dependent
+> that evaluates the gate while the dependency is mid-reconcile records a
+> failure. **Both** `revision is not up to date` **and** `is not ready` appear
+> during this, and neither implies a fault: the messages are last-attempt
+> snapshots, so a healthy `storage/longhorn` can be advertised as broken by a
+> dozen dependents for a full reconcile interval. Never triage on the
+> dependents' text — ask `storage/longhorn` itself. So **every new commit you
+> push re-arms the gate** for all
 > 36 direct dependents plus their transitive dependents, staggered by each
 > one's own reconcile interval. Three commits in 190 seconds (as happened here)
 > will keep the set rotating long after Longhorn is fine — with *zero* Longhorn
