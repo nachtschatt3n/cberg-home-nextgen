@@ -1964,6 +1964,18 @@ def _newer_upstream_tag_exists(image_ref: str):
         return None
 
 
+# Components whose Helm CHART version is published in LOCKSTEP with the app
+# version, so the Chart cell is a valid stand-in when the App cell is empty.
+# This is an explicit per-component opt-in, never a blanket fallback: for most
+# charts the two are unrelated (app-template 5.1.0 says nothing about the app
+# inside it), and guessing there would feed OSV a version from the wrong
+# software. Verify BOTH axes before adding a name here — the chart version and
+# every image the chart runs must carry the same version string.
+#   cert-manager: chart v1.21.1 runs controller/cainjector/webhook all at
+#   v1.21.1 (verified against the live cluster 2026-08-19).
+_CHART_VERSION_IS_APP_VERSION = {"cert-manager"}
+
+
 def _parse_version_snapshot(content: str) -> tuple[list[tuple[str, str]], list[str]]:
     """Extract (deployment, app_version) from version-check-current.md.
 
@@ -2002,6 +2014,22 @@ def _parse_version_snapshot(content: str) -> tuple[list[tuple[str, str]], list[s
         app = re.sub(r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*',
                      '', app).lstrip("v")
         if not re.fullmatch(r'\d+(\.\d+)*', app):
+            # Before dropping, allow the Chart cell for the few components whose
+            # chart and app versions move together. Without this, cert-manager --
+            # which HAS a verified OSV mapping -- is dropped for an empty App cell
+            # and silently never checked, the exact trap this function's docstring
+            # warns about.
+            chart_ver = ""
+            if name in _CHART_VERSION_IS_APP_VERSION:
+                raw = cells[3]
+                chart_ver = raw.split("@")[0].split()[0] if raw.split() else ""
+                chart_ver = re.sub(
+                    r'[-_](alpine|bookworm|bullseye|jammy|focal|slim|rootless).*',
+                    '', chart_ver).lstrip("v")
+            if re.fullmatch(r'\d+(\.\d+)*', chart_ver):
+                seen.add(name)
+                out.append((name, chart_ver))
+                continue
             seen.add(name)
             dropped.append(name)
             continue

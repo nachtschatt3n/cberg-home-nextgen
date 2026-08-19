@@ -170,19 +170,63 @@ class TestVersionSnapshotParser(unittest.TestCase):
         self.assertNotIn("Deployment", rows)
 
     def test_dropped_rows_are_reported_not_swallowed(self):
-        """A mapped component with no comparable version must not vanish.
+        """A mapped component with no resolvable version must not vanish.
 
-        cert-manager's App cell is `-` (its version is in the Chart column), so
-        it is dropped by the version filter. It was then in NEITHER `candidates`
-        NOR `unmapped`, so it was never queried and never reported as
-        unchecked — the same silently-folded-into-a-green shape one layer down.
+        Such a component would otherwise be in NEITHER `candidates` NOR
+        `unmapped`, so it is never queried and never reported as unchecked —
+        the silently-folded-into-a-green shape one layer down.
+
+        Fixture uses superset, not cert-manager: cert-manager is now resolvable
+        from the Chart column (see the lockstep test below), so it no longer
+        exercises this path. The invariant is unchanged.
         """
-        table = self.TABLE + "| `cert-manager` | `cert-manager` | 1.21.1 | x | - | - |\n"
+        # Standalone table: every mapped component already appears in
+        # self.TABLE with a good version, and the parser keeps only the first
+        # row per name, so appending a second superset row would be ignored.
+        table = (
+            "\n| Deployment | Namespace | Chart | Image | App | Complexity |\n"
+            "| `superset` | `databases` | 1.2.3 | x | - | - |\n"
+        )
         rows, dropped = sc._parse_version_snapshot(table)
-        self.assertIn("cert-manager", dropped)
-        self.assertNotIn("cert-manager", dict(rows))
-        self.assertIn("cert-manager", sc._OSV_PACKAGES,
-                      "fixture assumes cert-manager IS mapped")
+        self.assertIn("superset", dropped)
+        self.assertNotIn("superset", dict(rows))
+        self.assertIn("superset", sc._OSV_PACKAGES,
+                      "fixture assumes superset IS mapped")
+        self.assertNotIn("superset", sc._CHART_VERSION_IS_APP_VERSION,
+                         "fixture assumes superset does NOT opt into the chart fallback")
+
+    def test_lockstep_component_resolves_from_the_chart_column(self):
+        """cert-manager ships chart and app in lockstep, so an empty App cell
+        must fall back to the Chart cell rather than dropping the component."""
+        table = (
+            "\n| Deployment | Namespace | Chart | Image | App | Complexity |\n"
+            "| `cert-manager` | `cert-manager` | v1.21.1 | x | - | - |\n"
+        )
+        rows, dropped = sc._parse_version_snapshot(table)
+        self.assertEqual(dict(rows).get("cert-manager"), "1.21.1")
+        self.assertNotIn("cert-manager", dropped)
+
+    def test_chart_fallback_is_opt_in_only(self):
+        """The fallback must NOT become a blanket rule.
+
+        A chart version is usually unrelated to the app inside it
+        (app-template 5.1.0 says nothing about the app), so feeding it to OSV
+        would query the wrong software's version. Any component not explicitly
+        opted in must still be dropped even when its Chart cell parses cleanly
+        as a version.
+        """
+        table = (
+            "\n| Deployment | Namespace | Chart | Image | App | Complexity |\n"
+            "| `notlockstep` | `ns` | 9.9.9 | x | - | - |\n"
+        )
+        rows, dropped = sc._parse_version_snapshot(table)
+        self.assertNotIn("notlockstep", dict(rows),
+                         "a non-opted-in component must not borrow the chart version")
+        self.assertIn("notlockstep", dropped)
+        for name in sc._CHART_VERSION_IS_APP_VERSION:
+            self.assertIn(name, sc._OSV_PACKAGES,
+                          f"{name} opts into the chart fallback but has no OSV mapping, "
+                          "so the fallback buys nothing")
 
 
 class TestTransientClassifier(unittest.TestCase):
