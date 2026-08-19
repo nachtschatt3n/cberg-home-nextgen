@@ -65,6 +65,82 @@ go/no-go by default — never run fully unattended.
 - Monitor reconciliation events in the Flux system
 - Do not make direct modifications to the Kubernetes cluster
 
+### Committing in a SHARED worktree (several agents at once)
+
+Multiple sessions routinely work in this one checkout, and **git's index is
+shared state**. Path-scoped staging is therefore NOT isolation: a concurrent
+session can stage its own hunk between your `git add` and your `git commit`,
+and it rides into your commit under your message. This has happened twice —
+most recently a Longhorn chart bump landing inside a git-hooks commit
+(`5f7cf141`), which left a Flux-reconciled storage change with no review trail
+under its own subject.
+
+**Use `git commit --only` (`-o`) with explicit paths.** It builds the commit
+from HEAD plus the named paths, *disregarding whatever else is staged*, so a
+foreign hunk in the shared index cannot ride along:
+
+```bash
+# Safe: commits exactly these paths, whatever else is in the index
+git commit --only runbooks/lib/findings_writer.py runbooks/sweep-run.py -F msg.txt
+
+# NOT sufficient on its own — the index is shared
+git add <paths> && git commit -F msg.txt
+```
+
+**Then verify before you push**, because the cost of noticing late is an
+untraceable change to someone else's component:
+
+```bash
+git show --stat HEAD    # is every file here actually yours?
+```
+
+If a foreign hunk did ride along and it is already pushed: **do not rewrite
+history** (another session may have built on it). Record the provenance in a
+follow-up commit naming the stray file and its real owner — see `3f9923c9` for
+the shape.
+
+Other rules that still apply: work directly on `main` (no feature branches in
+this repo), stage specific hunks rather than whole files, and never
+`git add -A`.
+
+### Committing in a SHARED worktree (several agents at once)
+
+Multiple sessions routinely work in this one checkout, and **git's index is
+shared state**. Path-scoped staging is therefore NOT isolation: a concurrent
+session can stage its own hunk between your `git add` and your `git commit`,
+and it rides into your commit under your message. This has happened twice —
+most recently a Longhorn chart bump landing inside a git-hooks commit
+(`5f7cf141`), which left a Flux-reconciled storage change with no review trail
+under its own subject.
+
+**Use `git commit --only` (`-o`) with explicit paths.** It builds the commit
+from HEAD plus the named paths, *disregarding whatever else is staged*, so a
+foreign hunk in the shared index cannot ride along:
+
+```bash
+# Safe: commits exactly these paths, whatever else is in the index
+git commit --only runbooks/lib/findings_writer.py runbooks/sweep-run.py -F msg.txt
+
+# NOT sufficient on its own — the index is shared
+git add <paths> && git commit -F msg.txt
+```
+
+**Then verify before you push**, because the cost of noticing late is an
+untraceable change to someone else's component:
+
+```bash
+git show --stat HEAD    # is every file here actually yours?
+```
+
+If a foreign hunk did ride along and it is already pushed: **do not rewrite
+history** (another session may have built on it). Record the provenance in a
+follow-up commit naming the stray file and its real owner — see `3f9923c9` for
+the shape.
+
+Other rules that still apply: work directly on `main` (no feature branches in
+this repo), stage specific hunks rather than whole files, and never
+`git add -A`.
+
 ## SOPS Encryption Rules
 
 ### File Naming Convention

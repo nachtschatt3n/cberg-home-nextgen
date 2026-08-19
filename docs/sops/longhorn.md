@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `Platform`
 
 ---
@@ -548,6 +548,96 @@ kubectl get replicas.longhorn.io -n storage -l longhornvolume={volume-name} \
   -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,STATE:.status.currentState
 # Expected: numberOfReplicas rows, each on a distinct node, all state=running
 ```
+
+### Chart Upgrade Storm — dozens of Kustomizations go not-Ready at once
+
+**Symptom.** Minutes into a routine Longhorn chart upgrade, `flux get
+kustomizations -A` shows a cluster-wide failure — 60 Kustomizations not-Ready
+in the 2026-08-19 window — across namespaces that have nothing to do with each
+other:
+
+```
+databases    memgraph        False   dependency 'storage/longhorn' is not ready
+monitoring   grafana         False   dependency 'storage/longhorn' is not ready
+office       vaultwarden     False   dependency 'storage/longhorn' is not ready
+...
+```
+
+with `storage` events showing:
+
+```
+Warning  Unhealthy  pod/longhorn-manager-<id>  Readiness probe failed:
+         Get "https://10.x.x.x:9502/v1/healthz": connect: connection refused
+Warning  FailedPreStopHook  pod/longhorn-csi-plugin-<id>  PreStopHook failed
+```
+
+**This is expected and self-clearing. Do not roll it back.** Nothing is
+broken, no PVC is lost, and no running workload is evicted.
+
+**Why it happens.** The Longhorn **admission webhook is served by
+`longhorn-manager` itself on port 9502** — there is no separate webhook
+Deployment to check (`kubectl get deploy -n storage | grep webhook` returns
+nothing, which misleads people into thinking the webhook is gone). A chart
+upgrade rolls the `longhorn-manager` **DaemonSet**, so for the span of that
+roll the `longhorn-admission-webhook` Service has **no healthy endpoints**, and
+`longhorn-webhook-validator` / `longhorn-webhook-mutator` have nothing to call.
+
+That produces a two-layer cascade, and the second layer is what makes it look
+catastrophic:
+
+1. Manager pods fail readiness → the `storage/longhorn` HelmRelease and
+   Kustomization go not-Ready.
+2. **35 Kustomizations declare `dependsOn: storage/longhorn`**, and Flux fans
+   the failure out to every one of them plus their transitive dependents
+   (`monitoring/grafana` → `monitoring/unpoller`, and so on). Those downstream
+   Kustomizations never touched a Longhorn object — they are reporting their
+   *dependency's* state, which is why the blast radius looks unrelated to
+   storage.
+
+**Confirm it is CLEARING, not wedged.** Watch the endpoint list — it is the
+single load-bearing signal, because everything above is downstream of it:
+
+```bash
+# 1) The webhook must repopulate to one endpoint per node (3 here).
+mise exec -- kubectl get endpoints -n storage longhorn-admission-webhook
+#    healthy: 10.69.0.157:9502,10.69.1.246:9502,10.69.2.183:9502
+#    mid-roll: fewer, or <none>  -> still rolling, keep waiting
+
+# 2) The DaemonSet must converge to DESIRED == READY.
+mise exec -- kubectl get ds -n storage longhorn-manager
+
+# 3) Then the HelmRelease, then the dependents (in that order).
+mise exec -- flux get helmrelease -n storage longhorn
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
+```
+
+Expected: the not-Ready count **falls monotonically** as the roll proceeds
+(60 → 11 → 0 in the 2026-08-19 window). Flux retries the dependents on its own
+interval, so they recover without intervention — resist the urge to
+`flux reconcile` each one, which only adds load while the webhook is still
+down.
+
+**When it IS wedged** (act only if these hold):
+
+- `longhorn-manager` DaemonSet stuck below DESIRED for **more than ~10 minutes**
+  with no progress, or
+- the webhook endpoint list stays empty while manager pods report Ready
+  (a Service selector / label mismatch, not an upgrade artefact), or
+- the not-Ready count stops falling and manager pods are `CrashLoopBackOff`
+  rather than `Terminating`/`ContainerCreating`.
+
+Then diagnose the manager roll itself (`kubectl -n storage logs ds/longhorn-manager
+--previous`), not the downstream Kustomizations — every one of those is a
+symptom.
+
+**`FailedPreStopHook` on `longhorn-csi-plugin` is noise here.** The plugin pods
+are being replaced in the same roll and their pre-stop hook tries to reach the
+manager that is already gone. It does not indicate data-path damage.
+
+**Planning note.** Because the dependency fan-out is this wide, a Longhorn
+chart upgrade is not a "storage-only" window — schedule it where a 5-15 minute
+cluster-wide Flux amber is acceptable, and tell whoever is watching the board,
+or they will page on a healthy cluster.
 
 ### Stale Stopped Replicas
 
