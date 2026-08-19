@@ -79,6 +79,42 @@ way and draining.
 (`longhorn-1.12.1-chart`) and is a hard `depends_on` — v1.12.1 must be the
 cluster's default engine image before anything drains onto it.
 
+## 1b) TRAP FOUND 2026-08-19 during the chart half — read before any longhorn bump
+
+The chart bump to 1.12.1 shipped a **silent network-posture change inside a
+patch release**, and it broke monitoring within seconds.
+
+Chart 1.12.1 adds `networkPolicies.restrictInternalTraffic`, **defaulting to
+`true`**. It renders NetworkPolicies even though `networkPolicies.enabled` is
+still `false` — the two are independent, which is not obvious from the values
+file. Measured:
+
+```
+helm template … --version 1.12.0                                      -> 0 NetworkPolicy
+helm template … --version 1.12.1                                      -> 6 NetworkPolicy
+helm template … --version 1.12.1 --set networkPolicies.restrictInternalTraffic=false -> 0
+```
+
+`netpol/storage/longhorn-manager` admits only longhorn-internal pods. Prometheus
+is not in the allow-list, so all three `longhorn-backend` scrape targets went
+DOWN (`context deadline exceeded` on `:9500/metrics`) and `LonghornManagerDown`
+×3 + `TargetDown` fired **permanently**. Longhorn itself stayed healthy (93/93
+volumes attached + healthy) — so this was a monitoring blind spot, which is the
+dangerous kind: a standing false alarm masks a real future manager failure.
+
+Pinned to `false` in the HelmRelease to keep 1.12.1 a true patch bump.
+
+**The hardening is worth adopting — but as its own vetted plan, not as a side
+effect.** That plan must (a) allow-list `monitoring` to `longhorn-manager:9500`,
+and (b) verify the ~10 nightly `storage` CronJobs under the policies — backups
+`0 3 * * *`, filesystem-trim `0 2 * * *`, snapshot-cleanup `30 2 * * *`. None of
+them had run under the new policies when this was found, so their blast radius
+is still untested. Do not adopt it blind.
+
+**Lesson for this plan:** verification for a storage-layer change must include
+"Prometheus can still scrape it", not only "the volumes are healthy". §4 below
+inherits that.
+
 ## 2) Pre-checks
 
 ```bash
