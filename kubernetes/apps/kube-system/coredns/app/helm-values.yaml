@@ -1,6 +1,12 @@
 ---
 fullnameOverride: coredns
 k8sAppLabelOverride: kube-dns
+# Chart 1.47.0 is the newest published chart and still ships appVersion 1.14.6,
+# so the image is pinned ahead of the chart's tested appVersion. Re-check on
+# every chart bump: once a chart ships >= this appVersion, drop this block and
+# let the chart own the tag again.
+image:
+  tag: "1.14.7"
 serviceAccount:
   create: true
 service:
@@ -20,6 +26,8 @@ servers:
           class error
       - name: forward
         parameters: . 192.168.55.101
+        configBlock: |-
+          max_connect_attempts 0
       - name: cache
         parameters: 30
       - name: loop
@@ -48,6 +56,8 @@ servers:
           fallthrough in-addr.arpa ip6.arpa
       - name: forward
         parameters: . /etc/resolv.conf
+        configBlock: |-
+          max_connect_attempts 0
       - name: cache
         parameters: 30
       - name: loop
