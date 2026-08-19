@@ -45,7 +45,7 @@ def _activate_mise() -> None:
 
 _activate_mise()
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Acceptance lists used to live in runbooks/security_check_acceptances.py
@@ -1415,6 +1415,198 @@ def _is_kernel_header_pkg(pkg_name: str, result_class: str) -> bool:
     return name in _KERNEL_HEADER_PKGS or name.startswith(_KERNEL_HEADER_PREFIXES)
 
 
+# ---------------------------------------------------------------------------
+# Go PSEUDO-VERSIONS: a version string that carries no comparable version.
+#
+# A Go binary built from a VCS checkout that carries no semver tag is stamped
+# with a PSEUDO-VERSION — `v0.0.0-20260819003913-427fc80ed9ca`: a synthetic
+# base (`v0.0.0`), the commit's UTC timestamp, and the commit hash. Trivy reads
+# it out of the buildinfo and compares it against the advisory's FixedVersion
+# with ordinary semver rules. `v0.0.0-…` sorts below every real release, so the
+# comparison says "vulnerable" for EVERY advisory against that module,
+# regardless of what the source actually contained.
+#
+# That is not a Trivy bug so much as an absence of information: the base
+# `v0.0.0` is a placeholder, not a measurement. The defect is ours — we counted
+# the result as `fixable`, which asserts two things we had not established
+# (the code is vulnerable, and a bump fixes it) from a comparison that could
+# not distinguish either way.
+#
+# Measured on the running fleet 2026-08-19: 44 fixable CRITICAL/HIGH findings
+# across 4 of 206 scanned images sit on a pseudo-version. It is not a coredns
+# quirk — any Go binary can carry one, for its own main module or for a
+# dependency pinned at a commit rather than a release.
+#
+# Three routes, tried in order, then an explicit unknown. Each route either
+# ESTABLISHES a real comparison or declines; nothing is dropped on a hunch.
+#
+#   A. MAIN-MODULE IDENTITY (deterministic). When the pseudo-versioned module
+#      IS the image's own program — the module path's leaf equals the image
+#      repository's leaf — the real version is the one printed on the image:
+#      `coredns/coredns:1.14.7` is coredns 1.14.7 no matter what the buildinfo
+#      says. Compare the TAG against FixedVersion. This route can also come
+#      back FIXABLE (tag genuinely older than the fix), which is the point: it
+#      restores the comparison rather than suppressing it.
+#
+#   B. PSEUDO-vs-PSEUDO (deterministic). When FixedVersion is ITSELF a
+#      pseudo-version (common for golang.org/x/* advisories fixed before the
+#      module started tagging releases), the two embedded commit timestamps are
+#      directly comparable. No inference.
+#
+#   C. BUILD-TIME vs ADVISORY-PUBLICATION (bounded inference). The commit
+#      timestamp says when the source was written. An advisory that names a
+#      FixedVersion was, at publication, describing a fix that existed. So a
+#      build whose source postdates publication by a clear margin was cut from
+#      a tree that already had the fix; one that predates publication by a
+#      clear margin cannot have contained it. The margin absorbs the two ways
+#      publication drifts from the fix commit (embargoed fixes land early;
+#      advisories are sometimes amended with a FixedVersion later), and inside
+#      the margin the route declines rather than guessing.
+#
+#   D. UNDETERMINABLE. Everything else. Counted and reported in its own bucket
+#      with its own wording — never folded into `fixable` (which would repeat
+#      the original false positive) and never into `nofix` (which would launder
+#      an unknown into an accepted risk). Per docs/sops/audit-script-correctness.md:
+#      a check that could not measure must say so.
+_GO_PSEUDO_RE = re.compile(
+    r"^v?\d+\.\d+\.\d+(?:-0)?-(?P<ts>\d{14})-(?P<rev>[0-9a-f]{12})$")
+
+# Slack between an advisory's PublishedDate and the fix commit it names, in
+# both directions. Route C only concludes OUTSIDE this window. 90 days is
+# deliberately generous: the cost of being wrong is either a hidden real CVE
+# or a fabricated one, and the cost of declining is a finding that says
+# "undetermined" — which is the honest answer and still surfaces.
+_PSEUDO_FIX_MARGIN_DAYS = 90
+
+
+def _parse_go_pseudo_version(ver: str) -> datetime | None:
+    """The commit timestamp inside a Go pseudo-version, or None if it isn't one."""
+    m = _GO_PSEUDO_RE.match((ver or "").strip())
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group("ts"), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _semver_key(ver: str) -> tuple[int, ...] | None:
+    """Numeric release key for a plain version string, or None if it isn't one.
+
+    Deliberately strict: a leading `v` is tolerated, a trailing pre-release or
+    build suffix makes the string UNCOMPARABLE (returns None) rather than being
+    silently truncated to its release part -- `1.14.0-rc1` is not `1.14.0`, and
+    treating it as such is the same "assert what you did not measure" mistake
+    one level down.
+    """
+    s = (ver or "").strip().lstrip("vV")
+    if not s or not re.fullmatch(r"\d+(?:\.\d+)*", s):
+        return None
+    return tuple(int(p) for p in s.split("."))
+
+
+def _cmp_semver(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    """-1/0/1 comparing release tuples of possibly different length."""
+    n = max(len(a), len(b))
+    a = a + (0,) * (n - len(a))
+    b = b + (0,) * (n - len(b))
+    return (a > b) - (a < b)
+
+
+def _repo_leaf(image_ref: str) -> str:
+    """Last path element of an image reference's repository, lowercased."""
+    ref = (image_ref or "").split("@")[0]
+    # Strip the tag, but not a registry port (`host:5000/repo`).
+    head, _, tail = ref.rpartition(":")
+    if head and "/" not in tail:
+        ref = head
+    return ref.rstrip("/").rpartition("/")[2].lower()
+
+
+def _image_tag(image_ref: str) -> str:
+    """The tag of an image reference, or "" for a bare/digest-only reference."""
+    ref = (image_ref or "").split("@")[0]
+    head, sep, tail = ref.rpartition(":")
+    if not sep or not head or "/" in tail:
+        return ""
+    return tail
+
+
+def _module_leaf(pkg_name: str) -> str:
+    """Last path element of a Go module path, with a /vN major suffix removed."""
+    parts = [p for p in (pkg_name or "").lower().split("/") if p]
+    if not parts:
+        return ""
+    if len(parts) > 1 and re.fullmatch(r"v[2-9]\d*", parts[-1]):
+        parts.pop()
+    return parts[-1]
+
+
+def _parse_trivy_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    t = s.strip().replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def classify_pseudo_version(vuln: dict, result_class: str, artifact_name: str) -> str | None:
+    """Re-decide a finding whose InstalledVersion is a Go pseudo-version.
+
+    Returns:
+      None            -- not this case; the caller's normal rules apply.
+      "fixable"       -- a real comparison was established and the installed
+                         code IS older than the fix.
+      "fixed"         -- a real comparison was established and the installed
+                         code already POSTDATES the fix. Not a finding.
+      "undetermined"  -- could not establish either. Reported as undetermined.
+
+    Only ever consulted for findings Trivy already called fixable (non-empty
+    FixedVersion); the no-upstream-fix class is untouched.
+    """
+    if result_class != "lang-pkgs":
+        return None
+    built_at = _parse_go_pseudo_version(vuln.get("InstalledVersion", ""))
+    if built_at is None:
+        return None  # a real version string -- Trivy's comparison stands
+
+    fixed_raw = (vuln.get("FixedVersion") or "").strip()
+    # Trivy sometimes lists several fix targets ("1.2.3, 2.0.1"); the LOWEST is
+    # the earliest release carrying the fix, which is the bar to clear.
+    fixed_parts = [p.strip() for p in re.split(r"[,\s]+", fixed_raw) if p.strip()]
+
+    # -- Route A: the pseudo-versioned module is the image's own program. -----
+    pkg_leaf = _module_leaf(vuln.get("PkgName", ""))
+    if pkg_leaf and pkg_leaf == _repo_leaf(artifact_name):
+        tag_key = _semver_key(_image_tag(artifact_name))
+        fixed_keys = [k for k in (_semver_key(p) for p in fixed_parts) if k]
+        if tag_key and fixed_keys:
+            # Cleared if the tag reaches the LOWEST named fix release.
+            if any(_cmp_semver(tag_key, fk) >= 0 for fk in fixed_keys):
+                return "fixed"
+            return "fixable"
+
+    # -- Route B: FixedVersion is itself a pseudo-version -> compare commits. -
+    fixed_stamps = [d for d in (_parse_go_pseudo_version(p) for p in fixed_parts) if d]
+    if fixed_stamps:
+        return "fixed" if built_at >= min(fixed_stamps) else "fixable"
+
+    # -- Route C: build time vs advisory publication, outside the margin. -----
+    published = _parse_trivy_date(vuln.get("PublishedDate"))
+    if published:
+        margin = timedelta(days=_PSEUDO_FIX_MARGIN_DAYS)
+        if built_at >= published + margin:
+            return "fixed"
+        if built_at <= published - margin:
+            return "fixable"
+
+    # -- Route D ------------------------------------------------------------
+    return "undetermined"
+
+
 # Version of the TALLY LOGIC below (not of the cache file format). It is
 # written into the Trivy cache and compared on load: a cache produced by a
 # different tally version is DISCARDED, not served.
@@ -1428,7 +1620,9 @@ def _is_kernel_header_pkg(pkg_name: str, result_class: str) -> bool:
 #
 # BUMP THIS whenever tally_trivy_report() or the fix/no-fix classification it
 # feeds changes in a way that alters the numbers.
-_TRIVY_TALLY_VERSION = 2  # 2 = kernel-header packages excluded from fixable tallies
+_TRIVY_TALLY_VERSION = 3  # 3 = Go pseudo-versions re-classified (fixed / fixable /
+                         #     undetermined) instead of always-fixable
+                         # 2 = kernel-header packages excluded from fixable tallies
 
 
 def tally_trivy_report(report: dict) -> dict | None:
@@ -1440,13 +1634,22 @@ def tally_trivy_report(report: dict) -> dict | None:
     until upstream ships -- that's the AR-029 accepted class. Severity does NOT
     decide acceptance; fix-availability does.
 
-    Returns None when the image has nothing in either bucket. Module-level (not
+    A THIRD bucket exists because fix-availability is not always decidable:
+    when the installed version is a Go pseudo-version, Trivy's comparison is
+    meaningless (see classify_pseudo_version) and the finding lands in
+    crit_undet/high_undet -- surfaced under its own wording, never counted as
+    fixable and never laundered into the accepted no-fix class.
+
+    Returns None when the image has nothing in any bucket. Module-level (not
     nested in the scan worker) so the counting rules are unit-testable against
     a saved report -- see runbooks/tests/test-trivy-tally.py.
     """
     cf = cn = hf = hn = 0  # crit-fixable, crit-nofix, high-fixable, high-nofix
+    cu = hu = 0                # crit/high UNDETERMINED (see classify_pseudo_version)
     fix_ids: list[str] = []    # ALL fixable CRITICAL/HIGH CVE IDs (deduped)
     nofix_ids: list[str] = []  # ALL no-upstream-fix CRITICAL/HIGH CVE IDs
+    undet_ids: list[str] = []  # CRITICAL/HIGH whose fix-status could NOT be decided
+    artifact = report.get("ArtifactName", "") or ""
     for tgt in report.get("Results", []) or []:
         tgt_class = tgt.get("Class", "")
         for v in tgt.get("Vulnerabilities", []) or []:
@@ -1462,10 +1665,29 @@ def tally_trivy_report(report: dict) -> dict | None:
             # change stays narrow and auditable.
             if fixable and _is_kernel_header_pkg(v.get("PkgName", ""), tgt_class):
                 continue
+            # Go pseudo-versions: Trivy's "fixable" here rests on comparing a
+            # `v0.0.0-<ts>-<rev>` placeholder against a real release, which is
+            # arithmetic without meaning. Re-decide it (or admit we cannot) --
+            # see classify_pseudo_version. Only the fixable side is revisited;
+            # a no-upstream-fix finding never depended on the comparison.
+            undetermined = False
+            if fixable:
+                verdict = classify_pseudo_version(v, tgt_class, artifact)
+                if verdict == "fixed":
+                    continue                 # established: the fix is present
+                if verdict == "undetermined":
+                    undetermined = True      # neither established -- own bucket
+                # "fixable" and None both fall through to the normal tally
             if sev == "CRITICAL":
-                cf, cn = (cf + 1, cn) if fixable else (cf, cn + 1)
+                if undetermined:
+                    cu += 1
+                else:
+                    cf, cn = (cf + 1, cn) if fixable else (cf, cn + 1)
             elif sev == "HIGH":
-                hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
+                if undetermined:
+                    hu += 1
+                else:
+                    hf, hn = (hf + 1, hn) if fixable else (hf, hn + 1)
             else:
                 continue
             # Capture the FULL CVE-ID list (deduped), not just a 5-id sample.
@@ -1474,15 +1696,18 @@ def tally_trivy_report(report: dict) -> dict | None:
             # Phase-1 gap where 122/199 scored exploited=UNKNOWN was purely
             # missing IDs, not missing risk.
             if vid:
-                bucket = fix_ids if fixable else nofix_ids
+                bucket = (undet_ids if undetermined
+                          else (fix_ids if fixable else nofix_ids))
                 if vid not in bucket:
                     bucket.append(vid)
-    if not (cf or cn or hf or hn):
+    if not (cf or cn or hf or hn or cu or hu):
         return None
     return {"crit_fix": cf, "crit_nofix": cn,
             "high_fix": hf, "high_nofix": hn,
+            "crit_undet": cu, "high_undet": hu,
             "fix_sample": fix_ids[:5], "nofix_sample": nofix_ids[:5],
-            "fix_ids": fix_ids, "nofix_ids": nofix_ids}
+            "undet_sample": undet_ids[:5],
+            "fix_ids": fix_ids, "nofix_ids": nofix_ids, "undet_ids": undet_ids}
 
 
 def load_trivy_cache(path: Path, ttl_sec: int, now: float | None = None) -> tuple[dict | None, float | None]:
@@ -2093,7 +2318,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     # blunt "HIGH CVEs" substring — masking FIXABLE criticals (2026-07-30 fix).
     if findings_per_image:
         n_actionable = n_latest = n_accepted = 0
-        n_floating = n_stale = 0
+        n_floating = n_stale = n_undet = 0
         for img, r in sorted(findings_per_image.items()):
             tag = img.split("@")[0]  # strip digest if present
             fix_s = ", ".join(r["fix_sample"][:3]) + ("…" if len(r["fix_sample"]) > 3 else "")
@@ -2170,6 +2395,21 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                         f.add(WARNING, f"`{tag}`: {r['high_fix']} fixable HIGH CVE(s) — newer upstream tag available — {fix_s}", meta=_fix_meta)
                         cprint(C.YELLOW, f"  🟡 {tag}: {r['high_fix']} fixable HIGH (bump available) — {fix_s}")
                     n_actionable += 1
+            # UNDETERMINED fix-status. The installed version is a Go
+            # pseudo-version and none of the routes in classify_pseudo_version
+            # could establish whether the fix is present. This is the
+            # tri-state's third leg (docs/sops/audit-script-correctness.md):
+            # it must NOT read as fixable (that is the false positive this
+            # bucket exists to stop) and must NOT be folded into the AR-029
+            # no-upstream-fix class (that would launder an unknown into an
+            # accepted risk). WARNING, worded as the unknown it is.
+            if r.get("crit_undet", 0) > 0 or r.get("high_undet", 0) > 0:
+                _undet_meta = {"cve_ids": list(r.get("undet_ids", []))}
+                undet_s = ", ".join(r.get("undet_sample", [])[:3]) + ("…" if len(r.get("undet_sample", [])) > 3 else "")
+                f.add(WARNING, f"`{tag}`: {r['crit_undet']} CRITICAL + {r['high_undet']} HIGH CVE(s) whose fix-status could NOT be determined — the Go binary reports a pseudo-version (`v0.0.0-<commit>`), so neither 'vulnerable' nor 'patched' was established; resolve by hand against the module's actual commit — {undet_s}", meta=_undet_meta)
+                cprint(C.YELLOW, f"  🟡 {tag}: {r['crit_undet']}C/{r['high_undet']}H fix-status UNDETERMINED (Go pseudo-version)")
+                n_undet += 1
+
             # NO UPSTREAM FIX at all — nothing to patch until upstream ships;
             # accepted per AR-029. Tagged ACCEPTED directly (precise).
             if r["crit_nofix"] > 0 or r["high_nofix"] > 0:
@@ -2179,6 +2419,7 @@ def s4_cve_check() -> tuple[str, Findings, str]:
                        f"{n_actionable} actionable (newer tag → bump), {n_floating} on FLOATING tags (posture unknowable), "
                        f"{n_stale} unbumpable-but-severe (needs a decision), "
                        f"{n_latest} fixable-but-already-latest (accepted), "
+                       f"{n_undet} with an UNDETERMINED fix-status (Go pseudo-version), "
                        f"{n_accepted} no-upstream-fix (accepted)")
     else:
         cprint(C.GREEN, f"  🟢 Trivy: no CRITICAL/HIGH CVEs in {len(distinct_images)} running images")
