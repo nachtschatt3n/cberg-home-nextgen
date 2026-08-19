@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: authentik
-      version: 2026.8.0
+      version: 2026.5.6
       sourceRef:
         kind: HelmRepository
         name: authentik
@@ -93,7 +93,7 @@ spec:
                 sleep 2
               done
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2026.8.0
+          image: ghcr.io/goauthentik/server:2026.5.6
           command:
             - sh
             - -c
@@ -221,7 +221,7 @@ spec:
                 sleep 2
               done
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2026.8.0
+          image: ghcr.io/goauthentik/server:2026.5.6
           command:
             - sh
             - -c
@@ -281,8 +281,8 @@ spec:
     postgresql:
       # Use built-in PostgreSQL for compatibility
       enabled: true
-      # Pin the postgres image explicitly (chart 2026.8.0 defaults to
-      # 17.11-bookworm). SAME major only: 18.x is a data-dir migration.
+      # Pin the postgres image explicitly (chart 2026.5.6 defaults to
+      # 17.10-bookworm). SAME major only: 18.x is a data-dir migration.
       # Keep the MAJOR/MINOR (17.11) in sync with
       # cronjob-channels-cleanup.yaml so the client psql matches the server;
       # the BASE deliberately differs — the cleanup job runs alpine (psql
