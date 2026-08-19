@@ -200,11 +200,14 @@ wc -l /tmp/nextcloud-db-tables-before.txt        # expect 206 rows
 #    the collations and useless as evidence that data arrived. Generate one
 #    count(*) per table and keep the output:
 #    (single-quoted body: everything runs INSIDE the pod, so the password never
-#     enters kubectl argv, the API-server audit log or your shell history)
+#     enters kubectl argv, the API-server audit log or your shell history.
+#     MYSQL_PWD rather than -p"$P" so it is not in the in-pod process argv
+#     either — `-p<value>` is visible to `ps` inside that PID namespace, and
+#     these loops fork ~206 short-lived clients.)
 mise exec -- kubectl exec -n office nextcloud-mariadb-0 -c mariadb -- sh -c '
-  P=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
-  for T in $(mariadb -uroot -p"$P" -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
-    printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$P" -N -B nextcloud -e "select count(*) from \`$T\`")"
+  export MYSQL_PWD=$(cat "$MARIADB_ROOT_PASSWORD_FILE")
+  for T in $(mariadb -uroot -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
+    printf "%s=%s\n" "$T" "$(mariadb -uroot -N -B nextcloud -e "select count(*) from \`$T\`")"
   done' > /tmp/nextcloud-rows-before.txt
 wc -l /tmp/nextcloud-rows-before.txt            # expect 206
 awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/nextcloud-rows-before.txt
@@ -584,9 +587,9 @@ mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_RO
 #    two pods: the OLD bitnami STS delivers it as a FILE
 #    ($MARIADB_ROOT_PASSWORD_FILE); the NEW official image as an ENV VAR.
 mise exec -- kubectl exec -n office $NEW -- sh -c '
-  P="$MARIADB_ROOT_PASSWORD"
-  for T in $(mariadb -uroot -p"$P" -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
-    printf "%s=%s\n" "$T" "$(mariadb -uroot -p"$P" -N -B nextcloud -e "select count(*) from \`$T\`")"
+  export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
+  for T in $(mariadb -uroot -N -B -e "select table_name from information_schema.tables where table_schema=\"nextcloud\" and table_type=\"BASE TABLE\" order by table_name"); do
+    printf "%s=%s\n" "$T" "$(mariadb -uroot -N -B nextcloud -e "select count(*) from \`$T\`")"
   done' > /tmp/nextcloud-rows-after.txt
 wc -l /tmp/nextcloud-rows-after.txt                                  # 206
 diff /tmp/nextcloud-rows-before.txt /tmp/nextcloud-rows-after.txt \
