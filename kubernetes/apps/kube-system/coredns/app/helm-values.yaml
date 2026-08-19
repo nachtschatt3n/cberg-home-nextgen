@@ -26,8 +26,23 @@ servers:
           class error
       - name: forward
         parameters: . 192.168.55.101
+        # Bounded, not unbounded, and not upstream's default either. Derived
+        # from the 1.14.7 forward plugin: the per-request deadline is 5s and a
+        # dead-upstream exchange costs read_timeout 2s, so at most THREE
+        # attempts can start (t=0, 2, 4) when the upstream is silent — any cap
+        # >= 3 is non-binding there and the deadline governs. Upstream's
+        # default (2 x upstreams = 2 for our single upstream) DOES bind, which
+        # is the SERVFAIL risk that made the 1.14.7 bump pin this. The other
+        # failure shape is a connect error that returns instantly (ICMP port
+        # unreachable while k8s-gateway has no ready endpoint); nothing paces
+        # that loop, so 0 spins until the 5s deadline — the busy loop upstream
+        # capped this to stop. 6 = three complete passes: double the
+        # deadline-implied maximum, so it never binds where a retry costs
+        # wall-clock time, and binds only on the instant-error path it exists
+        # to bound. Re-derive if read_timeout, the 5s deadline, or the number
+        # of upstreams in this block changes.
         configBlock: |-
-          max_connect_attempts 0
+          max_connect_attempts 6
       - name: cache
         parameters: 30
       - name: loop
@@ -56,8 +71,13 @@ servers:
           fallthrough in-addr.arpa ip6.arpa
       - name: forward
         parameters: . /etc/resolv.conf
+        # Same bound, same derivation (see the block above). This block is also
+        # single-upstream — verified on the running pods rather than assumed
+        # from the file: coredns_proxy_* carries exactly one `to=` label per
+        # forward block (169.254.116.108:53 here, 192.168.55.101:53 above), so
+        # upstream's 2 x upstreams default would be 2 for this block too.
         configBlock: |-
-          max_connect_attempts 0
+          max_connect_attempts 6
       - name: cache
         parameters: 30
       - name: loop
