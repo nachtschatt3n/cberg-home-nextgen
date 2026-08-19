@@ -40,8 +40,8 @@ revertible state.
 
 | # | plan | what moves | risk | est | window |
 |---|---|---|---|---|---|
-| 1 | [`superset-redis-official`](superset-redis-official.md) | bundled `bitnamilegacy/redis` → official `redis:8.10.0-alpine` (cache only) | medium | 45 m | `thu-early:2026-08-20` |
-| 2 | [`superset-pg-standup`](superset-pg-standup.md) | stand up `postgres:17.11-alpine` **alongside** + restore a dump; **no cutover** | medium | 45 m | `thu-early:2026-09-03` |
+| 1 | `superset-redis-official` **(executed 2026-08-17, plan retired)** | bundled `bitnamilegacy/redis` → official `redis:8.10.0-alpine` (cache only) | medium | 45 m | `thu-early:2026-08-20` |
+| 2 | `superset-pg-standup` **(executed, plan retired)** | stand up `postgres:17.11-alpine` **alongside** + restore a dump; **no cutover** | medium | 45 m | `thu-early:2026-09-03` |
 | 3 | [`superset-pg-cutover`](superset-pg-cutover.md) | fresh dump + repoint `DB_HOST`; old DB **left running** as the rollback | high | 50 m | `sat-early:2026-09-12` |
 | 4 | [`superset-pg-decommission`](superset-pg-decommission.md) | `postgresql.enabled:false` — the archived image finally leaves the namespace | medium | 30 m | `tue-early:2026-09-22` |
 

@@ -51,8 +51,11 @@ file count is misleading, because three different things live in this directory:
 | **PROGRAMME** | A parent/index doc for work split into stages. Carries the goal and the total duration; the *stages* are the executable units. | `status: superseded` + `target:` says "delivered in N stages" |
 | **REFERENCE** | Deliberately unwindowed — break-glass contingencies, or attended projects that do not belong in the window system at all. | no `window:`, and that is intentional |
 
-Counting all three together turns 24 real pieces of work into "33 plans", which
-is how a queue starts looking unmanageable when it isn't.
+Counting all three together inflates the queue: on 2026-08-15 it turned 24 real
+pieces of work into "33 plans", which is how a queue starts looking unmanageable
+when it isn't. Those figures are a dated snapshot kept to illustrate the effect --
+they are NOT the current count and are not maintained. For live numbers run
+`python3 runbooks/maintenance-plan.py --open`, which prints the per-tier split.
 
 Two reference cases worth knowing, because both look like neglect and are not:
 
