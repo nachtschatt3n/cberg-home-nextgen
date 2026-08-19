@@ -173,7 +173,7 @@
 |-----|---------|---------|---------------|
 | authentik | Identity provider + forward auth proxy | Internal + External | System |
 | cilium | eBPF CNI, load balancing, network policies | None | — |
-| coredns | Cluster-internal DNS resolution | None | — |
+| coredns | Cluster-internal DNS resolution. Chart 1.47.0 / image **1.14.7** — the image tag is pinned in `helm-values.yaml` because the chart's appVersion lags (1.14.6); re-check the pin on every chart bump. Both forward blocks set `max_connect_attempts 0` (unbounded) to opt out of the cap of 2 that 1.14.7 made the default. | None | — |
 | csi-driver-smb | SMB/CIFS storage integration (NAS) | None | — |
 | descheduler | Pod descheduler for resource optimization | None | — |
 | intel-device-plugin | Intel device plugin operator (manages GPU + NPU sub-charts) | None | — |

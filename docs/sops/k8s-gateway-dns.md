@@ -1,8 +1,8 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `cberg-agent / operator`
 
 ---
@@ -12,7 +12,10 @@
 k8s-gateway is the answer to "why do `*.${SECRET_DOMAIN}` hosts resolve to
 LAN VIPs at home but to Cloudflare on the internet". It watches cluster
 resources and serves A records for their hostnames; AdGuard (192.168.55.5)
-forwards the domain to it.
+forwards the domain to it — **and so does the cluster's own CoreDNS**, whose
+`${SECRET_DOMAIN}` server block forwards the whole zone to this same IP. So this
+service is on the critical path for LAN clients *and* for every in-cluster pod
+resolving an internal host.
 
 - Scope: namespace `network`, deployment `k8s-gateway`, LB 192.168.55.101:53
 - Prerequisites: kubectl via mise, repo checkout
@@ -40,7 +43,8 @@ mandatory restart-and-verify gate for future CRD/chart changes.
 | Watched resources | `["Ingress", "Service"]` — adding `HTTPRoute` is deliberate phase-1 work of the EG migration, behind the §8 restart-and-verify gate |
 | TTL | 60 (matches SOA negative TTL; do not lower — see comment in HR) |
 | Expected answers | internal-class hosts → 192.168.55.100, external-class → 192.168.55.102 |
-| Critical dependency | none in-cluster; AdGuard forwards to it |
+| Critical dependency | **BOTH** AdGuard (for LAN clients) **and cluster CoreDNS** — CoreDNS's `${SECRET_DOMAIN}` server block forwards to this IP (`kubernetes/apps/kube-system/coredns/app/helm-values.yaml`), so in-cluster resolution of internal hosts fails with it too. (Corrected 2026-08-19: this row previously read "none in-cluster", which understated the blast radius of a k8s-gateway outage in the exact SOP written to handle one.) |
+| Upstream retry policy | CoreDNS forwards to this IP with `max_connect_attempts 0` (unbounded), set explicitly. CoreDNS >= 1.14.7 defaults to 2 connect attempts per upstream; our forward block has a SINGLE upstream, which is the shape that cap bites, and the resulting SERVFAIL would then be cached. The directive parses identically on 1.14.6 and 1.14.7. Revisit as its own change — unbounded also preserves the retry-storm behaviour upstream capped on purpose. |
 | Alerting | **NONE** — the 2026-08-15 full outage fired zero alerts (known gap) |
 
 ---
