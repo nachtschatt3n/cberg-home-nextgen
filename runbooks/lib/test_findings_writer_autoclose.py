@@ -500,6 +500,42 @@ def test_refused_autoclose_does_not_clear_the_note():
     assert _notes_payload(conn) is None, "a refused run retracted the veto anyway"
 
 
+def test_refused_autoclose_does_not_clear_the_uncovered_note():
+    """The mirror of the incomplete case — and the one that actually bit.
+
+    `notes.uncovered` is the ONLY per-component hold that survives into
+    sweep-run.py's own auto-close, which has no circuit breaker. Retracting
+    it on a refused run inverts the breaker outright: the writer refuses to
+    close and simultaneously authorises the orchestrator to close the very
+    rows it just held back. Shipped once because both refusal tests seeded
+    the `incomplete` key and neither covered its sibling.
+    """
+    _clear_env()
+    w, conn = _writer(section="version")
+    w._emitted_fps = set()          # zero-emit: trips the breaker
+    conn.notes = json.dumps(
+        {"uncovered": {"version": {"ghcr.io/example/app": "manifest unreadable"}}})
+    assert not w._uncovered, "precondition: this run recorded no uncovered set"
+    w.close(verdict="green")
+    assert not _autoclose_stmts(conn), "precondition: the breaker must refuse"
+    assert _notes_payload(conn) is None, (
+        "a refused run retracted the per-component scope veto anyway")
+
+
+def test_dry_run_clears_no_uncovered_note():
+    """Dry-run is documented as writing nothing — that must include this note."""
+    _clear_env()
+    os.environ["SWEEP_AUTOCLOSE_DRYRUN"] = "1"
+    try:
+        w, conn = _writer(section="security")
+        conn.notes = json.dumps(
+            {"uncovered": {"security": {"ghcr.io/example/app": "unreadable"}}})
+        w.close(verdict="green")
+        assert _notes_payload(conn) is None, "a dry run mutated the cycle row"
+    finally:
+        _clear_env()
+
+
 def test_dry_run_clears_nothing():
     """SWEEP_AUTOCLOSE_DRYRUN writes nothing — the note is a write."""
     _clear_env()

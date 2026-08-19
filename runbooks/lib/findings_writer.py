@@ -764,7 +764,8 @@ class FindingsWriter:
             print(f"==> cleared the stale {kind.upper()} note for section "
                   f"{self.section} on cycle {self._cycle_id} — this run "
                   f"completed and closed on its own authority, so the earlier "
-                  f"pass's reason no longer holds ({stale})")
+                  f"pass's reason no longer holds ({stale}). Callers MUST gate "
+                  f"this on that authority; it is not a general-purpose reset.")
         except Exception as e:  # noqa: BLE001 — never lose the cycle close
             print(f"==> WARNING: could not clear the {kind} note for "
                   f"{self.section}: {type(e).__name__}: {e}. The section stays "
@@ -782,14 +783,13 @@ class FindingsWriter:
         a scope enforced only here would be undone seconds later by the
         orchestrator closing exactly the rows we held back.
 
-        Full coverage this pass is a positive result, not an absence of one:
-        it must RETRACT an earlier pass's scope note rather than leave it
-        standing, or a component resolves and stays vetoed forever.
+        Retraction of a stale scope note is deliberately NOT done here. This
+        runs BEFORE the zero-emit circuit breaker and regardless of dry-run,
+        so clearing from here would retract the orchestrator's only
+        hold-instruction on a run that then refused to close anything — see
+        the paired clears in close().
         """
-        if self._conn is None:
-            return
-        if not self._uncovered:
-            self._clear_cycle_note("uncovered")
+        if self._conn is None or not self._uncovered:
             return
         try:
             with self._conn.cursor() as cur:
@@ -1113,12 +1113,21 @@ class FindingsWriter:
                     if not dry:
                         # Reached only when the section ran complete, declared
                         # no veto, and actually closed on its own authority —
-                        # so an earlier pass's note on this shared cycle is
-                        # now stale. Deliberately NOT hoisted above the
-                        # circuit breaker: a REFUSED close still wants the
-                        # orchestrator held off, and the breaker is the one
-                        # gate that says "this section did not really run".
+                        # so an earlier pass's notes on this shared cycle are
+                        # now stale. BOTH retractions live here, behind the
+                        # same gate that authorises the close itself.
+                        #
+                        # Deliberately NOT hoisted above the circuit breaker.
+                        # notes.uncovered is the ONLY thing that survives the
+                        # process boundary into sweep-run.py's own auto-close,
+                        # which has no breaker of its own — so retracting it on
+                        # a REFUSED run inverts the breaker: the writer says
+                        # "this section almost certainly failed, I refuse to
+                        # close" and in the same breath hands the orchestrator
+                        # permission to close exactly those rows.
                         self._clear_cycle_note("incomplete")
+                        if not self._uncovered:
+                            self._clear_cycle_note("uncovered")
                 if rows:
                     self._report_autoclose(rows, dry_run=dry)
             except Exception as e:  # noqa: BLE001 — never lose the cycle close
