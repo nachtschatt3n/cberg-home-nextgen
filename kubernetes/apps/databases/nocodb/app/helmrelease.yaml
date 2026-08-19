@@ -21,7 +21,8 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 3
+      retries: 0
+      remediateLastFailure: false   # TEMP for calver migration — restore after
   uninstall:
     keepHistory: false
 
@@ -33,7 +34,7 @@ spec:
           app:
             image:
               repository: nocodb/nocodb
-              tag: 0.301.5
+              tag: 2026.08.0
               pullPolicy: IfNotPresent
 
             envFrom:
