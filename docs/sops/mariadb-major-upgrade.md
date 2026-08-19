@@ -1,8 +1,8 @@
 # SOP: MariaDB Major Upgrade (Bitnami chart)
 
 > Description: Taking a Bitnami-chart MariaDB across a server major (12 → 13 and onward) without leaving old-format system tables under a new binary, including the digest-pinning rule the free-tier catalog forces on us.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -45,11 +45,38 @@ N/A.
    version delta. `SELECT table_schema, COUNT(*) FROM information_schema.tables
    GROUP BY 1;` — a metadata-only instance is a very different upgrade from one
    with user schemas.
-2. **Take a logical dump.** `mariadb-dump --all-databases`. This is the only
-   rollback that works: MariaDB majors are **one-way**, there is no downgrade.
-   Verify it is non-empty and ends `-- Dump completed`.
+2. **Take a logical dump.**
+   `mariadb-dump --default-character-set=utf8mb4 --all-databases`. This is the
+   only rollback that works: MariaDB majors are **one-way**, there is no
+   downgrade. Verify it is non-empty and ends `-- Dump completed`.
    **Chmod it `0600` in a `0700` directory** — the dump contains
    `mysql.global_priv` password hashes.
+
+   **`--default-character-set=utf8mb4` is not optional, and omitting it fails
+   silently.** Without it the client negotiates the *server* default, and the
+   server default is not the storage encoding. On 2026-08-19 this destroyed a
+   Nextcloud migration: `@@character_set_server` and
+   `information_schema.schemata` both read `utf8mb3`, while all 206 tables were
+   `utf8mb4_bin`. The server transcoded every 4-byte character to `?` on its way
+   out, so the dump — the rollback floor — was already corrupt when written.
+   **The value that decides this is
+   `information_schema.tables.table_collation`, not the server or schema
+   default.** Check it before you dump:
+
+   ```bash
+   mariadb -N -e "select table_collation, count(*) from information_schema.tables
+                  where table_schema='<db>' group by 1;"
+   ```
+
+   Then prove the dump round-trips 4-byte data before you trust it:
+
+   ```bash
+   # rows whose content is genuinely multi-byte
+   mariadb -N -B <db> --default-character-set=utf8mb4 \
+     -e "select count(*) from <table> where char_length(<col>) <> octet_length(<col>);"
+   # the dump must still contain real 4-byte lead bytes, not '?'
+   LC_ALL=C grep -c $'[\xf0-\xf4]' "$DUMP" || echo "NO 4-BYTE SEQUENCES — DUMP IS LOSSY, ABORT"
+   ```
 3. **Pin the image by digest.** Bitnami has withdrawn semver tags: `bitnami/mariadb`
    publishes 394 tags of which exactly two (`latest`, `latest-metadata`) are not
    digests. `bitnamilegacy` is *behind* current versions and is not a fallback.
@@ -90,6 +117,20 @@ but that its app cannot use is the failure worth catching.
 Compare against the pre-upgrade baseline: same schema count, same table counts,
 same user count. `sys` gaining a view or two is normal — MariaDB rebuilds its
 own diagnostic schema in upgrade phase 4.
+
+**Counts cannot detect encoding loss, so they are necessary and not
+sufficient.** A dump taken over the wrong connection charset restores the right
+number of rows into the right number of tables with the right collations, and
+every count matches — while the *contents* of those rows have been flattened.
+Add a byte-for-byte spot-check of known 4-byte content, source vs target:
+
+```bash
+select count(*) from <table> where char_length(<col>) <> octet_length(<col>);
+select hex(<col>) from <table> where char_length(<col>) <> octet_length(<col>) limit 5;
+```
+
+The two sides must agree on both. See step 2, and
+`docs/sops/verification-contents-not-shape.md`.
 
 ## Troubleshooting
 
