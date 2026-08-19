@@ -6,7 +6,7 @@ pr: null                              # No Renovate PR is possible — that IS t
                                       # tag; a floating tag never changes, so it never emits
                                       # a PR and the image ages invisibly.
 kind: config
-current: "17 images on floating tags (latest / main / stable / variant-only)"
+current: "19 images on floating tags (latest / main / stable / variant-only)"
 target: "each pinned to a concrete version or digest, so drift becomes visible"
 update_type: security
 risk: medium                          # Not from any single pin — from the number of distinct
@@ -53,8 +53,24 @@ means one window where a failure could come from any of 17 unrelated apps, and
 a rollback that has to reason about all of them at once. Instead:
 
 **Batch A — trivially safe (no state, no data path).** `busybox:latest`,
-`busybox:stable`, `node:22-bookworm`, and the devcontainer image. These are
-init/util containers; pinning is a text change with a pod restart.
+`busybox:stable`, `node:22-bookworm`, `python:3.11-slim`, `python:3.12-slim`,
+and the devcontainer image. These are init/util containers; pinning is a text
+change with a pod restart.
+
+The two `python` entries were missing from the original inventory (they are
+variant-only floats, the same shape as `node:22-bookworm`, so a scan keyed on
+`latest`/`main`/`stable` walks straight past them). They are the widest single
+edit in this plan: **15 manifest sites across 4 namespaces** — 11 on
+`python:3.11-slim` (media/library-tools CronJobs + dashboard,
+download/tube-archivist sync jobs) and 2 on `python:3.12-slim` (ai/openclaw).
+Each is a throwaway interpreter running a mounted script, so the pin is
+mechanical — but change all sites of one tag in a single commit, or the two
+halves drift apart and the finding never clears.
+
+> Pinning these changes **drift visibility only, not the CVE posture** — a
+> pinned digest carries exactly the CVEs the float carried at pin time. Their
+> CVE findings are accepted under AR-106 / AR-107, which do not lapse when the
+> pin lands; they lapse on a Python minor move.
 
 **Batch B — stateless apps.** `paperless-ai`, `paperless-gpt`, `trmnl-ha`,
 `hermes-agent`, `paperclip`, `actual-server`, `nocodb`, `makemkv`, `scrypted`.
@@ -62,8 +78,13 @@ Pin to the current running digest first, *then* raise to the newest release as a
 separate step — conflating "stop drifting" with "upgrade" is what makes these
 risky. `scrypted` and `makemkv` carry user configuration; snapshot first.
 
-**Batch C — datastores. Do NOT batch these with anything.** `pgvector:pg16`
-(a major-version alias, not a version), `phpmyadmin:latest`,
+**Batch C — datastores. Do NOT batch these with anything.** ~~`pgvector:pg16`
+(a major-version alias, not a version)~~ **— DONE, verified 2026-08-19:** all four
+pgvector sites (databases/postgresql, databases/sweep-history, office/sure,
+office/affine) already carry `0.8.6-pg16@sha256:ccc6e83d…`, so there is no
+unpinned alias left to fix. Its residual CVE finding is accepted under AR-104,
+because 0.8.6-pg16 is the newest tag upstream publishes on that line. Remaining
+in Batch C: `phpmyadmin:latest`,
 `bitnamilegacy/mariadb:latest`, `bitnamilegacy/redis:latest`. The two
 `bitnamilegacy` entries are **already owned** by the bitnamilegacy-exit plans —
 do not touch them here; pinning a deprecated-namespace image is wasted work when

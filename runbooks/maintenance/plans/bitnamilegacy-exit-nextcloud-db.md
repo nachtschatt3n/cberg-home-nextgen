@@ -5,6 +5,10 @@ pr: null                               # archived registry — no upstream tag c
 kind: chart                            # HelmRelease values + new sibling manifests + storage
 current: "bundled bitnamilegacy/mariadb:latest (server 11.8.2-MariaDB) on PVC nextcloud-mariadb"
 target: "mariadb:11.8.8 (Docker Official Image) as deployment/nextcloud-db on a NEW volume nextcloud-db-data"
+# 11.8 is the LTS line and 11.8.8 is its newest tag (verified 2026-08-19); the
+# only newer tags are 12.x short-term releases, so do NOT "fix" a CVE finding on
+# this target by jumping majors. The residual finding is accepted as AR-105,
+# whose needle `mariadb:11.8.` lapses the moment we leave the LTS line.
 update_type: major                     # datastore replacement (image lineage + datadir + uid)
 risk: high                             # the household's primary file server; occ migrations
 est_duration_min: 80
