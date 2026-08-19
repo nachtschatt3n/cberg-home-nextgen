@@ -84,7 +84,13 @@ spec:
     # the DB/redis connection details all under `config`).
     config:
       publicUri: "https://penpot.${SECRET_DOMAIN}"
-      flags: "disable-registration enable-login-with-password disable-email-verification"
+      # enable-prepl-server exposes Penpot's admin socket on localhost:6063
+      # INSIDE the backend pod only (never through a Service or the ingress).
+      # It is the only supported way to create the first account here:
+      # registration is disabled and Penpot ships no default admin, so the
+      # instance had zero profiles and was unusable. `manage.py create-profile`
+      # talks to this socket.
+      flags: "disable-registration enable-login-with-password disable-email-verification enable-prepl-server"
       # Session/token secret — reuse the existing PENPOT_SECRET_KEY so logins
       # carry over (renamed to apiSecretKey in 1.1.0).
       existingSecret: penpot-secret
