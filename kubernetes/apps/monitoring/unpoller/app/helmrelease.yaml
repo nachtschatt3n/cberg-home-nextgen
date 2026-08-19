@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: unpoller
-      version: 2.1.0
+      version: 2.4.0
       sourceRef:
         kind: HelmRepository
         name: unpoller
@@ -22,24 +22,6 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
-  # Chart 2.1.0 renders templates/pod-monitor.yaml unconditionally — the
-  # podMonitor.enabled=false value below is silently ignored. Drop the
-  # chart's PodMonitor at render time so only the hand-tuned
-  # ServiceMonitor (servicemonitor.yaml, 60s interval) scrapes unpoller;
-  # a second 30s-default scrape doubles UniFi controller API load (429s)
-  # and duplicates every series.
-  postRenderers:
-    - kustomize:
-        patches:
-          - patch: |
-              apiVersion: monitoring.coreos.com/v1
-              kind: PodMonitor
-              metadata:
-                name: unifi-poller
-              $patch: delete
-            target:
-              kind: PodMonitor
-              name: unifi-poller
   valuesFrom:
     - kind: Secret
       name: unpoller-credentials
@@ -49,18 +31,30 @@ spec:
     image:
       repository: ghcr.io/unpoller/unpoller
       pullPolicy: IfNotPresent
-      tag: v2.39.0
+      tag: v3.5.0
 
     replicaCount: 1
 
     # Service configuration
+    # MUST stay false: chart 2.4.0 added a Service template (2.1.0 had none,
+    # which is why this value was inert and service.yaml is hand-written).
+    # The chart's Service is named `unpoller` in `monitoring` — the same object
+    # our Kustomization owns — and names its port `tcp`, while
+    # servicemonitor.yaml scrapes `port: http`. If the chart's Service won,
+    # the ServiceMonitor would select a Service with no `http` port and every
+    # unpoller_* series would stop with a green HelmRelease.
     service:
-      enabled: true
+      enabled: false
       type: ClusterIP
       port: 9130
       annotations: {}
 
-    # Prometheus integration
+    # Prometheus integration.
+    # Chart 2.4.0 wraps templates/pod-monitor.yaml in `if .Values.podMonitor.enabled`,
+    # so this false is finally honoured and the postRenderer that used to delete
+    # PodMonitor/unifi-poller has been removed. Keep it false: only the hand-tuned
+    # ServiceMonitor (servicemonitor.yaml, 60s) may scrape unpoller — a second
+    # 30s scrape doubles UniFi controller API load (429s) and duplicates every series.
     podMonitor:
       enabled: false
       interval: 30s
