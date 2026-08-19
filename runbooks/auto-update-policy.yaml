@@ -91,12 +91,17 @@ deny:
   # rule closes the OTHER door, an open Renovate PR auto-merging at Step 0.
   - match: "*scrypted*"
     reason: "v0.144.x is upstream's PRE-RELEASE channel (stable = odd minors; no GitHub release for 144, and v0.144.0 predates stable v0.143.0). Beta builds are not acceptable on a privileged NVR — AR-081. A stable odd-minor bump is planned in a window, never unattended."
-  # Chart and image are ONE deployable unit here. Chart 2.4.0 ships appVersion
-  # v3.5.0 while `image.tag` is pinned at v2.39.0 and held in plan unpoller-v3
-  # (mon-early 2026-08-24) — auto-merging the chart alone would run a v3-aware
-  # chart against a v2 image. Remove this rule when unpoller-v3 has executed.
+  # Chart and image are ONE deployable unit here. RETARGETED 2026-08-19: the old
+  # note said "remove this rule when unpoller-v3 has executed" — it has (live is
+  # chart 2.4.0 + image v3.5.0, matching that plan's target). Removing it now
+  # would re-arm the same failure in the opposite direction: upstream released
+  # image v4.0.0 on 2026-08-19 and the chart repo's newest entry is still
+  # chart 2.4.0 -> appVersion v3.5.0 (published 2026-08-18), so NO v4-aware
+  # chart exists. With the rule gone, the v4 image major would be free to land
+  # unattended against a chart that templates for v3. Keep unpoller denied and
+  # move it in plan unpoller-v4 once a v4 chart ships.
   - match: "*unpoller*"
-    reason: "chart 2.4.0 (appVersion v3.5.0) must land together with the v2.39.0 -> v3.5.0 image major in plan unpoller-v3 — never a chart-only unattended merge."
+    reason: "image v4.0.0 (2026-08-19) has no v4-aware chart — newest is chart 2.4.0/appVersion v3.5.0. Chart and image move together in plan unpoller-v4, never as an unattended half."
   - match: "*openclaw*"
     reason: "held at 2026.6.11 pending the Memory Core→SQLite migration (2026.7.1 blocked)."
   - match: "*@openclaw/*"
