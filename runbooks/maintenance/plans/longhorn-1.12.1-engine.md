@@ -166,11 +166,12 @@ So the honest gate for this run is:
    assert that its remaining references are exactly those two, not some volume
    the drain silently skipped. That distinction is the whole point of the check.
 
-**The v1.11.2 finding therefore does not close in this run.** It closes when the
-two floors are retired, which is a separate decision with its own risk (deleting
-a rollback floor), and must not be smuggled into a drain. Record the partial
-outcome on the finding rather than reporting the drain as failed — a drain that
-correctly refuses to touch a rollback floor has succeeded, not fallen short.
+**Scope note:** the outcome for the older engine line is bounded by those two
+exclusions, and retiring a rollback floor is a separate decision with its own
+risk. Do not smuggle it into a drain. Record the outcome on the finding records
+(`F-49f172b9`, `F-6bedee0b`) rather than reporting the drain as failed — a drain
+that correctly refuses to touch a rollback floor has succeeded, not fallen
+short. Status detail belongs on the record, not in this file.
 
 ## 2) Pre-checks
 
