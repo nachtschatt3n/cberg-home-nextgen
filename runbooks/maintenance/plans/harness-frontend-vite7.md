@@ -4,7 +4,7 @@ component: ha-ai-harness
 pr: null                              # self-owned image; no upstream PR
 kind: image
 current: "harness-home-frontend 0.5.3-alpha (vite 6 toolchain)"
-target: "vite 7 toolchain (esbuild >= 0.27)"
+target: "0.5.4-alpha — vite 7 toolchain (esbuild resolves to the 0.28 line, not 0.27)"
 update_type: major
 risk: medium
 est_duration_min: 60
@@ -18,6 +18,12 @@ touches:
 depends_on: []
 conflicts_with: []
 status: executed                      # EXECUTED 2026-08-19 (bec644fe) in the ad-hoc window, STEP 4.
+# RETAIN, do not delete on the usual executed-plan convention: §1a + §7 are
+# currently the ONLY home for the dev-server-as-runtime knowledge (the rejected
+# npm-overrides shortcut, the vite-8/rolldown decision, and the 403-from-a-Ready-pod
+# failure mode). docs/sops/self-built-image-rebuild.md §1 scopes framework majors
+# OUT, so retiring this file would lose it. Retire once that SOP grows a
+# dev-server-as-runtime section.
 window: null                          # cleared 2026-08-19: executed ahead of the
                                       # sat-early:2026-08-29 slot, which is now released.
 # Was scheduled 2026-08-15 for a 90m slot; pulled forward into the 2026-08-19
