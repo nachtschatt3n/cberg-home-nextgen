@@ -7,7 +7,8 @@ current: "bundled bitnamilegacy/redis:latest (redis 8.0.3) as nextcloud-redis-ma
 target: "redis:8.10.0-alpine (official image) as nextcloud-redis, chart's bundled redis disabled"
 update_type: minor                     # redis 8.0.3 -> 8.10.0; the registry move is the real work
 risk: medium                           # distributed cache + FILE LOCKING; no durable data
-est_duration_min: 30
+est_duration_min: 45                   # 30 -> 45 (AMENDED 2026-08-19): the values change is
+                                       # larger than drafted — six coupled edits, not one
 needs_reboot: false
 touches:
   namespaces: [office]
@@ -18,11 +19,14 @@ touches:
     - deployment/nextcloud                      # restarts (locking + cache move; users logged out)
     - deployment/nextcloud-notify-push          # restarts with the stack
     - pvc/redis-data-nextcloud-redis-master-0   # orphaned, Retain — kept for rollback
+    - networkpolicy/nextcloud-redis             # SUBCHART-OWNED — vanishes with redis.enabled:false
+                                                # (AMENDED 2026-08-19, see §1a item 6)
   shared: []                                    # nextcloud's OWN cache; no shared datastore
 depends_on: []
 conflicts_with: [bitnamilegacy-exit-nextcloud-db]
 security_ref: F-d62ac46a                        # see also F-46597825 (same image, fixable class)
-status: draft
+status: vetted                                  # AMENDED + re-vetted 2026-08-19 against a real
+                                                # `helm template` render of chart 9.2.5
 window: "fri-early:2026-08-28"        # MOVED off sat-early:2026-08-22 (2026-08-16): that slot held
                                       # longhorn-1.12.1-engine (60m) + this (30m) = exactly 90m of a
                                       # 90m window. The reconciler flags that TIGHT and it is right —
@@ -116,6 +120,100 @@ still owns a Service of that name while kustomize-controller applies ours — a
 field-manager/already-exists conflict at exactly the wrong moment. A new name
 costs two reference edits and removes the race.
 
+## 1a) AMENDMENT 2026-08-19 — what `redis.enabled: false` ACTUALLY removes
+
+**The plan as originally drafted would have shipped a broken Nextcloud.** Held
+back from execution on 2026-08-19 by operator instruction, amended, re-vetted.
+
+Method — not template-reading, but a real render of the pinned chart with our
+real values, diffed:
+
+```bash
+helm pull nextcloud/nextcloud --version 9.2.5 --untar
+# values extracted verbatim from spec.values of our HelmRelease
+helm template nextcloud ./nextcloud -f <ours> --namespace office   # redis ON
+helm template nextcloud ./nextcloud -f <ours+redis.enabled:false>  # redis OFF
+# diff the `nextcloud` Deployment between the two
+```
+
+`redis.enabled` gates **six** things, not one. In chart 9.2.5 the gates are
+`templates/deployment.yaml` lines 28, 274, 328, 406 and `_helpers.tpl` 180-226,
+plus the subchart's own resources:
+
+1. **Pod label `nextcloud-redis-client: "true"`** (deployment.yaml:28) — removed.
+   *Verified harmless:* no NetworkPolicy in the cluster selects it
+   (`kubectl get netpol -A -o yaml | grep -c nextcloud-redis-client` → 0).
+2. **`REDIS_HOST` + `REDIS_HOST_PORT` on the MAIN container** (`_helpers.tpl`
+   `nextcloud.env.redis`) — removed. These are what `redis.config.php` reads.
+   Without them Nextcloud silently falls back to no distributed cache **and no
+   file locking**.
+3. **`REDIS_URL` MUTATES — the trap the original draft walked into.** The helper
+   picks the URL form from the *auth* values, not the enabled flag:
+   ```
+   {{- if or (and .Values.redis.auth.enabled .Values.redis.auth.password) ... }}
+   - name: REDIS_URL
+     value: "redis://:$(REDIS_HOST_PASSWORD)@$(REDIS_HOST):$(REDIS_HOST_PORT)"
+   {{- else }}
+   - name: REDIS_URL
+     value: "redis://$(REDIS_HOST):$(REDIS_HOST_PORT)"
+   {{- end }}
+   ```
+   Our HR currently sets `redis.auth.enabled: false`, so we get the clean form.
+   **The original step 3 said to replace the WHOLE `redis:` block with just
+   `enabled: false`** — which drops `auth.enabled: false` and lets the chart
+   default (`auth.enabled: true`, `password: changeme`) win. Rendered result:
+   `REDIS_URL="redis://:$(REDIS_HOST_PASSWORD)@$(REDIS_HOST):$(REDIS_HOST_PORT)"`
+   where **`REDIS_HOST_PASSWORD` is never emitted** — an empty-password AUTH
+   against a Redis with no `requirepass`. `redis.auth.enabled: false` MUST be
+   retained explicitly.
+4. **`init-redis-session-ini` init container** (deployment.yaml:328) — removed.
+5. **`php-confd` emptyDir volume** (deployment.yaml:406) — removed.
+6. **The subchart's `networkpolicy/nextcloud-redis`** — removed with the
+   subchart. It restricts ingress to port 6379 on
+   `app.kubernetes.io/{instance: nextcloud, name: redis}`. The replacement
+   Deployment inherits no policy, so the new Redis is **unguarded** unless we
+   ship one.
+
+**On items 4 and 5 — correcting the record.** The concern raised was that losing
+them "lands PHP sessions on an unwritable path". Against *this* configuration
+that does **not** hold, and the render proves it: in our rendered Deployment
+`php-confd` appears exactly twice — the emptyDir, and a mount **on the init
+container only**. The main `nextcloud` container never mounts it (it mounts only
+`zz-memory_limit.ini` and `zz-opcache.ini` into `conf.d`). The chart's
+`redis-session.ini` volumeMount at deployment.yaml:274-277 lives in the
+**cronjob** container block, which our values do not render. So the init
+container writes `redis-session.ini` into an emptyDir nothing else ever reads —
+**the whole php-confd mechanism is inert here.** Removing it is a no-op.
+Do **not** re-add it via `extraVolumes`/`extraInitContainers`: that would
+reintroduce dead weight and imply a coupling that does not exist. This is
+recorded so the next reader does not "restore" it.
+
+**The real fix is items 2+3, and the chart supports it directly.** Use
+`externalRedis` — the chart's first-class external path (`_helpers.tpl:197`,
+`{{- else if .Values.externalRedis.enabled }}`) — rather than hand-injecting
+`REDIS_HOST` through `nextcloud.extraEnv` as originally drafted. Verified render
+with `redis: {enabled: false, auth: {enabled: false}}` +
+`externalRedis: {enabled: true, host: nextcloud-redis, port: "6379"}`:
+
+```yaml
+- name: REDIS_HOST
+  value: "nextcloud-redis"
+- name: REDIS_HOST_PORT
+  value: "6379"
+- name: REDIS_URL
+  value: "redis://$(REDIS_HOST):$(REDIS_HOST_PORT)"     # clean form, no empty AUTH
+```
+
+**Also corrected: the draft pointed at the wrong `REDIS_HOST`.** Step 3 said
+"`nextcloud.extraEnv` → REDIS_HOST … around line 367". Line ~367 of the
+HelmRelease is **not** `extraEnv` (which is `[]` at line 201) — it is the
+`extraSidecarContainers` **worker** container's own hardcoded env. That worker
+keeps `nextcloud-redis-master` regardless of any chart value and must be edited
+separately. Confirmed still present in the corrected render. So there are
+**two** hardcoded `nextcloud-redis-master` references in the HR to repoint (the
+worker sidecar's env, and the `wait-for-redis` initContainer), *plus* the
+chart-level `externalRedis.host`.
+
 ## 2) Pre-checks
 
 ```bash
@@ -180,23 +278,67 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    Register it in `kubernetes/apps/office/nextcloud/app/kustomization.yaml`
    `resources:`.
 
-3. **Edit `kubernetes/apps/office/nextcloud/app/helmrelease.yaml`**:
-   - Replace the whole `redis:` values block (currently around line 596) with:
-     ```yaml
-         # Bundled Bitnami redis retired 2026-XX-XX: bitnamilegacy is an ARCHIVED
-         # registry (last push 2025-08-28, no future security fixes) and
-         # docker.io/bitnami/redis publishes no semver tags. Security driver
-         # tracked as F-d62ac46a. Nextcloud now uses the official redis image
-         # deployed by redis-deployment.yaml in this folder. Auth stays DISABLED
-         # to match the retired instance — redis.config.php carries no password.
-         redis:
+3. **Edit `kubernetes/apps/office/nextcloud/app/helmrelease.yaml`** — FOUR edits.
+   (REWRITTEN 2026-08-19; the original single-edit version shipped a broken
+   `REDIS_URL` and repointed the wrong `REDIS_HOST`. See §1a.)
+
+   **3a. Replace the `redis:` values block** (around line 596). Note
+   `auth.enabled: false` is **retained deliberately** — dropping it flips the
+   chart default to `auth.enabled: true` and rewrites `REDIS_URL` into an
+   empty-password AUTH form (§1a item 3):
+   ```yaml
+       # Bundled Bitnami redis retired 2026-08-19: bitnamilegacy is an ARCHIVED
+       # registry (last push 2025-08-28, no future security fixes) and
+       # docker.io/bitnami/redis publishes no semver tags. Security driver
+       # tracked as F-d62ac46a. Nextcloud now uses the official redis image
+       # deployed by redis-deployment.yaml in this folder.
+       redis:
+         enabled: false
+         auth:
+           # DO NOT REMOVE. With the subchart disabled this value still selects
+           # the REDIS_URL form in _helpers.tpl. Chart default is `true` +
+           # password `changeme`, which renders
+           # redis://:$(REDIS_HOST_PASSWORD)@... with REDIS_HOST_PASSWORD never
+           # emitted — an empty-password AUTH against a no-requirepass Redis.
            enabled: false
-     ```
-   - `nextcloud.extraEnv` → `REDIS_HOST: nextcloud-redis` (was
-     `nextcloud-redis-master`, around line 367). Leave `REDIS_HOST_PORT: "6379"`.
-   - Update the `wait-for-redis` initContainer (around line 229) to
-     `until nc -z nextcloud-redis 6379; do` and fix its echo string. Leave
-     `wait-for-mariadb` and `install-openclaw-mail` untouched.
+   ```
+
+   **3b. Add the `externalRedis` block** (chart-supported external path — this is
+   what restores `REDIS_HOST`/`REDIS_HOST_PORT`/`REDIS_URL` on the MAIN
+   container; do NOT hand-inject them via `nextcloud.extraEnv`):
+   ```yaml
+       externalRedis:
+         enabled: true
+         host: nextcloud-redis
+         port: "6379"
+         # no password — matches the retired instance's auth-disabled posture;
+         # redis.config.php carries no password either.
+   ```
+
+   **3c. Repoint the `wait-for-redis` initContainer** (around line 229, under
+   `nextcloud.extraInitContainers`) to `until nc -z nextcloud-redis 6379; do`
+   and fix its echo string. Leave `wait-for-mariadb` and `install-openclaw-mail`
+   untouched.
+
+   **3d. Repoint the `extraSidecarContainers` worker's OWN env** (around line
+   366): `REDIS_HOST: nextcloud-redis-master` → `nextcloud-redis`. This is a
+   hardcoded container env, NOT `extraEnv` and NOT chart-driven — no value
+   change reaches it. Leave `REDIS_HOST_PORT: "6379"`.
+
+   **Verify the render before committing** — this is the step that would have
+   caught the original defect:
+   ```bash
+   helm template nextcloud nextcloud/nextcloud --version 9.2.5 \
+     -f <(python3 -c "import yaml,sys;print(yaml.safe_dump(yaml.safe_load(open('kubernetes/apps/office/nextcloud/app/helmrelease.yaml'))['spec']['values']))") \
+     --namespace office | grep -A2 'name: REDIS_URL'
+   # MUST be:  value: "redis://$(REDIS_HOST):$(REDIS_HOST_PORT)"
+   # NOT:      value: "redis://:$(REDIS_HOST_PASSWORD)@$(REDIS_HOST):$(REDIS_HOST_PORT)"
+   ```
+
+3e. **Ship a replacement NetworkPolicy** in `redis-deployment.yaml` (§1a item 6).
+   The subchart's `networkpolicy/nextcloud-redis` disappears with
+   `redis.enabled: false`, leaving the new Redis unguarded. Mirror its posture —
+   ingress restricted to TCP 6379 — against the new Deployment's own labels.
 
 4. **Validate, commit, push** (on `main`, stage only these three files):
    ```bash
@@ -213,6 +355,46 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    `runbooks/update-marker.sh clear nextcloud`.
 
 ## 4) Verification
+
+**AMENDED 2026-08-19 — run these FIRST; they are the checks that would have
+caught the original defect. A green HelmRelease does not prove any of them.**
+
+```bash
+# 0a) the MAIN container's redis env, read off the LIVE pod (not the HR)
+mise exec -- kubectl get deploy -n office nextcloud -o json | python3 -c "
+import sys,json
+c=[c for c in json.load(sys.stdin)['spec']['template']['spec']['containers'] if c['name']=='nextcloud'][0]
+e={v['name']:v.get('value') for v in c.get('env',[])}
+for k in ('REDIS_HOST','REDIS_HOST_PORT','REDIS_URL','REDIS_HOST_PASSWORD'):
+    print(f'{k} = {e.get(k)!r}')
+"
+#   REDIS_HOST      = 'nextcloud-redis'      (NOT nextcloud-redis-master, NOT None)
+#   REDIS_HOST_PORT = '6379'
+#   REDIS_URL       = 'redis://$(REDIS_HOST):$(REDIS_HOST_PORT)'
+#   REDIS_HOST_PASSWORD = None               <- and REDIS_URL must NOT reference it
+
+# 0b) the worker sidecar was repointed too (§1a — it is hardcoded, not chart-driven)
+mise exec -- kubectl get deploy -n office nextcloud -o json | python3 -c "
+import sys,json
+for c in json.load(sys.stdin)['spec']['template']['spec']['containers']:
+    e={v['name']:v.get('value') for v in c.get('env',[])}
+    if 'REDIS_HOST' in e: print(c['name'], '->', e['REDIS_HOST'])
+"
+#   every container must say nextcloud-redis; ANY remaining -master is a miss
+
+# 0c) no dangling reference anywhere in the rendered spec
+mise exec -- kubectl get deploy -n office nextcloud -o yaml | grep -c 'nextcloud-redis-master'   # 0
+
+# 0d) file locking + cache actually live (this is what silently degrades)
+mise exec -- kubectl exec -n office deploy/nextcloud -c nextcloud -- \
+  php occ config:system:get memcache.locking      # \OC\Memcache\Redis
+mise exec -- kubectl exec -n office deploy/nextcloud -- \
+  redis-cli -h nextcloud-redis ping 2>/dev/null || \
+  mise exec -- kubectl exec -n office deploy/nextcloud-redis -- redis-cli ping   # PONG
+
+# 0e) the replacement NetworkPolicy exists (the subchart's vanished — §1a item 6)
+mise exec -- kubectl get netpol -n office nextcloud-redis
+```
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
