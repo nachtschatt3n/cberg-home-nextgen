@@ -24,8 +24,20 @@ touches:
 depends_on: []  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 (2dcbfad2) — dependency satisfied  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
 conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-nextcloud-db, ]  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 — dead ref removed  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
-status: draft
-window: "sun-window:2026-09-06"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+status: executed                                # EXECUTED 2026-08-19 (4604c711) in the
+                                                # operator-approved ad-hoc window. Dump
+                                                # verified row-for-row against the quiesced
+                                                # source (74 tables / 15404 rows) before the
+                                                # cutover; restore matched it exactly.
+# RETAIN, do not delete on the usual executed-plan convention: §5 stays the live rollback
+# while the orphaned volume paperless-mariadb is still the only way back, i.e. until the
+# "clean for a week" retirement in §6 is done.
+window: null                          # cleared 2026-08-19: executed in the ad-hoc window
+                                      # (4604c711), so the reserved slot is released.
+                                      # maintenance-plan.py buckets by `window` regardless of
+                                      # `status`, so leaving it set would reserve 70m for work
+                                      # already done. Was: "sun-window:2026-09-06",
+                                      # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
                                                 # which requires a SOLO window. 09-26/10-03/10-10
@@ -106,7 +118,7 @@ Even though a fresh `initdb` at 11.8.8 should write its own datadir marker,
 `docs/sops/mariadb-major-upgrade.md` documents that **every signal an operator
 normally trusts can lie**: `Ready=True`, a correct `SELECT VERSION()`, and a
 running pod are all compatible with old-format system tables underneath. So
-Verification below checks the **datadir marker** (`/var/lib/mysql/mysql_upgrade_info`)
+Verification below checks the **datadir marker** (`/var/lib/mysql/mariadb_upgrade_info`)
 and runs `mariadb-check --all-databases`, not just `SELECT VERSION()`. And if a
 manual upgrade is ever needed, it must go over the socket
 (`mariadb-upgrade --protocol=socket --skip-ssl`) — the SOP records that the
@@ -410,7 +422,13 @@ mise exec -- kubectl get volume -n storage paperless-db-data \
 #    docs/sops/mariadb-major-upgrade.md: Ready=True + a correct SELECT VERSION()
 #    are both compatible with old-format system tables. Check the DATADIR MARKER.
 mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "select version();"'
-mise exec -- kubectl exec -n office $NEW -- cat /var/lib/mysql/mysql_upgrade_info
+mise exec -- kubectl exec -n office $NEW -- cat /var/lib/mysql/mariadb_upgrade_info
+#    ^ CORRECTED 2026-08-19 during execution: MariaDB 11.8 writes the marker as
+#      `mariadb_upgrade_info`, NOT `mysql_upgrade_info`. The old path does not exist
+#      and cat exits 1 — which reads exactly like the trap this check is meant to
+#      catch. Phase 4 (nextcloud) must use the mariadb_ name. Cross-check with
+#      `mariadb-upgrade --protocol=socket --skip-ssl -uroot -p... --check-if-upgrade-is-needed`,
+#      which reports "already upgraded to <version>" and exits 1 when nothing is due.
 #    ^ MUST show 11.8.8. If it lags, run the upgrade BY HAND OVER THE SOCKET —
 #      the default TLS/TCP loopback resets mid-run and half-applies the privilege
 #      migration (two runs failing at DIFFERENT lines is the tell):
@@ -598,3 +616,64 @@ Confirmed back = bundled StatefulSet Running on 11.8.2 with 72 tables, paperless
 - The dump in step 2 is a **credential-adjacent artefact** even though it excludes
   the `mysql` schema. Keep it `0600` in a `0700` directory outside the repo,
   and delete it once phase 3 has been clean for a week.
+
+## 7) Execution record — 2026-08-19 (commit 4604c711)
+
+Executed in the operator-approved ad-hoc window. Outcome: PASS. Carry the four
+findings below into phase 4 (`bitnamilegacy-exit-nextcloud-db`) — three of them
+cost time here and one is a real gap in §5.
+
+**a) Flux puts the app back before you have restored it.** Step 2 scales
+`paperless-ngx` to 0, but step 7's push makes Flux reconcile the HelmRelease,
+which restores `replicas: 1`. Paperless came straight back up against the empty
+new datadir and ran its Django migrations, creating all 74 tables before the
+restore. It was harmless *here* only because `mariadb-dump` emits
+`DROP TABLE IF EXISTS` for every table (verified: 74 of them), so the restore is
+authoritative and replaces whatever the app built. Do not rely on that for
+nextcloud — either suspend the HelmRelease over the cutover
+(`flux suspend hr nextcloud -n office`) or expect to scale to 0 a second time
+*after* the reconcile, which is what step 8 silently depends on. Budget for the
+app being up for a minute or two against an empty database.
+
+**b) §5 could not have restored root access.** The plan generates a NEW root
+password and lets the chart-generated `paperless-ngx-mariadb` Secret be deleted
+with the subchart. But the *retired* datadir still holds the *old* root password,
+and on `git revert` the bitnami subchart regenerates a fresh random Secret that
+will not match it — so the rollback's own verification step
+(`mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" ...`) would fail, and the app
+password would not match either. Mitigated during execution by backing the
+Secret up before the cutover, outside the repo:
+`~/db-dumps/paperless-ngx-mariadb-secret-2026-08-19.yaml` (0600 in a 0700 dir).
+**Phase 4 must do this before disabling the subchart**, and §5 should recreate
+the Secret from that backup as its first step.
+
+**c) The datadir marker is `mariadb_upgrade_info`.** See the corrected §4(b).
+`mysql_upgrade_info` does not exist on MariaDB 11.8; `cat` exits 1, which looks
+exactly like the failure the check exists to catch.
+
+**d) `lost+found` becomes a database.** The official image puts the datadir at
+the volume root, so MariaDB reads ext4's `lost+found` as a schema: it appears in
+`SHOW DATABASES` as `#mysql50#lost+found` and logs
+`[ERROR] Invalid (old?) table or database name 'lost+found'` on every scan
+(~10 lines in the first 15 minutes). Cosmetic — `mariadb-check --all-databases`
+is all-OK and the `paperless` schema is unaffected — but it is ERROR-level noise
+that log-based alerting may pick up. The bitnami image avoided it by using a
+subdirectory (`/bitnami/mariadb/data`). Fixing it means `subPath` on the volume
+mount, which requires re-initialising the datadir, so it was NOT done here.
+Phase 4 can avoid it from the start by mounting with `subPath: data`.
+
+### Verification result
+
+| check | before | after |
+|---|---|---|
+| tables in `paperless` | 74 | 74 |
+| exact rows, all tables summed | 15404 | 15405 (+1 celery task row written post-restore) |
+| per-table exact row counts | — | identical on 73/74; `documents_paperlesstask` +1, all 135 pre-dump rows present |
+| documents / correspondents / tags / types | 714 / 151 / 37 / 11 | 714 / 151 / 37 / 11 |
+| server + schema charset | utf8mb3 / utf8mb3_general_ci | utf8mb3 / utf8mb3_general_ci |
+| server version | 11.8.2-MariaDB | 11.8.8-MariaDB-ubu2404 |
+
+Dump: `~/db-dumps/paperless-2026-08-19.sql`, 14533054 bytes, 0600, 74
+`CREATE TABLE`, trailing `-- Dump completed`, row counts parsed out of the dump
+file matched the quiesced source exactly before the cutover began. Retain it and
+the Secret backup until the §6 one-week retirement.
