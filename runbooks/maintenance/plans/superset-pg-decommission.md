@@ -85,7 +85,10 @@ mise exec -- kubectl exec -n databases $NEW -- psql -U superset -d superset -At 
   union all select 'slices='||count(*) from slices
   union all select 'saved_query='||count(*) from saved_query
   union all select 'dbs='||count(*) from dbs
-  union all select 'ab_user='||count(*) from ab_user;"
+  union all select 'ab_user='||count(*) from ab_user;" | tee /tmp/superset-decom-before.txt
+#    KEEP this file — §4(c) diffs against it. "Counts look about right" is not a
+#    comparison; a recorded baseline is (docs/sops/verification-contents-not-shape.md).
+#    Values must be >= the cutover's numbers (normal growth is fine, shrinkage is not).
 
 # d) FINAL dump + fresh backup of the DB you are about to switch off. This replaces
 #    the running instance as the recovery floor, so it is mandatory.
@@ -175,15 +178,28 @@ print('bitnamilegacy images still running:', bad or 'NONE')"
 # paperless-ngx-mariadb, the one unpinned office/ mariadb image — are out of scope here and
 # are their own hygiene item; note them, do not fix them in this window.)
 
-# c) the data is still there and still served
+# c) CONTENTS ASSERTION — the data is still there, DIFFED against the recorded
+#    baseline, and still served. Turning off the old server must not perturb the
+#    live one; "the numbers look plausible" is not a comparison.
 NEW=$(mise exec -- kubectl get pods -n databases -l app=superset-pg -o jsonpath='{.items[0].metadata.name}')
 mise exec -- kubectl exec -n databases $NEW -- psql -U superset -d superset -At -c "
   select 'dashboards='||count(*) from dashboards
   union all select 'slices='||count(*) from slices
-  union all select 'saved_query='||count(*) from saved_query;"
+  union all select 'saved_query='||count(*) from saved_query
+  union all select 'dbs='||count(*) from dbs
+  union all select 'ab_user='||count(*) from ab_user;" > /tmp/superset-decom-after.txt
+diff /tmp/superset-decom-before.txt /tmp/superset-decom-after.txt \
+  && echo "IDENTICAL to the pre-check baseline"
+# Any output: STOP. This step only disables a server nothing was using — a count
+# that MOVED means something was still reading or writing it, i.e. pre-check (b)
+# was wrong. Revert (§5) before investigating.
+
 DOM=$(mise exec -- kubectl get secret -n flux-system cluster-secrets -o jsonpath='{.data.SECRET_DOMAIN}' | base64 -d)
 curl -s -o /dev/null -w '%{http_code}\n' --max-time 20 "https://superset.$DOM/health"     # 200
-# Operator: log in, open a dashboard, run a saved query. Same smoke test as the cutover.
+# `/health` 200 is the FLOOR, not the assertion: Superset answers 200 against an
+# empty metadata DB just as happily (this is the paperless-db failure shape).
+# Operator, LOAD-BEARING: log in, open a dashboard and confirm the panels paint
+# REAL NUMBERS, and run a saved query. Same smoke test as the cutover.
 
 # d) the retained data is genuinely retained (this is the recovery floor now)
 mise exec -- kubectl get pvc -n databases superset-postgresql-data     # still present
@@ -197,8 +213,9 @@ mise exec -- trivy image postgres:17.11-alpine --severity CRITICAL --ignore-unfi
 ```
 
 Success = old StatefulSet gone, no `bitnamilegacy` image running for Superset, HR
-Ready, Superset serving on the new DB with intact counts, and the old PVC/PV/Longhorn
-volume still present with `Retain` and a fresh backup.
+Ready, **the row-count diff against the pre-check baseline silent** and a dashboard
+rendering real data in the browser, and the old PVC/PV/Longhorn volume still present
+with `Retain` and a fresh backup.
 
 ## 5) Rollback
 

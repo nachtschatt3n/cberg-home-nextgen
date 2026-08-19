@@ -4,8 +4,8 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `operator + daily-operation agents`
 
 ---
@@ -25,6 +25,16 @@ into *fail*, operators chase things that do not exist and stop trusting the swee
 This SOP exists because that rule lived only in commit messages.
 
 ## 2) Overview
+
+> **Sibling failure class — change verification.** This SOP governs the sweep's
+> **audit code**: a check that could not measure must not report a result. Its
+> twin governs **change plans**: a check that measures the wrong noun. There the
+> defect is asserting the SHAPE of a thing (exists / Ready / 200) instead of its
+> CONTENTS, so every green signal is true while the thing is empty — three
+> instances on 2026-08-18/19. Rules and per-class assertions:
+> **[`docs/sops/verification-contents-not-shape.md`](verification-contents-not-shape.md)**.
+> One sentence covers both: *a health signal that cannot distinguish "working"
+> from "empty" is not a health signal.*
 
 **The rule: every audit function returns a tri-state. Never two.**
 

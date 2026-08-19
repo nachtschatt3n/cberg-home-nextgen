@@ -180,10 +180,79 @@ kubectl get volumes -n storage -o custom-columns=N:.metadata.name,S:.status.stat
 # finding cleared
 trivy image longhornio/longhorn-engine:v1.12.1 --severity CRITICAL --ignore-unfixed
 # Record the result on F-49f172b9 and F-6bedee0b — not in this file.
-
-# app-level smoke: one stateful app per class still reads/writes (a database pod
-# and a CIFS-backed media pod), plus `flux get kustomizations -A`.
 ```
+
+### CONTENTS ASSERTIONS — do NOT sign this plan off on the block above
+
+Volume `state=attached` + `robustness=healthy` is the SHAPE of the storage
+layer. It is exactly what stayed green through the §1b incident, and it says
+nothing about whether anything can still *observe* or *use* the volumes. Both
+assertions below are mandatory; see
+`docs/sops/verification-contents-not-shape.md`.
+
+**CONTENTS ASSERTION 1 — Prometheus still scrapes Longhorn.** This is §1b's
+lesson, executed rather than narrated. The chart half already pinned
+`restrictInternalTraffic: false`, but the engine drain restarts
+instance-managers on every node, so re-assert it *after* the drain:
+
+```bash
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+sleep 5
+
+# a) all three longhorn-backend targets UP (not "0 down" — count them: 3)
+curl -s http://localhost:9090/api/v1/targets | python3 -c "
+import sys, json
+t=[x for x in json.load(sys.stdin)['data']['activeTargets']
+   if 'longhorn' in x['labels'].get('job','')]
+print('targets:', len(t))
+for x in t: print(' ', x['labels']['job'], x['labels'].get('instance'), x['health'], x.get('lastError',''))
+assert t and all(x['health']=='up' for x in t), 'LONGHORN SCRAPE DOWN — STOP'"
+
+# b) the series ACTUALLY ARRIVE — a target can be up and export nothing.
+#    Query a 5m window that starts AFTER the drain, and require one row per volume.
+curl -s --get http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=count(count by (volume) (longhorn_volume_actual_size_bytes))' \
+  | python3 -c "
+import sys, json
+r=json.load(sys.stdin)['data']['result']
+assert r, 'EMPTY RESULT — metrics are not arriving. STOP.'
+print('volumes reporting metrics:', r[0]['value'][1])"
+#    must be 93. An empty result array is a FAILURE, not 'no news'.
+
+# c) and no permanently-firing false alarm left behind
+curl -s http://localhost:9090/api/v1/alerts | grep -o '"alertname":"[^"]*"' \
+  | grep -vE 'Watchdog|InfoInhibitor' | sort | uniq -c
+#    LonghornManagerDown / TargetDown must be ABSENT (they fired ×3 in §1b)
+
+# no NetworkPolicy crept back in with the engine work
+kubectl get netpol -n storage
+```
+
+**CONTENTS ASSERTION 2 — a real read/write round-trip through a mounted PVC.**
+"App-level smoke" was too vague to execute; make it a byte-level round-trip on
+one Longhorn-backed database pod and one CIFS-backed media pod (the CIFS pod is
+the control — it must be unaffected by engine work):
+
+```bash
+# Longhorn-backed: write, sync, read back, delete. Pick any attached-volume pod.
+POD=<a pod mounting a Longhorn PVC>; NS=<its namespace>
+kubectl exec -n $NS $POD -- sh -c \
+  'D=$(mktemp -d 2>/dev/null || echo /tmp); echo verify-$$ > /<mountpath>/.verify && sync && cat /<mountpath>/.verify && rm -f /<mountpath>/.verify'
+#   must echo back the exact string it wrote
+
+# Database-level, the assertion that matters for a storage change: the data is
+# still READABLE, not merely that the pod is Ready.
+kubectl exec -n databases <pg-pod> -- psql -U <u> -d <db> -At -c 'select count(*) from <a real table>;'
+#   non-zero and matching the pre-check value
+
+kubectl get pods -A --field-selector=status.phase!=Running | grep -v Completed
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
+```
+
+Success = 93/93 on v1.12.1, both stale EngineImages gone, every volume healthy,
+**all three Longhorn scrape targets up with 93 volumes reporting metrics and no
+LonghornManagerDown firing**, and a byte-level read/write round-trip proven on a
+Longhorn-backed PVC.
 
 ## 5) Rollback
 

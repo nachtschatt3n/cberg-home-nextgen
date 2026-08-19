@@ -549,7 +549,12 @@ mise exec -- kubectl logs -n databases deploy/superset --since=20m \
 # f) pods stable (0 restarts after settle) and the alerts are quiet
 mise exec -- kubectl get pods -n databases | grep superset
 
-# g) data survived — diff against the pre-check baseline
+# g) CONTENTS ASSERTION — data survived; diff against the pre-check baseline.
+#    (a)-(f) are all shape: a Superset on the correct image, at alembic head,
+#    with a live Celery and a 200 on /health is exactly what an empty metadata
+#    DB also looks like. The diff below and the operator checks (h)-(k) are the
+#    only things here that can tell working from empty.
+#    See docs/sops/verification-contents-not-shape.md.
 mise exec -- kubectl exec -n databases $NEW -- env PGPASSWORD="$PW" psql -U superset -d superset -At -c "
   select 'dashboards='||count(*) from dashboards
   union all select 'slices='||count(*) from slices
@@ -589,6 +594,15 @@ perfectly healthy at pod level and useless in the browser.**
   auto-revert for it.
 - **(k) The Databases list still shows the `Pellets` connection** and Test
   Connection passes (proves `psycopg2-binary==2.9.9` installed into the venv).
+
+**CONTENTS ASSERTION (log floor).** A major image bump can change where the app
+writes its logs. Assert that documents from the superset containers still REACH
+Elasticsearch after the roll — `logs-generic-default` filtered on
+`resource.attributes.k8s.namespace.name = databases` and
+`resource.attributes.k8s.container.name` for `superset` / `superset-worker`,
+over a window starting after the rollout, must be **non-zero**. Four Rails apps
+in this cluster are `Running` with logging configured and ship zero documents;
+"the error greps came back clean" is indistinguishable from that state.
 
 **Not applicable, do not go looking for them:** alerts/reports (0 configured, and
 6.1.0's lean image has no browser — §1), the Insights/local-LLM path (not wired to

@@ -165,18 +165,36 @@ mise exec -- kubectl logs -n media job/coverage-<id> | tail -30
 #   Plex: unmatched=0 in all 3 sections
 #   Jellyfin: overview 100%, primary 100%, backdrop STILL 546/550 (the 4 are WONTFIX)
 
-# c) per-show sanity, by hand, for the two trap shows especially: open 2 episodes each in
+# c) CONTENTS ASSERTION — the written .nfo files contain REAL DATA, not stubs.
+#    `episode_nfo_pct` counts FILES THAT EXIST. A writer that emits a well-formed
+#    but empty <episodedetails/> for every episode drives the metric straight to
+#    100% while adding nothing a media server can use — the coverage-percentage
+#    form of the empty-schema failure (docs/sops/verification-contents-not-shape.md).
+#    Sample at least 10 freshly-written sidecars across 3 different shows:
+mise exec -- kubectl exec -n media deploy/<library-tools-pod> -- sh -c '
+  find /media/tv -name "*.nfo" -newermt "-2 hours" | head -10 | while read F; do
+    printf "%s title=%s plot=%s ep=%s\n" "$F" \
+      "$(grep -c "<title>[^<]" "$F")" "$(grep -c "<plot>[^<]" "$F")" "$(grep -c "<episode>[0-9]" "$F")"
+  done'
+#    every sampled file must show title=1 plot=1 ep=1 — a 0 in any column means
+#    stub sidecars were written and the metric is lying. Also eyeball the byte
+#    size: a real episode .nfo is ~1-4 KB, a stub is ~100 bytes.
+
+# d) per-show sanity, by hand, for the two trap shows especially: open 2 episodes each in
 #    Jellyfin and confirm the episode titles belong to THAT series. A wrong-series match
 #    writes a full, valid, completely incorrect set of sidecars — the counters cannot see it.
+#    (This is the semantic half: (c) proves the files are non-empty, (d) proves they
+#     describe the right series. Counts and coverage percentages can see neither.)
 
-# d) job hygiene
+# e) job hygiene
 mise exec -- kubectl get jobs -n media | grep ep-write        # all Complete, none Failed
 mise exec -- kubectl logs -n media job/ep-write-<id> | grep -iE 'error|traceback' || echo clean
 ```
 
 Success = `episode_nfo_pct` at or above 80.0 for the shows processed, every other
-metric unchanged, Plex `unmatched=0`, Jellyfin backdrop 546/550, and hand-checked
-episode titles correct for the two trap shows.
+metric unchanged, **every sampled .nfo carrying a real title/plot/episode number
+rather than a stub**, Plex `unmatched=0`, Jellyfin backdrop 546/550, and
+hand-checked episode titles correct for the two trap shows.
 
 ## 5) Rollback
 

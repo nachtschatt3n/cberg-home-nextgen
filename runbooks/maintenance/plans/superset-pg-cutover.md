@@ -145,7 +145,16 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    ```
    **Read the `pg_restore` output.** Ownership/extension warnings are benign; any
    `error:` line is not — stop and roll back rather than cutting over onto a partial DB.
-4. **Compare the two databases before repointing anything**:
+4. **Compare the two databases before repointing anything.**
+
+   **CONTENTS ASSERTION: exact per-table row counts on BOTH servers, diffed,
+   before the repoint.** This is the step the paperless-db incident
+   (2026-08-19) did not have — a brand-new database with every table present and
+   zero rows passed pod-Ready, schema-present and HTTP 200 while 714 documents
+   were invisible. Superset behaves the same way: it starts fine on an empty
+   metadata DB and simply shows you nothing.
+   See `docs/sops/verification-contents-not-shape.md`.
+
    ```bash
    # EXACT per-table counts. Do NOT use pg_stat_user_tables.n_live_tup here: it is a
    # planner ESTIMATE maintained by autovacuum/ANALYZE, and it currently reads 0 for

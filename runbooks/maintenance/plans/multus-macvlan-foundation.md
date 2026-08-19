@@ -80,5 +80,41 @@ LB .29 for UI + music-stream ingress for Alexa), then home-assistant
 (+ cast known_hosts / homekit advertise_ip belt-and-braces). matter-server
 stays hostNetwork for now; otbr permanently.
 
-Rollback: NAD/Multus are additive — revert commits; esphome revert restores
+## Verification
+
+**CONTENTS ASSERTION: multicast/mDNS frames are actually RECEIVED on the
+macvlan interface.** This plan exists *because* multicast does not work; an
+attached NAD, a pod with a static IP on 192.168.32.0/23 and a successful
+unicast `ping` are all the SHAPE of that fix and are exactly what a pod with
+working L3 and broken multicast also looks like. Assert the property directly
+(`docs/sops/verification-contents-not-shape.md`):
+
+```bash
+# step 4 test pod, on the `iot` NAD
+kubectl exec -n <ns> <testpod> -- ip -o addr show           # macvlan iface with the static IP
+kubectl exec -n <ns> <testpod> -- ping -c3 <an IoT VLAN host>   # L3 — the FLOOR, not the assertion
+
+# THE assertion: multicast frames arrive. Non-empty output within ~30s is the pass;
+# a silent capture is the failure this plan exists to prevent.
+kubectl exec -n <ns> <testpod> -- timeout 30 tcpdump -ni <macvlan-iface> -c 5 'udp port 5353'
+#   must capture >= 1 mDNS packet. Zero packets => macvlan is up and useless.
+```
+
+```bash
+# step 5, esphome after dropping hostNetwork — assert DEVICES, not pods.
+# An esphome pod that is Ready with zero devices reachable is the empty-but-
+# healthy shape; the device count is the contents.
+kubectl get pods -n home-automation | grep esphome                  # floor
+#   Operator/ha-agent: confirm every ESPHome device still reports ONLINE in the
+#   dashboard and at least one entity's state updates in Home Assistant — the
+#   ping-based status + use_address path is what actually changed.
+```
+
+Also: `flux get kustomizations -A` clean, and no node lost its VLAN link after
+the per-node Talos apply-config (verify link before moving to the next node —
+this is already ordered as step 2).
+
+## Rollback
+
+NAD/Multus are additive — revert commits; esphome revert restores
 hostNetwork; Talos VLAN sub-iface removal via apply-config.

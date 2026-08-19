@@ -108,11 +108,60 @@ generated: "2026-07-25"
    (health, backups fresh, no in-flight reconcile).
 3. **Steps** — the exact GitOps change (file edits, `sops` edits, commit/push),
    numbered and copy-pasteable. Follow the referenced SOPs.
-4. **Verification** — how to prove success (Flux Ready, pods healthy, app probe,
-   data intact).
+4. **Verification** — how to prove success. Flux Ready, pods healthy and an app
+   probe are the *floor*, not the section. **Every plan MUST carry at least one
+   assertion about the CONTENTS of the thing it changed** — see the next
+   heading; a plan without one is not vetted.
 5. **Rollback** — the exact revert path if verification fails.
 6. **Interference notes** — anything the window agent must know (shared infra it
    restarts, ordering constraints, why `conflicts_with` is set).
+
+## Verification must assert CONTENTS, not SHAPE
+
+**The rule, and it generalises past the table below:**
+
+> Name the property this change could silently break, and assert that property
+> **directly**. Never a proxy for it. If the assertion would still go green with
+> the thing empty, wrong, or unreachable, it is not verification — it is a
+> shape check, and shape checks pass loudest exactly when contents are gone.
+
+This is the plan-side twin of `docs/sops/audit-script-correctness.md`: there, a
+check that could not measure reported a result anyway; here, a check measures
+the wrong noun. **A health signal that cannot distinguish "working" from
+"empty" is not a health signal.** Three plans produced this failure on
+2026-08-18/19 — worked examples in
+[`docs/sops/verification-contents-not-shape.md`](../../../docs/sops/verification-contents-not-shape.md).
+
+Every plan's §4 needs at least one assertion that **would fail if the thing were
+empty or wrong while structurally healthy**. Write it as an explicit line:
+
+```
+CONTENTS ASSERTION: <the property> — measured by <command>, compared to <baseline>.
+```
+
+### Per-class exemplars — use the row for your change class
+
+| Change class | The shape check that will lie to you | The contents assertion you must write instead |
+|---|---|---|
+| **data migration** (dump/restore, DB replatform, repoint) | pod Ready, `select version()`, schema present, all N tables exist, HTTP 200 | **Exact row counts on BOTH databases, for the full table set (or the top N tables), diffed BEFORE the repoint.** `schema present` and `pod Ready` are NOT evidence — Django/Rails/Alembic will happily create every table with zero rows in them. `pg_stat_user_tables.n_live_tup` is an ESTIMATE and does not count: use `count(*)` (see `superset-pg-cutover` §3.4 for the `query_to_xml` per-table form that works on both PG14 and PG17). Repoint only on a silent `diff`. |
+| **chart / version bump on anything SCRAPED** | volumes/pods healthy, HR Ready, chart version correct | **The metric series still arrive**: the scrape target is `up == 1` *and* a representative series returns a non-empty result over a window that starts after the change. A chart can ship a NetworkPolicy, a port rename or an auth default in a *patch* and cut the scrape while the workload stays perfect. |
+| **frontend / bundler / asset pipeline** | build exited 0, pod Ready, `/` returns 200 | **The fingerprinted artifacts actually serve**, diffed against a pre-change baseline: enumerate the digest-named assets the page references, fetch each, assert 200 **and** a plausible byte size **and** a body that is not `<!DOCTYPE`. A bundler bump fails silently as a *different bundle*, not as a failed build (`docs/sops/self-built-image-rebuild.md`; `absenty-drop-npm-runtime` §7 is the reference implementation). |
+| **anything log-emitting** (runtime bump, logging config, log-noise reduction) | `Running`, logging configured, line rate fell | **Documents actually reach Elasticsearch**: query `logs-generic-default` filtered on `resource.attributes.k8s.namespace.name` + `k8s.container.name` for a window after the change and assert a **non-zero floor**, not only a ceiling. Four Rails apps are `Running` with logging configured and ship **zero** log documents — a plan whose only assertion is "line rate dropped" scores that as a triumph. |
+| **cache / broker replatform** (redis, rabbit, memcached) | pod Ready, `redis-cli ping` → `PONG` | **A real round-trip**: write a throwaway key and read it back, assert `DBSIZE`/queue depth is non-zero where the app has live state, and assert the *consumer* reconnected (celery `inspect ping`, a delivered job). `PONG` is a liveness probe wearing a verification costume. |
+| **storage / volume work** | volume `state=attached`, `robustness=healthy` | **A real read/write round-trip through a mounted PVC** on the affected class, plus the scrape row above — Longhorn's own health says nothing about whether anything can still *use* it. |
+| **search / index / vector store** | index exists, green cluster status | **Document count and a query that returns results.** An empty index is green. |
+| **auth / SSO / identity** | pods Ready, `/-/health/ready` 200 | **A real login through each affected path**, exercising the provider rows the change touched (see `project_authentik_blueprint_grant_types`: providers with `grant_types: []` are perfectly healthy and every login fails). |
+| **metadata / bulk content backfill** | files written, counter moved | **Sample the written artifacts and assert they contain real values**, not empty stubs — a coverage percentage counts files, not their contents. |
+
+### Two corollaries worth stating
+
+- **Order matters for migrations.** The contents comparison must run *before*
+  the repoint/cutover, while the old source is still authoritative and the
+  rollback is free. Verifying after the app is already serving turns an
+  abort into an incident.
+- **A ceiling without a floor is a shape check.** Any assertion of the form
+  "X should go down" needs the matching "and X must still be > 0", or the
+  total disappearance of X reads as complete success.
 
 ## Public repo — vulnerability detail does NOT go in a plan
 

@@ -93,7 +93,14 @@ kubectl get pvc -n office | grep -i redis || echo "no redis PVC (expected)"
 curl -s -o /dev/null -w '8.10.0-alpine -> %{http_code}\n' \
   https://hub.docker.com/v2/repositories/library/redis/tags/8.10.0-alpine
 
-# e) no in-flight reconcile / other office plan running this window
+# e) baseline for the §4 contents assertion — what this redis holds under
+#    normal load (it is non-persistent, so this is a LOAD baseline, not a
+#    survival baseline; §4b must climb back to a comparable order of magnitude)
+POD=$(kubectl get pods -n office -l app.kubernetes.io/name=affine -o name | grep redis | head -1)
+kubectl exec -n office ${POD##*/} -- redis-cli dbsize
+kubectl exec -n office ${POD##*/} -- redis-cli info clients | grep connected_clients
+
+# f) no in-flight reconcile / other office plan running this window
 flux get kustomizations -n flux-system | grep -E 'office|affine' || true
 ```
 
@@ -144,20 +151,58 @@ kubectl get helmrelease -n office affine-redis \
 kubectl get deploy -n office affine-redis \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # expect redis:8.10.0-alpine
 
-# redis pod Ready, 0 restarts after settle, and PING works
+# redis pod Ready, 0 restarts after settle
 kubectl get pods -n office | grep affine-redis
 POD=$(kubectl get pods -n office -l app.kubernetes.io/name=affine -o name | grep redis | head -1)
-kubectl exec -n office ${POD##*/} -- redis-cli ping   # expect PONG
+POD=${POD##*/}
+```
 
-# affine app still Ready and reconnected (no sustained redis errors)
+### CONTENTS ASSERTION — `PING` → `PONG` is NOT verification
+
+`PONG` is a liveness probe wearing a verification costume: it is answered by a
+freshly-initialised, completely empty redis exactly as cheerfully as by the one
+holding Affine's sessions. A `Recreate` swap onto a mis-mounted or wrong-named
+PVC produces `Ready` + `PONG` + an app that has quietly lost every session.
+See `docs/sops/verification-contents-not-shape.md` (cache/broker row).
+
+**CONTENTS ASSERTION: a real write/read round-trip, plus non-empty live state.**
+
+```bash
+# a) round-trip — write a throwaway key and read the exact bytes back
+kubectl exec -n office $POD -- redis-cli set __verify_$$ ok EX 60
+kubectl exec -n office $POD -- redis-cli get __verify_$$      # MUST echo: ok
+kubectl exec -n office $POD -- redis-cli del __verify_$$
+
+# b) the app REPOPULATED it. Note the inversion for THIS app: affine-redis runs
+#    `--save "" --appendonly no` with no PVC (pre-check c), so an empty dbsize
+#    immediately after the Recreate is CORRECT, not a failure. The contents
+#    property here is therefore not "state survived" but "state comes BACK" —
+#    a redis that stays permanently at 0 keys while affine reports Ready means
+#    the app is not actually writing to it (wrong host/port/db, silent client
+#    failure), which is exactly the empty-but-healthy shape.
+kubectl exec -n office $POD -- redis-cli dbsize          # 0 right after the swap: expected
+#    ...then exercise the app (open Affine, load a doc) and re-measure:
+kubectl exec -n office $POD -- redis-cli dbsize          # MUST be > 0 within a few minutes
+kubectl exec -n office $POD -- redis-cli info keyspace   # at least one dbN with keys=N
+#    Still 0 after real app traffic => affine is not using this redis. STOP.
+kubectl exec -n office $POD -- redis-cli info clients | grep connected_clients
+#    non-zero — the affine pods are actually holding connections
+
+# c) the CONSUMER actually reconnected — assert from the app side, not the
+#    broker side. Log in to Affine in a browser and load a document; the
+#    workspace list and doc content must render with real data, not an empty
+#    shell.
 kubectl get pods -n office | grep -E 'affine-[0-9a-f]'
 kubectl logs -n office deploy/affine --since=3m | grep -iE 'redis|econnrefused|error' | tail -20 || true
 ```
 
-Success = affine-redis HR Ready, image `redis:8.10.0-alpine`, `PONG`, redis pod
-0 restarts after ~2 min, and the affine app pod stays Ready with no sustained
-redis connection errors (a brief burst during the Recreate swap is expected and
-self-heals).
+Success = affine-redis HR Ready, image `redis:8.10.0-alpine`, redis pod 0
+restarts after ~2 min, **the set/get round-trip returns the written value,
+`connected_clients` > 0, and `dbsize` climbs back above 0 once Affine is
+exercised**, and Affine loads a document in the browser (a brief error burst
+during the Recreate swap is expected and self-heals; because this redis is
+deliberately non-persistent, session loss across the swap is expected too — see
+§2c).
 
 ## 5) Rollback
 

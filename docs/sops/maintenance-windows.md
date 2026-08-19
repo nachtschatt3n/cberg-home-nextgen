@@ -54,7 +54,12 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   `touches`, `depends_on`, `conflicts_with`, status, window) + six body sections
   (Summary & why held, Pre-checks, Steps, Verification, Rollback, Interference
   notes). Schema in `runbooks/maintenance/plans/README.md`. Plans are transient —
-  deleted in the commit that lands the upgrade.
+  deleted in the commit that lands the upgrade. **Verification must assert
+  CONTENTS, not shape** — every plan carries at least one assertion that would
+  fail if the thing it changed were empty/wrong while structurally healthy
+  (per-class exemplars in the plans README; failure class and worked examples in
+  `docs/sops/verification-contents-not-shape.md`). A plan whose §4 is only
+  "Ready/200/healthy" is **not vettable** — the window agent sends it back.
 - **Reconciler:** `runbooks/maintenance-plan.py` — read-only glue the sweep runs.
   Reports held-updates-without-a-plan, stale/orphan plans, the next window + its
   queue, and capacity/reboot/interference warnings.
@@ -234,6 +239,21 @@ cycle is a process failure — dispatch the planner manually.
 `warnings` must contain no `OVER-CAPACITY` / `REBOOT-IN-NONREBOOT` /
 unresolved `INTERFERENCE` for any window with a date in the future.
 
+### Test 4: every scheduled plan asserts contents, not shape
+
+A plan is only vettable if its Verification section can fail on an *empty but
+healthy* outcome. Scan the queue before a window:
+
+```bash
+grep -L 'CONTENTS ASSERTION' runbooks/maintenance/plans/*.md
+```
+
+Absence of the marker is a prompt to read §4 by hand, not an automatic reject
+(several plans assert contents in prose and carry no marker) —
+but a §4 that contains only `Ready` / `200` / `healthy` / `Running` and no
+count, diff, round-trip or served-bytes check **is** a reject. See
+`docs/sops/verification-contents-not-shape.md`.
+
 ## 7) Troubleshooting
 
 | Symptom | Likely cause | Action |
@@ -244,6 +264,7 @@ unresolved `INTERFERENCE` for any window with a date in the future.
 | MISSED window warning | window date passed, plans unexecuted | run `maintenance-window-agent` for the next slot; investigate why it didn't fire |
 | `next window` shows a time already in the PAST | `next_occurrence()` ignored `start_hhmm`, so a same-weekday window was always dated TODAY (F-f95a8b52, fixed 2026-08-18) | today's slot now rolls +7d once its start time has passed; re-check with `maintenance-plan.py --json` |
 | A beta/pre-release tag appears in the AUTO lane | a `CHANNEL_RULES` entry is missing for an upstream that pushes pre-releases to the stable repo | add the component to `CHANNEL_RULES` in `runbooks/coverage.py` (a channel PREDICATE, e.g. `odd-minor`, not a version pin) and a deny rule for the Renovate-PR path; see §Coverage guarantee → AUTO disqualifiers |
+| Plan §4 is all `Ready` / `200` / `healthy` | shape-only verification — it cannot distinguish working from empty (`docs/sops/verification-contents-not-shape.md`) | send it back: add the per-class contents assertion from the plans README table before scheduling |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
 | Background window agent stalls "waiting to settle" | agent ended its turn on a passive wait — background agents get NO timer wakeups | agent must poll in-turn (bounded retries) or explicitly hand the wait back to its coordinator with what-to-check; coordinator: verify the settle yourself and resume it with the result |

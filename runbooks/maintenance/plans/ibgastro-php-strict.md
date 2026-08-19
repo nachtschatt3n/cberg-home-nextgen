@@ -165,6 +165,48 @@ not taken and dev behaviour is unchanged.
   T+10 minutes.
 - The app still serves: the sign-in page loads and behaves as before.
 
+### CONTENTS ASSERTION — the FLOOR, not only the ceiling
+
+**A ceiling with no floor is a shape check.** This plan's headline metric is
+"log lines should go *down*", and the best possible score on that metric is
+**zero lines/hour** — which is also exactly what an app that has stopped
+shipping logs entirely produces. That is not hypothetical here: this repo
+already has **four Rails apps that are `Running`, have `RAILS_LOG_TO_STDOUT=1`
+set correctly, and ship zero log documents** because the image never reads it
+(F-a49c67c3, cited in §2 above). Silencing a *diagnostic class* and silencing
+the *log pipeline* are indistinguishable from the ceiling alone.
+See `docs/sops/verification-contents-not-shape.md`.
+
+**CONTENTS ASSERTION: documents from this container still reach Elasticsearch
+after the change — a non-zero floor — and the surviving lines are the right
+ones.**
+
+```
+# In logs-generic-default, filtered to
+#   resource.attributes.k8s.namespace.name = my-software-showcase
+#   resource.attributes.k8s.container.name = <ibgastro container>
+# over a 1h window that STARTS after the roll:
+#
+#   a) total documents  > 0        <-- THE FLOOR. Zero = the pipeline died, not a win.
+#                                      Expect ~200-500 (access/liveness lines survive).
+#   b) documents matching *Strict Standards*  == 0   <-- the ceiling, the intended effect
+#   c) at least one ordinary request/access line is present, proving the stream
+#      is live rather than merely quiet.
+```
+
+```bash
+# corroborate at the pod, so a broken ES/edot path cannot be mistaken for success
+# (and vice versa — if the pod emits and ES does not receive, that is a DIFFERENT
+#  incident and must be raised, not silently absorbed into this plan's success)
+mise exec -- kubectl logs -n my-software-showcase deploy/ibgastro --since=10m | wc -l          # > 0
+mise exec -- kubectl logs -n my-software-showcase deploy/ibgastro --since=10m \
+  | grep -c 'Strict Standards' || echo 0                                                       # 0
+```
+
+If (a) is zero: **do not record this plan as successful.** Roll back or
+investigate the log path first — a plan that appears to have removed 100% of an
+app's logging has removed the wrong thing.
+
 ## 7) Known residual (accepted, not blocking)
 
 ~1-2 lines per request survive, emitted **before** core.php loads:

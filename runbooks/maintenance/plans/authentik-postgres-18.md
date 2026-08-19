@@ -190,7 +190,17 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
 mise exec -- kubectl get volume -n storage data-authentik-postgresql-0 \
   -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUST:.status.robustness,LASTBACKUP:.status.lastBackupAt
 
-# c) record the inventory you must see again on the NEW database (the acceptance test)
+# c) record the inventory you must see again on the NEW database (the acceptance
+#    test). NOTE: this curated list is the human summary — the binding
+#    acceptance test is the FULL per-table exact-count diff in §3 step 8.
+#    Capture the table list now so a table appearing/disappearing is visible:
+mise exec -- kubectl exec -n kube-system authentik-postgresql-0 -- sh -c '
+  PGPASSWORD=$(cat /opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD) \
+  psql -U authentik -d authentik -At -c "
+    select relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
+    where relkind='\''r'\'' and n.nspname='\''public'\'' order by relname;"' \
+  > /tmp/aktables-before.txt; wc -l /tmp/aktables-before.txt
+
 mise exec -- kubectl exec -n kube-system authentik-postgresql-0 -- sh -c '
   PGPASSWORD=$(cat /opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD) \
   psql -U authentik -d authentik -At -c "
@@ -445,18 +455,66 @@ mise exec -- crane digest docker.io/library/postgres:18.6-bookworm
    line is not — **stop and roll back** (§5, cheap path: just scale authentik
    back up; nothing has been repointed yet).
 
-8. **Compare old vs new before repointing anything**:
+8. **Compare old vs new before repointing anything.** This is the step the
+   paperless-db incident (2026-08-19) skipped: Django populated a brand-new
+   database with **all 74 tables and zero rows**, and pod-Ready + schema-present
+   + HTTP 200 were all green while 714 documents were invisible. Django will do
+   exactly the same to authentik — `authentik-server` runs migrations on boot
+   against whatever it is pointed at, so *the emptier the target, the more
+   cleanly it comes up*. Structural signals are worse than useless here.
+   See `docs/sops/verification-contents-not-shape.md`.
+
+   **CONTENTS ASSERTION: exact row counts for EVERY table, on BOTH servers,
+   diffed, while both are still reachable and nothing has been repointed.**
+
    ```bash
-   mise exec -- kubectl exec -n kube-system $PGPOD -- psql -U authentik -d authentik -c 'analyze;'
+   # EXACT per-table counts. Do NOT use pg_stat_user_tables.n_live_tup — it is a
+   # planner ESTIMATE maintained by autovacuum/ANALYZE and reads 0 on a server
+   # that has not been analyzed, which manufactures a total mismatch between two
+   # identical databases. query_to_xml counts for real, on PG14/17/18 alike.
+   cat > /tmp/akcounts.sql <<'SQL'
+   select c.relname||'='||(xpath('/row/c/text()',
+       query_to_xml(format('select count(*) as c from %I.%I', n.nspname, c.relname),
+                    false, true, '')))[1]::text::bigint
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where c.relkind = 'r' and n.nspname = 'public' order by c.relname;
+SQL
+
+   # OLD (17.11, bitnami layout — password from the mounted secret FILE).
+   # Single-quoted bodies: the password is expanded inside the pod, so it never
+   # enters kubectl argv, the API-server audit log or your shell history.
+   mise exec -- kubectl exec -i -n kube-system authentik-postgresql-0 -- sh -c '
+     PGPASSWORD=$(cat /opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD) \
+     psql -U authentik -d authentik -At -f -' < /tmp/akcounts.sql > /tmp/akcompare-old.txt
+
+   # NEW (18.6 — password is an ENV VAR here, not a file)
+   mise exec -- kubectl exec -i -n kube-system $PGPOD -- sh -c '
+     PGPASSWORD="$POSTGRES_PASSWORD" psql -U authentik -d authentik -At -f -' \
+     < /tmp/akcounts.sql > /tmp/akcompare-new.txt
+
+   wc -l /tmp/akcompare-old.txt /tmp/akcompare-new.txt     # same table count, both non-trivial
+   diff /tmp/akcompare-old.txt /tmp/akcompare-new.txt && echo "IDENTICAL — safe to repoint"
+   # `diff` MUST be silent. ANY output: STOP — do not repoint, roll back (§5).
+   # An all-zero right-hand side is the paperless signature: a perfect empty schema.
+
+   # sanity floor, so a silently-truncated dump on BOTH sides cannot diff clean
+   awk -F= '{s+=$2} END {print "total rows:", s}' /tmp/akcompare-new.txt
+   #   must be the same order of magnitude as the 784 MB database implies — a
+   #   total of ~0 with a matching old file means you dumped the wrong database.
+   ```
+
+   ```bash
+   # human-readable summary (the same six lines as pre-check (c)) — for the
+   # log, NOT as a substitute for the diff above
    mise exec -- kubectl exec -n kube-system $PGPOD -- psql -U authentik -d authentik -At -c "
      select 'users='||count(*) from authentik_core_user
      union all select 'groups='||count(*) from authentik_core_group
      union all select 'applications='||count(*) from authentik_core_application
      union all select 'oauth2_providers='||count(*) from authentik_providers_oauth2_oauth2provider
      union all select 'flows='||count(*) from authentik_flows_flow
-     union all select 'migrations='||count(*) from django_migrations
-     union all select 'tables='||count(*) from pg_stat_user_tables;"
+     union all select 'migrations='||count(*) from django_migrations;"
    # must equal pre-check (c) exactly. Mismatch → STOP, do not repoint, roll back.
+   mise exec -- kubectl exec -n kube-system $PGPOD -- psql -U authentik -d authentik -c 'analyze;'
    ```
 
 9. **The cutover commit** — one commit, hunk-scoped, on `main`:
@@ -570,9 +628,28 @@ mise exec -- kubectl logs -n kube-system deploy/ak-outpost-longhorn-forward-auth
 #         provider rows — a failure HERE means restored config, not the pg major).
 ```
 
-Success = both Deployments on `authentik-pg`, 3+3 Ready, inventory identical to
-pre-check, old DB idle but running, health endpoints 200, outposts connected,
-and the operator smoke test passing on BOTH the forward-auth and OIDC paths.
+### CONTENTS ASSERTIONS for this plan (summary — do not sign off without them)
+
+Per `docs/sops/verification-contents-not-shape.md`, `Ready` / `3+3 Running` /
+`/-/health/ready` 200 are the FLOOR. The load-bearing assertions are:
+
+1. **§3 step 8 — full per-table exact row-count diff, both servers, before the
+   repoint.** Silent `diff` or STOP.
+2. **(a) above — `grant_types` non-empty for the four at-risk providers.** A
+   provider with `grant_types: []` is perfectly healthy and every login through
+   it fails with `invalid_request` (memory
+   `project_authentik_blueprint_grant_types`). This is the auth-class contents
+   assertion: assert the provider ROWS, never `/-/health/ready`.
+3. **(f) — a real login through BOTH the forward-auth and the OIDC path.** SSO
+   is the highest-consequence member of this failure class: an empty-but-healthy
+   identity database breaks every application at once, and nothing below the
+   browser can see it.
+
+Success = both Deployments on `authentik-pg`, 3+3 Ready, **the per-table diff
+silent before the repoint**, curated inventory identical to pre-check, **the
+four at-risk providers' `grant_types` non-empty**, old DB idle but running,
+health endpoints 200, outposts connected, and the operator smoke test passing on
+BOTH the forward-auth and OIDC paths.
 
 ## 5) Rollback
 
