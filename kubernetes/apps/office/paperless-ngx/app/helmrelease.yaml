@@ -104,6 +104,21 @@ spec:
             name: paperless-ngx-secret
             key: redis-password
       PAPERLESS_REDIS: "redis://:$(A_REDIS_PASSWORD)@paperless-redis:6379"
+      # With mariadb.enabled: false the chart no longer templates the five DB
+      # variables (chart 0.24.1 templates/common.yaml emits them only inside
+      # `if .Values.mariadb.enabled`), so they must be declared explicitly.
+      # PAPERLESS_DBENGINE being explicit is also what paperless-ngx v3 wants:
+      # the engine is no longer inferred from the presence of PAPERLESS_DBHOST.
+      PAPERLESS_DBENGINE: mariadb
+      PAPERLESS_DBHOST: paperless-db
+      PAPERLESS_DBPORT: 3306
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS:
+        valueFrom:
+          secretKeyRef:
+            name: paperless-ngx-secret
+            key: mariadb-password
     service:
       # -- Configures service settings for the chart.
       # @default -- See [values.yaml](./values.yaml)
@@ -174,30 +189,16 @@ spec:
         mountPath: /app/db
     postgresql:
       enabled: false
+    # Bundled Bitnami mariadb retired 2026-08-19: bitnamilegacy is an ARCHIVED
+    # registry (last push 2025-08-28, no future security fixes) and
+    # docker.io/bitnami/mariadb publishes no semver tags (digest-only).
+    # Security driver tracked as F-cb42f390. Paperless now uses the official
+    # mariadb image deployed by db-deployment.yaml in this folder.
+    # Server charset is PINNED to utf8mb3/utf8mb3_general_ci there to match the
+    # retired server — utf8mb4 is a separate migration.
+    # The retired volume paperless-mariadb is kept (Retain) as the rollback path.
     mariadb:
-      enabled: true
-      # Use Bitnami legacy registry (no updates, but compatible with Bitnami charts)
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/mariadb
-        tag: latest
-      # auth:
-      #   database: paperless
-      #   username: paperless
-      #   password: changeme
-      #   rootPassword: changeme
-      primary:
-        persistence:
-          enabled: true
-          existingClaim: paperless-mariadb
-          size: 5Gi
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 1Gi
+      enabled: false
     # Bundled Bitnami redis retired 2026-08-18: bitnamilegacy is an ARCHIVED
     # registry (last push 2025-08-28, no future security fixes) and
     # docker.io/bitnami/redis publishes no semver tags. Security driver
@@ -245,8 +246,8 @@ spec:
           - sh
           - -c
           - |
-            until nc -z paperless-ngx-mariadb 3306; do
-              echo "waiting for paperless-ngx-mariadb:3306..."
+            until nc -z paperless-db 3306; do
+              echo "waiting for paperless-db:3306..."
               sleep 2
             done
       wait-for-redis:

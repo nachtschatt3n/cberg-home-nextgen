@@ -1,0 +1,120 @@
+---
+# Official MariaDB image replacing the chart-bundled bitnamilegacy mariadb
+# (archived registry, frozen at server 11.8.2 — see F-cb42f390 and the
+# retirement comment in helmrelease.yaml). Plain Deployment + Service on
+# purpose (not app-template): keeps this datastore out of the
+# app-template-5.0 migration blast radius, same as superset-pg.
+#
+# Replatform, not an upgrade: 11.8.2 -> 11.8.8 stays inside the 11.8 LTS
+# series. The datadir moved from /bitnami/mariadb/data to /var/lib/mysql and
+# the runtime uid from 1001 to 999, so the data came across as a logical dump
+# into a fresh volume (paperless-db-data). The retired volume
+# paperless-mariadb is kept, Retain, as the rollback floor.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paperless-db
+  namespace: office
+  labels:
+    app: paperless-db
+spec:
+  replicas: 1
+  # Recreate: single-replica Deployment on an RWO Longhorn PVC — RollingUpdate
+  # would surge a second pod and deadlock on Multi-Attach.
+  # See docs/sops/longhorn-rwo-multi-attach.md.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: paperless-db
+  template:
+    metadata:
+      labels:
+        app: paperless-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:11.8.8
+        imagePullPolicy: IfNotPresent
+        # Charset PIN — do not drop. MariaDB 11.5+ initialises a fresh datadir
+        # as utf8mb4/uca1400, but the retired server and every restored table
+        # are utf8mb3/utf8mb3_general_ci. Without this the entrypoint would
+        # create the `paperless` database as utf8mb4 while the dump restores
+        # utf8mb3 tables into it — a silently mixed schema. Converting
+        # paperless to utf8mb4 is a separate migration (index prefix lengths).
+        args:
+        - --character-set-server=utf8mb3
+        - --collation-server=utf8mb3_general_ci
+        - --innodb-file-per-table=1
+        env:
+        - name: MARIADB_DATABASE
+          value: paperless
+        - name: MARIADB_USER
+          value: paperless
+        - name: MARIADB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: paperless-ngx-secret
+              key: mariadb-password
+        - name: MARIADB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: paperless-ngx-secret
+              key: mariadb-root-password
+        ports:
+        - containerPort: 3306
+          name: mariadb
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+        # healthcheck.sh ships in the official image. --connect proves the
+        # server answers on the socket, --innodb_initialized proves the engine
+        # finished recovery (a server that answers but has not initialised
+        # InnoDB will fail every query the app makes).
+        readinessProbe:
+          exec:
+            command:
+            - healthcheck.sh
+            - --connect
+            - --innodb_initialized
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command:
+            - healthcheck.sh
+            - --connect
+            - --innodb_initialized
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 6
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: paperless-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: paperless-db
+  namespace: office
+  labels:
+    app: paperless-db
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3306
+    targetPort: 3306
+    protocol: TCP
+    name: mariadb
+  selector:
+    app: paperless-db

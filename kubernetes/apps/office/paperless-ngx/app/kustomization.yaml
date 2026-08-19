@@ -6,6 +6,11 @@ resources:
   - pvc.yaml
   - storageclass.yaml
   - redis-deployment.yaml
+  # db-longhorn-volume.yaml is deliberately NOT listed: Flux targetNamespace
+  # would override its `namespace: storage`. Apply it by hand.
+  - db-pv.yaml
+  - db-pvc.yaml
+  - db-deployment.yaml
   - helmrelease.yaml
   - validator-configmap.yaml
   - validator-deployment.yaml

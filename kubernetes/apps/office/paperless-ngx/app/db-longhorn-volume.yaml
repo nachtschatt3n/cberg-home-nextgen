@@ -1,0 +1,19 @@
+---
+# Replacement paperless DB volume (mariadb:11.8.8, plan bitnamilegacy-exit-paperless-db).
+# NOT registered in kustomization.yaml — Flux `targetNamespace: office` would
+# override `namespace: storage` and create a broken duplicate Longhorn ignores.
+# Apply by hand once:
+#   kubectl apply -f db-longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: paperless-db-data
+  namespace: storage
+spec:
+  size: "5368709120"   # 5 Gi
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
