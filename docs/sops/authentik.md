@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `Platform`
 
 ---
@@ -193,6 +193,8 @@ Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integ
 
 ### Gotchas
 
+- **SAML providers have no `grant_types` field** — the OIDC rule under
+  "Rules & gotchas" does not apply here. Do not add one.
 - **`exchange_key` must be URL-safe base64** (RFC 4648 §5: `-` and `_`, no `+` or `/`). Generate with `openssl rand -base64 64 | tr -d '\n=' | tr '+/' '-_'`. Wrong alphabet → `Illegal base64 character 2f`. Wrong padding → `Last unit does not have enough valid bits`.
 - **Use the PK URL** for `idp.metadata_url`, not the application slug URL — Authentik 302-redirects the slug path and the SAML library does not follow redirects.
 - **Provider PK is stable** across blueprint reapplications, but if you delete + recreate the SAML provider, the PK changes and the metadata URL needs updating.
@@ -276,15 +278,36 @@ existing `grafana-oauth2-blueprint.yaml` / `immich-oauth2-blueprint.yaml` /
 - **`grant_types` MUST be set explicitly** (Authentik ≥2026.5). A blueprint that
   omits it leaves the field **empty `[]`**, and then EVERY authorize request fails
   with `invalid_request` / "The request is otherwise malformed" (rejected at
-  `authorize.py`: `grant_type not in provider.grant_types`). This bites
-  **blueprint-only** providers — the existing grafana/pgadmin/superset entries dodged
-  it because they were UI-created first (the UI seeds the default grant-type set),
-  then imported by `identifiers.name`. `immich` and `librechat` are the providers that
-  were born blueprint-only and therefore carry the field explicitly — copy one of them.
+  `authorize.py`: `grant_type not in provider.grant_types`).
+  **Every blueprint-declared OIDC provider must set it — no exceptions.**
+  A provider that was UI-created first and is only *imported* by
+  `identifiers.name` is **NOT** structurally safe: it keeps working purely
+  because the live DB row still holds the legacy default set the UI seeded, and
+  the very first blueprint re-apply that touches it (a **server upgrade** being
+  the obvious trigger) overwrites that row with the empty default. Four
+  providers sat in exactly that state until 2026-08-19 and would have lost SSO
+  simultaneously on the next upgrade. All six in-repo OIDC providers now set the
+  field explicitly — copy any of them.
   Set `[authorization_code, refresh_token]`
   (add `implicit`/`hybrid` only if the app needs them). Symptom is identical to a
   redirect-uri problem but the redirect_uri is fine — confirm with
   `ak shell -c "from authentik.providers.oauth2.models import OAuth2Provider; print(OAuth2Provider.objects.get(name='<app>').grant_types)"`.
+  **You cannot detect this by curling the authorize endpoint.** The authorize
+  view is login-gated, so an unauthenticated request is redirected to
+  `/accounts/login/` *before* `check_grant()` ever runs — a broken provider and a
+  healthy one both return the same `302`. A probe built that way silently always
+  passes. Verify against the DB row (above) or with a real browser login.
+
+#### Which provider types need this
+
+| Provider model | `grant_types` required? | Why |
+|---|---|---|
+| `authentik_providers_oauth2.oauth2provider` (OIDC) | **YES — always** | Blueprint omission ⇒ empty list ⇒ every login fails. |
+| `authentik_providers_proxy.proxyprovider` (forward-auth) | **No — immune** | `ProxyProvider.set_oauth_defaults()` (`providers/proxy/models.py`) rewrites the grant types on every save, and is called from the serializer's `create()` **and** `update()` (`providers/proxy/api.py`) — the path blueprints use — plus at app startup. A blueprint cannot leave them empty. |
+| `authentik_providers_saml.samlprovider` (SAML) | **No — N/A** | The SAML model has no `grant_types` field at all. |
+
+So the rule is **OIDC-only**. Do not add `grant_types` to a proxy or SAML
+blueprint entry.
 - **`client_id` must be unique** across all providers. Reusing one throws a
   provider-collision error that leaves the blueprint in `errored` state (the
   whole app then fails SSO). Generate a fresh one: `openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 43`.
@@ -529,6 +552,102 @@ rm /tmp/configmap.yaml
 
 ---
 
+## Upgrading Authentik
+
+A server version bump is **three coordinated changes**, not one. Doing only the
+first takes the whole auth plane down.
+
+### 1. Move all THREE version strings in one commit
+
+In `kubernetes/apps/kube-system/authentik/app/helmrelease.yaml`:
+
+| What | Where |
+|---|---|
+| chart version | `spec.chart.spec.version` |
+| server init image | `server.initContainers[patch-session-settings].image` |
+| worker init image | `worker.initContainers[patch-session-settings].image` |
+
+The two `patch-session-settings` init containers copy `settings.py` **out of
+their own image** and mount it over the main container. If they stay on the old
+tag while the chart moves, the new server runs an old `settings.py` that imports
+modules the new release dropped (2026.5.6 → 2026.8.0 replaced
+`drf_orjson_renderer` with `msgspec`) — Django fails at import and **every
+server and worker replica crashloops simultaneously**. There is no partial
+outage here; SSO is fully down and most of the estate's ingress with it.
+
+Pre-flight the new image before committing — a moved path fails the `cp` and
+blocks startup just as hard, and a renamed setting makes the `sed` silently
+no-op:
+
+```bash
+mise exec -- kubectl run ak-preflight --rm -i --restart=Never -n kube-system \
+  --image=ghcr.io/goauthentik/server:<NEW_TAG> --command -- sh -c '
+  test -f /authentik/root/settings.py && echo settings.py OK
+  grep -c "SESSION_EXPIRE_AT_BROWSER_CLOSE = True" /authentik/root/settings.py'
+```
+
+### 2. Managed outposts do NOT follow the server
+
+A server upgrade leaves every managed proxy outpost pinned at the **old** image.
+They must be pushed:
+
+```bash
+POD=$(mise exec -- kubectl get pods -n kube-system \
+  -l app.kubernetes.io/component=server --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}')
+
+mise exec -- kubectl exec -n kube-system $POD -c server -- ak shell -c "
+from authentik.outposts.models import Outpost
+from authentik.outposts.controllers.kubernetes import KubernetesController
+for o in Outpost.objects.all():
+    if not o.service_connection: continue
+    try: KubernetesController(o, o.service_connection).up()
+    except Exception as e: print('partial', o.name, e)
+"
+```
+
+**NEVER `kubectl delete` an outpost Deployment** to force this — that is the
+documented way to break it.
+
+Two things to expect, both benign:
+
+- A bulk `o.save()` alone may enqueue controller tasks that finish `exc: null`
+  and change nothing. The explicit `up()` above is what actually reconciles.
+- Each `up()` raises `ControllerException (403)` — authentik's controller runs
+  as `kube-system:default`, which lacks `get secrets`, so the reconcile updates
+  the Deployment and then aborts at the Secret comparison. The **image bump
+  still lands**. (Granting that RBAC is an open improvement.)
+
+### 3. Verify — and verify the right things
+
+```bash
+# every pod on the new tag AND ready (checking readyReplicas alone is NOT enough:
+# it counts old-ReplicaSet pods and will report a completed rollout that has not happened)
+mise exec -- kubectl get pods -n kube-system -l app.kubernetes.io/instance=authentik \
+  -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
+
+# outposts: ask the SERVER what version each one reports back over its websocket,
+# rather than trusting pod readiness
+mise exec -- kubectl exec -n kube-system $POD -c server -- ak shell -c "
+from authentik.outposts.models import Outpost, OutpostState
+for o in Outpost.objects.all():
+    print(o.name, [s.version for s in OutpostState.for_outpost(o)])
+"
+
+# OIDC providers kept their grant_types across the upgrade's blueprint re-apply
+# (see the grant_types rule above — this is the field an upgrade can silently zero)
+```
+
+**Log-scanning traps.** authentik core emits `"level": "warning"` **with a space
+after the colon**, and its server/worker value is `warn`, not `warning` — a naive
+`"level":"error"` grep returns a meaningless zero. Since 2026.8 the proxy outpost
+is a **Rust rewrite** with a completely different JSON schema
+(`filename`/`line_number`/`spans`/`target`) and its own level vocabulary, so
+parse structurally per-format rather than grepping for the old strings. The Rust
+outpost also logs a benign `error` ("failed to detect a forward URL from
+nginx") for any request lacking `X-Forwarded-*` headers — including your own
+`curl` probes.
+
 ## Blueprint Reference: DO's and DON'Ts
 
 ### ✅ DO
@@ -558,6 +677,8 @@ Before deploying a new Authentik integration, verify:
    - Uses flow UUIDs, not slug names
    - `external_host` is an actual domain value (stored in SOPS ConfigMap)
    - `internal_host` points to the correct in-cluster service and port
+   - No `grant_types` entry needed — Authentik rewrites them on every save
+     (OIDC providers are the ones that require it; see "Rules & gotchas")
 2. Application
    - Uses `provider: !KeyOf <provider-id>` (not a string name)
    - Launch URL and icon URL use actual domain values
