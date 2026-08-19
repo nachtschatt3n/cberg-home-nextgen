@@ -72,6 +72,70 @@ Severity context for scheduling is recorded on **F-9f752afd** — read it there
 before picking a window. Short version for sequencing only: this is not an
 emergency, so do it properly rather than rushing.
 
+## 1a) TESTED AND REJECTED 2026-08-19 — the npm-`overrides` shortcut
+
+Before executing, the cheaper hypothesis was tested: skip the framework major and
+force a fixed esbuild under vite 6 with an npm `overrides` block. npm `overrides`
+does override a transitive dependency's declared range, so §1's "npm cannot
+resolve >= 0.27 while we stay on vite 6" is not by itself a blocker.
+
+**Resolution works. Runtime does not.**
+
+```jsonc
+// frontend/package.json
+"overrides": { "esbuild": "^0.27.0" }
+```
+resolves cleanly to esbuild **0.27.7**, including `@esbuild/linux-x64@0.27.7` —
+the exact binary the finding names — while vite stays 6.4.2. So the dependency
+graph accepts it.
+
+But the vite 6 dev server then **fails dependency pre-bundling outright**:
+
+```
+✘ [ERROR] Transforming destructuring to the configured target environment
+  ("chrome87", "edge88", "es2020", "firefox78", "safari14" + 2 overrides)
+  is not supported yet
+    node_modules/vue-router/dist/vue-router.mjs:17:7
+```
+
+201 such errors; `curl` to the dev server returns **HTTP 000** (no response).
+vite 6 passes a target/lowering configuration that esbuild 0.27 no longer
+supports, so the pairing is not merely unsupported, it is broken.
+
+**Conclusion: the override is not a viable shortcut. §1's judgment that a
+framework major is the only path stands, now on evidence rather than on the
+declared-range argument alone.** Do not re-propose the override.
+
+### Which major: 7 or 8?
+
+Tested both against this app's real `src/`, `index.html` and `vite.config.ts`:
+
+| | resolves | dev server | esbuild |
+|---|---|---|---|
+| vite **7.3.6** + plugin-vue ^6 + vitest ^4 | ok | root 200, pre-bundled dep 200, 0 errors | **0.28.2 — fixed** |
+| vite **8.2.1** + plugin-vue ^6 + vitest ^4 | ok | root 200, pre-bundled dep 200, 0 errors | **none — esbuild gone entirely** |
+
+Both clear the finding, and both need the *same* `@vitejs/plugin-vue@6`
+(its peer range is `^5 || ^6 || ^7 || ^8`), so the effort is identical.
+
+- **vite 7** pulls esbuild **0.28.2**, which is a fixed line — and note this is
+  0.28, not the 0.27.3 §1 anticipated.
+- **vite 8** replaces esbuild with **rolldown** (Rust/oxc). There is no Go
+  binary left, so this whole CVE *class* — Go stdlib compiled into a vendored
+  build tool — stops recurring rather than being version-chased.
+
+**DECISION (2026-08-19): execute vite 7 today; do NOT opportunistically take
+vite 8.** vite 8 is the strategically better destination, but swapping the
+bundler to rolldown is a larger change than a version major, it lands on a
+process that IS the serving runtime (`CMD` is `npm run dev`), and no plan has
+vetted it. Taking it mid-window would be unvetted scope expansion. vite 7 is the
+approved, now-smoke-tested path and it clears the finding today.
+
+The vite-8/rolldown move should be raised as its own plan, justified by
+eliminating the CVE class rather than by version currency — that is a better
+reason than "vite 7 is already a major behind", and it removes the deadline
+pressure from the decision.
+
 ## 2) Pre-checks
 
 ```bash
