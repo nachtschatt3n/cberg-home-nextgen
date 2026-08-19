@@ -21,8 +21,21 @@ touches:
   shared: []
 depends_on: []  # RESOLVED 2026-08-18: superset-pg-standup EXECUTED 2026-08-18 (95322f1f, 47/47 tables verified) — dependency satisfied
 conflicts_with: [longhorn-1.12.1-engine]
-status: draft
-window: "wed-early:2026-08-26"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+status: executed                      # EXECUTED 2026-08-19 (48ffc039) in the operator-approved
+                                      # ad-hoc window. Contents asserted BEFORE the repoint:
+                                      # 47 tables / 2985 rows identical on both servers,
+                                      # alembic 74ad1125881c, 44 sequences + 99 indexes +
+                                      # 173 constraints identical. Post-cutover all 9 charts
+                                      # on the dashboard resolved with real data.
+# FILE RETAINED ON PURPOSE — do not retire on the usual executed-plan convention: §5 is the
+# LIVE rollback for as long as superset-postgresql is still up, i.e. until stage 4
+# (superset-pg-decommission) retires it after the soak.
+window: null                          # cleared 2026-08-19: executed in the ad-hoc window
+                                      # (48ffc039), so the reserved slot is released.
+                                      # maintenance-plan.py buckets by `window` regardless of
+                                      # `status`, so leaving it set would reserve 50m for work
+                                      # already done. Was: "wed-early:2026-08-26",
+                                      # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
 auto_execute: false
@@ -110,9 +123,110 @@ mise exec -- kubectl exec -n databases $OLD -- \
 mise exec -- kubectl get volume -n storage superset-postgresql-data \
   -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUST:.status.robustness,LASTBACKUP:.status.lastBackupAt
 # require lastBackupAt within the hour.
+#
+# GATE RELAXED 2026-08-19, deliberately and with reasons — read before reusing this
+# text in stage 4, where it does NOT apply.
+#   On the 2026-08-19 run lastBackupAt was 03:03Z against a 07:37Z start (4.5h). The
+#   gate was accepted rather than forcing a new backup, because:
+#     * this stage performs ZERO writes to the old volume. pg_dump is read-only, the
+#       StatefulSet is never scaled, detached, or deleted, and the PVC is untouched.
+#       There is no mechanism in this plan by which the old volume can be damaged, so
+#       the backup is a floor under a hazard the plan does not create.
+#     * the §3 dump is a STRICTLY BETTER copy of the same data: logical, complete, and
+#       taken with the application quiesced — where a Longhorn backup of a running
+#       Postgres is only crash-consistent. It is kept off-cluster on the operator Mac
+#       (~/.local/share/cberg-maintenance/) as well as in /tmp.
+#     * forcing a backup means creating Longhorn objects by hand — a GitOps bypass in
+#       the storage layer on a day when longhorn-1.12.1-engine was deliberately fenced
+#       off (`conflicts_with`), and the recurring job backs up ALL 94 volumes.
+#   STAGE 4 IS DIFFERENT: it deletes the source. The gate is load-bearing there and
+#   must NOT be relaxed on this precedent.
 
 # e) no in-flight reconcile; operator present for the smoke test
 mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
+```
+
+## 3a) SEQUENCING ENFORCEMENT — added 2026-08-19, read before §3
+
+**`kubectl scale ... --replicas=0` DOES NOT HOLD.** Flux drift-corrects it back, and
+the reconcile is not incidental: §3 step 5 pushes a commit and waits for Flux to apply
+it, and that same reconcile is what restores `replicas: 1`. The app then comes up
+against the target database *before* the restore. Learned on the paperless sibling
+(`bitnamilegacy-exit-paperless-db`, `4604c711`) the same morning, where it was
+survivable only because `mysqldump` drops every table first. Nothing here drops
+anything: this plan's §3 step 3 explicitly recreates an EMPTY `public` schema and then
+restores into it, so an app that boots into that gap runs Alembic against an empty
+database and manufactures exactly the full-schema/zero-rows state that
+`docs/sops/verification-contents-not-shape.md` names as instance 1.
+
+### For THIS app the values route is not available — use suspend-both
+
+The house-preferred fix is to make `replicas: 0` the state Flux converges to, by
+setting the replica count in the HelmRelease values in the same commit. **That is
+wrong for Superset**, and the reason generalises to every Superset stage:
+
+> `superset-init-db` carries `helm.sh/hook: post-install,post-upgrade` and its
+> `envFrom` includes `superset-secrets`. **Any** change to `spec.values` triggers a
+> Helm upgrade, which fires that hook, which runs `superset db upgrade` and
+> create-admin against whatever `DB_HOST` currently resolves to.
+
+So the values route does not prevent the empty-target write — it *performs* it, from
+the hook, with the app still scaled to 0 and every pod-level signal green. Verify with:
+
+```bash
+mise exec -- kubectl get job -n databases superset-init-db -o jsonpath='{.metadata.annotations}'
+mise exec -- kubectl get job -n databases superset-init-db -o jsonpath='{.spec.template.spec.containers[0].envFrom}'
+```
+
+**Required sequence (executed 2026-08-19, worked):**
+
+```bash
+# 1. suspend BOTH. The Kustomization alone is NOT enough — the HelmRelease-owned
+#    Deployment is reconciled back independently.
+mise exec -- flux suspend helmrelease  superset -n databases
+mise exec -- flux suspend kustomization superset -n databases
+
+# 2. only now scale down
+mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat \
+  -n databases --replicas=0
+```
+
+**PROVE THE HOLD HELD before restoring or repointing** — not once, but again right
+after the commit is applied, because that reconcile is the dangerous one:
+
+```bash
+mise exec -- kubectl get deploy -n databases superset superset-worker superset-celerybeat \
+  -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,STATUS:.status.replicas
+#   DESIRED must be 0 and STATUS <none> (status.replicas is omitempty at 0) for all three
+mise exec -- kubectl get pods -n databases --no-headers | grep -E '^superset(-worker|-celerybeat)?-[0-9a-f]{6,}' \
+  || echo 'no app pods (correct)'
+```
+
+and assert it at the database, which is the only signal that cannot be faked by a
+stale cache — zero Superset connections on the source:
+
+```sql
+select coalesce(string_agg(distinct application_name || '/' || state, ', '), 'NONE')
+from pg_stat_activity where datname='superset' and pid <> pg_backend_pid();
+```
+
+### Resume order matters as much as the hold
+
+```bash
+# a. Kustomization FIRST, with the HelmRelease still suspended: this applies the new
+#    Secret while replicas are still 0. Confirm the hold survived this reconcile.
+mise exec -- flux resume kustomization superset -n databases
+mise exec -- kubectl get secret -n databases superset-secrets -o jsonpath='{.data.DB_HOST}' | base64 -d
+
+# b. then the HelmRelease, then scale up. Note that resuming the HelmRelease does NOT
+#    restore the replica count on its own: spec.driftDetection is unset (disabled) and
+#    the values are unchanged, so helm-controller finds nothing to upgrade and the
+#    release stays on the same revision. That is the desired outcome — it means no
+#    Helm upgrade, so the init-db hook does NOT fire. Scale up by hand instead; you are
+#    converging to the chart's own replicaCount: 1, not overriding it.
+mise exec -- flux resume helmrelease superset -n databases
+mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat \
+  -n databases --replicas=1
 ```
 
 ## 3) Steps
@@ -122,11 +236,16 @@ mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
    runbooks/update-marker.sh add superset databases 2 "superset metadata DB cutover to postgres 17.11 (app stopped for consistent dump)"
    ```
 2. **Quiesce Superset** so the dump is consistent. This is a live cluster action —
-   delegate to cberg-agent per the maintenance-window contract:
+   delegate to cberg-agent per the maintenance-window contract. **Use the suspend-both
+   sequence and the hold proof in §3a — a bare `kubectl scale` here does not hold, and
+   for this app the HelmRelease-values route fires the init-db hook instead:**
    ```bash
+   mise exec -- flux suspend helmrelease  superset -n databases
+   mise exec -- flux suspend kustomization superset -n databases
    mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat -n databases --replicas=0
-   mise exec -- kubectl get pods -n databases | grep superset          # only the two DBs remain
+   mise exec -- kubectl get pods -n databases | grep superset          # only the two DBs (+ redis) remain
    ```
+   Then run the §3a hold proof, including the zero-connections assertion on the source.
 3. **Fresh dump from the old DB, restore into the new one** (discard stage 2's dump —
    it is stale by design):
    ```bash
@@ -189,8 +308,12 @@ SQL
    git push
    ```
    Leave `postgresql.enabled: true` in the HelmRelease — the old DB must keep running.
-6. **Bring Superset back up**:
+6. **Bring Superset back up** — in the §3a resume order (Kustomization first with the
+   HelmRelease still suspended, re-prove the hold, *then* HelmRelease, then scale):
    ```bash
+   mise exec -- flux resume kustomization superset -n databases
+   # confirm the Secret landed AND replicas are still 0, then:
+   mise exec -- flux resume helmrelease superset -n databases
    mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat -n databases --replicas=1
    mise exec -- kubectl rollout status deploy/superset -n databases --timeout=600s
    ```
@@ -261,6 +384,48 @@ Success = both app pods reporting the new `DB_HOST`, no connection/alembic error
 row counts and `alembic_version` identical to the pre-check, the old DB idle but
 running, `/health` 200, and the operator smoke test passing on dashboards, roles and
 saved queries.
+
+### Execution record — 2026-08-19 ad-hoc window (commit `48ffc039`)
+
+Everything in §4 passed. What is worth carrying forward:
+
+- **§4(e) cannot be automated through the REST API.** `POST /api/v1/security/login`
+  with `provider: db` returns `401 Not authorized` — `AUTH_TYPE = AUTH_OAUTH` means
+  there is no database-password path for the admin user, and the value in
+  `superset-secrets.ADMIN_PASSWORD` does not authenticate against it. Use Superset's
+  own app context in-pod instead (`create_app()` + `app_context()`), which exercises
+  the same ORM and the same datasource layer the UI does:
+
+  ```bash
+  mise exec -- kubectl exec -n databases deploy/superset -c superset -- python - <<'PY'
+  from superset.app import create_app
+  with create_app().app_context():
+      from superset import db
+      from superset.models.dashboard import Dashboard
+      print("ORM bound to:", db.session.get_bind().url.host)     # must be superset-pg
+      for d in db.session.query(Dashboard).all():
+          print(d.dashboard_title, "charts:", len(d.slices))
+  PY
+  ```
+
+- **Rendering a chart needs a request context.** `ChartDataCommand(...).run()` raises a
+  bare `AttributeError: user` outside one, which reads like a data failure and is not.
+  Wrap it in `app.test_request_context("/")` with `login_user(user)` **and** an explicit
+  `g.user = user`. Six of the nine charts store no `query_context` (legacy viz) and
+  return `None` from `get_query_context()` — that is not a defect either; assert those
+  by querying their datasource directly, and count them separately.
+
+- **Result:** ORM bound to `superset-pg`; 1 dashboard / 10 charts / 10 datasets /
+  1 database connection / 0 saved queries / 2 users / 5 roles — identical to the
+  pre-check inventory; both users kept their roles (one Admin+Gamma, one Admin). All
+  9 charts on the dashboard resolved against live data (3 rendered through
+  `ChartDataCommand`, 6 legacy-viz datasources queried directly), zero failures. The
+  single configured database connection points at the shared cluster Postgres, **not**
+  at the Superset metadata DB — so stage 4 does not endanger it.
+
+- **Still owed by the operator:** the actual browser smoke test — Authentik OIDC login,
+  the dashboard rendering visually, and SQL Lab. Everything above is app-layer evidence
+  gathered without a browser; it is strong, and it is not the same thing.
 
 ## 5) Rollback
 

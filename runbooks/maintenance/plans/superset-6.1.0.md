@@ -627,6 +627,22 @@ claiming 5.0.0 while the data stays in 6.x shape, which is worse than either sta
 **The rollback is: restore the §3-step-3 dump, then revert the image.** Both halves,
 in this order, or the app comes up 5.0.0 against a 6.1.0 schema.
 
+> **SEQUENCING — this rollback does not currently hold Superset down (found 2026-08-19,
+> not yet exercised here).** Step 1 below stops the writers with `kubectl scale
+> --replicas=0`, and step 3 then does `git push`. Flux drift-corrects the replica count
+> on the reconcile that the push itself triggers, so the app can come back up between
+> the schema drop in step 2 and the image revert in step 4 — against a half-restored
+> database, on the wrong image. Worse for this app than for its siblings: the image
+> revert IS a values change, so it fires the `superset-init-db` post-upgrade hook, which
+> runs `superset db upgrade` against whatever `DB_HOST` resolves to at that moment.
+>
+> Before running this rollback, apply the suspend-both sequence and the hold proof from
+> `runbooks/maintenance/plans/superset-pg-cutover.md` §3a — suspend the **HelmRelease
+> and** the Kustomization (the Kustomization alone is not enough; the HelmRelease-owned
+> Deployment is reconciled back independently), scale to 0, prove `spec.replicas=0` with
+> no app pods and zero Superset connections on the database, and resume in the order
+> given there. The same applies to any scale-to-0 in §3 of this plan.
+
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
 STAMP=$(cat /tmp/superset-upgrade-stamp)
