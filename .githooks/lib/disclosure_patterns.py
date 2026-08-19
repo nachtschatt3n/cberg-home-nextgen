@@ -167,11 +167,24 @@ CLOSURE_VERB = (
 # negated-closure rules never see them. "persists", "carried forward",
 # "awaits an upstream release", "still present" — all reachable paraphrases of
 # the 2026-08-18 breach that the first residual tier let through.
+# NOTE the leading/trailing \b. Without them every alternative matched
+# mid-word: `pending` fired inside "sus\u200bpending", "de\u200bpending" and
+# "ap\u200bpending" (all reproduced 2026-08-19), and "suspend" is core
+# maintenance-plan vocabulary — the rule REJECTS commit messages, so this was
+# crying wolf on exactly the commits that get written most.
+#
+# `still (carries|contains|holds|retains)` was added the same day: commit
+# f06f2ce6 said "the retained rollback datadir ... still carries the old value"
+# next to a note that the value is in public git history, and the hook returned
+# exit 0 because only `still (there|present|open|unfixed)` was covered.
+# Deliberately NOT adding `still has` / `still uses` — too generic to sit in a
+# rule that blocks a commit.
 PERSISTS = (
-    r"(?:unresolved|unaddressed|unremediated|unmitigated|outstanding|"
+    r"\b(?:unresolved|unaddressed|unremediated|unmitigated|outstanding|"
     r"persist(?:s|ing|ed)?|carried\s+forward|carries\s+forward|"
-    r"awaits?|awaiting|pending|still\s+(?:there|present|open|unfixed)|"
-    r"remains?\s+(?:as\s+)?(?:recorded|present|unfixed|outstanding))"
+    r"awaits?|awaiting|pending|"
+    r"still\s+(?:there|present|open|unfixed|carries|contains|holds|retains)|"
+    r"remains?\s+(?:as\s+)?(?:recorded|present|unfixed|outstanding))\b"
 )
 
 # Acquits the negated-closure rules. "does not reopen a closed finding" puts a

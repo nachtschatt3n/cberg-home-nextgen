@@ -254,6 +254,50 @@ class WarnTierNeverGates(unittest.TestCase):
         self.assertNotEqual(id(dp._COMPILED3), id(dp._COMPILED3_WARN))
 
 
+class PersistsWordBoundaries(unittest.TestCase):
+    """PERSISTS had no \\b, so `pending` matched inside ordinary English.
+
+    Reproduced 2026-08-19: "suspending", "depending" and "appending" all fired
+    the residual rule. `suspend` is core maintenance-plan vocabulary — and this
+    tier BLOCKS a commit — so it was rejecting exactly the commits that get
+    written most during a maintenance window.
+    """
+
+    def test_pending_does_not_match_inside_a_longer_word(self):
+        for word in ("suspending", "depending", "appending", "impending"):
+            t = norm("fix(maintenance): %s the HelmRelease so the finding stays put" % word)
+            hits = [h for h in dp.scan(t) if "residual" in h[1].lower()]
+            self.assertFalse(hits, "%r must not trip the residual rule" % word)
+
+    def test_pending_still_matches_as_its_own_word(self):
+        self.assertTrue(re.search(dp.PERSISTS, "pending operator approval", re.I))
+
+    def test_suspend_vocabulary_survives_next_to_a_finding_anchor(self):
+        t = norm("fix(plan): suspend both the HelmRelease and the Kustomization "
+                 "so the finding's quiesce actually holds")
+        self.assertFalse(dp.scan(t), "suspend-vocabulary must not BLOCK a commit")
+
+
+class PersistsStillCarries(unittest.TestCase):
+    """`still (carries|contains|holds|retains)` was not covered.
+
+    Only `still (there|present|open|unfixed)` was, so a commit saying a retained
+    artefact "still carries the old value" scanned clean (2026-08-19).
+    """
+
+    def test_still_carries_family_is_matched(self):
+        for phrase in ("still carries the old value",
+                       "still contains the hash",
+                       "still holds the placeholder",
+                       "still retains the old credential"):
+            self.assertTrue(re.search(dp.PERSISTS, phrase, re.I), phrase)
+
+    def test_overly_generic_forms_deliberately_excluded(self):
+        # `still has` / `still uses` are too generic for a blocking rule.
+        for phrase in ("still has three steps", "still uses the same chart"):
+            self.assertFalse(re.search(dp.PERSISTS, phrase, re.I), phrase)
+
+
 class LibraryContract(unittest.TestCase):
     """Both hooks import this module; keep the exported shape stable."""
 
