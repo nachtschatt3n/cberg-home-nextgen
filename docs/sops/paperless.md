@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, the paperless-gpt (vision-OCR) and paperless-ai (RAG) add-ons, OCR tuning, and library curation.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -13,7 +13,7 @@ Covers the document lifecycle end to end: capture → OCR → split → classify
 store, across all ingestion paths, plus deployment health and library-wide
 metadata curation.
 
-- Scope: `office` namespace — `paperless-ngx` (+ mariadb, redis), `paperless-gpt`,
+- Scope: `office` namespace — `paperless-ngx` (+ `paperless-db`, `paperless-redis`), `paperless-gpt`,
   `paperless-ai`, the `scan-inbox-validator` Deployment, the Epson ES-580W scanner,
   and the GMX document mailbox.
 - Prerequisites: repo-local `mise` tooling (`kubectl`, `flux`, `sops`); local SOPS
@@ -33,7 +33,7 @@ metadata curation.
 | Chart / image | gabe565 `paperless-ngx` · app image `3.0.5`. The `scan-inbox-validator` Deployment **reuses the same tag** (it wants only the image's python3 + pikepdf runtime, and overrides the entrypoint) — bump `helmrelease.yaml` and `validator-deployment.yaml` in the SAME commit, or the validator silently keeps running a retired image. |
 | Ingress | `paperless.${SECRET_DOMAIN}` |
 | **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
-| DB / cache | mariadb (bitnamilegacy, `longhorn-static` PVC) + standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC — old PV `paperless-redis` kept Retain as rollback) |
+| DB / cache | `paperless-db` Deployment + Service — Docker Official `mariadb:11.8.8` on the `longhorn-static` volume `paperless-db-data` (2 replicas; Volume CR hand-applied, charset `utf8mb3`). Bundled MariaDB subchart retired 2026-08-19 — orphaned volume `paperless-mariadb` kept `Retain` as the rollback floor until its clean-week retirement. Cache: standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC — old PV `paperless-redis` kept Retain as rollback) |
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
