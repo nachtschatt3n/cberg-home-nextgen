@@ -18,6 +18,8 @@ Usage examples:
   policy-cli risk add AR-028 --description 'New risk' --severity informational \\
                               --justification 'why we accept it'
   policy-cli risk edit AR-047 --description 'openclaw: image node'
+  policy-cli risk match --description 'node:22.'   # PREVIEW what a needle would suppress
+                                        # — run this BEFORE `risk add`
   policy-cli risk lint                  # descriptions that will drift out of matching
   policy-cli risk review AR-001         # bumps last_reviewed_at to now
   policy-cli risk disable AR-001        # soft-disable (enabled=false)
@@ -245,36 +247,66 @@ def cmd_risk_show(args, dsn):
             print(f"  {k:18s}  {v}")
 
 
+# The suppressor's own exemptions, restated as SQL so the preview and the
+# `risk add` gate cannot disagree with what _apply_ar_suppression (sweep-run.py)
+# will actually do. Kept as one string used by both callers: two copies of this
+# predicate drifting apart is the same class of bug the preview exists to catch.
+_SUPPRESSIBLE_SQL = """
+      severity IN ('critical', 'warning', 'monitor')
+  AND position('[AR-' in title) = 0
+  AND coalesce(metadata->>'risk_nature', '') <> ALL(%s)
+  AND coalesce(metadata->>'subsection', '') !~* '^audit[-_]'
+"""
+_AUDIT_INTEGRITY_NATURES = [
+    "policy-drift", "audit-coverage-gap", "audit-integrity", "meta",
+]
+
+
 def _would_match(cur, desc: str) -> list:
-    """Open findings an AR description would suppress, as (finding_id, severity,
-    title) — the SAME needle semantics `_apply_ar_suppression` uses in
-    sweep-run.py: a case-insensitive SUBSTRING of the finding title.
+    """Open findings an AR description would touch, as
+    (finding_id, severity, title, suppressible).
+
+    Needle semantics are the suppressor's: a case-insensitive SUBSTRING of the
+    finding title. `suppressible` additionally applies the exemptions
+    _apply_ar_suppression enforces — eligible severity, not already AR-tagged,
+    not an audit-integrity row. A hit that is NOT suppressible is shown by the
+    preview (it tells you the needle reaches further than you think) but does
+    NOT satisfy the `risk add` gate, or the gate could be cleared by rows the
+    suppressor will never act on.
 
     This exists because an AR is written blind otherwise. A description is not
-    prose the operator composes for a reader; it is a needle, and prose is
-    almost never a substring of a generated finding title. AR-080 ("Go stdlib
-    CVEs reported against the bundled gosu binary...") was accepted by `risk
-    add`, linted clean, and suppressed exactly nothing — the third time that
-    shape of mistake shipped. Preview beats intent.
+    prose for a reader; it is a needle, and prose is almost never a substring
+    of a generated finding title — an AR written as a reason suppresses nothing
+    while reporting success. See AR-080 (security_ref F-6a941c93) for the third
+    instance; the detail lives on the finding record, not here.
     """
     needle = (desc or "").strip().lower()
     if not needle:
         return []
     cur.execute(
-        "SELECT finding_id, severity, title FROM sweep_findings "
-        "WHERE resolved_at IS NULL "
-        "  AND severity IN ('critical', 'warning', 'monitor', 'accepted') "
-        "  AND position(%s in lower(title)) > 0 "
-        "ORDER BY severity, finding_id",
-        (needle,))
-    return [(r["finding_id"], r["severity"], r["title"]) for r in cur.fetchall()]
+        "SELECT finding_id, severity, title, (" + _SUPPRESSIBLE_SQL + ") AS ok "
+        "  FROM sweep_findings "
+        " WHERE resolved_at IS NULL "
+        "   AND severity IN ('critical','warning','monitor','accepted','deferred') "
+        "   AND position(%s in lower(title)) > 0 "
+        " ORDER BY severity, finding_id",
+        (_AUDIT_INTEGRITY_NATURES, needle))
+    return [(r["finding_id"], r["severity"], r["title"], bool(r["ok"]))
+            for r in cur.fetchall()]
+
+
+# An AR needle is matched against EVERY future sweep, so breadth is a standing
+# liability, not a one-time one: a short needle permanently accepts findings
+# nobody has decided to accept yet. `risk match` can only ever show today's
+# rows, so the ceiling is the guard for the ones that do not exist yet.
+_BREADTH_CEILING = 12
 
 
 def cmd_risk_match(args, dsn):
     """Dry-run a candidate AR description against the open findings.
 
     Write the AR only after this prints the rows you meant to cover, and
-    nothing you did not.
+    nothing you did not. Exit 1 = matches nothing; exit 3 = over-broad.
     """
     with _connect(dsn) as conn, conn.cursor() as cur:
         hits = _would_match(cur, args.description)
@@ -282,14 +314,29 @@ def cmd_risk_match(args, dsn):
     print(f"needle: {args.description!r}")
     for w in warn:
         print(f"  ! not drift-stable: {w}")
+    live = [h for h in hits if h[3]]
+    inert = [h for h in hits if not h[3]]
     if not hits:
         print("  MATCHES NOTHING — this description would suppress no finding. "
-              "Name the component as it appears in the title (e.g. "
-              "`postgres:17.` / `node:22.`), not the reason.")
+              "Name the component as it appears in the finding title rather than "
+              "the reason you are accepting it; the reason belongs in "
+              "--justification.")
         return 1
-    print(f"  matches {len(hits)} open finding(s):")
-    for fid, sev, title in hits:
+    print(f"  would suppress {len(live)} open finding(s):")
+    for fid, sev, title, _ in live:
         print(f"    {fid}  {sev:<13} {title[:110]}")
+    if inert:
+        print(f"  matches {len(inert)} further row(s) the suppressor EXEMPTS "
+              f"(already AR-tagged, audit-integrity, or not an eligible "
+              f"severity) — they do not count toward the gate:")
+        for fid, sev, title, _ in inert:
+            print(f"    {fid}  {sev:<13} {title[:110]}")
+    if len(live) > _BREADTH_CEILING:
+        print(f"  ! OVER-BROAD: {len(live)} live matches (ceiling "
+              f"{_BREADTH_CEILING}). This needle is matched against every "
+              f"future sweep too — prefer the NARROWEST needle that covers "
+              f"your rows.")
+        return 3
     return 0
 
 
@@ -303,14 +350,28 @@ def cmd_risk_add(args, dsn):
               "pass --allow-drift to override)", file=sys.stderr)
         return 2
     with _connect(dsn) as conn, conn.cursor() as cur:
+        live = [h for h in _would_match(cur, args.description) if h[3]]
         # An AR that matches nothing is inert. Refuse by default rather than
         # report success on a suppression that will never fire.
-        if not _would_match(cur, args.description) and not args.allow_nomatch:
-            print(f"REFUSING: {args.description!r} is not a substring of any "
-                  f"open finding title, so this AR would suppress nothing.",
-                  file=sys.stderr)
+        if not live and not args.allow_nomatch:
+            print(f"REFUSING: {args.description!r} would suppress no open "
+                  f"finding, so this AR is inert.", file=sys.stderr)
             print("  Preview with `policy-cli.py risk match --description ...`. "
-                  "Pass --allow-nomatch for a genuinely forward-looking AR.",
+                  "Name the component as it appears in the finding title, not "
+                  "the reason (that belongs in --justification). Pass "
+                  "--allow-nomatch for a genuinely forward-looking AR.",
+                  file=sys.stderr)
+            return 2
+        # ... and one that matches far too much is worse than inert: the needle
+        # is re-applied every sweep, so it silently accepts findings nobody has
+        # decided to accept yet.
+        if len(live) > _BREADTH_CEILING and not args.allow_broad:
+            print(f"REFUSING: {args.description!r} would suppress {len(live)} "
+                  f"open findings (ceiling {_BREADTH_CEILING}) — and it is "
+                  f"re-applied to every future sweep.", file=sys.stderr)
+            print("  Review them with `policy-cli.py risk match`, then pick the "
+                  "narrowest needle that covers the rows you mean. Pass "
+                  "--allow-broad if the breadth really is intended.",
                   file=sys.stderr)
             return 2
         cur.execute(
@@ -322,7 +383,7 @@ def cmd_risk_add(args, dsn):
             print(f"AR {args.ar_id} already exists — use `risk delete` first or rename")
             return 1
         conn.commit()
-        print(f"added {args.ar_id}")
+        print(f"added {args.ar_id} — suppresses {len(live)} open finding(s)")
 
 
 # An AR's `description` is used as a SUBSTRING needle against open finding
@@ -1087,6 +1148,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="accept a description that pins a patch version / count")
     ra.add_argument("--allow-nomatch", action="store_true",
                     help="accept a description that currently matches no open finding")
+    ra.add_argument("--allow-broad", action="store_true",
+                    help=f"accept a description matching more than "
+                         f"{_BREADTH_CEILING} open findings")
     ra.set_defaults(handler=cmd_risk_add)
     rm = risk.add_parser("match",
                          help="preview which open findings a description would suppress")

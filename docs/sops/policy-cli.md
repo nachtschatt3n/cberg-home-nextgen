@@ -1,8 +1,8 @@
 # SOP: policy-cli — operator interface for sweep_history policy tables
 
 > Description: How to edit the four operator-curated policy tables that back the daily sweep (accepted_risks, slo_definitions, noise_suppressions, security_acceptances) from the operator's local Claude CLI / mise session.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.19`
+> Last Updated: `2026-08-19`
 > Owner: `homelab-operator`
 
 ---
@@ -28,9 +28,35 @@ The four tables and their CLI namespaces:
 | `noise_suppressions` | `policy-cli noise …` | `runbooks/noise_allowlist.yaml` |
 | `security_acceptances` | `policy-cli sec …` | `runbooks/security_check_acceptances.py` |
 
-Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification **in place** — the only way to change an AR without losing `accepted_at`), and `lint` (reports AR descriptions that have drifted out of matching). SLO also has `update` (patch numerator/denominator/target/window in place).
+Every entity supports `list`, `add`, `disable`, `delete`. Risk + SLO also have `show`. Risk also has `review` (bumps `last_reviewed_at`), `edit` (update description/severity/justification **in place** — the only way to change an AR without losing `accepted_at`), `match` (preview which open findings a candidate description would suppress — **run this before every `risk add`**), and `lint` (reports AR descriptions that have drifted out of matching). SLO also has `update` (patch numerator/denominator/target/window in place).
 
-**AR descriptions are substring matchers, so they must be drift-stable.** `risk edit` REFUSES a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
+**AR descriptions are substring matchers, so they must be drift-stable.** `risk add` and `risk edit` both REFUSE a description containing a patch-level version (`x.y.z`) or a volatile count (CVE/device tally) unless `--allow-drift` is passed. `risk lint` flags two signals: `at risk` (static — embeds a version/count) and `DRIFTING NOW` (the description matches zero open findings but a shorter prefix of it matches one — proof the tail already drifted). AR-030 and AR-047 both lapsed this way.
+
+**A description is a NEEDLE, not prose — and `risk lint` will not catch prose.** The
+description is used as a case-insensitive **substring of a finding title**
+(`_apply_ar_suppression`, `runbooks/sweep-run.py`). A sentence explaining *why* the
+risk is accepted is almost never a substring of a generated title, so such an AR
+suppresses nothing while reporting success. This has shipped three times; AR-080
+("Go stdlib CVEs reported against the bundled gosu binary…") sat enabled for a day
+covering four findings and matching zero. `risk lint` reports it `[ok]`, because its
+`DRIFTING NOW` probe only fires when a shorter **prefix** matches — and no prefix of
+a sentence matches an image title either. **`risk lint` is a periodic regression
+check, not a pre-write validator.** The reason belongs in `--justification`, which is
+free prose and is never matched against anything.
+
+**AR authoring workflow — do this in order:**
+
+1. `risk match --description '<candidate>'` — confirm it covers the rows you mean,
+   and nothing you don't. A needle that is too short silently absorbs future genuine
+   findings; the preview is the only place that is visible before it happens.
+2. `risk add …` — it now refuses a needle matching zero open findings
+   (`--allow-nomatch` for a deliberately forward-looking AR) and a non-drift-stable
+   one (`--allow-drift`).
+3. Put the evidence and the reasoning in `--justification`, not in `--description`.
+
+Name the component as it appears in the title, scoped to the **major line** so it
+survives patch drift and lapses at the major boundary — which is the intended
+re-review trigger: `postgres:17.`, `node:22.`, `bitnamilegacy/postgresql:14.17`.
 
 **Two classes of finding are exempt from AR substring suppression entirely**
 (`_apply_ar_suppression` in `runbooks/sweep-run.py`). **The same matcher exists a
@@ -84,10 +110,12 @@ python3 runbooks/policy-cli.py noise list
 python3 runbooks/policy-cli.py sec list
 
 # edits
+# ALWAYS preview the needle first — `risk add` refuses one that matches nothing
+python3 runbooks/policy-cli.py risk match --description 'authentik'
 python3 runbooks/policy-cli.py risk add AR-028 \
-    --description 'Authentik admin password rotated 2026-06-01' \
+    --description 'authentik' \
     --severity informational \
-    --justification 'previous credential was committed; rotated + service restarted'
+    --justification 'admin password rotated 2026-06-01; previous credential was committed, rotated + service restarted'
 
 python3 runbooks/policy-cli.py slo add my-new-slo \
     --source prom --target 0.99 --window 30d \
@@ -111,14 +139,34 @@ The CLI auto-resolves the DSN via `kubectl get secret -n databases sweep-history
 
 ### Add a new accepted risk
 
-You decide that the noisy Falco rule for one container is acceptable for 30 days while you decide on a permanent mute path:
+You decide that the noisy Falco rule for one container is acceptable for 30 days while you decide on a permanent mute path.
+
+**Step 1 — preview the needle.** The description is a substring of the finding
+*title*, so start from the title, not from the explanation:
+
+```bash
+python3 runbooks/policy-cli.py risk match --description 'argocd-repo-server'
+```
+
+```
+needle: 'argocd-repo-server'
+  would suppress 1 open finding(s):
+    F-3f1c9a02  warning       argocd-repo-server: Falco rule drop+exec fired ...
+```
+
+**Step 2 — write it,** putting the reasoning in `--justification` (free prose,
+never matched against anything):
 
 ```bash
 python3 runbooks/policy-cli.py risk add AR-028 \
-    --description 'Falco rule 100412 (drop+exec) firing for legitimate Argo CD sync image' \
+    --description 'argocd-repo-server' \
     --severity warning \
-    --justification 'Argo CD container does a legitimate fs-write during sync; rule tuning planned for sprint X'
+    --justification 'Falco rule 100412 (drop+exec): the Argo CD container does a legitimate fs-write during sync; rule tuning planned for sprint X. Re-review 2026-09-18.'
 ```
+
+Had step 1 printed `MATCHES NOTHING`, `risk add` would have refused with exit 2 —
+which is the point: an AR whose description reads like an explanation suppresses
+nothing while looking like it worked.
 
 ### Disable an SLO temporarily during a migration
 
@@ -199,6 +247,12 @@ https://sweep.<DOMAIN>/policies/security
 
 **"AR-XXX already exists"** on `risk add` — the AR-ID is already in use. Either pick a new ID or `delete` first.
 
+**"REFUSING: … would suppress no open finding, so this AR is inert"** on `risk add` (exit 2) — the description is not a substring of any open finding title, usually because it was written as an explanation rather than as a needle. Run `risk match --description '<candidate>'` and work back from the finding title; move the reasoning into `--justification`. If the AR is deliberately forward-looking (the finding is not open yet), pass `--allow-nomatch`.
+
+**"REFUSING: … would suppress N open findings (ceiling 12)"** on `risk add` (exit 2) — the needle is too broad, and it is re-applied on every future sweep, so it will also absorb findings nobody has decided to accept. Review the list with `risk match`, then narrow it. Pass `--allow-broad` only when the breadth is genuinely intended.
+
+**"REFUSING: proposed description is not drift-stable"** on `risk add` / `risk edit` (exit 2) — the description embeds a patch version (`x.y.z`) or a volatile count, so it will stop matching on the next bump. Scope to the major line instead (`postgres:17.`, `node:22.`). `--allow-drift` overrides.
+
 **"permission denied for table accepted_risks"** on a write — `sweep_writer` should have DML. Verify with `psql -c '\dp accepted_risks'`. If grants are missing, re-run the init Job (bump to v3 or higher).
 
 **"must be owner of table sweep_findings"** on DDL — expected. `sweep_writer` has DML but not ownership, so `CREATE INDEX` / `ALTER TABLE` cannot come from the CLI or from a migration script. Ship the DDL in `schema-configmap.yaml` and bump the init Job suffix (`docs/sops/immutable-job-image-bumps.md`), which runs as the owner.
@@ -271,3 +325,4 @@ To restore from a `policy-cli export` snapshot: import via direct psql `COPY FRO
 |---|---|---|
 | 2026-05-27 | 2026.05.27 | Initial — Phase 3 of policy-in-DB migration |
 | 2026-08-18 | 2026.08.18 | Documented `risk edit` / `risk lint` / `slo update`; drift-stable AR description rule; made the §6 verification rerun non-destructive (`SWEEP_AUTOCLOSE=0`); documented the two AR-suppression exemption classes (audit-integrity + self-reference) after F-21ceb683, and the not-yet-guarded second matcher in `security-check.py` |
+| 2026-08-19 | 2026.08.19 | Documented `risk match`; the AR-authoring workflow and the prose-description failure mode (`risk lint` is a regression check, not a pre-write validator); `risk add` now refuses inert, over-broad and drift-unstable descriptions; rewrote both `risk add` examples, which the new guards would have rejected |

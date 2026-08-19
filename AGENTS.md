@@ -230,6 +230,14 @@ DB, **not** in git:
 | `noise_suppressions` | known-recurring noise (was `runbooks/noise_allowlist.yaml`) | `runbooks/policy-cli.py noise` |
 | `security_acceptances` | git-history + ingress allowlists (was `runbooks/security_check_acceptances.py`) | `runbooks/policy-cli.py sec` |
 
+**An AR `description` is a SUBSTRING NEEDLE matched against finding titles, not
+prose.** Preview it with `runbooks/policy-cli.py risk match --description '…'`
+BEFORE `risk add`, and put the reasoning in `--justification`. A description
+written as an explanation matches nothing and silently suppresses nothing — that
+has shipped three times. `risk add` now refuses an inert, over-broad, or
+drift-unstable needle; scope to the major line (`postgres:17.`, `node:22.`) so it
+survives patch drift and lapses at the major boundary as the re-review trigger.
+
 Browse: `https://sweep.<DOMAIN>/policies/`. JSON API at
 `/api/policies/{accepted-risks,slos,noise,security}`.
 

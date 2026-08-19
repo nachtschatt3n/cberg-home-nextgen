@@ -483,7 +483,26 @@ those sections, naming each. Gate 3b crosses the same way:
 `_persist_uncovered()` writes `{section: {component: reason}}` into
 `sweep_cycles.notes.uncovered`, and the backstop reads it back, keeps those
 sections IN scope, and holds back only the rows `finding_matches_component()`
-attributes to an uncovered component. **If the backstop cannot read the veto it
+attributes to an uncovered component.
+
+**Both notes are RETRACTED by a later clean pass, not only written.** A cycle is
+shared by every specialist and outlives any one run of any one of them, so a
+section that was degraded earlier and clean later used to keep broadcasting the
+earlier pass's reason: the backstop went on skipping a section that had since
+answered in full, and the board went on rendering the cycle incomplete
+(observed on cycle `2d6b4635`). `_clear_cycle_note(kind)` now drops the
+section's own key — and only its own, since a clean security run says nothing
+about whether version or media got their answers. Three conditions gate it, and
+all three matter:
+
+| condition | why |
+|---|---|
+| the run completed and declared no veto | absence must mean "re-verified", not "never asked" |
+| the zero-emit **circuit breaker did not refuse** | `notes.uncovered` is the backstop's ONLY hold-instruction and the backstop has no breaker of its own — retracting on a refused close inverts the breaker outright |
+| not a dry run | `SWEEP_AUTOCLOSE_DRYRUN=1` writes nothing, and the note is a write |
+
+A section with nothing of its own to retract issues no `UPDATE` at all. If the
+clear fails it is swallowed and the section stays flagged — the safe direction. **If the backstop cannot read the veto it
 aborts without closing anything** — fail-closed, because the alternative is
 resolving findings from a section we cannot prove was healthy. It aborts the
 same way when a scope IS recorded but `finding_matches_component` cannot be

@@ -294,9 +294,18 @@ python3 runbooks/doc-check.py 2>/dev/null | tail -20
 - **Never put a suppression decision inside a finding's identity.** AR tags are
   presentation; `fingerprint()` strips them. See
   `docs/sops/sweep-findings-lifecycle.md` §4.1 step 2.
-- Run `runbooks/policy-cli.py risk lint` to find descriptions that are drifting
-  or will drift, and `risk edit AR-NNN --description '<drift-stable>'` to fix one
-  in place (it refuses a description embedding `x.y.z` or a volatile count).
+- Preview EVERY new AR description with `runbooks/policy-cli.py risk match
+  --description '<candidate>'` before writing it. The description is a substring
+  of a finding *title*, so a description written as prose matches nothing and
+  suppresses nothing while reporting success — and `risk lint` will not catch
+  that (its probe only fires when a shorter PREFIX matches). `risk lint` is a
+  periodic regression check, not a pre-write validator.
+- `risk add` and `risk edit` both refuse a description embedding `x.y.z` or a
+  volatile count (`--allow-drift`); `risk add` additionally refuses one that
+  matches nothing (`--allow-nomatch`) or far too much (`--allow-broad`).
+- Run `runbooks/policy-cli.py risk lint` to find descriptions that have already
+  drifted, and `risk edit AR-NNN --description '<drift-stable>'` to fix one in
+  place.
 
 ## 11) Rollback Plan
 
