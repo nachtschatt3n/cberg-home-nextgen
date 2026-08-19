@@ -18,7 +18,16 @@ metadata:
   labels:
     app: nextcloud-db
 spec:
-  replicas: 1
+  # PARKED at 0. The 2026-08-19 replatform attempt was rolled back: the logical
+  # dump it depended on was taken over a utf8mb3 connection while all 206 source
+  # tables are utf8mb4_bin, so every 4-byte character had been transcoded to '?'
+  # before it ever reached this server. Nextcloud is back on the bundled
+  # subchart and the source volume is untouched. This Deployment and its volume
+  # are kept (never deleted) so the retry has them ready; the retry re-dumps
+  # with --default-character-set=utf8mb4, drops and recreates the schema here,
+  # and flips this back to 1. See runbooks/maintenance/plans/
+  # bitnamilegacy-exit-nextcloud-db.md.
+  replicas: 0
   # Recreate: single-replica Deployment on an RWO Longhorn PVC — RollingUpdate
   # would surge a second pod and deadlock on Multi-Attach.
   # See docs/sops/longhorn-rwo-multi-attach.md.
