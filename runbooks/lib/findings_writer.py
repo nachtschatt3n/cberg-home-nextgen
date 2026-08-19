@@ -343,9 +343,13 @@ def finding_matches_component(component: str, title: str,
     idents = _row_idents(title, metadata)
     if ident in idents:
         return True
-    # Structured miss -> fall back to the rendered title. Bounded by the
-    # length guard above so a short ident cannot match half the estate.
-    if ident in (title or "").lower():
+    # Structured miss -> fall back to the rendered title, which is what covers
+    # rows written before the emitter carried a component. WORD-BOUNDED, not a
+    # bare substring: a short bare-Docker-Hub ident like `node` would otherwise
+    # hold back every row mentioning `node-red`, `nodejs` or a Talos node, and
+    # over-suppression is only cheap while it stays proportionate.
+    if re.search(r"(?<![\w/.\-])" + re.escape(ident) + r"(?![\w/.\-])",
+                 (title or "").lower()):
         return True
     # `library/redis` in the uncovered set should also hold a row that only
     # ever recorded `redis`.

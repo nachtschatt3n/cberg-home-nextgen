@@ -180,6 +180,21 @@ def test_does_not_match_an_unrelated_component():
         {"repository": "nocodb/nocodb"})
 
 
+def test_the_title_fallback_is_word_bounded():
+    """A bare Docker Hub ident like `node` must not hold back `node-red`.
+
+    Over-suppression is the safe direction, but only while it stays
+    proportionate — a bare substring would let one uncovered `node` freeze
+    every row whose title merely contains the letters.
+    """
+    assert not fw.finding_matches_component(
+        "image:node", "nodered: image node-red 4.0.0 → 4.1.0 (minor)", {})
+    assert not fw.finding_matches_component(
+        "image:node", "x: image nodejs/base 20 → 22 (major)", {})
+    assert fw.finding_matches_component(
+        "image:node", "x: image node 20.1.0 → 22.0.0 (major)", {})
+
+
 def test_a_too_short_ident_matches_nothing():
     """A 2-char ident would substring-match half the estate and silently widen
     the veto to everything. Refuse it instead."""
