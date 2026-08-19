@@ -587,15 +587,15 @@ catastrophic:
 
 1. Manager pods fail readiness → the `storage/longhorn` HelmRelease and
    Kustomization go not-Ready.
-2. **35 Kustomizations declare `dependsOn: storage/longhorn`**, and Flux fans
+2. **36 Kustomizations declare `dependsOn: storage/longhorn`**, and Flux fans
    the failure out to every one of them plus their transitive dependents
    (`monitoring/grafana` → `monitoring/unpoller`, and so on). Those downstream
    Kustomizations never touched a Longhorn object — they are reporting their
    *dependency's* state, which is why the blast radius looks unrelated to
    storage.
 
-**Confirm it is CLEARING, not wedged.** Watch the endpoint list — it is the
-single load-bearing signal, because everything above is downstream of it:
+**Confirm it is CLEARING, not wedged.** Check the storage layer first, then
+judge recovery by REVISION CONVERGENCE — not by the not-Ready count:
 
 ```bash
 # 1) The webhook must repopulate to one endpoint per node (3 here).
@@ -606,16 +606,48 @@ mise exec -- kubectl get endpoints -n storage longhorn-admission-webhook
 # 2) The DaemonSet must converge to DESIRED == READY.
 mise exec -- kubectl get ds -n storage longhorn-manager
 
-# 3) Then the HelmRelease, then the dependents (in that order).
+# 3) The HelmRelease.
 mise exec -- flux get helmrelease -n storage longhorn
-mise exec -- flux get kustomizations -A | awk 'NR==1 || $5!="True"'
+
+# 4) THE clearing test: how many Kustomizations are not yet at HEAD.
+HEAD=$(git rev-parse --short HEAD)
+mise exec -- flux get kustomizations -A | grep -cv "$HEAD"
 ```
 
-Expected: the not-Ready count **falls monotonically** as the roll proceeds
-(60 → 11 → 0 in the 2026-08-19 window). Flux retries the dependents on its own
-interval, so they recover without intervention — resist the urge to
-`flux reconcile` each one, which only adds load while the webhook is still
-down.
+**Steps 1-3 are necessary but NOT sufficient, and the gap is large enough to
+fool you.** Measured in the 2026-08-19 window: the manager pods came up at
+05:55:36Z and the webhook endpoints were fully repopulated within a minute —
+yet **27 Kustomizations were still not-Ready at 06:09, and 26 at 06:10**. The
+storm ran for roughly **15 minutes after the "load-bearing" signal went
+green.** An operator who expects the dependents to follow the endpoints
+promptly will read that tail as wedged and roll back a healthy cluster.
+
+**Do not use the not-Ready COUNT as the clearing test.** It does not fall
+monotonically — it churns, with near-total membership turnover between polls.
+Across one 90-second interval in that window, 12 Kustomizations left the
+not-Ready set and 12 *different* ones entered it, while the count moved only
+27 → 26. Kustomizations were going not-Ready **while the webhook was already
+healthy**, which is the observation that exposes a second mechanism:
+
+> **Flux's `dependsOn` is revision-gated, not merely readiness-gated.** A
+> dependent will not proceed until its dependency has applied *the same source
+> revision the dependent is at* — the giveaway is the message
+> `dependency 'storage/longhorn' revision is not up to date`, as distinct from
+> `... is not ready`. So **every new commit you push re-arms the gate** for all
+> 36 direct dependents plus their transitive dependents, staggered by each
+> one's own reconcile interval. Three commits in 190 seconds (as happened here)
+> will keep the set rotating long after Longhorn is fine — with *zero* Longhorn
+> involvement. Full mechanism, including why this is not Longhorn-specific:
+> [`docs/sops/flux-dependency-revision-gate.md`](flux-dependency-revision-gate.md).
+
+Practical consequence: **stop pushing commits while you are trying to judge
+whether the storm has cleared**, or you are re-arming the thing you are
+measuring. Revision convergence (step 4) is monotonic per-revision and is the
+signal to trust.
+
+Flux retries dependents on its own interval, so they recover without
+intervention — resist the urge to `flux reconcile` each one, which only adds
+load while the webhook is still down.
 
 **When it IS wedged** (act only if these hold):
 
@@ -623,8 +655,9 @@ down.
   with no progress, or
 - the webhook endpoint list stays empty while manager pods report Ready
   (a Service selector / label mismatch, not an upgrade artefact), or
-- the not-Ready count stops falling and manager pods are `CrashLoopBackOff`
-  rather than `Terminating`/`ContainerCreating`.
+- the not-Ready set stops *changing membership* between polls (a static set is
+  a stall; a rotating set is progress) **and** manager pods are
+  `CrashLoopBackOff` rather than `Terminating`/`ContainerCreating`.
 
 Then diagnose the manager roll itself (`kubectl -n storage logs ds/longhorn-manager
 --previous`), not the downstream Kustomizations — every one of those is a

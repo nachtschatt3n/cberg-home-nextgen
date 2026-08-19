@@ -406,8 +406,10 @@ spec:
           tools:
             image:
               repository: ubuntu
-              tag: "24.04@sha256:d78ab76437b1afc5f01e223d6bf0172763f404bb166441328845adbef44518cb"  # digest-pinned (float-tag policy). HELD on 24.04 LTS deliberately — the
-              # newer LTS has a worse measured posture here; security_ref: F-afa93406
+              # digest-pinned (float-tag policy). HELD on 24.04 LTS deliberately;
+              # rationale + re-evaluation triggers live on the finding record.
+              # security_ref: F-afa93406
+              tag: "24.04@sha256:d78ab76437b1afc5f01e223d6bf0172763f404bb166441328845adbef44518cb"
             command:
               - /bin/bash
               - -c
