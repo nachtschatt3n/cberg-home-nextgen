@@ -175,7 +175,12 @@ def sanitize(text):
 # scanning it directly would reject the closed-gap phrasings the SOP (§2.1)
 # explicitly publishes — "post-rebuild: 0 fixable CRITICAL" among them. One
 # code path, one set of semantics: the library decides, the hook reports.
-violations = _dp.scan(normalized)
+# The trailer is LINE-anchored and `normalized` is one joined line, so the
+# library can never self-detect it here — detect it on the raw lines and hand
+# the library the answer. Without this the sanctioned opt-out is inert in the
+# only place it is meant to be used, leaving `--no-verify` as the sole escape.
+_waived = bool(_dp.TOOLING_OPT_IN.search("\n".join(lines)))
+violations = _dp.scan(normalized, waived=_waived)
 advisories = _dp.scan_warn(normalized)
 
 # WARN tier: real signal, measured false-positive rate against ordinary

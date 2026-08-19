@@ -145,6 +145,19 @@ class PublishableStaysPublishable(unittest.TestCase):
                 "disclosure-review: tooling-edit")
         # Trailer is multiline-anchored, so scan the RAW text, not normalized.
         self.assertFalse(dp.scan(body), "trailer should waive the residual tier")
+        # ...and the commit-msg hook scans a whitespace-JOINED message, where
+        # the line anchor can never match. That made the sanctioned opt-out
+        # inert in the only place it is used while this test stayed green, so
+        # assert the hook's actual call shape too.
+        joined = re.sub(r"\s+", " ", " ".join(body.splitlines())).strip()
+        self.assertTrue(dp.scan(joined),
+                        "a joined message must not self-detect the trailer")
+        self.assertFalse(dp.scan(joined, waived=True),
+                         "an explicitly-waived joined message still blocked")
+        self.assertTrue(dp.scan(re.sub(r"\s+", " ", " ".join(
+            body.replace("Counts fixable criticals differently now.",
+                         "Fixes handling of CVE-2026-99999.").splitlines())),
+            waived=True), "waived=True must NOT waive a CVE identifier")
         # ...but never the hard tier.
         hard = body.replace("Counts fixable criticals differently now.",
                             "Fixes handling of CVE-2026-99999.")

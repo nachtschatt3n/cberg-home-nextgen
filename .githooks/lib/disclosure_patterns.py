@@ -443,7 +443,7 @@ def _scan(text: str, rules) -> list[tuple[str, str, str]]:
 RESIDUAL_PREFIX = "residual claim"
 
 
-def scan(text: str) -> list[tuple[str, str, str]]:
+def scan(text: str, *, waived: bool | None = None) -> list[tuple[str, str, str]]:
     """BLOCKING tier — a hit here must stop the commit.
 
     An explicit `disclosure-review: tooling-edit` trailer waives the RESIDUAL
@@ -454,9 +454,19 @@ def scan(text: str) -> list[tuple[str, str, str]]:
     has to type, and audits as one:
         git log --grep='disclosure-review: tooling-edit'
     The hard rules (advisory IDs, counts, image-tied state) are NEVER waived.
+
+    `waived` exists because TOOLING_OPT_IN is LINE-anchored while the
+    commit-msg hook deliberately scans a whitespace-JOINED message (a
+    hard-wrapped body would otherwise let a multi-word pattern straddle a line
+    break and escape). Auto-detection therefore never fired for the one caller
+    that matters, and the sanctioned trailer was inert in the hook while
+    passing its own unit test against raw text — the trailer's whole purpose is
+    to be the alternative to `--no-verify`, so it has to work there. A caller
+    that normalizes must detect the trailer on the RAW message and pass the
+    answer in. `None` keeps the self-detecting behaviour for raw-text callers.
     """
     rules = _COMPILED3
-    if TOOLING_OPT_IN.search(text):
+    if TOOLING_OPT_IN.search(text) if waived is None else waived:
         rules = [r for r in rules if not r[1].startswith(RESIDUAL_PREFIX)]
     return _scan(text, rules)
 
