@@ -65,7 +65,7 @@ auto-updater held it.
 
 **Why not in-place `pg_upgrade`.** Two independent blockers:
 
-- The authentik chart (2026.5.6) runs the official image inside a bitnami-style
+- The authentik chart (2026.8.0) runs the official image inside a bitnami-style
   layout: `PGDATA=/bitnami/postgresql/data`, data volume mounted at
   `/bitnami/postgresql` (verified on the live StatefulSet). `pg_upgrade` needs
   the *old and new* binaries plus both data dirs visible to one process — not
@@ -153,16 +153,31 @@ by decrypting `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`:
 | immich   | set |
 | librechat | set |
 
-The live server is **2026.5.6**, i.e. already at/above the release where
-blueprint-only OIDC providers get `grant_types: []` and every login fails
-`invalid_request` ("otherwise malformed"). immich and librechat carry an explicit
-comment and the correct list; the other four do not. The landmine is therefore
-**armed**, and it is armed independently of this plan.
+> **STATUS 2026-08-19: DISARMED — fixed in `eed5c910`, before the server bump.**
+> The table above is the state as FOUND. `grant_types:
+> [authorization_code, refresh_token]` is now declared explicitly for all four,
+> landed and verified on the then-current 2026.5.6 server, and it then survived
+> the 2026.8.0 blueprint re-apply (verified by direct DB read after the upgrade).
+> Two corrections to the original text worth carrying:
+>
+> - **pgadmin was never actually exposed.** Its blueprint has never applied
+>   (`status: error`, no `last_applied_hash`): it declares
+>   `identifiers: {name: pgadmin}` while the live provider is the UI-created
+>   `pgAdmin OAuth`, and it reuses that provider's `client_id`, which is
+>   UNIQUE-constrained. So pgAdmin's provider is not blueprint-managed and a
+>   re-apply cannot reset it. Its grant_types are still the legacy full set.
+>   Fixing that adoption is a separate, unfiled change.
+> - **Proxy and SAML providers were never exposed either.**
+>   `ProxyProvider.set_oauth_defaults()` hardcodes grant types on every save and
+>   is invoked from the serializer's `create()` and `update()` — the path
+>   blueprints use — so the 13 forward-auth providers self-heal. The SAML model
+>   has no `grant_types` field at all.
 
-**This plan must not fix it** (four provider definitions is its own change, with
-its own verification, and bundling it into an SSO database cutover makes any
-failure unattributable). What this plan MUST do is not trip it, and prove it did
-not:
+The live server is now **2026.8.0**. immich and librechat always carried an
+explicit comment and the correct list; the other four now do too.
+
+**This plan still must not re-open it.** The fix is landed elsewhere; what this
+plan must do is not regress it, and prove it did not:
 
 - Do **not** force a blueprint re-apply as part of the migration, and do not
   delete/recreate the blueprint ConfigMap.
@@ -171,9 +186,41 @@ not:
   (§4 gains a check for this).
 - If any of the four comes back with an empty `grant_types`, that is a
   **rollback trigger**, not a cosmetic issue — grafana, pgadmin, superset and
-  sure logins all break at once.
+  sure logins all break at once. Expected values after restore:
+  grafana / superset / sure / immich / librechat =
+  `{authorization_code,refresh_token}`; `pgAdmin OAuth` = the legacy full set
+  (it is UI-managed — see the status note above, do not "correct" it here).
 
-File the blueprint fix as its own plan.
+### (iii) RE-MEASURED 2026-08-19 AFTER the authentik 2026.8.0 server bump — NO DRIFT
+
+This plan's mechanics were originally measured against the live StatefulSet at
+chart **2026.5.6**. The server/chart was bumped to **2026.8.0** earlier the same
+day (`6ef2501b`), which changes the chart underneath this plan, so every value
+this plan keys on was re-read from the live cluster afterwards:
+
+| value this plan depends on | measured at 2026.5.6 | re-measured at 2026.8.0 | drift |
+|---|---|---|---|
+| bundled postgres image | `postgres:17.11-bookworm` | `postgres:17.11-bookworm` | none |
+| `PGDATA` | `/bitnami/postgresql/data` | `/bitnami/postgresql/data` | none |
+| data volume mount point | `/bitnami/postgresql` | `/bitnami/postgresql` | none |
+| DB password file (used by every §2/§3 psql call) | `/opt/bitnami/postgresql/secrets/SECRET_AUTHENTIK_DB_PASSWORD` | same | none |
+| `AUTHENTIK_POSTGRESQL__HOST` (the cutover repoint target) | `authentik-postgresql` | `authentik-postgresql` | none |
+| bundled postgresql SUBchart | `postgresql-18.7.9` | `postgresql-18.8.11` | patch only, same major; layout unchanged |
+
+**Conclusion: the plan's Phase A/B mechanics, its `PGDATA`/mount decisions and
+all its embedded `psql` invocations remain valid as written.** The subchart moved
+by a patch release only and did not change the bitnami-style layout that drives
+the "why not in-place pg_upgrade" argument in §1.
+
+One thing that DID change and is worth knowing at execution time: the 2026.8.0
+chart's own default for the bundled postgres image is now `17.11-bookworm` —
+i.e. identical to our explicit pin, so the pin no longer diverges from the chart
+default. It stays pinned deliberately: the pin is what stops a future chart from
+walking the major forward on a live data directory.
+
+Also re-confirmed for the rollback path: the Longhorn volume
+`data-authentik-postgresql-0` is `attached`/`healthy` with a backup from
+03:01 the same day.
 
 ## 2) Pre-checks
 
