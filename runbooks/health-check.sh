@@ -3444,7 +3444,25 @@ log_section "Section 24a: Network Infrastructure Services"
             CANARY_CAND=$(printf '%s' "$CANARY_SERVED" | grep -oE 'candidate=[^ ]+' | cut -d= -f2)
             if [ -n "$CANARY_CAND" ] && [ -n "$CANARY_REQ" ] && [ "$CANARY_CAND" != "$CANARY_REQ" ]; then
                 log_warning "openclaw dispatch canary: agent replied but DEGRADED — served by fallback ${CANARY_CAND} instead of ${CANARY_REQ}"
-                add_major_issue "openclaw is running on model fallback ${CANARY_CAND} (primary ${CANARY_REQ} failing). Chat/skills/briefing still work, but on the local model. Check which codex failure mode: 'codex login status' — 'Logged in using ChatGPT' + 'usage limit' = quota (self-heals at reset); otherwise OAuth refresh drift, needs an operator browser re-login. See docs/sops/ai-integration.md."
+                # Classify the degrade HERE rather than telling the operator to run
+                # `codex login status` and look for "usage limit". That command prints
+                # only "Logged in using ChatGPT" — it reports the OAuth state and says
+                # nothing about quota, so the old instruction could not discriminate
+                # and pointed at a browser re-login for what is usually a quota reset.
+                # The gateway already logs the real reason on the candidate_failed line.
+                CANARY_FAIL=$(kubectl logs -n ai "$OC_POD" -c app --tail=800 2>/dev/null \
+                    | grep 'model-fallback/decision' | grep 'decision=candidate_failed' \
+                    | grep -F "candidate=${CANARY_REQ}" | tail -1)
+                CANARY_REASON=$(printf '%s' "$CANARY_FAIL" | grep -oE 'reason=[^ ]+' | cut -d= -f2)
+                CANARY_RESET=$(printf '%s' "$CANARY_FAIL" | grep -oE 'Next reset[^."]*' | head -1)
+                if [ "$CANARY_REASON" = "rate_limit" ]; then
+                    # Expected and self-healing: the Codex subscription window refills.
+                    # Minor so it does not read as an outage, but still reported — a
+                    # rate_limit that shows up EVERY cycle is a real capacity problem.
+                    add_minor_issue "openclaw is on model fallback ${CANARY_CAND}: the Codex subscription usage limit is exhausted (reason=rate_limit). Self-heals at the reset. ${CANARY_RESET:-reset time not in the last 800 log lines}. No operator action unless this recurs every cycle. See docs/sops/ai-integration.md."
+                else
+                    add_major_issue "openclaw is running on model fallback ${CANARY_CAND} (primary ${CANARY_REQ} failing, reason=${CANARY_REASON:-unknown}). Chat/skills/briefing still work, but on the local model. NOT a quota exhaustion — that reports reason=rate_limit. Check the codex OAuth refresh chain: 'codex login status' shows the login state, and the pod log carries the raw provider error. Recovery is 'codex login --device-auth' plus a pod restart. See docs/sops/ai-integration.md."
+                fi
             else
                 log_success "openclaw dispatch canary: agent replied (Codex/OAuth path healthy)"
             fi
