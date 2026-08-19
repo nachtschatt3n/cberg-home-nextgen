@@ -127,7 +127,7 @@ dump/restore), not a system-table format transition.
 normally trusts can lie**: `Ready=True`, a correct `SELECT VERSION()` and a
 running pod are all compatible with old-format system tables underneath, because
 the entrypoint can log *"This installation is already upgraded"* and move on. So
-Verification checks the **datadir marker** (`/var/lib/mysql/mysql_upgrade_info`)
+Verification checks the **datadir marker** (`/var/lib/mysql/mariadb_upgrade_info`)
 and runs `mariadb-check --all-databases`, not just `SELECT VERSION()`. If a
 manual upgrade is ever needed it must run **over the socket**
 (`mariadb-upgrade --protocol=socket --skip-ssl`) — the SOP records that the
@@ -443,7 +443,13 @@ mise exec -- kubectl get volume -n storage nextcloud-db-data \
 
 # b) *** THE MARIADB TRAP — version alone is NOT sufficient ***
 mise exec -- kubectl exec -n office $NEW -- sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "select version();"'
-mise exec -- kubectl exec -n office $NEW -- cat /var/lib/mysql/mysql_upgrade_info
+mise exec -- kubectl exec -n office $NEW -- cat /var/lib/mysql/mariadb_upgrade_info
+#    ^ CORRECTED 2026-08-19 from phase 3's execution: MariaDB 11.8 writes the marker
+#      as `mariadb_upgrade_info`. The old `mysql_upgrade_info` path does not exist on
+#      this image, so `cat` exits 1 — which reads exactly like the trap this check is
+#      meant to catch, and will send you chasing a non-existent problem. Cross-check
+#      with `mariadb-upgrade ... --check-if-upgrade-is-needed`, which prints
+#      "already upgraded to <version>" and exits 1 when nothing is due.
 #    ^ MUST show 11.8.8. If it lags, run the upgrade BY HAND OVER THE SOCKET:
 #        mise exec -- kubectl exec -n office $NEW -- sh -c \
 #          'mariadb-upgrade --protocol=socket --skip-ssl -uroot -p"$MARIADB_ROOT_PASSWORD"'
