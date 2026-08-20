@@ -79,6 +79,31 @@ The 404 splits into two unrelated problems:
   the real file-rename surface**, and the 240-minute estimate should be re-sized
   against it.
 
+**FOLDER RENAMES ARE NOT THE CHEAP HALF — one was attempted and reverted
+(2026-08-20).** Of the two folder-side shows, the 43-file one renamed cleanly
+and its files are now compliant. The 170-file one did not:
+
+- Renaming its folder made the filenames compliant, but **Jellyfin lost the
+  series overview** — the new folder name is not identifiable, and Jellyfin
+  matches on the folder, not on the sidecar. Plex was unaffected
+  (`unmatched: 0`, 100% coverage throughout).
+- **Reverting the folder name did NOT restore it.** Jellyfin had already cached
+  the failed identification, so the revert left the library in the degraded
+  state. Assume a rename is one-way from the media server's point of view.
+- A `replaceAllMetadata` + `replaceAllImages` refresh, used trying to recover,
+  blocked the `/health` endpoint long enough for the **liveness probe to fail
+  and the kubelet to SIGKILL the pod** (exit 137 — not OOM; the limit is 12Gi
+  and it was using ~300Mi). One restart. It settled, but do not fire a full
+  refresh at a live server as a recovery step.
+
+**Consequences for this plan:** a folder rename must be treated as
+media-server-identity surgery, not a filename fix. Do them ONE at a time, and
+plan the Jellyfin *Identify* step (operator, UI, provider id from the show's
+own `tvshow.nfo`) as part of the same step rather than as cleanup. For the
+170-file show the safer route is the FILE side after all — rename the files to
+match the existing, identifiable folder name, which leaves the media servers'
+matching untouched.
+
 **One show cannot be fixed by renaming alone.** It holds 52 files numbered
 continuously `S01E01..S01E52`, while TMDb lists 26 episodes in season 1 —
 verified by forcing the series id from its own `tvshow.nfo`. Episodes 27-52
