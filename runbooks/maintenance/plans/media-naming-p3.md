@@ -44,6 +44,34 @@ generated: "2026-08-15"
 
 # Media stage 4/4 — rename the 404 non-SOP episode filenames (attended)
 
+## 0) Independently re-verified 2026-08-20 — and the surface is softer than 404 suggests
+
+The 49.9% figure was confirmed by a read-only scan of the actual filenames,
+run outside the audit so a second bad regex could not agree with the first.
+It reproduces the audit exactly, and the *reason* it differs from the old
+87.7% is now pinned down:
+
+| reading | compliant | pct |
+|---|---|---|
+| any prefix before ` - SxxEyy - ` | 616 | 76.3% |
+| prefix **equals the show folder** (the SOP rule) | **403** | **49.9%** |
+
+So the audit is right and the old 87.7% was the lax-regex artifact.
+
+**Of the 404 non-compliant files, 213 already carry a correct `SxxEyy` and a
+correct title — only the show-name prefix is wrong.** Those are a
+mechanical prefix substitution, not a re-derivation of episode identity, and
+they are much lower risk than the remaining ~191. Split the rename table on
+that boundary and do the 213 first.
+
+**One show cannot be fixed by renaming alone.** It holds 52 files numbered
+continuously `S01E01..S01E52`, while TMDb lists 26 episodes in season 1 —
+verified by forcing the series id from its own `tvshow.nfo`. Episodes 27-52
+therefore match nothing and received no sidecar in the NFO backfill. They
+need a season split (`S02Exx`) before either naming or NFO coverage can
+reach them; a prefix-only rename will not help.
+
+
 ## 1) Summary & why held
 
 Final stage. 404 of 807 episodes do not match the SOP form
