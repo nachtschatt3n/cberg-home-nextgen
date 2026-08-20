@@ -104,6 +104,32 @@ own `tvshow.nfo`) as part of the same step rather than as cleanup. For the
 match the existing, identifiable folder name, which leaves the media servers'
 matching untouched.
 
+**OPTION B EXECUTED 2026-08-20 — file-side rename, and it also repaired the
+folder-rename damage.** The 170-file show was fixed by renaming the FILES to
+match its existing, identifiable folder, instead of renaming the folder.
+
+- **344 files renamed, not 170.** Each video has a `.nfo` sidecar that must
+  move with it or the whole episode-NFO backfill is orphaned: 173 video + 171
+  sidecar. `tvshow.nfo`, `poster.jpg` and `fanart.jpg` are NOT prefixed and
+  must be excluded. Any future rename batch has to count sidecars, not
+  episodes.
+- Result: naming 55.3 -> 76.3, and `episode_nfo_pct` HELD at 96.3 — proof the
+  sidecars travelled with their videos. File count 347 before and after.
+- **It also restored what the folder rename broke.** Because episode identity
+  (`SxxEyy`) and the folder never changed, both servers re-matched cleanly and
+  Jellyfin recovered the overview it had lost: back to 100.0/100.0, Plex
+  `unmatched: 0` throughout. **This is the evidence that the file side is the
+  correct direction** — it moves nothing the media servers key on.
+- 3 of the show's 173 videos stay non-compliant: they carry no valid `SxxEyy`
+  and belong to the 191-file bucket, not this one.
+
+> **Trap for whoever does the remaining 191.** Recovering a mis-identified
+> series in Jellyfin means selecting the item to re-identify. Selecting it by
+> NAME PREFIX picked the wrong series and stamped one show's provider id onto
+> another, silently. **Select by PATH.** It was caught only because a
+> duplicate-name check ran afterwards, and fixed by re-applying the correct id
+> from the target folder's own `tvshow.nfo`.
+
 **One show cannot be fixed by renaming alone.** It holds 52 files numbered
 continuously `S01E01..S01E52`, while TMDb lists 26 episodes in season 1 —
 verified by forcing the series id from its own `tvshow.nfo`. Episodes 27-52
