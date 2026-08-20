@@ -30,6 +30,17 @@ spec:
         - name: postgresql
           image: postgres:18.6-bookworm
           imagePullPolicy: IfNotPresent
+          # max_connections MUST match what the bundled Bitnami 17.11 DB was
+          # tuned to (500). The stock postgres image defaults to 100, so the
+          # 2026-08-20 cutover silently cut the ceiling 5x and authentik began
+          # returning HTTP 500 from /application/o/authorize/ with
+          # "FATAL: sorry, too many clients already" once login load pushed past
+          # it -- logins failing while every pod stayed Ready. 3 server + 3
+          # worker replicas each hold a pool, so 100 is not close to enough.
+          # Memory is unchanged: the old DB served 500 within the same 1Gi cap.
+          args:
+            - -c
+            - max_connections=500
           ports:
             - containerPort: 5432
               name: postgresql
