@@ -70,8 +70,25 @@ async def _fanout():
                 _clients.discard(ws)
 
 
+# Liveness state. The bridge carries every critical page, and until 2026-08-20
+# nothing could tell "no alerts are firing" from "the bridge stopped forwarding":
+# do_GET answered "ok" whenever the PROCESS was alive, health-check.sh did not
+# reference the bridge at all, and the log records only startups (4,582 of them
+# from the historical bind crash-loop) -- never a forwarded alert. Alertmanager
+# already sends Watchdog here on every cycle and the handler drops it, so the
+# dead-man's switch was arriving and being thrown away. Record it instead.
+_last_post = 0.0        # any webhook POST reached us
+_last_watchdog = 0.0    # the always-firing heartbeat specifically
+_started = time.time()  # so a checker can tell "not yet" from "stopped arriving":
+                        # Alertmanager re-sends Watchdog on repeat_interval (4h
+                        # for the claude route), so a bridge younger than that
+                        # legitimately has no heartbeat yet.
+
+
 class _Webhook(BaseHTTPRequestHandler):
     def do_POST(self):
+        global _last_post, _last_watchdog
+        _last_post = time.time()
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n) if n else b""
         self.send_response(200)
@@ -90,6 +107,11 @@ class _Webhook(BaseHTTPRequestHandler):
         for a in payload.get("alerts", []):
             lbl = a.get("labels", {})
             if lbl.get("alertname") in _SYNTHETIC:
+                if lbl.get("alertname") == "Watchdog":
+                    # Still NOT forwarded -- it carries no condition. But its
+                    # arrival proves Alertmanager can still reach us, which is
+                    # the only evidence that silence means "nothing firing".
+                    _last_watchdog = time.time()
                 continue
             evt = {
                 "source": "alertmanager",
@@ -105,9 +127,21 @@ class _Webhook(BaseHTTPRequestHandler):
             _loop.call_soon_threadsafe(_queue.put_nowait, evt)
 
     def do_GET(self):  # health probe
+        now = time.time()
+        body = json.dumps({
+            "ok": True,
+            "ws_clients": len(_clients),
+            # null = never seen since this process started, which for the
+            # watchdog means Alertmanager is NOT reaching us.
+            "last_post_age_s": round(now - _last_post, 1) if _last_post else None,
+            "last_watchdog_age_s": round(now - _last_watchdog, 1) if _last_watchdog else None,
+            "uptime_s": round(now - _started, 1),
+        }).encode()
         self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b"alert-bridge ok")
+        self.wfile.write(body)
 
     def log_message(self, *a):
         pass

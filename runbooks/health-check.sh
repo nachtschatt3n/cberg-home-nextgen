@@ -5378,6 +5378,65 @@ except Exception as e:
 } >> "$OUTPUT_FILE" 2>&1
 
 echo "" | tee -a "$OUTPUT_FILE"
+log_section "Section 41: Alert Bridge Liveness"
+{
+    # The alert-bridge (launchd com.cberg.alert-bridge on this Mac) is the ONLY
+    # path from Alertmanager to the operator session: Alertmanager posts to
+    # http://192.168.30.111:8788/alertmanager and the bridge fans out over a
+    # local websocket. Until 2026-08-20 nothing checked it, and it could not be
+    # checked: its GET handler answered "alert-bridge ok" whenever the PROCESS
+    # was alive, and it logs only startups -- never a forwarded alert. So a dead
+    # bridge looked exactly like a quiet cluster. That is the silent-zero class
+    # from docs/sops/audit-script-correctness.md, applied to the pager itself.
+    # It is not hypothetical: the log holds 4,582 "alert-bridge up" lines from a
+    # bind crash-loop, during which alerts were dropped and nothing said so.
+    #
+    # The bridge now records the Watchdog it already receives and discards
+    # (Watchdog is the always-firing dead-man's switch; the claude route has no
+    # matchers so it arrives here) and reports it on GET /.
+    AB_URL="http://127.0.0.1:8788/"
+    AB_JSON=$(curl -sS --max-time 5 "$AB_URL" 2>/dev/null || echo "")
+
+    if [ -z "$AB_JSON" ]; then
+        log_critical "alert-bridge is NOT answering on $AB_URL — Alertmanager alerts are not reaching the operator session"
+        add_critical_issue "alert-bridge unreachable on 127.0.0.1:8788 — every Alertmanager page is being dropped silently. Check: launchctl list | grep cberg.alert-bridge; log at ~/.claude/logs/alert-bridge.log"
+    else
+        AB_WD=$(echo "$AB_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); v=d.get('last_watchdog_age_s'); print(-1 if v is None else int(v))" 2>/dev/null || echo "-1")
+        AB_UP=$(echo "$AB_JSON" | python3 -c "import sys,json; print(int(json.load(sys.stdin).get('uptime_s',0)))" 2>/dev/null || echo "0")
+        AB_CLIENTS=$(echo "$AB_JSON" | python3 -c "import sys,json; print(int(json.load(sys.stdin).get('ws_clients',0)))" 2>/dev/null || echo "0")
+        echo "alert-bridge: uptime=${AB_UP}s ws_clients=${AB_CLIENTS} last_watchdog_age=${AB_WD}s"
+
+        # Alertmanager re-sends Watchdog on the claude route's repeat_interval
+        # (4h). Stale threshold is 5h to leave headroom; "never seen" is only
+        # conclusive once the process has outlived one full repeat interval,
+        # otherwise a recent restart would read as a failure.
+        AB_STALE=18000   # 5h
+        AB_GRACE=16200   # 4.5h
+        if [ "$AB_WD" -lt 0 ]; then
+            if [ "$AB_UP" -gt "$AB_GRACE" ]; then
+                log_critical "alert-bridge has NEVER received a Watchdog in ${AB_UP}s of uptime — Alertmanager is not reaching it"
+                add_critical_issue "alert-bridge reachable but has received no Watchdog heartbeat in ${AB_UP}s (> one 4h repeat_interval): Alertmanager cannot post to it, so pages are being lost. Check the claude-watch-webhook receiver URL and the Mac's firewall."
+            else
+                log_info "alert-bridge restarted ${AB_UP}s ago; no Watchdog yet (expected — repeat_interval is 4h)"
+            fi
+        elif [ "$AB_WD" -gt "$AB_STALE" ]; then
+            log_critical "alert-bridge last heard from Alertmanager ${AB_WD}s ago (> 5h)"
+            add_critical_issue "alert-bridge Watchdog heartbeat is ${AB_WD}s stale (> 5h, repeat_interval is 4h) — Alertmanager has stopped reaching the bridge and pages are being lost silently."
+        else
+            log_success "alert-bridge healthy (heartbeat ${AB_WD}s ago, ${AB_CLIENTS} ws client(s))"
+        fi
+
+        # A bridge with no websocket consumer still accepts alerts and drops
+        # them on the floor -- reachable, heartbeating, and useless.
+        if [ "$AB_CLIENTS" -eq 0 ]; then
+            log_warning "alert-bridge has no websocket consumer — alerts are received but nothing is listening"
+            add_minor_issue "alert-bridge has 0 websocket clients: Alertmanager alerts arrive but no operator session is attached to receive them."
+        fi
+    fi
+    echo ""
+} >> "$OUTPUT_FILE" 2>&1
+
+echo "" | tee -a "$OUTPUT_FILE"
 log_section "Issues Summary by Severity"
 
 {
