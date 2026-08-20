@@ -414,6 +414,27 @@ fresh shell would silently resolve to `/`.
 > `/tmp` with no cleanup step. When a procedure writes a secret to disk, the
 > location, the mode, and the removal all belong in the procedure.
 
+## 3b-bis) THE ATTEMPT-1 STANDUP WAS REMOVED 2026-08-20 — Phase A starts clean
+
+`db-pv.yaml`, `db-pvc.yaml`, `db-deployment.yaml` and `db-longhorn-volume.yaml`
+were deleted from the app, and the Longhorn volume `nextcloud-db-data` was
+removed. They had sat parked at `replicas: 0` since the rollback, and the
+volume still held the restore this plan rejected as **lossy** — a parked
+deployment pointed at corrupted data is a trap for whoever picks this up next.
+
+**Consequences for attempt 2:**
+
+- Phase A must **recreate** the standup manifests; do not assume they exist.
+  Nothing about the procedure changes, only the starting point.
+- This is an improvement, not a setback: attempt 2 has to restore into a clean
+  schema anyway, and it now cannot accidentally inherit attempt 1's data.
+- Nextcloud was never affected at any point — it runs on the bundled
+  `nextcloud-mariadb`, verified live (`MYSQL_HOST=nextcloud-mariadb`) before
+  and after the removal.
+- Storage was checked before deleting: `driver.longhorn.io` (not a CIFS class,
+  so the catastrophic-share rule does not apply), `reclaim=Retain`, detached,
+  zero consumers, and its source DB live — so nothing unique was destroyed.
+
 ## 3c) WHY THIS PLAN IS BLOCKED — the dump was lossy (2026-08-19)
 
 Attempt 1 was **rolled back mid-restore, before the app was allowed up**
