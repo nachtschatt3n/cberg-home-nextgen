@@ -53,15 +53,47 @@ spec:
       interval: 30s
       rules:
         - alert: LonghornVolumeDetached
-          expr: longhorn_volume_state{state="detached"} == 1
-          for: 2m
+          # A detached volume is IDLE, not broken. The bare
+          # longhorn_volume_state{state="detached"} fired continuously on the
+          # rollback PVs the bitnamilegacy migrations deliberately keep
+          # (nextcloud-db-data, paperless-mariadb,
+          # redis-data-nextcloud-redis-master-0 — all reclaim=Retain, bound, no
+          # consumer): 3 permanent warnings for zero problems. This is the same
+          # false positive the sweep's health-check carried until bd74a478 —
+          # a second detector with the identical bug.
+          #
+          # A detach only matters when something WANTS the volume, so join
+          # against kube-state-metrics and fire only if a pod references the
+          # PVC. Verified with a control before shipping, because a 0 from a
+          # broken join looks identical to a clean one: the same join returns
+          # 93 series on the attached set and 0 on the detached set.
+          #
+          # Real replica damage is NOT hidden — LonghornVolumeDegraded and
+          # LonghornVolumeFaulted key on robustness with no state filter, so
+          # they still fire on a detached volume.
+          expr: |
+            longhorn_volume_state{state="detached"} == 1
+            and on (pvc, pvc_namespace)
+            label_replace(
+              label_replace(
+                kube_pod_spec_volumes_persistentvolumeclaims_info,
+                "pvc", "$1", "persistentvolumeclaim", "(.+)"
+              ),
+              "pvc_namespace", "$1", "namespace", "(.+)"
+            )
+          # 10m, not 2m: a volume legitimately detaches and reattaches while a
+          # pod is rescheduled, and a Talos node drain (plan talos-1.13.9)
+          # cycles every volume on the node with its pods still referencing
+          # them. At 2m that is a burst of false alerts during routine
+          # maintenance; a genuinely stuck attach outlasts 10m.
+          for: 10m
           labels:
             severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn volume {{ $labels.volume }} is detached"
-            description: "Longhorn volume {{ $labels.volume }} has been detached for more than 2 minutes."
+            summary: "Longhorn volume {{ $labels.volume }} is detached but a pod wants it"
+            description: "Longhorn volume {{ $labels.volume }} (PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }}) has been detached for more than 10 minutes while a pod still references it — the workload cannot start. Deliberately idle volumes with no consumer do not fire this."
             runbook_url: "https://longhorn.io/docs/latest/troubleshooting/"
 
         - alert: LonghornVolumeDegraded
