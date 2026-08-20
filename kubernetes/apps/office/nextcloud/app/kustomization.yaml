@@ -4,13 +4,14 @@ kind: Kustomization
 resources:
   - ./secrets.sops.yaml
   - ./pvc.yaml
-  # Replacement database (official mariadb image). db-longhorn-volume.yaml is
-  # deliberately NOT listed: Flux's targetNamespace would override the Volume
-  # CR's `namespace: storage` and create a broken duplicate Longhorn ignores.
-  # It is applied by hand — see the comment in that file.
-  - ./db-pv.yaml
-  - ./db-pvc.yaml
-  - ./db-deployment.yaml
+  # The replacement-database standup (db-pv/db-pvc/db-deployment/
+  # db-longhorn-volume) was REMOVED 2026-08-20. It had been parked at
+  # replicas: 0 since the 2026-08-19 rollback (revert d1dbbdd1) and its volume
+  # held the restore that rollback rejected as LOSSY, so leaving it invited a
+  # later reader to treat corrupted data as a usable starting point. Nextcloud
+  # runs on the bundled nextcloud-mariadb throughout. Plan
+  # bitnamilegacy-exit-nextcloud-db recreates the standup from scratch in its
+  # Phase A, which is what attempt 2 needs anyway.
   - ./helmrelease.yaml
   - ./redis-deployment.yaml
   - ./whiteboard-proxy.yaml

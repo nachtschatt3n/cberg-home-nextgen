@@ -27,6 +27,26 @@ spec:
   dependsOn:
     - name: node-feature-discovery
       namespace: kube-system
+  # UPSTREAM CHART BUG (intel-device-plugins-operator 0.36.0): the metrics
+  # Service declares `targetPort: https`, but the controller-manager Deployment
+  # declares only `containerPort: 9443, name: webhook-server` — no port named
+  # `https` exists anywhere. The EndpointSlice therefore resolves the pod IP but
+  # no port, so the Service has ZERO usable endpoints and surfaces as a
+  # "service without endpoints" health finding. Metrics ARE served, on :8443
+  # (--metrics-bind-address=:8443 --metrics-secure), so target it numerically.
+  # The chart exposes no value for this, hence a post-render patch.
+  # Re-check on every chart bump: if upstream names the port, drop this.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              version: v1
+              kind: Service
+              name: inteldeviceplugins-controller-manager-metrics-service
+            patch: |
+              - op: replace
+                path: /spec/ports/0/targetPort
+                value: 8443
   values:
     controllerExtraArgs: |
       - --devices=gpu
