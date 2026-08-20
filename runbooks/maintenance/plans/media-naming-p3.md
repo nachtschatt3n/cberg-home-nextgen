@@ -58,11 +58,26 @@ It reproduces the audit exactly, and the *reason* it differs from the old
 
 So the audit is right and the old 87.7% was the lax-regex artifact.
 
-**Of the 404 non-compliant files, 213 already carry a correct `SxxEyy` and a
-correct title — only the show-name prefix is wrong.** Those are a
-mechanical prefix substitution, not a re-derivation of episode identity, and
-they are much lower risk than the remaining ~191. Split the rename table on
-that boundary and do the 213 first.
+**CORRECTION 2026-08-20 (second pass).** A first reading of this called the
+213 "a mechanical prefix substitution, do them first". **That was wrong and
+generating the rename table is what caught it.** The table came out proposing
+to rewrite correctly-named files to match malformed folders — it would have
+damaged 213 good filenames. Do not restore that framing.
+
+The 404 splits into two unrelated problems:
+
+- **213 files across just 2 shows are FOLDER-side.** The filenames are already
+  correct; the *folder* disagrees with them. One folder is concatenated without
+  periods or spaces while its 43 files carry the properly punctuated title; the
+  other folder drops a separator its 170 files include. The remedy is
+  **2 folder renames and zero file renames**, which is a completely different
+  risk profile from 213 file operations. Caveat: renaming a show folder changes
+  the library path, so Plex/Jellyfin re-match the series — check watch state and
+  artwork after, and do it as its own step.
+- **191 files across 12 shows are genuine file-naming faults** — 99 carry an
+  `SxxEyy` but no ` - ` separators, 92 deviate otherwise. **This, not 404, is
+  the real file-rename surface**, and the 240-minute estimate should be re-sized
+  against it.
 
 **One show cannot be fixed by renaming alone.** It holds 52 files numbered
 continuously `S01E01..S01E52`, while TMDb lists 26 episodes in season 1 —
