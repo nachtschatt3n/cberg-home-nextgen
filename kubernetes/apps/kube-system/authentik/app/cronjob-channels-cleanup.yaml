@@ -29,7 +29,7 @@ spec:
               # tag move. security_ref: F-31aadd6f
               # NOTE: alpine has no bash — the script below is POSIX sh and
               # must stay that way (no [[ ]], no arrays, no local).
-              image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+              image: postgres:18.6-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
               command:
                 - /bin/sh
                 - -c
@@ -96,7 +96,7 @@ spec:
                   echo "Table size: $TABLE_SIZE"
               env:
                 - name: DB_HOST
-                  value: "authentik-postgresql"
+                  value: "authentik-pg"
                 - name: DB_USER
                   value: "authentik"
                 - name: DB_NAME
