@@ -1,0 +1,90 @@
+---
+# Replacement authentik DB (plan authentik-postgres-18). Runs ALONGSIDE the
+# bundled 17.11 StatefulSet until the post-soak decommission plan retires it.
+# postgres:18+ image layout: volume mounts at /var/lib/postgresql, PGDATA
+# defaults to /var/lib/postgresql/18/docker (docker-library/postgres #1259) —
+# this is what makes the NEXT major an in-place pg_upgrade candidate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-pg
+  namespace: kube-system
+  labels:
+    app: authentik-pg
+spec:
+  replicas: 1
+  # Recreate: single-replica Deployment on an RWO Longhorn PVC — RollingUpdate
+  # would surge a second pod and deadlock on Multi-Attach.
+  # See docs/sops/longhorn-rwo-multi-attach.md.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: authentik-pg
+  template:
+    metadata:
+      labels:
+        app: authentik-pg
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:18.6-bookworm
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: POSTGRES_USER
+              value: authentik
+            - name: POSTGRES_DB
+              value: authentik
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-secret
+                  key: SECRET_AUTHENTIK_DB_PASSWORD
+            # no PGDATA override — 18 image default (18/docker subdir) is the point
+            # no --data-checksums needed — enabled by default in PG 18 initdb
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exec pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 15
+            timeoutSeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exec pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            timeoutSeconds: 2
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: authentik-pg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik-pg
+  namespace: kube-system
+  labels:
+    app: authentik-pg
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgresql
+  selector:
+    app: authentik-pg
