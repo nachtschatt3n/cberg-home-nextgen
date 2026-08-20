@@ -1,6 +1,12 @@
 ---
 plan_id: talos-1.13.9
-component: talos
+component: Talos Linux              # MUST equal the version-check's component
+                                    # string exactly: coverage.py keys a plan
+                                    # solely on this field (keys = {component})
+                                    # and the held item reports "Talos Linux".
+                                    # Written as "talos" first, which matched
+                                    # nothing, so the plan was invisible and
+                                    # coverage kept the bump in NEEDS A PLAN.
 pr: null
 kind: os
 current: "talosVersion v1.13.8 on all 3 nodes (k8s-nuc14-01/02/03)"
