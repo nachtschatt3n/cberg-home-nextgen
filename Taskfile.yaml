@@ -49,6 +49,31 @@ tasks:
       - test -f {{.KUBECONFIG}}
       - which flux
 
+  test:
+    desc: Run the audit-tooling regression suite + manifest validation
+    summary: |
+      CLAUDE.md has documented `task test` as "run all tests" for a long time
+      while no such target existed, so the command in the docs did nothing.
+
+      Runs, in order:
+
+      - runbooks/tests/run-all.sh — every audit-tooling regression test. Each
+        one pins a correctness fix found the hard way (a detector that could
+        not see, a denominator that excluded what it measured, a zero reported
+        without a control). See docs/sops/audit-script-correctness.md.
+      - task kubeconform — manifest schema validation.
+
+      Until 2026-08-22 nothing ran the audit tests: not CI, not this Taskfile,
+      not pre-commit, not the sweep. A regression in any of them would only
+      have surfaced as a wrong answer in a future sweep.
+    cmds:
+      - bash runbooks/tests/run-all.sh
+      - task: kubeconform
+
+  test:audit:
+    desc: Run only the audit-tooling regression tests (fast, no cluster needed)
+    cmd: bash runbooks/tests/run-all.sh {{.CLI_ARGS}}
+
   kubeconform:
     desc: Validate all manifests in kubernetes/apps/ with the CRD schemas
     summary: |

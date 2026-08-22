@@ -325,6 +325,33 @@ if [ -f "$DISCLOSURE_SCAN" ]; then
 fi
 
 # ───────────────────────────────────────────────────────────────────
+# Layer 5: audit-tooling regression tests — only when runbooks/ is touched
+# ───────────────────────────────────────────────────────────────────
+# runbooks/tests/ holds a suite per correctness fix that was found the hard
+# way. Nothing ran them until 2026-08-22, so a regression in any would have
+# surfaced only as a wrong answer in a future sweep — the same silent-failure
+# mode the tests exist to prevent. ~12s, and only when the code they guard is
+# actually being changed.
+#
+# Fails CLOSED: an audit script whose tests cannot run is exactly the state
+# this layer exists to catch. Bypass with --no-verify if genuinely needed.
+RUNBOOK_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^runbooks/.*\.(py|sh)$' || true)
+if [ -n "$RUNBOOK_STAGED" ] && [ -x runbooks/tests/run-all.sh ]; then
+    echo -e "${YELLOW}🧪 runbooks/ changed — running audit regression tests...${NC}"
+    if bash runbooks/tests/run-all.sh -q; then
+        :
+    else
+        echo
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${RED}COMMIT BLOCKED: audit-tooling regression test failed${NC}"
+        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}These guard detectors against silently losing the ability to see.${NC}"
+        echo -e "${YELLOW}Re-run with: bash runbooks/tests/run-all.sh${NC}"
+        exit 1
+    fi
+fi
+
+# ───────────────────────────────────────────────────────────────────
 # Result
 # ───────────────────────────────────────────────────────────────────
 if [ $SECRETS_FOUND -eq 1 ]; then
