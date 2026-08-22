@@ -67,7 +67,8 @@ All three nodes connect to Basement-SW-24-PoE.
 | `.11 / .12 / .13` | excluded | Talos node IPs |
 | `.14 – .199` | **pool** | available auto-allocations |
 | `.200 – .210` | excluded | UniFi VLAN 55 DHCP pool |
-| `.211 – .254` | **pool** | available auto-allocations |
+| `.211 – .239` | **pool** | available auto-allocations |
+| `.240 – .254` | excluded | physical servers (NAS `.240`, SolarFocus `.241`) |
 
 Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so future pool changes can't migrate IPs:
 
