@@ -310,6 +310,134 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
     return result
 
 
+WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
+
+
+def find_repo_subworkloads() -> list[tuple[str, str, str, str]]:
+    """
+    Workloads AUTHORED IN THE REPO that do not own an app directory.
+
+    find_helmrelease_apps() enumerates DIRECTORIES, so a workload defined inside
+    another app's folder is invisible to it -- `authentik-pg`, a whole postgres
+    Deployment living in authentik/app/pg-deployment.yaml, was never once looked
+    at while section 3 reported "all cluster apps appear documented". So were
+    paperless-db, superset-pg, nextcloud-redis and 30 others. The denominator,
+    not the matching, was the blind spot.
+
+    Only manifests carrying an `image:` count: a postRenderer patch also parses
+    as `kind: Deployment` but is a modification of an existing workload, not a
+    new component to document.
+
+    Returns: [(namespace, parent_app, workload_name, kind), ...]
+    """
+    apps_dir = REPO_ROOT / "kubernetes" / "apps"
+    appdirs: set[str] = set()
+    for ns_dir in apps_dir.iterdir():
+        if ns_dir.is_dir() and not ns_dir.name.startswith("."):
+            for a in ns_dir.iterdir():
+                if a.is_dir() and not a.name.startswith("_"):
+                    appdirs.add(a.name)
+
+    found: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for ns_dir in sorted(apps_dir.iterdir()):
+        if not ns_dir.is_dir() or ns_dir.name.startswith("."):
+            continue
+        for app_dir in sorted(ns_dir.iterdir()):
+            if not app_dir.is_dir() or app_dir.name.startswith("_"):
+                continue
+            for y in sorted(app_dir.rglob("*.yaml")):
+                try:
+                    txt = y.read_text(errors="replace")
+                except OSError:
+                    continue
+                for doc in re.split(r"^---\s*$", txt, flags=re.M):
+                    k = re.search(r"^kind:\s*(\w+)\s*$", doc, re.M)
+                    if not k or k.group(1) not in WORKLOAD_KINDS:
+                        continue
+                    if not re.search(r"^\s+image:\s*\S", doc, re.M):
+                        continue
+                    m = re.search(r"^\s+name:\s*[\"\']?([\w.-]+)", doc, re.M)
+                    if not m:
+                        continue
+                    name = m.group(1)
+                    if name == app_dir.name or name in appdirs:
+                        continue
+                    if (ns_dir.name, name) in seen:
+                        continue
+                    seen.add((ns_dir.name, name))
+                    found.append((ns_dir.name, app_dir.name, name, k.group(1)))
+    return found
+
+
+# Workloads that legitimately run without a repo manifest. Flux's own
+# controllers are installed by flux-operator; the Longhorn CSI sidecars are
+# created by the Longhorn manager at runtime. Both are bootstrap-owned, stable,
+# and enumerable -- anything NOT on this list and not otherwise explained is
+# real GitOps drift.
+BOOTSTRAP_WORKLOADS = {
+    "flux-system/helm-controller", "flux-system/image-automation-controller",
+    "flux-system/image-reflector-controller", "flux-system/kustomize-controller",
+    "flux-system/notification-controller", "flux-system/source-controller",
+    "storage/csi-attacher", "storage/csi-provisioner",
+    "storage/csi-resizer", "storage/csi-snapshotter",
+}
+
+
+def find_unexplained_workloads(scope: str) -> tuple[list[str], int]:
+    """
+    Workloads RUNNING in the cluster that nothing in git explains.
+
+    The counterpart blind spot to the one above: section 3 printed "Apps in
+    cluster: N" while never contacting the cluster -- N was a count of repo
+    directories. Nothing anywhere asserted the reverse direction, so a workload
+    applied by hand and never committed would run indefinitely unnoticed.
+
+    A workload is explained if it is controller-owned (ownerReferences), created
+    by Helm (meta.helm.sh/release-name), an authentik-managed outpost, declared
+    in the repo, or a known bootstrap component.
+
+    Returns: (unexplained, total_examined). total_examined is the CONTROL -- a
+    zero result with zero examined is a broken query, not a clean cluster.
+    """
+    rc, out, err = run_cmd(
+        "kubectl get deploy,statefulset -A -o json", timeout=60,
+        scope=scope, dep="kubectl")
+    if rc != 0 or not out:
+        DEGRADED.record(scope, "kubectl get deploy,statefulset -A",
+                        (err.splitlines() or ["no output"])[-1])
+        return [], 0
+    try:
+        items = json.loads(out).get("items", [])
+    except json.JSONDecodeError as e:
+        DEGRADED.record(scope, "kubectl deploy/sts JSON", repr(e))
+        return [], 0
+
+    repo_names = {n for _ns, _p, n, _k in find_repo_subworkloads()}
+    for apps in find_helmrelease_apps().values():
+        repo_names.update(apps)
+
+    unexplained, examined = [], 0
+    for i in items:
+        md = i.get("metadata", {})
+        ns, name = md.get("namespace", ""), md.get("name", "")
+        if ns in ("kube-node-lease", "kube-public"):
+            continue
+        examined += 1
+        if md.get("ownerReferences"):
+            continue
+        if "meta.helm.sh/release-name" in (md.get("annotations") or {}):
+            continue
+        if name.startswith("ak-outpost-"):
+            continue
+        if name in repo_names:
+            continue
+        if f"{ns}/{name}" in BOOTSTRAP_WORKLOADS:
+            continue
+        unexplained.append(f"{ns}/{name}")
+    return sorted(unexplained), examined
+
+
 def check_doc_exists(path: Path, f: Findings, label: str) -> str:
     """Check doc file exists and is non-empty. Returns content."""
     if not path.exists():
@@ -613,7 +741,8 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     # HelmReleases only so Flux can order them; they are not apps in their own
     # right and the parent's row covers them. Structural rather than a hardcoded
     # pair, so the next app that splits its datastore doesn't re-trip this.
-    SUBCOMPONENT_SUFFIXES = ("-db", "-cache", "-redis", "-postgres", "-postgresql", "-valkey", "-mariadb")
+    SUBCOMPONENT_SUFFIXES = ("-db", "-cache", "-redis", "-postgres", "-postgresql",
+                             "-valkey", "-mariadb", "-pg")
     all_app_names = {a for apps in cluster_apps.values() for a in apps}
 
     def _is_documented_subcomponent(app: str) -> bool:
@@ -663,6 +792,63 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     lines.append(f"Undocumented apps: **{len(undocumented)}**\n")
     if undocumented:
         lines.append("Undocumented:\n" + "\n".join(f"- `{a}`" for a in undocumented[:20]) + "\n")
+
+    # --- Sub-components: workloads authored in the repo without an app dir ---
+    # The loop above enumerates app DIRECTORIES. A workload defined inside
+    # another app's folder therefore never entered the denominator at all, so
+    # "Undocumented apps: 0" was a statement about directories, not about what
+    # this repo actually deploys. authentik-pg (a whole postgres Deployment)
+    # went unexamined that way. Datastore sub-components of a documented parent
+    # stay exempt under the same policy applied above -- but now by an explicit,
+    # visible decision rather than by never being looked at.
+    subs = find_repo_subworkloads()
+    sub_undoc: list[str] = []
+    sub_exempt = 0
+    for sns, parent, sname, skind in subs:
+        if sname in INFRA_SKIP:
+            continue
+        if _is_documented_subcomponent(sname):
+            sub_exempt += 1
+            continue
+        sl = sname.lower()
+        if sl in content.lower() or sl.replace("-", "") in content.lower().replace("-", "").replace(" ", ""):
+            continue
+        sub_undoc.append(f"{sns}/{sname} ({skind}, in {parent}/)")
+        f.add(WARNING, f"Sub-component `{sns}/{sname}` ({skind}, defined in {parent}/) not found in docs/applications.md")
+        cprint(C.YELLOW, f"  {WARNING} Undocumented sub-component: {sns}/{sname}")
+
+    cprint(C.CYAN, f"  Repo sub-components examined: {len(subs)} "
+                   f"({sub_exempt} exempt as datastore of a documented parent)")
+    lines.append(f"Repo sub-components examined: **{len(subs)}** "
+                 f"({sub_exempt} exempt, {len(sub_undoc)} undocumented)\n")
+    if sub_undoc:
+        lines.append("Undocumented sub-components:\n"
+                     + "\n".join(f"- `{a}`" for a in sub_undoc[:20]) + "\n")
+    elif subs:
+        cprint(C.GREEN, f"  {OK} All repo sub-components documented or exempt")
+
+    # --- Reverse direction: running workloads that git does not explain ------
+    # Nothing checked this. The section printed "Apps in cluster: N" while never
+    # contacting the cluster, so a workload applied by hand and never committed
+    # ran indefinitely with no signal. GitOps drift is a documentation failure
+    # in the most literal sense: the repo stops describing what is running.
+    unexplained, examined = find_unexplained_workloads("s3_application_docs")
+    if examined == 0:
+        # Control failed -- say so instead of reporting a clean zero.
+        cprint(C.YELLOW, f"  {WARNING} Cluster cross-check unavailable (0 workloads examined)")
+        lines.append("Cluster cross-check: **unavailable** (kubectl returned nothing)\n")
+    else:
+        lines.append(f"Cluster workloads examined: **{examined}**, "
+                     f"unexplained by git: **{len(unexplained)}**\n")
+        if unexplained:
+            for u in unexplained:
+                f.add(WARNING, f"Workload `{u}` is running but nothing in git declares it (GitOps drift)")
+                cprint(C.YELLOW, f"  {WARNING} Unexplained workload: {u}")
+            lines.append("Unexplained workloads:\n"
+                         + "\n".join(f"- `{u}`" for u in unexplained[:20]) + "\n")
+        else:
+            cprint(C.GREEN, f"  {OK} All {examined} cluster workloads explained by git "
+                            f"(control: {examined} examined)")
 
     # --- Stated totals vs ground truth -------------------------------------
     # README.md, docs/infrastructure.md and docs/applications.md each state an
