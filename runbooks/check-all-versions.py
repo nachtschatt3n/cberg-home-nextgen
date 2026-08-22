@@ -1506,13 +1506,21 @@ class VersionChecker:
         pad = lambda t: tuple(t) + (0,) * (n - len(t))
         return pad(a) < pad(b)
 
-    def parse_version(self, version_str: str) -> Optional[Tuple[int, int, int]]:
-        """Parse version string into (major, minor, patch) tuple.
-        
-        Handles various version formats:
-        - Semantic versions: 1.2.3, v1.2.3
-        - Pre-release: 1.2.3-alpha, 1.2.3-beta.1
-        - Build metadata: 1.2.3+build
+    def parse_version(self, version_str: str) -> Optional[Tuple[int, ...]]:
+        """Parse a version string into a tuple of ALL its numeric components.
+
+        Returns variable length, NOT a fixed (major, minor, patch). Truncating
+        at three silently equated builds that differ only in a 4th component:
+        Plex `1.43.3.10861-07dfddaeb` and `1.43.3.10896-cb3ebc72d` both parsed
+        to (1, 43, 3), so a real update compared EQUAL and never surfaced
+        (verified 2026-08-22). The downgrade-suppressor at
+        `_is_real_downgrade` already pads to `max(len(a), len(b))` — it was
+        written for variable-length tuples, and that padding was dead code
+        because this function could never return more than three.
+
+        Callers index (`cp[0]`) or compare whole tuples; none unpack three
+        values, and Python compares unequal-length tuples by prefix, so
+        (1,43,3) < (1,43,3,10896) is correctly True.
         """
         if not version_str:
             return None
@@ -1521,17 +1529,18 @@ class VersionChecker:
         clean_version = version_str.lstrip('vV').split('+')[0].split('-')[0]
         
         try:
-            # Try using packaging library
+            # Try using packaging library. `.release` keeps every component;
+            # (v.major, v.minor, v.micro) would drop the 4th and beyond.
             v = version.parse(clean_version)
             if isinstance(v, version.Version):
-                return (v.major, v.minor, v.micro)
+                return tuple(v.release)
         except Exception:
             pass
         
-        # Fallback: try regex parsing
-        match = re.match(r'^(\d+)\.(\d+)\.(\d+)', clean_version)
-        if match:
-            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        # Fallback: capture every dot-separated numeric component, not just 3
+        match = re.match(r'^(\d+(?:\.\d+)*)', clean_version)
+        if match and '.' in match.group(1):
+            return tuple(int(x) for x in match.group(1).split('.'))
         
         # Try two-part version
         match = re.match(r'^(\d+)\.(\d+)', clean_version)
