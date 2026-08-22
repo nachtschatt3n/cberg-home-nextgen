@@ -10,10 +10,31 @@ metadata:
     release: kube-prometheus-stack
 spec:
   groups:
-    - name: longhorn.volume.usage
+    # These three rules measure ALLOCATION, not usage.
+    #
+    # longhorn_volume_actual_size_bytes counts blocks EVER WRITTEN to the volume,
+    # not blocks currently holding data — deleting files frees the filesystem but
+    # does not return blocks to Longhorn until a filesystem trim runs. On
+    # 2026-08-22 tube-archivist-cache-2g paged CRITICAL at 93.7% while `df` inside
+    # the pod showed 6% used with 23G free and the app had run four days without a
+    # write error. A trim took it to 2.7%.
+    #
+    # Worse, actual_size only ever GROWS between trims, so once a churning volume
+    # crosses 90% the CRITICAL could never clear on its own — a permanently firing
+    # page for a volume in no distress. Critical is the only tier that pages and
+    # should normally be zero, so a false permanent critical there is corrosive.
+    #
+    # Renamed to say what they measure, and demoted to warning: saturated
+    # allocation is a "run a trim, reclaim node disk" signal, not an outage. A
+    # volume whose FILESYSTEM is genuinely filling is a different condition,
+    # already covered by kube-prometheus-stack's built-in
+    # KubePersistentVolumeFillingUp (it reads kubelet_volume_stats, which is
+    # populated for Longhorn PVCs like any other). Node-level disk exhaustion is
+    # covered by the Longhorn node disk-capacity checks in health-check.sh.
+    - name: longhorn.volume.allocation
       interval: 30s
       rules:
-        - alert: LonghornVolumeUsageWarning
+        - alert: LonghornVolumeAllocationHigh
           expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 80
           for: 5m
           labels:
@@ -21,32 +42,32 @@ spec:
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} usage is high"
-            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Consider expanding the volume or cleaning up data."
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} has allocated most of its provisioned size"
+            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
-        - alert: LonghornVolumeUsageCritical
+        - alert: LonghornVolumeAllocationVeryHigh
           expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 90
           for: 2m
           labels:
-            severity: critical
+            severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} usage is critically high"
-            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Immediate action required to prevent storage exhaustion."
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} allocation is very high"
+            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
-        - alert: LonghornVolumeUsageEmergency
+        - alert: LonghornVolumeAllocationSaturated
           expr: (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 >= 99
           for: 30s
           labels:
-            severity: critical
+            severity: warning
             category: storage
             component: longhorn
           annotations:
-            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} is nearly full"
-            description: "PVC {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}) is {{ $value | printf \"%.1f\" }}% full on node {{ $labels.node }}. Storage exhaustion imminent!"
+            summary: "Longhorn PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} allocation is saturated"
+            description: "Longhorn has allocated {{ $value | printf \"%.1f\" }}% of the provisioned size for PVC {{ $labels.pvc }} in {{ $labels.pvc_namespace }} (volume: {{ $labels.volume }}, node {{ $labels.node }}). This counts blocks EVER WRITTEN, not current contents, so it can be high while the filesystem is nearly empty — check `df` inside the consuming pod before acting. Reclaim with a Longhorn filesystem trim, which returns the blocks to the node disk. Real filesystem fill is alerted separately by KubePersistentVolumeFillingUp."
             runbook_url: "https://longhorn.io/docs/latest/monitoring/metrics/"
 
     - name: longhorn.volume.health
