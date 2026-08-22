@@ -2611,6 +2611,36 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     return f.worst(), f, f.markdown()
 
 
+def _wc(needle: str) -> dict:
+    """A substring clause that ACTUALLY MATCHES `body.text`.
+
+    body.text does not substring-match under `match_phrase`: the same needle
+    returns 0 hits via match_phrase and 2 via wildcard, on the same index and
+    window (verified 2026-08-22). Sections 5 and 6 used match_phrase
+    exclusively, so every "no failed logins" / "no attack patterns" green they
+    printed was green BY CONSTRUCTION -- those detectors had no capability at
+    all. Every working query elsewhere in this file already uses wildcard.
+    """
+    return {"wildcard": {"body.text": {"value": f"*{needle}*", "case_insensitive": True}}}
+
+
+def _control_seen(es, extra_filter: list, needle: str, window: str) -> int:
+    """Hits for a needle that MUST be present if the query shape works.
+
+    A zero from a detector that cannot see is indistinguishable from a clean
+    cluster -- the exact failure docs/sops/audit-script-correctness.md exists
+    to prevent.
+    """
+    body = {"size": 0, "track_total_hits": True,
+            "query": {"bool": {"must": [_wc(needle)],
+                               "filter": [{"range": {"@timestamp": {"gte": window}}}] + extra_filter}}}
+    d = es.query(body)
+    try:
+        return int(d["hits"]["total"]["value"])
+    except Exception:
+        return 0
+
+
 def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
     section_header(5, "Authentik Security Log Analysis")
     f = Findings()
@@ -2620,11 +2650,11 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "kube-system"}},
             {"bool": {"should": [
-                {"match_phrase": {"body.text": "Login failed"}},
-                {"match_phrase": {"body.text": "Failed to authenticate"}},
-                {"match_phrase": {"body.text": "invalid_grant"}},
-                {"match_phrase": {"body.text": "FAILED_LOGIN"}},
-                {"match_phrase": {"body.text": "Unsuccessful login"}},
+                _wc("Login failed"),
+                _wc("Failed to authenticate"),
+                _wc("invalid_grant"),
+                _wc("FAILED_LOGIN"),
+                _wc("Unsuccessful login"),
             ]}},
         ], "filter": {"range": {"@timestamp": {"gte": "now-7d"}}}}},
         "aggs": {"by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}}},
@@ -2641,7 +2671,19 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
 
     lines = [f"Failed login events (7d): **{total}**\n"]
     if total == 0:
-        cprint(C.GREEN, f"  🟢 No failed login events in 7 days")
+        # A zero here is only meaningful if the query could have matched at all.
+        # Control: "authentik" in the same namespace/window returns ~673k when
+        # the shape works. If the control is 0 the detector is blind and this is
+        # NOT a clean result -- say so instead of printing a green.
+        _ctl = _control_seen(es, [{"term": {"resource.attributes.k8s.namespace.name": "kube-system"}}],
+                             "authentik", "now-7d")
+        if _ctl == 0:
+            f.add(WARNING, "Authentik failed-login assertion did NOT run — control query "
+                           "matched nothing, so the zero is unproven (blind detector, not a clean cluster)")
+            cprint(C.YELLOW, "  🟡 failed-login check is BLIND (control=0) — zero is unproven")
+            lines.append("\n> Control query returned 0 — this section did not actually run.\n")
+        else:
+            cprint(C.GREEN, f"  🟢 No failed login events in 7 days (control={_ctl} — detector proven live)")
     else:
         # Check for brute force: >20 failures from one pod
         for b in buckets:
@@ -2660,10 +2702,13 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
         "size": 0,
         "query": {"bool": {
             "should": [
-                {"match_phrase": {"body.text": "401"}},
-                {"match_phrase": {"body.text": "Unauthorized"}},
-                {"match_phrase": {"body.text": "authentication failed"}},
-                {"match_phrase": {"body.text": "token expired"}},
+                # NOT a bare "401": as a substring it matches any number containing
+                # 401 -- 121,523 hits in 7d, against 220 for the bounded
+                # form. Measured 2026-08-22 before switching operator.
+                _wc("401 Unauthorized"),
+                _wc("Unauthorized"),
+                _wc("authentication failed"),
+                _wc("token expired"),
             ],
             "minimum_should_match": 1,
             "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}],
@@ -2691,6 +2736,29 @@ def s5_authentik_logins(es: ElasticPortForward) -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def _body_text(hit: dict) -> str:
+    """Pull the log line out of a hit, whatever shape `body` arrived in.
+
+    The previous inline expression was broken in BOTH branches -- it called
+    .get("text") on a str in the true branch and chained
+    .get("text").get("text") in the false branch, raising AttributeError either
+    way. It never surfaced because it only runs when the attack-pattern query
+    returns hits, and that query could not match anything until the
+    match_phrase -> wildcard fix (2026-08-22). The first genuine detection
+    would have crashed the whole security check.
+    """
+    b = (hit.get("_source") or {}).get("body")
+    if isinstance(b, str):
+        return b
+    if isinstance(b, dict):
+        t = b.get("text", "")
+        if isinstance(t, str):
+            return t
+        if isinstance(t, dict):
+            return str(t.get("text", ""))
+    return ""
+
+
 def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
     section_header(6, "External Service Attack Pattern Analysis")
     f = Findings()
@@ -2700,16 +2768,16 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "network"}},
             {"bool": {"should": [
-                {"match_phrase": {"body.text": "../"}},
-                {"match_phrase": {"body.text": "etc/passwd"}},
-                {"match_phrase": {"body.text": "SELECT "}},
-                {"match_phrase": {"body.text": "<script"}},
-                {"match_phrase": {"body.text": "wp-login"}},
-                {"match_phrase": {"body.text": ".env"}},
-                {"match_phrase": {"body.text": "phpMyAdmin"}},
-                {"match_phrase": {"body.text": "cmd.exe"}},
-                {"match_phrase": {"body.text": "/bin/sh"}},
-                {"match_phrase": {"body.text": "UNION SELECT"}},
+                _wc("../"),
+                _wc("etc/passwd"),
+                _wc("SELECT "),
+                _wc("<script"),
+                _wc("wp-login"),
+                _wc(".env"),
+                _wc("phpMyAdmin"),
+                _wc("cmd.exe"),
+                _wc("/bin/sh"),
+                _wc("UNION SELECT"),
             ]}},
         ], "filter": {"range": {"@timestamp": {"gte": "now-24h"}}}}},
         "aggs": {"by_pod": {"terms": {"field": "resource.attributes.k8s.pod.name", "size": 10}}},
@@ -2726,7 +2794,17 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
 
     lines = [f"Attack pattern hits (24h): **{total}**\n"]
     if total == 0:
-        cprint(C.GREEN, "  🟢 No attack patterns in ingress logs (24h)")
+        # Control: "GET" in the ingress namespace returns ~214k when the shape
+        # works. Without this, "no attack patterns" is unfalsifiable.
+        _ctl = _control_seen(es, [{"term": {"resource.attributes.k8s.namespace.name": "network"}}],
+                             "GET", "now-24h")
+        if _ctl == 0:
+            f.add(WARNING, "Attack-pattern assertion did NOT run — control query matched nothing, "
+                           "so the zero is unproven (blind detector, not a clean ingress)")
+            cprint(C.YELLOW, "  🟡 attack-pattern check is BLIND (control=0) — zero is unproven")
+            lines.append("\n> Control query returned 0 — this section did not actually run.\n")
+        else:
+            cprint(C.GREEN, f"  🟢 No attack patterns in ingress logs (24h) (control={_ctl} — detector proven live)")
     else:
         for b in buckets:
             if b["doc_count"] > 100:
@@ -2738,9 +2816,7 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         lines.append("Top ingress pods:\n")
         for b in buckets:
             lines.append(f"- {b['key']}: {b['doc_count']}\n")
-        sample = [redact(h["_source"].get("body", {}).get("text", "")[:120] if isinstance(h["_source"].get("body"), str)
-                        else h["_source"].get("body", {}).get("text", "").get("text", "")[:120])
-                  for h in data["hits"]["hits"][:5]]
+        sample = [redact(_body_text(h)[:120]) for h in data["hits"]["hits"][:5]]
         lines.append("Sample requests:\n")
         for s in sample:
             lines.append(f"- `{s}`\n")
