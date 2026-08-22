@@ -273,16 +273,75 @@ _noise_tag() {
 }
 
 # Helper to safely get integer count
+# Register of measurements that could not be taken. FILE-backed on purpose:
+# safe_count is almost always invoked as `VAR=$(safe_count ...)`, which runs in
+# a SUBSHELL, so appending to MAJOR_ISSUES_LIST from in there would be silently
+# discarded when the subshell exits. A file append survives. Drained into real
+# findings by report_unmeasured() from the main shell.
+UNMEASURED_LOG="${TMPDIR:-/tmp}/_hc_unmeasured.$$"
+: > "$UNMEASURED_LOG" 2>/dev/null || true
+
+_record_unmeasured() {   # label, reason  — subshell-safe
+    printf '%s\t%s\n' "$1" "$2" >> "$UNMEASURED_LOG" 2>/dev/null || true
+}
+
+# safe_count CMD [LABEL] [FLOOR]
+#
+# Counts something, and — unlike the version this replaces — can tell a
+# measurement of zero apart from a measurement that did not happen.
+#
+# The old body was `eval "$1" 2>/dev/null | head -1 || echo "0"`, which returns
+# 0 for a genuine zero, a missing binary, an unreachable cluster and a failed
+# query alike. Verified: `echo 0`, `kubectl-does-not-exist ... | wc -l`, `false`
+# and an unreachable kubeconfig all produced exactly "0". 57 call sites, and
+# every silent-green defect in docs/sops/audit-script-correctness.md is a
+# variation on that collapse. `|| echo "0"` inside the caller cannot help
+# either: in `kubectl ... | wc -l` the pipeline's status is wc's, and wc happily
+# succeeds while printing 0.
+#
+# The real status is recovered with PIPESTATUS[0] evaluated INSIDE the eval, so
+# it refers to the head of the caller's pipeline rather than to eval itself.
+#
+# FLOOR is the denominator control: pass it when a zero is impossible in a
+# working cluster (there ARE certificates, HelmReleases, flux controllers). A
+# count below the floor is recorded as unmeasured even when the command exited 0
+# — that is exactly how the Longhorn disk-capacity check, which had queried a
+# path holding no data since it was written, was finally caught.
+#
+# Returns the count. A failed measurement still returns its numeric fallback so
+# the 57 existing guards keep their arithmetic and cannot be broken by this
+# change; the difference is that the run can no longer be reported clean,
+# because report_unmeasured() raises a MAJOR issue naming what did not run.
 safe_count() {
-    local result=$(eval "$1" 2>/dev/null | head -1 || echo "0")
-    # Remove any non-digit characters
-    result=$(echo "$result" | tr -cd '0-9' || echo "0")
-    # If empty, return 0
-    if [ -z "$result" ]; then
-        echo "0"
-    else
-        echo "$result"
+    local cmd="$1" label="${2:-}" floor="${3:-}"
+    local out rc result
+    out=$(eval "$cmd"'; printf "\n__RC:%s" "${PIPESTATUS[0]}"' 2>/dev/null)
+    rc="${out##*__RC:}"
+    out="${out%$'\n'__RC:*}"
+    result=$(printf '%s' "$out" | head -1 | tr -cd '0-9')
+    [ -z "$result" ] && result="0"
+
+    if [ "${rc:-1}" != "0" ]; then
+        _record_unmeasured "${label:-$cmd}" "command failed (rc=${rc:-?})"
+    elif [ -n "$floor" ] && [ "$result" -lt "$floor" ] 2>/dev/null; then
+        _record_unmeasured "${label:-$cmd}" \
+            "returned $result, below the floor of $floor expected in a working cluster"
     fi
+    echo "$result"
+}
+
+# Drain the register into findings. MUST run in the main shell.
+report_unmeasured() {
+    [ -s "$UNMEASURED_LOG" ] || return 0
+    local label reason n=0
+    while IFS=$'\t' read -r label reason; do
+        [ -n "$label" ] || continue
+        n=$((n+1))
+        log_warning "NOT MEASURED — ${label}: ${reason}"
+        add_major_issue "Measurement did not run — ${label}: ${reason} (a count that could not be taken is not a count of zero)"
+    done < <(sort -u "$UNMEASURED_LOG")
+    [ "$n" -gt 0 ] && log_warning "$n measurement(s) did not run; their assertions cannot be treated as clean"
+    rm -f "$UNMEASURED_LOG" 2>/dev/null || true
 }
 
 # Authoritative backup-freshness signal, judged PER VOLUME. For each Longhorn
@@ -459,7 +518,7 @@ check_icloud_instance() {
     #  - Apple "package" bundles (.numbers/.app) icloud-docker can't unpack,
     #    plus per-file package-type probes — benign tool limitations
     # Scope to last 24h; icloud-docker has sparse logs.
-    log_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '410|429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l")
+    log_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -iE '(error|ERROR|failed|FAILED)' | grep -viE '410|429|503|530|throttl|retry|connection reset|rate limit|PCS_KEY|cookie pcs|successful, [0-9]+ failed|cannot unpack the package|unhandled file type|check package type' | wc -l" "log-errors")
     echo "  iCloud log errors (last 24h, filtered): $log_errors"
 
     # Auth/session errors are the ones that actually need operator action
@@ -470,7 +529,7 @@ check_icloud_instance() {
     # genuine session expiry is always surfaced with a clear "re-auth"
     # title even when the generic filtered count is quiet, and must never
     # be swallowed by a broad accepted-risk needle.
-    auth_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -icE 'authentication required for account|[(]421[)]|2fa is required|2fa.*please|please log in|session (has )?expired|invalid session|missing.*bearer token'")
+    auth_errors=$(safe_count "kubectl logs -n backup '$pod' --since=24h 2>/dev/null | grep -icE 'authentication required for account|[(]421[)]|2fa is required|2fa.*please|please log in|session (has )?expired|invalid session|missing.*bearer token'" "auth-errors")
     echo "  iCloud auth/session errors (last 24h): $auth_errors"
 
     if [ "$auth_errors" -gt 0 ]; then
@@ -721,10 +780,10 @@ log_section "Section 1: Cluster Events & Logs"
     echo ""
 
     K8S_EXCLUDE=$(build_grep_exclude "${K8S_EVENT_FALSE_POSITIVES[@]}")
-    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | grep -vE '($K8S_EXCLUDE)' | wc -l")
+    WARNING_COUNT=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -v 'NAMESPACE' | grep -vE '($K8S_EXCLUDE)' | wc -l" "warning-count")
     echo "Warning events: $WARNING_COUNT"
 
-    OOM_COUNT=$(safe_count "kubectl get events -A --field-selector reason=OOMKilled 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    OOM_COUNT=$(safe_count "kubectl get events -A --field-selector reason=OOMKilled 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "oom-count")
     OOM_COUNT=$((10#${OOM_COUNT:-0}))   # strip leading zeros: "010" must not parse as octal
     echo "OOM kills (events reason=OOMKilled): $OOM_COUNT"
 
@@ -794,7 +853,7 @@ print(n)
     OOM_LASTSTATE_24H=$((10#$OOM_LASTSTATE_24H))
     echo "OOM kills (OOMKilled lastState finished within 24h): $OOM_LASTSTATE_24H"
 
-    EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    EVICTED_COUNT=$(safe_count "kubectl get events -A --field-selector reason=Evicted 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "evicted-count")
     # Same `|| echo 0` append trap as OOM_COUNT above: safe_count can emit "00".
     EVICTED_COUNT=$(echo "$EVICTED_COUNT" | tail -1 | tr -cd '0-9'); [ -z "$EVICTED_COUNT" ] && EVICTED_COUNT=0
     EVICTED_COUNT=$((10#$EVICTED_COUNT))
@@ -882,7 +941,7 @@ log_section "Section 3: Certificates"
     kubectl get certificates -A
     echo ""
 
-    TOTAL_CERTS=$(safe_count "kubectl get certificates -A --no-headers 2>/dev/null | wc -l")
+    TOTAL_CERTS=$(safe_count "kubectl get certificates -A --no-headers 2>/dev/null | wc -l" "total-certs" 1)
     READY_CERTS=$(kubectl get certificates -A -o json 2>/dev/null | jq '[.items[] | select(.status.conditions[]? | select(.type=="Ready" and .status=="True"))] | length' || echo "0")
 
     echo "Certificates: $READY_CERTS/$TOTAL_CERTS ready"
@@ -941,8 +1000,8 @@ log_section "Section 5: Helm Deployments"
     flux get helmreleases -A | head -20
     echo ""
 
-    TOTAL_HELM=$(safe_count "flux get helmreleases -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
-    FAILED_HELM=$(safe_count "flux get helmreleases -A 2>/dev/null | grep -E '(Failed|Error|Unknown)' | wc -l")
+    TOTAL_HELM=$(safe_count "flux get helmreleases -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "total-helm" 1)
+    FAILED_HELM=$(safe_count "flux get helmreleases -A 2>/dev/null | grep -E '(Failed|Error|Unknown)' | wc -l" "failed-helm")
 
     echo "HelmReleases: $((TOTAL_HELM - FAILED_HELM))/$TOTAL_HELM ready"
 
@@ -952,7 +1011,7 @@ log_section "Section 5: Helm Deployments"
     echo ""
 
     # Check for failed HelmRepositories (READY column = False)
-    FAILED_HELMREPOS=$(safe_count "flux get sources helm -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
+    FAILED_HELMREPOS=$(safe_count "flux get sources helm -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l" "failed-helmrepos")
     echo "Failed HelmRepositories: $FAILED_HELMREPOS"
 
     if [ "$FAILED_HELMREPOS" -gt 0 ]; then
@@ -972,13 +1031,13 @@ log_section "Section 5: Helm Deployments"
     echo "Kustomizations:"
     flux get kustomizations -A | head -20
 
-    TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "total-kust" 1)
     # Count kustomizations where READY column (col 5) is not True — resilient to mid-reconciliation message changes
     # Count DISTINCT not-Ready kustomizations from the API, not table lines: a
     # single failing kustomization wraps its multi-line MESSAGE (e.g. a SOPS
     # decryption stack trace) across ~12 table rows, and `awk '$5 != "True"'`
     # counted each wrapped row as a separate "not reconciled" entry (false 12).
-    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'")
+    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'" "not-reconciled")
 
     echo ""
     echo "Kustomizations: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
@@ -1088,7 +1147,7 @@ except: pass
 log_section "Section 7: Pods Health"
 {
     echo "Pod status summary:"
-    NON_RUNNING=$(safe_count "kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | wc -l")
+    NON_RUNNING=$(safe_count "kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | wc -l" "non-running")
     echo "Non-running pods: $NON_RUNNING"
     echo ""
 
@@ -1103,8 +1162,8 @@ log_section "Section 7: Pods Health"
     echo "Total restartCount (cluster-wide): ${TOTAL_RESTARTS:-0}"
     echo ""
 
-    CRASH_LOOP=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'CrashLoopBackOff'")
-    PENDING=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'Pending'")
+    CRASH_LOOP=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'CrashLoopBackOff'" "crash-loop")
+    PENDING=$(safe_count "kubectl get pods -A 2>/dev/null | grep -c 'Pending'" "pending")
 
     echo "CrashLoopBackOff pods: $CRASH_LOOP"
     echo "Pending pods: $PENDING"
@@ -1306,7 +1365,7 @@ log_section "Section 10: Longhorn Storage"
     kubectl get volumes -n storage -o wide | head -20
     echo ""
 
-    TOTAL_VOLUMES=$(safe_count "kubectl get volumes -n storage --no-headers 2>/dev/null | wc -l")
+    TOTAL_VOLUMES=$(safe_count "kubectl get volumes -n storage --no-headers 2>/dev/null | wc -l" "total-volumes" 1)
     # A DETACHED volume is idle, not unhealthy: Longhorn reports
     # robustness=unknown for every detached volume, so the old
     # `state != attached OR robustness != healthy` test flagged each
@@ -1330,7 +1389,7 @@ log_section "Section 10: Longhorn Storage"
 
     echo ""
     echo "PVC status:"
-    PENDING_PVC=$(safe_count "kubectl get pvc -A 2>/dev/null | grep -E '(Pending|Lost|Unknown)' | wc -l")
+    PENDING_PVC=$(safe_count "kubectl get pvc -A 2>/dev/null | grep -E '(Pending|Lost|Unknown)' | wc -l" "pending-pvc")
     echo "Pending/Lost/Unknown PVCs: $PENDING_PVC"
 
     echo ""
@@ -1357,11 +1416,11 @@ log_section "Section 10: Longhorn Storage"
     echo ""
 
     # Check for recent unexpected volume detachment events (last 24h)
-    DETACH_EVENTS=$(safe_count "kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'DetachedUnexpectedly' | wc -l")
+    DETACH_EVENTS=$(safe_count "kubectl get events -n storage --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'DetachedUnexpectedly' | wc -l" "detach-events")
     echo "Unexpected volume detachment events (recent): $DETACH_EVENTS"
 
     # Check for Flux/Longhorn admission webhook conflicts
-    ADMISSION_CONFLICTS=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'admission webhook.*longhorn.*denied' | wc -l")
+    ADMISSION_CONFLICTS=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'admission webhook.*longhorn.*denied' | wc -l" "admission-conflicts")
     echo "Longhorn admission webhook conflicts: $ADMISSION_CONFLICTS"
 
     if [ "$UNHEALTHY_VOLUMES" -eq 0 ] && [ "$PENDING_PVC" -eq 0 ] && [ "$AUTO_DELETE" == "false" ] && [ -z "$REPLICA_MISMATCHES" ]; then
@@ -1450,16 +1509,16 @@ log_section "Section 11: Container Logs Analysis"
 
     INFRA_EXCLUDE=$(build_grep_exclude "${INFRA_LOG_FALSE_POSITIVES[@]}")
 
-    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l")
+    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
 
-    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l")
+    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "coredns-errors")
     echo "CoreDNS errors (24h): $COREDNS_ERRORS"
 
-    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l")
+    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "flux-errors")
     echo "Flux controller errors (24h): $FLUX_ERRORS"
 
-    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l")
+    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cert-errors")
     echo "cert-manager errors (24h): $CERT_ERRORS"
 
     TOTAL_ERRORS=$((CILIUM_ERRORS + COREDNS_ERRORS + FLUX_ERRORS + CERT_ERRORS))
@@ -1553,7 +1612,7 @@ log_section "Section 13: Hardware Health"
             # Filter to actual hardware faults only; exclude known software/service error messages
         # 'edac' alone matches driver init (EDAC MC: Ver, igen6_edac load) — require 'edac.*error' for actual faults.
         # 'ecc' alone matches PCI device IDs (e.g. 7ecc) — require 'ecc error'. 'bare hardware' is a boot string.
-        ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(bare hardware error|ecc error|mce|edac.*error|uncorrected|corrected error|pcie.*error|disk error|bad sector|ata.*error|nvme.*error)' | grep -viE '(DiscoveryService|controller-runtime|rpc error|context deadline|connection refused|EOF|dialing)' | wc -l")
+        ERRORS=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(bare hardware error|ecc error|mce|edac.*error|uncorrected|corrected error|pcie.*error|disk error|bad sector|ata.*error|nvme.*error)' | grep -viE '(DiscoveryService|controller-runtime|rpc error|context deadline|connection refused|EOF|dialing)' | wc -l" "errors")
             echo "Hardware errors: $ERRORS"
             if [ "$ERRORS" -gt 10 ]; then
                 add_minor_issue "High hardware errors on $node: $ERRORS"
@@ -1564,7 +1623,7 @@ log_section "Section 13: Hardware Health"
         # A short burst (up to ~25) is normal during a transient upstream outage at discovery.talos.dev;
         # only alert if the count is high enough to indicate a sustained or recurring connectivity problem.
         for node in $NODE_IPS; do
-            DISC_COUNT=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(DiscoveryServiceController|hello failed)' | wc -l")
+            DISC_COUNT=$(safe_count "talosctl dmesg --nodes '$node' 2>&1 | grep -iE '(DiscoveryServiceController|hello failed)' | wc -l" "disc-count")
             echo "Talos discovery service errors on $node: $DISC_COUNT"
             if [ "$DISC_COUNT" -gt 30 ]; then
                 add_minor_issue "Talos discovery service errors on $node: $DISC_COUNT (discovery.talos.dev unreachable)"
@@ -1702,10 +1761,10 @@ log_section "Section 17: Security Checks"
     ROOT_PODS=$(kubectl get pods -A -o json | jq '[.items[] | select(.spec.securityContext.runAsUser == 0 or (.spec.containers[].securityContext.runAsUser // 0) == 0)] | length')
     echo "Pods running as root: $ROOT_PODS"
 
-    LB_SERVICES=$(safe_count "kubectl get svc -A --field-selector spec.type=LoadBalancer --no-headers 2>/dev/null | wc -l")
+    LB_SERVICES=$(safe_count "kubectl get svc -A --field-selector spec.type=LoadBalancer --no-headers 2>/dev/null | wc -l" "lb-services" 1)
     echo "LoadBalancer services: $LB_SERVICES"
 
-    INGRESSES=$(safe_count "kubectl get ingress -A --no-headers 2>/dev/null | wc -l")
+    INGRESSES=$(safe_count "kubectl get ingress -A --no-headers 2>/dev/null | wc -l" "ingresses" 1)
     echo "Total ingresses: $INGRESSES"
 
     if [ "$ROOT_PODS" -eq 0 ]; then
@@ -1965,7 +2024,7 @@ log_section "Section 19: Network Connectivity"
 
     # Check ingress-nginx error rate
     echo ""
-    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=100 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l")
+    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=100 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l" "ingress-errors")
     echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
 
     # Check NAS connectivity (important for storage)
@@ -2009,7 +2068,11 @@ log_section "Section 20: GitOps Status"
     echo ""
 
     # Check Git source status (READY column = False)
-    FAILED_GIT=$(safe_count "flux get sources git -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
+    # NOT `flux get sources git -A`: flux exits 1 when the inventory is simply
+    # EMPTY, which is indistinguishable from a real failure and made this raise
+    # a false "measurement did not run" (2026-08-22). kubectl returns rc 0 with
+    # "No resources found" for empty and non-zero only for an actual problem.
+    FAILED_GIT=$(safe_count "kubectl get gitrepositories -A -o json 2>/dev/null | jq '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'" "failed-git")
     if [ "$FAILED_GIT" -gt 0 ]; then
         echo "Failed Git sources: $FAILED_GIT"
         flux get sources git -A | awk '$5 == "False"' | while read line; do
@@ -2021,7 +2084,9 @@ log_section "Section 20: GitOps Status"
     # Check OCI sources (used for Flux operator bootstrap charts)
     echo "OCI sources:"
     flux get sources oci -A 2>/dev/null || echo "No OCI sources found"
-    FAILED_OCI=$(safe_count "flux get sources oci -A 2>/dev/null | awk '\$5 == \"False\"' | wc -l")
+    # Same reason as failed-git above. This cluster currently has zero
+    # OCIRepository objects, so the flux form exited 1 on every run.
+    FAILED_OCI=$(safe_count "kubectl get ocirepositories -A -o json 2>/dev/null | jq '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'" "failed-oci")
     if [ "$FAILED_OCI" -gt 0 ]; then
         log_warning "Failed OCI sources: $FAILED_OCI"
         add_major_issue "Failed Flux OCI sources: $FAILED_OCI (may block bootstrap chart deployments)"
@@ -2439,9 +2504,9 @@ print(bad)
     # STILL counted -- a controller that crashed is exactly what this check is
     # for. Note we cannot filter on the `part-of=flux` label instead: the
     # flux-operator pod does not carry it and is a real controller.
-    FLUX_CONTROLLERS=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null | wc -l")
-    FLUX_RUNNING=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l")
-    FLUX_LEFTOVER=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l")
+    FLUX_CONTROLLERS=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase!=Succeeded --no-headers 2>/dev/null | wc -l" "flux-controllers" 1)
+    FLUX_RUNNING=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l" "flux-running" 1)
+    FLUX_LEFTOVER=$(safe_count "kubectl get pods -n flux-system --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l" "flux-leftover")
     if [ "${FLUX_LEFTOVER:-0}" -gt 0 ]; then
         echo "Note: $FLUX_LEFTOVER completed one-off pod(s) left in flux-system (not controllers; safe to delete)"
     fi
@@ -2457,8 +2522,8 @@ print(bad)
     # single failing kustomization wraps its multi-line MESSAGE (e.g. a SOPS
     # decryption stack trace) across ~12 table rows, and `awk '$5 != "True"'`
     # counted each wrapped row as a separate "not reconciled" entry (false 12).
-    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'")
-    TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l")
+    NOT_RECONCILED=$(safe_count "kubectl get kustomizations -A -o json 2>/dev/null | jq -r '[.items[] | select(.status.conditions[]? | select(.type==\"Ready\" and .status!=\"True\"))] | length'" "not-reconciled")
+    TOTAL_KUST=$(safe_count "flux get kustomizations -A 2>/dev/null | grep -v 'NAMESPACE' | wc -l" "total-kust" 1)
     echo "Kustomization status: $((TOTAL_KUST - NOT_RECONCILED))/$TOTAL_KUST reconciled"
 
     # Check for specific GitOps issues
@@ -2490,13 +2555,13 @@ print(bad)
 
 log_section "Section 21: Namespace Review"
 {
-    TOTAL_NS=$(safe_count "kubectl get namespaces --no-headers | wc -l")
+    TOTAL_NS=$(safe_count "kubectl get namespaces --no-headers | wc -l" "total-ns" 1)
     echo "Total namespaces: $TOTAL_NS"
 
-    TERMINATING_NS=$(safe_count "kubectl get namespaces 2>/dev/null | grep 'Terminating' | wc -l")
+    TERMINATING_NS=$(safe_count "kubectl get namespaces 2>/dev/null | grep 'Terminating' | wc -l" "terminating-ns")
     echo "Terminating namespaces: $TERMINATING_NS"
 
-    TERMINATING_PODS=$(safe_count "kubectl get pods -A 2>/dev/null | grep 'Terminating' | wc -l")
+    TERMINATING_PODS=$(safe_count "kubectl get pods -A 2>/dev/null | grep 'Terminating' | wc -l" "terminating-pods")
     echo "Terminating pods: $TERMINATING_PODS"
 
     if [ "$TERMINATING_NS" -eq 0 ] && [ "$TERMINATING_PODS" -eq 0 ]; then
@@ -2907,7 +2972,7 @@ log_section "Section 22a: MQTT Connectivity & Shelly Devices"
 
     echo "=== Shelly MQTT Connections ==="
     # Fixed: increase log window to 20000 and use correct parsing
-    SHELLY_COUNT=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=20000 2>&1 | grep 'New client connected' | grep -v '<unknown>' | sed 's/.* as //' | sed 's/ .*//' | grep -i shelly | sort -u | wc -l")
+    SHELLY_COUNT=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=20000 2>&1 | grep 'New client connected' | grep -v '<unknown>' | sed 's/.* as //' | sed 's/ .*//' | grep -i shelly | sort -u | wc -l" "shelly-count")
     echo "Shelly devices identified (recent reconnections): $SHELLY_COUNT"
     echo ""
     echo "Note: MQTT clients maintain persistent connections. This count shows devices"
@@ -2915,12 +2980,12 @@ log_section "Section 22a: MQTT Connectivity & Shelly Devices"
     echo ""
 
     echo "=== MQTT Authentication Issues ==="
-    AUTH_FAILURES=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -E '(not authorised|authentication|Connection refused)' | wc -l")
+    AUTH_FAILURES=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -E '(not authorised|authentication|Connection refused)' | wc -l" "auth-failures")
     echo "Authentication failures: $AUTH_FAILURES"
     echo ""
 
     echo "=== MQTT Connection Errors ==="
-    MQTT_CONN_ERRORS=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -i error | wc -l")
+    MQTT_CONN_ERRORS=$(safe_count "kubectl logs -n home-automation -l app.kubernetes.io/name=mosquitto --tail=100 2>&1 | grep -i error | wc -l" "mqtt-conn-errors")
     echo "Connection errors: $MQTT_CONN_ERRORS"
     echo ""
 
@@ -3123,7 +3188,7 @@ log_section "Section 23: Media Services Health"
     echo "Tube Archivist:"
     kubectl get pods -n download -l app.kubernetes.io/name=tube-archivist 2>/dev/null || echo "Tube Archivist not found"
     echo ""
-    TA_ERRORS=$(safe_count "kubectl logs -n download deployment/tube-archivist --tail=20 --since=1h 2>&1 | grep -iE '\[ERROR\]|error:' | wc -l")
+    TA_ERRORS=$(safe_count "kubectl logs -n download deployment/tube-archivist --tail=20 --since=1h 2>&1 | grep -iE '\[ERROR\]|error:' | wc -l" "ta-errors")
     echo "Tube Archivist errors (last hour): $TA_ERRORS"
 
     echo "JDownloader:"
@@ -3752,12 +3817,12 @@ log_section "Section 26: Security & Access Monitoring"
     echo ""
 
     # Check Authentik auth failure rate
-    AUTH_FAILURES=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=200 --since=24h 2>&1 | grep -iE 'authentication.*failed|login.*failed|invalid.*credentials' | wc -l")
+    AUTH_FAILURES=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=authentik,app.kubernetes.io/component=server --tail=200 --since=24h 2>&1 | grep -iE 'authentication.*failed|login.*failed|invalid.*credentials' | wc -l" "auth-failures")
     echo "Authentik auth failures (last 24h): $AUTH_FAILURES"
     echo ""
 
     # Check for RBAC permission errors in audit/controller logs
-    RBAC_ERRORS=$(safe_count "kubectl logs -n kube-system -l component=kube-apiserver --tail=100 --since=1h 2>&1 | grep -i 'RBAC.*denied\|forbidden.*reason' | wc -l")
+    RBAC_ERRORS=$(safe_count "kubectl logs -n kube-system -l component=kube-apiserver --tail=100 --since=1h 2>&1 | grep -i 'RBAC.*denied\|forbidden.*reason' | wc -l" "rbac-errors")
     echo "RBAC denied events (last hour, apiserver): $RBAC_ERRORS"
 
     if [ "$AUTH_FAILURES" -gt 20 ]; then
@@ -3778,7 +3843,7 @@ log_section "Section 27: Performance & Trends"
 
 log_section "Section 28: Backup & Recovery Verification"
 {
-    BACKUP_JOBS=$(safe_count "kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5 | grep '1/1' | wc -l")
+    BACKUP_JOBS=$(safe_count "kubectl get jobs -n storage --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5 | grep '1/1' | wc -l" "backup-jobs")
     echo "Recent successful backups (last 5): $BACKUP_JOBS"
 
     if [ "$BACKUP_JOBS" -ge 1 ]; then
@@ -3799,21 +3864,32 @@ log_section "Section 29: Environmental & Power Monitoring"
 
 log_section "Section 30: Application-Specific Checks"
 {
-    echo "Authentik:"
-    AUTH_PODS=$(safe_count "kubectl get pods -n kube-system -l app.kubernetes.io/name=authentik | grep 'Running' | wc -l")
-    echo "Running pods: $AUTH_PODS"
-    echo ""
+    # This section counted pods for three apps and then logged success
+    # unconditionally — it asserted NOTHING, so all three could report zero
+    # running pods and the section still ended green. LH_PODS did exactly that:
+    # its selector was app.kubernetes.io/name=longhorn-manager, but that label
+    # is "longhorn" on those pods (app=longhorn-manager is the right one), so it
+    # read 0 with three managers running and nothing noticed (fixed 2026-08-22).
+    APP_DOWN=0
+    for _spec in \
+        "Authentik|kube-system|app.kubernetes.io/name=authentik" \
+        "Grafana|monitoring|app.kubernetes.io/name=grafana" \
+        "Longhorn manager|storage|app=longhorn-manager"; do
+        _name="${_spec%%|*}"; _rest="${_spec#*|}"
+        _ns="${_rest%%|*}"; _sel="${_rest#*|}"
+        _n=$(safe_count "kubectl get pods -n $_ns -l $_sel --no-headers 2>/dev/null | grep -c 'Running'" \
+                        "app-pods-${_ns}-${_sel}")
+        echo "$_name: $_n Running pod(s) [ns=$_ns selector=$_sel]"
+        if [ "${_n:-0}" -eq 0 ] 2>/dev/null; then
+            APP_DOWN=$((APP_DOWN+1))
+            log_critical "$_name has NO Running pods (ns=$_ns, selector=$_sel)"
+            add_critical_issue "$_name has no Running pods (ns=$_ns, selector=$_sel) — app down, or the selector no longer matches"
+        fi
+    done
 
-    echo "Grafana:"
-    GRAF_PODS=$(safe_count "kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana | grep 'Running' | wc -l")
-    echo "Running pods: $GRAF_PODS"
-    echo ""
-
-    echo "Longhorn:"
-    LH_PODS=$(safe_count "kubectl get pods -n storage -l app.kubernetes.io/name=longhorn-manager | grep 'Running' | wc -l")
-    echo "Running manager pods: $LH_PODS"
-
-    log_success "Application-specific checks completed"
+    if [ "$APP_DOWN" -eq 0 ]; then
+        log_success "Application-specific checks: all 3 apps have Running pods"
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 31: Home Assistant Integration Health"
@@ -4037,7 +4113,7 @@ except Exception as e:
         echo ""
 
         # Check Zigbee coordinator/controller errors in logs
-        Z2M_COORD_ERRORS=$(safe_count "kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 --since=24h 2>&1 | grep -iE '(error|ERROR)' | grep -v 'WARN' | wc -l")
+        Z2M_COORD_ERRORS=$(safe_count "kubectl logs -n home-automation deployment/zigbee2mqtt --tail=100 --since=24h 2>&1 | grep -iE '(error|ERROR)' | grep -v 'WARN' | wc -l" "z2m-coord-errors")
         echo "Zigbee2MQTT errors (24h): $Z2M_COORD_ERRORS"
 
         Z2M_ISSUES=0
@@ -5029,7 +5105,7 @@ except Exception as e:
     done
 
     # Check ingress controller errors
-    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l")
+    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l" "ingress-errors")
     echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
 
     if [ "$MISSING_BACKENDS" -gt 0 ]; then
@@ -5101,9 +5177,9 @@ except:
     echo ""
 
     # Count PVCs by status
-    BOUND_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Bound | wc -l")
-    PENDING_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Pending | wc -l")
-    LOST_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Lost | wc -l")
+    BOUND_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Bound | wc -l" "bound-pvcs" 1)
+    PENDING_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Pending | wc -l" "pending-pvcs")
+    LOST_PVCS=$(safe_count "kubectl get pvc -A --no-headers 2>/dev/null | grep Lost | wc -l" "lost-pvcs")
 
     echo "PVC Status:"
     echo "  - Bound: $BOUND_PVCS"
@@ -5174,11 +5250,11 @@ log_section "Section 38: Admission Webhook Health"
     echo "Checking admission webhooks..."
 
     # Check for webhook failures in events
-    WEBHOOK_FAILURES=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'webhook' | grep -iE 'failed|error|timeout' | wc -l")
+    WEBHOOK_FAILURES=$(safe_count "kubectl get events -A --field-selector type=Warning --sort-by='.lastTimestamp' 2>/dev/null | grep -i 'webhook' | grep -iE 'failed|error|timeout' | wc -l" "webhook-failures")
 
     # List configured webhooks
-    VALIDATING_WEBHOOKS=$(safe_count "kubectl get validatingwebhookconfigurations --no-headers 2>/dev/null | wc -l")
-    MUTATING_WEBHOOKS=$(safe_count "kubectl get mutatingwebhookconfigurations --no-headers 2>/dev/null | wc -l")
+    VALIDATING_WEBHOOKS=$(safe_count "kubectl get validatingwebhookconfigurations --no-headers 2>/dev/null | wc -l" "validating-webhooks" 1)
+    MUTATING_WEBHOOKS=$(safe_count "kubectl get mutatingwebhookconfigurations --no-headers 2>/dev/null | wc -l" "mutating-webhooks" 1)
     TOTAL_WEBHOOKS=$((VALIDATING_WEBHOOKS + MUTATING_WEBHOOKS))
 
     echo "Webhook Configuration:"
@@ -5215,11 +5291,11 @@ log_section "UnPoller Status (Current Investigation)"
         echo ""
 
         # Check for errors using structured pattern
-        UNPOLLER_ERRORS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=100 2>&1 | grep '\[ERROR\]' | wc -l")
+        UNPOLLER_ERRORS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=100 2>&1 | grep '\[ERROR\]' | wc -l" "unpoller-errors")
         echo "UnPoller errors (last 100 lines): $UNPOLLER_ERRORS"
 
         # Check for recent successful operations to detect recovery
-        UNPOLLER_SUCCESS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=20 2>&1 | grep 'Err: 0' | wc -l")
+        UNPOLLER_SUCCESS=$(safe_count "kubectl logs -n monitoring '$UNPOLLER_POD' --tail=20 2>&1 | grep 'Err: 0' | wc -l" "unpoller-success")
         echo "UnPoller recent successful operations (last 20 lines): $UNPOLLER_SUCCESS"
 
         UNPOLLER_STATUS=$(kubectl get pods -n monitoring -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
@@ -5244,6 +5320,11 @@ log_section "UnPoller Status (Current Investigation)"
 #######################################
 # Generate Issues Summary
 #######################################
+
+# Convert any measurement that could not be taken into findings BEFORE the
+# counts below are read — otherwise a run whose probes all died reports zero
+# issues, which is the exact failure this register exists to prevent.
+report_unmeasured
 
 # Calculate counts outside subshell to avoid unbound variable errors
 # Temporarily disable strict mode for array length checks
