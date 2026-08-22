@@ -4,15 +4,15 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, `maintenance-plan.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.08.22`
+> Last Updated: `2026-08-22`
 > Owner: `operator + daily-operation agents`
 
 ---
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-19, **thirty-one** defects across six audit
+Between 2026-07-30 and 2026-08-22, **thirty-six** defects across six audit
 scripts shared one root cause: an unmeasured, failed or absent probe was
 reported as a definite outcome. Several were introduced *while fixing the
 others* — the table below is the running register, not a closed list, and the
@@ -104,6 +104,39 @@ signal.
 | `sweep-run.py` | `--reconcile-only` without `--cycle-id` minted a FRESH uuid, making `cycle_id != <fresh>` true for every row — would have resolved every open finding in the `--ran` scope (cycle f11badb9, 2026-08-18 13:56) | pass (mass false resolution) |
 | `maintenance-plan.py` | `--verify` (`already_done_suspects`) flags a plan only when EVERY version token in its prose `target:` is present in the component's manifests — `hit and len(hit) == len(vers)`. A target that names the version it supersedes, `"0.178.1 (supersedes 0.177.1)"` (nextcloud-mcp), can never satisfy that AFTER the work lands, because removing the old version IS the success condition. The conjunction includes a token whose absence proves the plan is done, so the richer the prose the more certainly the check is inert — and the plan file carried a comment insisting the prose target was deliberate. It reported clean on exactly the kind of plan it exists to catch (2026-08-19). Match the tokens that must be PRESENT on success; never AND in one that must be absent | pass (cannot fire by construction) |
 | `security-check.py` | a Go binary built from an untagged checkout reports a PSEUDO-VERSION, `v0.0.0-<commit-ts>-<rev>`. The `v0.0.0` base is a placeholder, not a measurement, and it sorts below every real release — so Trivy's semver comparison against `FixedVersion` returns the same verdict whatever the source contained. Counting that as `fixable` asserted two unmeasured things at once: that the code is affected, and that a bump is the remedy. 44 findings across 4 of 206 images. Fixed with a three-route classifier (main-module identity, pseudo-vs-pseudo, build-time vs publication) plus an explicit UNDETERMINED bucket that is neither `fixable` nor the AR-029 accepted class (2026-08-19, `ee0bedab`, F-9e1e421c). A version string that cannot be ordered is not a version comparison | fail (a non-comparison scored as a confident result) |
+| `security-check.py` | sections 5 & 6 (auth-failure and suspicious-request log review) used `match_phrase` against `body.text`, which does not substring-match — the queries could not return a hit for any input, so both sections had reported "clean" for their whole existence. Fixed to case-insensitive `wildcard`, and both green branches now gated on a control query that proves the index is live (2026-08-22). Fixing it exposed a second latent bug: `_body_text()` crashed on the dict-shaped `body` the real documents use, so the first genuine hits would have thrown | pass (query could never match) |
+| `check-all-versions.py` | `parse_version()` returned only `(major, minor, patch)`, discarding every later component, so two Plex builds differing in the 4th field compared EQUAL and an available update read as "current". Returns the full release tuple now (2026-08-22) | pass (real update reported as current) |
+| `check-all-versions.py` | with no GitHub credential resolved, every GitHub/GHCR lookup runs anonymous or fails, yet the run still reported "no newer version" per component — an unproven silence, and auto-close then treated it as a fix. Now recorded as degraded coverage, which vetoes auto-close for the section (2026-08-22) | pass (unauthenticated silence read as up-to-date) |
+| `health-check.sh` | backup verdict was decided by the JOB, not by volume age. The daily-backup Job exits 0 once it has DISPATCHED backups; a present, succeeded Job short-circuited straight to "Backup system operational" with no age assertion, and a second copy of the block derived the age from the Job's `completionTime`. The authoritative per-volume signal ran only in the `else`, i.e. only once the Job had been TTL-reaped — so a volume stale for a week was invisible during exactly the window someone would be looking. One shared `assess_backup_freshness()` now always evaluates per-volume age; the Job only refines the wording (2026-08-22) | pass (proxy signal outranked the authoritative one) |
+| `doc-check.py` | SECOND instance of the denominator class in this file (see the raw-manifest row above): `find_helmrelease_apps()` enumerates app DIRECTORIES, so a workload authored inside another app's folder never entered the denominator and could not be flagged whatever the docs said. 36 in-repo workloads sat outside it, including whole databases (`authentik-pg`, `paperless-db`, `superset-pg`). The section also printed "Apps in cluster: N" while never contacting the cluster — N counted repo directories — so the reverse direction, a workload running that nothing in git declares, had no check at all. Both closed, the cluster cross-check reporting its examined-count as the control (2026-08-22) | pass (coverage claim narrower than it read, in both directions) |
+
+### Enforcement (added 2026-08-22)
+
+This register was a **ledger, not a control**. Thirty-one documented instances
+did not prevent instance thirty-two, and one of the new rows is the second
+occurrence of the denominator bug *in the same file* that already had a row for
+it. Writing the rule down is necessary and has not been sufficient.
+
+`runbooks/tests/` had grown a suite per fix — fourteen of them — and **nothing
+ran any of them**: not CI, not the Taskfile, not pre-commit, not the sweep. A
+regression would have surfaced only as a wrong answer in a later sweep, which
+is the very failure mode the tests exist to prevent.
+
+Now enforced:
+
+```bash
+task test          # audit suite + kubeconform  (CLAUDE.md documented this target for
+                   # a long time while it did not exist)
+task test:audit    # suite only, ~12s, no cluster required
+bash runbooks/tests/run-all.sh
+```
+
+`.githooks/pre-commit` **Layer 5** runs the suite whenever a staged file matches
+`runbooks/**.{py,sh}`, and fails closed — an audit script whose tests cannot run
+is exactly the state this SOP exists to catch.
+
+**When you fix an audit defect, add its row here AND a test under
+`runbooks/tests/`.** The row explains it; only the test keeps it fixed.
 
 ## 3) Blueprints
 
