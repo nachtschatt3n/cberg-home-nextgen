@@ -336,6 +336,7 @@ for b in backups:
     if ts > newest_cr.get(vol, ''):
         newest_cr[vol] = ts
 rows = []
+idle = []
 for v in vols:
     name = v.get('metadata', {}).get('name', '')
     cands = []
@@ -344,16 +345,78 @@ for v in vols:
     lb = v.get('status', {}).get('lastBackupAt')
     if lb:
         cands.append((age_h(lb), 'lastBackupAt'))
-    if cands:
+    if not cands:
+        continue
+    # A DETACHED volume's content cannot change, so however old its newest
+    # backup is, that backup still captures everything in it -- staleness is
+    # not data risk there. Counting them in the stalest-volume max() made the
+    # deliberate rollback volumes (detached since a migration) read as a
+    # backup failure. Reported separately rather than hidden.
+    if v.get('status', {}).get('state') == 'attached':
         rows.append((name,) + min(cands))
-if not rows:
+    else:
+        idle.append((name,) + min(cands))
+if not rows and not idle:
     print('NONE'); sys.exit()
 if mode == '--per-volume':
     for name, a, srcname in sorted(rows, key=lambda r: -r[1]):
         print(f'{name} {int(a)}h ' + ('FRESH' if a < 25 else 'STALE') + f' ({srcname})')
+    for name, a, srcname in sorted(idle, key=lambda r: -r[1]):
+        print(f'{name} {int(a)}h IDLE-DETACHED ({srcname})')
+elif mode == '--idle-stale-count':
+    print(sum(1 for _n, a, _s in idle if a > 48))
+elif not rows:
+    print('NONE')
 else:
     print(int(max(r[1] for r in rows)))
 " 2>/dev/null || echo "NONE"
+}
+
+# Verdict on backup health. The PER-VOLUME Longhorn age is AUTHORITATIVE and is
+# ALWAYS evaluated; the backup Job is CONTEXT ONLY.
+# Why: the daily-backup Job exits 0 once it has DISPATCHED backups, not once
+# every volume actually has a fresh one. Until 2026-08-22 a present, succeeded
+# Job short-circuited straight to "Backup system operational" with no age
+# assertion at all (and a second copy of this block derived the age from the
+# Job's completionTime), so a volume that had not backed up for a week was
+# invisible whenever the Job object happened to still be inside its TTL. The
+# Job now only refines the wording; it can no longer manufacture a pass.
+assess_backup_freshness() {
+    local job="$1"
+    local age idle jobnote status
+    age=$(longhorn_backup_age_hours)
+    idle=$(longhorn_backup_age_hours --idle-stale-count)
+
+    if [ -n "$job" ]; then
+        status=$(kubectl get job -n storage "$job" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+        if [ "$status" == "1" ]; then
+            jobnote="job $job succeeded"
+        else
+            jobnote="job $job NOT succeeded (succeeded=$status)"
+            log_warning "Backup job status unclear: $status"
+            add_minor_issue "Backup job status unclear"
+        fi
+    else
+        # Absence is EXPECTED: successful backup Jobs are TTL-reaped.
+        jobnote="job TTL-reaped"
+    fi
+
+    # Detached volumes are excluded from the age above on purpose: their content
+    # cannot change, so an old backup still captures all of it. Reported, never
+    # silently dropped.
+    if [ "$idle" != "0" ] && [ -n "$idle" ]; then
+        echo "Note: $idle detached volume(s) have backups older than 48h - content frozen, not a data risk (see --per-volume)"
+    fi
+
+    if [ "$age" == "NONE" ]; then
+        log_warning "No Longhorn backup evidence on any volume ($jobnote)"
+        add_major_issue "Backup evidence absent: no Backup CR or lastBackupAt on any Longhorn volume ($jobnote)"
+    elif [ "$age" -gt 48 ]; then
+        log_warning "Stalest attached Longhorn volume's newest backup is ${age}h old ($jobnote)"
+        add_major_issue "Backup stale: stalest ATTACHED Longhorn volume's newest backup evidence (Backup CR / lastBackupAt) was ${age}h ago (expected daily; $jobnote)"
+    else
+        log_success "Backups fresh - stalest attached volume ${age}h ago ($jobnote)"
+    fi
 }
 
 # check_icloud_instance <deployment-name>
@@ -800,31 +863,10 @@ b.sort(key=lambda j: j['metadata'].get('creationTimestamp', ''), reverse=True)
 print(b[0]['metadata']['name'] if b else '')
 " 2>/dev/null || echo "")
     if [ -n "$BACKUP_JOB" ]; then
-        BACKUP_STATUS=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
         BACKUP_TIME=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "Not completed")
-        echo "Last backup job: $BACKUP_JOB (Succeeded: $BACKUP_STATUS, Time: $BACKUP_TIME)"
-
-        if [ "$BACKUP_STATUS" == "1" ]; then
-            log_success "Backup system operational"
-        else
-            log_warning "Backup status unclear: $BACKUP_STATUS"
-            add_minor_issue "Backup job status unclear"
-        fi
-    else
-        # No backup Job object present is EXPECTED — successful backup jobs are
-        # TTL-reaped. Fall back to the authoritative signal: Longhorn volume
-        # lastBackupAt freshness (per docs/sops/monitoring.md).
-        BACKUP_AGE_H=$(longhorn_backup_age_hours)
-        if [ "$BACKUP_AGE_H" == "NONE" ]; then
-            log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
-            add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
-        elif [ "$BACKUP_AGE_H" -gt 48 ]; then
-            log_warning "Backup job reaped; stalest Longhorn volume's newest backup is ${BACKUP_AGE_H}h old"
-            add_major_issue "Backup stale: stalest Longhorn volume's newest backup evidence (Backup CR / lastBackupAt) was ${BACKUP_AGE_H}h ago (expected daily)"
-        else
-            log_success "Backup job reaped (TTL) but Longhorn backups fresh (stalest volume: ${BACKUP_AGE_H}h ago)"
-        fi
+        echo "Last backup job: $BACKUP_JOB (Time: $BACKUP_TIME)"
     fi
+    assess_backup_freshness "$BACKUP_JOB"
 
     if [ "$FAILED_JOBS" -gt 0 ]; then
         log_warning "Failed jobs detected: $FAILED_JOBS"
@@ -1611,39 +1653,12 @@ print(b[0]['metadata']['name'] if b else '')
     if [ -n "$BACKUP_JOB" ]; then
         echo "Last backup job:"
         kubectl get job -n storage "$BACKUP_JOB" 2>/dev/null || echo "Job details not available"
-
-        # Check staleness: flag if last successful backup completed more than 48 hours ago
-        LAST_BACKUP_TIME=$(kubectl get job -n storage "$BACKUP_JOB" -o jsonpath='{.status.completionTime}' 2>/dev/null || echo "")
-        if [ -n "$LAST_BACKUP_TIME" ]; then
-            # date -d is GNU only; use python3 for portable ISO8601 parsing
-            LAST_BACKUP_EPOCH=$(python3 -c "import datetime,sys; t=sys.argv[1].rstrip('Z'); print(int(datetime.datetime.fromisoformat(t).replace(tzinfo=datetime.timezone.utc).timestamp()))" "$LAST_BACKUP_TIME" 2>/dev/null || echo "0")
-            NOW_EPOCH=$(date +%s)
-            BACKUP_AGE_HOURS=$(( (NOW_EPOCH - LAST_BACKUP_EPOCH) / 3600 ))
-            echo "Last successful backup completed: ${BACKUP_AGE_HOURS}h ago ($LAST_BACKUP_TIME)"
-            if [ "$BACKUP_AGE_HOURS" -gt 48 ]; then
-                log_warning "Last backup is stale: ${BACKUP_AGE_HOURS}h ago (threshold: 48h)"
-                add_major_issue "Backup stale: last successful backup was ${BACKUP_AGE_HOURS}h ago (expected daily)"
-            else
-                log_success "Backup system operational (last: ${BACKUP_AGE_HOURS}h ago)"
-            fi
-        else
-            log_warning "Backup job found but no completion time recorded"
-            add_minor_issue "Backup job has no completion timestamp - may still be running or failed"
-        fi
-    else
-        # Backup Job TTL-reaped after success is normal — fall back to the
-        # authoritative Longhorn lastBackupAt freshness instead of warning.
-        BACKUP_AGE_H=$(longhorn_backup_age_hours)
-        if [ "$BACKUP_AGE_H" == "NONE" ]; then
-            log_warning "No backup jobs found and no Longhorn lastBackupAt on any volume"
-            add_minor_issue "No backup jobs found and no Longhorn backup timestamps"
-        elif [ "$BACKUP_AGE_H" -gt 48 ]; then
-            log_warning "Backup job reaped; stalest Longhorn volume's newest backup is ${BACKUP_AGE_H}h old"
-            add_major_issue "Backup stale: stalest Longhorn volume's newest backup evidence (Backup CR / lastBackupAt) was ${BACKUP_AGE_H}h ago (expected daily)"
-        else
-            log_success "Backup job reaped (TTL) but Longhorn backups fresh (stalest volume: ${BACKUP_AGE_H}h ago)"
-        fi
     fi
+    # Per-volume freshness, not the Job's completionTime (a Job can exit 0 in
+    # seconds while a volume goes a week without a backup).
+    assess_backup_freshness "$BACKUP_JOB"
+    echo "Per-volume backup freshness:"
+    longhorn_backup_age_hours --per-volume | grep -Ev ' FRESH ' || echo "  all attached volumes fresh"
 
     # iCloud sync check — every icloud-docker-* instance in the `backup` ns.
     # Discovered from live Deployments rather than a hardcoded list or a repo
