@@ -12,7 +12,7 @@
 
 ## 1) Description
 
-Between 2026-07-30 and 2026-08-22, **thirty-six** defects across six audit
+Between 2026-07-30 and 2026-08-22, **thirty-seven** defects across six audit
 scripts shared one root cause: an unmeasured, failed or absent probe was
 reported as a definite outcome. Several were introduced *while fixing the
 others* — the table below is the running register, not a closed list, and the
@@ -109,6 +109,7 @@ signal.
 | `check-all-versions.py` | with no GitHub credential resolved, every GitHub/GHCR lookup runs anonymous or fails, yet the run still reported "no newer version" per component — an unproven silence, and auto-close then treated it as a fix. Now recorded as degraded coverage, which vetoes auto-close for the section (2026-08-22) | pass (unauthenticated silence read as up-to-date) |
 | `health-check.sh` | backup verdict was decided by the JOB, not by volume age. The daily-backup Job exits 0 once it has DISPATCHED backups; a present, succeeded Job short-circuited straight to "Backup system operational" with no age assertion, and a second copy of the block derived the age from the Job's `completionTime`. The authoritative per-volume signal ran only in the `else`, i.e. only once the Job had been TTL-reaped — so a volume stale for a week was invisible during exactly the window someone would be looking. One shared `assess_backup_freshness()` now always evaluates per-volume age; the Job only refines the wording (2026-08-22) | pass (proxy signal outranked the authoritative one) |
 | `doc-check.py` | SECOND instance of the denominator class in this file (see the raw-manifest row above): `find_helmrelease_apps()` enumerates app DIRECTORIES, so a workload authored inside another app's folder never entered the denominator and could not be flagged whatever the docs said. 36 in-repo workloads sat outside it, including whole databases (`authentik-pg`, `paperless-db`, `superset-pg`). The section also printed "Apps in cluster: N" while never contacting the cluster — N counted repo directories — so the reverse direction, a workload running that nothing in git declares, had no check at all. Both closed, the cluster cross-check reporting its examined-count as the control (2026-08-22) | pass (coverage claim narrower than it read, in both directions) |
+| `health-check.sh` | all four jq queries in the Longhorn disk-capacity block read `.spec.disks`, which carries allowScheduling/path/storageReserved — `storageMaximum` and `storageAvailable` live under `.status.diskStatus` and were never on `.spec.disks`. `select(.value.storageMaximum > 0)` therefore matched nothing: the capacity table printed empty, both threshold counts were 0 every run, and the chain fell through to "Longhorn disk capacity healthy" — a green verdict no disk state could change. Node storage exhaustion went unmonitored for the check's whole existence (real usage 32-48% free, so nothing was hiding). Found by ADDING THE MISSING CONTROL: the denominator query reported 0 disks examined and the contradiction was immediate (2026-08-22, `b38549e5`) | pass (query pointed at a path that never held the data) |
 
 ### Enforcement (added 2026-08-22)
 
@@ -287,6 +288,27 @@ python3 -c "import ast;ast.parse(open('runbooks/security-check.py').read())"
 bash -n runbooks/health-check.sh
 python3 runbooks/doc-check.py 2>/dev/null | grep -E '🔴|🟡'
 ```
+
+### Finding dead queries mechanically (2026-08-22)
+
+The Longhorn row above was not found by reading the code — it was found by
+adding the control the block lacked and noticing the denominator was zero. That
+generalises into two sweeps worth running after touching any audit script:
+
+```bash
+# 1) every jq field path used against a kubectl resource, checked for existence
+#    on at least one LIVE object. A path present on zero objects is a query that
+#    can never fire.
+# 2) the to_entries[] shape specifically -- `.X // {} | to_entries[] |
+#    select(.value.FIELD ...)`. Verify FIELD exists on the map's VALUES, not on
+#    the parent. This is where the Longhorn bug lived and where a naive path
+#    scan does not look.
+```
+
+Both sweeps were run across `health-check.sh` on 2026-08-22 (38 kubectl+jq
+pairs, 3 `to_entries` queries): no further dead paths. Re-run them when adding
+queries against an unfamiliar CRD, where field placement is easiest to guess
+wrong.
 
 ## 8) Diagnose Examples
 
