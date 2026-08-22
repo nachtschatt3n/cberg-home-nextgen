@@ -1394,31 +1394,49 @@ log_section "Section 10: Longhorn Storage"
 
     # Check Longhorn node disk capacity (storageAvailable vs storageMaximum)
     echo ""
+    # storageMaximum / storageAvailable live under .status.diskStatus. Until
+    # 2026-08-22 all four queries here read .spec.disks, which carries only
+    # allowScheduling / path / storageReserved and has NEVER had those fields —
+    # so `select(.value.storageMaximum > 0)` matched nothing, the capacity table
+    # printed empty, and both threshold counts were 0 on every run. The chain
+    # below therefore reported "Longhorn disk capacity healthy" unconditionally:
+    # a green verdict no disk state could ever change. Real usage when this was
+    # found was 32-48% free, so nothing was hiding behind it, but node storage
+    # exhaustion was entirely unmonitored here.
     echo "Longhorn node disk capacity:"
     kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq -r '
-        .items[] |
-        (.spec.disks // {}) | to_entries[] |
+        .items[] | .metadata.name as $node |
+        (.status.diskStatus // {}) | to_entries[] |
         select(.value.storageMaximum > 0) |
-        "\(env.LONGHORN_NODE // "node")/\(.key): \((.value.storageAvailable / .value.storageMaximum * 100 | floor))% free (\(.value.storageAvailable / 1073741824 | floor)Gi free of \(.value.storageMaximum / 1073741824 | floor)Gi)"
+        "\($node)/\(.key): \((.value.storageAvailable / .value.storageMaximum * 100 | floor))% free (\(.value.storageAvailable / 1073741824 | floor)Gi free of \(.value.storageMaximum / 1073741824 | floor)Gi)"
     ' 2>/dev/null | tee /tmp/_lh_disk_check.txt || echo "Unable to retrieve Longhorn disk data"
-    DISK_CRITICAL=$(grep -c ' [0-9]\b\| [1-9]\b' /tmp/_lh_disk_check.txt 2>/dev/null || echo "0")
+    # CONTROL: how many disks did we actually see? A dead kubectl makes the two
+    # threshold queries return EMPTY, which `${VAR:-0}` turns into 0 and the
+    # chain below then reports "disk capacity healthy" — a green verdict from a
+    # probe that never ran. Count the denominator and refuse to score without it.
+    LH_DISK_TOTAL=$(kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq '
+        [.items[].status.diskStatus // {} | to_entries[] | select(.value.storageMaximum > 0)] | length
+    ' 2>/dev/null || echo "")
     LH_DISK_LOW=$(kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq '
-        [.items[].spec.disks // {} | to_entries[] |
+        [.items[].status.diskStatus // {} | to_entries[] |
         select(.value.storageMaximum > 0 and (.value.storageAvailable / .value.storageMaximum) < 0.15)] | length
-    ' 2>/dev/null || echo "0")
+    ' 2>/dev/null || echo "")
     LH_DISK_WARN=$(kubectl get nodes.longhorn.io -n storage -o json 2>/dev/null | jq '
-        [.items[].spec.disks // {} | to_entries[] |
+        [.items[].status.diskStatus // {} | to_entries[] |
         select(.value.storageMaximum > 0 and (.value.storageAvailable / .value.storageMaximum) >= 0.15 and (.value.storageAvailable / .value.storageMaximum) < 0.25)] | length
-    ' 2>/dev/null || echo "0")
+    ' 2>/dev/null || echo "")
     rm -f /tmp/_lh_disk_check.txt
-    if [ "${LH_DISK_LOW:-0}" -gt 0 ] 2>/dev/null; then
+    if [ -z "$LH_DISK_TOTAL" ] || [ "$LH_DISK_TOTAL" -eq 0 ] 2>/dev/null; then
+        log_warning "Longhorn disk capacity NOT MEASURED (0 disks visible - kubectl or jq failed)"
+        add_major_issue "Longhorn disk capacity assertions did not run: 0 disks visible from nodes.longhorn.io"
+    elif [ "${LH_DISK_LOW:-0}" -gt 0 ] 2>/dev/null; then
         log_critical "Longhorn disk(s) critically low (<15% free): $LH_DISK_LOW disk(s)"
         add_critical_issue "Longhorn storage critically low: $LH_DISK_LOW disk(s) have <15% free space"
     elif [ "${LH_DISK_WARN:-0}" -gt 0 ] 2>/dev/null; then
         log_warning "Longhorn disk(s) running low (15-25% free): $LH_DISK_WARN disk(s)"
         add_major_issue "Longhorn storage low: $LH_DISK_WARN disk(s) have 15-25% free space"
     else
-        log_success "Longhorn disk capacity healthy"
+        log_success "Longhorn disk capacity healthy ($LH_DISK_TOTAL disks examined)"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
