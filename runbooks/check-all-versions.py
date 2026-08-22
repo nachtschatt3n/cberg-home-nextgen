@@ -1735,8 +1735,25 @@ class VersionChecker:
             try:
                 tok = subprocess.run(['gh', 'auth', 'token'], capture_output=True,
                                      text=True, timeout=10).stdout.strip() or None
-            except Exception:  # noqa: BLE001 — no token is a valid outcome
+            except Exception:  # noqa: BLE001 — handled below as a degradation
                 tok = None
+        if not tok:
+            # NO TOKEN IS NOT A CLEAN RUN. Without it every GitHub/GHCR lookup
+            # falls to the 60/hr anonymous bucket or fails outright, and a failed
+            # lookup is indistinguishable from "no newer version" -- it yields
+            # latest=None, no finding, and writer-side auto-close then RESOLVES
+            # the section's open version findings as if they had been fixed.
+            # That is not hypothetical: a sweep run on 2026-08-21 with the token
+            # missing from the specialists' env wrongly closed 44 findings.
+            #
+            # Section-wide on purpose. record()'s own contract says a broken `gh`
+            # must NOT be component-scoped, because it degrades an unknown set of
+            # components rather than one nameable leaf.
+            self.degraded.record(
+                'github-api-token', 'GITHUB_TOKEN / GH_TOKEN / `gh auth token`',
+                'no GitHub credential resolved — every GitHub and GHCR lookup this '
+                'run is anonymous or failing, so "no newer version" is unproven for '
+                'the whole section and auto-close must not treat the silence as fixed')
         self._gh_api_token = tok
         return tok
 
