@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.08.23`
+> Last Updated: `2026-08-23`
 > Owner: `Platform`
 
 ---
@@ -27,6 +27,28 @@ Authentik provides unified SSO and forward-auth proxy for all cluster services.
 | Blueprint source | `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (SOPS-encrypted) |
 | Config approach | Blueprints only — never use UI |
 | Auth flow | Forward auth proxy via per-app outposts |
+| Core database | Standalone `authentik-pg` Deployment — Docker Official `postgres:18.6-bookworm`, `longhorn-static` volume `authentik-pg-data` (20Gi) |
+| Rollback DB | Bundled bitnamilegacy PostgreSQL 17.11 StatefulSet `authentik-postgresql`, still running until plan `authentik-pg17-decommission` |
+
+### Database: `max_connections` parity is mandatory
+
+The standalone `authentik-pg` Deployment passes `-c max_connections=500`, which
+**must match what the bundled Bitnami DB was configured with**. Authentik runs
+3 server + 3 worker replicas, each holding a pool; together they open far more
+than PostgreSQL's default of 100. A parity miss does NOT fail at cutover — the
+new DB accepts the first connections fine — it surfaces later as intermittent
+login failures and worker errors once the pools fill under load, which is a much
+harder signal to trace back to the migration. Verify before and after any change
+to the DB manifest:
+
+```bash
+kubectl -n kube-system exec deploy/authentik-pg -- \
+  psql -U authentik -c 'SHOW max_connections;'
+```
+
+The general procedure for this class of migration (bundled subchart datastore →
+standalone manifests) is in
+[`docs/sops/bundled-datastore-exit.md`](bundled-datastore-exit.md).
 
 **CRITICAL:** All Authentik configuration MUST be done via blueprints, never the UI.
 Blueprints are version-controlled, GitOps-compatible, and reproducible.
