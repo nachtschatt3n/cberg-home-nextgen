@@ -656,6 +656,84 @@ def _dedupe_tag(v) -> str:
     return core + ("-pre" if _PRERELEASE_TAG.search(s) else "")
 
 
+# ── Live-repo cross-check (the snapshot is not the cluster) ─────────────────
+# version-check-current.md is a SNAPSHOT the sweep writes every 48h. Maintenance
+# windows apply bumps BETWEEN sweeps, so the snapshot keeps proposing updates
+# that already landed: on 2026-08-23 the sun-window applied 10 of the 12 AUTO
+# items and re-running this reconciler returned byte-identical output. The AUTO
+# lane could never self-clear, so every window re-proposed the same batch and
+# the operator could not tell a pending bump from a done one. Cross-check each
+# item against the manifests actually in git before counting it actionable.
+_NS_TEXT_CACHE: dict = {}
+_YAML_COMMENT = re.compile(r"(?m)(?:^[ \t]*#.*$|[ \t]+#.*$)")
+
+
+def _strip_yaml_comments(text: str) -> str:
+    """Drop YAML comments before version matching.
+
+    A bump's changelog comment routinely names the version it REPLACED
+    (`# 2026-08-18: chart 12.11.0 (Grafana 13.2.0) — routine minor`), so the old
+    version lingers in the file long after the bump landed and the
+    already_applied test never fired. Grafana's 12.11.0→12.11.1 stayed in AUTO
+    for exactly that reason. A comment is not a deployed version.
+    """
+    return _YAML_COMMENT.sub("", text)
+
+
+def _namespace_text(ns: str):
+    """Concatenated manifest text under kubernetes/apps/<ns>/, else None.
+
+    Scoped by NAMESPACE, not component: the namespace comes straight off the
+    report row and is reliable, whereas component labels here are report-side
+    names (`otel-operator`, `tube-archivist-redis`, `open-webui` for its redis
+    sidecar) that do not map onto directory names.
+    """
+    if ns in _NS_TEXT_CACHE:
+        return _NS_TEXT_CACHE[ns]
+    d = REPO_ROOT / "kubernetes" / "apps" / ns
+    txt = None
+    if d.is_dir():
+        parts = []
+        for f in sorted(d.rglob("*.yaml")):
+            try:
+                parts.append(_strip_yaml_comments(f.read_text(errors="ignore")))
+            except OSError:
+                pass
+        txt = "\n".join(parts)
+    _NS_TEXT_CACHE[ns] = txt
+    return txt
+
+
+def already_applied(item) -> bool:
+    """True only when the bump is PROVABLY in git already.
+
+    Deliberately conservative in one direction. A false "already applied"
+    silently drops a real update — the exact CRACK this file exists to prevent —
+    so the test demands BOTH that the target version is present in the namespace
+    AND that the current one is gone. If the old version still appears anywhere
+    in that namespace we keep the item and re-propose an applied bump, which
+    costs a redundant no-op and nothing else.
+    """
+    cur, tgt = item.get("current"), item.get("target")
+    ns = (item.get("namespace") or "").strip()
+    if not ns or not cur or not tgt:
+        return False
+    if _is_truncated(cur) or _is_truncated(tgt):
+        return False          # a clipped tag cannot be matched literally
+    txt = _namespace_text(ns)
+    if txt is None:
+        return False          # external infra / unresolvable ns → never assume
+    return (tgt in txt) and (cur not in txt)
+
+
+def snapshot_age_hours():
+    """Age of version-check-current.md in hours, or None if absent."""
+    if not VERSION_MD.exists():
+        return None
+    import time
+    return (time.time() - VERSION_MD.stat().st_mtime) / 3600.0
+
+
 def _apply_lockstep(lanes, needs_plan):
     """Pull an AUTO item back to PLAN when a SIBLING of the same component is held.
 
@@ -739,6 +817,14 @@ def reconcile():
     for i in actionable:
         if i["kind"] == "image" and not i.get("image_repo"):
             i["image_repos"] = sorted(repo_index.get(i["component"].lower(), ()))
+    # Drop what the maintenance window already applied (see already_applied).
+    # Reported, never silently swallowed: a suppressed item that was NOT really
+    # applied would be an invisible crack, so the operator sees the list.
+    applied = [i for i in actionable if already_applied(i)]
+    if applied:
+        _drop = {id(i) for i in applied}
+        actionable = [i for i in actionable if id(i) not in _drop]
+
     prs = parse_renovate_prs()
     plans = load_plans()
     ar_holds = ar_prerelease_holds()
@@ -767,6 +853,8 @@ def reconcile():
 
     return {
         "counts": {k: len(v) for k, v in lanes.items()},
+        "already_applied": applied,         # in the snapshot, already in git
+        "snapshot_age_hours": snapshot_age_hours(),
         "lockstep": lockstep,               # AUTO items pulled back to PLAN
         "lanes": lanes,
         "needs_plan": needs_plan,           # dispatch an upgrade-planner for each
@@ -783,6 +871,18 @@ def human(r):
     L = [f"== update coverage — AUTO {c['AUTO']} · PLAN {c['PLAN']} · REBUILD {c['REBUILD']} "
          f"· HELD {c['HELD']} · CRACK {c['CRACK']} =="]
     L.append(f"covered: {'YES ✅ (no cracks)' if r['covered'] else 'NO 🚨 CRACKS PRESENT'}")
+    age = r.get("snapshot_age_hours")
+    if age is not None:
+        stale = age > 50            # the sweep runs every 48h; 50 allows for jitter
+        L.append(f"source: version-check-current.md, {age:.0f}h old"
+                 + ("  ⚠️  STALE — an update published since the last sweep is NOT "
+                    "in this report; these lanes describe the last snapshot, not "
+                    "live upstream" if stale else ""))
+    if r.get("already_applied"):
+        L.append(f"\nALREADY APPLIED ({len(r['already_applied'])}) — in the snapshot, "
+                 f"already in git; dropped from the lanes below:")
+        for e in r["already_applied"]:
+            L.append(f"  • {e['component']} [{e['kind']} {e['current']}→{e['target']}]")
     if r["needs_plan"]:
         L.append(f"\nNEEDS A PLAN ({len(r['needs_plan'])}) — dispatch an upgrade-planner for each:")
         for e in r["needs_plan"]:

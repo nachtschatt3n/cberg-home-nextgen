@@ -51,6 +51,21 @@ PR exists (CI-gated), direct-bump when it doesn't — so **no safe update ever
 stalls waiting on Renovate.** REBUILD-lane items (self-built) and PLAN-lane items
 are NOT touched here — they go through their source-repo rebuild / vetted plans.
 
+`coverage.py` reads `runbooks/version-check-current.md`, a SNAPSHOT the sweep
+writes every 48h — not live upstream state. Two consequences you must hold:
+
+- Items the LAST window already applied are filtered out and listed under
+  `already_applied` in the `--json` output (with `snapshot_age_hours`). Before
+  2026-08-23 they were not, so the AUTO lane could never self-clear and every
+  window re-proposed the same batch. If something you just bumped still shows in
+  AUTO, check whether a SIBLING workload in that namespace is still on the old
+  version — the filter is deliberately conservative and only drops an item when
+  the new version is present AND the old one is gone repo-wide in that namespace.
+- An update published SINCE the last sweep is not in this report at all. `AUTO 0`
+  means "nothing pending as of the snapshot", never "nothing to do". When
+  `snapshot_age_hours` is large, say so in your report rather than implying the
+  lane is live.
+
 **The AUTO lane you read is already post-gate — never re-promote a PLAN item
 into this batch.** Since 2026-08-18 `assign_lane()` also keeps out of AUTO:
 pre-release/beta channels (an explicit tag marker, a `CHANNEL_RULES` predicate
