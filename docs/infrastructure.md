@@ -76,6 +76,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 |---|---|
 | `network/adguard-home-dns` | `.5` |
 | `home-automation/mosquitto-main` | `.15` |
+| `monitoring/edot-collector-talos-kmsg` | `.18` |
 | `home-automation/home-assistant` | `.24` |
 | `home-automation/iobroker` | `.25` |
 | `home-automation/scrypted` | `.26` |

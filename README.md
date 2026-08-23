@@ -463,9 +463,9 @@ quarterly.
 
 ## 📦 Applications
 
-~105 apps across 18 namespaces. Full inventory with per-app purpose, ingress
-posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md);
-this section is a category-level map.
+~122 apps across 18 namespaces. Full inventory with per-app purpose, ingress
+posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
+which is the authoritative per-namespace count; this section is a category-level map.
 
 ### 🤖 AI (`ai` — 9)
 ai-sre · anythingllm · hermes-agent · librechat · mcpo ·
@@ -480,20 +480,21 @@ matter-server · mosquitto · mqttx-web · music-assistant-server · n8n ·
 node-red · otbr · pallet-price-monitor · scrypted-nvr · solarfocus-scraper ·
 teslamate · traccar · trmnl-ha · zero-export-controller · zigbee2mqtt
 
-### 🗄️ Databases (`databases` — 10)
+### 🗄️ Databases (`databases` — 11)
 influxdb · mariadb · memgraph · nocodb · pgadmin · phpmyadmin · postgresql ·
-redis · redisinsight · superset
+redis · redisinsight · superset · sweep-history
 
-### 📊 Monitoring & Observability (`monitoring` — 10)
+### 📊 Monitoring & Observability (`monitoring` — 13)
 eck-operator · edot-collector · elasticsearch · grafana · headlamp · kibana ·
-kube-prometheus-stack · otel-operator · unpoller · uptime-kuma
+kube-prometheus-stack · otel-operator · prometheus-blackbox-exporter ·
+prometheus-pushgateway · sweep-dashboard · unpoller · uptime-kuma
 
-### 📄 Office & Productivity (`office` — 11)
-actual-budget · affine · nextcloud · nextcloud-mcp · omni-tools · paperless-ai ·
-paperless-gpt · paperless-ngx · penpot · sure · vaultwarden
+### 📄 Office & Productivity (`office` — 12)
+actual-budget · affine · arag-web · nextcloud · nextcloud-mcp · omni-tools ·
+paperless-ai · paperless-gpt · paperless-ngx · penpot · sure · vaultwarden
 
-### 🎬 Media (`media` — 4)
-jellyfin · library-tools · makemkv · plex
+### 🎬 Media (`media` — 5)
+immich · jellyfin · library-tools · makemkv · plex
 
 Library curation (nested per-item folder layout, NFO/poster sidecar standards,
 intake-from-JDownloader, dedup, Tube Archivist → Plex bridging) is documented
@@ -505,24 +506,32 @@ jdownloader · tube-archivist
 ### 🛡️ Security (`security` — 2)
 wazuh · falco — see the dedicated SIEM section above.
 
-### 🌐 Network (`network` — 6)
+### 🌐 Network (`network` — 7)
 external: cloudflared · external-dns · ingress-nginx  
-internal: adguard-home · k8s-gateway · ingress-nginx
+internal: adguard-home · k8s-gateway · ingress-nginx  
+envoy-gateway (Gateway API control plane, running alongside ingress-nginx)
 
-### 🔧 Cluster system services (`kube-system` — 10)
-authentik · cilium · coredns · csi-driver-smb · descheduler ·
-intel-device-plugin · metrics-server · node-feature-discovery · reloader ·
-spegel
+### 🔧 Cluster system services (`kube-system` — 11)
+authentik · cilium · coredns · crash-ghost-reaper · csi-driver-smb ·
+descheduler · intel-device-plugin · metrics-server · node-feature-discovery ·
+reloader · spegel
 
 ### 💾 Storage & Backup (`storage`, `backup`, `cert-manager`)
 - storage: longhorn  
 - backup: icloud-docker-andrea · icloud-docker-mu  
 - cert-manager: cert-manager
 
-### 🛠️ Custom applications (`my-software-development`, `my-software-production`, `default`)
-- dev: absenty · andreamosteller · opencode-andreamosteller  
-- prod: absenty · andreamosteller · gas-price-monitor · rainbow-rescue  
-- default: echo-server · homepage (the homepage app dashboard)
+### 🛠️ Custom applications (`my-software-development`, `my-software-production`, `my-software-showcase`, `default`)
+- dev (3): absenty · andreamosteller · opencode-andreamosteller  
+- prod (4): absenty · andreamosteller · gas-price-monitor · rainbow-rescue  
+- default (2): echo-server · homepage (the homepage app dashboard)
+
+### 🏢 Showcase applications (`my-software-showcase` — 15)
+Legacy/customer-facing apps kept running for reference. All internal-only:
+
+globalmobility · haarfabrik · holm-backend · ibgastro · inbewegung ·
+kfa-medienarchiv · mangold-smarthomeadvisor · max-jung · metaldyne · ordiga ·
+see-edv-ibspm · stepbystepguide · u-zeit · uzeit-de · zuhause-betreut
 
 ### 🔍 Utilities (`tools/`)
 - **[SNMP Temperature Scanner](tools/snmp-temp-scan.sh)** — discovers
