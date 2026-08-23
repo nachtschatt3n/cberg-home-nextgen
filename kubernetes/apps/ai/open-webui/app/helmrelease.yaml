@@ -102,13 +102,13 @@ spec:
       # Pin the bundled websocket Redis image. The chart default is
       # redis:7.4.2-alpine3.21 — see security_ref: F-9e1e421c for the posture
       # (Trivy 2026-08-06). Redis 8 is safe for this use: ephemeral pub/sub
-      # only — no persistence, no ACL/auth, no modules. 8.10.0-alpine is
+      # only — no persistence, no ACL/auth, no modules. 8.10.1-alpine is
       # already proven by databases/redis in this cluster.
       redis:
         enabled: true
         image:
           repository: redis
-          tag: 8.10.0-alpine
+          tag: 8.10.1-alpine
           pullPolicy: IfNotPresent
 
     # -- Value of cluster domain

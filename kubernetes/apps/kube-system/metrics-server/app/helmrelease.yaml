@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: metrics-server
-      version: 3.13.1
+      version: 3.14.0
       sourceRef:
         kind: HelmRepository
         name: metrics-server
@@ -22,11 +22,6 @@ spec:
     remediation:
       retries: 3
   values:
-    image:
-      # Pin ahead of chart 3.13.1's appVersion (v0.8.1) to clear CVE-2025-47907 /
-      # CVE-2025-47906 (fixed in v0.9.0, Go 1.26.4). REMOVE this override once a
-      # metrics-server chart ships appVersion >= v0.9.0 (then bump the chart normally).
-      tag: v0.9.0
     args:
       - --kubelet-insecure-tls
       - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
