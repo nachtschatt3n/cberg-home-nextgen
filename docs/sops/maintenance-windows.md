@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.08.23`
+> Last Updated: `2026-08-23`
 
 ## 1) Description
 
@@ -143,6 +143,17 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   OpenClaw only records the decision (`exec_state=pending`); the
   maintenance-window-agent pulls it and does the GitOps via `cberg-agent` —
   OpenClaw never mutates the cluster.
+- **An approval is scoped to the window it was given for.** If the run failed,
+  was rolled back, or the plan slipped, the operator must REVOKE it with
+  `home-operation resolve --issue <key> --by cleared --note "<why>"`.
+  `--by cleared|denied|superseded|manual` voids the decision so
+  `decisions --pending-exec` can never serve it as live authorization again;
+  only `--by executed` keeps it, as executed history. Re-approving later is a
+  fresh `decide`. Until 2026-08-23 neither voiding happened nor did
+  `--pending-exec` filter resolved issues, so a revoked GO — and any issue
+  auto-closed by `reconcile` — stayed readable as a current approval. A window
+  agent MUST still treat a decision whose `window` has passed as expired, not
+  as a standing GO.
 - **Durability caveats (both PVC-only, not git):** (1) the `home-operation`
   issue store + the `tick` reminder cron live in OpenClaw's PVC — the skill
   itself is in git (`skills-configmap.sops.yaml`) and re-seeds on boot, but the
@@ -352,3 +363,4 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |
 | 2026.08.19 | 2026-08-19 | Documented the **AUTO-lane disqualifiers** (pre-release channel gate incl. `CHANNEL_RULES`, 0.x release-line moves, chart↔image lockstep) and the two troubleshooting rows for them + the past-dated `next window` bug (F-f95a8b52). |
 | 2026.08.16 | 2026-08-16 | Cadence 4 windows/week -> **7 (daily)**: added Mon/Wed/Fri 05:00 60m no-reboot slots, all windows at `capacity_risk: 6`. Drains the plan queue to 2026-09-13 instead of late October. Soaks are NOT compressible by the extra slots. |
+| 2026.08.23 | 2026-08-23 | **Approval revocation**: `resolve --by cleared|denied|superseded|manual` now VOIDS the decision, and `decisions --pending-exec` excludes resolved issues. Previously a revoked GO (and any issue auto-closed by `reconcile`) stayed readable as live authorization — found on `bitnamilegacy-exit-nextcloud-db`, a high-risk DB migration whose 2026-08-19 GO survived its own rollback. |
