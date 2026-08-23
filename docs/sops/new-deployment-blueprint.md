@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.23`
+> Last Updated: `2026-08-23`
 > Owner: `Platform`
 
 ---
@@ -507,9 +507,23 @@ Failure hint:
 
 Common pitfalls when onboarding a new Helm-based app into this cluster. Check these before debugging pod-level errors.
 
-### 1. Bitnami images — always use `bitnamilegacy/*`
+### 1. Bitnami images — `bitnamilegacy/*` unblocks a chart, it is not the destination
 
 Bitnami deleted all pre-2026 image tags from `docker.io/bitnami/*` in late 2025; the tags live in `docker.io/bitnamilegacy/*` with identical content. Helm charts using Bitnami subcharts (postgresql, redis, mongodb, etc.) still reference the old tags and will fail with `image not found` unless overridden.
+
+> **For a NEW deployment, do not bundle the datastore at all.** Those
+> `bitnamilegacy/*` images are frozen and unmaintained: the datastore cannot be
+> patched independently of the chart, so every CVE in it waits on a chart
+> release. Since 2026-08 this cluster has been actively exiting them — set
+> `postgresql.enabled: false` / `redis.enabled: false` / `mariadb.enabled: false`
+> and stand the datastore up as our own Deployment + Service + PV/PVC on the
+> Docker Official image. Done four times so far (`superset-pg`, `paperless-db`,
+> `authentik-pg`, `nextcloud-db`); the procedure and its failure modes are in
+> [`docs/sops/bundled-datastore-exit.md`](bundled-datastore-exit.md).
+>
+> Use the override below only to get an existing chart pulling again, or when a
+> subchart genuinely cannot be separated. It is a unblock, not a target state,
+> and it books future migration work.
 
 Fix pattern for any chart with Bitnami dependencies:
 ```yaml
@@ -522,6 +536,32 @@ redis:
     registry: docker.io
     repository: bitnamilegacy/redis
 ```
+
+### 1b. Never deploy on a floating tag — pin a version or a digest
+
+`latest`, `main`, `stable`, and variant-only tags (`node:22-bookworm`,
+`lts-alpine`, `trixie-slim`) are rebuilt in place upstream. The consequence is
+not just unpredictability, it is **invisibility**: Renovate's helm-values manager
+diffs a version-shaped tag, so a floating tag never changes, never emits a PR,
+and the image ages silently — no update lane, no CVE signal, no drift report.
+That was 19 images across six namespaces when it was measured, and clearing it
+took four batches (`43ec3d84`, `58faf4bd`, `b8d583f0`, `f5b03e8a`) plus a tail of
+residuals.
+
+**Rule for any new deployment:** every image reference — app, init containers,
+sidecars, and subchart images alike — must carry either a concrete version tag
+or a digest.
+
+```yaml
+image:
+  repository: docker.io/library/postgres
+  tag: 18.6-bookworm@sha256:<digest>   # version for readability, digest for immutability
+```
+
+Digest-pin whenever upstream rebuilds the tag in place (Docker Official base
+images, `node:*`, `busybox`, `debian`, `ubuntu`). A version tag alone is enough
+for images whose publisher treats tags as immutable. Pin to the digest that is
+**already running** so the change is pure observability and moves no bytes.
 
 ### 2. Flux `targetNamespace` overrides per-manifest namespaces
 
@@ -825,6 +865,7 @@ order and the attribution queries:
 | Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |
 | Celery-based app OOM-kills on fat nodes | Default concurrency = CPU count (18 on nuc14) → huge memory | Set explicit `--concurrency=N` in container `command` and bump memory limit |
 | OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust ingress's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #10 |
+| HelmRelease times out on FIRST install, pods look fine | A from-scratch schema/app install exceeds Helm's 5m default timeout — the work is still running when Flux gives up, and the retry restarts it from the beginning | Set `spec.timeout: 15m` (and `spec.install.timeout`) on the HelmRelease. Seen on uzeit-de's from-scratch TYPO3 install (`152cb651`, 2026-08-18) and on a Superset `Recreate` transition (`8b0075ed`). Check pod logs for forward progress before assuming a real failure |
 | Pod OOMKilled despite `resources:` in HelmRelease | `resources:` placed at wrong nesting level in app-template (no-op) | Move `resources:` inside `controllers.<name>.containers.<name>` — see Known Gotcha #9 |
 
 ---
@@ -961,3 +1002,4 @@ Rollback success criteria:
 | `2026.05.04` | `2026-05-04` | Add Known Gotcha #9: bjw-s app-template `resources` placement (top-level is a no-op → OOMKilled); update troubleshooting table; renumber WSGI gotcha to #10 |
 | `2026.05.06` | `2026-05-06` | Add Known Gotcha #11: external ingress requires `external-dns.alpha.kubernetes.io/target` annotation — without it Cloudflare rejects the A record (error 9003) and hostname returns NXDOMAIN |
 | `2026.08.18` | `2026-08-18` | Add Known Gotcha #13: probe endpoints must be static — a framework route probed at kubelet frequency (~480 req/h) produced 58% of all cluster log ingest; split-probe pattern, and why `startup` must stay on the deep route |
+| `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |

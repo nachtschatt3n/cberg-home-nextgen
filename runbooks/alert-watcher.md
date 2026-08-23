@@ -91,7 +91,42 @@ And the assistant `TaskStop`s the Monitor ws watch. Leaving the receiver up whil
 the bridge is down will eventually raise a failed-notification alert.
 
 ## Verification / health
-- Bridge up: `curl -s http://127.0.0.1:8788/` → `alert-bridge ok`.
+
+`GET /` returns a JSON health object (it used to answer the bare string
+`alert-bridge ok`, which was true whenever the PROCESS was alive and therefore
+could not distinguish a working pager from a dead one — a dead bridge looked
+exactly like a quiet cluster):
+
+```bash
+curl -s http://127.0.0.1:8788/
+# {"ok": true, "ws_clients": 1, "last_post_age_s": 1701.2,
+#  "last_watchdog_age_s": 1701.2, "uptime_s": 239462.9}
+```
+
+| Field | Meaning | Bad when |
+|---|---|---|
+| `ws_clients` | operator sessions attached to the websocket | `0` — alerts arrive and are dropped on the floor |
+| `last_post_age_s` | seconds since Alertmanager last POSTed anything | tracks `last_watchdog_age_s` in a healthy system |
+| `last_watchdog_age_s` | seconds since the **Watchdog** dead-man's switch last arrived | `> 18000` (5h), or `null` once uptime exceeds one 4h `repeat_interval` |
+| `uptime_s` | bridge process uptime | needed to interpret a `null` watchdog — a recent restart is not a failure |
+
+**The Watchdog is the liveness proof.** Watchdog is Alertmanager's always-firing
+dead-man's switch, and the `claude` route has no matchers, so it arrives here
+like any other alert. The bridge records it and discards it. Because it re-sends
+on the route's 4h `repeat_interval`, a fresh `last_watchdog_age_s` proves the
+whole chain — Alertmanager → network → bridge — was working minutes ago. Nothing
+else on this path produces traffic on a schedule: the bridge logs only startups,
+never a forwarded alert, so without the Watchdog there is no signal at all
+between real alerts.
+
+This is checked automatically by **`runbooks/health-check.sh` Section 41 "Alert
+Bridge Liveness"**, which criticals on unreachable, on a watchdog older than 5h,
+and on never-seen once uptime passes 4.5h; and warns on `ws_clients: 0`. Until
+2026-08-20 nothing checked it and it could not be checked — the log holds 4,582
+`alert-bridge up` lines from a bind crash-loop during which alerts were dropped
+and nothing said so. That is the silent-zero class from
+`docs/sops/audit-script-correctness.md`, applied to the pager itself.
+
 - Receiver merged: the generated secret
   `alertmanager-kube-prometheus-stack-generated` contains `192.168.30.111:8788`.
 - Monitor emits a `{"source":"bridge","event":"connected"}` frame on connect; if
@@ -105,6 +140,10 @@ the bridge is down will eventually raise a failed-notification alert.
 | Monitor watch ended unexpectedly | bridge crashed | persistent mode: `~/.claude/logs/alert-bridge.log` (launchd KeepAlive restarts it — just restart Monitor ws); ephemeral mode: `/tmp/alert-bridge.log`, re-run up.sh |
 | launchd `runs` climbing, exit 1, `EADDRINUSE` in log | an orphan bridge process holds :8787/:8788 (e.g. leftover nohup instance) | `lsof -nP -i :8788` → kill the orphan; launchd binds on next respawn |
 | `AlertmanagerFailedToSendAlerts` firing | receiver left up with bridge down | run `alert-watch-down.sh` |
+| `ws_clients: 0` but bridge healthy | no operator session attached | alerts are accepted and discarded — restart the Monitor ws watch |
+| `last_watchdog_age_s` null and `uptime_s` > 4.5h | Alertmanager cannot reach the bridge at all | check the `claude-watch-webhook` receiver URL, the Mac's IP, and the macOS firewall on `:8788` |
+| `last_watchdog_age_s` > 5h, bridge reachable | Alertmanager stopped posting | pages are being lost silently — check Alertmanager's own health and the route config |
+| Bridge answers a bare `alert-bridge ok` string | very old bridge build predating the JSON health surface | Section 41 cannot parse it; update the bridge |
 
 ## Should this be a sub-agent? — No (design note)
 Asked 2026-07-18. A sub-agent is the **wrong tool** here:
