@@ -94,5 +94,31 @@ dc.run_cmd = lambda *a, **k: (0, "not json", "")
 check("unparseable output reports 0 examined",
       dc.find_unexplained_workloads("t")[1], 0)
 
+# --- direction 3: what counts as ONE app ----------------------------------
+# network/{external,internal}/ carry their own ks.yaml but deploy nothing
+# themselves; their SUBDIRECTORIES are the apps. Counting the grouping dir too
+# inflated network by one, and the wrong number went into the
+# docs/applications.md Summary -- where it then read as the DOC being wrong.
+apps = dc.find_helmrelease_apps()
+net = apps["network"]
+check("grouping dir `external` is not counted as an app", "external" in net, False)
+check("grouping dir `internal` is not counted as an app", "internal" in net, False)
+check("apps inside the grouping dirs ARE counted",
+      {"cloudflared", "external-dns", "adguard-home", "k8s-gateway"} <= set(net), True)
+
+# ...but two grouping dirs can hold the SAME app name and still be two separate
+# deployments. network/{external,internal}/ingress-nginx are two controllers on
+# two LB IPs and docs/applications.md gives them a row each; collapsing them on
+# name undercounted network in the other direction.
+check("both ingress-nginx controllers are counted",
+      len([a for a in net if dc._bare(a) == "ingress-nginx"]), 2)
+check("_bare() strips the grouping-dir qualifier",
+      dc._bare("internal/ingress-nginx"), "ingress-nginx")
+check("_bare() leaves a plain name alone", dc._bare("cloudflared"), "cloudflared")
+
+# A raw-manifest app dir (ks.yaml, no HelmRelease, no sub-apps) must STILL count
+# -- the grouping-dir exclusion must not swallow it. crash-ghost-reaper is one.
+check("raw-manifest app still counted", "crash-ghost-reaper" in apps["kube-system"], True)
+
 print(f"\n  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

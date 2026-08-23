@@ -281,18 +281,29 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
                 has_hr = any((app_dir / name).exists() for name in HR_NAMES)
 
             # Handle 2-level subdirs like network/external/{app}/ or network/internal/{app}/
+            is_grouping_dir = False
             if not has_hr:
                 for sub in sorted(app_dir.iterdir()):
                     if not sub.is_dir() or sub.name.startswith("_"):
                         continue
                     sub_app = sub / "app"
-                    if sub_app.is_dir() and any((sub_app / name).exists() for name in HR_NAMES):
+                    has_sub_hr = (
+                        sub_app.is_dir() and any((sub_app / n).exists() for n in HR_NAMES)
+                    ) or any((sub / n).exists() for n in HR_NAMES)
+                    if has_sub_hr:
                         # sub is the logical app (e.g., cloudflared)
-                        if sub.name not in result[ns]:
-                            result[ns].append(sub.name)
-                    elif any((sub / name).exists() for name in HR_NAMES):
-                        if sub.name not in result[ns]:
-                            result[ns].append(sub.name)
+                        is_grouping_dir = True
+                        # Two grouping dirs can hold the SAME app name and still be
+                        # two separate deployments: network/{external,internal}/
+                        # ingress-nginx are two controllers on two LB IPs, and
+                        # docs/applications.md rightly gives them a row each.
+                        # Collapsing them on name undercounted network by one.
+                        # Qualify only the collision, so the common case stays a
+                        # plain name.
+                        label = (sub.name if sub.name not in result[ns]
+                                 else f"{app_dir.name}/{sub.name}")
+                        if label not in result[ns]:
+                            result[ns].append(label)
 
             # A raw-manifest app is still an app. The repo's canonical app unit
             # is the Flux Kustomization (ks.yaml), not the HelmRelease — counting
@@ -301,13 +312,29 @@ def find_helmrelease_apps() -> dict[str, list[str]]:
             # docs/applications.md said. That hid sweep-history (named in
             # CLAUDE.md as the policy DB), sweep-dashboard and crash-ghost-reaper
             # (which has its own SOP) behind an "Undocumented apps: 0" result.
-            if not has_hr:
+            # `network/external/` and `network/internal/` carry their own ks.yaml
+            # but deploy nothing themselves -- their SUBDIRECTORIES are the apps,
+            # and those were just appended above. Counting the grouping directory
+            # too inflated network to 8 and put a wrong number in the
+            # docs/applications.md Summary, which then read as the DOC being
+            # wrong. A directory whose apps are its children is not itself an app.
+            if not has_hr and not is_grouping_dir:
                 has_hr = (app_dir / "ks.yaml").exists()
 
             if has_hr:
                 result[ns].append(app_dir.name)
 
     return result
+
+
+def _bare(app: str) -> str:
+    """App name without its grouping-dir qualifier (`external/ingress-nginx`).
+
+    The qualifier exists only to keep two same-named deployments distinct in the
+    COUNT. Every name-based lookup -- documentation match, INFRA_SKIP, the
+    cluster cross-check -- must use the bare name.
+    """
+    return app.rsplit("/", 1)[-1]
 
 
 WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
@@ -416,6 +443,7 @@ def find_unexplained_workloads(scope: str) -> tuple[list[str], int]:
     repo_names = {n for _ns, _p, n, _k in find_repo_subworkloads()}
     for apps in find_helmrelease_apps().values():
         repo_names.update(apps)
+        repo_names.update(_bare(a) for a in apps)
 
     unexplained, examined = [], 0
     for i in items:
@@ -758,6 +786,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     undocumented = []
     for ns, apps in cluster_apps.items():
         for app in apps:
+            app = _bare(app)          # the grouping-dir qualifier is for counting only
             if app in INFRA_SKIP:
                 continue
             if _is_documented_subcomponent(app):
@@ -864,7 +893,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
     # do appear in the doc's sections. Only datastore sub-components are dropped,
     # matching the exemption above.
     countable = {
-        ns: [a for a in apps if not _is_documented_subcomponent(a)]
+        ns: [a for a in apps if not _is_documented_subcomponent(_bare(a))]
         for ns, apps in cluster_apps.items()
     }
     countable = {ns: apps for ns, apps in countable.items() if apps}
@@ -907,6 +936,58 @@ def s3_application_docs() -> tuple[str, Findings, str]:
             cprint(C.YELLOW, f"      - {r}")
     else:
         cprint(C.GREEN, f"  {OK} applications.md Summary table matches the cluster")
+
+    # --- The applications.md Total row -------------------------------------
+    m_tot = re.search(r"^\|\s*\*\*Total\*\*\s*\|\s*\*\*(\d+)\*\*\s*\|", content, re.M)
+    if not m_tot:
+        DEGRADED.record("s3_application_docs", "docs/applications.md '**Total**' row",
+                        "not found — stated total not compared")
+    elif int(m_tot.group(1)) != real_apps:
+        f.add(WARNING, f"docs/applications.md Total says {m_tot.group(1)}, actual is {real_apps}")
+        cprint(C.YELLOW, f"  {WARNING} applications.md Total: says {m_tot.group(1)}, actual {real_apps}")
+
+    # --- README.md PER-NAMESPACE counts ------------------------------------
+    # Only the 'across N namespaces' phrase was compared, so README's own
+    # per-category counts drifted untouched: it claimed ~105 apps with six
+    # namespace counts wrong and a whole 15-app namespace missing, and nothing
+    # said so (F-09a67f8d). README states these as '### <emoji> <Name> (`ns` — N)'.
+    readme_p = REPO_ROOT / "README.md"
+    if not readme_p.exists():
+        DEGRADED.record("s3_application_docs", "README.md",
+                        "absent — per-namespace counts not checked")
+    else:
+        readme = readme_p.read_text()
+        stated_ns = {m.group(1): int(m.group(2))
+                     for m in re.finditer(r"^###\s+.*\(`([a-z][a-z0-9-]*)`\s+—\s+(\d+)\)",
+                                          readme, re.M)}
+        readme_bad = []
+        for ns, n in sorted(stated_ns.items()):
+            actual = len(countable.get(ns, []))
+            if n != actual:
+                readme_bad.append(f"{ns}: README says {n}, actual {actual}")
+        # A namespace with apps that README never mentions is the miss that hid
+        # my-software-showcase; report it as drift, not as a clean pass.
+        for ns, apps in sorted(countable.items()):
+            if ns not in stated_ns and ns not in ("storage", "backup", "cert-manager",
+                                                  "flux-system", "default",
+                                                  "my-software-development",
+                                                  "my-software-production"):
+                readme_bad.append(f"{ns}: {len(apps)} apps, no README category block")
+        m_tot_r = re.search(r"~(\d+)\s+apps\s+across", readme)
+        if not m_tot_r:
+            DEGRADED.record("s3_application_docs", "README.md '~N apps across'",
+                            "phrase not found — stated total not compared")
+        elif int(m_tot_r.group(1)) != real_apps:
+            readme_bad.append(f"total: README says ~{m_tot_r.group(1)}, actual {real_apps}")
+        if readme_bad:
+            f.add(WARNING, "README.md Applications section disagrees with the cluster: "
+                           + "; ".join(readme_bad[:8]))
+            cprint(C.YELLOW, f"  {WARNING} README.md app counts: {len(readme_bad)} wrong")
+            for r in readme_bad[:8]:
+                cprint(C.YELLOW, f"      - {r}")
+        elif stated_ns:
+            cprint(C.GREEN, f"  {OK} README.md per-namespace counts match "
+                            f"({len(stated_ns)} categories)")
 
     # Check namespace sections exist in the doc
     expected_namespaces = [
