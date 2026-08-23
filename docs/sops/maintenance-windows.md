@@ -136,7 +136,11 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   subcommand (`decisions`, `list`, `brief`, `reconcile`, `resolve`, `decide`,
   `ack`, `tick`, `run`) takes the global form only.
   Issue fields: `key` (plan_id|finding_id, required), `kind`
-  (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|`window_warning`),
+  (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|`window_warning`
+  — an unknown `kind` matches no `KIND_DEFAULTS`, so `action` used to fall back
+  to `ack` and a go/no-go became a passive notice nobody was asked to decide;
+  since 2026-08-23 ingest coerces an unknown kind to the nearest valid one and
+  warns on stderr rather than accepting it silently),
   `source`, `severity` (`info`|`warning`|`critical`), `title`, `action` (csv;
   containing `approve`/`deny` marks it a decision), + optional `component`,
   `target`, `window`, `plan_path`, `detail`, `url`. **Decision → execution:**
