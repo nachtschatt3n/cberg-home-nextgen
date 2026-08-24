@@ -738,6 +738,30 @@ def s2_network_docs() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def _documented_name_surface(content: str) -> str:
+    """The text in which an app name counts as an ENTRY, not a mention.
+
+    docs/applications.md is a set of markdown tables whose FIRST column is the
+    app name; the remaining columns are prose that freely names other apps
+    (a Grafana dashboard, a Redis cache, the Postgres behind something else).
+    Matching an app name against the whole file therefore cannot distinguish
+    "has a row" from "is mentioned in someone else's row" — see the note at
+    the call site for the four apps that proved it.
+
+    Returns the row-head cells and the headings, newline-joined, lowercased.
+    """
+    surface: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            cells = stripped.split("|")
+            if len(cells) > 2:
+                surface.append(cells[1].strip().strip("`").lower())
+        elif stripped.startswith("#"):
+            surface.append(stripped.lstrip("#").strip().lower())
+    return "\n".join(surface)
+
+
 def s3_application_docs() -> tuple[str, Findings, str]:
     section_header(3, 8, "Application Documentation")
     f = Findings()
@@ -779,9 +803,31 @@ def s3_application_docs() -> tuple[str, Findings, str]:
                 parent = app[: -len(suf)]
                 # Only exempt when the PARENT is itself a real app AND documented —
                 # otherwise a genuinely undocumented datastore would hide too.
-                if parent in all_app_names and parent.lower() in content.lower():
+                # "Documented" means the parent has an ENTRY, not a passing
+                # mention; an exemption keyed on prose would let a datastore
+                # ride in on a name that appears in some other app's row.
+                if parent in all_app_names and parent.lower() in _documented_name_surface(content):
                     return True
         return False
+
+    # The surface an app must appear IN to count as documented: the first cell
+    # of each table row, plus markdown headings — i.e. the places that actually
+    # declare "this doc has an entry for X".
+    #
+    # NOTE (2026-08-24): this used to search the WHOLE document — the same
+    # false-negative family as the fuzzy ">4 char word" clause it replaced.
+    # That earlier fix narrowed WHAT counts as a hit and never questioned
+    # WHERE a hit was allowed to land, so the blind spot survived it.
+    # An app counted as documented when its name appeared anywhere, including
+    # inside a DIFFERENT app's prose. Verified by mutation: delete grafana's,
+    # penpot's, superset's or jellyfin's entire row and the old test still
+    # reported them documented (grafana survives on a mention in the
+    # pellet-price-monitor row; the others likewise). Scoping to row-heads
+    # catches all four and flags ZERO extra apps out of the 108 non-infra apps
+    # in the live inventory — so this removes a blind spot without trading it
+    # for false positives. Pinned by runbooks/tests/test-doc-check-row-scope.py.
+    doc_surface = _documented_name_surface(content)
+    doc_surface_nosep = doc_surface.replace("-", "").replace(" ", "")
 
     undocumented = []
     for ns, apps in cluster_apps.items():
@@ -791,22 +837,15 @@ def s3_application_docs() -> tuple[str, Findings, str]:
                 continue
             if _is_documented_subcomponent(app):
                 continue
-            # Check if app name (or normalized form) appears in the doc
             app_lower = app.lower()
             app_nohyphen = app_lower.replace("-", "")
-            # Check various forms: exact, without hyphens, name part only
-            app_words = app_lower.replace("-", " ")
-            # NOTE: a fuzzy "any word longer than 4 chars matches" clause used to
-            # live here. It made this check a false-negative machine —
-            # `sweep-history` "passed" because the word "history" appears
-            # somewhere in the doc, `prometheus-pushgateway` because
-            # "prometheus" does, `crash-ghost-reaper` because "crash" does.
-            # Four genuinely undocumented apps were hidden behind it while the
-            # section reported "Undocumented apps: 0". Match on the real name
-            # only: exact, or with hyphens/spaces stripped.
+            # Substring WITHIN a row-head is deliberate, not laxity: entries are
+            # legitimately written as `ingress-nginx (internal)` or split across
+            # `wazuh-indexer` / `wazuh-manager-master`. What is excluded is the
+            # body prose, which is where the false negatives lived.
             found = (
-                app_lower in content.lower()
-                or app_nohyphen in content.lower().replace("-", "").replace(" ", "")
+                app_lower in doc_surface
+                or app_nohyphen in doc_surface_nosep
             )
             if not found:
                 undocumented.append(f"{ns}/{app}")
