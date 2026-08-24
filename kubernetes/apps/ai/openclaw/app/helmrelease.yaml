@@ -392,6 +392,43 @@ spec:
                 # 2026.6.11 declares peerDependencies openclaw>=2026.6.11) and the
                 # host bundles the matching plugin-sdk. Keep all three on the same version.
                 install_npm openclaw@2026.6.11
+
+                # PATCH (2026-08-24): key-order-independent reply-session revision.
+                # Upstream 2026.6.11 computes the session-init conflict revision as
+                # JSON.stringify(entry); key-order skew between the disk snapshot
+                # and the in-memory store made identical entries compare unequal,
+                # wedging DMs in a permanent "reply session initialization
+                # conflicted" retry loop until a process restart (hit 3x
+                # 2026-08-22..24). Re-applied after every npm install because the
+                # install overwrites dist/. WARNs instead of failing when the
+                # function is not found (i.e. after an upgrade past 2026.6.11 —
+                # then verify upstream fixed it and drop this block).
+                python3 - <<'REVPATCH'
+                import glob, re, sys
+                hits = 0
+                for f in glob.glob("/home/node/.openclaw/lib/node_modules/openclaw/dist/session-accessor-*.js"):
+                    src = open(f).read()
+                    if "OPENCLAW_STABLE_REVISION_PATCH" in src:
+                        hits += 1; continue
+                    m = re.search(r"function createReplySessionInitializationRevision\(entry\)\s*\{\s*return JSON\.stringify\(entry \?\? null\);\s*\}", src)
+                    if not m:
+                        continue
+                    repl = (
+                        "function createReplySessionInitializationRevision(entry) {\n"
+                        "\t/* OPENCLAW_STABLE_REVISION_PATCH: see helmrelease init */\n"
+                        "\tconst stable = (v) => {\n"
+                        "\t\tif (Array.isArray(v)) return \"[\" + v.map(stable).join(\",\") + \"]\";\n"
+                        "\t\tif (v && typeof v === \"object\") return \"{\" + Object.keys(v).sort().map((k) => JSON.stringify(k) + \":\" + stable(v[k])).join(\",\") + \"}\";\n"
+                        "\t\treturn JSON.stringify(v) ?? \"null\";\n"
+                        "\t};\n"
+                        "\treturn stable(entry ?? null);\n"
+                        "}")
+                    open(f, "w").write(src[:m.start()] + repl + src[m.end():])
+                    hits += 1
+                    print("stable-revision patch applied:", f)
+                if not hits:
+                    print("WARN: stable-revision patch target not found — openclaw upgraded past 2026.6.11? Verify upstream fix and drop the patch block.")
+                REVPATCH
                 install_npm @openai/codex
                 install_npm @google/gemini-cli
                 install_npm @anthropic-ai/claude-code
