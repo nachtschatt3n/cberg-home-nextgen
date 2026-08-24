@@ -1785,30 +1785,64 @@ log_section "Section 18: Network Infrastructure (UniFi)"
         unifictl local health get 2>&1 || echo "UniFi controller not accessible"
         echo ""
 
+        # The subcommands are `device list` / `client list`, NOT `devices` /
+        # `clients`. Until 2026-08-24 this block called the plural forms, which
+        # unifictl rejects with "unrecognized subcommand". stderr was sent to
+        # /dev/null and the JSON parse fell into a bare `except: print(0)`, so
+        # the offline-device check reported ZERO OFFLINE DEVICES on every run
+        # since it was written — a green verdict no device state could change —
+        # and the client counts printed "?" forever. Verify with:
+        #   unifictl local device list -o json | python3 -c 'import sys,json;
+        #     print(len(json.load(sys.stdin)["data"]))'
         echo "=== Devices ==="
-        unifictl local devices 2>/dev/null || echo "Unable to list devices"
+        unifictl local device list 2>/dev/null || echo "Unable to list devices"
         echo ""
 
-        OFFLINE_DEVICES=$(unifictl local devices -o json 2>/dev/null | python3 -c "
+        # Emit "total offline" so an empty/failed response is distinguishable
+        # from a genuine 0. A count alone cannot tell those apart, and that is
+        # exactly how the previous version scored green while blind.
+        UNIFI_DEV_TALLY=$(unifictl local device list -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     items = d.get('data', d) if isinstance(d, dict) else d
-    offline = [x.get('name','?') for x in items if x.get('state') != 1]
-    print(len(offline))
-    for o in offline: print(' ', o)
-except: print(0)
-" 2>/dev/null | head -1 | tr -d '\r\n' || echo "0")
+    if not isinstance(items, list):
+        raise ValueError('unexpected payload shape')
+except Exception:
+    print('QUERY-FAILED')
+    raise SystemExit(0)
+offline = [x.get('name', '?') for x in items if x.get('state') != 1]
+print(str(len(offline)) + ' ' + str(len(items)))
+for o in offline:
+    print('  offline: ' + o, file=sys.stderr)
+" 2>/dev/null | head -1 | tr -d '\r\n' || echo "QUERY-FAILED")
 
-        if [ "${OFFLINE_DEVICES:-0}" -gt 0 ] 2>/dev/null; then
-            log_warning "UniFi offline devices: $OFFLINE_DEVICES"
-            add_major_issue "UniFi devices offline: $OFFLINE_DEVICES"
+        if [ "$UNIFI_DEV_TALLY" = "QUERY-FAILED" ] || [ -z "$UNIFI_DEV_TALLY" ]; then
+            log_warning "UniFi device query failed - offline-device check did NOT run"
+            add_minor_issue "UniFi offline-device check could not run (unifictl device list returned nothing) - device state unverified this cycle"
             UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+        else
+            OFFLINE_DEVICES=${UNIFI_DEV_TALLY%% *}
+            UNIFI_DEV_TOTAL=${UNIFI_DEV_TALLY##* }
+            echo "Devices seen by unifictl: ${UNIFI_DEV_TOTAL} (offline: ${OFFLINE_DEVICES})"
+            if [ "${UNIFI_DEV_TOTAL:-0}" -eq 0 ] 2>/dev/null; then
+                log_warning "UniFi controller returned an EMPTY device list - nothing was measured"
+                add_minor_issue "UniFi device list empty - offline-device check has no denominator this cycle"
+                UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+            elif [ "${OFFLINE_DEVICES:-0}" -gt 0 ] 2>/dev/null; then
+                log_warning "UniFi offline devices: $OFFLINE_DEVICES/$UNIFI_DEV_TOTAL"
+                add_major_issue "UniFi devices offline: $OFFLINE_DEVICES of $UNIFI_DEV_TOTAL"
+                UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+            fi
         fi
+        echo ""
 
+        # --limit defaults to 30, which silently truncates the wireless list on
+        # this site (74+ IoT clients on one SSID alone) and made the printed
+        # count a cap, not a measurement.
         echo "=== Clients ==="
-        WIRED=$(unifictl local clients --wired -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
-        WIRELESS=$(unifictl local clients --wireless -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
+        WIRED=$(unifictl local client list --wired --limit 500 -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
+        WIRELESS=$(unifictl local client list --wireless --limit 500 -o json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',d)))" 2>/dev/null || echo "?")
         echo "Wired clients: $WIRED  |  Wireless clients: $WIRELESS"
         echo ""
     else
@@ -1925,7 +1959,6 @@ for c in rows(sys.stdin.read()):
         echo ""
 
         # Device reboots in last 24h (uptime regression)
-        # CSV cols after keep(name,_time): ,_result,table,name,_time  (indices 3,4)
         echo "--- Device Reboots (last 24h, from InfluxDB) ---"
         # A SCRAPE GAP is indistinguishable from a reboot in derivative(uptime):
         # the series just restarts lower. Cross-check every candidate against the
@@ -1933,36 +1966,82 @@ for c in rows(sys.stdin.read()):
         # reboot can have happened inside it and the dip was a collection
         # artifact. (2026-08-14: two APs "rebooted" 10 ms apart during a UniFi
         # controller flap; their real uptimes were 659h and 179h.)
-        LONG_UPTIME_NAMES=$(influx_query 'from(bucket:"default") |> range(start: -15m) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> last() |> filter(fn: (r) => r._value > 86400) |> keep(columns: ["name"])' \
-        | python3 -c "
-${PYPARSE}
-print(chr(10).join(c[3] for c in rows(sys.stdin.read()) if len(c) > 3))" 2>/dev/null || true)
-        export LONG_UPTIME_NAMES
+        #
+        # PARSE BY CSV HEADER NAME, NEVER BY COLUMN INDEX. Flux orders keep()
+        # output by its own rules, not by the order you asked for:
+        #   keep(["name"])          -> ,result,table,name          (name at 3)
+        #   keep(["name","_time"])  -> ,result,table,_time,name    (name at 4)
+        # The 2026-08-14 guard read index 3 for the name in BOTH queries, so on
+        # the two-column one it compared a TIMESTAMP against a set of device
+        # names. Nothing ever matched, nothing was ever dropped, and the guard
+        # was 100% inert from the day it shipped — while the printed line read
+        # "<timestamp> rebooted around <name>", backwards, which was the visible
+        # tell. Found 2026-08-24: 3 APs with 37d/37d/17d uptime reported as
+        # having rebooted, all at the same nanosecond.
+        INFLUX_BY_HEADER="import sys
+def table(text):
+    hdr = None
+    for l in (text or '').replace('\r', '').split('\n'):
+        l = l.strip()
+        if not l or l.startswith('#'):
+            continue
+        cells = [c.strip() for c in l.split(',')]
+        if l.startswith(',result'):
+            hdr = cells
+            continue
+        if hdr is not None:
+            yield dict(zip(hdr, cells))
+"
+        # Baseline uptimes are fetched WITHOUT the >24h Flux filter so that an
+        # empty result is unambiguously a MEASUREMENT FAILURE (InfluxDB down,
+        # UnPoller not writing) and not "every device is freshly booted". With
+        # the filter pushed into Flux those two cases are identical, and the
+        # first one would silently turn the guard off again.
+        UPTIME_CSV=$(influx_query 'from(bucket:"default") |> range(start: -15m) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> last() |> keep(columns: ["name","_value"])' 2>/dev/null || true)
+        export UPTIME_CSV
         REBOOT_OUTPUT=$(influx_query 'from(bucket:"default") |> range(start: -24h) |> filter(fn: (r) => (r._measurement == "uap" or r._measurement == "usw") and r._field == "uptime") |> derivative(unit: 30s, nonNegative: false) |> filter(fn: (r) => r._value < -1000) |> keep(columns: ["name","_time"])' \
         | python3 -c "
-${PYPARSE}
+${INFLUX_BY_HEADER}
 import os
-stable = {n.strip() for n in os.environ.get('LONG_UPTIME_NAMES', '').splitlines() if n.strip()}
-raw = [c for c in rows(sys.stdin.read()) if len(c) >= 4]
-data = [c for c in raw if c[3] not in stable]
+base = [r for r in table(os.environ.get('UPTIME_CSV', '')) if r.get('name')]
+stable = set()
+for r in base:
+    try:
+        if float(r.get('_value') or 0) > 86400:
+            stable.add(r['name'])
+    except ValueError:
+        pass
+raw = [r for r in table(sys.stdin.read()) if r.get('name')]
+data = [r for r in raw if r['name'] not in stable]
 dropped = len(raw) - len(data)
-if not data:
+if not base:
+    print('  BASELINE-UNAVAILABLE: InfluxDB returned no current uptimes, so the')
+    print('  ' + str(len(raw)) + ' uptime dip(s) in the window could NOT be cross-checked')
+elif not data:
     print('None detected')
 else:
-    for c in data:
-        print(f'  {c[3]} rebooted around {c[4] if len(c) > 4 else \"?\"}')
-    print(f'Total reboots: {len(data)}')
+    for r in data:
+        nm = r['name']
+        ts = r.get('_time', '?')
+        print('  ' + nm + ' rebooted around ' + ts)
+    print('Total reboots: ' + str(len(data)))
 if dropped:
-    print(f'  ({dropped} uptime-dip candidate(s) ignored: device uptime already exceeds 24h -> scrape gap, not a reboot)')
+    print('  (' + str(dropped) + ' uptime-dip candidate(s) ignored: device uptime already exceeds 24h -> scrape gap, not a reboot)')
 ")
         echo "$REBOOT_OUTPUT"
-        REBOOT_COUNT=$(echo "$REBOOT_OUTPUT" | grep -c "rebooted" || true)
-        if [ "$REBOOT_COUNT" -gt 0 ]; then
-            log_warning "$REBOOT_COUNT UniFi device reboot(s) detected in last 24h"
-            add_minor_issue "UniFi device reboots in last 24h: $REBOOT_COUNT"
+        if echo "$REBOOT_OUTPUT" | grep -q "BASELINE-UNAVAILABLE"; then
+            log_warning "UniFi reboot detection did not run - no current uptimes from InfluxDB"
+            add_minor_issue "UniFi reboot check could not run (InfluxDB uptime baseline empty) - reboots unverified this cycle"
             UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
         else
-            echo ""
+            REBOOT_COUNT=$(echo "$REBOOT_OUTPUT" | grep -c "rebooted around" || true)
+            if [ "$REBOOT_COUNT" -gt 0 ]; then
+                log_warning "$REBOOT_COUNT UniFi device reboot(s) detected in last 24h"
+                add_minor_issue "UniFi device reboots in last 24h: $REBOOT_COUNT"
+                UNIFI_ISSUES=$((UNIFI_ISSUES + 1))
+            else
+                echo ""
+            fi
         fi
 
         # AP/SW device count sanity check — count data rows
