@@ -49,7 +49,7 @@ spec:
 # headroom over that projection, and — unlike the old 200Gi — is small enough to
 # place a replica on a SECOND node, which is the whole point of the migration.
 #
-# 75Gi -> 150Gi on 2026-08-25. That sizing was correct for ONE library and this
+# 75Gi -> 120Gi on 2026-08-25. That sizing was correct for ONE library and this
 # volume now serves TWO: adding andrea's 23,341-asset external library takes the
 # projection past the ceiling. Measured per-asset from mu's completed scan
 # (54,107 assets -> 24GiB thumbs + 33GiB encoded-video) the second library needs
@@ -59,9 +59,21 @@ spec:
 # Note what this volume holds: 100% derived data, both libraries' originals are
 # on the read-only CIFS mount. So the risk of running out is a broken scan and a
 # thumbnail-less timeline, not data loss — but Immich handles a full /data badly,
-# so size it ahead rather than at the edge. 150Gi is ~1.8x the two-library
-# projection and still small enough for two replicas on distinct nodes (~350GiB
-# free per node at the time of writing).
+# so size it ahead rather than at the edge.
+#
+# 120Gi rather than the 150Gi first attempted, because Longhorn refused that:
+#   admission webhook validator.longhorn.io denied the request:
+#   cannot schedule 80530636800 more bytes to disk ...
+# Raw free space is not the constraint — SCHEDULABLE space is. With
+# storage-over-provisioning-percentage=100, a disk may hold at most its own size
+# in provisioned volumes, and two of three nodes are close to that ceiling
+# (nuc14-01 858G/930G, nuc14-02 872G/930G, nuc14-03 622G/930G). An expansion must
+# fit on BOTH replica disks, so +75Gi was impossible while +45Gi fits with margin.
+# 120Gi is still ~1.5x the two-library projection.
+#
+# The real constraint is cluster-wide: two of three nodes are near the
+# provisioning ceiling, so the next volume that needs growing may not be able to.
+# That wants addressing on its own, not at the moment something is filling up.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -71,7 +83,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 150Gi
+      storage: 120Gi
   storageClassName: longhorn
 ---
 # Machine-learning model cache (CLIP + face-detection + OCR ONNX models, plus
