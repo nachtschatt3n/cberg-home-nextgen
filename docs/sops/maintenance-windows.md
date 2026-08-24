@@ -136,11 +136,17 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   subcommand (`decisions`, `list`, `brief`, `reconcile`, `resolve`, `decide`,
   `ack`, `tick`, `run`) takes the global form only.
   Issue fields: `key` (plan_id|finding_id, required), `kind`
-  (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|`window_warning`
-  — an unknown `kind` matches no `KIND_DEFAULTS`, so `action` used to fall back
-  to `ack` and a go/no-go became a passive notice nobody was asked to decide;
-  since 2026-08-23 ingest coerces an unknown kind to the nearest valid one and
-  warns on stderr rather than accepting it silently),
+  (`go_no_go`|`blocked_plan`|`auto_update_revert`|`auto_update_blocked`|
+  `window_warning`|`finding`|`reverted` — the last two are emitted by the sweep
+  and the auto-updater respectively and were simply never written down until
+  2026-08-24. An unknown `kind` matches no `KIND_DEFAULTS`, so `severity` and
+  `action` fall back to the generic defaults; when the emitter also omits
+  `action` that means `ack`, and a go/no-go silently becomes a passive notice
+  nobody is asked to decide. Emitters that pass `action` explicitly dodge it —
+  which is why the five `kind=plan` rows in the store still got
+  `needs_decision=1`; the trap was latent, not universal. Since 2026-08-23
+  ingest coerces a genuinely unknown kind to the nearest valid one and warns on
+  stderr rather than accepting it silently),
   `source`, `severity` (`info`|`warning`|`critical`), `title`, `action` (csv;
   containing `approve`/`deny` marks it a decision), + optional `component`,
   `target`, `window`, `plan_path`, `detail`, `url`. **Decision → execution:**
