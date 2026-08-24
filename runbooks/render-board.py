@@ -239,12 +239,12 @@ def collect(cur, cycle_id: str | None) -> dict:
     # are operator-acknowledged ARs — neither is an action item (the 44
     # "SOP … compliant" doc rows of cycle b2410887 rendered as 44 MEDIUMs).
     cur.execute(
-        """SELECT finding_id, section, title FROM sweep_findings
+        """SELECT finding_id, section, title, severity FROM sweep_findings
            WHERE cycle_id=%s AND status='new' AND section != 'security'
              AND severity NOT IN ('clean', 'accepted')
            ORDER BY section, finding_id""", (cycle_id,))
-    out["new_other"] = [{"id": f, "section": sec, "title": t}
-                        for f, sec, t in cur.fetchall()]
+    out["new_other"] = [{"id": f, "section": sec, "title": t, "severity": sev}
+                        for f, sec, t, sev in cur.fetchall()]
     cur.execute(
         """SELECT COALESCE(metadata->>'subsection', 'other') AS grp, count(*)
            FROM sweep_findings
@@ -329,7 +329,14 @@ def render(d: dict, w: dict) -> str:
         L.append(f"{n:>3}. **[{rating}]** `{category}` — {desc}")
 
     planned = d.get("planned") or planned_findings()
-    if not d["criticals"]:
+    # Operational criticals from non-security sections (health, version, ...).
+    # They carry no `risk_tier` -- that contextual model is security-only -- so
+    # before this they fell into the hardcoded MEDIUM bucket below, and a
+    # cluster component actively degrading NOW ranked beneath a grouped doc
+    # line. Stored severity is the authority for non-security sections.
+    ops_criticals = [f_ for f_ in d.get("new_other", [])
+                     if f_.get("severity") == "critical"]
+    if not d["criticals"] and not ops_criticals:
         L.append("*(no CRITICAL items — nothing pages; list starts at HIGH)*")
         L.append("")
     for c in d["criticals"]:
@@ -339,6 +346,9 @@ def render(d: dict, w: dict) -> str:
             pid, win = planned[c["id"]]
             note = f"  *(planned: {pid} @ {win})*"
         item("CRITICAL", "security/exposed+exploited", _desc(c["title"]) + note)
+    for f_ in ops_criticals:
+        # never collapsed -- same contract as the security criticals above
+        item("CRITICAL", f"{f_['section']}/critical", _desc(f_["title"]))
     high_planned = [h for h in d["high"] if h["id"] in planned]
     for h in [h for h in d["high"] if h["id"] not in planned]:
         # category: real exposure when recorded; else derive from subsection
@@ -364,6 +374,8 @@ def render(d: dict, w: dict) -> str:
     # 44 individual `doc/new` rows on the 2026-08-18 board proved the bypass).
     _by_sec: dict[str, list] = {}
     for f_ in d.get("new_other", []):
+        if f_.get("severity") == "critical":
+            continue      # already emitted individually as CRITICAL above
         _by_sec.setdefault(f_["section"], []).append(f_)
     for sec in sorted(_by_sec):
         items_ = _by_sec[sec]
