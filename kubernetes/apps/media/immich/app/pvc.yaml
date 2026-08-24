@@ -45,9 +45,23 @@ spec:
 # case this volume is re-generatable — it is not precious data.
 # Size from measurement, not guesswork: at 69% of thumbnails and 53% of video
 # transcodes complete, thumbs were 13GiB and encoded-video 21GiB, projecting to
-# ~19GiB + ~41GiB = ~60GiB at full scan (32.6GiB in use today). 75Gi gives ~25%
+# ~19GiB + ~41GiB = ~60GiB at full scan (32.6GiB in use today). 75Gi gave ~25%
 # headroom over that projection, and — unlike the old 200Gi — is small enough to
 # place a replica on a SECOND node, which is the whole point of the migration.
+#
+# 75Gi -> 150Gi on 2026-08-25. That sizing was correct for ONE library and this
+# volume now serves TWO: adding andrea's 23,341-asset external library takes the
+# projection past the ceiling. Measured per-asset from mu's completed scan
+# (54,107 assets -> 24GiB thumbs + 33GiB encoded-video) the second library needs
+# ~10GiB + ~14GiB, for ~82GiB total against a 73.3GiB filesystem. It was filling
+# at 5.35 GiB/hour with 2.7 hours of headroom left when the alert fired.
+#
+# Note what this volume holds: 100% derived data, both libraries' originals are
+# on the read-only CIFS mount. So the risk of running out is a broken scan and a
+# thumbnail-less timeline, not data loss — but Immich handles a full /data badly,
+# so size it ahead rather than at the edge. 150Gi is ~1.8x the two-library
+# projection and still small enough for two replicas on distinct nodes (~350GiB
+# free per node at the time of writing).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -57,7 +71,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 75Gi
+      storage: 150Gi
   storageClassName: longhorn
 ---
 # Machine-learning model cache (CLIP + face-detection + OCR ONNX models, plus
