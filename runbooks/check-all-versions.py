@@ -444,6 +444,25 @@ def resolve_bjw_s_chart_latest(chart_name: str) -> Optional[str]:
     return latest
 
 
+def _pad_to_same_length(a: Tuple[int, ...], b: Tuple[int, ...], *,
+                        minimum: int = 0) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """Right-pad two version tuples with zeros so they are directly comparable.
+
+    `parse_version` deliberately returns as many numeric components as the tag
+    actually has (a 4-component Plex build must not be truncated). The cost is
+    that comparisons and unpacks meet variable arity: `1.38` → (1, 38) is not
+    the same shape as `1.38.0` → (1, 38, 0), even though it is the same
+    release. Zero-padding is the semantically-correct reconciliation — it
+    equates only the formatting difference and leaves every real ordering
+    intact, including 4+ component builds.
+
+    `minimum` guarantees a floor (3 for major/minor/patch unpacking).
+    """
+    n = max(len(a), len(b), minimum)
+    pad = lambda t: tuple(t) + (0,) * (n - len(t))  # noqa: E731
+    return pad(a), pad(b)
+
+
 # Color codes for terminal output
 class Colors:
     RESET = '\033[0m'
@@ -1481,6 +1500,14 @@ class VersionChecker:
         cur = self.parse_version(current)
         lat = self.parse_version(latest)
         if cur is not None and lat is not None:
+            # Compare PADDED. parse_version returns as many components as the
+            # tag has, so `1.38` → (1,38) and `1.38.0` → (1,38,0); raw tuple
+            # comparison makes the shorter one strictly smaller and reports
+            # the same release as an available update (the recurring busybox
+            # `1.38 → 1.38.0` no-op). Padding is length-agnostic, so a real
+            # 4-component update (Plex 1.43.3.10861 → …10896) still compares
+            # greater — this suppresses only the formatting difference.
+            cur, lat = _pad_to_same_length(cur, lat)
             return lat > cur
         # Non-semver on at least one side: keep prior behaviour (surface the
         # difference) so date-tagged / opaque real updates aren't hidden.
@@ -1575,8 +1602,17 @@ class VersionChecker:
             result['description'] = 'Version format not recognized'
             return result
         
-        current_major, current_minor, current_patch = current_parsed
-        latest_major, latest_minor, latest_patch = latest_parsed
+        # Pad before unpacking. parse_version returns ALL numeric components,
+        # so a two-part tag (`python:3.11-slim` → (3, 11), `busybox:1.38`)
+        # yields a 2-tuple and a bare 3-way unpack raises ValueError. That
+        # crashed the ENTIRE version check at the first such image (mcpo's
+        # python:3.11-slim, 2026-08-24) — and since a Python traceback exits
+        # 1, exactly like "found findings", sweep-run scored the aborted run
+        # as complete and auto-closed 25 still-open findings.
+        current_parsed, latest_parsed = _pad_to_same_length(
+            current_parsed, latest_parsed, minimum=3)
+        current_major, current_minor, current_patch = current_parsed[:3]
+        latest_major, latest_minor, latest_patch = latest_parsed[:3]
 
         # Guard: only classify as an update if `latest` is actually greater
         # OVERALL. The component-wise elif chain below would otherwise
@@ -1604,9 +1640,17 @@ class VersionChecker:
             result['complexity'] = 'low'
             result['description'] = f'Patch version update: {current_major}.{current_minor}.{current_patch} → {current_major}.{current_minor}.{latest_patch}'
         else:
-            result['type'] = 'unknown'
-            result['description'] = 'Versions appear equal or downgrade detected'
-        
+            # Major/minor/patch all equal, yet the guard above already proved
+            # latest > current OVERALL — so the difference lives in a 4th or
+            # later component: a vendor BUILD bump (Plex
+            # `1.43.3.10861` → `1.43.3.10896`). Calling that "versions appear
+            # equal" described a real, reportable update as a non-event.
+            result['type'] = 'patch'
+            result['complexity'] = 'low'
+            result['description'] = (
+                f'Build update: {".".join(str(x) for x in current_parsed)} → '
+                f'{".".join(str(x) for x in latest_parsed)}')
+
         return result
     
     def fetch_release_notes(self, repo_owner: str, repo_name: str, tag: str) -> Optional[Dict[str, Any]]:
@@ -3690,7 +3734,37 @@ def main(argv: list[str] | None = None):
     if args.postgres_dsn:
         print(f"{Colors.GREEN}Sweep-history Postgres: enabled (cycle={cycle_id_from_env('<new>')}){Colors.RESET}")
 
-    checker.check_all()
+    try:
+        checker.check_all()
+    except Exception as exc:  # noqa: BLE001
+        # A CRASH IS NOT A CLEAN RUN. sweep-run.py scores a step as
+        # "completed" on rc in (0, 1, 2) — and an uncaught Python traceback
+        # exits 1, indistinguishable from the ordinary "found findings" rc.
+        # So without this handler an abort partway through the scan let the
+        # auto-close pass conclude that every finding the scan never reached
+        # had been fixed: 25 open findings were resolved that way on
+        # 2026-08-24, after the scan died four apps in. Record the veto on the
+        # shared cycle row (the only channel that survives this process) and
+        # exit on a code sweep-run cannot mistake for a completed run.
+        import traceback
+        traceback.print_exc()
+        try:
+            with FindingsWriter(
+                dsn=args.postgres_dsn,
+                section="version",
+                cycle_id=cycle_id_from_env(),
+                trigger=trigger_from_env(),
+                git_head=git_head(),
+            ) as writer:
+                writer.mark_incomplete(
+                    f"version check aborted: {type(exc).__name__}: {exc}")
+                writer.close(verdict="red")
+        except Exception as veto_exc:  # noqa: BLE001
+            print(f"{Colors.RED}CRITICAL: the crash veto could not be "
+                  f"recorded ({type(veto_exc).__name__}: {veto_exc}) — open "
+                  f"version findings may be auto-closed by this cycle and "
+                  f"must be re-verified by hand{Colors.RESET}")
+        return 3
 
     # Generate report
     report = checker.generate_markdown_report()
@@ -3738,4 +3812,6 @@ def main(argv: list[str] | None = None):
 
 
 if __name__ == '__main__':
-    main()
+    # PROPAGATE the exit code. `main()` bare discarded it, so the crash
+    # veto's `return 3` would still have exited 0 and read as a clean run.
+    sys.exit(main() or 0)
