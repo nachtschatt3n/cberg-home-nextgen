@@ -1,0 +1,119 @@
+# finding-triage-policy — how the sweep routes a CRITICAL finding.
+#
+# WHY THIS EXISTS
+# The "no cracks" coverage guarantee (daily-operation rule 4d0) proves that every
+# actionable VERSION UPDATE lands in a lane. Nothing did the same for findings
+# that are not version updates, so they simply sat. On 2026-08-24 a frigate
+# memory leak sat at 98.6% of its limit with `action: NULL` and no plan, no
+# window and no owner — it was reported daily and routed nowhere. This file
+# extends the same guarantee to every critical finding.
+#
+# MODEL
+# Each open critical finding is assigned exactly one lane:
+#
+#   COVERED   the finding is already handled by the update pipeline (its
+#             component has an AUTO / PLAN / REBUILD lane). Do nothing — acting
+#             here would duplicate or fight the maintenance window.
+#   FIX_NOW   remediation is additive, revertible by a single git revert, and
+#             restarts nothing. The sweep may apply it unattended.
+#   PLAN      needs a maintenance window: anything that restarts a workload,
+#             touches data or storage, changes auth, or has blast radius.
+#   DECIDE    needs a human judgement the sweep must not make for them
+#             (accept the risk, change a product behaviour, spend money).
+#   CRACK     matched nothing. MUST be zero — a critical finding with no lane is
+#             the exact failure this policy exists to prevent, so it pages.
+#
+# FAIL-SAFE, DELIBERATELY ASYMMETRIC
+# `PLAN` is the default for anything unmatched, and FIX_NOW requires an explicit
+# rule. A missed auto-fix costs a maintenance window; a wrong one runs unattended
+# at 04:00 against a live cluster. If this file is missing or unparseable the
+# triage tool routes EVERYTHING to PLAN and says so.
+#
+# Edit -> commit -> push. Git-tracked on purpose: a list of things a robot may
+# change unattended must be code-reviewed, not a mutable DB row. Bump `version`.
+version: "2026.08.24.1"
+
+# ── FIX_NOW: the only remediations the sweep may apply by itself ─────────────
+# Each entry names a finding SHAPE and the deterministic remediation for it. The
+# sweep never invents a fix — if a critical finding does not match one of these
+# recipes it cannot be auto-fixed, however obvious the fix looks.
+#
+#   match_section : sweep section the finding came from (security|health|doc|slo|coverage)
+#   match_title   : shell-style glob against the finding title, case-insensitive
+#   remediation   : the registered recipe name; the tool refuses an unknown one
+#   why_safe      : the argument that this cannot hurt. Reviewers check THIS.
+fix_now:
+  - id: doc-count-drift
+    match_section: doc
+    match_title: "*summary count*"
+    remediation: doc_count_sync
+    why_safe: >-
+      Rewrites a count in docs/applications.md to match what the repository
+      already contains. Touches no cluster object, changes no behaviour, and a
+      wrong value is visible in the diff and revertible in one commit.
+
+  - id: missing-alert-rule
+    match_section: health
+    match_title: "*no alert rule*"
+    remediation: add_prometheus_rule
+    why_safe: >-
+      Adds a PrometheusRule. Purely additive observability: it cannot restart a
+      workload, and the worst failure is a noisy or silent alert, not an outage.
+      Prometheus rejects a malformed rule at load without affecting existing ones.
+
+# ── COVERED: owned by another pipeline — record the lane, take no action ────
+# These findings are real, but something else is already accountable for them.
+# Routing them to PLAN would create a duplicate plan racing the pipeline that
+# already owns the change.
+covered:
+  - id: image-or-version-bump
+    match_title: "*bump the image*|*newer upstream tag*|*update available*"
+    reason: >-
+      Version bumps belong to the update pipeline: safe ones apply at Step 0 of
+      the next maintenance window, held ones get an upgrade-planner-agent. This
+      is exactly how the uptime-kuma CVE finding of 2026-08-24 was already fixed
+      five hours after it was raised — the finding looked stuck only because
+      nothing recorded who owned it.
+
+# ── PLAN: always a maintenance window, never unattended ─────────────────────
+# Listed explicitly rather than relying on the default, so the reasoning is
+# recorded where the next person will look for it.
+plan:
+  - id: memory-limit-change
+    match_title: "*memory limit*"
+    reason: >-
+      Changing resources rewrites the pod spec and therefore RESTARTS the
+      container. On an NVR that is a recording gap; on a database it is a
+      failover. Restarts belong in a window, even when the edit is one line.
+
+  - id: storage
+    match_title: "*pvc*|*volume*|*longhorn*|*cifs*|*smb*"
+    reason: >-
+      Storage is the one place a mistake is unrecoverable. docs/sops/storage-safety.md
+      requires a 3-step pre-flight and, for shared-fs classes, explicit operator
+      go/no-go. Never unattended, no exceptions.
+
+  - id: certificate-or-auth
+    match_title: "*certificate*|*oidc*|*authentik*|*token*|*secret*"
+    reason: >-
+      Auth changes lock people out when wrong, and the failure is often only
+      visible at the next login rather than immediately after the change.
+
+# ── DECIDE: hand to the operator, do not act ────────────────────────────────
+decide:
+  - id: accepted-risk-candidate
+    match_title: "*exposed*|*without auth*|*publicly reachable*"
+    reason: >-
+      Exposure findings are a posture question, not a defect. The answer is an
+      operator decision (accept and register an AR, or close the exposure), and
+      the sweep must not quietly pick one.
+
+  - id: eol-component
+    match_title: "*end of life*|*EOL*|*no longer maintained*"
+    reason: >-
+      Replacing an unmaintained component is a project, not a fix.
+
+# ── Default for anything unmatched ──────────────────────────────────────────
+# PLAN, never FIX_NOW. An unmatched critical finding still gets an owner and a
+# window; it just does not get touched automatically.
+default_lane: PLAN

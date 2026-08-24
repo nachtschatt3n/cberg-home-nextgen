@@ -288,6 +288,54 @@ needs their decision, and what got auto-fixed.
       `maintenance-window-agent`'s job (vets interference + side effects,
       sequences, operator go/no-go). The sweep only plans + schedules + reports.
 
+4e. **TRIAGE EVERY CRITICAL FINDING — the no-cracks guarantee, extended.**
+    Rule 4d0 proves every actionable *version update* lands in a lane. Nothing
+    did the same for findings that are NOT version updates, and they simply sat:
+    on 2026-08-24 a frigate memory leak sat at 98.6% of its limit with
+    `action` NULL, no plan, no window and no owner, re-reported every single day.
+    Close that gap:
+
+        .venv/bin/python3 runbooks/finding-triage.py --severity critical \
+          --coverage-json <coverage.py --json output from 4d0> \
+          --record --json
+        # cron-triggered sweeps only, never a manual `operation sweep`:
+        #   add --apply-fixes   (same SWEEP_TRIGGER=cron gate as auto-update.py)
+
+    Every open critical finding is assigned exactly one lane, and the lane is
+    written back onto the finding (`action`), because `action` NULL is precisely
+    what made frigate invisible — a side report nobody reads would reproduce it.
+
+    - **COVERED** — another pipeline already owns it (a version bump belongs to
+      the update lanes). Report it, do nothing. Acting here would race the
+      maintenance window and double-apply.
+    - **FIX_NOW** — the policy explicitly allows an additive, revertible,
+      restarts-nothing remediation. Applied here on cron runs. This is the ONE
+      way the sweep may now change something; everything else stays read-only.
+    - **PLAN** — needs a window. **Dispatch an `upgrade-planner-agent` per
+      finding** (parallel, same as 4d), briefed with the finding id, title,
+      evidence and why it cannot be done unattended. The planner writes a plan
+      under `runbooks/maintenance/plans/` and touches nothing.
+    - **DECIDE** — an operator judgement (accept the risk, change behaviour).
+      Ingest into OpenClaw `home-operation` as a `go_no_go` issue exactly as 4d
+      does, `source:"maintenance"`, so it gets escalating reminders instead of
+      being re-printed daily.
+    - **CRACK** — matched nothing. `no_cracks` MUST be true. If false, emit a
+      CRITICAL `coverage` finding AND page via OpenClaw: a critical finding with
+      no owner is the exact failure this rule exists to prevent.
+
+    **What may be auto-fixed is operator policy, not agent judgement.**
+    `runbooks/finding-triage-policy.yaml` is git-tracked and code-reviewed for
+    the same reason `auto-update-policy.yaml` is. Never widen it from inside a
+    sweep, and never hand-apply a fix the policy did not authorise — if the fix
+    looks obvious but has no rule, that is the design working, so write the rule
+    in a PR instead. The default for anything unmatched is PLAN, and a policy
+    that fails to load routes EVERYTHING to PLAN rather than reading as "all
+    clear".
+
+    Surface the lane counts (COVERED / FIX_NOW / PLAN / DECIDE / CRACK) in the
+    summary, and list every FIX_NOW actually applied as its own row — an
+    unattended change must never be invisible in the report.
+
 4a. **Read the synthesized findings from the dashboard API, not from
     the specialists' markdown.** Once all specialists report (or the
     8-min deadline fires), query the dashboard:
