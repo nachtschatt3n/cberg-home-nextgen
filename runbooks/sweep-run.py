@@ -133,9 +133,18 @@ def _free_port() -> int:
 
 
 def _kubectl_secret_dsn() -> str | None:
-    """Pull the WRITER_DSN out of the sweep-history secret and rewrite the
-    in-cluster Service hostname to point at localhost (assuming a
-    port-forward will exist before we use it)."""
+    """Return the sweep-history WRITER_DSN exactly as stored in the Secret.
+
+    The DSN comes back pointing at the IN-CLUSTER Service FQDN, which does not
+    resolve from this Mac. It is NOT usable as returned. The caller is
+    responsible for rewriting the host to the local port-forward — see the
+    `raw.replace(fqdn, ...)` in main(), which is the only supported way to
+    turn this value into a connectable DSN.
+
+    (This docstring previously claimed the rewrite happened here. It never
+    did, and a caller trusting that claim connects to the in-cluster FQDN and
+    fails to resolve.)
+    """
     try:
         out = subprocess.check_output(
             ["kubectl", "get", "secret", "-n", "databases", "sweep-history",
