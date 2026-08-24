@@ -574,6 +574,77 @@ def cmd_cookbooks(args):
     return 0
 
 
+def cmd_correct(args):
+    """Apply verification corrections onto recipes that are already imported.
+
+    `push` deliberately skips anything already traceable to Paperless, which is
+    what makes it safe to re-run -- so corrections need their own path. Input is
+    a list of `{paperless_key, changes, recipe}` objects; only the named recipes
+    are touched.
+    """
+    base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
+    corrections = []
+    for path in sorted(Path(args.corrections).expanduser().glob("*.json")) \
+            if Path(args.corrections).expanduser().is_dir() \
+            else [Path(args.corrections).expanduser()]:
+        corrections += json.loads(path.read_text())
+    print(f"corrections to apply: {len(corrections)}")
+
+    # map paperless_key -> slug once, rather than re-scanning per correction
+    by_key, page = {}, 1
+    while True:
+        data = _mealie("GET", f"{base}/api/recipes?page={page}&perPage=100", token)
+        for item in data.get("items", []):
+            full = _mealie("GET", f"{base}/api/recipes/{item['slug']}", token)
+            key = (full.get("extras") or {}).get("paperless_key")
+            if key:
+                by_key[key] = item["slug"]
+        if page >= data.get("total_pages", 1):
+            break
+        page += 1
+
+    organizers = OrganizerCache(base, token)
+    applied, missing, failed = 0, [], []
+    for correction in corrections:
+        key = correction.get("paperless_key")
+        slug = by_key.get(key)
+        if not slug:
+            missing.append(key)
+            continue
+        try:
+            recipe = organizers.apply(correction["recipe"])
+            current = _mealie("GET", f"{base}/api/recipes/{slug}", token)
+            live_name = current["name"]
+            current.update({k: v for k, v in recipe.items() if k != "slug"})
+            current["extras"] = {**(current.get("extras") or {}), **recipe.get("extras", {})}
+            try:
+                _mealie("PUT", f"{base}/api/recipes/{slug}", token, current)
+            except urllib.error.HTTPError as exc:
+                # The corpus holds a few dishes scanned twice, so Mealie stored the
+                # second as "<name> (1)". A correction echoes back the un-suffixed
+                # name, and renaming onto the sibling collides -- reported, as ever,
+                # as "Recipe already exists". The title change is incidental there,
+                # so fall back to the stored name. Corrections that genuinely fix a
+                # title still succeed on the first attempt.
+                if exc.code != 400 or current["name"] == live_name:
+                    raise
+                current["name"] = live_name
+                _mealie("PUT", f"{base}/api/recipes/{slug}", token, current)
+                print(f"  ! {key}: kept stored name {live_name!r} (rename collided)")
+            applied += 1
+            for change in correction.get("changes", []):
+                print(f"  ~ {key}: {change}")
+        except (urllib.error.HTTPError, urllib.error.URLError, KeyError) as exc:
+            failed.append((key, str(exc)))
+
+    print(f"\napplied={applied} not-found={len(missing)} failed={len(failed)}")
+    for key in missing:
+        print(f"  MISSING {key}")
+    for key, err in failed:
+        print(f"  FAIL {key}: {err}")
+    return 1 if failed else 0
+
+
 def cmd_status(args):
     base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
     done = imported_keys(base, token)
@@ -603,6 +674,8 @@ def main():
     images.add_argument("--force", action="store_true",
                         help="replace images that are already set")
     sub.add_parser("cookbooks", help="create one smart cookbook per source brand")
+    correct = sub.add_parser("correct", help="apply verification corrections to imported recipes")
+    correct.add_argument("corrections", help="a corrections JSON file, or a directory of them")
     sub.add_parser("status", help="show import progress")
 
     args = parser.parse_args()
@@ -611,6 +684,7 @@ def main():
         "push": cmd_push,
         "images": cmd_images,
         "cookbooks": cmd_cookbooks,
+        "correct": cmd_correct,
         "status": cmd_status,
     }[args.command](args)
 

@@ -53,6 +53,14 @@ The stored base is **4 servings**.
 | `B-2person` | 2-person card stating *"für 4 Personen alle Zutaten verdoppeln"* | double, record `extras.scaled_from` |
 | `C-bulletlist` | Marley Spoon bullets under *"Was du von uns bekommst"* | keep the card's own serving count — the card gives no scaling rule, so inventing one would be a guess |
 
+`family` is a **hint, not a verdict**. It is detected from OCR text, and where the
+OCR damaged the marker phrase the guess is wrong — observed on at least two cards
+that were labelled `C-bulletlist` but actually carry a 2P/3P/4P table or the
+*"alle Zutaten verdoppeln"* note. The parse must therefore confirm the layout
+against the card itself and follow what it sees, not the label. Reading the
+rendered page image rather than only the text layer resolves both this and the
+residual OCR digit damage, and is worth doing wherever a quantity looks implausible.
+
 ## Running it
 
 Both services are reached over port-forwards; Paperless has no external ingress and
@@ -80,6 +88,32 @@ python3 runbooks/mealie-import.py status
 `images` and `cookbooks` are separate passes keyed on `extras.paperless_key`, not
 steps inside `push`, so either can be re-run for the recipes that failed without
 disturbing the ones that succeeded.
+
+## Verification pass
+
+`push` skips anything already imported, which is what makes it safe to re-run --
+so corrections need their own path:
+
+```bash
+python3 runbooks/mealie-import.py correct <file-or-directory-of-corrections>
+```
+
+Input is a list of `{paperless_key, changes, recipe}` objects carrying the
+**complete** corrected recipe; only the named recipes are touched.
+
+**Have the verification agents read the rendered page image, not the text layer.**
+This is the single highest-value instruction in the whole import. On the first
+run, 63 of 159 recipes were self-flagged `medium`/`low`; re-checking them against
+images at 150-300 DPI corrected **53**, and the dominant finding was that values
+earlier passes had called "unreadable" or estimated from the 2P/3P progression
+were in fact plainly printed. That pass recovered 40 quantities from zero, two
+ingredients that had been dropped from a recipe entirely, and six nutrition
+blocks -- and it also caught errors nobody had flagged (an ingredient stored at
+70g where the card reads 140g, two spice quantities swapped with each other).
+
+An estimated quantity is invented data. The rule is read it off the card, or
+leave it at 0 with the reason in the ingredient `note`; never interpolate from
+the neighbouring serving columns.
 
 **Images.** Each card is scanned as a pair -- picture side and method side -- so a
 recipe's photo is simply the other page of its pair: `page + 1` for an odd content
