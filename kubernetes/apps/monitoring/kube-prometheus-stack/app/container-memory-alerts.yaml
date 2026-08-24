@@ -1,0 +1,124 @@
+---
+# Container memory-ceiling alerts — added 2026-08-24.
+#
+# The cluster had NO memory-ceiling alerting of any kind. frigate leaked from
+# 5.8 GiB to 7.95 GiB of an 8 GiB limit over six days and nobody knew until the
+# daily sweep happened to notice it at 98.6%; a redeploy then reset the counter
+# and the finding looked stale rather than urgent. Building the rule immediately
+# surfaced three more containers already above 85% that nothing was watching.
+#
+# Why "approaching the limit" needs its own alert rather than relying on OOMKill:
+# a container at its cgroup limit does NOT necessarily get OOMKilled. The kernel
+# fails the allocation first, so a leaking multi-process app (frigate spawns one
+# process per camera) sees child allocations return ENOMEM and degrades — cameras
+# stop recording, detectors stall — while the pod stays Ready with restart-count 0.
+# Waiting for a kill means waiting for a signal that may never arrive.
+#
+# THE LIMIT COMES FROM kube-state-metrics, NOT cAdvisor. The obvious choice,
+# container_spec_memory_limit_bytes, is not exposed on this cluster: a rule built
+# on it returns no data and therefore never fires for anything, which looks
+# identical to "nothing is near its limit". In kube_pod_container_resource_limits
+# the resource is a LABEL, which is why searching metric names for "memory.*limit"
+# does not turn it up. Every rule below was checked to return series before being
+# trusted.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack  # required — Prometheus ruleSelector matchLabels
+  name: container-memory-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: container.memory.rules
+      interval: 60s
+      rules:
+        - alert: ContainerMemoryNearLimit
+          # The join itself excludes containers with no limit set, where a ratio
+          # would be meaningless — no limit series, no result.
+          expr: |
+            (
+              container_memory_working_set_bytes{container!="",container!="POD"}
+              / on(namespace,pod,container) group_left
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.90
+          for: 15m
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} at {{ $value | humanizePercentage }} of its memory limit"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} has held above 90% of its
+              memory limit for 15 minutes. It may never be OOMKilled — the kernel fails child
+              allocations with ENOMEM first, so a multi-process app degrades silently while the pod
+              stays Ready. Check whether this is a leak (rising floor across restarts) or a limit
+              that is simply too small for current load.
+
+        - alert: ContainerMemoryLimitImminent
+          expr: |
+            (
+              container_memory_working_set_bytes{container!="",container!="POD"}
+              / on(namespace,pod,container) group_left
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.97
+          for: 5m
+          labels:
+            severity: critical
+            category: capacity
+            component: container
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} is out of memory headroom ({{ $value | humanizePercentage }})"
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} is within 3% of its memory
+              limit. Allocations are likely already failing. Restart it to reclaim, then fix the
+              underlying leak or raise the limit.
+
+        - alert: ContainerMemoryLeakPredicted
+          # The early-warning rule, and the one that would have caught frigate.
+          # Projects 6h of growth 48h forward, so a steady leak surfaces days
+          # before the ceiling. Thresholding the PREDICTION is what makes it fire
+          # early; the >0.50 guard on the current value keeps containers that sit
+          # high and flat from alerting forever.
+          #
+          # The container-age guard is load-bearing. A memory-hungry app ramping
+          # up after a restart grows steeply for its first few hours -- frigate
+          # projected 138% of its limit while merely loading models -- so without
+          # it this rule pages after every single restart of elasticsearch,
+          # frigate or any other large process. Six hours matches the prediction
+          # window, so the projection is never built purely from ramp-up.
+          expr: |
+            (
+              predict_linear(
+                container_memory_working_set_bytes{container!="",container!="POD"}[6h],
+                48 * 3600
+              )
+              / on(namespace,pod,container) group_left
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.90
+            and
+            (
+              container_memory_working_set_bytes{container!="",container!="POD"}
+              / on(namespace,pod,container) group_left
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.50
+            and
+            (
+              (time() - container_start_time_seconds{container!="",container!="POD"}) > 6 * 3600
+            )
+          for: 1h
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.container }} is trending into its memory limit within 48h"
+            description: >-
+              Projecting the last 6 hours of growth forward, container {{ $labels.container }} in
+              pod {{ $labels.pod }} reaches over 90% of its memory limit within 48 hours. This is
+              the shape of a leak rather than a load spike. Plan a limit change or a fix in a
+              maintenance window — do not wait for it to reach the ceiling, where allocations fail
+              silently instead of producing a clean OOMKill.
