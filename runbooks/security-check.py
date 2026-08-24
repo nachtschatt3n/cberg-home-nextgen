@@ -2323,12 +2323,24 @@ def s4_cve_check() -> tuple[str, Findings, str]:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Skip well-known bases that AR docs accept or that don't add useful
-    # signal (Bitnami images tracked by Renovate; Wazuh internal images).
-    # A POLICY exclusion, permanent by construction: it is reported in the
-    # coverage line but never treated as a gap and never vetoes auto-close.
+    # signal (Bitnami images tracked by Renovate — frozen/unmaintained,
+    # separately tracked by the bundled-datastore-exit programme, see
+    # docs/sops/bundled-datastore-exit.md). A POLICY exclusion, permanent by
+    # construction: it is reported in the coverage line but never treated as
+    # a gap and never vetoes auto-close.
+    #
+    # `wazuh/wazuh-*` was ALSO in this list from the very first commit that
+    # introduced Trivy scanning (85790e0a, 2026-05-09), grouped with Bitnami
+    # under "internal images" with no accepted-risk rationale ever recorded
+    # for it. Unlike Bitnami it has none: the images are public (no auth
+    # blocker), actively maintained upstream, and demonstrably NOT low-signal
+    # — verified 2026-08-24 to carry real, currently-open CRITICAL/HIGH CVEs
+    # (detail in sweep_findings, not here — see docs/sops/vulnerability-disclosure.md).
+    # The security-monitoring stack was the one thing this audit never
+    # measured. Removed.
     def _should_skip(img: str) -> bool:
         return any(skip in img.lower() for skip in (
-            "bitnami/", "wazuh/wazuh-",
+            "bitnami/",
         ))
 
     scan_targets = [i for i in distinct_images if not _should_skip(i)]
