@@ -512,6 +512,79 @@ data:
             "series_compliance_pct": round(100 * series_compliant / max(len(shows), 1), 1),
         }
 
+    def check_album(folder: Path) -> dict:
+        """Compliance record for one album folder (Music/<Artist>/<Album (Year)>/)."""
+        name = folder.name
+        layout_ok = bool(YEAR_RE.search(name))
+        nfo = folder / "album.nfo"
+        nfo_ok = False
+        if nfo.exists():
+            try:
+                ET.parse(nfo)
+                nfo_ok = True
+            except Exception:
+                nfo_ok = False
+        # SOP calls the album-level cover "folder.jpg", not "poster.jpg" -- the
+        # `poster` record key is kept for naming consistency with check_movie(),
+        # it just points at a different filename per the Music layout in
+        # docs/sops/media-library-standards.md.
+        poster = folder / "folder.jpg"
+        pw, _ = image_dims(poster) if poster.exists() else (0, 0)
+        return {
+            "layout": layout_ok,
+            "nfo":    nfo_ok,
+            "poster": pw >= POSTER_MIN_WIDTH,
+        }
+
+    def audit_music():
+        # common.SECTIONS has defined "music" since this file was written; the
+        # SOP's own audit-thresholds table has a Music row (Layout >=95%,
+        # NFO >=80%, folder.jpg >=80%); main() never called this. A threshold
+        # that is never measured is not a passing threshold -- same class of
+        # defect the audit_tv() fix above already names. Found 2026-08-24.
+        root = SECTIONS["music"]
+        if not root.is_dir():
+            log("Music: section root missing")
+            return None
+        # Music/<Artist>/<Album (Year)>/ -- TWO levels of nesting, unlike
+        # Movies' one. `_*` artist/album folders are operator housekeeping,
+        # excluded the same way audit_movies()/audit_tv() exclude them.
+        albums = []
+        flat_artists = 0  # tracks sitting directly under Artist/, no Album layer
+        AUDIO_EXT = {".flac", ".mp3", ".m4a", ".ogg", ".wav"}
+        for artist in sorted(root.iterdir()):
+            if not artist.is_dir() or artist.name.startswith('_'):
+                continue
+            found_album = False
+            for entry in sorted(artist.iterdir()):
+                if entry.name.startswith('_'):
+                    continue
+                if entry.is_dir():
+                    found_album = True
+                    albums.append(check_album(entry))
+            if not found_album:
+                has_loose_tracks = any(
+                    f.is_file() and f.suffix.lower() in AUDIO_EXT
+                    for f in artist.iterdir()
+                )
+                if has_loose_tracks:
+                    flat_artists += 1
+        total = len(albums) + flat_artists
+        if total == 0:
+            return {"section": "music", "items": 0}
+        compliant = sum(1 for r in albums if all(r.values()))
+        return {
+            "section":     "music",
+            "items":       total,
+            "nested":      len(albums),
+            "flat":        flat_artists,
+            "compliant":   compliant,
+            "layout_pct":  round(100 * sum(r["layout"] for r in albums) / total, 1),
+            "nested_pct":  round(100 * len(albums) / total, 1),
+            "nfo_pct":     round(100 * sum(r["nfo"] for r in albums) / max(len(albums), 1), 1),
+            "poster_pct":  round(100 * sum(r["poster"] for r in albums) / max(len(albums), 1), 1),
+        }
+
     def main():
         log("# Media Library Audit")
         log(f"Mount root: {MEDIA_ROOT}")
@@ -519,7 +592,7 @@ data:
         log("YouTube (Tube Archivist) is Jellyfin-only and not audited here.")
         log("")
         results = []
-        for fn in (audit_movies, audit_tv):
+        for fn in (audit_movies, audit_tv, audit_music):
             r = fn()
             if r:
                 results.append(r)
@@ -529,13 +602,31 @@ data:
         for r in results:
             log(f"- {r['section']}: " + ", ".join(
                 f"{k}={v}" for k, v in r.items() if k != "section"))
-        # Exit non-zero if any section has < 80% compliance somewhere
+        # "Worst compliance metric" is meant to answer "are we meeting the
+        # docs/sops/media-library-standards.md audit-thresholds table" -- so
+        # it must only look at the *_pct keys THAT TABLE ACTUALLY DEFINES A
+        # THRESHOLD FOR. An earlier blanket `k.endswith("_pct")` swept in
+        # every percentage the code happens to compute, including ones with
+        # no SOP threshold at all: `episode_thumb_pct` (thumbnails are a
+        # required SIDECAR per the Naming rules section, but never got a row
+        # in the threshold table) and `episode_naming_pct`/`nested_pct`
+        # (structural stats, not compliance targets). Found 2026-08-24: the
+        # untracked episode_thumb_pct was the low outlier that made the
+        # headline read as a near-total library failure while every SOP
+        # threshold the table actually defines was passing. An ALLOWLIST
+        # (not a blocklist) so a FUTURE *_pct the code adds defaults to
+        # excluded until someone deliberately maps it to a table row.
+        TRACKED_PCT_KEYS = {
+            "layout_pct", "nfo_pct", "poster_pct", "fanart_pct",  # movies, music
+            "season_layout_pct", "episode_nfo_pct",               # tv, episode-level
+            "series_compliance_pct",                              # tv, series-level
+        }
         worst = 100.0
         for r in results:
             for k, v in r.items():
-                if k.endswith("_pct") and isinstance(v, (int, float)):
+                if k in TRACKED_PCT_KEYS and isinstance(v, (int, float)):
                     worst = min(worst, v)
-        log(f"\nWorst compliance metric: {worst}%")
+        log(f"\nWorst compliance metric (SOP-tracked thresholds only): {worst}%")
         # Always exit 0 — the audit ran successfully if it walked the share.
         # Low compliance is a number, not a Job failure; alerting on it
         # belongs to a metrics exporter, not a CronJob exit code.
