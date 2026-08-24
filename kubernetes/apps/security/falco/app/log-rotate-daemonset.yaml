@@ -62,17 +62,22 @@ spec:
               # a day, so 64 MiB is over half a day of buffer even if Wazuh
               # stops consuming entirely -- while costing a fraction of falco's
               # 768Mi limit.
-              MAX=$((64 * 1024 * 1024))
+              # EVERY shell $ is escaped as $$ because cluster-wide Flux
+              # postBuild substitution runs envsubst over this manifest. An
+              # an unescaped shell variable is not "left alone" -- in strict mode
+              # the Kustomization fails to build at all, with
+              #   envsubst error: variable not set (strict mode): "SIZE"
+              MAX=$$((64 * 1024 * 1024))
               LOG=/var/run/falco/falco.log
               while true; do
-                if [ -f "$LOG" ]; then
-                  SIZE=$(wc -c < "$LOG" 2>/dev/null || echo 0)
-                  if [ "$SIZE" -gt "$MAX" ]; then
+                if [ -f "$${LOG}" ]; then
+                  SIZE=$$(wc -c < "$${LOG}" 2>/dev/null || echo 0)
+                  if [ "$${SIZE}" -gt "$${MAX}" ]; then
                     # Truncate in place. Recreating the file would change the
                     # inode and make the wazuh-agent's tail miss events until it
                     # noticed and reopened.
-                    : > "$LOG"
-                    echo "$(date -Iseconds) truncated falco.log at ${SIZE} bytes"
+                    : > "$${LOG}"
+                    echo "$$(date -Iseconds) truncated falco.log at $${SIZE} bytes"
                   fi
                 fi
                 sleep 300
