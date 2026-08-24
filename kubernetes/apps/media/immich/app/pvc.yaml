@@ -49,31 +49,33 @@ spec:
 # headroom over that projection, and — unlike the old 200Gi — is small enough to
 # place a replica on a SECOND node, which is the whole point of the migration.
 #
-# 75Gi -> 120Gi on 2026-08-25. That sizing was correct for ONE library and this
-# volume now serves TWO: adding andrea's 23,341-asset external library takes the
-# projection past the ceiling. Measured per-asset from mu's completed scan
-# (54,107 assets -> 24GiB thumbs + 33GiB encoded-video) the second library needs
-# ~10GiB + ~14GiB, for ~82GiB total against a 73.3GiB filesystem. It was filling
-# at 5.35 GiB/hour with 2.7 hours of headroom left when the alert fired.
+# STILL 75Gi, and it needs to grow — blocked on cluster capacity, not on this file.
 #
-# Note what this volume holds: 100% derived data, both libraries' originals are
-# on the read-only CIFS mount. So the risk of running out is a broken scan and a
-# thumbnail-less timeline, not data loss — but Immich handles a full /data badly,
-# so size it ahead rather than at the edge.
+# 2026-08-25: this volume now serves TWO libraries. The 75Gi was sized correctly
+# for one; adding andrea's 23,341-asset external library pushes the projection to
+# ~82GiB (measured per-asset from mu's completed scan: 54,107 assets -> 24GiB
+# thumbs + 33GiB encoded-video). It hit 84% and was filling at 5.35 GiB/hour.
 #
-# 120Gi rather than the 150Gi first attempted, because Longhorn refused that:
+# Expansion to 150Gi and then 120Gi were BOTH refused by Longhorn:
 #   admission webhook validator.longhorn.io denied the request:
-#   cannot schedule 80530636800 more bytes to disk ...
-# Raw free space is not the constraint — SCHEDULABLE space is. With
-# storage-over-provisioning-percentage=100, a disk may hold at most its own size
-# in provisioned volumes, and two of three nodes are close to that ceiling
-# (nuc14-01 858G/930G, nuc14-02 872G/930G, nuc14-03 622G/930G). An expansion must
-# fit on BOTH replica disks, so +75Gi was impossible while +45Gi fits with margin.
-# 120Gi is still ~1.5x the two-library projection.
+#   cannot schedule ... ProvisionedLimit = 100% of (StorageMax - StorageReserved)
 #
-# The real constraint is cluster-wide: two of three nodes are near the
-# provisioning ceiling, so the next volume that needs growing may not be able to.
-# That wants addressing on its own, not at the moment something is filling up.
+# Raw free space is not the constraint — SCHEDULABLE space is, and the limit is
+# (StorageMaximum - StorageReserved), NOT StorageMaximum. With 50GiB reserved the
+# per-disk ceiling is ~880GiB, and the replica disks sit at 858GiB (nuc14-01) and
+# 872GiB (nuc14-02) — about 22GiB and 8GiB of headroom. nuc14-03 has ~258GiB.
+# An expansion must fit on BOTH replica disks, so almost nothing fits today.
+#
+# Unblocking it needs one of, in rough order of preference:
+#   1. move a replica off nuc14-02 onto nuc14-03, then expand
+#   2. reclaim provisioned space (over-sized or dead volumes) on nuc14-01/02
+#   3. raise storage-over-provisioning-percentage above 100 — a global setting,
+#      and the least attractive: it lets Longhorn promise space it may not have
+#
+# Until then Immich's thumbnail/faces/OCR queues are PAUSED, which is what
+# stopped the fill. Everything on this volume is derived data (originals live on
+# the read-only CIFS mount), so the cost of the pause is a thumbnail-less
+# timeline for the new library, not data loss.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -83,7 +85,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 120Gi
+      storage: 75Gi
   storageClassName: longhorn
 ---
 # Machine-learning model cache (CLIP + face-detection + OCR ONNX models, plus
