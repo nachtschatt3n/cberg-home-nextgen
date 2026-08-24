@@ -1712,6 +1712,18 @@ except: pass
     # finding, which is the anti-pattern in docs/sops/audit-script-correctness.md.
     # The discriminator is level AND 24h GROWTH: a plateau is fine, a climb is
     # a leak with a deadline.
+    #
+    # KNOWN BLIND SPOT, stated here rather than left for someone to rediscover:
+    # a leak that SATURATES stops growing, because the kernel reclaims under
+    # cgroup pressure instead of OOMKilling. Its curve then looks exactly like
+    # penpot's benign plateau, and this check goes quiet while the container is
+    # still pinned at its ceiling and still failing child allocations. frigate
+    # was entering that regime when this was written (deriv over 6h already
+    # negative at 98.6%). The signal that separates the two is NOT the memory
+    # curve -- it is the ENOMEM evidence: §34's "Cannot allocate memory" log
+    # count, which is a separate MINOR assertion. Correlating the two (at-limit
+    # AND allocation failures = CRITICAL regardless of trend) is the follow-up
+    # this check does not yet do. Do not read a green here as "not saturated".
     MEM_RATIO_JSON=$(prom_query 'container_memory_working_set_bytes{container!="",container!="POD"} / on(namespace,pod,container) group_left kube_pod_container_resource_limits{resource="memory"} * 100')
     MEM_DELTA_JSON=$(prom_query 'container_memory_working_set_bytes{container!="",container!="POD"} - container_memory_working_set_bytes{container!="",container!="POD"} offset 24h')
     MEM_LIMIT_JSON=$(prom_query 'kube_pod_container_resource_limits{resource="memory"}')
