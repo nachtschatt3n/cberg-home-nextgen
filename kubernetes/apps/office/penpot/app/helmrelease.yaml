@@ -136,10 +136,21 @@ spec:
       resources:
         requests:
           cpu: 100m
-          memory: 256Mi
+          memory: 384Mi
         limits:
+          # 512Mi -> 1Gi on 2026-08-24. It sat at 504 MiB of 512Mi — 98.5%, with
+          # zero headroom for any transient spike. NOT a leak: flat to within
+          # 0.1 MiB/day over five days, and RSS 500 MiB against 1 MiB of page
+          # cache, so this is real resident memory that has simply outgrown a
+          # limit set when the app was smaller. A leak would need the fix below
+          # it, not a bigger number.
+          #
+          # It never OOMKilled and stayed Ready throughout, which is exactly why
+          # it went unnoticed: at the cgroup limit the kernel fails allocations
+          # rather than killing the process. Found by the container-memory alerts
+          # added the same day.
           cpu: 500m
-          memory: 512Mi
+          memory: 1Gi
 
     # Exporter service configuration
     exporter:
