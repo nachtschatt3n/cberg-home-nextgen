@@ -218,6 +218,13 @@ spec:
         annotations:
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
           nginx.ingress.kubernetes.io/proxy-body-size: "100m"   # recipe image uploads
+          # Mealie's AI import holds the request open for the whole model call.
+          # Against the local Ollama host that is minutes, not seconds, so the
+          # 60s default read timeout returns a 504 while the request is still
+          # being served — the import looks broken but actually completes
+          # server-side, orphaning a half-written recipe. Verified 2026-08-24.
+          nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+          nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Mealie"
           gethomepage.dev/description: "Recipe manager and meal planner"
