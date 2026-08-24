@@ -1,8 +1,8 @@
 # SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the coverage veto
 
 > Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.08.24`
+> Last Updated: `2026-08-24`
 > Owner: `homelab-sre`
 
 ---
@@ -337,7 +337,7 @@ decided at the CALL SITE, never inferred — see §4.2.
 | Script | Section | Tripped by |
 |--------|---------|-----------|
 | `health-check.py` | `health` | no issues file this run; stale issues file (mtime < run start); `health-check.sh` exit code outside `{0,1}` |
-| `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a running image still unscannable after retry — including a private one whenever the run HOLDS registry credentials — and any scannable running image that got no scan attempt at all (s4; the one exclusion is a private image on a credential-less run: see the worked example below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
+| `security-check.py` | `security` | **Shared primitives** (cover every call site): `run()`/`run_cmd()` exception path — timeout, missing binary, OSError; `kubectl_json()` returning None (a live apiserver returns an empty `items` list, so None is always a coverage gap); `run_unifictl()` empty/login-failed after all retries; `_exec_search()` failing all 3 attempts. **Named sites**: Elasticsearch pod/credential lookup (s5, s6, s6a); Wazuh indexer credentials and `agent_control -l` enumeration (s13); UniFi `stat alarm` / `stat rogueap` / `client list` / `wlan list` empty or unparsable (s11); NVD API 2.0 failure (s11 — `[]` otherwise prints a green "no open CVEs"); OSV.dev lookup failures (s4); `trivy` not on PATH (s4 — skips the entire running-image scan); `version-check-current.md` absent (s4 — skips OSV *and* Trivy); empty running-image inventory (s4); a running image still unscannable after retry — including a private one whenever the run HOLDS registry credentials, or (since 2026-08-24) whenever it does not but a prior open finding already exists for it — and any scannable running image that got no scan attempt at all (s4; see the worked example below); exposure-index build failure and an unloaded CISA KEV feed (risk scoring) |
 | `check-all-versions.py` | `version` | **(C)** registry unreachable/timeout, **HTTP 429 registry rate-limit** (only after `_get_retry_429()` exhausts its retries) and OCI tag-listing truncation — all attributable to the ONE image whose tag listing failed, so the section still completes and still auto-closes every other component. **(S)** Helm `index.yaml` fetch failure (recorded once per repo — it negative-caches); OCI `helm show chart` / `helm search repo` failure; the bjw-s chart resolver (its negative cache fans out across most of the repo); unparseable `HelmRepository` / `HelmRelease` (the latter drops a whole app from the run); `gh auth` failure and Renovate PR fetch failure (currently renders identically to "there genuinely are none"); NVD, npm, talosctl per-node + talconfig fallback, PiKVM, UniFi — each degrades an UNKNOWN set of components, so nothing can be scoped around them. Gated by `_is_transient()` + `_is_real_downgrade()` + `_is_structurally_slow()` — the last one measures avg-seconds-per-page, so a tag listing defeated by a registry's INHERENT pace (docker.elastic.co: ~14.3 s/page, no acceptable budget ever completes) is undeterminable and records NOTHING, while the same budget blown at a normal page rate still records a degradation (C) — see the transitions rule below |
 | `doc-check.py` | `doc` | **Shared primitives**: `run()` exception path and `rc != 0` with empty stdout (scoped call sites only — an unscoped grep returning nothing is a legitimate clean result); `run_cmd()` exception path; `read_file()` on PermissionError / IsADirectoryError / decode error (unreadable is never a legitimate clean result), and on FileNotFoundError only where a call site passes an explicit scope. **Named sites**: `kubectl version` / node list / ingress / `sops-age` secret unavailable; `talosctl version` unavailable; `unifictl` VLAN + WLAN JSON unparsable or rc≠0; helmfile / homepage / renovate / ollama / blueprint / SOP / Taskfile / `.gitignore` / `.sops.yaml` / `CLAUDE.md` unreadable; `age-keygen` missing (silently downgrades a wrong-key CRITICAL to a green line); a regex that no longer matches a reworded doc |
 
@@ -378,31 +378,52 @@ decided at the CALL SITE, never inferred — see §4.2.
 > next run?** If no, emit a finding; do not veto.
 >
 > **Worked example — the Trivy running-image scan (s4).** Its uncovered images
-> split three ways, and only one of them vetoes. (1) Images excluded by the
-> scan-target policy (Bitnami, Wazuh internals): permanent by construction,
-> reported in the coverage line, no veto and no finding. (2) Images in our own
-> private registry **on a run that holds no registry credentials**: the scan
-> fails identically every time — steady state, reported as a standing FINDING,
-> no veto (there are ~30 of them, so vetoing here would switch auto-close off
-> for the whole security section permanently). (3) Anything else that failed
-> after retry, or any scannable image that got no scan attempt this run: could
-> succeed tomorrow, had findings yesterday — **veto**. The cached failure list
-> is retried on the next run for class 3 and not for class 2, so a transient
-> blip cannot keep the veto armed for the full cache TTL.
+> split three ways. (1) Images excluded by the scan-target policy (Bitnami,
+> Wazuh internals): permanent by construction, reported in the coverage line,
+> no veto and no finding. (2) Images in our own private registry **on a run
+> that holds no registry credentials**: reported as a standing FINDING, and
+> individually component-scoped-vetoed (`mark_uncovered`, not
+> `mark_incomplete`) for exactly the images that already have an open finding
+> — see the correction below. (3) Anything else that failed after retry, or
+> any scannable image that got no scan attempt this run: could succeed
+> tomorrow, had findings yesterday — **veto**. The cached failure list is
+> retried on the next run for class 3 and not for class 2, so a transient blip
+> cannot keep the veto armed for the full cache TTL.
 >
-> **The discriminator in (2) is the ENVIRONMENT, not the registry** — and
-> getting that wrong is how a steady-state exclusion becomes the very
-> false-negative it was meant to avoid. `runbooks/sweep-run.py` passes a
-> `gh auth token` through as `TRIVY_USERNAME`/`TRIVY_PASSWORD`, so under the
-> orchestrated sweep those private images ARE scanned and DO carry real
-> findings. Classifying them "steady state" unconditionally would mean an
-> expired or under-scoped token fails all ~30 at once, records no degradation,
-> and lets auto-close resolve every one of their open findings on a run that
-> never looked at them. `_is_permanently_unscannable()` therefore requires
-> BOTH the private prefix AND the absence of credentials; with credentials
-> present the failure is class 3 and vetoes. When you write a steady-state
-> exclusion, state the condition that makes it permanent and assert THAT in
-> code — never infer permanence from the identity of the thing that failed.
+> **Corrected 2026-08-24 — the original discriminator for (2) was wrong, and
+> it wrongly auto-closed 44 findings before the fix.** The design through
+> 2026-08-23 assumed "no credentials THIS RUN" meant "this is a deliberately
+> credential-less standalone run" — a permanent, environmental fact — and
+> therefore a steady state safe to skip vetoing. That assumption is false:
+> `runbooks/sweep-run.py` fetches a `gh auth token` fresh every ORCHESTRATED
+> run, so "no credentials this run" can just as easily mean the token fetch
+> failed mid-schedule on a run that is normally credentialed — a TRANSIENT
+> blip, indistinguishable from inside `security-check.py` from the genuine
+> steady state. Treating both as the same case meant an expired token silently
+> auto-closed 44 findings across ~9 private images in one cycle — exactly the
+> failure this section exists to prevent, produced by the section's own
+> exception carved out to keep it from over-suppressing.
+>
+> The fix drops the environmental discriminator entirely and asks a
+> behavioural question instead: **does a prior OPEN finding already exist for
+> this image?** An image with none has nothing to protect regardless of why it
+> is unscannable — no veto needed, matching the original "vetoing here helps
+> nothing" reasoning for the common case. An image WITH one is exactly the row
+> auto-close would wrongly resolve — veto it, narrowly, via
+> `mark_uncovered(component_key("image", img), ...)`. This also resolves the
+> original tension the ~30-image count created: a section-wide veto over all
+> unscannable private images would indeed disable auto-close for the whole
+> security section, but a PER-COMPONENT veto scoped to only the ones with
+> prior findings stays small in practice and is bounded on top by
+> `DegradationLog.MAX_SCOPED_COMPONENTS` — if it ever isn't small, `apply()`
+> safely reverts to the section-wide veto on its own rather than silently
+> under-protecting.
+>
+> When you write a steady-state exclusion, state the condition that makes it
+> permanent and assert THAT in code — never infer permanence from the identity
+> of the thing that failed, and never from an environment variable's value
+> THIS run when that value can plausibly flip between runs for reasons the
+> check cannot see.
 >
 > **Worked example — the image-tag oracle (2026-08-18, e1aae07f).** Same rule,
 > a different kind of discriminator: a MEASUREMENT rather than an environment

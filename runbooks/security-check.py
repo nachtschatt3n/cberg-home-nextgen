@@ -103,7 +103,7 @@ ACCEPTED_RISKS_DOC = REPO_ROOT / "docs" / "security-accepted-risks.md"
 sys.path.insert(0, str(SCRIPT_DIR))
 from lib.findings_writer import (  # noqa: E402
     FindingsWriter, DegradationLog, cycle_id_from_env, trigger_from_env,
-    git_head, SEVERITY_MAP,
+    git_head, SEVERITY_MAP, component_key, finding_matches_component,
 )
 from lib import risk_model as rm  # noqa: E402  — contextual tier scorer (Phase 2)
 from lib import notify as _notify  # noqa: E402  — tier-based routing (Phase 2)
@@ -1376,6 +1376,48 @@ def _is_permanently_unscannable(img: str) -> bool:
     return img.startswith(_PRIVATE_REGISTRY_PREFIX) and not _trivy_has_private_creds()
 
 
+def _private_images_at_risk(
+    private: list[str], prior_findings: list[tuple[str, dict | None]]
+) -> list[str]:
+    """Which of `private` (unscannable, no creds) already have an open finding.
+
+    Pure predicate, split out from the call site so it can be unit-tested
+    without a database: see docs/sops/audit-script-correctness.md's own bias
+    toward isolated, testable discriminators (`_is_transient()` etc).
+    """
+    return [
+        img for img in private
+        if any(finding_matches_component(component_key("image", img), title, meta)
+               for title, meta in prior_findings)
+    ]
+
+
+def _open_findings_titles(dsn: str | None, section: str) -> list[tuple[str, dict | None]]:
+    """(title, metadata) for every currently-open finding in `section`.
+
+    Read-only, best-effort: a query failure returns [] rather than raising,
+    because the only thing this feeds is a veto-narrowing decision, never a
+    pass/fail verdict. An empty result under-vetoes (same fail-safe direction
+    as `finding_matches_component()`'s own docstring), never over-vetoes.
+    """
+    if not dsn:
+        return []
+    try:
+        import psycopg  # lazy: degrade if psycopg isn't available
+    except ImportError:
+        return []
+    try:
+        with psycopg.connect(dsn, connect_timeout=5) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT title, metadata FROM sweep_findings "
+                "WHERE section = %s AND status = 'open'",
+                (section,),
+            )
+            return [(row[0], row[1]) for row in cur.fetchall()]
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Kernel-header packages: header FILES, never executed code.
 #
@@ -2572,15 +2614,33 @@ def s4_cve_check() -> tuple[str, Findings, str]:
             f.add(WARNING, f"Trivy scan coverage gap: private {_PRIVATE_REGISTRY_PREFIX.rstrip('/')} images unscannable by the cluster sweep (no registry credentials) — CVE status UNKNOWN for our own applications; scanning belongs in each app repo's own CI")
             cprint(C.YELLOW, f"  🟡 {len(private)} private image(s) unscannable (no registry creds): "
                               + ", ".join(i.split('@')[0].split('/')[-1] for i in private[:8]))
-            # DELIBERATELY NO DEGRADED.record() here — and ONLY because
-            # _is_permanently_unscannable() already established that this run
-            # holds no registry credentials at all. That makes the failure a
-            # STEADY STATE: identical on every credential-less run, so these
-            # images never produced a CVE finding that absence could wrongly
-            # resolve, and per docs/sops/sweep-findings-lifecycle.md §4.3 a
-            # veto here would disable auto-close for the entire security
-            # section while protecting nothing (there are ~30 such images).
-            # It is reported as a FINDING instead — the auto-close-safe channel.
+            # Gate the veto on whether a prior OPEN finding actually exists for
+            # the image — NOT on why creds are absent this run (found
+            # 2026-08-24; docs/sops/sweep-findings-lifecycle.md §4.3 worked
+            # example). "No creds this run" cannot tell a deliberately
+            # credential-less standalone run apart from an ORCHESTRATED sweep
+            # whose `gh auth token` fetch failed mid-schedule — both look
+            # identical from inside this function, and the latter is exactly
+            # the transient blip §4.3 says must veto. Treating every
+            # credential-less run as steady state let an expired token
+            # silently auto-close 44 findings across ~9 private images in one
+            # cycle. Querying "does this image already have an open finding"
+            # sidesteps the ambiguity: an image with no prior finding has
+            # nothing to protect regardless of WHY it is unscannable, and an
+            # image WITH one is exactly the row auto-close would wrongly
+            # resolve. Bounded by DegradationLog's own MAX_SCOPED_COMPONENTS —
+            # if more than 10 private images turn out to be at risk, apply()
+            # safely reverts to the section-wide veto on its own.
+            _prior_security_findings = _open_findings_titles(
+                os.environ.get("SWEEP_PG_DSN"), "security")
+            for img in _private_images_at_risk(private, _prior_security_findings):
+                DEGRADED.record(
+                    _scope(),
+                    f"private image {img.split('@')[0].split('/')[-1]}",
+                    "no registry credentials this run, but an open finding "
+                    "already exists for it — absence could wrongly resolve it",
+                    component=component_key("image", img),
+                )
             # The moment credentials ARE present the same failure is classified
             # transient and lands in `other` below, which DOES veto.
         if other:
