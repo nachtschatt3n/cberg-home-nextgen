@@ -72,8 +72,25 @@ python3 runbooks/mealie-import.py extract
 # payloads; see "Agent parse" below
 
 python3 runbooks/mealie-import.py push ~/.cache/mealie-import/parsed.json
+python3 runbooks/mealie-import.py images       # photo from each card's picture side
+python3 runbooks/mealie-import.py cookbooks    # one smart cookbook per brand
 python3 runbooks/mealie-import.py status
 ```
+
+`images` and `cookbooks` are separate passes keyed on `extras.paperless_key`, not
+steps inside `push`, so either can be re-run for the recipes that failed without
+disturbing the ones that succeeded.
+
+**Images.** Each card is scanned as a pair -- picture side and method side -- so a
+recipe's photo is simply the other page of its pair: `page + 1` for an odd content
+page, `page - 1` for an even one. `pdftoppm` renders it at 150 DPI and it is PUT to
+`/api/recipes/{slug}/image`. Existing images are left alone unless `--force` is
+given.
+
+**Cookbooks.** Mealie cookbooks are saved smart filters, not folders. One is
+created per source brand over the category the import already sets
+(`recipeCategory.name = "Hello Fresh"`), which means they stay current on their
+own -- a recipe imported later shows up without the cookbook being touched.
 
 `push` is **resumable**. It reads back every recipe's `extras.paperless_key` and
 skips what already landed, so a re-run after a partial failure does not create a

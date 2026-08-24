@@ -400,6 +400,134 @@ def cmd_push(args):
     return 1 if failed else 0
 
 
+def _photo_page(content_page: int) -> int:
+    """The picture side that belongs to a given content side.
+
+    Cards are scanned in fixed pairs -- (1,2), (3,4), (5,6) -- with the photo and
+    the method on opposite sides of the same card. So the photo for an odd content
+    page is the page after it, and for an even content page the page before it.
+    """
+    return content_page + 1 if content_page % 2 else content_page - 1
+
+
+def cmd_images(args):
+    """Attach each recipe's own photo, rendered from the picture side of its scan.
+
+    Done as a separate pass keyed on `extras.paperless_key` rather than during
+    `push`, so it can be re-run for recipes that failed without touching the ones
+    that succeeded.
+    """
+    base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
+    pdf_dir = Path(args.out_dir).expanduser() / "pdfs"
+
+    attached, skipped, failed = 0, 0, []
+    page_num = 1
+    while True:
+        data = _mealie("GET", f"{base}/api/recipes?page={page_num}&perPage=100", token)
+        for item in data.get("items", []):
+            full = _mealie("GET", f"{base}/api/recipes/{item['slug']}", token)
+            extras = full.get("extras") or {}
+            key = extras.get("paperless_key")
+            if not key:
+                continue
+            if full.get("image") and not args.force:
+                skipped += 1
+                continue
+            doc_id, content_page = key.split("-p")
+            pdf = pdf_dir / f"{doc_id}.pdf"
+            try:
+                jpeg = _render_page(pdf, _photo_page(int(content_page)))
+                _upload_image(base, token, item["slug"], jpeg)
+                attached += 1
+                print(f"  * {item['slug']}")
+            except Exception as exc:  # noqa: BLE001 - report, never abort the pass
+                failed.append((key, str(exc)))
+        if page_num >= data.get("total_pages", 1):
+            break
+        page_num += 1
+
+    print(f"\nattached={attached} skipped={skipped} failed={len(failed)}")
+    for key, err in failed:
+        print(f"  FAIL {key}: {err}")
+    return 1 if failed else 0
+
+
+def _render_page(pdf: Path, page: int) -> bytes:
+    """Render one PDF page to JPEG at a resolution worth looking at."""
+    result = subprocess.run(
+        # pdftoppm writes the image to stdout only when no output-file root is
+        # given; passing "-" makes it a filename root instead and writes nothing.
+        ["pdftoppm", "-jpeg", "-r", "150", "-f", str(page), "-l", str(page),
+         "-singlefile", str(pdf)],
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError(f"pdftoppm failed for {pdf} page {page}")
+    return result.stdout
+
+
+def _upload_image(base: str, token: str, slug: str, jpeg: bytes) -> None:
+    boundary = "----mealieimport"
+    parts = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; "
+        f"filename=\"{slug}.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode(),
+        jpeg,
+        f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"extension\""
+        f"\r\n\r\njpg\r\n--{boundary}--\r\n".encode(),
+    ]
+    req = urllib.request.Request(
+        f"{base}/api/recipes/{slug}/image", data=b"".join(parts), method="PUT"
+    )
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    urllib.request.urlopen(req, timeout=300).read()
+
+
+def cmd_cookbooks(args):
+    """One cookbook per source brand.
+
+    Mealie cookbooks are saved smart filters, not folders, so a brand cookbook is
+    a query over the category the import already sets. That means it keeps itself
+    up to date: a recipe imported later appears without touching the cookbook.
+    """
+    base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
+    brands = {}
+    page_num = 1
+    while True:
+        data = _mealie("GET", f"{base}/api/recipes?page={page_num}&perPage=100", token)
+        for item in data.get("items", []):
+            full = _mealie("GET", f"{base}/api/recipes/{item['slug']}", token)
+            if not (full.get("extras") or {}).get("paperless_key"):
+                continue
+            for category in full.get("recipeCategory") or []:
+                brands[category["name"]] = brands.get(category["name"], 0) + 1
+        if page_num >= data.get("total_pages", 1):
+            break
+        page_num += 1
+
+    existing = {
+        c["name"]
+        for c in _mealie("GET", f"{base}/api/households/cookbooks?perPage=100", token)["items"]
+    }
+    for brand, count in sorted(brands.items(), key=lambda kv: -kv[1]):
+        if brand in existing:
+            print(f"  = {brand} ({count} recipes, already exists)")
+            continue
+        _mealie(
+            "POST",
+            f"{base}/api/households/cookbooks",
+            token,
+            {
+                "name": brand,
+                "description": f"Recipe cards from {brand}",
+                "public": False,
+                "queryFilterString": f'recipeCategory.name = "{brand}"',
+            },
+        )
+        print(f"  + {brand} ({count} recipes)")
+    return 0
+
+
 def cmd_status(args):
     base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
     done = imported_keys(base, token)
@@ -425,10 +553,20 @@ def main():
     push.add_argument("recipes")
     push.add_argument("--no-resume", action="store_true",
                       help="do not skip recipes already traceable to Paperless")
+    images = sub.add_parser("images", help="attach each recipe's photo from its scan")
+    images.add_argument("--force", action="store_true",
+                        help="replace images that are already set")
+    sub.add_parser("cookbooks", help="create one smart cookbook per source brand")
     sub.add_parser("status", help="show import progress")
 
     args = parser.parse_args()
-    return {"extract": cmd_extract, "push": cmd_push, "status": cmd_status}[args.command](args)
+    return {
+        "extract": cmd_extract,
+        "push": cmd_push,
+        "images": cmd_images,
+        "cookbooks": cmd_cookbooks,
+        "status": cmd_status,
+    }[args.command](args)
 
 
 if __name__ == "__main__":
