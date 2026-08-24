@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
-> Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, the paperless-gpt (vision-OCR) and paperless-ai (RAG) add-ons, OCR tuning, and library curation.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
+> Version: `2026.08.24`
+> Last Updated: `2026-08-24`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -13,9 +13,15 @@ Covers the document lifecycle end to end: capture → OCR → split → classify
 store, across all ingestion paths, plus deployment health and library-wide
 metadata curation.
 
-- Scope: `office` namespace — `paperless-ngx` (+ `paperless-db`, `paperless-redis`), `paperless-gpt`,
-  `paperless-ai`, the `scan-inbox-validator` Deployment, the Epson ES-580W scanner,
-  and the GMX document mailbox.
+- Scope: `office` namespace — `paperless-ngx` (+ `paperless-db`, `paperless-redis`),
+  its native AI module, the `scan-inbox-validator` Deployment, the Epson ES-580W
+  scanner, and the GMX document mailbox.
+- **paperless-gpt (vision-OCR/metadata) and paperless-ai (auto-tag/RAG) were
+  retired 2026-08-24** in favor of paperless-ngx 3.0.5's built-in AI module — see
+  §4a below. Vision-OCR has no native replacement; hard-to-OCR scans now go
+  through **manual review** (operator + Claude Code reading the page image
+  directly on demand) instead of an automated pipeline stage. This is a
+  deliberate scope reduction, not a gap to fill.
 - Prerequisites: repo-local `mise` tooling (`kubectl`, `flux`, `sops`); local SOPS
   age key; LAN access to the cluster (VLAN 55) and scanner (IoT VLAN).
 - Out of scope: Ollama model lifecycle (→ ollama-agent), UniFi/scanner network
@@ -37,7 +43,7 @@ metadata curation.
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
-| AI add-ons | paperless-gpt (vision-OCR, tag-triggered) · paperless-ai (RAG, `*/30`) → Ollama `gemma4:26b` @ `192.168.30.111:11434` |
+| Native AI | `ai_enabled=True` · LLM suggestions `ollama`/`gemma4:26b`/`http://192.168.30.111:11434` · embeddings (RAG) `ollama`/`nomic-embed-text:latest`/same endpoint. **DB-stored** (`paperless.models.ApplicationConfiguration`), not GitOps — see §4a. paperless-gpt/paperless-ai retired 2026-08-24. |
 
 Key OCR/consumer env (`paperless-ngx` helmrelease): `OCR_LANGUAGE=deu+eng`,
 `OCR_MODE=force`, `OCR_ROTATE_PAGES_THRESHOLD=7`, `CONSUMER_BARCODE_SCANNER=ZXING`,
@@ -51,7 +57,8 @@ Ingestion flow:
 ES-580W preset (duplex, 300dpi, PDF, skip-blank) --SMB--> //NAS/paperless_ngx/inbox
   scan-inbox-validator: file stable + pikepdf valid + pages>0 --atomic--> /consume
   paperless (poll 10s): PATCHT split · force OCR (deu+eng) · store
-  paperless-ai (*/30) / paperless-gpt (on tag) tag/title; else built-in matcher
+  native AI suggestions (ai_enabled) tag/correspondent/type/title; else built-in matcher
+  Hard-to-OCR scans: manual review (operator + Claude Code reads the page image on demand)
 Email: forwarded invoice → GMX INBOX → MailRule (inline+attachment *.pdf) → consume
 ```
 
@@ -63,8 +70,10 @@ Email: forwarded invoice → GMX INBOX → MailRule (inline+attachment *.pdf) �
   (OCR/consumer env, 6Gi limit, ingress), `validator-configmap.yaml` +
   `validator-deployment.yaml` (scan-inbox validator), `storageclass.yaml`,
   `pvc.yaml`.
-- paperless-gpt: `kubernetes/apps/office/paperless-gpt/app/configmap.yaml` (strict
-  `ocr_prompt.tmpl`) + `helmrelease.yaml`. paperless-ai: `.../paperless-ai/app/`.
+- Native AI config (`ai_enabled`, `llm_*`, `llm_embedding_*`) is **DB state**
+  (`paperless.models.ApplicationConfiguration`, singleton row) — not a manifest,
+  not GitOps. Set/read via `manage.py shell` (see §4a). There is no
+  `paperless-gpt`/`paperless-ai` directory anymore — both retired 2026-08-24.
 - Mail accounts/rules and per-document metadata are **DB state**, not git —
   edited via the paperless UI or the manage.py shell (see §4).
 
@@ -84,6 +93,50 @@ folder: INBOX
 **Manifest change (GitOps):** edit under `kubernetes/apps/office/...`, `task
 kubeconform` + `kubeconform -summary`, commit to **main** (no feature
 branches), push, let Flux reconcile.
+
+### 4a) Native AI config (DB-stored, not GitOps)
+
+`ai_enabled`/`llm_backend`/`llm_model`/`llm_endpoint`/`llm_api_key` (LLM
+suggestions: title/correspondent/type/tags/date, text-only input) and
+`llm_embedding_backend`/`llm_embedding_model`/`llm_embedding_endpoint`/
+`llm_embedding_chunk_size` (RAG embedding/chat) live on the singleton
+`paperless.models.ApplicationConfiguration` row. **Always use `gosu paperless`**
+for the exec (SOP gotcha, see the permission-bug troubleshooting row) —
+never a bare/root shell.
+
+```bash
+PPOD=$(mise exec -- kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+mise exec -- kubectl exec -n office "$PPOD" -c paperless-ngx -- gosu paperless \
+  python3 /usr/src/paperless/src/manage.py shell -c "
+from paperless.models import ApplicationConfiguration
+ac = ApplicationConfiguration.objects.first()
+ac.ai_enabled = True
+ac.llm_backend = 'ollama'                      # LLMBackend choices: openai-like, ollama
+ac.llm_model = 'gemma4:26b'
+ac.llm_endpoint = 'http://192.168.30.111:11434'
+ac.llm_embedding_backend = 'ollama'             # LLMEmbeddingBackend: openai-like, huggingface, ollama
+ac.llm_embedding_model = 'nomic-embed-text:latest'
+ac.llm_embedding_endpoint = 'http://192.168.30.111:11434'
+ac.save()
+"
+```
+
+Current cluster state (set 2026-08-24): `ai_enabled=True`, `llm_backend=ollama`,
+`llm_model=gemma4:26b`, `llm_endpoint=http://192.168.30.111:11434`,
+`llm_embedding_backend=ollama`, `llm_embedding_model=nomic-embed-text:latest`
+(already pulled/pinned on the shared Ollama host — used by AnythingLLM, AFFiNE,
+Nextcloud context_chat; see `docs/ai-usage-map.md`), `llm_embedding_endpoint`
+same as `llm_endpoint`. `llm_embedding_chunk_size`/`llm_context_size`/
+`llm_request_timeout` left `null` — falls back to the app's built-in defaults
+(1024/8192/120) via `paperless/settings/__init__.py`.
+
+**Vision-OCR has no native equivalent.** paperless-gpt used to auto-OCR
+hard-to-read scans (garbled/decorative fonts, thermal receipts, rotated pages)
+via a vision LLM. That automated fallback is retired; for a scan that OCR'd
+badly, pull up the page image and have the operator + Claude Code read it
+directly (manual transcription into `Document.content`), rather than expecting
+an automated second-pass OCR stage.
 
 **Document / DB / mail operations** run in the paperless shell:
 ```bash
@@ -164,7 +217,7 @@ process_mail_accounts.delay()
 | Mail consume `PermissionError /tmp/paperless/paperless-mail-*` | `process_mail_accounts` was run from a **root** shell (root-owned temp) | queue via `.delay()` or let the beat run; never trigger from a root exec |
 | Mail re-run says "No new documents" but INBOX has unread PDFs | UIDs are in the `ProcessedMail` table (even `FAILED`) | delete the `FAILED` rows to reprocess |
 | paperless CrashLoopBackOff, exit 137 OOMKilled | `OCR_MODE=force` re-OCRs a multi-page doc's pages concurrently > mem limit | keep limit **6Gi**; pull the wedging file out of `/consume` via the validator pod to recover |
-| Vision-OCR (paperless-gpt) writes empty/garbage | gemma4 thinking model returns empty; default prompt encourages hallucination | retry empties, never overwrite with empty; strict `ocr_prompt.tmpl` is mounted |
+| Doc OCR'd badly (garbled/decorative fonts, thermal receipt, rotated) | no automated vision-OCR fallback anymore (paperless-gpt retired 2026-08-24) | manual review — operator + Claude Code reads the page image directly and transcribes into `Document.content`; see §4a |
 | Doc partly garbled (upside-down pages) | ocrmypdf OSD confidence too low to rotate | rotate-both-tesseract (Example C) |
 | validator CrashLoopBackOff | liveness probe used `pgrep` (absent in image) | heartbeat-file probe (already in `validator-deployment.yaml`) |
 | One PDF stuck in `/consume`, paperless crash-loops on it (tesseract `generate_hocr` ParseError / `SubprocessOutputError`) | under `OCR_MODE=force`, tesseract can ParseError on a **near-blank duplex back** (e.g. only hole-punch marks) and wedge the whole PDF on every 10s poll | pull the file via the `scan-inbox-validator` pod (stops the loop), drop/pre-OCR the blank page, re-consume the good page(s). Mitigate at source: **Skip Blank Pages ON** on the Epson preset (raise the blank threshold if hole-punches slip through) |
@@ -202,13 +255,16 @@ hit-rate false-positives on foreign-language docs — don't use it.)
 ## 9) Health Check ("check paperless")
 
 Read-only; summarise green/finding per row:
-1. Pods `paperless-ngx` / `-gpt` / `-ai` / mariadb / `paperless-redis` / `scan-inbox-validator`
+1. Pods `paperless-ngx` / `paperless-db` / `paperless-redis` / `scan-inbox-validator`
    — READY + **restart count** (climbing = OOM crash-storm).
 2. paperless mem limit = **6Gi**; `Document.objects.count()`; `/consume` PDF
    backlog = 0; validator heartbeat fresh.
 3. Mail beat firing (every 10 min, "No new documents" = healthy) + INBOX
    unprocessed-PDF = 0.
-4. Flux kustomizations/HelmReleases Ready; git in sync.
+4. Native AI: `ApplicationConfiguration.objects.first().ai_enabled` is `True`
+   and `llm_backend`/`llm_embedding_backend` are still `ollama` (a chart/DB
+   restore can silently reset this singleton row — it's not covered by Flux).
+5. Flux kustomizations/HelmReleases Ready; git in sync.
 
 Known-normal (not faults): "No new documents" every 10 min; `page already has
 text! … running OCR anyway` (force mode); `Too few characters. Skipping this page`
@@ -222,8 +278,10 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 - Public repo: never commit the real domain, the mailbox address, or
   `*.sops.yaml` plaintext. Don't name specific document content (people, invoice
   details) in committed artifacts — IDs/counts are fine.
-- API tokens (paperless-gpt/ai), mail credentials, and `csi-driver-smb` live in
-  SOPS/cluster secrets — reference via `secretKeyRef`, never inline.
+- Mail credentials and `csi-driver-smb` live in SOPS/cluster secrets — reference
+  via `secretKeyRef`, never inline. `llm_api_key` (native AI) is `None` — Ollama
+  doesn't require one; if a future backend needs a key, put it in the DB row,
+  not a manifest (the row isn't git-tracked, so redact accordingly if ever dumped).
 - CIFS `cifs-paperless-*` PVCs are **Severe** class (`docs/sops/storage-safety.md`)
   — never delete without the 3-step pre-flight; keep reclaim=Retain.
 - Never enter the scanner Administrator password (prohibited action).
@@ -246,8 +304,8 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 
 ## 12) References
 
-- `kubernetes/apps/office/paperless-ngx/app/` · `paperless-gpt/app/` ·
-  `paperless-ai/app/`.
+- `kubernetes/apps/office/paperless-ngx/app/`. (No `paperless-gpt`/`paperless-ai`
+  directories anymore — retired 2026-08-24.)
 - `docs/sops/storage-safety.md`, `docs/sops/longhorn.md`, `docs/sops/monitoring.md`,
   `docs/sops/new-deployment-blueprint.md`, `docs/sops/ai-integration.md`.
 - `~/.claude/agents/paperless-agent.md` (operational depth + hard rules).
@@ -264,3 +322,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.07.13` | 2026-07-13 | Add troubleshooting for hOCR crash on near-blank duplex backs (force-mode wedge in `/consume`) and the DOB date-misparse on medical/insurance docs (surfaced in the 64-doc scan-batch audit). |
 | `2026.08.18` | 2026-08-18 | Record that `scan-inbox-validator` reuses the app's image tag (bump both in one commit); add image-parity and heartbeat-advances verification tests. |
 | `2026.08.24` | 2026-08-24 | Add troubleshooting for the root-vs-uid1000 permission bug in `bulk_edit.split()`/`manage.py shell` writes (use `gosu paperless`) and the split chord's silent no-retry-no-delete failure mode — surfaced during the 9-doc/147-recipe HelloFresh/Marley Spoon batch split. |
+| `2026.08.24` | 2026-08-24 | Retire paperless-gpt and paperless-ai in favor of paperless-ngx 3.0.5's native AI module (`ApplicationConfiguration` DB row — `ai_enabled`/`llm_*`/`llm_embedding_*`, `ollama`/`gemma4:26b` + `nomic-embed-text:latest`). Add §4a (native AI operations), document the new manual-vision-review fallback for hard scans, drop vision-OCR/gpt/ai troubleshooting rows and references. |

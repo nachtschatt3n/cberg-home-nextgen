@@ -171,9 +171,7 @@ spec:
         existingClaim: paperless-ngx-consume
       prompts:
         enabled: true
-        #type: configMap
         type: emptyDir
-        #name: paperless-gpt-prompts
         mountPath: /app/prompts
       hocr:
         enabled: true

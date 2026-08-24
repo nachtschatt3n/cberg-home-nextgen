@@ -1,7 +1,7 @@
 # AI Usage Map
 
 > Comprehensive mapping of all AI/LLM integrations across the cluster and Home Assistant.
-> Last Updated: 2026-08-14
+> Last Updated: 2026-08-24
 
 ---
 
@@ -27,8 +27,7 @@ Ports 11435 and 11436 are no longer in use.
 | Next AI Draw.io | ai | `gemma4:26b` | Native Ollama `/api` | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
 | LibreChat | ai | `gemma4:26b` (default, fetch=true) | OpenAI `/v1` | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:93-103` |
 | Open WebUI | ai | (all available models) | Native Ollama | `kubernetes/apps/ai/open-webui/app/helmrelease.yaml:84` |
-| Paperless-GPT | office | `gemma4:26b` (LLM + vision) | OpenAI `/v1` | `kubernetes/apps/office/paperless-gpt/app/helmrelease.yaml:48,55-56` |
-| Paperless-AI | office | `gemma4:26b` | OpenAI `/v1` | `kubernetes/apps/office/paperless-ai/app/helmrelease.yaml:52-53` |
+| Paperless-ngx (native AI) | office | `gemma4:26b` (suggestions) + `nomic-embed-text:latest` (RAG embeddings) | Native Ollama | DB-stored (`paperless.models.ApplicationConfiguration`), not a manifest — see `docs/sops/paperless.md` §4a. Replaces the retired Paperless-GPT/Paperless-AI sidecars (2026-08-24). |
 | AFFiNE | office | `gemma4:26b` (coding, text, summarize) | OpenAI `/v1` | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
 | Frigate NVR | home-automation | `gemma4:26b` (in encrypted configmap) | OpenAI `/v1` | `kubernetes/apps/home-automation/frigate-nvr/app/helmrelease.yaml:34` |
 | Nextcloud | office | `gemma4:26b` | OpenAI `/v1` | NC UI: `integration_openai` app (updated 2026-04-04) |
@@ -104,8 +103,8 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, Paperless-GPT, Paperless-AI, AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
-| `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings) |
+| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, Paperless-ngx (native AI suggestions), AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
+| `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
 ---
 

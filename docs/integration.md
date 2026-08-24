@@ -42,8 +42,7 @@ Endpoints: /v1/chat/completions
 | next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` |
 | librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b` (fetch=true) | Custom endpoint "Ollama" |
 | open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` |
-| paperless-gpt | `http://192.168.30.111:11434/v1` | `gemma4:26b` (LLM + vision) | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL` |
-| paperless-ai | `http://192.168.30.111:11434/v1` | `gemma4:26b` | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
+| paperless-ngx (native AI) | `http://192.168.30.111:11434` | `gemma4:26b` + `nomic-embed-text:latest` | DB-stored `ApplicationConfiguration` row (`ai_enabled`/`llm_*`/`llm_embedding_*`), not GitOps — see `docs/sops/paperless.md` §4a. Retired `paperless-gpt`/`paperless-ai` sidecars 2026-08-24. |
 | affine | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
 | frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b` (in encrypted config) | `OPENAI_BASE_URL` |
 | nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |

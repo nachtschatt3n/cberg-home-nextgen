@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.08.24`
+> Last Updated: `2026-08-24`
 > Owner: `Platform`
 
 ---
@@ -35,7 +35,7 @@ N/A for dedicated Authentik-style blueprints.
 
 Declarative source-of-truth for AI integrations is maintained in application manifests under:
 - `kubernetes/apps/ai/`
-- `kubernetes/apps/office/` (Paperless-AI / Paperless-GPT / AFFiNE / Nextcloud)
+- `kubernetes/apps/office/` (Paperless-ngx native AI / AFFiNE / Nextcloud)
 - `kubernetes/apps/home-automation/` (Frigate AI settings, Home Assistant, n8n)
 
 ---
@@ -448,35 +448,36 @@ kubectl exec -n home-automation deploy/n8n -- cat /home/node/.n8n/database.sqlit
   | strings | grep -iE 'ollamaApi|openAiApi|anthropicApi' | head -10
 ```
 
-### Paperless-AI (`office/paperless-ai`)
+### Paperless-ngx native AI (`office/paperless-ngx`)
 
-Document classification using Ollama.
-
-| Setting | Value |
-|---------|-------|
-| Endpoint | `http://192.168.30.111:11434/v1` |
-| Model | `gemma4:26b` |
-| Config | `AI_PROVIDER: "custom"`, `CUSTOM_BASE_URL` |
-
-```bash
-kubectl get pods -n office -l app.kubernetes.io/name=paperless-ai
-kubectl logs -n office -l app.kubernetes.io/name=paperless-ai --tail=50
-```
-
-### Paperless-GPT (`office/paperless-gpt`)
-
-AI tagging and summarization for Paperless-ngx.
+Document classification (LLM suggestions) + RAG chat, built into paperless-ngx
+3.0.5. Retired the standalone `paperless-gpt` (vision-OCR/metadata) and
+`paperless-ai` (auto-tag/RAG) sidecars on 2026-08-24 — both were fully
+redundant with this native module. **Config is a DB row, not a manifest**
+(`paperless.models.ApplicationConfiguration`) — see `docs/sops/paperless.md`
+§4a for the read/write recipe (always `gosu paperless`, never a bare exec).
 
 | Setting | Value |
 |---------|-------|
-| Endpoint | `http://192.168.30.111:11434/v1` |
-| LLM Model | `gemma4:26b` |
-| Vision Model | `gemma4:26b` (multimodal) |
-| Config | `LLM_PROVIDER: "openai"`, `OPENAI_BASE_URL` |
+| Endpoint (LLM + embeddings) | `http://192.168.30.111:11434` |
+| LLM model | `gemma4:26b` (`llm_backend=ollama`) |
+| Embedding model | `nomic-embed-text:latest` (`llm_embedding_backend=ollama`) |
+| Config | DB-stored `ApplicationConfiguration` singleton row |
 
 ```bash
-kubectl logs -n office -l app.kubernetes.io/name=paperless-gpt --tail=50
+PPOD=$(kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n office "$PPOD" -c paperless-ngx -- gosu paperless python3 \
+  /usr/src/paperless/src/manage.py shell -c "
+from paperless.models import ApplicationConfiguration
+ac = ApplicationConfiguration.objects.first()
+print(ac.ai_enabled, ac.llm_backend, ac.llm_model, ac.llm_embedding_backend, ac.llm_embedding_model)"
 ```
+
+paperless-gpt's vision-OCR (automated hard-scan fallback) has no native
+replacement — hard-to-OCR scans now go through manual review (operator +
+Claude Code reading the page image on demand) instead of an automated
+pipeline stage.
 
 ### Frigate NVR AI (`home-automation/frigate-nvr`)
 
