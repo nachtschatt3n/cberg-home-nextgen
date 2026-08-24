@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -253,53 +254,98 @@ def imported_keys(base: str, token: str) -> set:
     return keys
 
 
-def _fetch_all(base: str, token: str, endpoint: str) -> dict:
-    """name -> id for an organizer collection (units, foods)."""
+def _fetch_all(base: str, token: str, path: str) -> dict:
+    """normalised name -> id for an organizer collection."""
     found, page = {}, 1
     while True:
-        data = _mealie("GET", f"{base}/api/{endpoint}?page={page}&perPage=100", token)
+        data = _mealie("GET", f"{base}/{path}?page={page}&perPage=100", token)
         for item in data.get("items", []):
-            found[item["name"].strip().lower()] = item["id"]
+            found[_norm(item["name"])] = item["id"]
         if page >= data.get("total_pages", 1):
             break
         page += 1
     return found
 
 
-class OrganizerCache:
-    """Resolves ingredient units and foods to existing IDs, creating what is missing.
+def _norm(name: str) -> str:
+    """Match Mealie's own uniqueness rule.
 
-    Mealie's OpenAPI advertises that `unit`/`food` accept a create-shape carrying
-    only a name, but the recipe update handler rejects it with
-    `ValueError: Expected 'id' to be provided for unit`. Units and foods must
-    therefore exist before a recipe can reference them. Resolving up-front also
-    keeps the corpus from sprouting near-duplicate foods, since matching is done
-    case-insensitively on the trimmed name.
+    Mealie stores a `name_normalized` column that is lower-cased and stripped of
+    diacritics, and the unique constraint is on that. A cache keyed on plain
+    lower-case therefore misses `Crème fraîche` when `creme fraiche` already
+    exists, and the create then fails.
     """
+    decomposed = unicodedata.normalize("NFKD", name.strip().casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+class OrganizerCache:
+    """Resolves every organizer a recipe references to an existing ID.
+
+    Units, foods, tags and categories must all exist before a recipe can
+    reference them:
+
+      - `unit`/`food` are advertised in the OpenAPI as accepting a create-shape
+        carrying only a name, but the update handler rejects that with
+        `ValueError: Expected 'id' to be provided for unit`.
+      - `tags`/`recipeCategory` fail more confusingly. Passing name+slug makes
+        Mealie try to create them, and when one already exists the unique
+        violation surfaces as `400 Recipe already exists` -- an error about the
+        recipe, naming the wrong object entirely. That message cost real time to
+        trace, hence this note.
+
+    Resolving up-front also stops the corpus sprouting near-duplicate foods.
+    """
+
+    KINDS = {
+        "units": "api/units",
+        "foods": "api/foods",
+        "tags": "api/organizers/tags",
+        "categories": "api/organizers/categories",
+    }
 
     def __init__(self, base: str, token: str):
         self.base, self.token = base, token
-        self.units = _fetch_all(base, token, "units")
-        self.foods = _fetch_all(base, token, "foods")
+        self.cache = {k: _fetch_all(base, token, path) for k, path in self.KINDS.items()}
 
-    def _resolve(self, kind: str, cache: dict, name: str) -> dict:
-        key = name.strip().lower()
+    def _resolve(self, kind: str, name: str) -> dict:
+        cache, key = self.cache[kind], _norm(name)
         if key not in cache:
-            created = _mealie(
-                "POST", f"{self.base}/api/{kind}", self.token, {"name": name.strip()}
-            )
-            cache[key] = created["id"]
+            try:
+                cache[key] = _mealie(
+                    "POST", f"{self.base}/{self.KINDS[kind]}", self.token,
+                    {"name": name.strip()},
+                )["id"]
+            except urllib.error.HTTPError as exc:
+                # 409 means another name normalises to the same key -- re-read the
+                # collection and use what is already there rather than failing.
+                if exc.code != 409:
+                    raise
+                self.cache[kind] = _fetch_all(self.base, self.token, self.KINDS[kind])
+                cache = self.cache[kind]
+                if key not in cache:
+                    raise
         return {"id": cache[key], "name": name.strip()}
 
     def apply(self, recipe: dict) -> dict:
         for ing in recipe.get("recipeIngredient") or []:
-            for field, kind, cache in (
-                ("unit", "units", self.units),
-                ("food", "foods", self.foods),
-            ):
+            for field, kind in (("unit", "units"), ("food", "foods")):
                 value = ing.get(field)
                 if isinstance(value, dict) and value.get("name") and not value.get("id"):
-                    ing[field] = self._resolve(kind, cache, value["name"])
+                    ing[field] = self._resolve(kind, value["name"])
+        for field, kind in (("tags", "tags"), ("recipeCategory", "categories")):
+            items = recipe.get(field) or []
+            resolved = []
+            for item in items:
+                name = item.get("name") if isinstance(item, dict) else item
+                if not name:
+                    continue
+                entry = self._resolve(kind, name)
+                # the recipe payload wants a slug alongside the id
+                entry["slug"] = _norm(name).replace(" ", "-").replace(",", "")
+                resolved.append(entry)
+            if items:
+                recipe[field] = resolved
         return recipe
 
 
