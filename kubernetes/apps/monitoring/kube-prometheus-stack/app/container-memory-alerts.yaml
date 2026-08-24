@@ -84,6 +84,20 @@ spec:
           # early; the >0.50 guard on the current value keeps containers that sit
           # high and flat from alerting forever.
           #
+          # RSS, NOT working_set, and this is the one rule where that is right.
+          # A leak is ANONYMOUS memory that cannot be reclaimed; page cache
+          # growth is a workload reading files and says nothing about a leak.
+          # On working_set this rule fired four times in one evening for
+          # open-webui, immich (twice) and the unifi controller — every one of
+          # them cache from heavy I/O, none of them leaking. Checked against the
+          # real leak before switching: frigate still trips it about 1.4 days
+          # from now, ~2.8 days before its ceiling, so this sharpens the
+          # detector rather than blinding it.
+          #
+          # The two THRESHOLD rules above deliberately stay on working_set:
+          # there, unreclaimable tmpfs pages must count, and that is exactly what
+          # caught falco's 501 MiB in-RAM log file.
+          #
           # The growth requirement is what separates this from
           # ContainerMemoryNearLimit. Predicting a FLAT series returns roughly
           # its current value, so a container simply pinned near its limit —
@@ -102,7 +116,7 @@ spec:
           expr: |
             (
               predict_linear(
-                container_memory_working_set_bytes{container!="",container!="POD"}[6h],
+                container_memory_rss{container!="",container!="POD"}[6h],
                 48 * 3600
               )
               / on(namespace,pod,container) group_left
@@ -110,7 +124,7 @@ spec:
             ) > 0.90
             and
             (
-              container_memory_working_set_bytes{container!="",container!="POD"}
+              container_memory_rss{container!="",container!="POD"}
               / on(namespace,pod,container) group_left
               kube_pod_container_resource_limits{resource="memory"}
             ) > 0.50
@@ -121,10 +135,10 @@ spec:
             and
             (
               predict_linear(
-                container_memory_working_set_bytes{container!="",container!="POD"}[6h],
+                container_memory_rss{container!="",container!="POD"}[6h],
                 48 * 3600
               )
-              - container_memory_working_set_bytes{container!="",container!="POD"}
+              - container_memory_rss{container!="",container!="POD"}
             )
             / on(namespace,pod,container) group_left
             kube_pod_container_resource_limits{resource="memory"} > 0.10
