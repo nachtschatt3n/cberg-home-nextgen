@@ -251,21 +251,43 @@ _ROW = re.compile(r"^\|\s*`?([^`|]+?)`?\s*\|\s*`?([^`|]*)`?\s*\|\s*([^|]*)\|\s*(
 _ARROW = re.compile(r"(\S+)\s*(?:→|->)\s*(\S+)")
 
 
+def _version_components(v: str) -> list:
+    """Every numeric component of a tag, never just the first three.
+
+    `[:3]` made two Plex builds that differ ONLY in the 4th field
+    (`1.43.3.10861` vs `1.43.3.10896`) parse identically — see
+    `_is_strictly_newer` for what that cost. Callers pad with `_padded()`.
+    """
+    v = v.lstrip("vV").split("-")[0].split("+")[0].split("@")[0]
+    return [int(x) for x in re.findall(r"\d+", v)]
+
+
+def _padded(a: list, b: list, minimum: int = 3):
+    """Zero-pad two component lists to a common length so they are
+    comparable. Equates only the formatting difference (`1.38` vs `1.38.0`);
+    every real ordering, 4+ components included, survives."""
+    n = max(len(a), len(b), minimum)
+    return a + [0] * (n - len(a)), b + [0] * (n - len(b))
+
+
 def _semver_type(cur: str, tgt: str) -> str:
     """patch/minor/major from two versions (handles v-prefix, date tags like
     2026.7.2, alpine suffixes). unknown if unparseable."""
-    def parse(v):
-        v = v.lstrip("vV").split("-")[0].split("+")[0].split("@")[0]
-        return [int(x) for x in re.findall(r"\d+", v)[:3]]
-    a, b = parse(cur), parse(tgt)
+    a, b = _version_components(cur), _version_components(tgt)
     if not a or not b:
         return "unknown"
-    a += [0] * (3 - len(a)); b += [0] * (3 - len(b))
+    a, b = _padded(a, b)
     if b[0] != a[0]:
         return "major"
     if b[1] != a[1]:
         return "minor"
     if b[2] != a[2]:
+        return "patch"
+    if b != a:
+        # Equal through patch but not equal overall: the difference is in a
+        # 4th or later component, i.e. a vendor BUILD bump. Returning
+        # "unknown" here handed classification to the row's complexity
+        # column, which describes the CHART, not this image.
         return "patch"
     return "unknown"
 
@@ -276,14 +298,19 @@ def _is_strictly_newer(cur: str, tgt: str) -> bool:
     edited version-check-current.md: `v3.1.0 → v1.116.0` is a downgrade, not
     an actionable update, and must never manufacture a PLAN-lane item. When
     either side is unparseable we keep the arrow (can't prove a downgrade, so
-    don't silently drop a possibly-real update)."""
-    def parse(v):
-        v = v.lstrip("vV").split("-")[0].split("+")[0].split("@")[0]
-        return [int(x) for x in re.findall(r"\d+", v)[:3]]
-    a, b = parse(cur), parse(tgt)
+    don't silently drop a possibly-real update).
+
+    It must be equally careful in the other direction. Truncating at three
+    components made two Plex builds differing only in the 4th field compare
+    EQUAL, so a real patch update returned False and was dropped before it
+    ever reached a lane -- and an item that never enters the enumeration can
+    never be reported as a crack, so `covered: YES (no cracks)` was printed
+    over it. A suppressor that is also a denominator has to be right twice.
+    """
+    a, b = _version_components(cur), _version_components(tgt)
     if not a or not b:
         return True  # unparseable → don't suppress
-    a += [0] * (3 - len(a)); b += [0] * (3 - len(b))
+    a, b = _padded(a, b)
     return b > a
 
 
