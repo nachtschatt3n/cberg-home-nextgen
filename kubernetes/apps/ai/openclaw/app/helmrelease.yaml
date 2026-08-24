@@ -1760,7 +1760,10 @@ spec:
                 # usage (we sit at 1.1-1.3 GiB; the 512Mi request let the
                 # scheduler over-commit the node, making us the first
                 # eviction target under pressure).
-                cpu: 100m
+                # CPU request raised 100m -> 500m on 2026-08-24: measured
+                # steady-state is ~500m (492m at review time), so 100m let
+                # the scheduler over-commit the node against us.
+                cpu: 500m
                 memory: 1200Mi
               limits:
                 # Bumped 2Gi -> 4Gi on 2026-06-06 after an OOMKill (exit
