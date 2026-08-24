@@ -1380,7 +1380,25 @@ log_section "Section 10: Longhorn Storage"
     # without masking an unrelated real failure on a different volume.
     UNHEALTHY_DETAIL=$(kubectl get volumes -n storage -o json 2>/dev/null | jq -r '.items[] | select((.status.robustness == "degraded" or .status.robustness == "faulted") or (.status.state == "attached" and .status.robustness != "healthy")) | "\(.metadata.name): state=\(.status.state) robustness=\(.status.robustness)"')
 
-    echo "Volumes: $((TOTAL_VOLUMES - UNHEALTHY_VOLUMES))/$TOTAL_VOLUMES healthy"
+    # `robustness == "unknown"` is EXCLUDED from UNHEALTHY_VOLUMES above by
+    # design (it's the expected value for every detached volume, not a
+    # failure) -- but the display line then computed
+    # `TOTAL - UNHEALTHY` and printed that as "healthy", which silently folds
+    # "unknown" volumes INTO the healthy count by omission. Found 2026-08-24:
+    # 2 detached migration-rollback orphans (paperless-mariadb,
+    # redis-data-nextcloud-redis-master-0) read as "95/95 healthy" -- a
+    # literal claim that Longhorn reported ALL 95 as healthy, when 2 of them
+    # have UNKNOWN robustness, which is a different thing to report than
+    # "healthy" even though it correctly does not page. Counted as its own
+    # bucket now so the display line cannot claim more than the data supports.
+    UNKNOWN_ROBUSTNESS=$(kubectl get volumes -n storage -o json 2>/dev/null | jq '[.items[] | select(.status.robustness == "unknown")] | length')
+    HEALTHY_VOLUMES=$((TOTAL_VOLUMES - UNHEALTHY_VOLUMES - UNKNOWN_ROBUSTNESS))
+
+    echo "Volumes: $HEALTHY_VOLUMES/$TOTAL_VOLUMES healthy"
+    if [ "$UNKNOWN_ROBUSTNESS" -gt 0 ]; then
+        echo "  + $UNKNOWN_ROBUSTNESS volume(s) with unknown robustness (expected for detached volumes, not a failure):"
+        kubectl get volumes -n storage -o json 2>/dev/null | jq -r '.items[] | select(.status.robustness == "unknown") | "      \(.metadata.name): state=\(.status.state)"'
+    fi
 
     if [ "$UNHEALTHY_VOLUMES" -gt 0 ]; then
         echo "Unhealthy volumes:"
@@ -1534,18 +1552,27 @@ log_section "Section 11: Container Logs Analysis"
     fi
 
     # ES enrichment: 7-day error context for infra namespaces
+    # must_not is a TOP-LEVEL sibling of should/minimum_should_match, never a
+    # third should-branch: {"bool":{"must_not":X}} inside "should" matches
+    # every document that does NOT contain X (nearly all of them), so it does
+    # not exclude NOERROR, it makes minimum_should_match:1 trivially true for
+    # almost the entire index. Verified live 2026-08-24: the should-branch
+    # form returns 30,077,958 over 7d; moving must_not to the top level (the
+    # form already used at the §34 24h check below) returns 38,213 — an
+    # ~800x over-count, not the 77x this was first measured at. A JSON
+    # comment on the should-branch line ALSO broke the query outright
+    # (Elasticsearch rejects "#" in JSON: x_content_parse_exception), so this
+    # had been silently dead before it was silently wrong.
     ES_INFRA=$(es_query '{
       "size": 0,
+      "track_total_hits": true,
       "query": {"bool": {
         "should": [
           {"wildcard": {"body.text": "*ERROR*"}},
-          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
-          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
-          # 224 real, not 24,223). A success counted as a failure is the same
-          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
           {"wildcard": {"body.text": "*FATAL*"}}
         ],
         "minimum_should_match": 1,
+        "must_not": [{"wildcard": {"body.text": "*NOERROR*"}}],
         "filter": [
           {"range": {"@timestamp": {"gte": "now-7d"}}},
           {"terms": {"resource.attributes.k8s.namespace.name": ["kube-system", "flux-system", "cert-manager", "monitoring"]}}
@@ -3100,18 +3127,18 @@ PYEOF
     fi
 
     # ES enrichment: 7-day HA error trends by pod
+    # See the infra ES enrichment above for why must_not must be a TOP-LEVEL
+    # sibling of should, never a third should-branch (2026-08-24 fix).
     ES_HA=$(es_query '{
       "size": 0,
+      "track_total_hits": true,
       "query": {"bool": {
         "should": [
           {"wildcard": {"body.text": "*ERROR*"}},
-          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
-          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
-          # 224 real, not 24,223). A success counted as a failure is the same
-          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
           {"wildcard": {"body.text": "*FATAL*"}}
         ],
         "minimum_should_match": 1,
+        "must_not": [{"wildcard": {"body.text": "*NOERROR*"}}],
         "filter": [
           {"range": {"@timestamp": {"gte": "now-7d"}}},
           {"term": {"resource.attributes.k8s.namespace.name": "home-automation"}}
@@ -5462,6 +5489,155 @@ log_section "Section 38: Admission Webhook Health"
     echo "  - Total: $TOTAL_WEBHOOKS"
     echo ""
 
+    # PROBE actual responses, not just count config objects. Counting
+    # `mutatingwebhookconfigurations` answers "how many webhooks are
+    # DECLARED", never "do they WORK" -- Section 38 read "All webhooks
+    # healthy (48 configured)" every single run while 14 of those 48 routes
+    # 404'd on their own target service. Found 2026-08-24: the Intel
+    # device-plugin operator runs with `--devices=gpu,npu` only, but its
+    # chart renders webhook config objects for all 8 device types
+    # unconditionally, so the other 6 (dlb/dsa/fpga/iaa/qat/sgx) have both a
+    # validating and a mutating webhook entry pointing at a route the
+    # controller never registers. Two of those 14 -- the FPGA and SGX
+    # POD-mutators (apiGroups:[""] + resources:["pods"], not the CRD-scoped
+    # ones) -- fire on EVERY pod CREATE cluster-wide with `failurePolicy:
+    # Ignore`, so the 404 blocks nothing, generates no Warning event (the
+    # WEBHOOK_FAILURES grep above cannot see it), and repeats an estimated
+    # ~2,700 times/day. The other 12 are CRD-scoped (fire only when someone
+    # creates e.g. an `FpgaDevicePlugin` object, which essentially never
+    # happens here) -- genuinely dead, but not a noise source.
+    #
+    # One port-forward per unique target SERVICE (48 webhook entries share
+    # only 8 backing services in this cluster), POST an empty AdmissionReview
+    # body to each registered path, and treat exactly 404 as "route not
+    # registered". Any other response (200/400/500/...) means the route
+    # EXISTS and merely rejected the synthetic payload -- expected, not a
+    # finding. HIGH severity is a webhook whose `rules` match core-group
+    # `pods` (fires on every pod, cluster-wide); everything else is LOW.
+    WEBHOOK_PROBE=$(python3 -c "
+import json, socket, subprocess, sys, time
+
+def get_json(kind):
+    out = subprocess.run(['kubectl', 'get', kind, '-o', 'json'],
+                         capture_output=True, text=True, timeout=15)
+    return json.loads(out.stdout) if out.stdout.strip() else {'items': []}
+
+targets = []
+for kind_arg in ('validatingwebhookconfigurations', 'mutatingwebhookconfigurations'):
+    d = get_json(kind_arg)
+    for item in d.get('items', []):
+        kind = item['kind']
+        for wh in item.get('webhooks', []):
+            svc = (wh.get('clientConfig') or {}).get('service')
+            if not svc:
+                continue  # URL-based clientConfig (external target) -- not ours to probe
+            rules = wh.get('rules') or []
+            hits_all_pods = any(
+                'pods' in (r.get('resources') or [])
+                and '' in (r.get('apiGroups') or [])
+                for r in rules
+            )
+            targets.append({
+                'name': wh['name'], 'kind': kind, 'namespace': svc['namespace'],
+                'service': svc['name'], 'port': svc.get('port', 443),
+                'path': svc.get('path') or '/', 'hits_all_pods': hits_all_pods,
+            })
+
+groups = {}
+for t in targets:
+    key = (t['namespace'], t['service'], t['port'])
+    groups.setdefault(key, []).append(t)
+
+def free_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+probed = 0
+could_not_run = []
+dead = []
+
+for (ns, svc, port), items in groups.items():
+    lport = free_port()
+    pf = subprocess.Popen(
+        ['kubectl', 'port-forward', '-n', ns, 'svc/' + svc, str(lport) + ':' + str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        connected = False
+        for _ in range(10):
+            r = subprocess.run(
+                ['curl', '-k', '-s', '-m', '2', '-o', '/dev/null',
+                 '-w', '%{http_code}', 'https://127.0.0.1:' + str(lport) + '/'],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                connected = True
+                break
+            time.sleep(0.4)
+        if not connected:
+            could_not_run.append(ns + '/' + svc + ':' + str(port))
+            continue
+        for t in items:
+            probed += 1
+            r = subprocess.run(
+                ['curl', '-k', '-s', '-m', '3', '-o', '/dev/null',
+                 '-w', '%{http_code}', '-X', 'POST',
+                 'https://127.0.0.1:' + str(lport) + t['path'],
+                 '-H', 'Content-Type: application/json', '-d', '{}'],
+                capture_output=True, text=True,
+            )
+            if r.stdout.strip() == '404':
+                sev = 'HIGH' if t['hits_all_pods'] else 'LOW'
+                target_desc = ns + '/' + svc + ':' + str(port) + t['path']
+                dead.append((sev, t['kind'], t['name'], target_desc))
+    finally:
+        pf.terminate()
+        try:
+            pf.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pf.kill()
+
+print('PROBED=' + str(probed))
+print('COULD_NOT_RUN=' + str(len(could_not_run)))
+for svc_id in could_not_run:
+    print('SKIPPED|' + svc_id)
+for sev, kind, name, target in dead:
+    print('DEAD|' + sev + '|' + kind + '|' + name + '|' + target)
+" 2>/dev/null)
+
+    PROBED=$(echo "$WEBHOOK_PROBE" | grep '^PROBED=' | cut -d= -f2)
+    COULD_NOT_RUN=$(echo "$WEBHOOK_PROBE" | grep '^COULD_NOT_RUN=' | cut -d= -f2)
+    DEAD_HIGH=$(echo "$WEBHOOK_PROBE" | grep -c '^DEAD|HIGH|' || true)
+    DEAD_LOW=$(echo "$WEBHOOK_PROBE" | grep -c '^DEAD|LOW|' || true)
+
+    if [ -z "$PROBED" ]; then
+        log_warning "Webhook response probe did not run (kubectl/curl unavailable) -- coverage is config-count only"
+        add_minor_issue "Admission webhook response probe could not run this cycle"
+    else
+        echo "Webhook response probe: $PROBED route(s) checked"
+        if [ "${COULD_NOT_RUN:-0}" -gt 0 ]; then
+            log_warning "Could not reach $COULD_NOT_RUN webhook backing service(s) -- their routes were NOT probed, not confirmed healthy"
+            add_minor_issue "Webhook probe: $COULD_NOT_RUN service(s) unreachable, coverage incomplete"
+            echo "$WEBHOOK_PROBE" | grep '^SKIPPED|' | sed 's/^SKIPPED|/  - unreachable: /'
+        fi
+        if [ "${DEAD_HIGH:-0}" -gt 0 ]; then
+            log_warning "$DEAD_HIGH webhook route(s) 404 on EVERY matching request (fires on every pod create)"
+            add_major_issue "Admission webhook 404s on every pod create: $DEAD_HIGH route(s) -- see Section 38 detail"
+            echo "$WEBHOOK_PROBE" | grep '^DEAD|HIGH|' | awk -F'|' '{print "  - " $3 "/" $4 " -> " $5}'
+        fi
+        if [ "${DEAD_LOW:-0}" -gt 0 ]; then
+            log_info "$DEAD_LOW low-frequency webhook route(s) 404 (CRD-scoped, rarely triggered)"
+            add_minor_issue "Admission webhook routes registered but unreachable: $DEAD_LOW (low-frequency)"
+            echo "$WEBHOOK_PROBE" | grep '^DEAD|LOW|' | awk -F'|' '{print "  - " $3 "/" $4 " -> " $5}'
+        fi
+        if [ "${DEAD_HIGH:-0}" -eq 0 ] && [ "${DEAD_LOW:-0}" -eq 0 ] && [ "${COULD_NOT_RUN:-0}" -eq 0 ]; then
+            log_success "All $PROBED probed webhook routes responded (no 404s)"
+        fi
+    fi
+
     if [ "$WEBHOOK_FAILURES" -gt 10 ]; then
         log_warning "High webhook failure count: $WEBHOOK_FAILURES"
         add_major_issue "Admission webhook failures: $WEBHOOK_FAILURES"
@@ -5538,18 +5714,20 @@ log_section "ES Log Insights (7-day analysis)"
 {
     if [ "$ES_AVAILABLE" = "true" ]; then
         echo "=== Top Error Producers (7d) ==="
+        # See the infra ES enrichment (above, earlier in this file) for why
+        # must_not must be a TOP-LEVEL sibling of should, never a third
+        # should-branch, and why a raw `#` inside this JSON string broke the
+        # query outright before it was ever silently wrong (2026-08-24 fix).
         ES_TOP=$(es_query '{
           "size": 0,
+          "track_total_hits": true,
           "query": {"bool": {
             "should": [
               {"wildcard": {"body.text": "*ERROR*"}},
-          {"bool": {"must_not": {"wildcard": {"body.text": "*NOERROR*"}}}},   # CoreDNS logs a SUCCESSFUL answer as "NOERROR", which *ERROR* matches.
-          # 22.9%% of all counted "errors" were healthy DNS responses (network ns:
-          # 224 real, not 24,223). A success counted as a failure is the same
-          # defect family as a silent zero — see docs/sops/audit-script-correctness.md.
               {"wildcard": {"body.text": "*FATAL*"}}
             ],
             "minimum_should_match": 1,
+            "must_not": [{"wildcard": {"body.text": "*NOERROR*"}}],
             "filter": [{"range": {"@timestamp": {"gte": "now-7d"}}}]
           }},
           "aggs": {
