@@ -1,0 +1,94 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+  name: mealie-alerts
+  namespace: monitoring
+spec:
+  groups:
+  # Two groups: the app and its database are separate workloads with separate
+  # failure modes. A single widened selector would report "mealie is down"
+  # when it is actually postgres that is down, which is the wrong first move
+  # for whoever gets paged.
+  - interval: 30s
+    name: mealie.pods.health
+    rules:
+    - alert: MealiePodNotReady
+      annotations:
+        description: Mealie pod {{ $labels.pod }} has been not ready for more than
+          5 minutes. The recipe manager and meal planner may be unavailable.
+        summary: Mealie pod {{ $labels.pod }} is not ready
+      # `unless ... Succeeded` excludes Completed Job pods, for which
+      # kube_pod_status_ready{condition="true"} is legitimately 0 and would
+      # otherwise fire this alert forever (blueprint Gotcha #7).
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="office", pod=~"mealie-[0-9a-f]+-.*", condition="true"}
+          unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+        ) == 0
+      for: 5m
+      labels:
+        category: office
+        component: mealie
+        severity: critical
+    - alert: MealiePodCrashLooping
+      annotations:
+        description: Mealie pod {{ $labels.pod }} has restarted {{ $value | printf
+          "%.0f" }} times in the last 15 minutes. Check logs for startup, OIDC or
+          database errors.
+        summary: Mealie pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="office", pod=~"mealie-[0-9a-f]+-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: office
+        component: mealie
+        severity: critical
+    - alert: MealiePodRestarted
+      annotations:
+        description: Mealie pod {{ $labels.pod }} has restarted at least once in
+          the last 15 minutes. Monitor for repeated restarts.
+        summary: Mealie pod {{ $labels.pod }} restarted
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace="office", pod=~"mealie-[0-9a-f]+-.*"}[15m]) > 0
+      for: 1m
+      labels:
+        category: office
+        component: mealie
+        severity: warning
+
+  - interval: 30s
+    name: mealie-pg.pods.health
+    rules:
+    - alert: MealiePostgresNotReady
+      annotations:
+        description: Mealie's Postgres pod {{ $labels.pod }} has been not ready for
+          more than 5 minutes. Mealie cannot serve or store recipes without it.
+        summary: Mealie Postgres pod {{ $labels.pod }} is not ready
+      expr: |
+        sum by (namespace, pod) (
+          kube_pod_status_ready{namespace="office", pod=~"mealie-pg-.*", condition="true"}
+          unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1
+        ) == 0
+      for: 5m
+      labels:
+        category: office
+        component: mealie-pg
+        severity: critical
+    - alert: MealiePostgresCrashLooping
+      annotations:
+        description: Mealie's Postgres pod {{ $labels.pod }} has restarted {{ $value
+          | printf "%.0f" }} times in the last 15 minutes. Check for volume-attach
+          or corruption errors.
+        summary: Mealie Postgres pod {{ $labels.pod }} is crash looping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="office", pod=~"mealie-pg-.*"}[15m]) * 900 > 2
+      for: 5m
+      labels:
+        category: office
+        component: mealie-pg
+        severity: critical

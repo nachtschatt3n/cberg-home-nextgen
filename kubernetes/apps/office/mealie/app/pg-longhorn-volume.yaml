@@ -1,0 +1,26 @@
+---
+# DELIBERATELY NOT REGISTERED in kustomization.yaml.
+#
+# The app Kustomization's `targetNamespace: office` silently overrides this
+# CR's `namespace: storage` and creates a broken duplicate in `office` that
+# Longhorn ignores — so Flux cannot own this file. Keep it here as
+# version-controlled source and apply it BY HAND, once:
+#
+#   mise exec -- kubectl apply -f kubernetes/apps/office/mealie/app/pg-longhorn-volume.yaml
+#
+# If you skip it the PVC sits Pending. That is the EXPECTED failure and a
+# prompt to run the apply — not a reason to fall back to the dynamic
+# `longhorn` storage class. See docs/sops/longhorn.md.
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: mealie-pg-data
+  namespace: storage
+spec:
+  size: "10737418240"   # 10 Gi  (10 * 1024^3)
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

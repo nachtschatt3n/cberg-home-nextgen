@@ -1,0 +1,99 @@
+---
+# Mealie's metadata database — a STANDALONE Postgres on plain manifests, not a
+# bundled chart subchart. New deployments do not bundle their datastore: a
+# bitnamilegacy/* subchart image is frozen and cannot be patched independently
+# of its chart. See docs/sops/bundled-datastore-exit.md.
+#
+# postgres:18+ image layout: the volume mounts at /var/lib/postgresql and PGDATA
+# defaults to /var/lib/postgresql/18/docker (docker-library/postgres#1259) —
+# deliberately NOT overridden, because that layout is what makes the next major
+# an in-place pg_upgrade candidate rather than a dump/restore.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mealie-pg
+  namespace: office
+  labels:
+    app: mealie-pg
+spec:
+  replicas: 1
+  # Recreate: single-replica Deployment on an RWO Longhorn PVC. The default
+  # RollingUpdate rounds maxSurge UP to 1 at replicas:1, so the replacement pod
+  # is scheduled before the old one releases the volume and blocks forever on
+  # Multi-Attach if it lands on another node. See
+  # docs/sops/longhorn-rwo-multi-attach.md.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mealie-pg
+  template:
+    metadata:
+      labels:
+        app: mealie-pg
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:18.6-bookworm
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgresql
+          env:
+            - name: POSTGRES_USER
+              value: mealie
+            - name: POSTGRES_DB
+              value: mealie
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mealie-secret
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exec pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 15
+            timeoutSeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "exec pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 30
+            timeoutSeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mealie-pg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mealie-pg
+  namespace: office
+  labels:
+    app: mealie-pg
+spec:
+  # ClusterIP only — a datastore is never exposed via LoadBalancer or ingress.
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgresql
+  selector:
+    app: mealie-pg

@@ -20,3 +20,4 @@ resources:
  - ./vaultwarden/ks.yaml
  - ./sure/ks.yaml
  - ./arag-web/ks.yaml
+ - ./mealie/ks.yaml

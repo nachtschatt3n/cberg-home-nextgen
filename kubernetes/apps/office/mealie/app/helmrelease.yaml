@@ -1,0 +1,221 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: mealie
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: app-template
+      version: 5.1.0
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  maxHistory: 1
+  # 15m, not the 5m default: first install runs Alembic migrations against an
+  # empty schema and the work is still progressing when the default timeout
+  # fires — Flux then rolls back a deploy that was about to succeed, and the
+  # retry starts the migration from zero. Same trap as uzeit-de (152cb651) and
+  # the superset Recreate transition (8b0075ed).
+  timeout: 15m
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  uninstall:
+    keepHistory: false
+  values:
+    controllers:
+      main:
+        # Recreate: single replica on an RWO Longhorn PVC. See
+        # docs/sops/longhorn-rwo-multi-attach.md — RollingUpdate deadlocks on
+        # Multi-Attach and the failure looks intermittent because it depends on
+        # which node the surge pod lands.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        # Mealie starts before postgres is reachable on a cold start /
+        # node-reboot, hits a connect error and enters CrashLoopBackOff, so
+        # recovery takes 5+ minutes of kubelet backoff instead of seconds.
+        # docs/sops/container-dependencies.md.
+        initContainers:
+          wait-for-pg:
+            image:
+              repository: busybox
+              tag: "1.38.0"
+            command:
+              - sh
+              - -c
+              - |
+                until nc -z mealie-pg 5432; do
+                  echo "waiting for mealie-pg:5432..."
+                  sleep 2
+                done
+        containers:
+          main:
+            image:
+              repository: ghcr.io/mealie-recipes/mealie
+              tag: v3.23.1
+            env:
+              TZ: ${TIMEZONE}
+              # BASE_URL is load-bearing for OIDC: it builds the redirect_uri
+              # and every self-link. Behind a TLS-terminating ingress it MUST
+              # be the external https URL or the callback goes to http:// and
+              # Authentik rejects it as a redirect_uri mismatch.
+              BASE_URL: https://mealie.${SECRET_DOMAIN}
+              ALLOW_SIGNUP: "false"          # local signup form stays closed; OIDC is the way in
+              DB_ENGINE: postgres
+              POSTGRES_SERVER: mealie-pg
+              POSTGRES_PORT: "5432"
+              POSTGRES_DB: mealie
+              POSTGRES_USER: mealie
+              POSTGRES_PASSWORD:
+                valueFrom:
+                  secretKeyRef:
+                    name: mealie-secret
+                    key: POSTGRES_PASSWORD
+
+              # --- Authentik OIDC ------------------------------------------
+              # Access control is OIDC_USER_GROUP: only members of the
+              # `mealie-users` Authentik group can log in at all. The groups
+              # claim rides on the managed `profile` scope — there is no
+              # separate groups scope to bind (docs/sops/authentik.md).
+              OIDC_AUTH_ENABLED: "true"
+              OIDC_SIGNUP_ENABLED: "true"    # auto-provision on first OIDC login
+              OIDC_CONFIGURATION_URL: https://auth.${SECRET_DOMAIN}/application/o/mealie/.well-known/openid-configuration
+              OIDC_PROVIDER_NAME: Authentik
+              OIDC_USER_CLAIM: email
+              OIDC_GROUPS_CLAIM: groups      # REQUIRED whenever USER/ADMIN group is set
+              OIDC_USER_GROUP: mealie-users
+              OIDC_ADMIN_GROUP: authentik Admins
+              # OIDC_REQUIRES_EMAIL_VERIFICATION is deliberately LEFT AT ITS
+              # DEFAULT (true, since Mealie v3.21.0). Authentik emits
+              # email_verified on the `email` scope, so this should just work.
+              # Setting it false would let an IdP that permits self-asserted
+              # addresses match an existing account by claiming its email.
+              OIDC_CLIENT_ID:
+                valueFrom:
+                  secretKeyRef:
+                    name: mealie-secret
+                    key: OIDC_CLIENT_ID
+              OIDC_CLIENT_SECRET:
+                valueFrom:
+                  secretKeyRef:
+                    name: mealie-secret
+                    key: OIDC_CLIENT_SECRET
+            probes:
+              # readiness on the cheap static endpoint; startup/liveness on the
+              # same route but with a long failureThreshold, because startup is
+              # the deploy gate that triggers HelmRelease rollback and the first
+              # boot has to finish Alembic before it answers.
+              # docs/sops/new-deployment-blueprint.md Gotcha #13.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: { path: /api/app/about, port: &port 9000 }
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: { path: /api/app/about, port: *port }
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet: { path: /api/app/about, port: *port }
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  # 60 * 10s = 10m for the from-scratch Alembic migration
+                  failureThreshold: 60
+            # resources MUST be nested here inside controllers.<c>.containers.<c>.
+            # At app-template top level it is a silent no-op and the pod runs
+            # unlimited until it OOMKills (blueprint Gotcha #9).
+            resources:
+              requests:
+                cpu: 50m
+                memory: 512Mi
+              limits:
+                cpu: 2000m
+                memory: 2Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: false
+              capabilities:
+                drop: ["ALL"]
+        pod:
+          securityContext:
+            runAsUser: 911          # mealie image's own uid/gid
+            runAsGroup: 911
+            runAsNonRoot: true
+            fsGroup: 911
+            fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      main:
+        controller: main
+        type: ClusterIP
+        ports:
+          http:
+            port: *port
+
+    ingress:
+      main:
+        enabled: true
+        className: external
+        annotations:
+          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+          nginx.ingress.kubernetes.io/proxy-body-size: "100m"   # recipe image uploads
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Mealie"
+          gethomepage.dev/description: "Recipe manager and meal planner"
+          gethomepage.dev/group: "Office"
+          gethomepage.dev/icon: "mealie.png"
+        labels:
+          # The LABEL is required, not just the annotations — without it the
+          # service never appears on Homepage even with every annotation
+          # correct (docs/sops/homepage-integration.md).
+          gethomepage.dev/enabled: "true"
+        hosts:
+          - host: &host mealie.${SECRET_DOMAIN}
+            paths:
+              - path: /
+                pathType: Prefix
+                service:
+                  identifier: main
+                  port: http
+        tls:
+          - hosts:
+              - *host
+
+    persistence:
+      data:
+        enabled: true
+        existingClaim: mealie-data
+        advancedMounts:
+          main:
+            main:
+              - path: /app/data
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          main:
+            main:
+              - path: /tmp

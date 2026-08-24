@@ -1,0 +1,23 @@
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mealie-pg-data
+spec:
+  capacity:
+    storage: 10Gi
+  volumeMode: Filesystem
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: longhorn-static
+  csi:
+    driver: driver.longhorn.io
+    fsType: ext4
+    volumeAttributes:
+      numberOfReplicas: "2"
+      staleReplicaTimeout: "30"
+    # volumeHandle == PV name == PVC name == Longhorn Volume name.
+    # docs/sops/longhorn.md: the same speaking identifier five times, so the
+    # volume is identifiable in the Longhorn UI / backup list / DR procedure
+    # without a claimRef lookup at exactly the moment you are under pressure.
+    volumeHandle: mealie-pg-data

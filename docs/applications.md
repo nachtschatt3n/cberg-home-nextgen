@@ -20,7 +20,7 @@
 | home-automation | 20 |
 | databases | 11 |
 | monitoring | 13 |
-| office | 12 |
+| office | 13 |
 | media | 5 |
 | download | 2 |
 | kube-system | 11 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **122** |
+| **Total** | **123** |
 
 ---
 
@@ -128,6 +128,7 @@
 |-----|---------|---------|---------------|
 | affine | Collaborative knowledge base and workspace | Internal | Office |
 | nextcloud | Self-hosted cloud storage + collaboration. Cache, file locks and PHP sessions run on the standalone `nextcloud-redis` Deployment — official `redis:8.10.0-alpine`, no PVC, plain manifests in `redis-deployment.yaml` (the chart-bundled Redis subchart was retired 2026-08-19; its orphaned `longhorn-static` volume `redis-data-nextcloud-redis-master-0` is kept `Retain` as the rollback until its soak ends). Metadata DB is still the bundled MariaDB subchart — replatform tracked as `bitnamilegacy-exit-nextcloud-db`. **A backing-service hostname change does not reach `notify_push` through the HelmRelease** — it reads the host persisted in `config.php`; see the note in `kubernetes/apps/office/nextcloud/app/notify-push.yaml`.  Real-time push (desktop/mobile client sync triggers) runs on the standalone `nextcloud-notify-push` Deployment — same `nextcloud:34.0.3` image kept in lockstep with the main server tag (the `notify_push` binary must match the server version), plain manifest in `notify-push.yaml`, port 7867. Collaborative editing runs on the standalone `nextcloud-whiteboard` Deployment (`ghcr.io/nextcloud-releases/whiteboard:v1.5.9`, plain manifest in `whiteboard-proxy.yaml`, websocket on port 3002). | Internal + External | Office |
+| mealie | Recipe manager and meal planner. Recipes imported from the Paperless-ngx recipe archive (`document_type=12`), parsed by Mealie's own AI importer against the local Ollama host — Paperless stays the archival source of truth and is never mutated. Metadata DB runs on the standalone `mealie-pg` Deployment + Service — Docker Official `postgres:18.6-bookworm`, plain manifests in `pg-deployment.yaml`/`pg-pv.yaml`/`pg-pvc.yaml`, on the `longhorn-static` volume `mealie-pg-data` (its Longhorn `Volume` CR, `pg-longhorn-volume.yaml`, is hand-applied and deliberately out of `kustomization.yaml`; same for the app's own `mealie-data`). **Internet-facing** on the external ingress, gated by Authentik OIDC at the app rather than forward-auth at the edge, so the Mealie login page itself is publicly reachable (same posture as librechat). Access is restricted to the `mealie-users` Authentik group via `OIDC_USER_GROUP`. Shopping-list items push one-way into the Home Assistant `todo` list the household already uses. | External | Office |
 | paperless-ngx | Document management with OCR. Document DB runs on the standalone `paperless-db` Deployment + `paperless-db` Service — Docker Official `mariadb:11.8.8`, plain manifests in `db-deployment.yaml`/`db-pv.yaml`/`db-pvc.yaml`, on the 2-replica `longhorn-static` volume `paperless-db-data` (its Longhorn `Volume` CR, `db-longhorn-volume.yaml`, is hand-applied and deliberately out of `kustomization.yaml`). The chart-bundled MariaDB subchart and its generated Secret were retired 2026-08-19 (plan `bitnamilegacy-exit-paperless-db`); the orphaned `longhorn-static` volume/PVC/PV `paperless-mariadb` is kept `Retain` as the rollback floor until its clean-week retirement. Cache runs on the standalone `paperless-redis` Deployment — official `redis:8.10.0-alpine`, no PVC. Server charset pinned `utf8mb3`/`utf8mb3_general_ci` to match the restored tables.  Scan intake QC runs on the standalone `scan-inbox-validator` Deployment — reuses the paperless-ngx image (ships python3 + pikepdf + qpdf, nothing extra to build), polls the SMB inbox the Epson ES-580W writes to, validates each scan (complete + valid PDF), and atomically moves good ones into the consume share; see `docs/sops/paperless.md`. | Internal | Office |
 | paperless-ai | AI document classification (Ollama backend) | None | — |
 | paperless-gpt | AI tagging/summarization for Paperless | None | — |

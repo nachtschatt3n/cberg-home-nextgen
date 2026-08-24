@@ -1,0 +1,18 @@
+---
+# DELIBERATELY NOT REGISTERED in kustomization.yaml — see the note in
+# pg-longhorn-volume.yaml. Apply by hand, once:
+#
+#   mise exec -- kubectl apply -f kubernetes/apps/office/mealie/app/longhorn-volume.yaml
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: mealie-data
+  namespace: storage
+spec:
+  size: "10737418240"   # 10 Gi  (10 * 1024^3)
+  numberOfReplicas: 2
+  dataEngine: v1
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false

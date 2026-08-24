@@ -1,0 +1,16 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./secret.sops.yaml
+  - ./pg-pv.yaml
+  - ./pg-pvc.yaml
+  - ./pg-deployment.yaml
+  - ./pv.yaml
+  - ./pvc.yaml
+  - ./helmrelease.yaml
+  # pg-longhorn-volume.yaml and longhorn-volume.yaml are deliberately NOT
+  # listed: this Kustomization's targetNamespace (office) would override their
+  # `namespace: storage` and create broken duplicates Longhorn ignores.
+  # Apply both by hand, once. See docs/sops/longhorn.md.
