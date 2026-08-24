@@ -84,6 +84,15 @@ spec:
           # early; the >0.50 guard on the current value keeps containers that sit
           # high and flat from alerting forever.
           #
+          # The growth requirement is what separates this from
+          # ContainerMemoryNearLimit. Predicting a FLAT series returns roughly
+          # its current value, so a container simply pinned near its limit —
+          # penpot-frontend sits at 98.5% and has moved 0.1 MiB in five days —
+          # satisfied "projected above 90%" without leaking at all, and fired
+          # both alerts for one condition. Requiring the projection to exceed
+          # today's usage by a tenth of the limit makes this a leak detector
+          # rather than a second copy of the threshold alert.
+          #
           # The container-age guard is load-bearing. A memory-hungry app ramping
           # up after a restart grows steeply for its first few hours -- frigate
           # projected 138% of its limit while merely loading models -- so without
@@ -109,6 +118,16 @@ spec:
             (
               (time() - container_start_time_seconds{container!="",container!="POD"}) > 6 * 3600
             )
+            and
+            (
+              predict_linear(
+                container_memory_working_set_bytes{container!="",container!="POD"}[6h],
+                48 * 3600
+              )
+              - container_memory_working_set_bytes{container!="",container!="POD"}
+            )
+            / on(namespace,pod,container) group_left
+            kube_pod_container_resource_limits{resource="memory"} > 0.10
           for: 1h
           labels:
             severity: warning
