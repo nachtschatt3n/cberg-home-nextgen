@@ -472,6 +472,25 @@ class Colors:
     BLUE = '\033[0;34m'
     CYAN = '\033[0;36m'
 
+
+def _split_image_ref(image: str) -> tuple:
+    """(repository, tag) from a `repo[:tag][@digest]` container image ref.
+
+    Handles a digest-pinned ref (`postgres:17.11-alpine@sha256:...`, this
+    repo's float-tag policy) by dropping the digest before splitting, and a
+    registry port (`registry:5000/app:v1`) by requiring the tag half to
+    contain no `/` — a colon whose right side has a `/` in it was the port,
+    not a tag separator. No tag or no colon at all -> ('repo', 'latest'),
+    matching this file's existing convention for a bare `image: repo` ref.
+    """
+    ref = (image or "").strip().split("@", 1)[0]
+    if ":" in ref:
+        repo, _, tag = ref.rpartition(":")
+        if tag and "/" not in tag:
+            return repo, tag
+    return ref, "latest"
+
+
 class VersionChecker:
     def __init__(self, repo_root: str, github_token: Optional[str] = None):
         self.repo_root = Path(repo_root)
@@ -518,7 +537,108 @@ class VersionChecker:
         for pattern in ("*helmrelease.yaml", "*helm-release.yaml"):
             found.update(apps_dir.rglob(pattern))
         return sorted(found)
-    
+
+    _RAW_WORKLOAD_KINDS = ("Deployment", "StatefulSet", "DaemonSet")
+
+    def find_raw_manifest_workloads(self) -> List[Dict]:
+        """Raw-manifest Deployments/StatefulSets/DaemonSets with no HelmRelease.
+
+        `find_helmreleases()` enumerates ONLY `kind: HelmRelease` files, so a
+        workload authored as a plain manifest inside an app directory never
+        entered the version-tracking universe at all — not "checked and
+        clean", simply never looked at. Found 2026-08-24: 23 containers across
+        ~20 raw-manifest apps were invisible this way, including the ENTIRE
+        Wazuh SIEM (manager, indexer, dashboard, agent DaemonSet — the
+        security-monitoring stack itself unmonitored) and three
+        `redis:8.10.0-alpine` caches (superset, nextcloud, paperless-ngx) that
+        sat a patch version behind their chart-managed siblings with nothing
+        to flag it. Same denominator-class bug as `doc-check.py`'s
+        `find_repo_subworkloads()`, applied to version coverage instead of
+        documentation coverage.
+
+        Returns HelmRelease-SHAPED dicts (`chart_name=''`, `repository_name=''`)
+        so `check_all()`'s existing per-image check loop handles them with
+        zero duplicated logic — the empty chart name cleanly no-ops the
+        chart-freshness branch and only the image checks run.
+
+        Deliberately does NOT close the sibling gap where a HelmRelease exists
+        but never overrides `values.image` (e.g. `mariadb`, which tracks only
+        as a bare chart version because its image comes from the chart's own
+        default `values.yaml`, never fetched here) — that needs a chart-values
+        resolver, a materially different fix, and is out of scope for this
+        pass. Recorded rather than silently left to be rediscovered.
+        """
+        apps_dir = self.kubernetes_dir / "apps"
+        out: List[Dict] = []
+        for file_path in sorted(apps_dir.rglob("*.yaml")):
+            if "helmrelease" in file_path.name.lower():
+                continue  # already covered by find_helmreleases()
+            try:
+                text = file_path.read_text()
+            except OSError as e:
+                self.degraded.record(f"raw-manifest {file_path.name}",
+                                     'raw workload manifest',
+                                     f"{type(e).__name__}: {e}")
+                continue
+            # Cheap text pre-filter BEFORE the YAML parse. This repo also
+            # carries non-Kubernetes YAML dialects in kubernetes/apps/ (e.g.
+            # Authentik blueprints, which use a `!KeyOf` custom tag PyYAML's
+            # safe loader cannot construct). Without this, a blueprint's
+            # ConstructorError was recorded via `degraded.record()` with no
+            # `component=` -- a SECTION-WIDE veto -- so one non-manifest file
+            # disabled auto-close for the entire version section on every run.
+            # A file with no `kind: Deployment/StatefulSet/DaemonSet` line can
+            # never match `self._RAW_WORKLOAD_KINDS` anyway, so skipping it
+            # here is a pure narrowing, not a coverage loss.
+            if not re.search(r'(?m)^kind:\s*(' + '|'.join(self._RAW_WORKLOAD_KINDS) + r')\s*$', text):
+                continue
+            try:
+                docs = list(yaml.safe_load_all(text))
+            except yaml.YAMLError as e:
+                self.degraded.record(f"raw-manifest {file_path.name}",
+                                     'raw workload manifest',
+                                     f"{type(e).__name__}: {e}")
+                continue
+            for doc in docs:
+                if not isinstance(doc, dict) or doc.get('kind') not in self._RAW_WORKLOAD_KINDS:
+                    continue
+                metadata = doc.get('metadata', {}) or {}
+                pod_spec = (((doc.get('spec') or {}).get('template') or {})
+                            .get('spec') or {})
+                containers = (list(pod_spec.get('containers') or [])
+                              + list(pod_spec.get('initContainers') or []))
+                images = []
+                for c in containers:
+                    if not isinstance(c, dict):
+                        continue
+                    ref = c.get('image')
+                    # A postRenderer patch fragment parses as this same kind
+                    # but carries no `image:` — it modifies an existing
+                    # workload, not a new component to track. No `image` key
+                    # means no entry, which is the correct outcome, not a gap.
+                    if not isinstance(ref, str) or not ref.strip():
+                        continue
+                    repo, tag = _split_image_ref(ref)
+                    if not repo:
+                        continue
+                    images.append({
+                        'repository': repo,
+                        'tag': tag,
+                        'path': f"containers.{c.get('name', '?')}.image",
+                    })
+                if not images:
+                    continue
+                out.append({
+                    'name': metadata.get('name') or file_path.stem,
+                    'namespace': self._resolve_namespace(file_path, metadata),
+                    'file_path': str(file_path.relative_to(self.repo_root)),
+                    'chart_name': '',
+                    'chart_version': '',
+                    'repository_name': '',
+                    'images': images,
+                })
+        return out
+
     def load_helmrepositories(self):
         """Load all HelmRepository definitions."""
         repos_dir = self.kubernetes_dir / "flux" / "meta" / "repositories" / "helm"
@@ -2704,13 +2824,24 @@ class VersionChecker:
         # Find and parse all HelmReleases
         helmrelease_files = self.find_helmreleases()
         print(f"Found {len(helmrelease_files)} HelmRelease files")
-        
+
         for file_path in helmrelease_files:
             hr = self.parse_helmrelease(file_path)
             if hr:
                 self.helmreleases.append(hr)
-        
+
         print(f"Parsed {len(self.helmreleases)} HelmReleases\n")
+
+        # Raw-manifest Deployments/StatefulSets/DaemonSets carry real images
+        # but no HelmRelease -- the whole Wazuh SIEM among them. Same shape as
+        # a parsed HelmRelease (chart_name='' no-ops the chart-check branch),
+        # so they ride the existing per-image check loop below unchanged.
+        raw_workloads = self.find_raw_manifest_workloads()
+        if raw_workloads:
+            self.helmreleases.extend(raw_workloads)
+            n_images = sum(len(w['images']) for w in raw_workloads)
+            print(f"Found {len(raw_workloads)} raw-manifest workload(s) "
+                  f"({n_images} container image(s), no HelmRelease)\n")
 
         # Check external infrastructure (non-Kubernetes components)
         self.check_external_infrastructure()
