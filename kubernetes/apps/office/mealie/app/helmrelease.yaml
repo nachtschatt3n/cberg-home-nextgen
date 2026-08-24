@@ -110,11 +110,32 @@ spec:
               # Override pins the scopes to what Authentik actually publishes;
               # OIDC_GROUPS_CLAIM still names the claim to READ from userinfo.
               OIDC_SCOPES_OVERRIDE: "openid email profile"
-              # OIDC_REQUIRES_EMAIL_VERIFICATION is deliberately LEFT AT ITS
-              # DEFAULT (true, since Mealie v3.21.0). Authentik emits
-              # email_verified on the `email` scope, so this should just work.
-              # Setting it false would let an IdP that permits self-asserted
-              # addresses match an existing account by claiming its email.
+              # Authentik CANNOT satisfy Mealie's email_verified requirement.
+              # Its managed email scope mapping is literally:
+              #     return {"email": request.user.email, "email_verified": False}
+              # — hardcoded False, because Authentik has no email-verification
+              # concept at all. Mealie has REQUIRED the claim to be true since
+              # v3.21.0, so every SSO login failed with
+              #     [OIDC] email_verified claim is missing or false
+              #     [OIDC] Required claims not present in ID token or userinfo
+              # (verified 2026-08-24 — this is the real reason SSO was broken,
+              # after the scopes fix above got the flow as far as the callback).
+              #
+              # Mealie's check exists to stop an IdP that lets a user
+              # SELF-ASSERT an arbitrary email from claiming someone else's
+              # address and taking over their account. That threat does not
+              # exist here: this Authentik has NO enrollment flow bound to the
+              # brand and no sources, so self-registration is impossible —
+              # every account is operator-created via the SOPS blueprint, and
+              # both emails were set by hand in git.
+              #
+              # Deliberately NOT "fixed" by overriding the email scope mapping
+              # to return True: that mapping is shared by grafana / immich /
+              # librechat / superset / pgadmin / sure, so it would assert a
+              # falsehood cluster-wide to fix one app. This setting is
+              # Mealie-scoped and is the escape hatch upstream documents for
+              # exactly this case.
+              OIDC_REQUIRES_EMAIL_VERIFICATION: "false"
               OIDC_CLIENT_ID:
                 valueFrom:
                   secretKeyRef:
