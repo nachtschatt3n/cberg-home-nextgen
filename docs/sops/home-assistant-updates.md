@@ -4,8 +4,8 @@
 > or Talos rolling reboot that recreates the HA pod. Institutionalizes the
 > 2026-08-02 certifi/EBUSY incident, the recurring HmIP cloud-session wedge, and
 > the custom-code regression surface that core version bumps can silently break.
-> Version: `2026.08.03`
-> Last Updated: `2026-08-03`
+> Version: `2026.08.24`
+> Last Updated: `2026-08-24`
 > Owner: `sre`
 
 ---
@@ -152,6 +152,29 @@ CAVEAT: `alexa_devices` entities can sit frozen at the boot timestamp with no
 state changes for days when the house is empty/idle. That is NOT evidence of a
 broken coordinator — judge health with the round-trip test, never with history
 freshness.
+
+#### Also check: the Mealie shopping-list sync writes here
+
+Since 2026-08-24 the `mealie-shopping-sync` CronJob (`office` namespace, every
+5 min) pushes Mealie shopping-list items onto the Alexa **Shopping List** entity.
+It is the only automated writer to that list, so an HA change that breaks the
+todo services breaks meal planning too — and silently, because the job's own
+health looks fine while nothing arrives.
+
+```bash
+kubectl -n office create job ha-sync-check --from=cronjob/mealie-shopping-sync
+kubectl -n office logs job/ha-sync-check          # must print the HA item count
+kubectl -n office delete job ha-sync-check
+```
+
+A run that reports `home assistant list holds 0 item(s)` against a list you know
+is non-empty means `todo/get_items` is returning nothing — the same failure Step 4
+tests for, seen from the other side.
+
+The job is **add-only** by design and never deletes from the list, precisely
+because of the normalization gotcha above: removal has to match the stored
+summary or uid, and the list is shared with voice input where a wrong delete
+would destroy something a person added by speaking.
 
 ### Step 5 — custom-code regression list (CORE VERSION BUMPS)
 
