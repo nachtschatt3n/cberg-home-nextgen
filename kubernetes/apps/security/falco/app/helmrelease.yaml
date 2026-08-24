@@ -99,10 +99,20 @@ spec:
           readOnly: false
     # Resource budget per node: 100m CPU + 256Mi RAM × 3 nodes = 300m / 768Mi
     # cluster-wide. Modest given the 18-core, 192GiB cluster.
-    # Limit raised 512Mi→768Mi on 2026-06-18: falco's working set peaks ~537Mi
-    # on busy nodes, so the old 512Mi ceiling caused page-cache reclaim thrash
-    # (NodeMemoryMajorPagesFaults storm) and a liveness SIGKILL. 768Mi gives
-    # ~40% headroom over the observed peak.
+    #
+    # Limit raised 512Mi→768Mi on 2026-06-18, attributed then to "page-cache
+    # reclaim thrash" against a ~537Mi working set. That diagnosis was wrong, and
+    # the same cause bit again on 2026-08-24 at 97.9% of the new limit: the
+    # working set was not falco, it was falco.log. /var/run is TMPFS on Talos and
+    # `file_output` has no rotation, so every event ever written stayed resident
+    # in RAM and charged to this cgroup — 501 MiB of it on the busiest node.
+    # falco's own RSS is flat at ~200 MiB; truncating the file dropped the
+    # container from 753 MiB to 299 MiB without touching RSS.
+    #
+    # So do NOT raise this limit again for "falco memory": check the size of
+    # /var/run/falco/falco.log first. The file is now capped by the
+    # falco-log-rotate DaemonSet (log-rotate-daemonset.yaml); 768Mi against a
+    # ~200 MiB RSS and a 64 MiB log cap is ample.
     resources:
       requests:
         cpu: 100m

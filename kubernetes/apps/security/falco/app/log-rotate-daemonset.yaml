@@ -1,0 +1,98 @@
+---
+# falco-log-rotate — keeps /var/run/falco/falco.log from eating falco's memory.
+#
+# WHY THIS EXISTS (2026-08-24)
+# falco's `file_output` has no rotation of its own, and on Talos /var/run is
+# TMPFS. So every event falco has ever written stays resident in RAM, charged to
+# falco's own cgroup. The file reached 501 MiB on the busiest node and pushed the
+# container to 97.9% of its 768Mi limit.
+#
+# It reads exactly like a memory leak and is not one. falco's RSS was flat at
+# ~200 MiB the whole time; truncating the file dropped the container from 753 MiB
+# to 299 MiB and left RSS untouched. Growth tracked node event volume, which is
+# why the three nodes diverged so widely (+27 vs +109 MiB/day).
+#
+# This is the second time the file has been misread. The 512Mi -> 768Mi limit
+# raise in June was attributed to "page-cache reclaim thrash"; it was this same
+# file. Raising the limit cannot fix an unbounded file — it only sets the date of
+# the next incident.
+#
+# WHY A DAEMONSET RATHER THAN CHANGING FALCO
+# The file is per-node, so the fix has to be per-node. Doing it here instead of
+# in the falco chart keeps the blast radius off both falco and the wazuh-agent
+# that tails this file: if this DaemonSet fails, falco and security ingestion are
+# entirely unaffected, and the container-memory alerts still catch the regrowth.
+#
+# WHY TRUNCATE RATHER THAN ROTATE
+# The file is a hand-off buffer, not an archive. The wazuh-agent tails it in real
+# time and was 37 KB behind a 501 MiB file when measured, so anything older than
+# the last few seconds has already been ingested and lives in Wazuh's indexer.
+# Truncating in place (`: > file`) keeps the inode, so the agent's tail follows it
+# without needing to reopen, and falco's `keep_alive: false` means it reopens per
+# write regardless.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: falco-log-rotate
+  namespace: security
+  labels:
+    app.kubernetes.io/name: falco-log-rotate
+    app.kubernetes.io/part-of: falco
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falco-log-rotate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: falco-log-rotate
+    spec:
+      # Runs on every node falco runs on, including control-plane nodes.
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rotate
+          image: busybox:1.38.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # 64 MiB cap. Sized from measurement, not taste: the agent stays
+              # within ~40 KB of the tail, and the busiest node writes ~100 MiB
+              # a day, so 64 MiB is over half a day of buffer even if Wazuh
+              # stops consuming entirely -- while costing a fraction of falco's
+              # 768Mi limit.
+              MAX=$((64 * 1024 * 1024))
+              LOG=/var/run/falco/falco.log
+              while true; do
+                if [ -f "$LOG" ]; then
+                  SIZE=$(wc -c < "$LOG" 2>/dev/null || echo 0)
+                  if [ "$SIZE" -gt "$MAX" ]; then
+                    # Truncate in place. Recreating the file would change the
+                    # inode and make the wazuh-agent's tail miss events until it
+                    # noticed and reopened.
+                    : > "$LOG"
+                    echo "$(date -Iseconds) truncated falco.log at ${SIZE} bytes"
+                  fi
+                fi
+                sleep 300
+              done
+          volumeMounts:
+            - name: falco-host-output
+              mountPath: /var/run/falco
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: falco-host-output
+          hostPath:
+            path: /var/run/falco
+            type: DirectoryOrCreate
