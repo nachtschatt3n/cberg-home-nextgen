@@ -96,6 +96,20 @@ spec:
               OIDC_GROUPS_CLAIM: groups      # REQUIRED whenever USER/ADMIN group is set
               OIDC_USER_GROUP: mealie-users
               OIDC_ADMIN_GROUP: authentik Admins
+              # Setting USER/ADMIN group makes Mealie append OIDC_GROUPS_CLAIM to
+              # the REQUESTED SCOPES:
+              #   scope = f"openid email profile {groups_claim}"
+              #                       (routes/auth/auth.py:38)
+              # Authentik has no `groups` scope — the groups claim rides on the
+              # managed `profile` mapping, which already returns
+              # "groups": [g.name for g in request.user.groups.all()].
+              # So Authentik silently dropped the unknown scope, granted only
+              # "openid profile email", and the login failed (verified 2026-08-24
+              # against the authorize_application event: requested
+              # "openid email profile groups", granted "openid profile email").
+              # Override pins the scopes to what Authentik actually publishes;
+              # OIDC_GROUPS_CLAIM still names the claim to READ from userinfo.
+              OIDC_SCOPES_OVERRIDE: "openid email profile"
               # OIDC_REQUIRES_EMAIL_VERIFICATION is deliberately LEFT AT ITS
               # DEFAULT (true, since Mealie v3.21.0). Authentik emits
               # email_verified on the `email` scope, so this should just work.
