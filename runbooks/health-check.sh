@@ -1696,6 +1696,114 @@ except: pass
         fi
     fi
 
+    # --- Per-container memory headroom (added 2026-08-24) -------------------
+    # Node-level memory says nothing about a single container walking into its
+    # OWN cgroup limit, and nothing else in this script or in the alert rules
+    # covers it (105 rule groups, 8 memory rules, none per-container-vs-limit).
+    # Found the hard way: frigate leaked 5683 -> 8078 MiB against an 8Gi limit
+    # over 7 days. It never OOMKilled -- the main process is not what trips the
+    # cgroup -- so `restarts: 0` and "No OOM kills" both stayed green while its
+    # ffmpeg children died with ENOMEM ("Cannot allocate memory") and camera
+    # detect threads dropped. The only trace was 6 log lines scored MINOR.
+    #
+    # LEVEL ALONE IS NOT THE SIGNAL. penpot-frontend sits flat at 98.5% of a
+    # 512Mi limit forever -- reclaimable page cache, entirely benign. Asserting
+    # on the ratio by itself would have made that a permanent unclearable
+    # finding, which is the anti-pattern in docs/sops/audit-script-correctness.md.
+    # The discriminator is level AND 24h GROWTH: a plateau is fine, a climb is
+    # a leak with a deadline.
+    MEM_RATIO_JSON=$(prom_query 'container_memory_working_set_bytes{container!="",container!="POD"} / on(namespace,pod,container) group_left kube_pod_container_resource_limits{resource="memory"} * 100')
+    MEM_DELTA_JSON=$(prom_query 'container_memory_working_set_bytes{container!="",container!="POD"} - container_memory_working_set_bytes{container!="",container!="POD"} offset 24h')
+    MEM_LIMIT_JSON=$(prom_query 'kube_pod_container_resource_limits{resource="memory"}')
+    MEM_HEADROOM=$(MEM_RATIO_JSON="$MEM_RATIO_JSON" MEM_DELTA_JSON="$MEM_DELTA_JSON" MEM_LIMIT_JSON="$MEM_LIMIT_JSON" python3 -c "
+import json, os
+
+def series(raw):
+    out = {}
+    try:
+        d = json.loads(raw)
+        if d.get('status') != 'success':
+            return None
+        for r in d['data']['result']:
+            m = r['metric']
+            key = (m.get('namespace',''), m.get('pod',''), m.get('container',''))
+            out[key] = float(r['value'][1])
+    except Exception:
+        return None
+    return out
+
+ratio = series(os.environ.get('MEM_RATIO_JSON',''))
+delta = series(os.environ.get('MEM_DELTA_JSON',''))
+limit = series(os.environ.get('MEM_LIMIT_JSON',''))
+if ratio is None or limit is None:
+    print('NOT-MEASURED query-failed')
+    raise SystemExit(0)
+if not ratio:
+    print('NOT-MEASURED no-container-has-a-memory-limit')
+    raise SystemExit(0)
+if delta is None:
+    delta = {}
+
+crit, major, blind = [], [], 0
+for key, pct in sorted(ratio.items(), key=lambda kv: -kv[1]):
+    if pct < 90:
+        continue
+    ns, pod, container = key
+    # IDENTITY IS namespace/container, NOT the pod. A pod name carries the
+    # ReplicaSet hash, so keying a finding on it forks a brand-new row on every
+    # restart -- the exact churn strip_ar_tags/_normalize exist to prevent, and
+    # digit-stripping does not save it because the hash is alphanumeric.
+    ident = ns + '/' + container
+    lim = limit.get(key)
+    d = delta.get(key)
+    if not lim or d is None:
+        # No 24h baseline (pod younger than the window) -> trend unknown.
+        blind += 1
+        if pct >= 95:
+            major.append('%s|%.1f%% of its memory limit (pod %s; no 24h baseline, trend unknown)' % (ident, pct, pod))
+        continue
+    growth = d / lim * 100.0
+    label = '%s|%.1f%% of its memory limit, +%.1f%% in 24h (pod %s)' % (ident, pct, growth, pod)
+    if pct >= 95 and growth >= 1.0:
+        crit.append(label)
+    elif growth >= 2.0:
+        major.append(label)
+
+print('EXAMINED %d %d %d' % (len(ratio), len(crit), len(major)))
+for c in crit:
+    print('CRIT ' + c)
+for m in major:
+    print('MAJOR ' + m)
+if blind:
+    print('INFO %d container(s) at/above 90%% have no 24h baseline yet' % blind)
+" 2>/dev/null || echo "NOT-MEASURED python-failed")
+
+    echo ""
+    echo "Per-container memory headroom (working set vs its own limit):"
+    if echo "$MEM_HEADROOM" | grep -q '^NOT-MEASURED'; then
+        log_warning "Per-container memory headroom NOT measured ($(echo "$MEM_HEADROOM" | head -1))"
+        add_minor_issue "Per-container memory-limit check could not run ($(echo "$MEM_HEADROOM" | head -1 | cut -d' ' -f2)) - leak-into-limit unverified this cycle"
+    else
+        MEM_EXAMINED=$(echo "$MEM_HEADROOM" | awk '/^EXAMINED/{print $2}')
+        echo "  containers with a memory limit examined: ${MEM_EXAMINED:-0}"
+        echo "$MEM_HEADROOM" | grep -E '^(CRIT|MAJOR|INFO) ' | sed 's/^/  /' || true
+        # The finding is keyed on the backticked namespace/container so it keeps
+        # one identity across pod restarts and across changing percentages.
+        while IFS='|' read -r ident detail; do
+            [ -z "$ident" ] && continue
+            log_critical "Container walking into its memory limit: $ident $detail"
+            add_critical_issue "Container \`$ident\` is walking into its memory limit: $detail — no OOMKill yet, child allocations fail with ENOMEM first"
+        done < <(echo "$MEM_HEADROOM" | sed -n 's/^CRIT //p')
+        while IFS='|' read -r ident detail; do
+            [ -z "$ident" ] && continue
+            log_warning "Container memory rising toward its limit: $ident $detail"
+            add_major_issue "Container \`$ident\` memory is rising toward its limit: $detail"
+        done < <(echo "$MEM_HEADROOM" | sed -n 's/^MAJOR //p')
+        if ! echo "$MEM_HEADROOM" | grep -qE '^(CRIT|MAJOR) '; then
+            log_success "No container is climbing into its memory limit (${MEM_EXAMINED:-0} limited containers examined)"
+        fi
+    fi
+
     # Check for nodes not in Ready condition (kubelet stopped, network partition, etc.)
     echo ""
     echo "Node Ready conditions:"
