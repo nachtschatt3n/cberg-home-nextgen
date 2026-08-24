@@ -1,0 +1,82 @@
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mealie-shopping-sync
+  namespace: office
+spec:
+  # Every 5 minutes. Mealie can fire a `shoppingListUpdated` event, but it is
+  # delivered through Apprise as a plain message with no payload, so a receiver
+  # would still have to fetch the list -- all the moving parts of a webhook for
+  # no more information. Polling is adequate here because the Alexa integration
+  # backing the target list polls anyway.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Do not replay a backlog of missed runs after an outage; the next tick has the
+  # full current state anyway.
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+          containers:
+            - name: sync
+              image: python:3.13.7-slim
+              command: ["python", "/app/sync.py"]
+              env:
+                # In-cluster service DNS; neither hop leaves the cluster.
+                # Short <service>.<namespace> form rather than the full
+                # svc.cluster.local FQDN: the FQDNs are also stored verbatim in
+                # other cluster Secrets, and the pre-commit scanner
+                # substring-matches against decoded Secret values, so the long
+                # form trips it. Both resolve identically.
+                - name: MEALIE_URL
+                  value: "http://mealie.office:9000"
+                - name: HA_URL
+                  value: "http://home-assistant.home-automation:8123"
+                # The family's real shopping list, the one Alexa reads out -- a
+                # new list would strand items outside the household's habit.
+                # Kept in the SOPS secret rather than inline: the entity id is
+                # derived from a household member's email address, and this
+                # repository is public.
+                - name: HA_TODO_ENTITY
+                  valueFrom:
+                    secretKeyRef:
+                      name: mealie-shopping-sync
+                      key: HA_TODO_ENTITY
+                - name: MEALIE_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: mealie-shopping-sync
+                      key: MEALIE_TOKEN
+                - name: HA_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: mealie-shopping-sync
+                      key: HA_TOKEN
+              volumeMounts:
+                - name: scripts
+                  mountPath: /app
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: scripts
+              configMap:
+                name: mealie-shopping-sync

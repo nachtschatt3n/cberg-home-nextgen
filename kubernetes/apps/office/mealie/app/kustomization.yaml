@@ -10,6 +10,9 @@ resources:
   - ./pv.yaml
   - ./pvc.yaml
   - ./helmrelease.yaml
+  - ./shopping-sync-secret.sops.yaml
+  - ./shopping-sync-configmap.yaml
+  - ./shopping-sync-cronjob.yaml
   # pg-longhorn-volume.yaml and longhorn-volume.yaml are deliberately NOT
   # listed: this Kustomization's targetNamespace (office) would override their
   # `namespace: storage` and create broken duplicates Longhorn ignores.

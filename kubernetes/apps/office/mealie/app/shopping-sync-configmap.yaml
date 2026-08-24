@@ -1,0 +1,169 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mealie-shopping-sync
+  namespace: office
+data:
+  # NOTE: no shell-style ${...} anywhere in this script. Cluster-wide Flux
+  # postBuild substitution rewrites those inside ConfigMap data, so a bash-style
+  # variable would be silently blanked. Python reads its config from os.environ.
+  sync.py: |
+    #!/usr/bin/env python3
+    """Push Mealie shopping-list items onto the household's Home Assistant list.
+
+    The family already keeps its shopping list on an Alexa-backed HA todo entity
+    and asks Alexa for it out loud. Mealie planning a week of meals is only useful
+    if the ingredients land on THAT list, so this syncs into the existing entity
+    rather than introducing a second list nobody would look at.
+
+    Deliberately ADD-ONLY
+    ---------------------
+    Items are pushed to Home Assistant and never removed by this job. Two reasons,
+    both learned rather than assumed:
+
+      * The Alexa integration normalises item text to sentence case, so
+        `todo.remove_item` matched on the string we SENT returns HTTP 500. Removal
+        has to match the stored summary or uid, which makes it fragile.
+      * The list is shared with voice input. A sync that deletes could delete an
+        item somebody added by speaking, which is far worse than leaving a stale
+        entry that a human can tick off.
+
+    Checking things off stays where the household already does it -- on Alexa.
+
+    State lives in Mealie
+    ---------------------
+    Each pushed item is stamped `extras.ha_synced`, so nothing is sent twice and
+    the job needs no database or volume of its own. Set `extras.ha_exclude` on an
+    item (staples like water) to have it skipped permanently.
+    """
+
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.request
+    from datetime import datetime, timezone
+
+    MEALIE_URL = os.environ["MEALIE_URL"].rstrip("/")
+    MEALIE_TOKEN = os.environ["MEALIE_TOKEN"]
+    HA_URL = os.environ["HA_URL"].rstrip("/")
+    HA_TOKEN = os.environ["HA_TOKEN"]
+    HA_ENTITY = os.environ["HA_TODO_ENTITY"]
+    DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
+
+
+    def request(url, token, method="GET", payload=None, scheme="Bearer"):
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", scheme + " " + token)
+        if data:
+            req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode()
+            return json.loads(body) if body else None
+
+
+    def mealie(path, method="GET", payload=None):
+        return request(MEALIE_URL + path, MEALIE_TOKEN, method, payload)
+
+
+    def home_assistant(service, payload):
+        return request(
+            HA_URL + "/api/services/todo/" + service, HA_TOKEN, "POST", payload
+        )
+
+
+    def item_text(item):
+        """What the shopping list should say.
+
+        The HA todo entity backing this list reports supported_features=7 --
+        create, delete and update only. There is no quantity field, no due date
+        and no description, so the amount has to be folded into the single line of
+        text or it is simply lost.
+        """
+        display = (item.get("display") or "").strip()
+        if display:
+            return display
+        parts = []
+        quantity = item.get("quantity")
+        if quantity:
+            parts.append(("%g" % quantity))
+        unit = (item.get("unit") or {}).get("name")
+        if unit:
+            parts.append(unit)
+        food = (item.get("food") or {}).get("name")
+        if food:
+            parts.append(food)
+        note = (item.get("note") or "").strip()
+        if note and not food:
+            parts.append(note)
+        return " ".join(parts).strip()
+
+
+    def already_on_list(existing, text):
+        """Alexa rewrites item text to sentence case, so equality has to ignore it."""
+        return text.strip().casefold() in existing
+
+
+    def main():
+        response = home_assistant("get_items?return_response=true", {"entity_id": HA_ENTITY})
+        existing = set()
+        for entity in (response or {}).get("service_response", {}).values():
+            for entry in entity.get("items", []):
+                existing.add((entry.get("summary") or "").strip().casefold())
+        print("home assistant list holds %d item(s)" % len(existing))
+
+        lists = mealie("/api/households/shopping/lists?perPage=100")["items"]
+        pushed = skipped = excluded = 0
+
+        for shopping_list in lists:
+            detail = mealie("/api/households/shopping/lists/" + shopping_list["id"])
+            for item in detail.get("listItems") or []:
+                extras = item.get("extras") or {}
+                if item.get("checked"):
+                    continue
+                if extras.get("ha_exclude"):
+                    excluded += 1
+                    continue
+                if extras.get("ha_synced"):
+                    skipped += 1
+                    continue
+
+                text = item_text(item)
+                if not text:
+                    print("  ! item %s has no text to send, skipping" % item["id"])
+                    continue
+
+                if not already_on_list(existing, text):
+                    if DRY_RUN:
+                        print("  would push: %s" % text)
+                    else:
+                        home_assistant("add_item", {"entity_id": HA_ENTITY, "item": text})
+                        print("  pushed: %s" % text)
+                    pushed += 1
+                else:
+                    print("  already present: %s" % text)
+
+                if not DRY_RUN:
+                    # Stamp it even when it was already present, so a manually
+                    # added duplicate does not get pushed on every single run.
+                    current = mealie("/api/households/shopping/items/" + item["id"])
+                    current["extras"] = dict(current.get("extras") or {})
+                    current["extras"]["ha_synced"] = datetime.now(timezone.utc).isoformat()
+                    mealie(
+                        "/api/households/shopping/items/" + item["id"], "PUT", current
+                    )
+
+        print(
+            "done: pushed=%d already-synced=%d excluded=%d lists=%d"
+            % (pushed, skipped, excluded, len(lists))
+        )
+
+
+    if __name__ == "__main__":
+        try:
+            main()
+        except urllib.error.HTTPError as exc:
+            print("HTTP %s: %s" % (exc.code, exc.read().decode()[:500]), file=sys.stderr)
+            sys.exit(1)
