@@ -198,6 +198,25 @@ spec:
           value: "5"
         - name: AUTO_DETECT_MERCHANTS_BATCH_SIZE
           value: "5"
+        # Token budget for BatchSlicer. Precedence in Provider::Openai#context_window
+        # is ENV > Setting > 2048, and both ENV and Setting were unset — so Sure
+        # assumed 2048, computed max_input_tokens = 2048 - 512 - 256 = 1280, and
+        # silently sliced the batch of 5 above back down to 1-4 transactions per
+        # call. This only stops that shredding; AUTO_*_BATCH_SIZE stays the real
+        # cap, so raising this further buys nothing. Safe against the model:
+        # gemma4:26b serves num_ctx 131072 and Sure's longest observed prompt is
+        # ~4.2k tokens, leaving ~30x headroom — no truncation risk.
+        - name: LLM_CONTEXT_WINDOW
+          value: "16384"
+        # Pin the JSON strategy instead of inheriting the "auto" default. Under
+        # auto, 31.2% of enrichment calls were retried in "none" mode, and every
+        # one of those retries was triggered by the model correctly returning
+        # null (Sure's own prompt prefers null over a guess) — not one caught a
+        # real failure. "strict" is a member of VALID_JSON_MODES and ENV outranks
+        # Setting.openai_json_mode, so this also documents intent in git rather
+        # than leaving it to the settings UI. The 400-fallback path is unchanged.
+        - name: LLM_JSON_MODE
+          value: "strict"
       externalAssistant:
         enabled: false
 
