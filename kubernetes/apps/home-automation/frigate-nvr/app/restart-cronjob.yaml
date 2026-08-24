@@ -1,0 +1,119 @@
+---
+# frigate-restart — weekly controlled restart to bound a real memory leak.
+#
+# WHY THIS EXISTS (2026-08-24)
+# frigate leaks roughly 0.32 GiB/day of genuine process memory. Measured across a
+# full pod lifetime: 5.81 -> 7.95 GiB of an 8 GiB limit over 6.4 days, monotonic.
+# Unlike the falco case investigated the same day, this one IS a leak — RSS grows
+# (+2.9 GiB/day during ramp) while page cache *shrinks*, and the dominant consumer
+# is the `frigate.embeddings` process at ~2.6 GB RSS, over half the total.
+#
+# WHY A RESTART RATHER THAN A BIGGER LIMIT
+# A limit only picks the date of the next incident, and the failure mode at the
+# ceiling is bad: frigate runs one process per camera, and the container is not
+# reliably OOMKilled — the kernel fails child allocations with ENOMEM first, so
+# cameras stop recording and detectors stall while the pod stays Ready with
+# restart-count 0. There is no event to alert on and nothing restarts it. A
+# controlled restart at a chosen time is strictly better than an uncontrolled
+# degradation at an unchosen one.
+#
+# WHY NOT semantic_search.model_size: small
+# It halves the embeddings baseline but does not stop the growth, and it degrades
+# a search feature the operator deliberately enabled. It buys days; this bounds
+# the problem indefinitely.
+#
+# WHY WEEKLY
+# ~14 days from a cold start (~3.5 GiB) to the 8 GiB ceiling at the observed
+# rate, so weekly leaves roughly half the budget unused even if the leak
+# accelerates. Sunday 02:30 is the quietest hour for an NVR and sits clear of the
+# 03:00 Longhorn backup and the 04:00 sweep.
+#
+# THIS IS A WORKAROUND, NOT A FIX. frigate 0.17.2 is the newest stable release
+# (0.18 is beta only), so there is nothing to upgrade to yet. Revisit when 0.18
+# ships: if the leak is fixed upstream, delete this CronJob rather than carrying
+# it forever.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frigate-restart
+  namespace: home-automation
+---
+# Deliberately minimal: patch on ONE named deployment. No create, no delete, no
+# secrets, no other workloads — a restarter that can only ever restart frigate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: frigate-restart
+  namespace: home-automation
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [frigate]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frigate-restart
+  namespace: home-automation
+subjects:
+  - kind: ServiceAccount
+    name: frigate-restart
+    namespace: home-automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: frigate-restart
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: frigate-restart
+  namespace: home-automation
+spec:
+  schedule: "30 2 * * 0"          # Sundays 02:30 Europe/Berlin
+  timeZone: Europe/Berlin
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Do not fire a missed restart late — the next week's run is equivalent, and a
+  # restart at an unplanned hour is exactly what this exists to avoid.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: frigate-restart
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+          containers:
+            - name: restart
+              image: docker.io/rancher/kubectl:v1.33.4
+              command:
+                - /bin/sh
+                - -c
+                # $$ throughout: cluster-wide Flux postBuild substitution runs
+                # envsubst over this manifest, and in strict mode an unescaped
+                # shell variable fails the whole Kustomization build rather than
+                # being passed through.
+                - |
+                  set -e
+                  echo "restarting frigate to reclaim leaked memory"
+                  kubectl -n home-automation rollout restart deployment/frigate
+                  kubectl -n home-automation rollout status deployment/frigate --timeout=10m
+                  echo "frigate restart complete at $$(date -Iseconds)"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
