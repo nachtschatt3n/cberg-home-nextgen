@@ -214,23 +214,40 @@ spec:
       # any multi-page PDF, so the limit must accommodate it.
       limits:
         memory: 6Gi
+    # Pinned 2026-08-24 (docs/sops/paperless.md §7): with these unset, a
+    # fresh `kubectl exec` ignored the image's internal `gosu paperless`
+    # drop and defaulted to root. A root exec that touches the Tantivy
+    # search index (data/index/ on the longhorn-static paperless-data PVC)
+    # or /tmp leaves root-owned files that block the uid-1000 celery worker
+    # cluster-wide until manually chown'd — happened 4x in one day. The
+    # paperless-ngx image's s6-overlay entrypoint auto-detects a non-root
+    # start (`id --user != 0` -> USER_IS_NON_ROOT) and skips
+    # usermod/groupmod/chown instead of requiring root — verified via the
+    # running container's /etc/s6-overlay/s6-rc.d/init-{modify-user,folders,
+    # migrations,search-index}/run scripts. uid 1000 = `paperless` confirmed
+    # (`id paperless` in-pod). The CIFS media/export/consume PVCs are
+    # unaffected either way (mount options force uid=1000/gid=1000
+    # client-side via `noperm`, masking the writer's real uid) — only the
+    # Longhorn data volume and container tmpfs have real uid tracking, and
+    # both were already fully paperless:paperless-owned at the time of this
+    # change (no stale root-owned files to block a switch).
+    #
+    # NOTE: `runAsUser: 1000` was tried once before (commit 022f6192,
+    # 2025-10-20) and reverted 5 minutes later (b924666c) with no recorded
+    # reason, back on paperless-ngx 2.18.4 before the CIFS migration — most
+    # likely a freshly-provisioned Longhorn PV defaulting to root:root that
+    # non-root init couldn't chown. That precondition no longer applies (the
+    # data PV is 10 months old and fully paperless-owned), but if this pod
+    # ever fails to start again after a *fresh* paperless-data PV
+    # provision, re-check ownership before re-enabling.
     securityContext:
-      #runAsUser: 1000
-      #runAsGroup: 1000
-      #fsGroup: 1000
+      runAsUser: 1000
+      runAsGroup: 1000
 
     podSecurityContext:
-      #runAsUser: 1000
-      #runAsGroup: 1000
-      #fsGroup: 1000
-
-    # If you have a containers section:
-    containers:
-      paperless:
-        securityContext:
-          #runAsUser: 1000
-          #runAsGroup: 1000
-          #fsGroup: 1000
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
 
     # initContainers wait for stateful deps to be reachable on cold-start /
     # node-reboot. Without these the paperless pod starts before mariadb /
