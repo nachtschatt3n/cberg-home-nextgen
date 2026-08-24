@@ -115,10 +115,11 @@ spec:
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
       # chart-version tag.
-      # This bump is code-only: Contracts status filter + form field improvements.
-      # No schema change / no migration (the db-migrate job is a no-op here).
+      # This bump adds a small additive migration: new nullable `contract_term`
+      # string column on `loans`, plus the corresponding UI field. No
+      # destructive schema change; db-migrate job runs the new migration.
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-40428d74d36e7c0ba4ba826dc5068136dbd395b5"
+      tag: "sha-8588d365c4723c12c4b39e807499f67983a8c063"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
