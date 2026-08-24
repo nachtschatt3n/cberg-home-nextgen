@@ -139,8 +139,39 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+    """Crash veto — docs/sops/audit-script-correctness.md, incident 2026-08-24.
 
+    sweep-run.py scores a step "completed" on rc in (0, 1, 2) -- 1/2 normally
+    meaning "found findings". An uncaught Python traceback ALSO exits 1, so
+    without this wrapper a mid-run crash reads as a clean pass and the
+    auto-close step resolves every open health finding this run never
+    re-examined. Return 3 on purpose -- outside the "completed" set.
+    """
+    args = _parse_args(argv)
+    try:
+        return _main_impl(args)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        try:
+            with FindingsWriter(
+                dsn=args.postgres_dsn,
+                section="health",
+                cycle_id=cycle_id_from_env(),
+                trigger=trigger_from_env(),
+                git_head=git_head(),
+            ) as writer:
+                writer.mark_incomplete(f"health-check aborted: {type(exc).__name__}: {exc}")
+                writer.close(verdict="red")
+        except Exception as veto_exc:  # noqa: BLE001
+            print(f"CRITICAL: the crash veto could not be recorded "
+                  f"({type(veto_exc).__name__}: {veto_exc}) — open health "
+                  f"findings may be auto-closed by this cycle and must be "
+                  f"re-verified by hand")
+        return 3
+
+
+def _main_impl(args) -> int:
     # Set to a reason string when this run's coverage is NOT trustworthy.
     # A partial run must not let auto-close read "absent" as "resolved".
     incomplete: str | None = None

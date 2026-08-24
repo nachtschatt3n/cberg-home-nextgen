@@ -46,7 +46,9 @@ from lib.slo.catalog import load as load_catalog, SloDef  # noqa: E402
 from lib.slo.clients import PromClient                    # noqa: E402
 from lib.slo.calc    import compute, defects              # noqa: E402
 from lib.slo.writer  import SloWriter                     # noqa: E402
-from lib.findings_writer import FindingsWriter            # noqa: E402
+from lib.findings_writer import (                          # noqa: E402
+    FindingsWriter, cycle_id_from_env, trigger_from_env, git_head,
+)
 
 
 DEFAULT_CATALOG = REPO_ROOT / "runbooks" / "slo-catalog.yaml"
@@ -128,7 +130,39 @@ def _evaluate_prom(slo: SloDef, prom: PromClient) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Crash veto — docs/sops/audit-script-correctness.md, incident 2026-08-24.
+
+    sweep-run.py scores a step "completed" on rc in (0, 1, 2) -- 1/2 normally
+    meaning "found findings". An uncaught Python traceback ALSO exits 1, so
+    without this wrapper a mid-run crash reads as a clean pass and the
+    auto-close step resolves every open slo finding this run never
+    re-examined. Return 3 on purpose -- outside the "completed" set.
+    """
     args = _parse_args(argv)
+    try:
+        return _main_impl(args)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        try:
+            with FindingsWriter(
+                dsn=args.postgres_dsn,
+                section="slo",
+                cycle_id=cycle_id_from_env(),
+                trigger=trigger_from_env(),
+                git_head=git_head(),
+            ) as writer:
+                writer.mark_incomplete(f"slo-check aborted: {type(exc).__name__}: {exc}")
+                writer.close(verdict="red")
+        except Exception as veto_exc:  # noqa: BLE001
+            print(f"CRITICAL: the crash veto could not be recorded "
+                  f"({type(veto_exc).__name__}: {veto_exc}) — open slo "
+                  f"findings may be auto-closed by this cycle and must be "
+                  f"re-verified by hand")
+        return 3
+
+
+def _main_impl(args) -> int:
     # Pass DSN explicitly so the loader uses the DB path. Falls back to the
     # legacy YAML when DSN is unset AND the file is still present.
     catalog = load_catalog(args.catalog, dsn=args.postgres_dsn)
