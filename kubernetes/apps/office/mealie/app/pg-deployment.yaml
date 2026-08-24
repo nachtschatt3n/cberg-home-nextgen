@@ -71,10 +71,15 @@ spec:
             initialDelaySeconds: 30
             timeoutSeconds: 2
             periodSeconds: 10
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
+          # NO securityContext here, deliberately — matching the working
+          # authentik-pg / paperless-db pattern. The postgres entrypoint starts
+          # as root to chown PGDATA and chmod /var/run/postgresql, then drops to
+          # the postgres user itself via gosu. Dropping ALL capabilities removes
+          # CHOWN/FOWNER and the container dies on first boot with
+          # "chown: changing ownership of '/var/lib/postgresql/18/docker':
+          # Operation not permitted" — verified here on 2026-08-24 before this
+          # comment was written. Do not "harden" this back without also
+          # pre-chowning the volume; the image handles its own privilege drop.
       volumes:
         - name: data
           persistentVolumeClaim:
