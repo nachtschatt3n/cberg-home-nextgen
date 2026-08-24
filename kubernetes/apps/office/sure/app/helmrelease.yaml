@@ -115,11 +115,17 @@ spec:
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
       # chart-version tag.
-      # This bump adds a small additive migration: new nullable `contract_term`
-      # string column on `loans`, plus the corresponding UI field. No
-      # destructive schema change; db-migrate job runs the new migration.
+      # This bump adds two small additive migrations: new nullable
+      # `contract_term` string column and `rate_lock_expires_on` date column
+      # on `loans`, plus the corresponding UI fields. No destructive schema
+      # change; db-migrate job runs both new migrations. Rebuilt from
+      # feat/contracts-trading212 after a CI checkout bug caused the prior
+      # sha-8588d365... image to be silently built from stale main (missing
+      # both migrations) — verified pre-deploy via a throwaway debug pod that
+      # both migration files, their app/ UI references, and db/schema.rb
+      # (version 2026_08_24_010000) are present in this image before bumping.
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-8588d365c4723c12c4b39e807499f67983a8c063"
+      tag: "sha-ff195b0315335006b8c890e98654fb6bdc18699c"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
