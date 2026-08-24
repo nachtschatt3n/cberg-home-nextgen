@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
 import urllib.error
 import urllib.request
@@ -50,6 +51,11 @@ DOCUMENT_TYPE_ID = 12
 # document may hold several cards (4- and 6-page scans are 2 and 3 recipes), so
 # recipes are counted per content page, never per document.
 CONTENT_PAGE_MIN_CHARS = 1000
+
+# A JPEG this small at 150 DPI is a blank sheet, not a photograph. One card in
+# the corpus was scanned with an empty back; it renders at 45 KB where the
+# smallest genuine photo is 155 KB, so the threshold has ~3x margin both ways.
+BLANK_PAGE_MAX_BYTES = 100_000
 
 # OCR of these cards drops the `ff`/`fl` ligatures outright, consistently enough
 # to repair by table. Applied to extracted text before anything else reads it.
@@ -464,7 +470,10 @@ def cmd_images(args):
     that succeeded.
     """
     base, token = args.mealie_url.rstrip("/"), os.environ["MEALIE_TOKEN"]
-    pdf_dir = Path(args.out_dir).expanduser() / "pdfs"
+    out_dir = Path(args.out_dir).expanduser()
+    pdf_dir = out_dir / "pdfs"
+    rotations = load_rotations(out_dir)
+    print(f"photos needing rotation: {len(rotations)}")
 
     attached, skipped, failed = 0, 0, []
     page_num = 1
@@ -482,7 +491,18 @@ def cmd_images(args):
             doc_id, content_page = key.split("-p")
             pdf = pdf_dir / f"{doc_id}.pdf"
             try:
-                jpeg = _render_page(pdf, _photo_page(int(content_page)))
+                jpeg = _render_page(
+                    pdf, _photo_page(int(content_page)), rotations.get(key, 0)
+                )
+                if len(jpeg) < BLANK_PAGE_MAX_BYTES:
+                    # An all-white scan compresses to almost nothing. Attaching it
+                    # gives the recipe a blank rectangle, which reads as "broken
+                    # image" -- worse than Mealie's own placeholder. Measured
+                    # across the corpus the gap is unambiguous: the one blank back
+                    # renders at 45 KB, the smallest real photo at 155 KB.
+                    print(f"  - {item['slug']}: picture side is blank, left unset")
+                    skipped += 1
+                    continue
                 _upload_image(base, token, item["slug"], jpeg)
                 attached += 1
                 print(f"  * {item['slug']}")
@@ -498,7 +518,26 @@ def cmd_images(args):
     return 1 if failed else 0
 
 
-def _render_page(pdf: Path, page: int) -> bytes:
+def load_rotations(out_dir: Path) -> dict:
+    """paperless_key -> degrees clockwise needed to stand the photo upright.
+
+    The cards were fed through the scanner in whatever orientation was handy, and
+    the PDFs carry no /Rotate metadata, so roughly a third of the picture sides
+    come out sideways or upside down. Orientation cannot be inferred from page
+    shape either: the 2-person cards are genuinely portrait while the standard
+    ones are landscape, so "portrait" is not a defect.
+
+    The map is produced by `runbooks/mealie-photo-orient.py` (tesseract OSD plus a
+    visual review of the disagreements) and is data, not code -- re-run that when
+    new scans arrive rather than editing anything here.
+    """
+    path = out_dir / "rotation.json"
+    if not path.exists():
+        return {}
+    return {k: int(v) for k, v in json.loads(path.read_text()).items() if int(v)}
+
+
+def _render_page(pdf: Path, page: int, rotate: int = 0) -> bytes:
     """Render one PDF page to JPEG at a resolution worth looking at."""
     result = subprocess.run(
         # pdftoppm writes the image to stdout only when no output-file root is
@@ -509,7 +548,30 @@ def _render_page(pdf: Path, page: int) -> bytes:
     )
     if result.returncode != 0 or not result.stdout:
         raise RuntimeError(f"pdftoppm failed for {pdf} page {page}")
-    return result.stdout
+    if not rotate:
+        return result.stdout
+    return _rotate_jpeg(result.stdout, rotate)
+
+
+def _rotate_jpeg(data: bytes, degrees: int) -> bytes:
+    """Rotate clockwise by `degrees`.
+
+    Uses `sips`, which ships with macOS, because this is an operator-run script
+    on the Mac (the cluster cannot reach Paperless' archived PDFs any more
+    conveniently) and it saves a Pillow dependency for one call.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        result = subprocess.run(
+            ["sips", "-r", str(degrees), tmp_path], capture_output=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"sips rotate failed: {result.stderr.decode()[:200]}")
+        return Path(tmp_path).read_bytes()
+    finally:
+        os.unlink(tmp_path)
 
 
 def _upload_image(base: str, token: str, slug: str, jpeg: bytes) -> None:

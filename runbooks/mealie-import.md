@@ -119,7 +119,34 @@ the neighbouring serving columns.
 recipe's photo is simply the other page of its pair: `page + 1` for an odd content
 page, `page - 1` for an even one. `pdftoppm` renders it at 150 DPI and it is PUT to
 `/api/recipes/{slug}/image`. Existing images are left alone unless `--force` is
-given.
+given. A picture side that renders under 100 KB is a blank sheet and is skipped --
+Mealie's placeholder beats a white rectangle.
+
+**Photo orientation is a separate step and it matters.** The cards went through the
+scanner in whatever orientation was handy and the PDFs carry no `/Rotate`, so about
+a third of the picture sides come out sideways or upside down:
+
+```bash
+python3 runbooks/mealie-photo-orient.py detect --overrides <overrides.json>
+python3 runbooks/mealie-photo-orient.py review --changed-only   # contact sheets
+python3 runbooks/mealie-import.py images --force
+```
+
+`detect` writes `rotation.json`, which `images` consumes; nothing else needs to
+change.
+
+Two things will mislead you here:
+
+- **Page shape is not the signal.** The two-person cards are genuinely portrait
+  while the standard ones are landscape. 66 of 159 photo pages are portrait and
+  most are perfectly upright, so rotating "the portrait ones" corrupts more than
+  it fixes.
+- **tesseract OSD is a strong first pass, not an oracle.** These pages are mostly
+  photograph with one line of title text, so confidence often sits below 1.0 and
+  it is sometimes wrong or silent. It got 46 of 159 right and 10 wrong on the first
+  run. Always `review` the rendered result -- a bad rotation is obvious in a
+  contact sheet and invisible in a confidence score -- and put corrections in the
+  overrides file so the run stays reproducible.
 
 **Cookbooks.** Mealie cookbooks are saved smart filters, not folders. One is
 created per source brand over the category the import already sets
