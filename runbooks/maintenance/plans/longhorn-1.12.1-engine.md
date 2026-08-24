@@ -19,11 +19,17 @@ touches:
     - daemonset/engine-image-ei-*      # both stale DaemonSets retire with the last reference
     - setting/concurrent-automatic-engine-upgrade-per-node-limit
   shared: [storage]                   # EVERY stateful app rides Longhorn — see §6
-depends_on: [longhorn-1.12.1-chart]   # v1.12.1 must be the default engine before draining onto it
+depends_on: []                        # was [longhorn-1.12.1-chart] -- DEAD REF, no such plan file ever
+                                      # existed, so the dependency guard could never enforce it (found
+                                      # 2026-08-23). The underlying precondition (v1.12.1 must be the
+                                      # default engine before draining onto it) is satisfied IN FACT --
+                                      # verified live 2026-08-24: longhorn-manager:v1.12.1 and
+                                      # setting/default-engine-image both v1.12.1. Cleared rather than
+                                      # left pointing at nothing.
 conflicts_with: []                    # (declared FROM the five sibling plans, see §6)
 security_ref: F-49f172b9              # see also F-6bedee0b (engine v1.12.0)
-status: vetted
-window: "ad-hoc:2026-08-19"           # LAST slot of the session; may run past it (async tail)
+status: approved                      # operator GO 2026-08-24 -- missed ad-hoc:2026-08-19, rescheduled
+window: "tue-early:2026-08-25"        # next no-reboot slot; conflicts_with talos-1.13.9 (scheduled sun-window:2026-08-30, different day)
 auto_execute: false                   # storage engine upgrade — never unattended
 sops_refs:
   - docs/sops/longhorn.md

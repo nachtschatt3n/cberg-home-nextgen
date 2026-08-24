@@ -26,8 +26,8 @@ touches:
 depends_on: []
 conflicts_with:
   - longhorn-1.12.1-engine            # both cycle Longhorn volumes; never the same window
-status: awaiting-go                   # operator go/no-go: reboots the whole cluster
-window: null                          # needs a full 90m window of its own
+status: approved                      # operator GO 2026-08-24 -- next reboot-capable slot
+window: "sun-window:2026-08-30"       # only allow_reboot:true slot; conflicts_with longhorn-1.12.1-engine (scheduled tue-early:2026-08-25, different day)
 auto_execute: false                   # never unattended: node reboots
 security_ref: F-912f4778
 sops_refs:
