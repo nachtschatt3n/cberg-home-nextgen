@@ -114,18 +114,28 @@ spec:
       repository: ghcr.io/nachtschatt3n/sure
       # Fork build (nachtschatt3n/sure) carrying the gated "Contracts" preview
       # feature. Pinned by commit SHA (multi-arch amd64+arm64) rather than a
-      # chart-version tag.
-      # This bump adds two small additive migrations: new nullable
-      # `contract_term` string column and `rate_lock_expires_on` date column
-      # on `loans`, plus the corresponding UI fields. No destructive schema
-      # change; db-migrate job runs both new migrations. Rebuilt from
-      # feat/contracts-trading212 after a CI checkout bug caused the prior
-      # sha-8588d365... image to be silently built from stale main (missing
-      # both migrations) — verified pre-deploy via a throwaway debug pod that
-      # both migration files, their app/ UI references, and db/schema.rb
-      # (version 2026_08_24_010000) are present in this image before bumping.
+      # chart-version tag. Built from branch `integration`.
+      # This bump is the first upstream sync in a month and runs 7 new
+      # migrations: add_last_used_at_to_categories,
+      # add_family_name_index_to_tags_and_categories, add_import_all_history_to_wise_items,
+      # add_personal_budgets, create_onchain_wallet_items_and_accounts,
+      # add_reconciliation_to_entries, create_sso_identity_blocks.
+      # Two of them need care:
+      #   * add_family_name_index_to_tags_and_categories builds UNIQUE indexes
+      #     with no de-dup step, so it fails outright on duplicate
+      #     (family_id, name). Verified read-only pre-deploy: 0 duplicate rows
+      #     in both `categories` (24 rows) and `tags` (0 rows).
+      #   * add_reconciliation_to_entries is `disable_ddl_transaction!` +
+      #     `algorithm: :concurrently` on `entries`, so a partial failure does
+      #     NOT roll back and can leave an INVALID index behind.
+      # add_personal_budgets is not purely additive — it drops
+      # index_budgets_on_family_id_and_start_date_and_end_date and replaces it
+      # with two partial unique indexes. Rollback is therefore
+      # revert-the-manifest, NOT db:rollback: the schema stays migrated forward.
+      # That is safe because all 6 existing budget rows get user_id IS NULL, so
+      # index_budgets_shared_unique enforces exactly the dropped constraint.
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-ff195b0315335006b8c890e98654fb6bdc18699c"
+      tag: "sha-4bd6b508f45b028b262139105f5019d5f64aebc4"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
@@ -223,6 +233,17 @@ spec:
         # than leaving it to the settings UI. The 400-fallback path is unchanged.
         - name: LLM_JSON_MODE
           value: "strict"
+        # Insights/assistant response watchdog. SECONDS, not milliseconds —
+        # 300 is five minutes; "300000" would be ~3.5 days and effectively
+        # disables the watchdog. Load-bearing as of this image: the fork's
+        # hardcoded 300000 client-side watchdog was deleted upstream and the
+        # timeout is now driven server-side from this env var. If it is absent
+        # the default is 90s, which is shorter than local Ollama inference
+        # takes and resurfaces the "assistant did not reply" bug. Verify in the
+        # RUNNING pod, not just the manifest:
+        #   kubectl exec -n office deploy/sure-web -c web -- printenv AI_RESPONSE_TIMEOUT
+        - name: AI_RESPONSE_TIMEOUT
+          value: "300"
       externalAssistant:
         enabled: false
 
