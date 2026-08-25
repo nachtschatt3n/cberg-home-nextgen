@@ -3,7 +3,7 @@ plan_id: longhorn-1.12.1-engine
 component: longhorn
 pr: null                              # the engine upgrade is a CR operation, not a version bump
 kind: chart
-current: "95 volumes (2026-08-19 recount): 72 v1.11.2 + 21 v1.12.0 + 2 v1.12.1"
+current: "96 volumes (2026-08-25 recount): 71 v1.11.2 + 21 v1.12.0 + 4 v1.12.1"
 target: "every ATTACHED volume on v1.12.1; 2 detached rollback floors explicitly EXCLUDED — see 1c"
 update_type: patch
 risk: medium                          # live engine upgrade touches every attached volume
@@ -28,9 +28,10 @@ depends_on: []                        # was [longhorn-1.12.1-chart] -- DEAD REF,
                                       # left pointing at nothing.
 conflicts_with: []                    # (declared FROM the five sibling plans, see §6)
 security_ref: F-49f172b9              # see also F-6bedee0b (engine v1.12.0)
-status: awaiting-go                   # operator GO 2026-08-24 is ON RECORD but is NO LONGER
-                                      # cleared-to-run: the preconditions it was given have since
-                                      # changed (see 1d). Re-approval required before any drain.
+status: scheduled                     # FRESH operator GO 2026-08-25 for sat-early:2026-08-29,
+                                      # recorded in OpenClaw (decision=approve, exec_state=pending).
+                                      # The 2026-08-24 GO was superseded when the preconditions moved;
+                                      # this one was given AFTER the 1d blocker was resolved (see 1e).
                                       # Deferred out of tue-early:2026-08-25 by the window agent.
 window: "sat-early:2026-08-29"        # 90min OPERATOR-PRESENT no-reboot slot. NOT sun-window:2026-08-30 --
                                       # talos-1.13.9 is scheduled there and 6 forbids pairing an engine
@@ -237,6 +238,45 @@ It is **not** unbacked — a `Completed` Backup CR exists from `2026-08-25T03:02
 This is the documented `lastBackupAt` lag in `docs/sops/backup.md`. When running
 pre-check (c), cross-check the Backup CRs before treating a blank field as a
 missing backup, or this plan will keep tripping over its own mandatory gate.
+
+## 1e) 1d RESOLVED — operator ruling 2026-08-25, gate stays at TWO
+
+The 1d blocker is closed. The operator ruled on the third detached volume:
+**`paperless-ai-data` was cleaned up, not sanctioned as a permanent exclusion.**
+
+Executed 2026-08-25 (this was the cleanup 1d called for, done separately and
+BEFORE the drain, exactly as that section required):
+
+```
+kubectl delete pv paperless-ai-data                    # Released / Retain, no claim, no workload
+kubectl -n storage delete volume paperless-ai-data     # the CR holding the v1.11.2 engine ref
+```
+
+Pre-flight before the delete: storageClass `longhorn-static` (a Longhorn volume,
+NOT a CIFS/SMB class — `docs/sops/storage-safety.md` blast-radius rules do not
+apply), phase `Released`, reclaim `Retain`, PVC `office/paperless-ai-data` gone,
+no pod in any namespace referencing it, and **7 Completed backups retained**
+(newest `backup-218a3d7a72b14ea7`, 2026-08-24) so the delete is recoverable.
+
+Live census re-verified immediately after:
+
+```
+96 volumes   94 attached   2 detached
+71 v1.11.2   21 v1.12.0    4 v1.12.1
+
+DETACHED SET:
+  paperless-mariadb                      v1.11.2   (sanctioned rollback floor)
+  redis-data-nextcloud-redis-master-0    v1.11.2   (sanctioned rollback floor)
+```
+
+**Success gate 3 is therefore assertable exactly as 1c wrote it: `ei-c9fa6d45`'s
+residual references must be EXACTLY those two volumes. Do NOT widen it to three.**
+The discriminator between "correctly refused to touch a rollback floor" and
+"silently missed a volume" is intact — which was the whole reason the window agent
+refused to widen it unattended.
+
+Also note the 1c census fix carried forward: `nextcloud-db-data` no longer exists.
+Do not look for it.
 
 ## 2) Pre-checks
 
