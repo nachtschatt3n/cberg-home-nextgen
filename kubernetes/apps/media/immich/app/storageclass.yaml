@@ -36,3 +36,51 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
   csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
   csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "cifs-immich-cache"
+provisioner: smb.csi.k8s.io
+# READ-WRITE mount for Immich's media location (/data) — thumbnails, encoded
+# video, profile images and Immich's own DB dumps. Everything here is DERIVED
+# from the read-only iCloud library above and is regenerable, which is exactly
+# why it does NOT belong on replicated NUC SSD: at 75Gi x 2 replicas it was
+# consuming 150Gi of scarce Longhorn scheduled capacity (nuc14-02 was down to
+# 0.9Gi of headroom) to store data whose loss costs only CPU time.
+#
+# Profile A (docs/sops/cifs-mount-options.md): read-heavy, write-once. Only
+# immich-server mounts this — a single writer — so the aggressive metadata
+# caching of `cache=loose`/`actimeo=30` is safe here. Profile B's cache=none
+# would be a large, pointless penalty on a ~140k-file thumbnail tree.
+#
+# reclaimPolicy Retain and a NON-ROOT subdir are mandatory: a PVC delete on a
+# `/` subdir recursively wipes the share (docs/sops/storage-safety.md,
+# 2026-04-26 incident). This shares the `media` share with plex/jellyfin, so a
+# stray delete here would be catastrophic if it were not pinned to `immich-cache`.
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nosharesock
+  - multichannel
+  - max_channels=4
+  - vers=3.1.1
+  - dir_mode=0777
+  - file_mode=0777
+  - uid=1000
+  - gid=1000
+  - noperm
+  - noatime
+  - rsize=1048576
+  - wsize=1048576
+  - cache=loose
+  - actimeo=30
+  - serverino
+parameters:
+  source: "//${NAS_HOSTNAME}/media"
+  subdir: "immich-cache"
+  csi.storage.k8s.io/node-stage-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/node-stage-secret-namespace: "kube-system"
+  csi.storage.k8s.io/provisioner-secret-name: "csi-driver-smb"
+  csi.storage.k8s.io/provisioner-secret-namespace: "kube-system"

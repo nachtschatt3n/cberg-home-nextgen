@@ -106,3 +106,35 @@ spec:
     requests:
       storage: 30Gi
   storageClassName: longhorn
+---
+# Immich media location (/data), CIFS-backed — replaces immich-upload-v2.
+#
+# WHY THIS MOVED OFF LONGHORN (2026-08-25): the contents are 100% derived
+# (thumbnails + encoded video + Immich's DB dumps); the originals are the
+# read-only iCloud library above. Storing regenerable data on replicated NUC
+# SSD cost 150Gi of Longhorn SCHEDULED capacity (75Gi x 2 replicas) — and that
+# was the binding constraint, not raw free space: the per-disk ceiling is
+# (StorageMaximum - StorageReserved) = ~880Gi, and nuc14-02 sat at 879Gi with
+# 0.9Gi of headroom. Both the 150Gi and 120Gi expansions above were refused for
+# exactly that reason. Moving to the NAS returns that 150Gi to the pool AND
+# removes the size ceiling that had Immich's thumbnail/faces/OCR queues paused.
+#
+# The size request is nominal — SMB PVCs are not quota-enforced by the NAS, so
+# this is a claim, not a reservation. Sized well above the ~82GiB two-library
+# projection so a third library never re-runs the 2026-08 capacity incident.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-data
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+    volume.kubernetes.io/storage-provisioner: smb.csi.k8s.io
+  labels:
+    csi-driver-smb: "cifs-share"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: cifs-immich-cache
