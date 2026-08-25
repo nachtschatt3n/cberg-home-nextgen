@@ -111,12 +111,41 @@ spec:
           # up after a restart grows steeply for its first few hours -- frigate
           # projected 138% of its limit while merely loading models -- so without
           # it this rule pages after every single restart of elasticsearch,
-          # frigate or any other large process. Six hours matches the prediction
-          # window, so the projection is never built purely from ramp-up.
+          # frigate or any other large process.
+          #
+          # The guard and the prediction window must MATCH, and both are 24h.
+          # They used to be 6h, on the reasoning that "six hours matches the
+          # prediction window, so the projection is never built purely from
+          # ramp-up" -- which is wrong. At container age 6h the [6h] window is
+          # ENTIRELY the container's first six hours. The guard only stops the
+          # window from predating the container; it does nothing to keep ramp-up
+          # out of it. office/sure-worker proved it: the alert went active at
+          # 02:57:43Z on a container started 20:57:03Z -- 6h00m40s, the exact
+          # instant the guard opened -- projecting 114% of limit off Sidekiq's
+          # post-boot glibc-arena ratchet, against an observed 7-day asymptote
+          # of 68% that has never OOMKilled.
+          #
+          # Widening the window alone would NOT have fixed that: predict_linear
+          # uses whatever samples exist in the range, so a 7h-old container fed
+          # a [24h] window still extrapolates the same steep 7h slope. The guard
+          # has to move with the window.
+          #
+          # Checked against the real leak before changing, so this sharpens the
+          # detector rather than blinding it. Frigate leaks ~437 MiB/day at a
+          # near-constant slope; over [24h] on 08-24 it projects 7623 MiB = 93%
+          # of its 8 Gi limit and still fires. The old [6h] window sampled at
+          # that same moment projected only 83% and would have MISSED it -- a
+          # short window on a noisy series catches a slow leak or not depending
+          # on which six hours it happens to land in. Frigate's growth-margin
+          # term lands at 10.7% against the >0.10 floor, so that floor is now
+          # the tight constraint for a slow leak; revisit it before the window.
+          #
+          # Cost: a 24h blind spot for this rule after every restart. The two
+          # threshold rules above cover that window.
           expr: |
             (
               predict_linear(
-                container_memory_rss{container!="",container!="POD"}[6h],
+                container_memory_rss{container!="",container!="POD"}[24h],
                 48 * 3600
               )
               / on(namespace,pod,container) group_left
@@ -130,12 +159,12 @@ spec:
             ) > 0.50
             and
             (
-              (time() - container_start_time_seconds{container!="",container!="POD"}) > 6 * 3600
+              (time() - container_start_time_seconds{container!="",container!="POD"}) > 24 * 3600
             )
             and
             (
               predict_linear(
-                container_memory_rss{container!="",container!="POD"}[6h],
+                container_memory_rss{container!="",container!="POD"}[24h],
                 48 * 3600
               )
               - container_memory_rss{container!="",container!="POD"}
