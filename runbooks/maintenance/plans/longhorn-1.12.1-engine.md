@@ -28,15 +28,22 @@ depends_on: []                        # was [longhorn-1.12.1-chart] -- DEAD REF,
                                       # left pointing at nothing.
 conflicts_with: []                    # (declared FROM the five sibling plans, see §6)
 security_ref: F-49f172b9              # see also F-6bedee0b (engine v1.12.0)
-status: approved                      # operator GO 2026-08-24 -- missed ad-hoc:2026-08-19, rescheduled
-window: "tue-early:2026-08-25"        # next no-reboot slot; conflicts_with talos-1.13.9 (scheduled sun-window:2026-08-30, different day)
+status: awaiting-go                   # operator GO 2026-08-24 is ON RECORD but is NO LONGER
+                                      # cleared-to-run: the preconditions it was given have since
+                                      # changed (see 1d). Re-approval required before any drain.
+                                      # Deferred out of tue-early:2026-08-25 by the window agent.
+window: "sat-early:2026-08-29"        # 90min OPERATOR-PRESENT no-reboot slot. NOT sun-window:2026-08-30 --
+                                      # talos-1.13.9 is scheduled there and 6 forbids pairing an engine
+                                      # drain with a node roll. Moved off tue-early:2026-08-25 because that
+                                      # was an unattended 60min cron slot and this plan is auto_execute:false.
 auto_execute: false                   # storage engine upgrade — never unattended
 sops_refs:
   - docs/sops/longhorn.md
   - docs/sops/backup.md
   - docs/sops/storage-safety.md
 generated: "2026-08-14"
-revised: "2026-08-19"                 # SPLIT from the chart bump + SCOPE CORRECTED
+revised: "2026-08-25"                 # 2026-08-19 SPLIT from chart bump + SCOPE CORRECTED;
+                                      # 2026-08-25 census drift + gate defect recorded (see 1d)
 ---
 
 # Longhorn: finish the engine upgrade — every attached volume → v1.12.1
@@ -178,6 +185,58 @@ risk. Do not smuggle it into a drain. Record the outcome on the finding records
 (`F-49f172b9`, `F-6bedee0b`) rather than reporting the drain as failed — a drain
 that correctly refuses to touch a rollback floor has succeeded, not fallen
 short. Status detail belongs on the record, not in this file.
+
+## 1d) CENSUS DRIFT + GATE DEFECT — found 2026-08-25 at tue-early, READ BEFORE RE-APPROVING
+
+The window agent ran this plan's read-only pre-checks on 2026-08-25 and did NOT
+drain. Pre-checks (a), (b), (d) PASSED: chart 1.12.1, engineimage v1.12.1
+`deployed`, `default-engine-image` v1.12.1, every ATTACHED volume healthy,
+concurrency limit still `0` as described. What changed is the census, again:
+
+```
+plan 1c (2026-08-19):  95 volumes   92 attached   3 detached
+LIVE   (2026-08-25):   97 volumes   94 attached   3 detached
+                       72 v1.11.2   21 v1.12.0    4 v1.12.1
+```
+
+**`nextcloud-db-data` no longer exists.** 1c lists it as one of the three
+detached volumes ("parked from the rolled-back nextcloud-db attempt"). It has
+since been removed. Do not look for it.
+
+**A THIRD detached v1.11.2 volume has appeared: `paperless-ai-data`.** Its PV is
+`Released` / reclaim `Retain`, orphaned by `66adefd7` (retiring paperless-ai for
+native paperless-ngx AI, 2026-08-24). It has a backup (2026-08-24). It is NOT a
+sanctioned exclusion in 1c.
+
+The live detached set on v1.11.2 is therefore:
+
+| volume | sanctioned by 1c? |
+|---|---|
+| `paperless-mariadb` | yes — rollback floor |
+| `redis-data-nextcloud-redis-master-0` | yes — rollback floor |
+| `paperless-ai-data` | **NO — undocumented, needs a ruling** |
+
+### Why this blocks, rather than being a footnote
+
+Success gate 3 in 1c/4 asserts that `ei-c9fa6d45`'s residual references are
+**exactly** the two rollback floors — and 1c is explicit that this is "the check
+that distinguishes 'correctly refused to touch a rollback floor' from 'missed
+one'". With an undocumented third detached volume that assertion cannot be made
+as written. Widening it to "three" unattended would delete the only discriminator
+the gate has, which is the opposite of what 1c intends.
+
+**Operator ruling needed before re-approval:** is `paperless-ai-data` a sanctioned
+third permanent exclusion (leave it detached on v1.11.2 and state the gate as
+three), or is the orphaned Released PV cleaned up separately FIRST so the gate
+stays at two? Either is defensible; the drain must not start until one is chosen.
+
+### One false alarm, already resolved — do not re-raise it
+
+Pre-check (c) appears to fail: `mealie-data` has an EMPTY `.status.lastBackupAt`.
+It is **not** unbacked — a `Completed` Backup CR exists from `2026-08-25T03:02:09Z`.
+This is the documented `lastBackupAt` lag in `docs/sops/backup.md`. When running
+pre-check (c), cross-check the Backup CRs before treating a blank field as a
+missing backup, or this plan will keep tripping over its own mandatory gate.
 
 ## 2) Pre-checks
 
