@@ -38,56 +38,6 @@ spec:
       storage: 20Gi
   storageClassName: longhorn
 ---
-# Immich media location (/data) — right-sized replacement for the original
-# 200Gi immich-upload, which was deleted on 2026-08-09 after cutover.
-# Contents are 100% DERIVED (thumbnails + transcoded video). The iCloud originals
-# live on the read-only CIFS library mount and are the source of truth, so worst
-# case this volume is re-generatable — it is not precious data.
-# Size from measurement, not guesswork: at 69% of thumbnails and 53% of video
-# transcodes complete, thumbs were 13GiB and encoded-video 21GiB, projecting to
-# ~19GiB + ~41GiB = ~60GiB at full scan (32.6GiB in use today). 75Gi gave ~25%
-# headroom over that projection, and — unlike the old 200Gi — is small enough to
-# place a replica on a SECOND node, which is the whole point of the migration.
-#
-# STILL 75Gi, and it needs to grow — blocked on cluster capacity, not on this file.
-#
-# 2026-08-25: this volume now serves TWO libraries. The 75Gi was sized correctly
-# for one; adding andrea's 23,341-asset external library pushes the projection to
-# ~82GiB (measured per-asset from mu's completed scan: 54,107 assets -> 24GiB
-# thumbs + 33GiB encoded-video). It hit 84% and was filling at 5.35 GiB/hour.
-#
-# Expansion to 150Gi and then 120Gi were BOTH refused by Longhorn:
-#   admission webhook validator.longhorn.io denied the request:
-#   cannot schedule ... ProvisionedLimit = 100% of (StorageMax - StorageReserved)
-#
-# Raw free space is not the constraint — SCHEDULABLE space is, and the limit is
-# (StorageMaximum - StorageReserved), NOT StorageMaximum. With 50GiB reserved the
-# per-disk ceiling is ~880GiB, and the replica disks sit at 858GiB (nuc14-01) and
-# 872GiB (nuc14-02) — about 22GiB and 8GiB of headroom. nuc14-03 has ~258GiB.
-# An expansion must fit on BOTH replica disks, so almost nothing fits today.
-#
-# Unblocking it needs one of, in rough order of preference:
-#   1. move a replica off nuc14-02 onto nuc14-03, then expand
-#   2. reclaim provisioned space (over-sized or dead volumes) on nuc14-01/02
-#   3. raise storage-over-provisioning-percentage above 100 — a global setting,
-#      and the least attractive: it lets Longhorn promise space it may not have
-#
-# Until then Immich's thumbnail/faces/OCR queues are PAUSED, which is what
-# stopped the fill. Everything on this volume is derived data (originals live on
-# the read-only CIFS mount), so the cost of the pause is a thumbnail-less
-# timeline for the new library, not data loss.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: immich-upload-v2
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 75Gi
-  storageClassName: longhorn
----
 # Machine-learning model cache (CLIP + face-detection + OCR ONNX models, plus
 # OpenVINO compiled-kernel/cl_cache blobs). The OpenVINO cache grows per unique
 # OCR input shape — the initial 54k-asset scan pushed /cache/ocr to ~8GB (57k
