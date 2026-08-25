@@ -236,15 +236,28 @@ spec:
               - *host
 
     persistence:
-      # Immich media location (/data): thumbnails, encoded video, uploads, profile,
-      # and the internal library. Generated data lives here (Longhorn), not on the NAS.
+      # Immich media location (/data): thumbnails, encoded video, profile and
+      # Immich's own DB dumps. NOW ON THE NAS (CIFS), not Longhorn.
       data:
         enabled: true
-        # Migrated 2026-08-08 from immich-upload (200Gi) to immich-upload-v2
-        # (75Gi). The old volume was too large for any second node to hold a
-        # replica, so both replicas sat on nuc14-03 and a single node loss would
-        # have taken /data offline. v2 has 2 replicas on 2 distinct nodes.
-        existingClaim: immich-upload-v2
+        # 2026-08-25: migrated off Longhorn (immich-upload-v2, 75Gi x 2 replicas)
+        # onto CIFS. /data is 100% DERIVED — 25G thumbnails, 33G of H.264
+        # transcodes of HEVC originals, 3.5G DB dumps; /data/upload, /library and
+        # /profile are empty because nothing is ever uploaded here. Replicating
+        # regenerable data cost 150Gi of Longhorn SCHEDULED capacity, and that was
+        # the binding cluster constraint: the per-disk ceiling is
+        # (StorageMaximum - StorageReserved) ~= 880Gi and nuc14-02 sat at 879Gi,
+        # which is why BOTH the 150Gi and 120Gi expansions were refused and why
+        # the thumbnail/faces/OCR queues had to be paused.
+        #
+        # Migration verified before cutover: 143,022 files on both sides, and every
+        # per-tree apparent-size difference an exact multiple of 4096 (54,979
+        # directory entries — ext4 counts a dir as 4096 bytes, CIFS as ~0), i.e.
+        # byte-identical file data.
+        #
+        # ROLLBACK: set existingClaim back to immich-upload-v2. That volume is
+        # retained untouched until this has soaked.
+        existingClaim: immich-data
         globalMounts:
           - path: /data
       # External-library originals — read-only CIFS mount of the icloud-backup parent.
