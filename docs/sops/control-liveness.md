@@ -163,7 +163,7 @@ then it is operator-manual and this table is the record. **Next due:
 
 | Date | What was restored | Outcome |
 |---|---|---|
-| — | (first drill pending) | — |
+| 2026-08-26 | `postgresql-data-5g` backup of same morning (03:01), via `runbooks/backup-restore-proof.py` | **PROVEN** — postgres booted, 6 databases, smoke count on a live table returned rows; scratch fully torn down |
 
 ---
 

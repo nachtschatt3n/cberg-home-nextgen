@@ -102,14 +102,15 @@ controls:
 
   - id: restore-drill
     kind: operator-procedure
-    what: "QUARTERLY scratch-restore of a Longhorn backup + a postgres dump — verified backups are Schroedinger's until restored (G2)"
+    what: "QUARTERLY push-button restore-proof per critical volume (backup-restore-proof.py) — verified backups are Schroedinger's until restored"
     cadence: quarterly
     watched_by:
       assertion: "Restore Drill Log"
       in: docs/sops/control-liveness.md
-      note: "manual quarterly; log table in the SOP. G2 upgrades this to an
-        automated scratch-restore probe — until then the drill is watched only
-        by the SOP section existing and the operator reading it"
+      note: "probe automated 2026-08-26 (first PROVEN run same day, logged);
+        cadence still operator-held — the log table + next-due date in the SOP
+        are the record until a scheduled runner earns its place"
+
 
   - id: alert-bridge
     kind: launchd
