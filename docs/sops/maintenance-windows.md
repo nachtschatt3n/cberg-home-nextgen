@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.23`
-> Last Updated: `2026-08-23`
+> Version: `2026.08.26`
+> Last Updated: `2026-08-26`
 
 ## 1) Description
 
@@ -21,7 +21,7 @@ sweep (rule 4d) → upgrade-planner-agent  ── writes one executable plan per
 maintenance-window-agent  ── vets plans for INTERFERENCE + SIDE EFFECTS,
       │                       sequences them, operator go/no-go, executes
       ▼
-7 scheduled windows/week — DAILY (runbooks/maintenance-windows.yaml)
+3 scheduled windows — nightly unattended + sat/sun attended (runbooks/maintenance-windows.yaml)
 ```
 
 Three roles, deliberately separated: the **sweep** plans + schedules + reports
@@ -34,10 +34,16 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
 
 ## 2) Overview
 
-- **Schedule:** `runbooks/maintenance-windows.yaml` — **7 windows/week
-  (DAILY since 2026-08-16)**: Mon/Tue/Wed/Thu/Fri 05:00 60m no-reboot slots;
-  Sat 09:00 90m no-reboot slot; Sun 09:00 90m reboot-capable operator-present
-  slot. Every window carries `capacity_risk: 6`. Daily replaced the 4/week
+- **Schedule:** `runbooks/maintenance-windows.yaml` — **3 windows (reshaped
+  2026-08-26, P1.1)**: `nightly` 03:30 daily 90m unattended no-reboot (Step 0
+  safe updates now land EVERY night); `sat-early` 09:00 90m attended
+  no-reboot; `sun-window` 09:00 90m attended reboot-capable. The 7/week
+  schedule this replaces was fictional capacity — four weekday slots never had
+  a driving cron, and plans scheduled into them silently never ran. Every
+  window now REQUIRES a driving cron (`window-crons.py --check`, asserted
+  every sweep) and a `window_runs` row per dated occurrence (asserted every
+  sweep). Weekend ids keep their old names until the GOs referencing them
+  execute (rename to *-attended in the P2.1 pass). Daily replaced the 4/week
   aggressive-drain cadence (Tue/Thu/Sat/Sun), which stretched the then-23-plan
   queue to late October; an IDLE window costs nothing — nothing runs unless a
   plan is slotted — so the extra weekday slots are pure optionality. **Daily
@@ -205,9 +211,13 @@ Authentik/Homepage/Longhorn objects.
 
   | Window | Cron (Europe/Berlin) | OpenClaw cron id |
   | --- | --- | --- |
-  | `tue-early` | `0 5 * * 2` | `335e4a3e-36e1-481a-81a7-6c59caa1be65` |
-  | `thu-early` | `0 5 * * 4` | `a9325ac9-443a-41d3-a386-d8f6402e0ea3` |
+  | `nightly` | `30 3 * * *` | `cd659ac2-180c-4de5-af39-7a339b52eedf` |
+  | `sat-early` | `0 9 * * 6` | `fe1f69f9-bf65-4aec-b49e-0b44f985d43f` |
   | `sun-window` | `0 9 * * 0` | `d8b8f2a0-61c5-45e7-92ca-aecc8e971917` |
+
+  (tue-early `335e4a3e` and thu-early `a9325ac9` removed 2026-08-26 with the
+  reshape. Re-render any command with `runbooks/window-crons.py --render`;
+  verify parity any time with `--check`.)
 
   **Durability caveat:** these crons live only in OpenClaw's PVC sqlite (the
   gateway cron store), **not** in git — same as the sweep cron. They survive pod
@@ -372,5 +382,6 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |
 | 2026.08.19 | 2026-08-19 | Documented the **AUTO-lane disqualifiers** (pre-release channel gate incl. `CHANNEL_RULES`, 0.x release-line moves, chart↔image lockstep) and the two troubleshooting rows for them + the past-dated `next window` bug (F-f95a8b52). |
+| 2026.08.26 | 2026-08-26 | **Reshape 7 -> 3** (P1.1): `nightly` 03:30 daily unattended replaces the five weekday slots (four of which never had a driving cron — the schedule was partly fictional); sat/sun stay attended. New enforcement: `window-crons.py --check` cron↔YAML parity + `window_runs` per-occurrence liveness, both asserted every sweep. GO auto-expiry in `home-operation tick`. |
 | 2026.08.16 | 2026-08-16 | Cadence 4 windows/week -> **7 (daily)**: added Mon/Wed/Fri 05:00 60m no-reboot slots, all windows at `capacity_risk: 6`. Drains the plan queue to 2026-09-13 instead of late October. Soaks are NOT compressible by the extra slots. |
 | 2026.08.23 | 2026-08-23 | **Approval revocation**: `resolve --by cleared|denied|superseded|manual` now VOIDS the decision, and `decisions --pending-exec` excludes resolved issues. Previously a revoked GO (and any issue auto-closed by `reconcile`) stayed readable as live authorization — found on `bitnamilegacy-exit-nextcloud-db`, a high-risk DB migration whose 2026-08-19 GO survived its own rollback. |

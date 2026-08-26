@@ -122,6 +122,15 @@ def next_occurrence(day_name, start_hhmm, today, now=None):
     is not a cosmetic slip — the window agent and the sweep both read this to
     decide what is due, and a window in the past reads as "now".
     """
+    if str(day_name).lower() == "daily":
+        now2 = now or datetime.now()
+        try:
+            hh, mm = (int(x) for x in str(start_hhmm).split(":")[:2])
+        except (TypeError, ValueError):
+            return today
+        if now2.date() == today and (now2.hour, now2.minute) >= (hh, mm):
+            return today + timedelta(days=1)
+        return today
     wd = _WD[day_name.lower()]
     delta = (wd - today.weekday()) % 7
     d = today + timedelta(days=delta)
@@ -141,7 +150,9 @@ def upcoming_windows(cfg, today, horizon_days=14, now=None):
     occ = []
     for w in cfg["windows"]:
         d = next_occurrence(w["day"], w["start"], today, now)
-        for bump in (0, 7):  # this week + next, to fill the horizon
+        step = 1 if str(w.get("day", "")).lower() == "daily" else 7
+        bumps = range(0, horizon_days + 1, step) if step == 1 else (0, 7)
+        for bump in bumps:  # daily: every day; weekly: this week + next
             dd = d + timedelta(days=bump)
             if (dd - today).days <= horizon_days:
                 occ.append({**w, "date": dd.isoformat(),
@@ -160,6 +171,7 @@ def reconcile(cfg, today):
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
     liveness_missing, liveness_verified = window_liveness(cfg, today)
+    parity_errors, parity_verified = cron_parity(cfg)
 
     # 1) held updates lacking a fresh plan.
     # Matching via lib/plan_matching (PR number / normalized names / version
@@ -313,6 +325,7 @@ def reconcile(cfg, today):
         "validation_errors": validation_errors,
         "window_liveness": {"missing": liveness_missing,
                             "verified": liveness_verified},
+        "cron_parity": {"errors": parity_errors, "verified": parity_verified},
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -341,6 +354,13 @@ def human(r, cfg):
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
     else:
         L.append("\nall held updates have a plan ✅")
+    cp = r.get("cron_parity") or {}
+    if not cp.get("verified", True):
+        L.append("\n⚠️  cron↔YAML parity NOT VERIFIED (cron list unreadable) — the schedule's executor is unconfirmed")
+    elif cp.get("errors"):
+        L.append(f"\n❌ CRON↔YAML PARITY FAILURES ({len(cp['errors'])}):")
+        for e in cp["errors"]:
+            L.append(f"  ! {e}")
     wl = r.get("window_liveness") or {}
     if not wl.get("verified", True):
         L.append("\n⚠️  window liveness NOT VERIFIED (no DB access) — absence of findings here is not evidence the windows ran")
@@ -495,7 +515,7 @@ def validate_plans(cfg, plans=None) -> list[str]:
                                 f"nonexistent windows are how the sat-early backlog happened")
                 else:
                     wd = _dt.date.fromisoformat(m.group(2)).strftime("%A").lower()
-                    if wd != win[m.group(1)]["day"]:
+                    if win[m.group(1)]["day"] != "daily" and wd != win[m.group(1)]["day"]:
                         errs.append(f"{pid}: window {w} dates a {wd}, but "
                                     f"{m.group(1)} runs on {win[m.group(1)]['day']}")
                     dur = pl.get("est_duration_min")
@@ -542,12 +562,13 @@ def expected_slots(cfg, today, lookback_days=7):
             "friday": 4, "saturday": 5, "sunday": 6}
     out = []
     for w in cfg.get("windows", []):
-        wd = days.get(str(w.get("day", "")).lower())
-        if wd is None:
+        day = str(w.get("day", "")).lower()
+        wd = days.get(day)
+        if wd is None and day != "daily":
             continue
         for back in range(1, lookback_days + 1):
             d = today - timedelta(days=back)
-            if d.weekday() == wd and d >= WINDOW_LIVENESS_EPOCH:
+            if (day == "daily" or d.weekday() == wd) and d >= WINDOW_LIVENESS_EPOCH:
                 out.append((w["id"], d.isoformat()))
     return sorted(out)
 
@@ -576,6 +597,20 @@ def window_liveness(cfg, today):
     except Exception:
         return [], False
     return missing_window_runs(expected, rows), True
+
+
+def cron_parity(cfg):
+    """(errors, verified) via window-crons.py --check --json. Unreachable
+    cron list => verified=False — parity NOT checked is not parity held."""
+    import subprocess
+    try:
+        pr = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / "window-crons.py"), "--check", "--json"],
+            capture_output=True, text=True, timeout=90)
+        d = json.loads(pr.stdout or "{}")
+        return d.get("errors", []), bool(d.get("verified"))
+    except Exception:
+        return [], False
 
 
 def open_queue(cfg) -> str:

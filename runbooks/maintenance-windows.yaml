@@ -1,83 +1,70 @@
 # maintenance-windows — when NON-safe (held) updates get executed.
 #
-# The auto-updater (runbooks/auto-update.py) merges patch/minor SAFE updates on
-# the scheduled sweep. Everything it HOLDS (majors, breaking-despite-patch,
+# The auto-updater (runbooks/auto-update.py) merges patch/minor SAFE updates in
+# every window's Step 0. Everything it HOLDS (majors, breaking-despite-patch,
 # deny-listed components, node-reboot items) flows here instead: an
-# upgrade-planner-agent preps an executable plan per held update, and the
-# maintenance-window-agent vets those plans for interference + side effects and
-# runs the approved sequence during one of these windows.
+# upgrade-planner-agent preps an executable plan per held update (or per
+# PLAN-lane finding), and the maintenance-window-agent vets those plans for
+# interference + side effects and runs the approved sequence.
 #
-# 7 windows/week — DAILY (2026-08-16). Was 4/week, which stretched the current
-# plan queue (see `maintenance-plan.py --open` for the live count) to late October. An IDLE window costs nothing: nothing runs
-# unless a plan is slotted, so the extra weekday slots are pure optionality.
+# THREE windows (reshaped 2026-08-26, P1.1 of the ops-continuity plan; was
+# "7/week — DAILY"). Seven declared slots turned out to be fictional capacity:
+# four never had a driving cron, and plans scheduled into them — including one
+# carrying a live operator GO — silently never ran. "An idle window costs
+# nothing" was empirically false: an UNDRIVEN window absorbed scheduled work
+# into a black hole. The operator's actual policy has exactly two time shapes:
 #
-# What daily does NOT buy: chains with a deliberate soak. superset-pg-decommission
-# sits 10 days after the cutover ON PURPOSE — the old database IS the rollback,
-# and removing it early trades a real safety net for calendar speed. Same shape
-# anywhere a plan says "soak"/"observe". Daily windows compress the INDEPENDENT
-# work; they must not be used to collapse a soak.
+#   nightly       unattended, every night — routine reversible work while
+#                 nobody is using the services. Safe updates now land DAILY
+#                 (previously only when a driven window happened to exist).
+#   sat/sun       attended weekend mornings — human-gated plans, with Sunday
+#                 the only reboot-capable slot (Talos node rolls).
 #
-# (previous note, still the governing rule) 4 windows/week (aggressive-drain cadence, 2026-08-02). Times are low-traffic;
-# Tue/Thu align with the Renovate scan cadence + the every-48h sweep, Sat/Sun are
-# longer weekend slots for higher-risk / operator-present work. An IDLE window
-# costs nothing (nothing runs unless a plan is slotted into it) — the extra
-# Saturday slot + the raised weekday capacity exist to DRAIN the current backlog
-# (app-template's ~5 tiers + the no-reboot heavies) in ~2-3 weeks instead of
-# ~6-8. Once the backlog clears you can drop sat-early / lower caps back — it's
-# git-tracked. Slot by REBOOT-NEED, not risk: Sunday is the only reboot-capable
-# window (Talos), so reserve it for reboot + app-template churn and push every
-# needs_reboot:false plan (kube-prom-stack, mariadb, nextcloud*) to Tue/Thu/Sat.
+# Every window here MUST have a driving OpenClaw cron; `window-crons.py
+# --check` asserts that parity on every sweep, and `window_runs` rows assert
+# each dated slot actually RAN. A window this file declares that does not fire
+# is a sweep finding, not a quiet absence.
+#
+# Soak rule (unchanged): daily nightly windows compress INDEPENDENT work; they
+# must never be used to collapse a deliberate soak ("the old database IS the
+# rollback"). A plan that says soak/observe keeps its full interval.
+#
+# NAMING NOTE (transitional, 2026-08-26): the weekend ids stay `sat-early` /
+# `sun-window` until the plans + GOs referencing them
+# (longhorn-1.12.1-engine @ sat-early:2026-08-29, talos-1.13.9 @
+# sun-window:2026-08-30) have executed — renaming an id out from under a live
+# GO orphans it. Rename to sat-attended / sun-attended in the P2.1 pass.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.08.16"
+version: "2026.08.26"
 timezone: Europe/Berlin
 
 windows:
-  - id: mon-early
-    day: monday
-    start: "05:00"
-    duration_min: 60
+  - id: nightly
+    day: daily
+    start: "03:30"            # after the 03:00 Longhorn backup kicks off its
+                              # snapshots, before the 04:00-anchored sweep and
+                              # frigate's 02:30 restart-window traffic; nobody
+                              # is using the services.
+    duration_min: 90
     capacity_risk: 6
-    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
-  - id: tue-early
-    day: tuesday
-    start: "05:00"
-    duration_min: 60
-    capacity_risk: 6        # sum of plan risk-weights this window can hold
-                            # (low=1, medium=2, high=3). Raised 4→6 (2026-08-02)
-                            # so a weekday slot can hold one high-solo (3) or two
-                            # mediums (4) during the backlog drain.
-    allow_reboot: false     # node-reboot plans (Talos) not in a 1h weekday slot
-  - id: thu-early
-    day: thursday
-    start: "05:00"
-    duration_min: 60
-    capacity_risk: 6        # raised 4→6 (2026-08-02), see tue-early
     allow_reboot: false
-  - id: wed-early
-    day: wednesday
-    start: "05:00"
-    duration_min: 60
-    capacity_risk: 6
-    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
-  - id: fri-early
-    day: friday
-    start: "05:00"
-    duration_min: 60
-    capacity_risk: 6
-    allow_reboot: false     # NEW 2026-08-16 (daily cadence)
-  - id: sat-early
+    mode: unattended          # P2.1 keys autonomy classes on this; until then
+                              # the window agent's existing rules apply (Step 0
+                              # safe updates + auto_execute:true low-risk only)
+  - id: sat-early             # -> sat-attended after 2026-08-29 (see NAMING NOTE)
     day: saturday
     start: "09:00"
-    duration_min: 90        # NEW (2026-08-02): a 2nd weekend no-reboot slot so
-    capacity_risk: 6        # app-template tiers run 2×/week (sat+sun) and the
-    allow_reboot: false     # no-reboot heavies get more slots. No reboots here —
-                            # keep node drains on Sunday.
-  - id: sun-window
+    duration_min: 90
+    capacity_risk: 6
+    allow_reboot: false
+    mode: attended
+  - id: sun-window            # -> sun-attended after 2026-08-30 (see NAMING NOTE)
     day: sunday
     start: "09:00"
     duration_min: 90
     capacity_risk: 6
-    allow_reboot: true      # rolling node reboots (Talos) go here, operator-present
+    allow_reboot: true        # rolling node reboots (Talos) go here, operator-present
+    mode: attended
 
 execution:
   # Limited autonomy (enabled 2026-07-25): a plan may run WITHOUT asking only if
