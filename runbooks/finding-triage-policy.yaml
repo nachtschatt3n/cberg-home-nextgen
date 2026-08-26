@@ -110,7 +110,11 @@ plan:
 # ── DECIDE: hand to the operator, do not act ────────────────────────────────
 decide:
   - id: accepted-risk-candidate
-    match_title: "*exposed*|*without auth*|*publicly reachable*"
+    match_title: "*exposed*|*without auth*|*publicly reachable*|*unexpected external ingress*|*unexpected ingress*"
+    # "unexpected external ingress" added 2026-08-26: the security check's
+    # actual vocabulary for exactly the posture question this rule describes —
+    # the globs and the emitter had drifted apart, so an exposure finding fell
+    # through to PLAN, where a planner would have "solved" a judgement call.
     reason: >-
       Exposure findings are a posture question, not a defect. The answer is an
       operator decision (accept and register an AR, or close the exposure), and
