@@ -19,6 +19,9 @@ update_type: patch
 risk: medium                          # patch content, but it reboots every node in the cluster
 est_duration_min: 60
 needs_reboot: true                    # 3 sequential node reboots
+capability_change: false
+rollback_class: one-way              # node-image roll-forward; talosctl rollback is
+                                     # another reboot, not a revert-or-restore
 touches:
   namespaces: [all]                   # every workload is rescheduled as nodes cycle
   resources:

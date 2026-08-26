@@ -172,6 +172,14 @@ def reconcile(cfg, today):
     validation_errors = validate_plans(cfg, plans)
     liveness_missing, liveness_verified = window_liveness(cfg, today)
     parity_errors, parity_verified = cron_parity(cfg)
+    autonomy = load_autonomy_policy()
+    exec_classes = []
+    for p in plans:
+        if p.get("status") in ("executed", "superseded", "reference"):
+            continue
+        cls, why = execution_class(p, autonomy)
+        exec_classes.append({"plan_id": p.get("plan_id"), "class": cls,
+                             "reason": why, "window": p.get("window")})
 
     # 1) held updates lacking a fresh plan.
     # Matching via lib/plan_matching (PR number / normalized names / version
@@ -326,6 +334,7 @@ def reconcile(cfg, today):
         "window_liveness": {"missing": liveness_missing,
                             "verified": liveness_verified},
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
+        "execution_classes": exec_classes,   # REPORT-ONLY until P2.1b
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -354,6 +363,11 @@ def human(r, cfg):
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
     else:
         L.append("\nall held updates have a plan ✅")
+    ec = r.get("execution_classes") or []
+    if ec:
+        L.append("\nexecution classes (REPORT-ONLY — enforcement lands with P2.1b):")
+        for e in ec:
+            L.append(f"  {e['class']:<18} {e['plan_id']:<34} {e['reason']}")
     cp = r.get("cron_parity") or {}
     if not cp.get("verified", True):
         L.append("\n⚠️  cron↔YAML parity NOT VERIFIED (cron list unreadable) — the schedule's executor is unconfirmed")
@@ -525,6 +539,17 @@ def validate_plans(cfg, plans=None) -> list[str]:
         # reference plans must NOT name a window — that is the other half of the contract
         if st == "reference" and w:
             errs.append(f"{pid}: status:reference must not carry a window ({w})")
+        # autonomy facts (P2.1): free-form values here would silently derive
+        # HUMAN-GATED forever (fail-safe eats typos), so malformed = error.
+        rc = pl.get("rollback_class")
+        if rc is not None and rc not in ("git-revert", "backup-restore", "one-way"):
+            errs.append(f"{pid}: rollback_class {rc!r} not in git-revert|backup-restore|one-way")
+        cc = pl.get("capability_change")
+        if cc is not None and not isinstance(cc, bool):
+            errs.append(f"{pid}: capability_change must be a bare boolean, got {cc!r}")
+        ao = pl.get("autonomy_override")
+        if ao is not None and ao != "human-gated":
+            errs.append(f"{pid}: autonomy_override may only RESTRICT (only legal value: human-gated)")
         # finding_refs bind a plan to the sweep findings it answers — the
         # plan-or-page pass (finding-triage.py) joins on them, so a malformed
         # ref silently un-plans a finding. Format-checked here.
@@ -597,6 +622,57 @@ def window_liveness(cfg, today):
     except Exception:
         return [], False
     return missing_window_runs(expected, rows), True
+
+
+# ---------------------------------------------------------------------------
+# Execution classes (P2.1a — REPORT-ONLY until P2.1b flips enforcement).
+# Derived from declared plan facts against runbooks/autonomy-policy.yaml.
+# A plan cannot claim a class; it declares capability_change / rollback_class
+# and the policy decides. Fail-safe: no policy, or missing facts => HUMAN-GATED.
+# ---------------------------------------------------------------------------
+
+AUTONOMY_POLICY_PATH = SCRIPT_DIR / "autonomy-policy.yaml"
+
+
+def load_autonomy_policy(path=AUTONOMY_POLICY_PATH):
+    try:
+        d = yaml.safe_load(path.read_text()) or {}
+        if not d.get("classes"):
+            return None
+        return d
+    except Exception:
+        return None
+
+
+def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
+    """(class, reason). HUMAN-GATED unless the policy affirmatively says
+    otherwise — absence of facts is absence of pre-approval."""
+    if not policy:
+        return "HUMAN-GATED", "autonomy policy missing/unparseable (fail-safe)"
+    if str(plan.get("autonomy_override") or "").strip() == "human-gated":
+        return "HUMAN-GATED", "plan restricts itself via autonomy_override"
+    facts = {
+        "capability_change": plan.get("capability_change"),
+        "rollback_class": plan.get("rollback_class"),
+        "needs_reboot": plan.get("needs_reboot"),
+    }
+    if facts["capability_change"] is True:
+        # decisive on its own — no other fact can rescue a capability change
+        return "HUMAN-GATED", "capability-changing — human-gated by policy"
+    if facts["capability_change"] is None or facts["rollback_class"] is None:
+        return "HUMAN-GATED", "facts not declared (capability_change/rollback_class)"
+    shared = {str(x).lower() for x in ((plan.get("touches") or {}).get("shared") or [])}
+    for cname, spec in policy.get("classes", {}).items():
+        req = spec.get("require", {})
+        if any(facts.get(k) != v for k, v in req.items()):
+            continue
+        if shared & {str(x).lower() for x in spec.get("forbid_shared", [])}:
+            continue
+        if spec.get("require_backup_gate") and not plan.get("backup_gate"):
+            return "HUMAN-GATED", (f"matches {cname} but names no backup_gate — "
+                                   f"an ungated backup-restore plan is not pre-approved")
+        return cname.upper(), f"policy class {cname}"
+    return "HUMAN-GATED", "matches no pre-approved class (default)"
 
 
 def cron_parity(cfg):

@@ -14,6 +14,7 @@ risk: high                            # one-way schema migrations + a Flask-AppB
 est_duration_min: 75                  # needs a 90-min window; a 60-min weekday slot leaves
                                       # zero slack for the restore-from-dump rollback
 needs_reboot: false
+capability_change: true              # app major — user-visible behaviour changes
 touches:
   namespaces: [databases]
   resources:

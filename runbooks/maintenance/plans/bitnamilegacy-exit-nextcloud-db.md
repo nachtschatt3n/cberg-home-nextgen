@@ -13,6 +13,10 @@ update_type: major                     # datastore replacement (image lineage + 
 risk: high                             # the household's primary file server; occ migrations
 est_duration_min: 80
 needs_reboot: false
+capability_change: false
+rollback_class: backup-restore       # HUMAN-GATED regardless: touches.shared includes
+                                     # storage, which forbid_shared excludes from any
+                                     # unattended class — and no backup_gate is named
 touches:
   namespaces: [office]
   resources:

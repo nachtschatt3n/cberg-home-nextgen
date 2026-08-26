@@ -10,6 +10,8 @@ risk: medium                          # live engine upgrade touches every attach
 est_duration_min: 45                  # ATTENDED portion. The drain itself is ASYNC and
                                       # unbounded — see §6. Do not read this as a finish time.
 needs_reboot: false
+capability_change: false             # same storage features before and after
+rollback_class: one-way              # the drain has no clean rollback (its own §5)
 touches:
   namespaces: [storage]
   resources:

@@ -9,6 +9,8 @@ update_type: major
 risk: medium                          # removes the rollback path; the live DB is not touched
 est_duration_min: 30
 needs_reboot: false
+capability_change: false
+rollback_class: one-way              # removes the old DB, which IS the rollback
 touches:
   namespaces: [databases]
   resources:

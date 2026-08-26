@@ -88,6 +88,15 @@ touches:                          # interference surface — be precise
 depends_on: []                    # other plan_ids that must run first
 conflicts_with: []               # plan_ids that must NOT share a window
 security_ref: null                # F-xxxxxxxx if this plan has a security driver.
+capability_change: false          # P2.1: does this change what the software can
+                                  # do / user-visible behaviour? true => never
+                                  # unattended. A FACT, reviewed with the plan —
+                                  # the execution class is DERIVED from it by
+                                  # runbooks/autonomy-policy.yaml, never claimed.
+rollback_class: git-revert        # git-revert | backup-restore | one-way.
+                                  # backup-restore additionally requires a named
+                                  # `backup_gate:` (a runtime restore-PROOF) to
+                                  # ever run unattended. one-way => human-gated.
 finding_refs: []                  # sweep findings this plan ANSWERS (P2.2). The
                                   # plan-or-page pass joins lane=PLAN findings to
                                   # plans on this field; a PLAN-lane critical with
