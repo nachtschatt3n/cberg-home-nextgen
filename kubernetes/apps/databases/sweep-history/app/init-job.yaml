@@ -58,7 +58,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v5b
+  name: sweep-history-init-v6  # v5b->v6: window_runs table (P1.3). Rename forces recreate (Job spec immutable).
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

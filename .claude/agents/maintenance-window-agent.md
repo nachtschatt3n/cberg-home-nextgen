@@ -209,6 +209,26 @@ done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets
 close-out even when nothing needed a decision. OpenClaw surfaces it in the
 briefing.
 
+**Record the run in `window_runs` — EVERY run, no exceptions (P1.3):**
+
+```bash
+SWEEP_PG_DSN=... python3 runbooks/window-run-record.py \
+  --slot <slot-id> --outcome <green|revert|partial|idle|aborted> \
+  --trigger <cron|ad-hoc> --plans-executed <n> --safe-updates <n> \
+  [--notes "<one line>"]
+```
+
+(Obtain the DSN the same way the sweep does — `runbooks/sweep-run.py` shows the
+secret + port-forward recipe; from inside the cluster the in-cluster FQDN works
+directly.) An **idle run is still a run**: "checked, nothing to do" writes
+`--outcome idle`. An operator-triggered run writes `--trigger ad-hoc` with the
+slot it stood in for. This row is the ONLY thing that distinguishes "the window
+ran and found nothing" from "the window never ran" — four of seven declared
+windows had no driving cron for weeks and nothing could tell. The sweep asserts
+a row exists for every dated slot; skipping this step makes an honest run look
+like a dead schedule, and the recorder prints loudly (exit 2) rather than
+failing silent when it has no DSN — do not swallow that.
+
 ## Boundaries
 - You orchestrate + verify; **cberg-agent performs cluster mutations**, ha-agent
   for Home Assistant, and node-reboot upgrades follow `docs/sops/talos-upgrade.md`.

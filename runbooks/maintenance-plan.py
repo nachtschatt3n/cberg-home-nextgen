@@ -159,6 +159,7 @@ def reconcile(cfg, today):
     held, held_error = get_held()
     plans = load_plans(cfg)
     validation_errors = validate_plans(cfg, plans)
+    liveness_missing, liveness_verified = window_liveness(cfg, today)
 
     # 1) held updates lacking a fresh plan.
     # Matching via lib/plan_matching (PR number / normalized names / version
@@ -310,6 +311,8 @@ def reconcile(cfg, today):
         "needs_plan": needs_plan,
         "ambiguous_matches": ambiguous,
         "validation_errors": validation_errors,
+        "window_liveness": {"missing": liveness_missing,
+                            "verified": liveness_verified},
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -338,6 +341,13 @@ def human(r, cfg):
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
     else:
         L.append("\nall held updates have a plan ✅")
+    wl = r.get("window_liveness") or {}
+    if not wl.get("verified", True):
+        L.append("\n⚠️  window liveness NOT VERIFIED (no DB access) — absence of findings here is not evidence the windows ran")
+    elif wl.get("missing"):
+        L.append(f"\n❌ WINDOWS DECLARED BUT NEVER RAN ({len(wl['missing'])}) — the schedule is fictional for these slots:")
+        for m in wl["missing"]:
+            L.append(f"  ! {m} — no window_runs row; check the OpenClaw cron and the window agent")
     if r.get("validation_errors"):
         L.append(f"\n❌ PLAN FRONTMATTER ERRORS ({len(r['validation_errors'])}) — fix before these plans can be trusted:")
         for e in r["validation_errors"]:
@@ -504,6 +514,62 @@ def validate_plans(cfg, plans=None) -> list[str]:
                                 f"— this guard is not enforced; resolve or delete "
                                 f"the ref with a dated comment")
     return errs
+
+
+# ---------------------------------------------------------------------------
+# Window liveness (P1.3). Asserts every dated slot the YAML declares actually
+# RAN, using the window_runs rows the window agent writes at close-out.
+# Four of seven declared windows had no driving cron for weeks and nothing
+# could notice: the only artifact of a window was its commits, so an idle
+# window that ran and a window that never ran were indistinguishable.
+# ---------------------------------------------------------------------------
+
+# Occurrences before this date predate the window_runs mechanism and are not
+# asserted — otherwise the check would fire for all of history on day one.
+WINDOW_LIVENESS_EPOCH = date(2026, 8, 27)
+
+
+def expected_slots(cfg, today, lookback_days=7):
+    """Every (slot, date) the YAML says should have run: fully-past days only
+    (today's window may legitimately not have fired yet), since the epoch."""
+    days = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6}
+    out = []
+    for w in cfg.get("windows", []):
+        wd = days.get(str(w.get("day", "")).lower())
+        if wd is None:
+            continue
+        for back in range(1, lookback_days + 1):
+            d = today - timedelta(days=back)
+            if d.weekday() == wd and d >= WINDOW_LIVENESS_EPOCH:
+                out.append((w["id"], d.isoformat()))
+    return sorted(out)
+
+
+def missing_window_runs(expected, run_rows):
+    """Pure logic, DB-free: expected (slot,date) pairs minus recorded ones."""
+    have = {(str(s), str(d)) for s, d in run_rows}
+    return [f"{s}:{d}" for s, d in expected if (s, d) not in have]
+
+
+def window_liveness(cfg, today):
+    """(missing, verified). verified=False when the DB is unreachable —
+    an unreadable ledger must render as NOT CHECKED, never as all-clear."""
+    expected = expected_slots(cfg, today)
+    if not expected:
+        return [], True
+    dsn = __import__("os").environ.get("SWEEP_PG_DSN")
+    if not dsn:
+        return [], False
+    try:
+        import psycopg
+        with psycopg.connect(dsn, connect_timeout=10) as c, c.cursor() as cur:
+            cur.execute("SELECT slot, run_date::text FROM window_runs "
+                        "WHERE run_date >= %s", (min(d for _, d in expected),))
+            rows = cur.fetchall()
+    except Exception:
+        return [], False
+    return missing_window_runs(expected, rows), True
 
 
 def open_queue(cfg) -> str:
