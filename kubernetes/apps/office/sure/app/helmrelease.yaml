@@ -137,7 +137,10 @@ spec:
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
       # Fixes AutoMerchantDetector's local-LLM path persisting leaked reasoning
       # text / placeholder strings as merchant names (no schema change).
-      tag: "sha-22cab2330b602d96511b9dff3a1f8aba6eaf0ffc"
+      # Fixes Contract#next_due freezing at first-detection value forever
+      # (recomputes from the most recent matching transaction; scan-time
+      # refresh restored too). No schema change.
+      tag: "sha-e683bcb8981d78e91b59a462248e100c237a6612"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
