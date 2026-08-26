@@ -155,11 +155,15 @@ rows roll back by git revert.
 
 ## Restore Drill Log
 
-Quarterly scratch-restore of one Longhorn backup AND one postgres dump, with
-smoke queries — "verified" backups are Schrödinger's until restored. G2 will
-automate this as the `backup_gate` probe for AUTO-BACKUP-GATED plans; until
-then it is operator-manual and this table is the record. **Next due:
-2026-11-26.**
+Quarterly restore-proof of each critical volume — "verified" backups are
+Schrödinger's until restored. The drill is push-button since 2026-08-26:
+`runbooks/backup-restore-proof.py` (the same probe AUTO-BACKUP-GATED plans
+name as their `backup_gate`) restores the newest backup into a scratch
+volume, boots the real image on it, smoke-queries, and tears down — the
+source volume is never touched, leftovers block a new run, and volume-name
+matching is EXACT (a retired volume's stale backup record must never be the
+thing "proven"). Cadence stays operator-held; run per target volume and log
+here. **Next due: 2026-11-26.**
 
 | Date | What was restored | Outcome |
 |---|---|---|
