@@ -5,3 +5,4 @@ resources:
   - secret.sops.yaml
   - schema-configmap.yaml
   - init-job.yaml
+  - heartbeat-cronjob.yaml

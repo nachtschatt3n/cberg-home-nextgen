@@ -10,6 +10,7 @@ resources:
   - ./claude-watch-webhook.yaml
   - ./longhorn-alerts.yaml
   - ./nas-share-alerts.yaml
+  - ./sweep-pipeline-alerts.yaml
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
