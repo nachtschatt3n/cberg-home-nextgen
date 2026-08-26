@@ -44,20 +44,15 @@ commissioning proof it CAN fire and (b) a standing staleness assertion.
 | P2.2 | plan-or-page: `finding_refs` frontmatter, 4d SLA, pages on overdue; planner accepts finding-shaped input | `7ac09300` |
 | — | DECIDE glob fix: "unexpected external ingress" routes to operator judgement | `3332d094` |
 | P1.1/2 | Windows 7→3 (`nightly` 03:30 unattended daily + sat/sun attended); `window-crons.py --render/--check` parity asserted every sweep | `7589b734` |
+| P2.1a | `autonomy-policy.yaml` + derived execution classes (REPORT-ONLY soak); facts backfilled into 5 executable plans; G4 doctrine codified | `3a6ca388` |
 | P3.1 prep | 30-day back-test of ownership-aware verdict: 21/33 reds → yellow; the 12 that stay red are the genuine 08-15..18 stuck period; one old yellow was an under-report. 4d SLA needs no tuning | (read-only) |
 
-Six new regression suites (41 total in `runbooks/tests/run-all.sh`). Three
+Seven new regression suites (42 total in `runbooks/tests/run-all.sh`). Three
 falsy-zero/def-time-default/carried-field bugs caught during commissioning and
 pinned.
 
 ## Remaining
 
-- **P2.1a (report-only, can land any time):** `runbooks/autonomy-policy.yaml`
-  (AUTO-NIGHT / AUTO-BACKUP-GATED / HUMAN-GATED derived from
-  `capability_change` + `rollback_class` + reboot + storage blast radius;
-  override may only restrict; fail-safe to HUMAN-GATED), execution_class in
-  `maintenance-plan.py --json`, new frontmatter facts in README + validator.
-  ITIL note: a plan CATEGORY earns AUTO only after 2 clean supervised runs.
 - **P2.1b (enforcement, AFTER the weekend GOs execute):** window agent Step 3
   keys on execution_class + window `mode`; delete `auto_execute`,
   `unattended_allowed`, `max_unattended_risk`; rename weekend windows to
