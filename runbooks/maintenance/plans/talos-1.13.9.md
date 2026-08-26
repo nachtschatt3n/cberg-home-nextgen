@@ -26,7 +26,10 @@ touches:
 depends_on: []
 conflicts_with:
   - longhorn-1.12.1-engine            # both cycle Longhorn volumes; never the same window
-status: approved                      # operator GO 2026-08-24 -- next reboot-capable slot
+status: awaiting-go                   # the 2026-08-24 GO was scoped to sun-window:2026-08-23,
+                                      # which passed with 0 plans executed; voided 2026-08-26
+                                      # (resolve --by superseded) and a FRESH go/no-go issued for
+                                      # sun-window:2026-08-30. A GO does not survive its window.
 window: "sun-window:2026-08-30"       # only allow_reboot:true slot; conflicts_with longhorn-1.12.1-engine (scheduled tue-early:2026-08-25, different day)
 auto_execute: false                   # never unattended: node reboots
 security_ref: F-912f4778
