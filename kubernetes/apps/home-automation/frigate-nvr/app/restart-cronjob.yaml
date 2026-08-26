@@ -71,13 +71,26 @@ metadata:
   name: frigate-restart
   namespace: home-automation
 spec:
-  schedule: "30 2 * * 0"          # Sundays 02:30 Europe/Berlin
+  # WHY DAILY (was weekly; corrected 2026-08-26, finding F-5e6cdafc)
+  # The original "~14 days from a ~3.5 GiB cold start" estimate was wrong by ~9x.
+  # MEASURED: pod jb4c2 went 3.87 GiB -> 97% of the 8 GiB limit in 38.4 hours
+  # (~2.14 GiB/day), image 0.17.2 throughout. Weekly is 168h against a 38h budget.
+  # Daily at 02:30 leaves ~14h of the budget unused even before the 10Gi headroom
+  # and MALLOC_ARENA_MAX=1 that landed in the same change.
+  # 02:30 stays the quietest hour for an NVR and clear of the 03:00 Longhorn backup
+  # and the 04:00 sweep.
+  schedule: "30 2 * * *"          # DAILY 02:30 Europe/Berlin
   timeZone: Europe/Berlin
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
-  # Do not fire a missed restart late — the next week's run is equivalent, and a
+  # Do not fire a missed restart late — the next day's run is equivalent, and a
   # restart at an unplanned hour is exactly what this exists to avoid.
+  #
+  # This is deliberate and unchanged, but it means the mitigation can stop
+  # SILENTLY: a run missed by more than 10 minutes is skipped, not deferred. The
+  # alert ContainerRestartMitigationStale (container-memory-alerts.yaml) exists to
+  # catch exactly that — do not remove one without the other.
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:

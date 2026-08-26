@@ -179,8 +179,106 @@ spec:
           annotations:
             summary: "{{ $labels.namespace }}/{{ $labels.container }} is trending into its memory limit within 48h"
             description: >-
-              Projecting the last 6 hours of growth forward, container {{ $labels.container }} in
+              Projecting the last 24 hours of growth forward, container {{ $labels.container }} in
               pod {{ $labels.pod }} reaches over 90% of its memory limit within 48 hours. This is
               the shape of a leak rather than a load spike. Plan a limit change or a fix in a
               maintenance window — do not wait for it to reach the ceiling, where allocations fail
               silently instead of producing a clean OOMKill.
+
+        # ---- Restart-mitigated workloads (added 2026-08-26, finding F-5e6cdafc) ----
+        #
+        # ContainerMemoryLeakPredicted above is STRUCTURALLY BLIND to any workload
+        # under a restart mitigation: it needs container age > 24h plus for:1h, and
+        # frigate is now restarted every 24h at 02:30. Making the restart more
+        # frequent makes that alert LESS likely to ever fire. The two rules below
+        # exist so the mitigation is observable; neither depends on container age
+        # being large, so neither can be blinded by the restart.
+        #
+        # The 24h guard on ContainerMemoryLeakPredicted is deliberately UNTOUCHED.
+        # It is load-bearing: office/sure-worker fired at container age 6h00m40s --
+        # the exact instant a 6h guard opened -- projecting 114% of limit off
+        # Sidekiq's post-boot arena ratchet, against a 7-day asymptote of 68%.
+        # Loosening it to cover frigate would trade this false negative for that
+        # false positive. Add coverage; do not move the guard.
+        #
+        # Scoped by an explicit selector rather than applied cluster-wide: a
+        # restart mitigation is a rare, deliberate, per-workload decision, and a
+        # cluster-wide version of either rule would fire on every normal deploy.
+        # To put another workload under a restart mitigation, add it here.
+
+        - alert: ContainerRestartMitigationStale
+          # The restart is the mitigation, so the restart itself must be monitored.
+          # Asserts the EFFECT (the container actually got younger), not the
+          # mechanism -- so it covers CronJob deleted, RBAC revoked, image pull
+          # failing, job erroring, schedule edited wrong, and
+          # startingDeadlineSeconds silently skipping a run, all in one expression.
+          #
+          # NOT built on kube_cronjob_status_last_schedule_time: that series does
+          # not exist until the CronJob first fires, so `time() - <absent>` returns
+          # no data and never fires in exactly the broken state this rule is for.
+          # Verified 2026-08-26: no such series exists for frigate-restart.
+          #
+          # The `or absent(...)` arm is not decoration. Without it, frigate's pod
+          # disappearing entirely makes this rule return no data -- which reads as
+          # "all clear", the exact failure the rule is meant to prevent.
+          #
+          # 30h = the 24h schedule plus one skipped run's grace. Warning, not
+          # critical: at 30h the container is well inside the 10Gi budget, so this
+          # is a day of lead time rather than an emergency. ContainerMemoryNearLimit
+          # and ContainerMemoryLimitImminent remain the critical tier. Expect it to
+          # fire if the CronJob is deliberately suspended -- that is correct.
+          expr: |
+            (
+              (time() - container_start_time_seconds{namespace="home-automation",container="frigate"}) > 30 * 3600
+            )
+            or
+            absent(container_start_time_seconds{namespace="home-automation",container="frigate"})
+          for: 30m
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "frigate has not been restarted on schedule — its leak mitigation may be dead"
+            description: >-
+              home-automation/frigate is under a DAILY restart mitigation (CronJob frigate-restart,
+              30 2 * * *) because it exhausts its memory limit in roughly 38 hours. The container has
+              now gone more than 30 hours without a restart, or has vanished entirely. The mitigation
+              is not running. Check the CronJob's lastScheduleTime, its Job history, and its RBAC.
+              Do not silence this — at the ceiling frigate degrades silently (ENOMEM to child
+              processes) instead of being OOMKilled.
+
+        - alert: ContainerMemoryBudgetExceeded
+          # "The restart interval is no longer sized correctly." Age-independent,
+          # so the restart cannot hide it. Fires an entire tier earlier than
+          # ContainerMemoryNearLimit (0.90) and much earlier than Imminent (0.97).
+          #
+          # working_set, matching the two threshold rules and matching what the
+          # cgroup actually enforces -- frigate has a 2Gi /dev/shm for ffmpeg
+          # frames, which is charged to the container and is NOT visible in RSS.
+          # (RSS is the right metric for the PREDICTION rule and the wrong one here.)
+          #
+          # 0.75 of 10Gi = 7.5 GiB. Expected daily peak under this mitigation is
+          # ~62% (cold start ~3.87 GiB + ~2.14 GiB over 24h), and the pre-change
+          # 8Gi-era peak was ~7.76 GiB, so crossing 7.5 GiB within one restart
+          # cycle means the leak rate has risen above what daily can absorb.
+          # Response: tighten the interval or act on the root cause -- do not
+          # raise this threshold.
+          expr: |
+            (
+              container_memory_working_set_bytes{namespace="home-automation",container="frigate"}
+              / on(namespace,pod,container) group_left
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.75
+          for: 30m
+          labels:
+            severity: warning
+            category: capacity
+            component: container
+          annotations:
+            summary: "frigate reached {{ $value | humanizePercentage }} of its limit inside one restart cycle"
+            description: >-
+              home-automation/frigate crossed 75% of its memory limit within a single daily restart
+              cycle. The daily restart is no longer sufficient to bound the leak. Tighten the
+              frigate-restart schedule or address the root cause (frigate.embeddings_manager);
+              see docs/sops/frigate-memory-leak.md and finding F-5e6cdafc.
