@@ -19,7 +19,9 @@ depends_on: []
 conflicts_with: []
 status: blocked                       # BLOCKED ON UPSTREAM: no v4-aware chart published
 window: null                          # cannot be scheduled until the chart exists
-auto_execute: false                   # image major + chart move in lockstep
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: image major + chart move in lockstep)
 security_ref: F-a5ceabc1
 sops_refs:
   - docs/sops/application-update.md

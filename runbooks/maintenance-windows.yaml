@@ -74,8 +74,10 @@ execution:
   # operator and waits for go/no-go. So the trivial runs itself; anything that
   # needs a decision reaches your phone.
   default_mode: operator-go-no-go
-  unattended_allowed: true           # low-risk opt-in plans may auto-run
-  max_unattended_risk: low           # never auto-run above this, regardless
+  # unattended_allowed / max_unattended_risk RETIRED 2026-08-26 (P2.1b): the
+  # blunt boolean+risk-ceiling pair is superseded by derived execution classes
+  # (runbooks/autonomy-policy.yaml). Autonomy is decided by reversibility +
+  # capability-change + blast radius, per window `mode:` — not by risk.
 
   # Operator MUST be told on every event below, and a go/no-go is never silently
   # skipped or auto-decided. Since 2026-07-25 OpenClaw's `home-operation` skill

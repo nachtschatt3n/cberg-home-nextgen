@@ -56,7 +56,8 @@ window: null                          # 2026-08-15: the envoy chain is NOT windo
                                       # `window: null` here is DELIBERATE, not neglect:
                                       # maintenance-plan.py --open classifies these as
                                       # REFERENCE / UNWINDOWED by design.
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/troubleshooting/ingress-migration-plan.md
   - docs/sops/k8s-gateway-dns.md     # ADDED 2026-08-16 — §8 restart gate applies to the

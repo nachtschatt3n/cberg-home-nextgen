@@ -103,12 +103,18 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
     OpenClaw page. The sweep reports lane counts and fails loud on any CRACK.
 - **Agents:** `.claude/agents/upgrade-planner-agent.md` (one per held update),
   `.claude/agents/maintenance-window-agent.md` (runs a window).
-- **Execution posture (limited autonomy, enabled 2026-07-25):** a plan runs
-  unattended only if `auto_execute: true` AND `risk: low` AND
-  `execution.unattended_allowed: true` AND it has no unresolved interference —
-  the trivial runs itself. Everything else (any medium/high plan, any
-  interference/side-effect conflict, any rollback) is **operator go/no-go** and
-  is never silently skipped or auto-decided.
+- **Execution posture (class-based autonomy, P2.1b 2026-08-26; replaces the
+  2026-07-25 `auto_execute`+`risk: low` pair):** a plan's execution class is
+  DERIVED from declared facts (`capability_change`, `rollback_class`,
+  `needs_reboot`, shared-storage touch) against `runbooks/autonomy-policy.yaml`
+  — plans cannot claim a class. **AUTO-NIGHT** runs unattended in
+  `mode: unattended` windows (no unresolved interference; category needs
+  `first_runs_supervised` clean supervised runs first). **AUTO-BACKUP-GATED**
+  additionally requires its named restore-proof `backup_gate` to PASS in the
+  window. **HUMAN-GATED** — and every ambiguity, missing fact, or unreadable
+  policy — is operator go/no-go, never silently skipped or auto-decided.
+  Autonomy is decided by reversibility + capability-change + blast radius,
+  deliberately NOT by `risk:` (which stays the capacity weight).
 - **Notifications + open-issue tracking are owned by OpenClaw** (skill
   `home-operation`, since 2026-07-25). Emitters route each issue to it via
   `kubectl exec` (contract below); OpenClaw pushes to the operator's Clawd DM,
@@ -343,10 +349,10 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 - Execution runs only the operator-approved sequence, one plan at a time, via
   GitOps through `cberg-agent`; nothing here decrypts secrets outside the normal
   SOPS flow.
-- Non-safe updates are operator go/no-go by default. `unattended_allowed: true`
-  (enabled 2026-07-25) permits ONLY `auto_execute: true` + `risk: low` plans to
-  run without asking; `max_unattended_risk: low` is the hard ceiling and set
-  `unattended_allowed: false` to disable all self-running.
+- Non-safe updates are operator go/no-go by default; only derived AUTO-*
+  classes run without asking (see Execution posture above). To disable ALL
+  self-running: empty the `classes:` map in `runbooks/autonomy-policy.yaml`
+  (or delete the file — fail-safe routes everything to HUMAN-GATED).
 - Node-reboot plans run only in an `allow_reboot: true` window and follow
   `docs/sops/talos-upgrade.md`.
 

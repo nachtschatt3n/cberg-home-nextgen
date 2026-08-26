@@ -21,7 +21,8 @@ conflicts_with: []                 # keep out of the same window as any future a
 security_ref: null
 status: draft
 window: null                       # window agent assigns — any no-reboot weekday slot (mon/tue/wed/thu/fri/sat)
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-08-16"

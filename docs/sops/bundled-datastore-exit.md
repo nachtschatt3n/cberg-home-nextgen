@@ -37,7 +37,7 @@ before executing.** Every near-miss in this procedure has been a case where the
 | Applies to | Any app whose chart bundles its datastore as a subchart |
 | Executed for | `superset-pg`, `paperless-db`, `authentik-pg` (done); `nextcloud-db` (blocked) |
 | Still bundled | see `runbooks/maintenance/plans/bitnamilegacy-exit-*.md` |
-| Risk | **high** for a primary datastore — always operator go/no-go, never `auto_execute` |
+| Risk | **high** for a primary datastore — always operator go/no-go (derives HUMAN-GATED: shared storage + backup-restore rollback) |
 | Window | a maintenance window; the dump must be taken with the app quiesced |
 | Storage class | `longhorn-static` with a speaking PV name (`docs/sops/longhorn.md`) |
 | Rollback | the OLD datastore, left running and untouched, until the soak passes |
@@ -179,7 +179,7 @@ rollback. Do not `*.enabled: false` it, do not delete its volume, do not
 
 ### Stage 4 — Decommission
 
-A separate plan, `status: awaiting-soak`, `auto_execute: false` — it destroys
+A separate plan, `status: awaiting-soak`, HUMAN-GATED (one-way: it destroys
 the rollback path, so it never runs on a schedule.
 
 ---

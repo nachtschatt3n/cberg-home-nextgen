@@ -18,7 +18,8 @@ depends_on: []
 conflicts_with: []
 status: superseded                    # INDEX ONLY — split into 4 stage plans on 2026-08-15
 window: null                          # never schedule this file; schedule the stages
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/media-library-standards.md
   - docs/sops/storage-safety.md

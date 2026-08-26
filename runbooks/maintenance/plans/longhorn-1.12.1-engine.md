@@ -39,7 +39,9 @@ window: "sat-early:2026-08-29"        # 90min OPERATOR-PRESENT no-reboot slot. N
                                       # talos-1.13.9 is scheduled there and 6 forbids pairing an engine
                                       # drain with a node roll. Moved off tue-early:2026-08-25 because that
                                       # was an unattended 60min cron slot and this plan is auto_execute:false.
-auto_execute: false                   # storage engine upgrade — never unattended
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: storage engine upgrade — never unattended)
 sops_refs:
   - docs/sops/longhorn.md
   - docs/sops/backup.md

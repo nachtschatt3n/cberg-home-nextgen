@@ -20,7 +20,9 @@ depends_on: []
 conflicts_with: []
 status: awaiting-soak                 # do NOT run until the soak below is satisfied
 window: null
-auto_execute: false                   # destroys the rollback path
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: destroys the rollback path)
 security_ref: null
 sops_refs:
   - docs/sops/longhorn.md

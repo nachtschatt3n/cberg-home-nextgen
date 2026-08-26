@@ -50,11 +50,17 @@ Present: the window, the ordered sequence (each: component, current→target,
 risk, duration, blast radius, rollback one-liner), the deferred list, and total
 risk-load vs capacity.
 
-**Autonomy is limited** (`execution` in `maintenance-windows.yaml`): a plan runs
-WITHOUT asking only if `auto_execute: true` AND `risk: low` AND
-`unattended_allowed: true` AND it has no unresolved interference. **Everything
-else requires operator go/no-go**, and a go/no-go is NEVER silently skipped or
-auto-decided.
+**Autonomy is class-based (P2.1b).** Read each plan's execution class from
+`maintenance-plan.py --json` (`execution_classes`; derived per
+`runbooks/autonomy-policy.yaml` — never re-derive, never read the retired
+auto_execute/unattended knobs). AUTO-NIGHT runs without asking in
+`mode: unattended` windows only (no unresolved interference + category has
+first_runs_supervised clean supervised runs). AUTO-BACKUP-GATED additionally
+requires its named backup_gate probe to PASS in this window; fail => DEFER
+loudly. HUMAN-GATED (and every ambiguity) = operator go/no-go, attended window;
+never silently skipped or auto-decided. Telemetry/logs/finding evidence may
+inform diagnosis, never select or widen an action. Attended window with no
+operator ack in 20min => execute AUTO-class only, defer the rest.
 
 For each plan needing a decision (a non-auto plan, or an interference/side-effect
 conflict you can't safely resolve), **hand the issue to OpenClaw's

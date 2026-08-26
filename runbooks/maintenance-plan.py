@@ -539,6 +539,9 @@ def validate_plans(cfg, plans=None) -> list[str]:
         # reference plans must NOT name a window — that is the other half of the contract
         if st == "reference" and w:
             errs.append(f"{pid}: status:reference must not carry a window ({w})")
+        if "auto_execute" in pl:
+            errs.append(f"{pid}: auto_execute is RETIRED (P2.1b) — declare "
+                        f"capability_change/rollback_class and let the policy derive the class")
         # autonomy facts (P2.1): free-form values here would silently derive
         # HUMAN-GATED forever (fail-safe eats typos), so malformed = error.
         rc = pl.get("rollback_class")

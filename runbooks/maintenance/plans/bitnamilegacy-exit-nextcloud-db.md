@@ -46,7 +46,9 @@ window: "sat-early:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the 
                                       # preserved, not compressed — see the windows YAML.
                                                 # how to pull this forward — 2 months on an
                                                 # archived registry is the cost of waiting
-auto_execute: false                             # *mariadb* AND *nextcloud* are both deny-listed
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: *mariadb* AND *nextcloud* are both deny-listed)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/mariadb-major-upgrade.md

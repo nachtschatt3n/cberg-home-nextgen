@@ -43,7 +43,9 @@ window: null                          # cleared 2026-08-19: executed in the ad-h
                                                 # which requires a SOLO window. 09-26/10-03/10-10
                                                 # have <70m free. See §6 — this date is the weakest
                                                 # part of the plan and the operator should challenge it.
-auto_execute: false                             # *mariadb* is on the auto-update deny-list
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: *mariadb* is on the auto-update deny-list)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/mariadb-major-upgrade.md

@@ -55,7 +55,8 @@ window: null                          # UNSCHEDULED 2026-08-16. 90m of work agai
                                       # 60m window — it never fit. sun-window:2026-09-06 is a
                                       # free 90m slot. (It does not need reboot, so a sun window
                                       # is not required, but no 90m no-reboot slot was free.)
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/troubleshooting/ingress-migration-plan.md   # hostNetwork research recorded in §scope
 generated: "2026-08-07"

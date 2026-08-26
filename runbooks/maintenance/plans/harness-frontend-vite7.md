@@ -28,7 +28,9 @@ window: null                          # cleared 2026-08-19: executed ahead of th
                                       # sat-early:2026-08-29 slot, which is now released.
 # Was scheduled 2026-08-15 for a 90m slot; pulled forward into the 2026-08-19
 # ad-hoc window after the operator smoke-tested the toolchain (see §1a).
-auto_execute: false                   # toolchain major bump on the serving process
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: toolchain major bump on the serving process)
 security_ref: F-9f752afd              # security driver; detail is DB-only
 sops_refs:
   - docs/sops/application-update.md

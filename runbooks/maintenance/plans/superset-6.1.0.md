@@ -69,7 +69,8 @@ window: "sun-window:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECI
                                        # mis-attributed to the Flask-AppBuilder major. If
                                        # authentik-postgres-18 slips into 09-20 or was rolled
                                        # back, move this to sat-early:2026-09-26.
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md

@@ -37,7 +37,8 @@ status: executed                   # EXECUTED 2026-08-19 (46fda565 bump, d6cec70
 # 2026-08-19 carries the short version).
 window: null                       # cleared 2026-08-19: executed ahead of the
                                    # tue-early:2026-08-25 slot, which is now released.
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md

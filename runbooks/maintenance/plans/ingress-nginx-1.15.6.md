@@ -46,7 +46,8 @@ window: null                        # HELD until cgr.dev creds exist; then an at
                                     # slot (e.g. sat-early). NOT auto/unattended — supply-chain source
                                     # change + public-ingress blast radius + an operator go/no-go on
                                     # trusting the fork image (§Pre-checks P0).
-auto_execute: false
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/maintenance-windows.md

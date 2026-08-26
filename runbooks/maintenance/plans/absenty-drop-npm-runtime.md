@@ -19,7 +19,9 @@ depends_on: []
 conflicts_with: []
 status: draft
 window: null
-auto_execute: false                   # changes the shape of the production runtime image
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: changes the shape of the production runtime image)
 security_ref: F-fec7ea4b              # security driver; detail is DB-only
 sops_refs:
   - docs/sops/vulnerability-disclosure.md

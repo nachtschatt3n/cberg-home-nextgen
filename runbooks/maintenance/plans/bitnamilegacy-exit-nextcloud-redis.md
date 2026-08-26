@@ -39,7 +39,9 @@ window: null                          # cleared 2026-08-19: executed in the ad-h
                                       # released. maintenance-plan.py buckets by `window` regardless
                                       # of `status`, so leaving it set would reserve 45m + a medium
                                       # risk-weight of a 60m window for work already done.
-auto_execute: false                             # *nextcloud* is on the auto-update deny-list
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: *nextcloud* is on the auto-update deny-list)
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-08-15"

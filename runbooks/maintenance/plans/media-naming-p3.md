@@ -38,7 +38,9 @@ window: null                          # UNSCHEDULED 2026-08-16. Re-rated to 240m
                                       # soak-gated 09-05 window; leave it to the DB work).
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
-auto_execute: false                   # NEVER unattended — operator-approved rename table required
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: NEVER unattended — operator-approved rename table required)
 sops_refs:
   - docs/sops/media-library-standards.md
   - docs/sops/storage-safety.md

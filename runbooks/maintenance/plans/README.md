@@ -111,7 +111,9 @@ status: draft                     # draft | vetted | scheduled | awaiting-go |
                                   # awaiting-go = window agent asked for go/no-go;
                                   # the sweep re-reminds you every cycle until answered
 window: null                      # e.g. "sun-window:2026-07-27" once scheduled
-auto_execute: false               # opt-in unattended (only honored if risk:low + policy allows)
+# auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
+# from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
+# (original rationale: opt-in unattended (only honored if risk:low + policy allows))
 sops_refs:                        # SOPs the executor must follow
   - docs/sops/application-update.md
 generated: "2026-07-25"
