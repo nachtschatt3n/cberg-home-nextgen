@@ -38,7 +38,7 @@ depends_on: [superset-pg-cutover]      # HARD. See §6 — this must not run aga
 conflicts_with: [superset-pg-cutover, superset-pg-decommission, longhorn-1.12.1-engine]
 security_ref: F-9d259837
 status: draft
-window: "sun-window:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B
+window: "sun-attended:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B
                                        # (after superset-pg-decommission), NOT Option A.
                                        # Why B: A (sat 08-29) would close the security driver
                                        # ~2 weeks sooner but leaves only 3 days of soak on a

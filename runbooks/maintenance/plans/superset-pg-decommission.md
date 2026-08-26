@@ -22,7 +22,7 @@ touches:
 depends_on: [superset-pg-cutover]
 conflicts_with: []
 status: draft
-window: "sat-early:2026-09-05"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+window: "sat-attended:2026-09-05"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED

@@ -41,7 +41,7 @@ status: blocked                                 # ROLLED BACK 2026-08-19 (revert
                                                 # Root cause + required fix in 3c. Do not
                                                 # re-run until the dump is proven to carry
                                                 # 4-byte characters.
-window: "sat-early:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+window: "sat-attended:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
                                                 # how to pull this forward — 2 months on an

@@ -42,8 +42,8 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   a driving cron, and plans scheduled into them silently never ran. Every
   window now REQUIRES a driving cron (`window-crons.py --check`, asserted
   every sweep) and a `window_runs` row per dated occurrence (asserted every
-  sweep). Weekend ids keep their old names until the GOs referencing them
-  execute (rename to *-attended in the P2.1 pass). Daily replaced the 4/week
+  sweep). Weekend ids renamed to `sat-attended`/`sun-attended` 2026-08-26, migrated
+  atomically with the plans' window refs, both crons, and the live GO records. Daily replaced the 4/week
   aggressive-drain cadence (Tue/Thu/Sat/Sun), which stretched the then-23-plan
   queue to late October; an IDLE window costs nothing — nothing runs unless a
   plan is slotted — so the extra weekday slots are pure optionality. **Daily
@@ -218,8 +218,8 @@ Authentik/Homepage/Longhorn objects.
   | Window | Cron (Europe/Berlin) | OpenClaw cron id |
   | --- | --- | --- |
   | `nightly` | `30 3 * * *` | `cd659ac2-180c-4de5-af39-7a339b52eedf` |
-  | `sat-early` | `0 9 * * 6` | `fe1f69f9-bf65-4aec-b49e-0b44f985d43f` |
-  | `sun-window` | `0 9 * * 0` | `d8b8f2a0-61c5-45e7-92ca-aecc8e971917` |
+  | `sat-attended` | `0 9 * * 6` | `fe1f69f9-bf65-4aec-b49e-0b44f985d43f` |
+  | `sun-attended` | `0 9 * * 0` | `d8b8f2a0-61c5-45e7-92ca-aecc8e971917` |
 
   (tue-early `335e4a3e` and thu-early `a9325ac9` removed 2026-08-26 with the
   reshape. Re-render any command with `runbooks/window-crons.py --render`;

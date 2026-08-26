@@ -29,13 +29,12 @@
 # must never be used to collapse a deliberate soak ("the old database IS the
 # rollback"). A plan that says soak/observe keeps its full interval.
 #
-# NAMING NOTE (transitional, 2026-08-26): the weekend ids stay `sat-early` /
-# `sun-window` until the plans + GOs referencing them
-# (longhorn-1.12.1-engine @ sat-early:2026-08-29, talos-1.13.9 @
-# sun-window:2026-08-30) have executed — renaming an id out from under a live
-# GO orphans it. Rename to sat-attended / sun-attended in the P2.1 pass.
+# Weekend ids renamed sat-early -> sat-attended / sun-window -> sun-attended
+# (2026-08-26, operator call). Renamed ATOMICALLY with every reference: the two
+# scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
+# GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.08.26"
+version: "2026.08.26.2"
 timezone: Europe/Berlin
 
 windows:
@@ -51,14 +50,14 @@ windows:
     mode: unattended          # P2.1 keys autonomy classes on this; until then
                               # the window agent's existing rules apply (Step 0
                               # safe updates + auto_execute:true low-risk only)
-  - id: sat-early             # -> sat-attended after 2026-08-29 (see NAMING NOTE)
+  - id: sat-attended
     day: saturday
     start: "09:00"
     duration_min: 90
     capacity_risk: 6
     allow_reboot: false
     mode: attended
-  - id: sun-window            # -> sun-attended after 2026-08-30 (see NAMING NOTE)
+  - id: sun-attended
     day: sunday
     start: "09:00"
     duration_min: 90

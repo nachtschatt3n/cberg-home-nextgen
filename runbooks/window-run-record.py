@@ -11,7 +11,7 @@ artifact of a window was its commits, so an idle-and-ran window and a
 never-ran window were indistinguishable).
 
 Usage:
-  SWEEP_PG_DSN=... window-run-record.py --slot sat-early --outcome green \
+  SWEEP_PG_DSN=... window-run-record.py --slot sat-attended --outcome green \
       --trigger cron --plans-executed 1 --safe-updates 7 [--notes "..."]
   (--run-date defaults to today; --started defaults to now)
 

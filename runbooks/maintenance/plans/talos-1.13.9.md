@@ -37,7 +37,7 @@ status: awaiting-go                   # the 2026-08-24 GO was scoped to sun-wind
                                       # which passed with 0 plans executed; voided 2026-08-26
                                       # (resolve --by superseded) and a FRESH go/no-go issued for
                                       # sun-window:2026-08-30. A GO does not survive its window.
-window: "sun-window:2026-08-30"       # only allow_reboot:true slot; conflicts_with longhorn-1.12.1-engine (scheduled tue-early:2026-08-25, different day)
+window: "sun-attended:2026-08-30"       # only allow_reboot:true slot; conflicts_with longhorn-1.12.1-engine (scheduled tue-early:2026-08-25, different day)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: never unattended: node reboots)

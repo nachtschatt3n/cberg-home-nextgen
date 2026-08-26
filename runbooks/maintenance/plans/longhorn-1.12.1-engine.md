@@ -35,7 +35,7 @@ status: scheduled                     # FRESH operator GO 2026-08-25 for sat-ear
                                       # The 2026-08-24 GO was superseded when the preconditions moved;
                                       # this one was given AFTER the 1d blocker was resolved (see 1e).
                                       # Deferred out of tue-early:2026-08-25 by the window agent.
-window: "sat-early:2026-08-29"        # 90min OPERATOR-PRESENT no-reboot slot. NOT sun-window:2026-08-30 --
+window: "sat-attended:2026-08-29"        # 90min OPERATOR-PRESENT no-reboot slot. NOT sun-window:2026-08-30 --
                                       # talos-1.13.9 is scheduled there and 6 forbids pairing an engine
                                       # drain with a node roll. Moved off tue-early:2026-08-25 because that
                                       # was an unattended 60min cron slot and this plan is auto_execute:false.

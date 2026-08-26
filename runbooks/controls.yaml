@@ -39,7 +39,7 @@ controls:
 
   - id: window-crons
     kind: openclaw-cron
-    what: "nightly / sat-early / sun-window maintenance-window triggers"
+    what: "nightly / sat-attended / sun-attended maintenance-window triggers"
     cadence: daily/weekly
     watched_by:
       assertion: "CRON↔YAML PARITY FAILURES"
