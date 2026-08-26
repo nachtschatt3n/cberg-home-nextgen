@@ -1,18 +1,46 @@
 [features]
 multi_agent = true
 
-[agents.health_check]
-description = "Runs cluster and service health diagnostics with a read-only, evidence-first workflow."
-config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/health-check.toml"
+[agents.cluster_ops_agent]
+description = "Top-level operator for this homelab Kubernetes cluster. Owns deployments, in-cluster operations, and orchestrates the health-check-agent, version-check-agent, security-agent, and doc-agent after deployments and significant changes. Use for any \"deploy X\", \"roll out\", \"upgrade\", \"investigate cluster issue\", \"post-change verification\" task in this repo."
+config_file = "agents/cluster-ops-agent.toml"
 
-[agents.version_check]
-description = "Audits Helm chart and container image versions and reports safe upgrade opportunities."
-config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/version-check.toml"
+[agents.daily_operation]
+description = "Orchestrates the daily homelab sweep — invokes health-check-agent, security-agent, version-check-agent, doc-agent, and media-manager in parallel, synthesizes their reports into one structured summary with a triaged action list. Use when the user asks for the daily/regular sweep, or when the recurring cron fires."
+config_file = "agents/daily-operation.toml"
 
-[agents.security]
-description = "Performs repository and cluster security audits with strict redaction and SOPS-first handling."
-config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/security.toml"
-
-[agents.doc]
+[agents.doc_agent]
 description = "Validates that infrastructure and operational documentation matches repository and cluster state."
-config_file = "/home/mu/code/cberg-home-nextgen/.codex/agents/doc.toml"
+config_file = "agents/doc-agent.toml"
+
+[agents.health_check_agent]
+description = "Runs cluster and service health diagnostics with a read-only, evidence-first workflow."
+config_file = "agents/health-check-agent.toml"
+
+[agents.maintenance_window_agent]
+description = "Runs a maintenance window. Gathers the upgrade plans due for the window, cross-checks them for INTERFERENCE (shared namespaces/resources/infra, ordering, multiple reboots) and UNWANTED SIDE EFFECTS, produces a safe ordered execution sequence, presents a go/no-go, and on approval executes the plans (delegating cluster changes to cberg-agent) with per-plan verification + rollback. Use at a scheduled maintenance window, or when the operator says \"run the maintenance window\" / \"vet the pending upgrade plans\"."
+config_file = "agents/maintenance-window-agent.toml"
+
+[agents.media_manager]
+description = "Owns the Plex + Jellyfin + Tube Archivist library curation loop. Organises new arrivals from JDownloader, enforces the nested per-item-folder layout from docs/sops/media-library-standards.md, dedupes with ffprobe quality comparison, backfills NFO and poster/fanart artwork, bridges Tube Archivist channels into Plex, performs the one-time flat→nested migration, and triggers library rescans via cluster-ops-agent. Use for \"organise new downloads\", \"migrate library to nested layout\", \"audit the media library\", \"fix metadata for X\", \"add Tube Archivist channel to Plex\"."
+config_file = "agents/media-manager.toml"
+
+[agents.security_agent]
+description = "Performs repository and cluster security audits with strict redaction and SOPS-first handling."
+config_file = "agents/security-agent.toml"
+
+[agents.slo_agent]
+description = "Computes SLO compliance, burn rates, and error-budget remaining for every enabled entry in the sweep_history `slo_definitions` table, and reports any SLO that is burning fast or has exhausted budget."
+config_file = "agents/slo-agent.toml"
+
+[agents.sure_data_audit_agent]
+description = "Weekly read-only audit of the Sure finance app's data quality — duplicate merchants, \"magnet\" merchants (LLM mis-tagged entries), pending transfers, coverage drift, pipeline health. Surfaces findings and proposed cleanup SQL; never mutates without explicit user approval."
+config_file = "agents/sure-data-audit-agent.toml"
+
+[agents.upgrade_planner_agent]
+description = "Investigates ONE non-safe (held) version update and writes an executable maintenance-window plan for it — pre-checks, GitOps steps, verification, rollback, risk, duration, and its interference surface. Read-only against the cluster; writes only a plan file under runbooks/maintenance/plans/. Dispatched once per held update by the daily-operation sweep. Delegates actual execution to the maintenance-window-agent / cberg-agent."
+config_file = "agents/upgrade-planner-agent.toml"
+
+[agents.version_check_agent]
+description = "Audits Helm chart and container image versions and reports safe upgrade opportunities."
+config_file = "agents/version-check-agent.toml"
