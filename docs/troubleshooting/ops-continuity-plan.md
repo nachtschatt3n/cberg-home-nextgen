@@ -56,19 +56,13 @@ pinned.
 
 ## Remaining
 
-- **G1:** `minimum_release_age` in `auto-update-policy.yaml` (waived for
-  CVE-driven bumps) + enforcement in the safe-update lane, with tests.
-  auto-update.py is the most safety-critical script — deserves its own
-  focused session.
-- **G2:** the automated scratch-restore probe (`backup_gate`) for
-  AUTO-BACKUP-GATED plans; upgrades the manual quarterly Restore Drill
-  (log in control-liveness.md, next due 2026-11-26). The two postgres 17→18
-  plans (expected from the 2026-08-28 sweep's planner dispatch) adopt it.
-- **Weekend-gated:** `sat-early`→`sat-attended` / `sun-window`→`sun-attended`
-  renames after the 08-29/08-30 GOs execute; `first_runs_supervised` tracking
-  begins with the first AUTO-classed plan.
-- **Close-out:** delete this file once the above land and one full week of
-  nightly windows + two sweeps have run clean under the new semantics.
+- ALL BUILD ITEMS DONE (G1 `a3039874` 48h cooldown, live-holding a 16h-old
+  release on first run · G2 `backup-restore-proof.py` with first PROVEN drill
+  logged · renames `746eff14` migrated atomically incl. live GO records).
+- **Close-out only:** one full week of nightly windows + two sweeps clean
+  under the new semantics, the pg-major plans adopting the backup_gate, and
+  first_runs_supervised counting from the first AUTO-classed execution —
+  then delete this file.
 
 ## Live soak events (first unattended exercises)
 
