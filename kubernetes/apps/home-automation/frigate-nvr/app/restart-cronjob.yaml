@@ -106,19 +106,34 @@ spec:
           containers:
             - name: restart
               image: docker.io/rancher/kubectl:v1.33.4
-              command:
-                - /bin/sh
-                - -c
-                # $$ throughout: cluster-wide Flux postBuild substitution runs
-                # envsubst over this manifest, and in strict mode an unescaped
-                # shell variable fails the whole Kustomization build rather than
-                # being passed through.
-                - |
-                  set -e
-                  echo "restarting frigate to reclaim leaked memory"
-                  kubectl -n home-automation rollout restart deployment/frigate
-                  kubectl -n home-automation rollout status deployment/frigate --timeout=10m
-                  echo "frigate restart complete at $$(date -Iseconds)"
+              # NO SHELL. rancher/kubectl ships the kubectl binary and nothing
+              # else -- no /bin/sh, no coreutils. The previous form here was
+              # ["/bin/sh","-c", ...], which could never start:
+              #   OCI runtime create failed: exec "/bin/sh": stat /bin/sh:
+              #   no such file or directory
+              # Proven 2026-08-26 by forcing the first ever run of this CronJob:
+              # all three attempts died StartError. Combined with the Sunday
+              # schedule on a CronJob created on a Monday, this mitigation had
+              # never executed once and would have failed silently at 02:30.
+              #
+              # The image's entrypoint IS kubectl, so pass args only. Verified in
+              # cluster with this exact securityContext and ServiceAccount:
+              # the container starts, and `auth can-i patch deployments/frigate`
+              # returns yes.
+              #
+              # This drops the old `rollout status` wait, so the Job reports
+              # success once the restart is REQUESTED, not once it completes.
+              # That is acceptable here and deliberately so: the safety net is
+              # ContainerRestartMitigationStale, which asserts the EFFECT (the
+              # container actually got younger) rather than this Job's exit code.
+              # A rollout that is requested but never completes leaves the pod
+              # old, and that alert fires at 30h.
+              args:
+                - -n
+                - home-automation
+                - rollout
+                - restart
+                - deployment/frigate
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
