@@ -7,7 +7,11 @@ component: Talos Linux              # MUST equal the version-check's component
                                     # Written as "talos" first, which matched
                                     # nothing, so the plan was invisible and
                                     # coverage kept the bump in NEEDS A PLAN.
-pr: null
+pr: 208                               # Renovate PR — deliberately NOT merged (the upgrade is a
+                                      # Talos CR operation, not a git bump); recorded so the
+                                      # plan↔held matcher's PR tier binds them (was null, which
+                                      # plus component 'Talos Linux' vs dep basename 'installer'
+                                      # made this plan invisible to the matcher for a week)
 kind: os
 current: "talosVersion v1.13.8 on all 3 nodes (k8s-nuc14-01/02/03)"
 target: "talosVersion v1.13.9"

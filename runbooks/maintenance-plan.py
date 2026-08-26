@@ -30,6 +30,9 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).parent))
+from lib.plan_matching import match_held_to_plan, target_covers  # noqa: E402
+
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REPO_ROOT = SCRIPT_DIR.parent
 WINDOWS_YAML = SCRIPT_DIR / "maintenance-windows.yaml"
@@ -155,25 +158,30 @@ def held_key(h):
 def reconcile(cfg, today):
     held, held_error = get_held()
     plans = load_plans(cfg)
-    plans_by_pr = {str(p.get("pr")): p for p in plans if p.get("pr")}
-    plans_by_comp = {}
-    for p in plans:
-        plans_by_comp.setdefault(str(p.get("component", "")).lower(), []).append(p)
 
-    # 1) held updates lacking a fresh plan
-    needs_plan, stale = [], []
+    # 1) held updates lacking a fresh plan.
+    # Matching via lib/plan_matching (PR number / normalized names / version
+    # pair). The previous inline lookup keyed plans by PR and by the held dep's
+    # IMAGE BASENAME — the talos plan (pr: null, component "Talos Linux" vs dep
+    # ghcr.io/siderolabs/installer) missed both, was reported NEEDS A PLAN
+    # every sweep, and got a redundant planner dispatched every cycle.
+    needs_plan, stale, ambiguous = [], [], []
     for h in held:
-        pr = str(h.get("number", ""))
-        comp = (h.get("dep", "").split("/")[-1] or "").lower()
-        plan = plans_by_pr.get(pr) or (plans_by_comp.get(comp, [None])[0])
+        plan, others = match_held_to_plan(h, plans)
+        if others:
+            ambiguous.append({"held": held_key(h),
+                              "picked": plan.get("_path"),
+                              "also_matched": [o.get("_path") for o in others]})
         if not plan:
             needs_plan.append({"key": held_key(h), "dep": h.get("dep"),
                                "pr": h.get("number"), "cur": h.get("cur"),
                                "new": h.get("new"), "gate": h.get("gate"),
                                "reason": h.get("reason")})
             continue
-        # stale if the plan's target no longer matches the held PR's target
-        if plan.get("target") and h.get("new") and str(plan["target"]) != str(h["new"]):
+        # stale if the plan's target no longer covers the held bump. Version-
+        # TOKEN comparison, not string equality: a prose target like
+        # "talosVersion v1.13.9" is the same target as "v1.13.9".
+        if plan.get("target") and h.get("new") and not target_covers(plan, h):
             stale.append({"plan": plan["_path"], "plan_target": plan.get("target"),
                           "now_target": h.get("new"), "component": plan.get("component")})
         # stale by age
@@ -299,6 +307,7 @@ def reconcile(cfg, today):
         # non-None => held_count is NOT a fact; render it as unknown
         "held_error": held_error,
         "needs_plan": needs_plan,
+        "ambiguous_matches": ambiguous,
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -327,6 +336,10 @@ def human(r, cfg):
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
     else:
         L.append("\nall held updates have a plan ✅")
+    if r.get("ambiguous_matches"):
+        L.append(f"\n⚠️  AMBIGUOUS plan matches ({len(r['ambiguous_matches'])}) — one held update matched several plans; picked the first, verify:")
+        for a in r["ambiguous_matches"]:
+            L.append(f"  • {a['held']}: picked {a['picked']}, also matched {a['also_matched']}")
     if r["stale"]:
         L.append(f"\nSTALE plans ({len(r['stale'])}) — re-investigate:")
         for s in r["stale"]:
