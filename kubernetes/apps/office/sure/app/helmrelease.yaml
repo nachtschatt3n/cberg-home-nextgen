@@ -135,7 +135,9 @@ spec:
       # That is safe because all 6 existing budget rows get user_id IS NULL, so
       # index_budgets_shared_unique enforces exactly the dropped constraint.
       # Contracts feature preserved. Reuses the existing office GHCR pull secret.
-      tag: "sha-4bd6b508f45b028b262139105f5019d5f64aebc4"
+      # Fixes AutoMerchantDetector's local-LLM path persisting leaked reasoning
+      # text / placeholder strings as merchant names (no schema change).
+      tag: "sha-22cab2330b602d96511b9dff3a1f8aba6eaf0ffc"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
