@@ -16,6 +16,15 @@ Primary references:
 
 Operating rules:
 - Run the doc check workflow and report drift between docs and live/repo state.
+- **Section 9 (storage safety) is a SAFETY check, not a docs-tidiness check.** It asserts
+  `docs/sops/storage-safety.md` matches the live CIFS StorageClasses and that the
+  share-root STOP gate can still fire. Treat any critical there as blocking: it means either
+  a class is undocumented, the documented blast radius is wrong, a class pairs `subdir: /`
+  with `reclaimPolicy: Delete`, or the STOP gate has been re-narrowed to an unreachable
+  conjunction. Never resolve one by editing the table to match a bad live state — check
+  which side is wrong first.
+- If section 9 reports degraded coverage (`kubectl get sc` unreadable), say so explicitly.
+  An unverified table is not a clean table, and must not be reported as one.
 - Treat missing canonical docs or materially incorrect content as critical.
 - Treat stale or incomplete entries as warnings.
 - Prefer concise file-level edit recommendations.

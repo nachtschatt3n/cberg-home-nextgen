@@ -490,7 +490,7 @@ def section_header(n: int, total: int, title: str) -> None:
 
 
 def s1_infrastructure_docs() -> tuple[str, Findings, str]:
-    section_header(1, 8, "Infrastructure Documentation")
+    section_header(1, 9, "Infrastructure Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -613,7 +613,7 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
 
 
 def s2_network_docs() -> tuple[str, Findings, str]:
-    section_header(2, 8, "Network Documentation")
+    section_header(2, 9, "Network Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -763,7 +763,7 @@ def _documented_name_surface(content: str) -> str:
 
 
 def s3_application_docs() -> tuple[str, Findings, str]:
-    section_header(3, 8, "Application Documentation")
+    section_header(3, 9, "Application Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1043,7 +1043,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
 
 
 def s4_security_docs() -> tuple[str, Findings, str]:
-    section_header(4, 8, "Security Documentation")
+    section_header(4, 9, "Security Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1202,7 +1202,7 @@ def s4_security_docs() -> tuple[str, Findings, str]:
 
 
 def s5_integration_docs() -> tuple[str, Findings, str]:
-    section_header(5, 8, "Integration Documentation")
+    section_header(5, 9, "Integration Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1335,7 +1335,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
 
 def s6_readme_claude_currency() -> tuple[str, Findings, str]:
-    section_header(6, 8, "README & CLAUDE.md Currency")
+    section_header(6, 9, "README & CLAUDE.md Currency")
     f = Findings()
     lines: list[str] = []
 
@@ -1467,7 +1467,7 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
 
 
 def s7_coding_guidelines() -> tuple[str, Findings, str]:
-    section_header(7, 8, "Coding Guidelines & Rules")
+    section_header(7, 9, "Coding Guidelines & Rules")
     f = Findings()
     lines: list[str] = []
 
@@ -1624,7 +1624,7 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
 
 
 def s8_runbook_coverage() -> tuple[str, Findings, str]:
-    section_header(8, 8, "Runbook Coverage")
+    section_header(8, 9, "Runbook Coverage")
     f = Findings()
     lines: list[str] = []
 
@@ -1796,6 +1796,116 @@ SECTION_NAMES = [
     "Coding Guidelines & Rules",
     "Runbook Coverage",
 ]
+
+
+def s9_storage_safety_table() -> tuple[str, Findings, str]:
+    """Assert docs/sops/storage-safety.md matches the live CIFS StorageClasses.
+
+    This exists because the table silently drifted: every class was moved to
+    `Retain` at some point, nobody updated the SOP, and 17 rows sat claiming
+    `Delete` until a sweep noticed months later. Worse, Hard Rule 1's STOP gate
+    required `subdir == "/" AND reclaimPolicy == Delete` — a conjunction no class
+    could satisfy once the fleet was all-Retain, so the guard protecting the two
+    `subdir: /` classes was unreachable.
+
+    Both failures are the same shape: a check that quietly stopped checking. A
+    doc nobody verifies is not a control, so this verifies it.
+    """
+    section_header(9, 9, "Storage Safety Table vs Live StorageClasses")
+    f = Findings()
+    lines: list[str] = []
+    scope = "s9_storage_safety_table"
+
+    sop_path = REPO_ROOT / "docs/sops/storage-safety.md"
+    sop = read_file(sop_path, scope=scope)
+    if not sop:
+        f.add(CRITICAL, "`docs/sops/storage-safety.md` is missing or unreadable — the destructive-PVC guardrails cannot be verified")
+        return f.worst(), f, "".join(lines)
+
+    raw = run("kubectl get sc -o json", timeout=30, scope=scope, dep="kubectl")
+    live: dict[str, tuple[str, str, str]] = {}
+    if raw:
+        try:
+            for sc in json.loads(raw).get("items", []):
+                if sc.get("provisioner") != "smb.csi.k8s.io":
+                    continue
+                prm = sc.get("parameters", {}) or {}
+                live[sc["metadata"]["name"]] = (
+                    prm.get("source", "?"), prm.get("subdir", "(none)"), sc.get("reclaimPolicy", "?"))
+        except Exception as e:
+            DEGRADED.record(scope, "kubectl get sc -o json", repr(e))
+
+    # A cluster we could not read must NOT render as a clean table.
+    if not live:
+        DEGRADED.record(scope, "kubectl get sc (smb.csi.k8s.io)",
+                        "no CIFS StorageClasses returned — table NOT verified")
+        f.add(WARNING, "Could not read live StorageClasses — the storage-safety table was **not** verified this run (absence of findings here does not mean it is correct)")
+        cprint(C.YELLOW, f"  {WARNING} no live StorageClasses readable — table unverified")
+        return f.worst(), f, "".join(lines)
+
+    rows = dict(
+        (m[0], (m[1], m[2], m[3]))
+        for m in re.findall(r"^\| `(cifs-[a-z0-9-]+)` \| `([^`]+)` \| `([^`]+)` \| (\w+) \|", sop, re.M)
+    )
+
+    lines.append(f"**Live CIFS StorageClasses:** {len(live)} · **rows in SOP table:** {len(rows)}\n\n")
+
+    # 1. Every live class must be documented (Hard Rule 6, same-commit rule).
+    for name in sorted(set(live) - set(rows)):
+        src, sub, rec = live[name]
+        f.add(CRITICAL, f"StorageClass `{name}` exists but is **missing from the storage-safety table** (`{src}` subdir `{sub}`, {rec}) — Hard Rule 6 requires adding it in the same commit that creates the class")
+        cprint(C.RED, f"  {CRITICAL} {name}: live but undocumented")
+        lines.append(f"- {CRITICAL} `{name}` live but missing from the table\n")
+
+    # 2. Documented values must match reality, field by field.
+    for name in sorted(set(rows) & set(live)):
+        want, got = live[name], rows[name]
+        if want != got:
+            diffs = [f"{lbl}: doc `{g}` vs live `{w}`"
+                     for lbl, g, w in zip(("source", "subdir", "reclaim"), got, want) if g != w]
+            f.add(CRITICAL, f"StorageClass `{name}` is documented incorrectly — " + "; ".join(diffs))
+            cprint(C.RED, f"  {CRITICAL} {name}: {'; '.join(diffs)}")
+            lines.append(f"- {CRITICAL} `{name}`: {'; '.join(diffs)}\n")
+
+    # 3. Rows for classes that no longer exist.
+    for name in sorted(set(rows) - set(live)):
+        f.add(WARNING, f"storage-safety table documents `{name}`, which no longer exists — remove the row")
+        cprint(C.YELLOW, f"  {WARNING} {name}: documented but not live")
+        lines.append(f"- {WARNING} `{name}` documented but not live\n")
+
+    # 4. The fleet rule itself: root subdir + Delete is the catastrophic pair.
+    for name, (src, sub, rec) in sorted(live.items()):
+        if sub in ("/", "", "(none)", None) or ".." in str(sub):
+            if rec == "Delete":
+                f.add(CRITICAL, f"StorageClass `{name}` pairs a share-root subdir (`{sub}`) with `reclaimPolicy: Delete` on `{src}` — a PVC delete recursively wipes the entire share (Hard Rule 6 forbids this)")
+                cprint(C.RED, f"  {CRITICAL} {name}: subdir={sub} + Delete — catastrophic pairing")
+                lines.append(f"- {CRITICAL} `{name}`: share-root subdir with reclaim Delete\n")
+            else:
+                lines.append(f"- {OK} `{name}`: share-root subdir but `{rec}` — protection depends on reclaim staying non-Delete\n")
+
+    # 5. Regression guard for the unreachable-STOP fix. If someone re-adds the
+    #    `AND reclaimPolicy == Delete` conjunction to the root-subdir branch, the
+    #    gate silently stops matching anything again.
+    gate_files = {
+        "docs/sops/storage-safety.md": sop,
+        "AGENTS.md": read_file(REPO_ROOT / "AGENTS.md", scope=scope),
+        ".claude/agents/cluster-ops-agent.md": read_file(REPO_ROOT / ".claude/agents/cluster-ops-agent.md", scope=scope),
+    }
+    stale_gate = re.compile(r"subdir.{0,40}(`/`|== \"/\"|=/).{0,60}AND.{0,30}reclaim\w*\s*(==|is)\s*`?Delete", re.S)
+    for label, content in gate_files.items():
+        if not content:
+            continue
+        for m in stale_gate.finditer(content):
+            frag = " ".join(m.group(0).split())[:120]
+            f.add(CRITICAL, f"`{label}` gates the share-root STOP on `AND reclaimPolicy == Delete` again — with an all-Retain fleet that conjunction matches nothing, making the guard unreachable. Gate on `subdir` alone. (`{frag}…`)")
+            cprint(C.RED, f"  {CRITICAL} {label}: unreachable STOP gate reintroduced")
+            lines.append(f"- {CRITICAL} `{label}`: unreachable STOP gate reintroduced\n")
+
+    if f.count(CRITICAL) == 0 and f.count(WARNING) == 0:
+        cprint(C.GREEN, f"  {OK} table matches all {len(live)} live CIFS StorageClasses; STOP gate intact")
+        lines.append(f"\n{OK} Table matches all {len(live)} live CIFS StorageClasses; share-root STOP gate intact.\n")
+
+    return f.worst(), f, "".join(lines)
 
 
 def write_report(timestamp: str, results: list[tuple[str, Findings, str]]) -> None:
@@ -1980,6 +2090,7 @@ def _main_impl(args) -> int:
     results.append(s6_readme_claude_currency())
     results.append(s7_coding_guidelines())
     results.append(s8_runbook_coverage())
+    results.append(s9_storage_safety_table())
 
     # Write report
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

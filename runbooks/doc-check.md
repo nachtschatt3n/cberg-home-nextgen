@@ -421,6 +421,54 @@ grep "security-check-current" .gitignore
 
 ---
 
+## 9. Storage Safety Table vs Live StorageClasses
+
+**Objective**: Prove `docs/sops/storage-safety.md` still describes the cluster it
+claims to describe, and that its destructive-PVC STOP gate can actually fire.
+
+This section exists because both silently stopped being true. Every CIFS
+StorageClass was moved to `reclaimPolicy: Retain` at some point; the SOP table
+kept saying `Delete` for 17 of them for months. And Hard Rule 1's STOP required
+`subdir == "/"` **AND** `reclaimPolicy == Delete` — a pair an all-Retain fleet
+can never satisfy, so the guard protecting the two `subdir: /` classes
+(`cifs-jellyfin-media`, `cifs-plex-media`) matched nothing at all.
+
+A doc nobody verifies is not a control. This verifies it.
+
+**What it asserts:**
+
+| # | Assertion | Severity if violated |
+|---|---|---|
+| 1 | Every live CIFS class appears in the table (Hard Rule 6: same commit) | critical |
+| 2 | Each row's `source`/`subdir`/`reclaim` matches live, field by field | critical |
+| 3 | No row describes a class that no longer exists | warning |
+| 4 | No live class pairs a share-root `subdir` with `reclaimPolicy: Delete` | critical |
+| 5 | The share-root STOP gate is not re-narrowed with `AND reclaim == Delete`, in the SOP, `AGENTS.md`, or `.claude/agents/cluster-ops-agent.md` | critical |
+
+**Degradation is not success.** If `kubectl get sc` returns nothing, the check
+reports a warning and records degraded coverage rather than an empty finding
+list — an unreadable cluster must never render as a clean table. That veto also
+blocks stale-finding auto-close for the whole `doc` section.
+
+**Commands:**
+
+```bash
+# The check runs as section 9 of the doc sweep
+python3 runbooks/doc-check.py
+
+# Regression tests (prove it FAILS when it should — a guard that only
+# returns green is indistinguishable from a broken one)
+python3 runbooks/tests/test-storage-safety-table.py
+
+# Manual re-audit of live state
+kubectl get sc -o json | python3 -c '
+import sys, json
+for sc in json.load(sys.stdin)["items"]:
+    if sc.get("provisioner") == "smb.csi.k8s.io":
+        p = sc.get("parameters", {})
+        print(f"{sc[\"metadata\"][\"name\"]:32} reclaim={sc.get(\"reclaimPolicy\"):8} subdir={p.get(\"subdir\")}")'
+```
+
 ## Report Generation
 
 The automated script (`doc-check.py`) generates `runbooks/doc-check-current.md` automatically.
