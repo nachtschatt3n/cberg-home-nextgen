@@ -490,7 +490,7 @@ def section_header(n: int, total: int, title: str) -> None:
 
 
 def s1_infrastructure_docs() -> tuple[str, Findings, str]:
-    section_header(1, 9, "Infrastructure Documentation")
+    section_header(1, 10, "Infrastructure Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -613,7 +613,7 @@ def s1_infrastructure_docs() -> tuple[str, Findings, str]:
 
 
 def s2_network_docs() -> tuple[str, Findings, str]:
-    section_header(2, 9, "Network Documentation")
+    section_header(2, 10, "Network Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -763,7 +763,7 @@ def _documented_name_surface(content: str) -> str:
 
 
 def s3_application_docs() -> tuple[str, Findings, str]:
-    section_header(3, 9, "Application Documentation")
+    section_header(3, 10, "Application Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1043,7 +1043,7 @@ def s3_application_docs() -> tuple[str, Findings, str]:
 
 
 def s4_security_docs() -> tuple[str, Findings, str]:
-    section_header(4, 9, "Security Documentation")
+    section_header(4, 10, "Security Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1202,7 +1202,7 @@ def s4_security_docs() -> tuple[str, Findings, str]:
 
 
 def s5_integration_docs() -> tuple[str, Findings, str]:
-    section_header(5, 9, "Integration Documentation")
+    section_header(5, 10, "Integration Documentation")
     f = Findings()
     lines: list[str] = []
 
@@ -1335,7 +1335,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
 
 
 def s6_readme_claude_currency() -> tuple[str, Findings, str]:
-    section_header(6, 9, "README & CLAUDE.md Currency")
+    section_header(6, 10, "README & CLAUDE.md Currency")
     f = Findings()
     lines: list[str] = []
 
@@ -1467,7 +1467,7 @@ def s6_readme_claude_currency() -> tuple[str, Findings, str]:
 
 
 def s7_coding_guidelines() -> tuple[str, Findings, str]:
-    section_header(7, 9, "Coding Guidelines & Rules")
+    section_header(7, 10, "Coding Guidelines & Rules")
     f = Findings()
     lines: list[str] = []
 
@@ -1624,7 +1624,7 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
 
 
 def s8_runbook_coverage() -> tuple[str, Findings, str]:
-    section_header(8, 9, "Runbook Coverage")
+    section_header(8, 10, "Runbook Coverage")
     f = Findings()
     lines: list[str] = []
 
@@ -1811,7 +1811,7 @@ def s9_storage_safety_table() -> tuple[str, Findings, str]:
     Both failures are the same shape: a check that quietly stopped checking. A
     doc nobody verifies is not a control, so this verifies it.
     """
-    section_header(9, 9, "Storage Safety Table vs Live StorageClasses")
+    section_header(9, 10, "Storage Safety Table vs Live StorageClasses")
     f = Findings()
     lines: list[str] = []
     scope = "s9_storage_safety_table"
@@ -1905,6 +1905,64 @@ def s9_storage_safety_table() -> tuple[str, Findings, str]:
         cprint(C.GREEN, f"  {OK} table matches all {len(live)} live CIFS StorageClasses; STOP gate intact")
         lines.append(f"\n{OK} Table matches all {len(live)} live CIFS StorageClasses; share-root STOP gate intact.\n")
 
+    return f.worst(), f, "".join(lines)
+
+
+def s10_control_ledger() -> tuple[str, Findings, str]:
+    """Every control in runbooks/controls.yaml names a watching assertion that
+    EXISTS in git. A ledger row pointing at a deleted alert rule or removed
+    check is precisely the silent-inert-control failure the ledger exists to
+    catch — so the ledger itself is verified, in git, with no cluster access
+    needed (pure-repo check).
+    """
+    section_header(10, 10, "Control Ledger — every control has a live watcher")
+    f = Findings()
+    lines: list[str] = []
+    scope = "s10_control_ledger"
+
+    ledger_path = REPO_ROOT / "runbooks/controls.yaml"
+    raw = read_file(ledger_path, scope=scope)
+    if not raw:
+        f.add(CRITICAL, "`runbooks/controls.yaml` missing/unreadable — the control ledger is itself unwatched")
+        return f.worst(), f, "".join(lines)
+    try:
+        import yaml as _yaml
+        controls = (_yaml.safe_load(raw) or {}).get("controls", [])
+    except Exception as e:
+        f.add(CRITICAL, f"controls.yaml unparseable: {e}")
+        return f.worst(), f, "".join(lines)
+
+    if not controls:
+        f.add(CRITICAL, "controls.yaml has no entries — nothing declares its watcher")
+    if len(controls) > 15:
+        f.add(WARNING, f"controls.yaml has {len(controls)} entries (cap ~15) — prune mechanisms, don't grow the ledger")
+
+    for c in controls:
+        cid = c.get("id", "?")
+        wb = c.get("watched_by") or {}
+        assertion, ref = str(wb.get("assertion") or ""), str(wb.get("in") or "")
+        if not assertion or not ref:
+            f.add(CRITICAL, f"control `{cid}` declares no watching assertion — it can fail silently")
+            continue
+        target = REPO_ROOT / ref
+        if not target.exists():
+            f.add(CRITICAL, f"control `{cid}`: watcher file `{ref}` does not exist — the assertion is gone")
+            continue
+        # the assertion IS the needle, verbatim — same substring contract as
+        # AR descriptions; no heuristics, so a prose assertion fails loudly
+        content = read_file(target, scope=scope)
+        needle = assertion
+        if needle and needle not in content:
+            f.add(CRITICAL, f"control `{cid}`: assertion `{needle}` not found in `{ref}` — the watcher was renamed or removed")
+        else:
+            lines.append(f"- {OK} `{cid}` watched by `{needle}` in `{ref}`\n")
+
+    if f.count(CRITICAL) == 0 and f.count(WARNING) == 0:
+        cprint(C.GREEN, f"  {OK} {len(controls)} controls, every watcher present")
+        lines.insert(0, f"{OK} {len(controls)} controls, every named watcher exists in git.\n\n")
+    else:
+        for sev, msg in f._items:
+            cprint(C.RED if sev == CRITICAL else C.YELLOW, f"  {sev} {msg}")
     return f.worst(), f, "".join(lines)
 
 
@@ -2091,6 +2149,7 @@ def _main_impl(args) -> int:
     results.append(s7_coding_guidelines())
     results.append(s8_runbook_coverage())
     results.append(s9_storage_safety_table())
+    results.append(s10_control_ledger())
 
     # Write report
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

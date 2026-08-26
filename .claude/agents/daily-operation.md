@@ -242,11 +242,14 @@ needs their decision, and what got auto-fixed.
     It reports, read-only: held updates with NO plan, stale/orphan plans, the
     next window + what's queued, and capacity/reboot/interference warnings. Then:
 
-    - **For each held update in `needs_plan`, dispatch an `upgrade-planner-agent`**
-      (one Agent call per update, in parallel) so every non-safe update gets an
-      executable plan before its window. Brief each with the held update's
-      component / PR / current→target / hold-reason. The planner writes a plan
-      file under `runbooks/maintenance/plans/` and does not touch the cluster.
+    - **Do NOT dispatch planners here.** Rule 4d0 is the single dispatch point
+      for update-shaped planners (and 4e for finding-shaped ones); until
+      2026-08-26 both 4d0 and this rule dispatched for overlapping sets, which
+      double-planned the same held update whenever their matchers drifted —
+      and their matchers DID drift (the talos plan was invisible to one and
+      not the other). This rule only REPORTS `needs_plan` residue: anything
+      still unplanned here after 4d0 ran is a reconciliation bug to surface,
+      not a dispatch to fire.
       (On a manual/dry-run sweep you may report the gap instead of dispatching —
       planners are read-only + write only a plan file, so dispatching is safe,
       but keep the count sane.)

@@ -1,0 +1,121 @@
+# controls — the automations this system depends on, and WHO WATCHES EACH ONE.
+#
+# WHY: half of this system's historical failures were controls that could not
+# fire and looked healthy — a restart CronJob that never ran AND could not
+# have started, alert selectors matching deleted resources, a STOP gate whose
+# condition nothing could satisfy, four maintenance windows with no driving
+# cron. The common shape: a mechanism whose absence is silent.
+#
+# CONTRACT (docs/sops/control-liveness.md): every entry names the standing
+# ASSERTION that fires when the control has NOT done its job on cadence.
+# `assertion:` is an EXACT SUBSTRING NEEDLE grepped in `in:` — the same
+# contract as accepted-risk descriptions: prose matches nothing and silently
+# watches nothing. `in:` must be PLAINTEXT in git (a needle can never match
+# inside a SOPS-encrypted file). Prose goes in `note:`.
+# doc-check section 10 verifies each named assertion actually exists in git —
+# a ledger row pointing at a deleted assertion is itself the failure mode this
+# file exists to catch.
+#
+# Keep this under ~15 entries. If it grows past that, the system has too many
+# mechanisms — prune mechanisms, don't grow the ledger.
+version: "2026.08.26"
+
+controls:
+  - id: sweep-cron
+    kind: openclaw-cron
+    what: "48h operation sweep (OpenClaw 8163c139 -> Mac daily-operation session)"
+    cadence: 48h
+    watched_by:
+      assertion: SweepPipelineDead
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/sweep-pipeline-alerts.yaml
+
+  - id: sweep-heartbeat
+    kind: k8s-cronjob
+    what: "in-cluster probe that the newest sweep_cycles row is <72h old"
+    cadence: 6h
+    watched_by:
+      assertion: SweepPipelineDead
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/sweep-pipeline-alerts.yaml
+
+  - id: window-crons
+    kind: openclaw-cron
+    what: "nightly / sat-early / sun-window maintenance-window triggers"
+    cadence: daily/weekly
+    watched_by:
+      assertion: "CRON↔YAML PARITY FAILURES"
+      in: runbooks/window-crons.py
+      note: "window-crons.py --check, run in every reconcile"
+
+  - id: window-execution
+    kind: agent-close-out
+    what: "every dated window occurrence writes a window_runs row (idle included)"
+    cadence: per-window
+    watched_by:
+      assertion: "WINDOWS DECLARED BUT NEVER RAN"
+      in: runbooks/maintenance-plan.py
+      note: "window_liveness(), every reconcile"
+
+  - id: go-lifecycle
+    kind: openclaw-tick
+    what: "GO expiry: pending-exec decisions whose window passed are voided + re-requested"
+    cadence: 30m
+    watched_by:
+      assertion: "GO auto-expiry"
+      in: docs/sops/maintenance-windows.md
+      note: "tick expires+re-requests; the skill itself is SOPS-encrypted so the
+        needle lives in the SOP that documents the contract"
+
+  - id: plan-or-page
+    kind: sweep-check
+    what: "PLAN-lane criticals must gain a plan file (finding_refs) within plan_sla_days"
+    cadence: per-sweep
+    watched_by:
+      assertion: "overdue_unplanned"
+      in: runbooks/finding-triage.py
+      note: "plan-or-page pass; overdue pages + exits non-zero + red verdict"
+
+  - id: frigate-restart-mitigation
+    kind: k8s-cronjob
+    what: "daily 02:30 frigate restart bounding the 0.17.2 leak (exit: 0.18 GA)"
+    cadence: daily
+    watched_by:
+      assertion: ContainerRestartMitigationStale
+      in: kubernetes/apps/monitoring/kube-prometheus-stack/app/container-memory-alerts.yaml
+
+  - id: renovate
+    kind: external
+    what: "dependency PRs feeding the safe-update lane"
+    cadence: daily
+    watched_by:
+      assertion: "AUTO"
+      in: runbooks/coverage.py
+      note: "lane reconciler; a dry safe lane surfaces in the sweep report"
+
+  - id: longhorn-backups
+    kind: k8s-cronjob
+    what: "storage/backup-of-all-volumes @ 03:00 to the NAS backupstore"
+    cadence: daily
+    watched_by:
+      assertion: "backup"
+      in: runbooks/tests/test-backup-freshness.sh
+      note: "freshness only — restorability is the restore-drill control below"
+
+  - id: restore-drill
+    kind: operator-procedure
+    what: "QUARTERLY scratch-restore of a Longhorn backup + a postgres dump — verified backups are Schroedinger's until restored (G2)"
+    cadence: quarterly
+    watched_by:
+      assertion: "Restore Drill Log"
+      in: docs/sops/control-liveness.md
+      note: "manual quarterly; log table in the SOP. G2 upgrades this to an
+        automated scratch-restore probe — until then the drill is watched only
+        by the SOP section existing and the operator reading it"
+
+  - id: alert-bridge
+    kind: launchd
+    what: "Alertmanager -> Mac ws bridge (com.cberg.alert-bridge)"
+    cadence: continuous
+    watched_by:
+      assertion: "last_watchdog_age_s"
+      in: runbooks/alert-watcher.md
+      note: "Watchdog dead-man's switch on the bridge health endpoint"
