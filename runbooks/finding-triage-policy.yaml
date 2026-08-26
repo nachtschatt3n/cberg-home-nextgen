@@ -31,7 +31,15 @@
 #
 # Edit -> commit -> push. Git-tracked on purpose: a list of things a robot may
 # change unattended must be code-reviewed, not a mutable DB row. Bump `version`.
-version: "2026.08.24.1"
+version: "2026.08.26.1"
+
+# PLAN-lane SLA (P2.2). "Routed to PLAN" is a promise, not a plan: triage
+# defaults unmatched criticals to a window, but nothing then CREATED the plan —
+# findings sat with lane=PLAN, no plan file and no window (2026-08-26). A PLAN-lane
+# finding older than this many days with no plan file carrying its finding_id
+# in `finding_refs` is OVERDUE: finding-triage exits non-zero and pages the
+# operator via home-operation. Two sweep cycles = the planner had two chances.
+plan_sla_days: 4
 
 # ── FIX_NOW: the only remediations the sweep may apply by itself ─────────────
 # Each entry names a finding SHAPE and the deterministic remediation for it. The

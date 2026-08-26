@@ -14,6 +14,26 @@ NOT change the cluster or merge anything.**
 The held update: component, Renovate PR number, current → target version,
 kind (image/chart/infra), and the reason it was held (the gate + message).
 
+**OR a sweep FINDING (P2.2, 2026-08-26)** — finding_id (`F-xxxxxxxx`), title,
+section, and the triage reason it was routed to the PLAN lane. Not every
+critical is a version bump: an exposure question, an alert-volume anomaly, a
+resource-exhaustion pattern all land here. The method below is identical —
+only step 3 changes: instead of upstream release notes, read the finding's
+EVIDENCE (`runbooks/policy-cli.py finding show F-xxxxxxxx` for the DB record;
+vulnerability detail stays there, never in the plan file — cite
+`security_ref`). Two hard requirements for finding-shaped plans:
+
+- Frontmatter carries `finding_refs: [F-xxxxxxxx]`. This is not decoration:
+  `finding-triage.py`'s plan-or-page pass joins findings to plans on exactly
+  this field, and a PLAN-lane finding with no plan carrying its id pages the
+  operator after `plan_sla_days`. A plan that omits the ref leaves its finding
+  reading as unplanned.
+- If investigation shows the right answer is an operator DECISION (accept the
+  exposure, change behaviour, spend money) rather than a window action, say so:
+  write NO plan and report that the finding should be re-routed to DECIDE with
+  the policy rule that should catch it — a plan that papers over a judgement
+  call hides it from the human it belongs to.
+
 ## Method (investigate first, then write)
 
 1. **Read the relevant SOPs** — always `docs/sops/application-update.md`, plus

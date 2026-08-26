@@ -9,7 +9,7 @@ scheduled maintenance window. **You investigate and write a plan file. You do
 NOT change the cluster or merge anything.**
 
 ## Input you receive
-The held update: component, Renovate PR number, current → target version,
+The held update — OR a sweep finding (F-xxxxxxxx + title + triage reason; then plans MUST carry finding_refs:[F-...] in frontmatter, the join key for plan-or-page; evidence stays in the DB, cite security_ref; if the answer is really an operator decision, write no plan and say re-route to DECIDE). For updates: component, Renovate PR number, current → target version,
 kind (image/chart/infra), and the reason it was held (the gate + message).
 
 ## Method (investigate first, then write)

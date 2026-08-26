@@ -182,6 +182,7 @@ def triage(findings: list, policy: dict, covered: set) -> list:
             "section": finding.get("section"),
             "severity": finding.get("severity"),
             "title": finding.get("title"),
+            "first_seen": finding.get("first_seen"),
             "component": component,
             "lane": lane,
             "rule": rule_id,
@@ -193,6 +194,101 @@ def triage(findings: list, policy: dict, covered: set) -> list:
 
 # --- finding store -----------------------------------------------------------
 
+# ── plan-or-page (P2.2) ──────────────────────────────────────────────────────
+# "Routed to PLAN" used to be where the guarantee quietly ended: the lane was
+# assigned, rule 4e's prose said "dispatch a planner", and whether a plan file
+# ever appeared was checked by nobody — criticals sat with lane=PLAN, no plan,
+# no window, owned on paper and orphaned in fact (found 2026-08-26; the
+# specifics live on the finding records, not here — public repo).
+# This pass closes the loop the same way CRACK does — as data the
+# sweep can assert on, with an SLA and a page, not as an instruction.
+
+PLANS_DIR = Path(__file__).resolve().parent / "maintenance" / "plans"
+
+
+def plans_by_finding_ref(plans_dir: Path | None = None) -> dict:
+    """{finding_id: plan_filename} from every live plan's `finding_refs`.
+    Executed/superseded plans do not count — their work is history, and a new
+    finding on the same component needs a NEW plan (same rule coverage.py
+    applies to version plans)."""
+    import yaml  # noqa: PLC0415
+    # resolved at CALL time, not def time — a def-time default freezes the
+    # module-level path and silently ignores later rebinding (tests included)
+    plans_dir = plans_dir or PLANS_DIR
+    out = {}
+    if not plans_dir.exists():
+        return out
+    for f in sorted(plans_dir.glob("*.md")):
+        if f.name.lower() == "readme.md":
+            continue
+        try:
+            fm = yaml.safe_load(f.read_text().split("---", 2)[1]) or {}
+        except Exception:
+            continue
+        if str(fm.get("status") or "").strip() in ("executed", "superseded"):
+            continue
+        for ref in (fm.get("finding_refs") or []):
+            out[str(ref)] = f.name
+    return out
+
+
+def plan_or_page(results: list, policy: dict, now=None) -> tuple[list, list]:
+    """(needs_plan, overdue). Annotates PLAN-lane results with plan_file /
+    age_days; anything past `plan_sla_days` with no plan is OVERDUE."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+    now = now or datetime.now(timezone.utc)
+    _sla = policy.get("plan_sla_days")
+    # explicit None-check, NOT `or 4`: an SLA of 0 is a legitimate value (the
+    # commissioning override) and `0 or 4` silently rewrites it to 4 — the
+    # falsy-zero bug, same family as a shell's ${var:-0} turning "query failed"
+    # into "zero jobs left".
+    sla = 4.0 if _sla is None else float(_sla)
+    refs = plans_by_finding_ref()
+    needs, overdue = [], []
+    for r in results:
+        if r["lane"] != "PLAN":
+            continue
+        r["plan_file"] = refs.get(r["finding_id"])
+        fs = r.get("first_seen")
+        age = None
+        if fs is not None:
+            ts = fs if hasattr(fs, "tzinfo") else datetime.fromisoformat(str(fs))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age = (now - ts).total_seconds() / 86400
+        r["age_days"] = round(age, 1) if age is not None else None
+        if not r["plan_file"]:
+            needs.append(r)
+            # unknown age counts as overdue: a finding we cannot age must not
+            # get an implicit SLA extension
+            if age is None or age > sla:
+                overdue.append(r)
+    return needs, overdue
+
+
+def page_overdue(overdue: list) -> bool:
+    """Best-effort OpenClaw page for overdue unplanned criticals. Loud on
+    failure (returns False), never raises — a broken pager must not kill the
+    triage run whose output the sweep still needs."""
+    import subprocess  # noqa: PLC0415
+    issues = [{
+        "key": f"unplanned-{r['finding_id']}",
+        "kind": "blocked_plan", "source": "maintenance", "severity": "critical",
+        "title": (f"PLAN-lane critical {r['finding_id']} has NO PLAN after "
+                  f"{r.get('age_days')}d (SLA breach): {(r.get('title') or '')[:100]}"),
+        "action": "ack",
+    } for r in overdue]
+    try:
+        p = subprocess.run(
+            ["kubectl", "-n", "ai", "exec", "deploy/openclaw", "-c", "app", "--",
+             "/home/node/.openclaw/bin/home-operation", "ingest", "--json",
+             json.dumps(issues)],
+            capture_output=True, text=True, timeout=60)
+        return p.returncode == 0
+    except Exception:
+        return False
+
+
 def fetch_open_criticals(severities: list) -> list:
     import psycopg  # noqa: PLC0415
     dsn = os.environ["SWEEP_PG_DSN"]
@@ -200,7 +296,7 @@ def fetch_open_criticals(severities: list) -> list:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT finding_id, section, severity, title, status, action, metadata
+                SELECT finding_id, section, severity, title, status, action, metadata, first_seen
                 FROM sweep_findings
                 WHERE status <> 'resolved'
                   AND resolved_at IS NULL
@@ -288,6 +384,10 @@ def main():
                         help="write the assigned lane back onto each finding")
     parser.add_argument("--apply-fixes", action="store_true",
                         help="run remediations for FIX_NOW findings (implies --record)")
+    parser.add_argument("--plan-sla-days", type=float, default=None,
+                        help="override the policy plan_sla_days (commissioning/tests)")
+    parser.add_argument("--no-page", action="store_true",
+                        help="suppress the OpenClaw page for overdue unplanned findings")
     parser.add_argument("--json", action="store_true", help="emit JSON")
     args = parser.parse_args()
 
@@ -310,6 +410,13 @@ def main():
     if args.record or args.apply_fixes:
         record_lanes(results)
 
+    if args.plan_sla_days is not None:
+        policy["plan_sla_days"] = args.plan_sla_days
+    needs_plan, overdue = plan_or_page(results, policy)
+    paged = None
+    if overdue and not args.no_page:
+        paged = page_overdue(overdue)
+
     counts = {lane: sum(1 for r in results if r["lane"] == lane) for lane in LANES}
     payload = {
         "policy_version": policy.get("version"),
@@ -319,6 +426,10 @@ def main():
         "counts": counts,
         # The guarantee, stated as data so the sweep can assert on it.
         "no_cracks": counts["CRACK"] == 0,
+        # PLAN-lane accountability: lane assignment is not plan existence.
+        "needs_plan_findings": [r["finding_id"] for r in needs_plan],
+        "overdue_unplanned": [r["finding_id"] for r in overdue],
+        "overdue_paged": paged,
         "results": results,
     }
 
@@ -332,7 +443,11 @@ def main():
         for r in results:
             print(f"  [{r['lane']:<7}] {r['finding_id']}  {(r['title'] or '')[:88]}")
             print(f"            rule={r['rule']}  {(r['reason'] or '')[:110]}")
-    return 0 if counts["CRACK"] == 0 else 1
+    if not args.json and overdue:
+        print(f"!! OVERDUE UNPLANNED ({len(overdue)}): " +
+              ", ".join(r["finding_id"] for r in overdue) +
+              (f"  (paged={paged})" if paged is not None else "  (page suppressed)"))
+    return 0 if (counts["CRACK"] == 0 and not overdue) else 1
 
 
 if __name__ == "__main__":

@@ -88,6 +88,13 @@ touches:                          # interference surface — be precise
 depends_on: []                    # other plan_ids that must run first
 conflicts_with: []               # plan_ids that must NOT share a window
 security_ref: null                # F-xxxxxxxx if this plan has a security driver.
+finding_refs: []                  # sweep findings this plan ANSWERS (P2.2). The
+                                  # plan-or-page pass joins lane=PLAN findings to
+                                  # plans on this field; a PLAN-lane critical with
+                                  # no live plan carrying its id pages the operator
+                                  # after plan_sla_days. Distinct from security_ref
+                                  # (a citation); this is an ownership claim.
+                                  # Format-checked by maintenance-plan.py --validate.
                                   # The DETAIL stays in the DB — see "Public repo"
                                   # below. Never inline CVE IDs or counts here.
 status: draft                     # draft | vetted | scheduled | awaiting-go |

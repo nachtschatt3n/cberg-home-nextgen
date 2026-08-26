@@ -505,6 +505,12 @@ def validate_plans(cfg, plans=None) -> list[str]:
         # reference plans must NOT name a window — that is the other half of the contract
         if st == "reference" and w:
             errs.append(f"{pid}: status:reference must not carry a window ({w})")
+        # finding_refs bind a plan to the sweep findings it answers — the
+        # plan-or-page pass (finding-triage.py) joins on them, so a malformed
+        # ref silently un-plans a finding. Format-checked here.
+        for ref in (pl.get("finding_refs") or []):
+            if not __import__("re").fullmatch(r"F-[0-9a-f]{8}", str(ref)):
+                errs.append(f"{pid}: finding_refs entry {ref!r} is not F-xxxxxxxx")
         # dependency refs must resolve. DEAD-REF is an ERROR, not a warning:
         # a guard pointing at nothing enforces nothing.
         for field in ("depends_on", "conflicts_with"):
