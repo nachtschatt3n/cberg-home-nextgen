@@ -219,7 +219,9 @@ $ kubectl get pv $PV -o jsonpath='{.spec.csi.volumeAttributes}' | jq
 }
 $ kubectl get pv $PV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'
 Delete
-# subdir=/ AND reclaim=Delete → STOP.
+# subdir=/ → STOP. (This 2026-04-26 walkthrough shows reclaim=Delete because that
+#  is what the class carried at the time, and it is what made the delete wipe the
+#  share. The gate no longer waits for that second condition — see Hard Rule 1.)
 $ kubectl patch pv $PV --type=merge \
     -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
 $ kubectl delete pvc extract-sort-nas -n download
