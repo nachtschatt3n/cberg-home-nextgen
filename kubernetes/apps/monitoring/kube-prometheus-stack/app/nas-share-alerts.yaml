@@ -1,0 +1,65 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nas-share-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: nas.shares
+      interval: 1m
+      rules:
+        # Replaces ImmichUploadPVCFillingUp, deleted 2026-08-26 with the
+        # immich-upload-v2 PVC it referenced. That alert had become unfireable —
+        # its selector matched a PVC that no longer exists — which is worse than
+        # having no alert, because the rule still LOOKS like storage is watched.
+        #
+        # It cannot simply be repointed at immich-data. Every CIFS PVC on the
+        # `media` share reports the WHOLE share to kubelet: immich-data,
+        # jellyfin-media, plex-media-smb, makemkv-media and jdownloader-intake all
+        # report an identical ~9.1Ti used of 32.7Ti. A per-app percentage would be
+        # the share's percentage wearing an app's label. So this is scoped, named
+        # and described as what it actually measures: the share.
+        #
+        # max() over the claim set rather than one representative claim, so
+        # retiring any single app does not silently kill the alert the way the
+        # immich one died.
+        - alert: NasMediaShareFillingUp
+          expr: |
+            max(
+              kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim=~"immich-data|jellyfin-media|plex-media-smb|makemkv-media|jdownloader-intake"}
+            )
+            /
+            max(
+              kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim=~"immich-data|jellyfin-media|plex-media-smb|makemkv-media|jdownloader-intake"}
+            ) * 100 > 85
+          for: 30m
+          labels:
+            severity: warning
+            category: storage
+            component: nas
+          annotations:
+            summary: NAS //NAS/media share is {{ $value | printf "%.0f" }}% full
+            description: >-
+              The shared `media` CIFS export is over 85% full. This is one share
+              behind Plex, Jellyfin, Immich's derived cache, MakeMKV and
+              JDownloader — it filling affects all of them at once, and Immich
+              will stop generating thumbnails and transcodes.
+        # The companion the old alert lacked. A selector that matches nothing
+        # returns no data and never fires, so a deleted or renamed PVC turns the
+        # alert above into permanent silence that reads as "all clear". This
+        # fires when the series set disappears entirely.
+        - alert: NasMediaShareMetricsMissing
+          expr: |
+            absent(kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim=~"immich-data|jellyfin-media|plex-media-smb|makemkv-media|jdownloader-intake"})
+          for: 30m
+          labels:
+            severity: warning
+            category: storage
+            component: nas
+          annotations:
+            summary: NAS media-share capacity metrics have disappeared
+            description: >-
+              No kubelet volume stats match any media-share PVC. NasMediaShareFillingUp
+              cannot fire in this state — treat it as blind, not healthy. Usually a
+              PVC was renamed or retired; update the selector in nas-share-alerts.yaml.

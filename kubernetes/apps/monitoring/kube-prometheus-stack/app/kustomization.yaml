@@ -9,6 +9,7 @@ resources:
   - ./alertmanager-telegram-config.yaml
   - ./claude-watch-webhook.yaml
   - ./longhorn-alerts.yaml
+  - ./nas-share-alerts.yaml
   - ./authentik-alerts.yaml
   - ./otel-collector-alerts.yaml
   - ./anythingllm-alerts.yaml
