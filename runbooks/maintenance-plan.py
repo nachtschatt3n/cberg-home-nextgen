@@ -158,6 +158,7 @@ def held_key(h):
 def reconcile(cfg, today):
     held, held_error = get_held()
     plans = load_plans(cfg)
+    validation_errors = validate_plans(cfg, plans)
 
     # 1) held updates lacking a fresh plan.
     # Matching via lib/plan_matching (PR number / normalized names / version
@@ -308,6 +309,7 @@ def reconcile(cfg, today):
         "held_error": held_error,
         "needs_plan": needs_plan,
         "ambiguous_matches": ambiguous,
+        "validation_errors": validation_errors,
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -336,6 +338,10 @@ def human(r, cfg):
             L.append(f"  • {n['dep']} {n['cur']}→{n['new']} (PR #{n['pr']}, held:{n['gate']}) — {n['reason'][:80]}")
     else:
         L.append("\nall held updates have a plan ✅")
+    if r.get("validation_errors"):
+        L.append(f"\n❌ PLAN FRONTMATTER ERRORS ({len(r['validation_errors'])}) — fix before these plans can be trusted:")
+        for e in r["validation_errors"]:
+            L.append(f"  ! {e}")
     if r.get("ambiguous_matches"):
         L.append(f"\n⚠️  AMBIGUOUS plan matches ({len(r['ambiguous_matches'])}) — one held update matched several plans; picked the first, verify:")
         for a in r["ambiguous_matches"]:
@@ -430,6 +436,76 @@ def already_done_suspects(cfg) -> list:
             out.append((pl.get("plan_id"), tgt[:56], hit[:3]))
     return out
 
+# ---------------------------------------------------------------------------
+# Frontmatter invariants (P0.4). These exist because contradictions were being
+# FILED, not caught: five plans carried `status: scheduled` with
+# `window: null` (a plan that believes it is scheduled but names no slot is
+# exactly how work silently never runs), one plan's depends_on named a plan
+# file that has never existed (a guard that could not guard), and nothing
+# checked that a window id in a plan corresponds to a window that exists.
+# ---------------------------------------------------------------------------
+
+_WINDOW_REF = __import__("re").compile(r"^([a-z0-9-]+):(\d{4}-\d{2}-\d{2})$")
+
+# `reference` is the new legal status for plans deliberately OUTSIDE the
+# window system (break-glass contingencies, attended projects). Named exactly
+# what open_queue's tier already called them.
+VALID_STATUSES = {
+    "draft", "vetted", "scheduled", "awaiting-go", "approved", "awaiting-soak",
+    "blocked", "executed", "superseded", "reference",
+}
+
+
+def validate_plans(cfg, plans=None) -> list[str]:
+    """Machine-checkable frontmatter invariants. Returns error strings."""
+    import datetime as _dt
+    plans = plans if plans is not None else load_plans(cfg)
+    win = {w["id"]: w for w in cfg.get("windows", [])}
+    ids = {p.get("plan_id") for p in plans}
+    errs = []
+    for pl in plans:
+        pid = pl.get("plan_id") or pl.get("_path")
+        st = str(pl.get("status") or "").strip()
+        w = pl.get("window")
+        if st and st not in VALID_STATUSES:
+            errs.append(f"{pid}: unknown status {st!r}")
+        # a plan that claims a slot must name a real, dated, weekday-consistent one
+        if st in ("scheduled", "awaiting-go", "approved"):
+            if not w:
+                errs.append(f"{pid}: status:{st} but window is null — "
+                            f"a slotless '{st}' plan silently never runs "
+                            f"(use status: reference if it is deliberately unwindowed)")
+            else:
+                m = _WINDOW_REF.match(str(w))
+                if not m:
+                    errs.append(f"{pid}: window {w!r} is not <window-id>:<YYYY-MM-DD>")
+                elif m.group(1) not in win:
+                    errs.append(f"{pid}: window id {m.group(1)!r} not declared in "
+                                f"maintenance-windows.yaml — plans scheduled into "
+                                f"nonexistent windows are how the sat-early backlog happened")
+                else:
+                    wd = _dt.date.fromisoformat(m.group(2)).strftime("%A").lower()
+                    if wd != win[m.group(1)]["day"]:
+                        errs.append(f"{pid}: window {w} dates a {wd}, but "
+                                    f"{m.group(1)} runs on {win[m.group(1)]['day']}")
+                    dur = pl.get("est_duration_min")
+                    if isinstance(dur, (int, float)) and dur > win[m.group(1)]["duration_min"]:
+                        errs.append(f"{pid}: est_duration_min {dur} can never fit "
+                                    f"{m.group(1)} ({win[m.group(1)]['duration_min']}m)")
+        # reference plans must NOT name a window — that is the other half of the contract
+        if st == "reference" and w:
+            errs.append(f"{pid}: status:reference must not carry a window ({w})")
+        # dependency refs must resolve. DEAD-REF is an ERROR, not a warning:
+        # a guard pointing at nothing enforces nothing.
+        for field in ("depends_on", "conflicts_with"):
+            for ref in (pl.get(field) or []):
+                if ref not in ids:
+                    errs.append(f"{pid}: {field} -> {ref!r} names no existing plan "
+                                f"— this guard is not enforced; resolve or delete "
+                                f"the ref with a dated comment")
+    return errs
+
+
 def open_queue(cfg) -> str:
     """The canonical answer to "what plans are open?".
 
@@ -449,6 +525,8 @@ def open_queue(cfg) -> str:
             continue
         if st == "superseded":
             (ref if not _has_stages(pl, plans) else prog).append(pl)
+        elif st == "reference":
+            ref.append(pl)
         elif w:
             ex.append(pl)
         else:
@@ -489,6 +567,8 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--verify", action="store_true",
                     help="plans whose target version already appears pinned — verify whether the work is done")
+    ap.add_argument("--validate", action="store_true",
+                    help="check plan frontmatter invariants and exit (rc 1 on errors)")
     ap.add_argument("--open", action="store_true",
                     help="canonical open-plan queue, split executable/programme/reference")
     args = ap.parse_args(argv)
@@ -503,6 +583,15 @@ def main(argv=None):
             print("VERIFY — target version already present in manifests:")
             for pid, tgt, hit in sus:
                 print(f"  {pid:<34} target={tgt}  matched={hit}")
+        return 0
+    if args.validate:
+        errs = validate_plans(cfg)
+        if errs:
+            print(f"PLAN FRONTMATTER ERRORS ({len(errs)}):")
+            for e in errs:
+                print(f"  ! {e}")
+            return 1
+        print("all plan frontmatter invariants hold")
         return 0
     if args.open:
         print(open_queue(cfg))

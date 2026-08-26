@@ -35,7 +35,11 @@ conflicts_with: []                    # RESOLVED 2026-08-16: was [talos-v1.13.8]
                                       # Longhorn replicas per node; stacking CNI-layer changes on
                                       # that is how 2026-08-16 produced a 34-volume / 37-pod attach
                                       # pile-up. Re-point at the next talos-* plan when written.
-status: scheduled
+status: reference                     # was 'scheduled' with window:null — a contradiction:
+                                      # a plan that believes it is scheduled but names no slot
+                                      # silently never runs. 'reference' is the honest state:
+                                      # deliberately outside the window system until its
+                                      # track is activated (P0.4, 2026-08-26).
 window: null                          # UNSCHEDULED 2026-08-16. 90m of work against a 90m maximum
                                       # window — zero rollback slack, the same TIGHT condition that
                                       # app-template-5.0 was pulled for. Treated consistently rather

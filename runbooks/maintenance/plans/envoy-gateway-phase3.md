@@ -34,7 +34,11 @@ depends_on: [envoy-gateway-phase2]
 conflicts_with: []  # don't run an app-template tier in this session  # RESOLVED 2026-08-18: app-template migration (renamed 5.1) EXECUTED 78/78 — dead ref removed
 security_ref: null                  # see envoy-gateway-phase4; AR-055's escalation
                                     # clause keys on THIS phase (the external cutover)
-status: scheduled                   # unblocked 2026-08-15: k8s-gateway 3.7.2/1.8.0
+status: reference                     # was 'scheduled' with window:null — a contradiction:
+                                      # a plan that believes it is scheduled but names no slot
+                                      # silently never runs. 'reference' is the honest state:
+                                      # deliberately outside the window system until its
+                                      # track is activated (P0.4, 2026-08-26).
                                     # (gateway-api v1.5.1, new org). phase0 re-run and
                                     # executed the same day: DNS gates passed twice,
                                     # including the restart-with-CRDs-present gate that

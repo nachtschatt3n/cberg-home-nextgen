@@ -17,7 +17,10 @@ touches:
     - "cifs-plex-media / cifs-jellyfin-media (file RENAMES — media files + their sidecars)"
     - "Plex + Jellyfin TV libraries (re-identification after each show)"
   shared: [media]
-depends_on: [media-episode-backfill-bulk]
+depends_on: [media-episode-backfill]  # was 'media-episode-backfill-bulk', a stage name that
+                                      # never existed as a plan file — so this guard enforced
+                                      # nothing (flagged by every sweep since). Repointed to the
+                                      # programme plan that actually exists (P0.4, 2026-08-26).
 conflicts_with: []
 status: draft
 window: null                          # UNSCHEDULED 2026-08-16. Re-rated to 240m after the audit
