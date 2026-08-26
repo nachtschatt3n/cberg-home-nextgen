@@ -246,6 +246,23 @@ spec:
         #   kubectl exec -n office deploy/sure-web -c web -- printenv AI_RESPONSE_TIMEOUT
         - name: AI_RESPONSE_TIMEOUT
           value: "300"
+        # Vector store (Settings → AI health "hosted vector-store check failed"):
+        # Ollama doesn't implement OpenAI's /v1/vector_stores API, so route
+        # document/PDF search to pgvector instead — Sure's own Postgres image
+        # is pgvector/pgvector:0.8.6-pg16 (extension available, enabled on
+        # first use by VectorStore::Pgvector#ensure_schema!). Embeddings reuse
+        # OPENAI_URI_BASE/OPENAI_ACCESS_TOKEN above (same Ollama host), so no
+        # separate EMBEDDING_URI_BASE/EMBEDDING_ACCESS_TOKEN needed.
+        - name: VECTOR_STORE_PROVIDER
+          value: "pgvector"
+        # nomic-embed-text is the only embedding-capable model pulled on the
+        # Ollama host (confirmed via /api/tags) — mxbai-embed-large (Sure's
+        # default) is not pulled. embedding_length 768 per Ollama, must match
+        # EMBEDDING_DIMENSIONS (the vector_store_chunks column width).
+        - name: EMBEDDING_MODEL
+          value: "nomic-embed-text"
+        - name: EMBEDDING_DIMENSIONS
+          value: "768"
       externalAssistant:
         enabled: false
 
