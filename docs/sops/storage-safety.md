@@ -1,8 +1,8 @@
 # SOP: Storage Safety — Destructive Operations on Persistent Storage
 
 > Description: Pre-flight, guardrails, and recovery procedure for destructive PVC/PV operations on shared-filesystem (CIFS/SMB/NFS) and Longhorn storage classes.
-> Version: `2026.04.26`
-> Last Updated: `2026-04-26`
+> Version: `2026.08.26`
+> Last Updated: `2026-08-26`
 > Owner: `cluster-ops`
 
 | Field | Value |
@@ -54,11 +54,18 @@ kubectl get sc $SC -o yaml | grep -E 'reclaim|subdir|source'
 
 **Decision tree:**
 
-- `subdir == "/"` (or empty, or `..`-traversed) AND `reclaimPolicy == Delete`
-  → **STOP. Do not delete the PVC.** Use one of the two safe paths below.
+- `subdir == "/"` (or empty, or `..`-traversed)
+  → **STOP, regardless of `reclaimPolicy`.** Do not delete the PVC. Use one of
+    the two safe paths below.
+    *This branch deliberately does NOT also require `reclaimPolicy == Delete`.
+    It used to, and that made it unreachable: every class on this cluster is
+    `Retain`, so a root-subdir PVC fell straight through to "safe to delete" and
+    the STOP could never fire. `subdir` is structural; `reclaim` is one
+    `kubectl edit sc` away from turning that same delete catastrophic. Gate on
+    the durable half.*
 - `subdir` is a per-app path (e.g. `/jdownloader`, `data/<app>`) AND `reclaimPolicy == Delete`
   → Acceptable IF the path is fully owned by the PVC's app. Confirm by inspecting share contents under that subdir before deleting.
-- `reclaimPolicy == Retain`
+- `subdir` is a per-app path AND `reclaimPolicy == Retain`
   → Safe to delete the PVC; the underlying data and PV remain. Manual cleanup of the PV (and underlying directory if desired) is a separate explicit step.
 
 **Two safe paths to delete a PVC:**
@@ -88,41 +95,70 @@ If the brief is ambiguous (e.g. "clean up the test resources"), enumerate what e
 
 ### Hard Rule 3 — Dangerous StorageClasses on this cluster
 
-**Subdir = share root (`/`) + `reclaimPolicy: Delete` — catastrophic, full share wipe on any PVC delete:**
+**Every CIFS StorageClass on this cluster is `reclaimPolicy: Retain` (19/19,
+verified live 2026-08-26).** This table used to record 17 of them as `Delete`,
+which had stopped being true. That is not a harmless over-warning: a table wrong
+on most of its rows teaches operators to discount it, and it hides real change —
+if someone flipped a class to `Delete`, the table would have looked identical.
+
+**So read the tiers below as blast radius IF reclaim were ever `Delete`, not as
+today's behaviour.** With `Retain`, a PVC delete leaves the PV `Released` and the
+data intact. `subdir` is the durable property here — it is structural and rarely
+edited — whereas `reclaimPolicy` is one `kubectl edit sc` away from catastrophic.
+That is why Hard Rule 1 now stops on `subdir`, not on the pair.
+
+**Tier 1 — subdir is the SHARE ROOT (`/`). A `Delete` here wipes the entire
+share, including data owned by other apps:**
 
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
-| `cifs-jellyfin-media` | `//192.168.55.240/media` | `/` | Delete ⚠ |
-| `cifs-plex-media` | `//192.168.55.240/media` | `/` | Delete ⚠ |
+| `cifs-jellyfin-media` | `//192.168.55.240/media` | `/` | Retain |
+| `cifs-plex-media` | `//192.168.55.240/media` | `/` | Retain |
 
-**Subdir = entire app share + `reclaimPolicy: Delete` — wipes the whole app share:**
+Both sit on `//192.168.55.240/media`, which also carries Plex, Jellyfin, MakeMKV,
+JDownloader, Tube Archivist and Immich's derived cache. **Never set either to
+`Delete`, and never author a third class this way** (Hard Rule 6).
+
+**Tier 2 — subdir is an app-owned directory. A `Delete` wipes that app's data,
+not the whole share:**
 
 | StorageClass | Source | Subdir | Reclaim |
 |---|---|---|---|
-| `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Delete |
-| `cifs-scrypted-media` | `//192.168.55.240/scrypted` | `/media` | Delete |
-| `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Delete |
-| `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Delete |
-| `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Delete |
-| `cifs-nextcloud-data` | `//192.168.55.240/nextcloud` | `data` | Delete |
-| `cifs-paperless-consume` | `//192.168.55.240/paperless_ngx` | `consume` | Delete |
-| `cifs-paperless-export` | `//192.168.55.240/paperless_ngx` | `export` | Delete |
-| `cifs-paperless-log` | `//192.168.55.240/paperless_ngx` | `log` | Delete |
-| `cifs-paperless-media` | `//192.168.55.240/paperless_ngx` | `media` | Delete |
+| `cifs-frigate-media` | `//192.168.55.240/frigate` | `/media` | Retain |
+| `cifs-scrypted-media` | `//192.168.55.240/scrypted` | `/media` | Retain |
+| `cifs-jdownloader-media` | `//192.168.55.240/media/downloads` | `/jdownloader` | Retain |
+| `cifs-makemkv-media` | `//192.168.55.240/media` | `/Transcode` | Retain |
+| `cifs-tube-archivist-media` | `//192.168.55.240/media/downloads` | `/tube-archivist` | Retain |
+| `cifs-immich-cache` | `//192.168.55.240/media` | `immich-cache` | Retain |
+| `cifs-nextcloud-data` | `//192.168.55.240/nextcloud` | `data` | Retain |
+| `cifs-paperless-consume` | `//192.168.55.240/paperless_ngx` | `consume` | Retain |
+| `cifs-paperless-export` | `//192.168.55.240/paperless_ngx` | `export` | Retain |
+| `cifs-paperless-inbox` | `//192.168.55.240/paperless_ngx` | `inbox` | Retain |
+| `cifs-paperless-log` | `//192.168.55.240/paperless_ngx` | `log` | Retain |
+| `cifs-paperless-media` | `//192.168.55.240/paperless_ngx` | `media` | Retain |
 
-**Safer (`reclaimPolicy: Retain`) — PVC delete leaves data on share:**
+**Tier 3 — app-owned directory, additionally mounted read-only or otherwise
+constrained:**
 
-| StorageClass | Notes |
-|---|---|
-| `cifs-icloud-docker-andrea` | Retain — `//192.168.55.240/backups` `icloud-backup/andrea`; PV must be cleaned up manually |
-| `cifs-icloud-docker-mu` | Retain — `//192.168.55.240/backups` `icloud-backup/mu`; PV must be cleaned up manually. **Moved here 2026-08-08**: this row previously sat in the `Delete` table above, but the class has been `Retain` since commit `f14af609` |
-| `cifs-immich-icloud-backup` | Retain — `//192.168.55.240/backups` `icloud-backup` (**parent**, mounted **read-only** via `ro`); Immich external-library viewer indexes the iCloud originals but cannot write or delete them. PV must be cleaned up manually. **Added 2026-08-08** with the Immich rollout |
-| `cifs-opencode-andreamosteller` | Retain — PV must be cleaned up manually |
-| `cifs-penpot-assets` | Retain — same |
+| StorageClass | Source | Subdir | Reclaim |
+|---|---|---|---|
+| `cifs-icloud-docker-andrea` | `//192.168.55.240/backups` | `icloud-backup/andrea` | Retain |
+| `cifs-icloud-docker-mu` | `//192.168.55.240/backups` | `icloud-backup/mu` | Retain |
+| `cifs-immich-icloud-backup` | `//192.168.55.240/backups` | `icloud-backup` | Retain |
+| `cifs-opencode-andreamosteller` | `//192.168.55.240/opencode` | `/andrea-opencode` | Retain |
+| `cifs-penpot-assets` | `//192.168.55.240/penpot` | `assets` | Retain |
 
-A PVC against any `Delete` class above means the blast radius is the entire `<source>/<subdir>`, **not** the PVC's stated quota. Treat the quota as a cosmetic field — it does not bound deletes.
+`cifs-immich-icloud-backup` is mounted `ro`, so Immich indexes the iCloud
+originals but cannot write or delete them — iCloud stays source of truth.
+`cifs-immich-cache` (Tier 2, added 2026-08-25) holds Immich's *derived* data
+after `/data` moved off Longhorn; it is regenerable, unlike everything else here.
 
-**Update this list** when StorageClasses are added or when their `subdir` / `reclaimPolicy` changes. Re-audit with:
+A PVC's stated quota is **cosmetic** — it does not bound a delete. Blast radius is
+set by `<source>/<subdir>`, always.
+
+**Update this table in the same commit that adds or changes a class** (Hard
+Rule 6). It drifted precisely because the fleet got *safer* — someone moved every
+class to `Retain` — and nobody updated the doc, so nothing was watching. Re-audit:
 
 ```bash
 kubectl get sc -o json | python3 -c '
