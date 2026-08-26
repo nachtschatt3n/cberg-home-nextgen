@@ -560,12 +560,27 @@ def _auto_close_stale_findings(
 
 
 def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
-    """Recompute and store the cycle verdict from the CURRENTLY-OPEN findings,
-    so it matches what the dashboard shows under "open findings".
+    """Recompute and store the cycle verdict from the CURRENTLY-OPEN findings.
 
-    red  = any open critical
-    yellow = any open warning
-    green = none of the above
+    OWNERSHIP-AWARE since 2026-08-26 (P3.1). The previous semantics —
+    red = any open critical — produced 33 red / 2 yellow / 0 green over 30
+    days: with criticals arriving daily and resolving at a 2-day median, red
+    was the permanent state and stopped meaning "act today". Back-tested
+    before flipping: under these semantics 21 of those 33 reds become yellow
+    (owned work in flight), the 12 that stay red are one genuine multi-day
+    stuck period, and one old yellow becomes red because 49 findings sat >4d
+    unplanned while the verdict said yellow — the old semantics under-reported
+    exactly where it mattered.
+
+      red    = something needs a human TODAY:
+               - any CRACK (finding-triage: matched no lane)
+               - any PLAN-lane critical past plan_sla_days with no plan file
+               - triage itself unavailable while criticals are open (a
+                 verdict that cannot see ownership must not claim it)
+      yellow = open criticals/warnings exist but every critical is OWNED:
+               routed to a lane, within SLA. The healthy steady state.
+      green  = no open criticals or warnings at all (the operator's literal
+               goal stays the top state).
 
     "Open" = status IN (new, unchanged) AND severity NOT IN (accepted, clean),
     i.e. post AR-suppression + auto-close. This overrides the provisional
@@ -591,7 +606,14 @@ def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
                     """
                 )
                 crit, warn = cur.fetchone()
-                verdict = "red" if crit else ("yellow" if warn else "green")
+
+        if not crit:
+            verdict = "yellow" if warn else "green"
+        else:
+            verdict = _ownership_verdict(warn)
+
+        with psycopg.connect(dsn) as conn:
+            with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE sweep_cycles SET verdict = %s WHERE cycle_id = %s",
                     (verdict, cycle_id),
@@ -601,6 +623,41 @@ def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
     except Exception as e:  # noqa: BLE001
         print(f"==> verdict reconcile failed: {type(e).__name__}: {e}")
         return None
+
+
+def _ownership_verdict(warn: int) -> str:
+    """red/yellow for a cycle WITH open criticals, by ownership.
+
+    Runs finding-triage.py --no-page (it re-reads the open criticals itself,
+    inheriting SWEEP_PG_DSN from our env) and reads counts + overdue from its
+    JSON. Every failure mode is RED, deliberately: a verdict that cannot
+    establish ownership must never report the calm color — that would be the
+    silent-inert-check family wearing the verdict's clothes.
+    """
+    import json as _json
+    import subprocess as _sp
+    try:
+        pr = _sp.run(
+            [sys.executable, str(SCRIPT_DIR / "finding-triage.py"),
+             "--no-page", "--json"],
+            capture_output=True, text=True, timeout=300)
+        d = _json.loads(pr.stdout or "{}")
+    except Exception as e:  # noqa: BLE001
+        print(f"==> ownership triage failed ({type(e).__name__}: {e}) — "
+              f"criticals open + ownership unknown => red")
+        return "red"
+    counts = d.get("counts") or {}
+    overdue = d.get("overdue_unplanned") or []
+    cracks = counts.get("CRACK")
+    if cracks is None:
+        print("==> triage JSON carried no counts — ownership unknown => red")
+        return "red"
+    if cracks or overdue:
+        print(f"==> verdict red: CRACK={cracks} overdue_unplanned={len(overdue)}")
+        return "red"
+    print(f"==> verdict yellow: all open criticals owned "
+          f"({ {k: v for k, v in counts.items() if v} }), none past SLA")
+    return "yellow"
 
 
 def _git_head() -> str | None:
