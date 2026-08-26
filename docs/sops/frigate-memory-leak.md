@@ -89,6 +89,27 @@ kubectl -n home-automation create job frigate-restart-manual-$(date +%Y%m%d) \
 A Job created with `--from` is standalone and not owned by the CronJob, so
 `concurrencyPolicy: Forbid` does not block it.
 
+**The restart container has NO SHELL.** `rancher/kubectl` ships the kubectl
+binary and nothing else — no `/bin/sh`, no coreutils. The CronJob therefore
+passes `args` only and relies on the image's entrypoint. Do not "helpfully"
+rewrite it as `command: ["/bin/sh","-c", ...]`: that is what it used to be, and
+it could never start —
+
+```
+OCI runtime create failed: exec "/bin/sh": stat /bin/sh: no such file or directory
+```
+
+Because the CronJob had also never fired (created on a Monday with a Sunday
+schedule), `lastScheduleTime` was empty and there were no Jobs to inspect, so the
+mitigation looked correct in every manifest review while being incapable of
+running. If you need multiple commands here, change the image — do not reintroduce
+a shell that is not there.
+
+Consequence of the shell-free form: the Job reports success once the restart is
+**requested**, not once the rollout completes. That is deliberate. The safety net
+is `ContainerRestartMitigationStale`, which asserts the container actually got
+younger rather than trusting this Job's exit code.
+
 ---
 
 ## 5) Examples
@@ -131,7 +152,16 @@ kubectl -n monitoring get prometheusrule container-memory-alerts \
 
 **Cameras must be unaffected.** Compare against a pre-change capture — every
 camera present, `skipped_fps` still 0.0, detector inference speed not materially
-worse. A rise in `skipped_fps` after `MALLOC_ARENA_MAX=1` is the signal that one
+worse.
+
+**Wait at least 8 minutes before judging.** After a restart, individual cameras
+re-negotiate RTSP at different rates and sit at `camera_fps: 0.0` in the meantime,
+logging `Could not find codec parameters for stream 0 ... unspecified size` while
+the watchdog retries. Measured at t+3min this looks like a regression; by t+8min
+all five recover. Two separate restarts on 2026-08-26 each showed a DIFFERENT
+pair of cameras lagging, which is the tell: a real regression from a change like
+`MALLOC_ARENA_MAX` would hit the same cameras every time. Judging at t+3min would
+have reverted a good change. A rise in `skipped_fps` after `MALLOC_ARENA_MAX=1` is the signal that one
 arena is serialising malloc across frigate's threads: revert **that line only**.
 
 ---
