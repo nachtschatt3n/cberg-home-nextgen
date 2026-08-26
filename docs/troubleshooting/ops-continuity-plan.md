@@ -1,6 +1,6 @@
 # Ops-Continuity Plan — autonomous operations that actually run
 
-> Status: **in progress** (Phase 2 of 3). Delete this file when P3.2 closes.
+> Status: **in progress** (mechanisms complete; G1/G2 + weekend renames outstanding). Delete this file when P3.2 closes.
 > Started: 2026-08-26 · Operator-approved plan, validated against SRE/ITIL/
 > k8s-at-home practice + current AIOps research (G1–G4 amendments).
 
@@ -45,6 +45,9 @@ commissioning proof it CAN fire and (b) a standing staleness assertion.
 | — | DECIDE glob fix: "unexpected external ingress" routes to operator judgement | `3332d094` |
 | P1.1/2 | Windows 7→3 (`nightly` 03:30 unattended daily + sat/sun attended); `window-crons.py --render/--check` parity asserted every sweep | `7589b734` |
 | P2.1a | `autonomy-policy.yaml` + derived execution classes (REPORT-ONLY soak); facts backfilled into 5 executable plans; G4 doctrine codified | `3a6ca388` |
+| P2.1b | Class-based autonomy ENFORCED in the window agent; auto_execute retired everywhere (validator-blocked); kill switch = empty the policy classes | `a39d8766` |
+| P3.1 | Ownership-aware verdict flipped (red = unowned/SLA-breach/ownership-unknown; yellow = owned in flight; green = zero). First live run: 2026-08-28 sweep | `0f786bc4` |
+| P3.2 | `controls.yaml` ledger (needle contract) + `docs/sops/control-liveness.md` + doc-check s10 enforcement; 4d planner dispatch collapsed into 4d0 | `fb35142f` |
 | P3.1 prep | 30-day back-test of ownership-aware verdict: 21/33 reds → yellow; the 12 that stay red are the genuine 08-15..18 stuck period; one old yellow was an under-report. 4d SLA needs no tuning | (read-only) |
 
 Seven new regression suites (42 total in `runbooks/tests/run-all.sh`). Three
@@ -53,24 +56,19 @@ pinned.
 
 ## Remaining
 
-- **P2.1b (enforcement, AFTER the weekend GOs execute):** window agent Step 3
-  keys on execution_class + window `mode`; delete `auto_execute`,
-  `unattended_allowed`, `max_unattended_risk`; rename weekend windows to
-  `sat-attended`/`sun-attended` (blocked until longhorn @ 08-29 and talos @
-  08-30 execute — renaming an id orphans a live GO).
 - **G1:** `minimum_release_age` in `auto-update-policy.yaml` (waived for
-  CVE-driven bumps) + enforcement in the safe-update lane. Supply-chain
-  cooldown per Renovate guidance.
-- **G2:** AUTO-BACKUP-GATED's runtime gate = scratch-restore PROOF (pgbackrest_auto
-  pattern), not a freshness timestamp. Applies to the two postgres 17→18 plans.
-- **G4:** codify in autonomy-policy: telemetry may inform diagnosis, never
-  select or widen an action; autonomous actions only from registered allowlists.
-- **P3.1:** flip `_reconcile_verdict` to ownership semantics (red = unowned /
-  SLA breach / pipeline-integrity failure; yellow = owned in flight; green =
-  zero open criticals). Calibration done — see back-test above.
-- **P3.2:** `runbooks/controls.yaml` ledger + `docs/sops/control-liveness.md`
-  + doc-check section asserting every listed control names an existing
-  assertion; quarterly restore drill as a standing control; deletions.
+  CVE-driven bumps) + enforcement in the safe-update lane, with tests.
+  auto-update.py is the most safety-critical script — deserves its own
+  focused session.
+- **G2:** the automated scratch-restore probe (`backup_gate`) for
+  AUTO-BACKUP-GATED plans; upgrades the manual quarterly Restore Drill
+  (log in control-liveness.md, next due 2026-11-26). The two postgres 17→18
+  plans (expected from the 2026-08-28 sweep's planner dispatch) adopt it.
+- **Weekend-gated:** `sat-early`→`sat-attended` / `sun-window`→`sun-attended`
+  renames after the 08-29/08-30 GOs execute; `first_runs_supervised` tracking
+  begins with the first AUTO-classed plan.
+- **Close-out:** delete this file once the above land and one full week of
+  nightly windows + two sweeps have run clean under the new semantics.
 
 ## Live soak events (first unattended exercises)
 
