@@ -16,7 +16,19 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.08.19.1"
+version: "2026.08.26.1"
+
+# ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
+# An unattended merge waits until the PR's newest Renovate commit is this old.
+# Supply-chain hygiene: poisoned releases are typically yanked within days, so
+# the nightly lane must not merge day-old artifacts. CVE/security-driven bumps
+# are WAIVED (merge at age 0): a known-bad current version outranks an
+# unknown-new one. Unknown age HOLDS. Set 0 to disable the gate.
+minimum_release_age_hours: 48
+
+# deps whose bumps skip the cooldown even without a security marker in the PR
+# (shell globs against depName, same syntax as deny.match). Keep short.
+age_waive: []
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between

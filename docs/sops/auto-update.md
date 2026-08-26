@@ -65,6 +65,7 @@ that SOP has the `vN`-rename fix and the detection command.
      `detect_breaking_changes`. Best-effort: if notes can't be fetched, this
      gate is skipped and the merge relies on G2 + G4 (logged explicitly).
   4. **G4 ci** — PR `mergeable == MERGEABLE` and every CI check green. The
+- **G5 age**: the PR's newest Renovate commit must be ≥ `minimum_release_age_hours` old (48h, policy-set 2026-08-26) — supply-chain cooldown for the nightly unattended lane. CVE/security bumps waive it (age 0); unknown age HOLDS; measured from the newest commit so a retargeted PR cannot inherit its old target's age.
      repo's `flux-local` workflow renders every HelmRelease with Helm on each
      PR, so green = the manifest actually renders. Pending checks → hold this
      cycle (passes next cycle); failing checks → hold.

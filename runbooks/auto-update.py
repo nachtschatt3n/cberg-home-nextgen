@@ -15,6 +15,16 @@ Gates (all must pass) — see runbooks/auto-update-policy.yaml:
                 detect_breaking_changes, so a "patch-but-breaking" bump
                 (affine 0.27.3 env→config.json) is caught even if a human
                 forgot to deny-list it.
+  G5 age      : the PR's newest Renovate commit is at least
+                `minimum_release_age_hours` old (policy; operator set 48h).
+                Supply-chain cooldown: poisoned releases are usually yanked
+                within days, so an unattended merge WAITS unless the bump is
+                security-driven (CVE fixes merge at age 0 — a known-bad
+                current version outranks an unknown-new one). Measured from
+                the newest commit, not PR creation: Renovate retargets open
+                PRs to newer releases, and the new target must not inherit
+                the old target's age. Unknown age HOLDS — a cooldown that
+                cannot be proven has not elapsed.
   G4 ci       : PR mergeable + all required CI checks green. The repo's
                 flux-local workflow renders every HelmRelease with Helm on
                 each PR, so a green check means the manifest actually renders.
@@ -265,6 +275,64 @@ def breaking_signal(checker, dep, new_tag):
         return [], False
 
 
+# ── G5 release-age cooldown ──────────────────────────────────────────────────
+_SEC_MARKERS = ("cve", "security", "vulnerability", "ghsa")
+
+
+def security_waived(pr, policy):
+    """CVE-driven bumps skip the age cooldown (operator: 0 days for CVE fixes).
+    Signals: security markers in the PR title or labels, or an operator
+    `age_waive` glob on the dep."""
+    hay = (pr.get("title") or "").lower() + " " + " ".join(
+        (l.get("name") or "").lower() if isinstance(l, dict) else str(l).lower()
+        for l in (pr.get("labels") or []))
+    if any(m in hay for m in _SEC_MARKERS):
+        return "security-marked PR"
+    import fnmatch as _fn
+    dep = (pr.get("_dep") or "").lower()
+    for pat in (policy.get("age_waive") or []):
+        if _fn.fnmatch(dep, str(pat).lower()):
+            return f"age_waive glob {pat!r}"
+    return None
+
+
+def newest_commit_age_hours(number):
+    """Hours since the PR's newest commit, or None when unknowable."""
+    rc, out, _ = run(["gh", "pr", "view", str(number),
+                      "--json", "commits"], timeout=45)
+    if rc != 0:
+        return None
+    try:
+        commits = json.loads(out or "{}").get("commits", [])
+        newest = max(c.get("committedDate") or c.get("authoredDate") or ""
+                     for c in commits)
+        if not newest:
+            return None
+        from datetime import datetime, timezone
+        ts = datetime.fromisoformat(newest.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    except Exception:
+        return None
+
+
+def age_gate(pr, parsed, policy):
+    """None = pass; else (gate, reason) hold tuple. Fail-safe: unknown HOLDS."""
+    min_age = policy.get("minimum_release_age_hours") or 0
+    if not min_age:
+        return None
+    waiver = security_waived({**pr, "_dep": parsed["dep"]}, policy)
+    if waiver:
+        return None
+    age = newest_commit_age_hours(pr["number"])
+    if age is None:
+        return ("age", f"release age UNKNOWN (cannot prove the {min_age}h "
+                       f"cooldown elapsed) — holding")
+    if age < min_age:
+        return ("age", f"release only {age:.0f}h old (< {min_age}h cooldown); "
+                       f"auto-merges after the cooldown or on a security signal")
+    return None
+
+
 # ── CI / mergeability (G4) ───────────────────────────────────────────────────
 def ci_state(number):
     """Return (ok, detail). ok=True only when mergeable + every check succeeded."""
@@ -319,6 +387,10 @@ def classify(pr, policy, checker):
     blocked = policy_block(policy, parsed["dep"], parsed["update_type"])
     if blocked:
         return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
+    # G5 age (before the expensive gates; cheap policy checks already passed)
+    held = age_gate(pr, parsed, policy)
+    if held:
+        return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
     # G3 breaking
     notes, resolved = breaking_signal(checker, parsed["dep"], parsed["new"])
     if notes:
