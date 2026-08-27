@@ -1,6 +1,6 @@
 # Ops-Continuity Plan — autonomous operations that actually run
 
-> Status: **in progress** (mechanisms complete; G1/G2 + weekend renames outstanding). Delete this file when P3.2 closes.
+> Status: **build complete** (all P0–P3 items landed incl. G1 cooldown a3039874, G2 restore-proof ea084ad9, weekend renames 746eff14; close-out soak remains). Delete this file when P3.2 closes — successor: docs/troubleshooting/p4-continuous-green.md.
 > Started: 2026-08-26 · Operator-approved plan, validated against SRE/ITIL/
 > k8s-at-home practice + current AIOps research (G1–G4 amendments).
 

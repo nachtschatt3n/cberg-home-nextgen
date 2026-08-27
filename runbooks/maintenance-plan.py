@@ -334,7 +334,7 @@ def reconcile(cfg, today):
         "window_liveness": {"missing": liveness_missing,
                             "verified": liveness_verified},
         "cron_parity": {"errors": parity_errors, "verified": parity_verified},
-        "execution_classes": exec_classes,   # REPORT-ONLY until P2.1b
+        "execution_classes": exec_classes,   # ENFORCED since P2.1b (a39d8766)
         "stale": stale,
         "orphan_plans": orphan,
         "awaiting_go": awaiting_go,
@@ -365,7 +365,7 @@ def human(r, cfg):
         L.append("\nall held updates have a plan ✅")
     ec = r.get("execution_classes") or []
     if ec:
-        L.append("\nexecution classes (REPORT-ONLY — enforcement lands with P2.1b):")
+        L.append("\nexecution classes (ENFORCED — window agent executes AUTO-* only, P2.1b):")
         for e in ec:
             L.append(f"  {e['class']:<18} {e['plan_id']:<34} {e['reason']}")
     cp = r.get("cron_parity") or {}
@@ -494,8 +494,12 @@ _WINDOW_REF = __import__("re").compile(r"^([a-z0-9-]+):(\d{4}-\d{2}-\d{2})$")
 # `reference` is the new legal status for plans deliberately OUTSIDE the
 # window system (break-glass contingencies, attended projects). Named exactly
 # what open_queue's tier already called them.
+# `approved` was removed (P4.0.4): no loader ever read it — a plan could sit
+# in `approved` forever, seen by neither the awaiting-go reminder path nor the
+# window agent's Step 1 candidate set. The GO state is `awaiting-go` + a
+# recorded home-operation decision, never a status value.
 VALID_STATUSES = {
-    "draft", "vetted", "scheduled", "awaiting-go", "approved", "awaiting-soak",
+    "draft", "vetted", "scheduled", "awaiting-go", "awaiting-soak",
     "blocked", "executed", "superseded", "reference",
 }
 
@@ -514,7 +518,7 @@ def validate_plans(cfg, plans=None) -> list[str]:
         if st and st not in VALID_STATUSES:
             errs.append(f"{pid}: unknown status {st!r}")
         # a plan that claims a slot must name a real, dated, weekday-consistent one
-        if st in ("scheduled", "awaiting-go", "approved"):
+        if st in ("scheduled", "awaiting-go"):
             if not w:
                 errs.append(f"{pid}: status:{st} but window is null — "
                             f"a slotless '{st}' plan silently never runs "
@@ -628,7 +632,7 @@ def window_liveness(cfg, today):
 
 
 # ---------------------------------------------------------------------------
-# Execution classes (P2.1a — REPORT-ONLY until P2.1b flips enforcement).
+# Execution classes (P2.1a derivation; ENFORCED since P2.1b, a39d8766).
 # Derived from declared plan facts against runbooks/autonomy-policy.yaml.
 # A plan cannot claim a class; it declares capability_change / rollback_class
 # and the policy decides. Fail-safe: no policy, or missing facts => HUMAN-GATED.

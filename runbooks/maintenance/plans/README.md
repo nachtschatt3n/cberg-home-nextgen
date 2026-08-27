@@ -107,7 +107,10 @@ finding_refs: []                  # sweep findings this plan ANSWERS (P2.2). The
                                   # The DETAIL stays in the DB — see "Public repo"
                                   # below. Never inline CVE IDs or counts here.
 status: draft                     # draft | vetted | scheduled | awaiting-go |
-                                  #   executed | blocked | superseded
+                                  #   awaiting-soak | executed | blocked |
+                                  #   superseded | reference
+                                  # (the FULL set — mirrors VALID_STATUSES in
+                                  #   maintenance-plan.py, parity-tested)
                                   # awaiting-go = window agent asked for go/no-go;
                                   # the sweep re-reminds you every cycle until answered
 window: null                      # e.g. "sun-window:2026-07-27" once scheduled

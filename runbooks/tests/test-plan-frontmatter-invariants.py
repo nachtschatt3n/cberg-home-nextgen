@@ -99,6 +99,30 @@ def main() -> int:
     check("malformed window ref -> error",
           v(dict(GOOD, window="saturday morning")), "not <window-id>")
 
+    # `approved` was dropped in P4.0.4 — a status no loader reads must not
+    # silently return
+    check("retired 'approved' status -> error",
+          v(dict(GOOD, status="approved")), "unknown status")
+
+    # status-vocabulary parity (P4.0.4): the plans README must document exactly
+    # VALID_STATUSES, and the window agent's Step 1 load-set must be a subset.
+    # Same needle contract as controls.yaml: prose that drifts silently
+    # documents a different system.
+    readme = (REPO / "runbooks/maintenance/plans/README.md").read_text()
+    missing = [st for st in sorted(mp.VALID_STATUSES) if st not in readme]
+    check("README documents every VALID_STATUSES value",
+          [f"missing from README: {missing}"] if missing else [], None)
+    check("README does not document retired 'approved'",
+          ["README still documents 'approved'"]
+          if "| approved" in readme or "approved |" in readme else [], None)
+    agent = (REPO / ".claude/agents/maintenance-window-agent.md").read_text()
+    import re as _re
+    m2 = _re.search(r"status: ([a-z|-]+)", agent)
+    loadset = set((m2.group(1) if m2 else "").split("|")) - {""}
+    bad = sorted(loadset - mp.VALID_STATUSES) if loadset else ["<no load-set found>"]
+    check("window-agent Step 1 load-set is a VALID_STATUSES subset",
+          [f"outside VALID_STATUSES: {bad}"] if (not loadset or loadset - mp.VALID_STATUSES) else [], None)
+
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} -> {', '.join(FAILURES)}")

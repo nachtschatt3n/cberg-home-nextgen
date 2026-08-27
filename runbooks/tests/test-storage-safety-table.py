@@ -137,6 +137,23 @@ def main() -> int:
     check("no live StorageClasses -> WARNING, never OK",
           sev != OK and "not** verified" in _msgs(f), _msgs(f))
 
+    # --- 7. the corrected STOP gate must be carried by every agent doc that
+    # can touch CIFS PVCs (P4.0.3). The 2026-04-26 wipe rule regressed once
+    # already: media-manager.md kept the unreachable AND-Delete conjunction
+    # after cluster-ops-agent.md was corrected.
+    for rel in (".claude/agents/media-manager.md",
+                ".claude/agents/cluster-ops-agent.md",
+                "AGENTS.md"):
+        text = (REPO / rel).read_text()
+        stop_lines = [ln for ln in text.splitlines()
+                      if "subdir" in ln and "STOP" in ln]
+        ok = bool(stop_lines) and all(
+            ("regardless of" in ln or "whatever" in ln) and
+            not ("AND" in ln and "Delete" in ln and "STOP" in ln.split("AND")[-1])
+            for ln in stop_lines)
+        check(f"unconditional subdir=/ STOP gate present in {rel}", ok,
+              stop_lines or ["<no STOP line found>"])
+
     print()
     if FAILURES:
         print(f"FAILED: {len(FAILURES)} -> {', '.join(FAILURES)}")

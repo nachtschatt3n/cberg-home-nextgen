@@ -36,8 +36,9 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
 
 - **Schedule:** `runbooks/maintenance-windows.yaml` — **3 windows (reshaped
   2026-08-26, P1.1)**: `nightly` 03:30 daily 90m unattended no-reboot (Step 0
-  safe updates now land EVERY night); `sat-early` 09:00 90m attended
-  no-reboot; `sun-window` 09:00 90m attended reboot-capable. The 7/week
+  safe updates now land EVERY night); `sat-attended` 09:00 90m attended
+  no-reboot; `sun-attended` 09:00 90m attended reboot-capable (renamed from
+  `sat-early`/`sun-window` in 746eff14, migrated atomically). The 7/week
   schedule this replaces was fictional capacity — four weekday slots never had
   a driving cron, and plans scheduled into them silently never ran. Every
   window now REQUIRES a driving cron (`window-crons.py --check`, asserted
@@ -124,7 +125,9 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
   in the **morning briefing**, and can **run a plan on say-so** ("run the redis
   upgrade now"). `runbooks/lib/notify.py` (raw Telegram) is only the **fallback**
   when the openclaw pod is unreachable — an alert is never lost. A go/no-go left
-  unanswered **defers** (never hangs, never auto-runs above `max_unattended_risk`);
+  unanswered **defers** (never hangs, never widens autonomy — unattended
+  execution stays limited to plans deriving AUTO-* under
+  `runbooks/autonomy-policy.yaml`);
   the plan sits `status: awaiting-go` and OpenClaw keeps reminding until you
   answer or it's superseded.
 
@@ -200,7 +203,7 @@ Authentik/Homepage/Longhorn objects.
   an `upgrade-planner-agent` per held update). To force one:
   `Task/Agent → upgrade-planner-agent` with the held update's details.
 - **Assign a plan to a window:** set its frontmatter `window: "<id>:<YYYY-MM-DD>"`
-  (e.g. `sun-window:2026-07-27`) and `status: scheduled`.
+  (e.g. `sun-attended:2026-08-30`) and `status: scheduled`.
 - **Run a window:** invoke `maintenance-window-agent` ("run the maintenance
   window"). It vets interference/side effects, sequences, and asks go/no-go.
 - **Trigger at the window time:** the sweep reports upcoming windows so nothing
@@ -236,8 +239,8 @@ Authentik/Homepage/Longhorn objects.
 ### Reconciler output (sweep's schedule check)
 
 ```
-== maintenance schedule · 2026-07-25 · 1 held update(s) ==
-next window: sun-window:2026-07-26 09:00 Europe/Berlin (90m, cap 6, reboot=yes)
+== maintenance schedule · 2026-08-27 · 1 held update(s) ==
+next window: sun-attended:2026-08-30 09:00 Europe/Berlin (90m, cap 6, reboot=yes)
 
 NEEDS A PLAN (1) — dispatch an upgrade-planner-agent for each:
   • ghcr.io/siderolabs/installer v1.13.6→v1.13.7 (PR #194, held:policy) — Talos node image …

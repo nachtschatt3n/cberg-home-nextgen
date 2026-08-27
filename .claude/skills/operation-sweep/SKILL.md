@@ -53,6 +53,11 @@ sections that did not report.
 3. **Update the lists** (this is the "updates" half of the skill):
    - `python3 runbooks/sweep-run.py --reconcile-only` with the cycle id and
      `--ran <sections-that-actually-ran>` — AR suppression + auto-close.
+     NOTE (P4.0.6): `media` is the one section with NO sweep-run step —
+     the media-manager agent writes its findings out-of-band. Include
+     `media` in `--ran` ONLY if that agent reported completion; a
+     caller-declared `--ran` is the sole thing standing between "ran
+     clean" and "never ran" until the media step lands (P4.4.5).
      Auto-close only touches sections that demonstrably ran, and
      `--cycle-id` is now REQUIRED: without it the reconcile mints a fresh
      cycle id that no row can carry, so every open finding in the `--ran`

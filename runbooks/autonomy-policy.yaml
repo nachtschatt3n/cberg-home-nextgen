@@ -44,13 +44,13 @@
 # `autonomy_override: human-gated` in a plan may RESTRICT, never widen.
 #
 # TRACK RECORD (ITIL): a plan CATEGORY earns unattended execution only after
-# `first_runs_supervised` clean supervised runs. Enforcement lands with P2.1b
-# (window agent); the derivation reports the class either way.
+# `first_runs_supervised` clean supervised runs. Enforced by the window agent
+# since P2.1b (a39d8766); the derivation reports the class either way.
 #
-# STATUS: REPORT-ONLY as of 2026-08-26. maintenance-plan.py derives and
-# displays classes; the window agent still executes by its existing rules.
-# The enforcement flip (P2.1b) happens only after the 2026-08-29/30 attended
-# windows execute and the derivation has soaked in reports.
+# STATUS: ENFORCED as of 2026-08-26 (P2.1b, a39d8766). The window agent
+# executes unattended only what derives AUTO-*; everything else is
+# HUMAN-GATED. KILL SWITCH: empty the `classes:` map (or delete this file)
+# => every plan derives HUMAN-GATED.
 # Changes here are code-reviewed; bump `version`.
 version: "2026.08.26"
 

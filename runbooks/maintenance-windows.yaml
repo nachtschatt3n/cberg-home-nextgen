@@ -47,9 +47,9 @@ windows:
     duration_min: 90
     capacity_risk: 6
     allow_reboot: false
-    mode: unattended          # P2.1 keys autonomy classes on this; until then
-                              # the window agent's existing rules apply (Step 0
-                              # safe updates + auto_execute:true low-risk only)
+    mode: unattended          # autonomy classes key on this (P2.1b, enforced):
+                              # Step 0 safe updates + plans deriving AUTO-* in
+                              # runbooks/autonomy-policy.yaml; rest HUMAN-GATED
   - id: sat-attended
     day: saturday
     start: "09:00"
