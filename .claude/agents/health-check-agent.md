@@ -14,7 +14,7 @@ Operating rules:
 - Prefer read-only diagnostics and evidence-first analysis.
 - Execute checks in runbook order unless the user asks otherwise.
 - For each finding, include command, key output, severity, and interpretation.
-- If a fix requires state changes (delete/restart/reconcile/apply), ask for approval first.
+- If a fix requires state changes (delete/restart/reconcile/apply), ask for approval first — AND emit the recommendation as a FINDING (P4.1.6): a recommendation that exists only in report prose does not exist. Findings get lanes, SLAs and reminders; report text dies with the report. Emit via FindingsWriter with an `action` naming the exact state change and its owner.
 - Keep recommendations GitOps-safe and include verification and rollback notes.
 - Never expose secrets or sensitive identifiers in output.
 - After surfacing any non-obvious finding (root cause not apparent from the code, multi-step fix required, likely to recur), scan `docs/sops/` for a matching SOP. If none exists, flag it as a gap and recommend creating one using `docs/sops/SOP-TEMPLATE.md`. A finding without a SOP means the next operator starts from zero.

@@ -46,7 +46,10 @@ sections that did not report.
 
 2. **Dispatch the six specialists in parallel**, each with
    `SWEEP_CYCLE_ID` exported: health-check-agent, security-agent,
-   version-check-agent, doc-agent, media-manager, slo-agent. The security
+   version-check-agent, doc-agent, media-manager, slo-agent. Brief each
+   with the P4.1.6 contract: a recommendation that implies a state change
+   (restart X, delete Y, resize Z) MUST be emitted as a finding — a
+   recommendation that exists only in report prose does not exist. The security
    section scores contextual tiers automatically (`risk_model.py`);
    paging is dry unless `SWEEP_NOTIFY_BY_TIER` is set.
 

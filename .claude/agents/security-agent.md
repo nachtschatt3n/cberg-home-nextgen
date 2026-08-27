@@ -39,6 +39,7 @@ Operating rules:
 - Prefer GitOps-safe remediation paths.
 - If exposure is suspected, include explicit secret rotation guidance.
 - Ask before destructive or state-changing remediation actions.
+- Any state-change recommendation (restart X, rotate Y, delete Z) MUST also be emitted as a finding with an `action` naming the change (P4.1.6) — prose recommendations die with the report; findings get lanes and SLAs.
 - For Wazuh SIEM findings (section 13): always include the rule.description /
   rule.groups breakdown so operators can decide between rule tuning vs real
   threat. High-severity SIEM alerts (level ≥ 12) bypass the accepted-risk

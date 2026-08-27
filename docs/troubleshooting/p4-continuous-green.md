@@ -1,6 +1,6 @@
 # P4 — Autonomy to Continuous Green
 
-> Status: **P4.0 · P4.1.1 · P4.1.2 done** (openclaw-sync.py + alert-record.py live, commissioned 2026-08-28) · rest pending. Delete this file
+> Status: **P4.0 · P4.1.1 · P4.1.2 · P4.1.6 done** (openclaw-sync.py + alert-record.py live, commissioned 2026-08-28) · rest pending. Delete this file
 > when P4.5 closes and the exit criterion has held.
 > Started: 2026-08-28 · Successor to `ops-continuity-plan.md` (P0–P3).
 > Operator-approved plan (2026-08-27/28 review session), validated against
@@ -82,9 +82,10 @@ Reuse `runbooks/lib/notify.py` — no new transport.
 5. **PVC SPOF watchers** — OpenClaw issue store + briefing patch join the
    backup-gate roster; two controls.yaml entries (hits the 15-entry cap —
    prune before any 16th).
-6. **Specialist-recommendation contract** — a state-change recommendation
-   MUST be emitted as a finding; "a recommendation that exists only in report
-   prose does not exist" (sweep skill + specialist docs).
+6. ✅ **Specialist-recommendation contract** (2026-08-28) — a state-change
+   recommendation MUST be emitted as a finding; "a recommendation that exists
+   only in report prose does not exist" (sweep skill + health-check/security
+   agent docs). Prompt contract; enforcement backstop is P4.2's verdict.
 
 ## P4.2 — Warning ownership + verdict v2
 
