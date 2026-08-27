@@ -54,7 +54,16 @@ decides EXPECTED vs SURFACE and **conservatively auto-silences only clear matche
 2. the **`noise_suppressions`** policy table (`runbooks/policy-cli.py noise`);
 3. a **documented recurrence** (e.g. UniFi GC spiral).
 It NEVER auto-silences `critical`/security alerts, scopes silences to the specific
-alert with a short TTL, and SURFACEs everything else. The main loop keeps owning
+alert with a short TTL, and SURFACEs everything else. Since P4.1.2 every
+SURFACE verdict is also **persisted** via `runbooks/alert-record.py` — one
+`sweep_findings` row (section `alert`, fingerprint = alert identity, re-fires
+dedupe) plus one `home-operation` reminder issue keyed on the finding id — and
+the matching Alertmanager `resolved` frame closes both (`--resolved`). A
+SURFACE that lived only in a session report used to die with the session; now
+it has the same owner/SLA substrate as every other finding. (`ws_clients: 0`
+stays a WARNING by design: no session listening is a routine state and the
+Alertmanager→Telegram receiver runs in parallel, so paging on it would be
+alert-fatigue, not signal.) The main loop keeps owning
 the `ws` listen (the agent only rules on what it's handed — see the sub-agent note
 below for why the listen can't move into an agent). Note Alertmanager doesn't even
 notify on *already-silenced* alerts, so the update SOP's pre-silence step keeps the

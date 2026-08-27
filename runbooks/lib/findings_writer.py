@@ -119,6 +119,10 @@ SEVERITY_MAP = {
 VALID_SECTIONS = {
     "health", "security", "version", "doc",
     "media", "smarthome", "slo", "infra", "carry",
+    # "alert" (P4.1.2): SURFACE'd Alertmanager alerts persisted by
+    # runbooks/alert-record.py — ad-hoc cycles, never part of a sweep's
+    # EXPECTED_SECTIONS, so absence is not a gap.
+    "alert",
 }
 
 _RE_DIGITS    = re.compile(r"\d+")

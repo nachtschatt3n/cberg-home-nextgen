@@ -1,6 +1,6 @@
 # P4 — Autonomy to Continuous Green
 
-> Status: **P4.0 done · P4.1.1 done** (openclaw-sync.py live, commissioned both ways 2026-08-28) · rest pending. Delete this file
+> Status: **P4.0 · P4.1.1 · P4.1.2 done** (openclaw-sync.py + alert-record.py live, commissioned 2026-08-28) · rest pending. Delete this file
 > when P4.5 closes and the exit criterion has held.
 > Started: 2026-08-28 · Successor to `ops-continuity-plan.md` (P0–P3).
 > Operator-approved plan (2026-08-27/28 review session), validated against
@@ -61,12 +61,16 @@ Reuse `runbooks/lib/notify.py` — no new transport.
    unreachable → `ingest_or_notify` Telegram fallback + loud non-zero exit.
    Test: `test-openclaw-sync-payload.py` (`--dry-run` prints JSON, execs
    nothing); commission against a scaled-down pod.
-2. **`runbooks/alert-record.py`** — alert-triage-agent invokes on every
-   SURFACE: finding via `findings_writer.py` (section `alert`, fingerprint =
-   alert identity → re-fires dedupe) + home-operation issue; `--resolved`
-   closes both. SURFACE'd alerts inherit lanes/SLAs/ownership from existing
-   machinery. Plus `AlertBridgeNoListener` PrometheusRule + controls.yaml
-   entry so `ws_clients: 0` stops being a mere warning.
+2. ✅ **`runbooks/alert-record.py`** (2026-08-28) — alert-triage-agent invokes
+   on every SURFACE: finding via `findings_writer.py` (section `alert`,
+   fingerprint = alert identity `(alertname, ns, instance-key)` → re-fires
+   dedupe, pods are record-only) + home-operation issue; `--resolved` closes
+   both. Commissioned live: synthetic alert round-tripped (record → row +
+   reminder; resolve → both closed). DEVIATION from the draft: the planned
+   `AlertBridgeNoListener` PrometheusRule was dropped — `ws_clients: 0` is a
+   routine state (no session open) with the Telegram receiver as the standing
+   parallel path; paging on it would alert on normalcy. It stays a
+   health-check warning.
 3. **awaiting-go terminal escalation** — home-operation `tick`: after 3
    unanswered escalations (~72h) record a `deferred` decision-of-record
    (silence can only defer, never approve), rebase plan to next same-mode

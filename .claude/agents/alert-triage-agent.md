@@ -69,6 +69,22 @@ Return SURFACE items clearly so the main loop escalates them to the operator; th
 main loop keeps owning the Monitor `ws` listen — you only ever rule on what it
 hands you.
 
+**Every SURFACE verdict MUST also be persisted (P4.1.2)** — a verdict that
+exists only in this report dies with the session, and the alert goes back to
+having no owner and no SLA:
+
+```bash
+.venv/bin/python3 runbooks/alert-record.py   --alertname <alertname> --namespace <ns> --severity <warning|critical>   --why "<the one-line why>" --owner <owning agent you named>   [--instance-key "<discriminator>"] [--pod <pod>]
+```
+
+One row + one OpenClaw reminder per alert identity `(alertname, ns,
+instance-key)` — re-fires dedupe by fingerprint. Pass `--instance-key` when one
+alertname covers many subjects (KumaMonitorDown → the monitor name from the
+summary); pods churn and are record-only. Exit 2 = the finding or the reminder
+did NOT persist — say so in your report, never swallow it. When the main loop
+hands you the matching `resolved` event later, run the same identity with
+`--resolved` to close both.
+
 ## Delegation
 You do not deploy or change manifests. For a SURFACE alert that needs a fix,
 name the owning agent (cberg-agent/cluster-ops-agent, ha-agent, unifi-agent,
