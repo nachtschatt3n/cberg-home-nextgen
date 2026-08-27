@@ -229,6 +229,15 @@ done: <x> applied, <y> awaiting-go, <z> blocked"}'`) so the operator always gets
 close-out even when nothing needed a decision. OpenClaw surfaces it in the
 briefing.
 
+Then run the scripted issue-set reconcile (P4.1.1) so plans this window
+executed/resolved drop their reminders immediately instead of waiting for the
+next sweep — save `maintenance-plan.py --json` to a file and:
+
+```bash
+.venv/bin/python3 runbooks/openclaw-sync.py --plan-json <that file>
+# exit 2 = sync degraded — note it in the close-out summary, never ignore it.
+```
+
 **Record the run in `window_runs` — EVERY run, no exceptions (P1.3):**
 
 ```bash

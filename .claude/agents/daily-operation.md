@@ -264,29 +264,24 @@ needs their decision, and what got auto-fixed.
       ingest the `awaiting_go` plans + any `warnings`, then reconcile so cleared
       issues auto-close:
 
-          # one ingest per awaiting_go plan (key on plan_id), then reconcile the set.
-          # ALL maintenance plan-issues MUST use source:"maintenance" exactly — the
-          # reconcile keys on it, so any other source (e.g. "maintenance-window")
-          # strands the issue as an un-reconcilable stale reminder.
-          kubectl -n ai exec deploy/openclaw -c app -- \
-            /home/node/.openclaw/bin/home-operation ingest --json '<[{key:plan_id, kind:go_no_go, action:"approve,deny,defer", source:"maintenance", title, component, target, window, plan_path}, ...]>'
-          # Reconcile BOTH sources (belt-and-suspenders against any stray emitter
-          # that used "maintenance-window"): the --open set is plan-file-derived
-          # (maintenance-plan.py open_issue_keys = plans whose file still exists and
-          # status not in executed/superseded), so executed+removed plans auto-close
-          # regardless of how they were executed (cron OR out-of-band interactive).
-          for src in maintenance maintenance-window; do
-            kubectl -n ai exec deploy/openclaw -c app -- \
-              /home/node/.openclaw/bin/home-operation reconcile --source "$src" \
-              --open '<open_issue_keys from maintenance-plan.py --json>'
-          done
+          # SCRIPTED since P4.1.1 — do NOT hand-roll the kubectl exec calls.
+          # openclaw-sync.py builds the payloads (go_no_go with approve/deny/
+          # defer, source:"maintenance"), reconciles BOTH legacy sources over
+          # open_issue_keys, and falls back to raw Telegram + exit 2 if the
+          # pod is unreachable. Save the two --json outputs you already
+          # produced in 4d/4e and hand them over (also pass --coverage-json
+          # from 4d0 — it owns the REBUILD-lane issues):
+          .venv/bin/python3 runbooks/openclaw-sync.py \
+            --plan-json <maintenance-plan.py --json output (file)> \
+            --triage-json <finding-triage.py --json output (file)> \
+            --coverage-json <coverage.py --json output (file)>
+          # exit 0 = synced; exit 2 = DEGRADED — report it as a ⚠️ row, the
+          # findings still carry their DB lanes either way.
 
-      Optionally also ingest `warnings` as `kind:window_warning` awareness issues.
-      If the openclaw pod is unreachable, fall back to a single
-      `python3 runbooks/lib/notify.py "🔔 <N> maintenance plan(s) await go/no-go"`
-      so nothing is lost. Still list `awaiting_go` + `warnings` as ⚠️ rows in the
-      table. OpenClaw does the actual escalating reminders (its `tick` cron) —
-      the sweep only keeps its issue set in sync.
+      Still list `awaiting_go` + `warnings` as ⚠️ rows in the table. OpenClaw
+      does the actual escalating reminders (its `tick` cron) — the sweep only
+      keeps its issue set in sync, and the sync is now a script that fails
+      loudly instead of prose that fails silently.
     - **Do NOT execute upgrades here.** Running a window is the
       `maintenance-window-agent`'s job (vets interference + side effects,
       sequences, operator go/no-go). The sweep only plans + schedules + reports.
@@ -319,9 +314,12 @@ needs their decision, and what got auto-fixed.
       evidence and why it cannot be done unattended. The planner writes a plan
       under `runbooks/maintenance/plans/` and touches nothing.
     - **DECIDE** — an operator judgement (accept the risk, change behaviour).
-      Ingest into OpenClaw `home-operation` as a `go_no_go` issue exactly as 4d
-      does, `source:"maintenance"`, so it gets escalating reminders instead of
-      being re-printed daily.
+      Ingested by the SAME `openclaw-sync.py` call as 4d (pass the triage
+      `--json` output as `--triage-json`), under its OWN source `"triage"` —
+      NOT `"maintenance"`: 4d's reconcile uses plan-ids as the open set, so a
+      DECIDE issue filed under "maintenance" would be auto-closed one sweep
+      after it was opened. The script owns the source-isolation; do not
+      hand-ingest.
     - **CRACK** — matched nothing. `no_cracks` MUST be true. If false, emit a
       CRITICAL `coverage` finding AND page via OpenClaw: a critical finding with
       no owner is the exact failure this rule exists to prevent.

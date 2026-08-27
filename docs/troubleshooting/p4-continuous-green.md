@@ -1,6 +1,6 @@
 # P4 — Autonomy to Continuous Green
 
-> Status: **P4.0 done** (this commit) · P4.1–P4.5 pending. Delete this file
+> Status: **P4.0 done · P4.1.1 done** (openclaw-sync.py live, commissioned both ways 2026-08-28) · rest pending. Delete this file
 > when P4.5 closes and the exit criterion has held.
 > Started: 2026-08-28 · Successor to `ops-continuity-plan.md` (P0–P3).
 > Operator-approved plan (2026-08-27/28 review session), validated against
@@ -52,7 +52,7 @@ Principle: every ingest that today lives as instruction text becomes a script
 the prompt merely invokes (the `window-crons.py --check` migration, again).
 Reuse `runbooks/lib/notify.py` — no new transport.
 
-1. **`runbooks/openclaw-sync.py`** — one idempotent reconciler, run every
+1. ✅ **`runbooks/openclaw-sync.py`** (2026-08-28) — one idempotent reconciler, run every
    sweep + window close-out, three subjects, all glue over existing `--json`
    outputs: awaiting-go plans (`maintenance-plan.py --json`), DECIDE-lane
    findings (`finding-triage.py --json`), REBUILD-lane components
