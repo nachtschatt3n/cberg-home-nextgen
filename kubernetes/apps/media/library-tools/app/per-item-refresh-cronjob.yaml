@@ -41,7 +41,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: per-item-refresh
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/per_item_refresh.py"]
               env:
                 - name: PLEX_URL

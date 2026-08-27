@@ -25,7 +25,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: coverage
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/metadata_coverage.py"]
               env:
                 - name: PLEX_URL

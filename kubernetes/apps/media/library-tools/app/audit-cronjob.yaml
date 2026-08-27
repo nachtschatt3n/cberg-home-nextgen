@@ -21,7 +21,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: audit
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/audit.py"]
               env:
                 - name: MEDIA_ROOT

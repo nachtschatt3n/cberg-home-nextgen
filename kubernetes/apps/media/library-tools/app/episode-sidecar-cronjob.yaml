@@ -33,7 +33,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: episode-sidecar
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/episode_sidecar.py"]
               env:
                 - name: MEDIA_ROOT

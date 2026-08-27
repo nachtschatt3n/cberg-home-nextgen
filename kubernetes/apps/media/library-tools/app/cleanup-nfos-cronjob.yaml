@@ -30,7 +30,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: cleanup-nfos
-              image: python:3.11-slim
+              image: python:3.14.7-slim
               command: ["python", "/app/cleanup_nfos.py"]
               env:
                 - name: MEDIA_ROOT
