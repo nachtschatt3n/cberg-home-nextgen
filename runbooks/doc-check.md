@@ -469,6 +469,33 @@ for sc in json.load(sys.stdin)["items"]:
         print(f"{sc[\"metadata\"][\"name\"]:32} reclaim={sc.get(\"reclaimPolicy\"):8} subdir={p.get(\"subdir\")}")'
 ```
 
+## 10. Control Ledger — Every Control Has a Live Watcher
+
+**Objective**: Verify every control in `runbooks/controls.yaml` names a watching
+assertion that still EXISTS in git. A ledger row pointing at a deleted alert
+rule or removed check is exactly the silent-inert-control failure the ledger
+exists to catch. Pure-repo check — no cluster access needed.
+
+Full convention: `docs/sops/control-liveness.md`.
+
+**Commands:**
+
+```bash
+# Runs as section 10 of the doc sweep
+python3 runbooks/doc-check.py
+
+# Manual inspection
+cat runbooks/controls.yaml
+```
+
+**Severity:**
+- 🔴 Critical if the ledger is missing, unparseable, or empty
+- 🔴 Critical if a control declares no watcher, its watcher file is gone, or
+  the named assertion no longer appears in that file
+- 🟡 Warning if the ledger exceeds ~15 entries (prune mechanisms, don't grow it)
+
+---
+
 ## Report Generation
 
 The automated script (`doc-check.py`) generates `runbooks/doc-check-current.md` automatically.

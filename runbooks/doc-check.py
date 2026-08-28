@@ -1795,7 +1795,22 @@ SECTION_NAMES = [
     "README & CLAUDE.md Currency",
     "Coding Guidelines & Rules",
     "Runbook Coverage",
+    "Storage Safety Table vs Live StorageClasses",
+    "Control Ledger",
 ]
+
+
+def section_name(i: int) -> str:
+    """1-based section title. Falls back visibly instead of crashing the report.
+
+    Two sections (s9, s10) were each added without extending SECTION_NAMES, so
+    write_report died on an IndexError AFTER all checks had run — no report, no
+    findings persisted, section recorded INCOMPLETE every cycle. A forgotten
+    name must degrade to a placeholder in the report, never kill the run.
+    """
+    if 1 <= i <= len(SECTION_NAMES):
+        return SECTION_NAMES[i - 1]
+    return f"Section {i} (name missing from SECTION_NAMES)"
 
 
 def s9_storage_safety_table() -> tuple[str, Findings, str]:
@@ -1977,7 +1992,7 @@ def write_report(timestamp: str, results: list[tuple[str, Findings, str]]) -> No
     doc.append("| # | Section | Status | Findings |\n")
     doc.append("|---|---------|--------|----------|\n")
     for i, (status, findings, _) in enumerate(results, 1):
-        name = SECTION_NAMES[i - 1]
+        name = section_name(i)
         doc.append(f"| {i} | {name} | {status} | {findings.summary_cell()} |\n")
 
     # Overall assessment
@@ -1993,14 +2008,14 @@ def write_report(timestamp: str, results: list[tuple[str, Findings, str]]) -> No
 
     # Detailed sections
     for i, (status, findings, body) in enumerate(results, 1):
-        name = SECTION_NAMES[i - 1]
+        name = section_name(i)
         doc.append(f"## {i}. {name}\n\n**Status: {status}**\n\n")
         doc.append(body)
         doc.append("\n---\n\n")
 
     # Priority actions
-    criticals = [(SECTION_NAMES[i], f) for i, (s, f, _) in enumerate(results) if s == CRITICAL]
-    warnings  = [(SECTION_NAMES[i], f) for i, (s, f, _) in enumerate(results) if s == WARNING]
+    criticals = [(section_name(i), f) for i, (s, f, _) in enumerate(results, 1) if s == CRITICAL]
+    warnings  = [(section_name(i), f) for i, (s, f, _) in enumerate(results, 1) if s == WARNING]
 
     if criticals or warnings:
         doc.append("## Priority Actions\n\n")
