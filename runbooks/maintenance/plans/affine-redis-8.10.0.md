@@ -1,11 +1,12 @@
 ---
-plan_id: affine-redis-8.10.0
+plan_id: affine-redis-8.10.0      # kept from original generation (refresh 2026-08-28;
+                                  # window/tracking references key on this id — do not rename)
 component: affine-redis
 pr: null                          # coverage.py needs_plan — no open Renovate PR
 kind: image
-current: "8.8.0-alpine"
-target: "8.10.0-alpine"
-update_type: minor
+current: "8.10.0-alpine"
+target: "8.10.1-alpine"
+update_type: security             # upstream classifies 8.10.1 urgency SECURITY (patch step)
 risk: low
 est_duration_min: 10
 needs_reboot: false
@@ -18,59 +19,74 @@ touches:
   shared: []                       # dedicated redis (ClusterIP affine-redis:6379); no shared cache/DB/storage/ingress
 depends_on: []
 conflicts_with: []                 # keep out of the same window as any future affine-app plan (see Interference)
-security_ref: null
+security_ref: null                 # no sweep finding dispatched this refresh; driver is the
+                                   # upstream security-classified patch, detail stays upstream (see §1)
+capability_change: false
+rollback_class: git-revert
+finding_refs: []
 status: draft
 window: null                       # window agent assigns — any no-reboot weekday slot (mon/tue/wed/thu/fri/sat)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
   - docs/sops/application-update.md
-generated: "2026-08-16"
+generated: "2026-08-28"            # refreshed; original plan (8.8.0→8.10.0) generated 2026-08-16
 ---
 
-# affine-redis 8.8.0-alpine → 8.10.0-alpine
+# affine-redis 8.10.0-alpine → 8.10.1-alpine
 
 ## 1) Summary & why held
 
 `affine-redis` is a **stock Docker Hub `redis` image** run as AFFiNE's ephemeral
-cache/queue. Only its image tag moves here: `redis:8.8.0-alpine → 8.10.0-alpine`
-(a minor upstream Redis bump). The AFFiNE application image
-(`ghcr.io/toeverything/affine:0.27.3`) is **not** touched by this plan.
+cache/queue. Only its image tag moves here: `redis:8.10.0-alpine →
+8.10.1-alpine` (upstream patch step). The AFFiNE application image
+(`ghcr.io/toeverything/affine`) is **not** touched by this plan.
 
-**Why it was held — almost certainly a false positive.** `coverage.py` surfaced
-this from the full version universe (no open Renovate PR) and attributed the hold
-to the `*affine*` deny rule in `runbooks/auto-update-policy.yaml`, whose stated
-reason is:
+**Refresh history (2026-08-28).** The original edition of this plan targeted
+`8.8.0 → 8.10.0`; that bump has since landed (deployed image verified
+`redis:8.10.0-alpine`, pod Ready 0 restarts, manifest tag matches). Upstream
+then released **8.10.1**, so the version sweep flagged the plan stale. Ground
+truth re-verified against Docker Hub on 2026-08-28: `8.10.1-alpine` → HTTP 200;
+**`8.10.2-alpine` → 404 and `8.11.0-alpine` → 404** — 8.10.1-alpine is the
+newest published 8.10.x/alpine tag. Do NOT plan or bump toward "8.10.2"; that
+tag does not exist. `plan_id` retained from the original generation so window
+tracking stays continuous.
+
+**What 8.10.1 is.** Upstream marks the 8.10.1 release urgency **SECURITY** — a
+patch release consisting of security remediations, with no documented bug fixes,
+breaking changes, persistence-format changes, or protocol/command changes.
+Item-level detail lives in the upstream redis 8.10.1 GitHub release notes and is
+**deliberately not restated here** (public-repo vulnerability-disclosure rule —
+see `docs/sops/vulnerability-disclosure.md`). Deployment context that bounds the
+exposure: this redis is a **dedicated ClusterIP cache** (`affine-redis:6379`,
+LAN-only cluster, single trusted client), runs **without TLS** and **without any
+persistence** (`--save "" --appendonly "no"`, no PVC), so it never loads RDB
+payloads at all — several of the patched classes simply have no code path here.
+Treat the bump as prompt hygiene, not an emergency.
+
+**Why it was held — still a policy false positive.** No open Renovate PR;
+`coverage.py` attributes the hold to the `*affine*` deny rule in
+`runbooks/auto-update-policy.yaml`:
 
 > "affine chart/image bumps carry breaking env→config.json changes even on patch
 > tags (0.27.3) — hold for manual review."
 
 That reason is about the **AFFiNE server image's** env → `config.json` migration
-surface. It has **nothing to do with the plain upstream Redis cache image**,
-which carries no AFFiNE config semantics. The glob simply also catches the
-`affine-redis` HelmRelease name.
+surface. It has nothing to do with the plain upstream Redis cache image; the
+glob simply also catches the `affine-redis` HelmRelease name.
 
 **Why the residual risk is genuinely low:**
 - The redis container runs **with no persistence at all** — verbatim args
-  `--save "" --appendonly "no"` (see `redis-helmrelease.yaml`). There is **no
-  PVC**, no RDB, and no AOF. So the Redis release-note breaking-change classes
-  that matter (RDB/AOF on-disk format, persistence config directives) **do not
-  apply** — nothing is read from or written to disk across the restart.
-- AFFiNE uses it as a standard cache/pub-sub over `affine-redis:6379`; the
-  commands involved are long-stable across Redis majors, let alone an 8.8→8.10
-  minor.
-- Redis 8.10 release notes (as of 2026-08) describe additive features (e.g.
-  compact-hash encoding) and performance work, not a command/protocol break for
-  a basic cache client.
+  `--save "" --appendonly "no"` (see `redis-helmrelease.yaml`). No PVC, no RDB,
+  no AOF: on-disk-format change classes cannot apply across the restart.
+- AFFiNE uses it as a standard cache/pub-sub over `affine-redis:6379`; a
+  same-minor patch step carries no command/protocol movement.
+- Upstream documents 8.10.1 as fixes-only (see above), no behavioural change.
 
-Both tag endpoints are published: `redis:8.8.0-alpine` and `redis:8.10.0-alpine`
-return HTTP 200 on Docker Hub (note `8.9.0-alpine` is 404 — the published minor
-step is 8.8 → 8.10, so the bump is correct, not a skipped patch).
-
-The proper long-term fix is to tighten the deny rule so it does not swallow the
-sidecar (e.g. scope it to the affine app image, or add a `max:` / allow-list for
-`affine-redis`); that is an **operator/policy change, out of scope for this plan**
-— flagged for the window agent to raise.
+The proper long-term fix is still to tighten the deny rule so it does not
+swallow the sidecar (scope it to the affine app image, or allow-list
+`affine-redis`); that is an **operator/policy change, out of scope for this
+plan** — flagged again for the window agent to raise.
 
 ## 2) Pre-checks
 
@@ -81,7 +97,7 @@ cd /Users/mu/code/cberg-home-nextgen
 kubectl get pods -n office | grep -E 'affine(-pg|-redis)?-'
 flux get helmreleases -n office | grep -E 'affine(-pg|-redis)?\b'
 
-# b) confirm what is actually running now (expect redis:8.8.0-alpine)
+# b) confirm what is actually running now (expect redis:8.10.0-alpine)
 kubectl get deploy -n office affine-redis \
   -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 
@@ -90,9 +106,14 @@ kubectl get deploy -n office affine-redis \
   -o jsonpath='{.spec.template.spec.containers[0].command}{"\n"}'
 kubectl get pvc -n office | grep -i redis || echo "no redis PVC (expected)"
 
-# d) target tag exists
-curl -s -o /dev/null -w '8.10.0-alpine -> %{http_code}\n' \
-  https://hub.docker.com/v2/repositories/library/redis/tags/8.10.0-alpine
+# d) target tag exists — and the phantom next tag still does not.
+#    8.10.1-alpine MUST return 200. If 8.10.2-alpine has started returning 200
+#    since 2026-08-28, upstream moved again: STOP and refresh this plan rather
+#    than executing against a superseded target.
+curl -s -o /dev/null -w '8.10.1-alpine -> %{http_code}\n' \
+  https://hub.docker.com/v2/repositories/library/redis/tags/8.10.1-alpine
+curl -s -o /dev/null -w '8.10.2-alpine -> %{http_code} (expect 404)\n' \
+  https://hub.docker.com/v2/repositories/library/redis/tags/8.10.2-alpine
 
 # e) baseline for the §4 contents assertion — what this redis holds under
 #    normal load (it is non-persistent, so this is a LOAD baseline, not a
@@ -106,7 +127,7 @@ flux get kustomizations -n flux-system | grep -E 'office|affine' || true
 ```
 
 Proceed only if the stack is Ready, redis shows `--save "" --appendonly no`, no
-redis PVC exists, and the target tag returns 200.
+redis PVC exists, and `8.10.1-alpine` returns 200 (with `8.10.2-alpine` still 404).
 
 ## 3) Steps (GitOps)
 
@@ -120,18 +141,20 @@ No alert silence or rollback-disable needed (low-risk, non-migration sidecar) �
    # spec.values.controllers.main.containers.app.image
              image:
                repository: redis
-               tag: 8.10.0-alpine   # was 8.8.0-alpine
+               tag: 8.10.1-alpine   # was 8.10.0-alpine
                pullPolicy: IfNotPresent
    ```
 
-2. Commit + push (work directly on `main`, no feature branch):
+2. Commit + push (work directly on `main`, no feature branch; `--only` so a
+   concurrent session's staged hunks cannot ride along):
    ```bash
    cd /Users/mu/code/cberg-home-nextgen
-   git add kubernetes/apps/office/affine/app/redis-helmrelease.yaml
-   git commit -m "chore(affine): redis sidecar 8.8.0-alpine -> 8.10.0-alpine (ephemeral cache, non-persistent)
+   git commit --only kubernetes/apps/office/affine/app/redis-helmrelease.yaml \
+     -m "chore(affine): redis sidecar 8.10.0-alpine -> 8.10.1-alpine (upstream security patch; ephemeral cache, non-persistent)
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_012bXdxrZGGHNy5e4RnF6seD"
+   git show --stat HEAD   # verify: exactly this one file
    git push
    ```
 
@@ -150,7 +173,7 @@ kubectl get helmrelease -n office affine-redis \
 
 # new image is live
 kubectl get deploy -n office affine-redis \
-  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # expect redis:8.10.0-alpine
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # expect redis:8.10.1-alpine
 
 # redis pod Ready, 0 restarts after settle
 kubectl get pods -n office | grep affine-redis
@@ -197,7 +220,7 @@ kubectl get pods -n office | grep -E 'affine-[0-9a-f]'
 kubectl logs -n office deploy/affine --since=3m | grep -iE 'redis|econnrefused|error' | tail -20 || true
 ```
 
-Success = affine-redis HR Ready, image `redis:8.10.0-alpine`, redis pod 0
+Success = affine-redis HR Ready, image `redis:8.10.1-alpine`, redis pod 0
 restarts after ~2 min, **the set/get round-trip returns the written value,
 `connected_clients` > 0, and `dbsize` climbs back above 0 once Affine is
 exercised**, and Affine loads a document in the browser (a brief error burst
@@ -208,18 +231,19 @@ deliberately non-persistent, session loss across the swap is expected too — se
 ## 5) Rollback
 
 Single-file revert — the change is one image tag; the cache is disposable so
-there is no data to restore.
+there is no data to restore. (Rollback target is `8.10.0-alpine`, the currently
+deployed and known-good tag.)
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
-git revert --no-edit <commit-sha>     # or restore tag: 8.8.0-alpine in redis-helmrelease.yaml
+git revert --no-edit <commit-sha>     # or restore tag: 8.10.0-alpine in redis-helmrelease.yaml
 git push
 ```
 
 Confirm recovery:
 ```bash
 kubectl get deploy -n office affine-redis \
-  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # back to redis:8.8.0-alpine
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'   # back to redis:8.10.0-alpine
 kubectl get pods -n office | grep affine-redis                    # Ready, 0 restarts
 kubectl get helmrelease -n office affine-redis \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
@@ -246,7 +270,12 @@ kubectl get helmrelease -n office affine-redis \
   are verified independently — today no such plan exists, so `conflicts_with: []`.
 - **No reboot, no operator presence required.** Fits any no-reboot weekday slot
   (mon/tue/wed/thu/fri/sat); Sunday's reboot-capable window is not needed. Risk
-  weight 1 (low) — trivially fits `capacity_risk: 6`.
+  weight 1 (low) — trivially fits `capacity_risk: 6`. Being an upstream
+  security-classified patch, prefer the **next available** slot over deferral.
+- **Version drift guard.** This plan was already refreshed once because the
+  target moved under it (8.10.0 executed, 8.10.1 released). Pre-check (d)
+  re-asserts the tag frontier at execution time; if `8.10.2-alpine` exists by
+  then, refresh the plan instead of executing.
 - **Policy flag for the operator/window agent:** the `*affine*` deny rule is
   over-broad — it holds this stock-redis sidecar under a reason written for the
   AFFiNE server image. Consider narrowing the rule in
