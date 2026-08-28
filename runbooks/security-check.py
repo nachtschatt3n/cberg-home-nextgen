@@ -244,6 +244,18 @@ def _scope() -> str:
 # check-all-versions.py's classifier; the two must not drift.
 _TRANSIENT_HTTP = {408, 425, 429, 403}
 
+# Operator decision 2026-08-28: UniFi threat management (IDS/IPS) is DISABLED
+# on the controller — it cost too much gateway performance. With the feature
+# off, the alarm feed has nothing to serve (`stat alarm` 404s/empty), so
+# probing it every sweep recorded a DEGRADED coverage gap that kept the whole
+# security section INCOMPLETE and permanently vetoed stale-finding auto-close
+# — for a signal that is deliberately absent. Report N/A instead of probing.
+# Flip to True if IDS/IPS is ever re-enabled (compensating signals that still
+# run while off: evil-twin rogue-AP scan, admin-access audit, Wazuh SIEM
+# slices, firewall posture). Closes the F-e545073a loop — the 404 was the
+# disabled feature, not a moved endpoint.
+UNIFI_IPS_ENABLED = False
+
 
 def _is_transient(exc: Exception) -> bool:
     """True when `exc` is a retry-worthy blip rather than a permanent defect."""
@@ -3765,8 +3777,13 @@ def s11_unifi() -> tuple[str, Findings, str]:
             return None
 
     # IPS/IDS alarms — active threat-management events
-    alarms = _unifi_json("stat alarm")
-    if alarms is None:
+    if not UNIFI_IPS_ENABLED:
+        # Feature disabled by operator (see UNIFI_IPS_ENABLED) — the feed is
+        # deliberately absent, so this is N/A, not a coverage gap.
+        cprint(C.GREEN, "  🟢 IPS/IDS disabled by operator decision (2026-08-28, performance) — alarm feed N/A")
+        lines.append("IPS/IDS alarms: N/A — threat management disabled by operator (performance, 2026-08-28)\n")
+        alarms = None
+    elif (alarms := _unifi_json("stat alarm")) is None:
         cprint(C.YELLOW, "  🟡 Could not read UniFi IPS/IDS alarms (stat alarm)")
         lines.append("IPS/IDS alarms: query failed\n")
     elif alarms:
