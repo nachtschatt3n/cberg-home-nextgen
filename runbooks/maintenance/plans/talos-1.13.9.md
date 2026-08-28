@@ -33,10 +33,16 @@ touches:
 depends_on: []
 conflicts_with:
   - longhorn-1.12.1-engine            # both cycle Longhorn volumes; never the same window
-status: awaiting-go                   # the 2026-08-24 GO was scoped to sun-window:2026-08-23,
+status: scheduled                     # OPERATOR GO 2026-08-26T17:40Z for sun-attended:2026-08-30,
+                                      # recorded in OpenClaw (decision=approve, decided_by=operator,
+                                      # exec_state=pending) and RE-CONFIRMED by the operator
+                                      # 2026-08-28. The file was left at awaiting-go after that GO,
+                                      # so maintenance-plan.py — which reads plan status alone and
+                                      # never cross-checks `decisions --pending-exec` — re-paged an
+                                      # already-answered question for two days (F-0c639ada).
+                                      # The 2026-08-24 GO was scoped to sun-window:2026-08-23,
                                       # which passed with 0 plans executed; voided 2026-08-26
-                                      # (resolve --by superseded) and a FRESH go/no-go issued for
-                                      # sun-window:2026-08-30. A GO does not survive its window.
+                                      # (resolve --by superseded). A GO does not survive its window.
 window: "sun-attended:2026-08-30"       # only allow_reboot:true slot; conflicts_with longhorn-1.12.1-engine (scheduled tue-early:2026-08-25, different day)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
