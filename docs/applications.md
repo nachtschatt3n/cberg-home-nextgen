@@ -20,7 +20,7 @@
 | home-automation | 20 |
 | databases | 11 |
 | monitoring | 13 |
-| office | 13 |
+| office | 11 |
 | media | 5 |
 | download | 2 |
 | kube-system | 11 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **123** |
+| **Total** | **121** |
 
 ---
 
@@ -248,7 +248,7 @@
 | wazuh-manager-master | Single-node Wazuh Manager — agent enrollment (1515), comms (1514), REST API (55000), UniFi syslog/CEF (UDP 514, LB IP 192.168.55.27). 10Gi (live: 20Gi) single PVC with subPath layout. Cluster mode disabled. Custom decoder sets mounted at `etc/decoders/{unifi,ingress-nginx}` + matching `etc/rules/` dirs (each path listed explicitly in `ossec.conf` — `<decoder_dir>` is non-recursive); ingress-nginx decoder lifts `cf_connecting_ip` from CRI-wrapped JSON for true-source-IP correlation, uses the bare reserved `<status>` match element (not `<field name="status">`, which crashes analysisd at startup with "Field 'status' is static"). Runbook: [wazuh-unifi-syslog.md](../runbooks/wazuh-unifi-syslog.md) | None | — |
 | wazuh-dashboard | Wazuh SIEM web UI (4.14.5). API connection pre-registered via mounted wazuh.yml (`run_as: false`) | Internal + Authentik SAML SSO | Security |
 | wazuh-agent | DaemonSet — one privileged Wazuh agent per cluster node, enrolled with stable identity `k8s-nuc14-{01,02,03}` (pinned via `WAZUH_AGENT_NAME=$(NODE_NAME)` so DaemonSet rollouts don't create zombie agent IDs; manager `<auth><purge>yes</purge>` reuses the same ID on re-enrollment). Collects FIM (rootcheck on `/etc /usr/bin /usr/sbin /bin /sbin /boot`), Talos node logs (kubelet, kernel, machined, containerd, cri), Kubernetes pod stdout via `/host/var/log/containers/*.log` (every CRI log on the node, except `wazuh-*` and `longhorn-manager-*` to avoid feedback loops), and Falco syscall events from `/var/run/falco/falco.log`. 4.14.5, AR-023 + AR-025. | None | — |
-| falco | DaemonSet — runtime syscall monitoring on every node via modern_ebpf driver (Talos kernel ≥5.8, no kmod build). JSON-formatted events written to `/var/run/falco/falco.log` and tailed by wazuh-agent. Wazuh rules `100400-100404` map Falco priorities to alert levels; rules `100410` (suppress wazuh-* daemon FIM-cycle reads), `100411` (suppress cilium-cni plugin invocations) and `100412` (suppress postgres pg_isready liveness probes — perl wrapper reads /etc/shadow) silence the dominant false-positive families. Chart `falcosecurity/falco@9.1.0`, AR-026. | None | — |
+| falco | DaemonSet — runtime syscall monitoring on every node via modern_ebpf driver (Talos kernel ≥5.8, no kmod build). JSON-formatted events written to `/var/run/falco/falco.log` and tailed by wazuh-agent. Wazuh rules `100400-100404` map Falco priorities to alert levels; rules `100410` (suppress wazuh-* daemon FIM-cycle reads), `100411` (suppress cilium-cni plugin invocations) and `100412` (suppress postgres pg_isready liveness probes — perl wrapper reads /etc/shadow) silence the dominant false-positive families. Companion `falco-log-rotate` DaemonSet (busybox, plain manifest `log-rotate-daemonset.yaml`) truncates `/var/run/falco/falco.log` on each node so the hostPath log cannot grow unbounded. Chart `falcosecurity/falco@9.1.0`, AR-026. | None | — |
 
 ---
 
