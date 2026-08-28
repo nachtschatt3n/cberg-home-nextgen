@@ -204,6 +204,17 @@ spec:
           # Scope TIGHTLY to the media-ns immich-upload-migrate pod running a
           # copy tool (rsync/cp/tar) — any other dropped binary in that pod, a
           # different pod name, or another namespace still fires.
+          #
+          # esphome ESP32 firmware build: the esphome pod (home-automation ns,
+          # ghcr.io/esphome/esphome) downloads its ESP-IDF xtensa toolchain into
+          # /root/.cache/esphome/ at build time, so every compiler exec
+          # (cc1plus, xtensa-esp-elf-g++, ...) runs from a writable overlay
+          # layer and is "not part of base image" -> 9865 level-12 events/24h,
+          # 100% of the SIEM critical tier (finding F-2804f72b, operator-approved
+          # 2026-08-28). Legitimate firmware compilation, lineage
+          # esphome->containerd-shim. Scope TIGHTLY to the esphome image
+          # executing from its build-tool cache -- a dropped binary anywhere
+          # else in that pod (e.g. /tmp) still fires.
           condition: >
             and not (
               proc.name in (dpkg, dpkg-trigger, dpkg-deb, dpkg-split, dpkg-reconfigure, apt, apt-get, apt-config, py3compile) or
@@ -216,7 +227,8 @@ spec:
               container.name in (install-openclaw, mount-cgroup, apply-sysctl-overwrites) or
               (container.name = nextcloud and (proc.exepath startswith /tmp/appimage_extracted or proc.name in (coolwsd, coolforkit, coolforkit-ns, coolmount))) or
               (k8s.ns.name = ai and k8s.pod.name startswith mcpo and container.name = runtime-setup and container.image.repository = docker.io/library/python) or
-              (k8s.ns.name = media and k8s.pod.name startswith immich-upload-migrate and proc.name in (rsync, cp, tar))
+              (k8s.ns.name = media and k8s.pod.name startswith immich-upload-migrate and proc.name in (rsync, cp, tar)) or
+              (k8s.ns.name = home-automation and container.image.repository = ghcr.io/esphome/esphome and proc.exepath startswith /root/.cache/esphome/)
             )
           override:
             condition: append
