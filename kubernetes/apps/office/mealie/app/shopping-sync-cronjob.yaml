@@ -20,6 +20,17 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      # Garbage-collect finished Jobs an hour after they end. Without this a
+      # single genuinely-failed Job (all `backoffLimit` attempts exhausted --
+      # seen 2026-08-29 05:05 and 2026-08-30 04:20, both times because the
+      # Alexa-backed HA todo entity was momentarily unavailable and Home
+      # Assistant answered the service call with a 500) is retained by
+      # `failedJobsHistoryLimit` and keeps `kube_job_failed` at 1 forever, so
+      # KubeJobFailed pages indefinitely for an outage that already healed --
+      # it needs three MORE failures to age out, which is backwards. An hour is
+      # long enough to inspect the pod logs, and a genuinely broken sync still
+      # pages continuously because it produces a fresh failed Job every 5 min.
+      ttlSecondsAfterFinished: 3600
       template:
         spec:
           restartPolicy: Never
