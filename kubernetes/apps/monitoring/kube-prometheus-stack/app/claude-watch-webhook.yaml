@@ -22,7 +22,14 @@ spec:
     receiver: claude-webhook
     groupBy: [alertname]
     groupWait: 1s
-    groupInterval: 5s
+    # 1m, not the original 5s. groupBy is [alertname], so ANY change in a
+    # group's membership re-sends the whole group -- with several flapping
+    # instances of one alertname (2026-08-29: five KumaMonitorDown monitors
+    # bouncing for hours) a 5s interval re-notified every few seconds and
+    # buried the signal. 1m keeps the watcher responsive while collapsing a
+    # flap storm into one event per minute. Nothing is hidden: groupWait stays
+    # at 1s so the FIRST notification of a new alert is still immediate.
+    groupInterval: 1m
     repeatInterval: 4h
     matchers: []            # all alerts
   receivers:
