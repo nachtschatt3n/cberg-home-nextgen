@@ -273,7 +273,15 @@ upload). Env vars do not hot-reload: cluster consumers need a
 | arag-web (PaperlessSyncJob / DeductibleAnalysisJob / ReductionAnalysisJob) | `office` ns | `kubernetes/apps/office/arag-web/app/secret.sops.yaml` → `PAPERLESS_API_KEY` (envFrom) | mathiasuhl | health-insurance-agent | in-pod: ruby `Net::HTTP` GET `$PAPERLESS_API_URL/documents/?page_size=1` with `Token $PAPERLESS_API_KEY`; also grep pod logs for `Paperless API error 401` |
 | mcpo (paperless MCP tools for LibreChat/Open WebUI) | `ai` ns | `kubernetes/flux/components/common/cluster-secrets.sops.yaml` → `PAPERLESS_API_KEY`, postBuild-substituted into `kubernetes/apps/ai/mcpo/app/secret.sops.yaml` (`paperless-api-key`) → env `PAPERLESS_API_KEY`. **Two-hop: rotate cluster-secrets, then reconcile flux-system BEFORE mcpo** | mathiasuhl | cluster-ops-agent | in-pod: python `urllib` GET `/api/documents/?page_size=1` with the env token |
 | arag-scrape menubar/scraper (Mac mini) | Mac mini, not git-tracked | `/Users/mu/code/arag-scrape-ios/data/menubar_config.json` → `paperlessToken` (passed as `--token` to `arag-scraper paperless-push`) | mathiasuhl | health-insurance-agent | `curl -H "Authorization: Token <cfg value>" <paperlessURL>/documents/?page_size=1`. **Latent-failure trap:** the push step returns success without authenticating when nothing is pending — a green cycle does NOT prove the token works |
-| *(vestigial)* `PAPERLESS_TOKEN` key in `kubernetes/apps/office/paperless-ngx/app/secret.sops.yaml` | `office` ns | consumed by **nothing** (leftover from the retired paperless-gpt/paperless-ai sidecars); still holds the dead 2026-08 token | — | cberg-agent (remove the key) | n/a |
+| *(removed 2026-08-30)* `PAPERLESS_TOKEN` key in the paperless-ngx secret | `office` ns | was consumed by nothing (leftover from retired paperless-gpt/paperless-ai); key deleted per operator decision | — | — | n/a |
+
+> **Operator decision (2026-08-30): ONE shared API token by design.** All
+> consumers authenticate with the same mathiasuhl token; per-consumer tokens
+> were considered after the Aug-27 silent breakage and explicitly declined.
+> Do not re-propose token-per-consumer in audits; the mitigation of choice is
+> this consumer table + the §6a token canary, which turn a future rotation
+> into a checklist walk of every row.
+
 
 The `andreauhl` token has no known repo/Mac consumer (personal use only).
 
