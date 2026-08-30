@@ -36,15 +36,20 @@ spec:
       - name: mariadb
         image: mariadb:11.8.9
         imagePullPolicy: IfNotPresent
-        # Charset PIN — do not drop. MariaDB 11.5+ initialises a fresh datadir
-        # as utf8mb4/uca1400, but the retired server and every restored table
-        # are utf8mb3/utf8mb3_general_ci. Without this the entrypoint would
-        # create the `paperless` database as utf8mb4 while the dump restores
-        # utf8mb3 tables into it — a silently mixed schema. Converting
-        # paperless to utf8mb4 is a separate migration (index prefix lengths).
+        # Charset PIN — do not drop. 2026-08-30: whole schema converted to
+        # utf8mb4/utf8mb4_general_ci (all tables + DATABASE default) after a
+        # 4-byte emoji in a mail subject broke every mail-processing cycle
+        # with OperationalError 1366 on paperless_mail_processedmail.subject
+        # (utf8mb3 cannot store 4-byte UTF-8). The old "index prefix lengths"
+        # deferral was unfounded on MariaDB 11.x: the varchar(1024) unique
+        # indexes on documents_document are long-unique HASH indexes with no
+        # key-length limit, so CONVERT succeeded cleanly. These args keep the
+        # server default in lockstep so future Django migrations create
+        # utf8mb4 tables. Invariant check: docs/sops/paperless.md
+        # (post-update verification).
         args:
-        - --character-set-server=utf8mb3
-        - --collation-server=utf8mb3_general_ci
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_general_ci
         - --innodb-file-per-table=1
         env:
         - name: MARIADB_DATABASE
