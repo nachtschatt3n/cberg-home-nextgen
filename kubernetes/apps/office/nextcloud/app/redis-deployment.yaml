@@ -11,8 +11,9 @@
 # of them carrying a TTL (the ~800 in the plan was the retired instance under
 # load; size memory from the live figure, not that one). Nothing durable
 # survives a restart by design. The old longhorn-static PV
-# `redis-data-nextcloud-redis-master-0` is kept (Retain) purely as the
-# rollback path for the bundled chart redis.
+# `redis-data-nextcloud-redis-master-0` was kept (Retain) as the rollback
+# path for the bundled chart redis; deleted 2026-08-30 once the cutover was
+# 11 days stable. It held only cache contents, so there was nothing to lose.
 #
 # Deliberately NO --requirepass: parity with the retired instance's
 # `auth.enabled: false` posture, so this cutover stays a pure registry move.

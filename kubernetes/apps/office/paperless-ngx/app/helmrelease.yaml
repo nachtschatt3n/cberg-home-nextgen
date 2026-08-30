@@ -194,7 +194,9 @@ spec:
     # mariadb image deployed by db-deployment.yaml in this folder.
     # Server charset is PINNED to utf8mb3/utf8mb3_general_ci there to match the
     # retired server — utf8mb4 is a separate migration.
-    # The retired volume paperless-mariadb is kept (Retain) as the rollback path.
+    # The retired volume paperless-mariadb was the rollback path; deleted
+    # 2026-08-30 after verifying the logical dump landed intact (see
+    # db-deployment.yaml in this folder for the evidence).
     mariadb:
       enabled: false
     # Bundled Bitnami redis retired 2026-08-18: bitnamilegacy is an ARCHIVED

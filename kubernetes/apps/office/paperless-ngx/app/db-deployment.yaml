@@ -9,7 +9,11 @@
 # series. The datadir moved from /bitnami/mariadb/data to /var/lib/mysql and
 # the runtime uid from 1001 to 999, so the data came across as a logical dump
 # into a fresh volume (paperless-db-data). The retired volume
-# paperless-mariadb is kept, Retain, as the rollback floor.
+# paperless-mariadb was kept, Retain, as the rollback floor; deleted
+# 2026-08-30 after verifying the dump landed: 798 of 963 documents predate
+# the cutover, oldest 1980-12-10, with 51 tags / 179 correspondents / 2287
+# tag links intact, and ZERO documents added in the 4h window between the
+# volume's last backup and the cutover -- so it held nothing this DB lacks.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

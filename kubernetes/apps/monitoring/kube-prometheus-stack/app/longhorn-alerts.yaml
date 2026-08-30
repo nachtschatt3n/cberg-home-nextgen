@@ -77,8 +77,9 @@ spec:
           # A detached volume is IDLE, not broken. The bare
           # longhorn_volume_state{state="detached"} fired continuously on the
           # rollback PVs the bitnamilegacy migrations deliberately keep
-          # (nextcloud-db-data, paperless-mariadb,
-          # redis-data-nextcloud-redis-master-0 — all reclaim=Retain, bound, no
+          # (nextcloud-db-data; paperless-mariadb and
+          # redis-data-nextcloud-redis-master-0 were deleted 2026-08-30 once
+          # their cutovers were verified — all reclaim=Retain, bound, no
           # consumer): 3 permanent warnings for zero problems. This is the same
           # false positive the sweep's health-check carried until bd74a478 —
           # a second detector with the identical bug.
