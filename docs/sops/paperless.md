@@ -257,6 +257,26 @@ Run all three after every image/chart bump of `paperless-ngx` or roll of
    (the varchar(1024) unique indexes on `documents_document` are long-unique
    HASH indexes on MariaDB 11.x — no key-length limit, CONVERT is safe).
 
+### 6b) Paperless API token consumers (rotation checklist)
+
+Every consumer of a paperless API token. **When a token is rotated or dies,
+walk EVERY row** — on 2026-08-30 only openclaw was rotated at first and the
+other three carriers of the dead token stayed silently broken for days
+(arag-web logged 4,400+ `401 Invalid token`; the Mac scraper's breakage was
+latent because `paperless-push` only authenticates when it has something to
+upload). Env vars do not hot-reload: cluster consumers need a
+`kubectl rollout restart` after the SOPS change reconciles.
+
+| Consumer | Where | Credential location | Paperless user | Owning agent | Verify (expect HTTP 200) |
+|---|---|---|---|---|---|
+| openclaw (paperless skill; also the source the `runbooks/mealie-import.md` export step points at) | `ai` ns | `kubernetes/apps/ai/openclaw/app/secret.sops.yaml` → `PAPERLESS_TOKEN` | mathiasuhl | openclaw-agent | `kubectl exec -n ai <openclaw-pod> -- paperless search <term>` |
+| arag-web (PaperlessSyncJob / DeductibleAnalysisJob / ReductionAnalysisJob) | `office` ns | `kubernetes/apps/office/arag-web/app/secret.sops.yaml` → `PAPERLESS_API_KEY` (envFrom) | mathiasuhl | health-insurance-agent | in-pod: ruby `Net::HTTP` GET `$PAPERLESS_API_URL/documents/?page_size=1` with `Token $PAPERLESS_API_KEY`; also grep pod logs for `Paperless API error 401` |
+| mcpo (paperless MCP tools for LibreChat/Open WebUI) | `ai` ns | `kubernetes/flux/components/common/cluster-secrets.sops.yaml` → `PAPERLESS_API_KEY`, postBuild-substituted into `kubernetes/apps/ai/mcpo/app/secret.sops.yaml` (`paperless-api-key`) → env `PAPERLESS_API_KEY`. **Two-hop: rotate cluster-secrets, then reconcile flux-system BEFORE mcpo** | mathiasuhl | cluster-ops-agent | in-pod: python `urllib` GET `/api/documents/?page_size=1` with the env token |
+| arag-scrape menubar/scraper (Mac mini) | Mac mini, not git-tracked | `/Users/mu/code/arag-scrape-ios/data/menubar_config.json` → `paperlessToken` (passed as `--token` to `arag-scraper paperless-push`) | mathiasuhl | health-insurance-agent | `curl -H "Authorization: Token <cfg value>" <paperlessURL>/documents/?page_size=1`. **Latent-failure trap:** the push step returns success without authenticating when nothing is pending — a green cycle does NOT prove the token works |
+| *(vestigial)* `PAPERLESS_TOKEN` key in `kubernetes/apps/office/paperless-ngx/app/secret.sops.yaml` | `office` ns | consumed by **nothing** (leftover from the retired paperless-gpt/paperless-ai sidecars); still holds the dead 2026-08 token | — | cberg-agent (remove the key) | n/a |
+
+The `andreauhl` token has no known repo/Mac consumer (personal use only).
+
 **Token-audit gap (known):** token deletions leave **no trail** — deleting or
 regenerating a token in the profile UI kills API consumers silently (no log,
 no event). After suspicious 401s, check
@@ -384,3 +404,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.08.24` | 2026-08-24 | Retire paperless-gpt and paperless-ai in favor of paperless-ngx 3.0.5's native AI module (`ApplicationConfiguration` DB row — `ai_enabled`/`llm_*`/`llm_embedding_*`, `ollama`/`gemma4:26b` + `nomic-embed-text:latest`). Add §4a (native AI operations), document the new manual-vision-review fallback for hard scans, drop vision-OCR/gpt/ai troubleshooting rows and references. |
 | `2026.08.24` | 2026-08-24 | Structural fix for the root-exec index-corruption bug: pin `podSecurityContext`/`securityContext` to `runAsUser/runAsGroup/fsGroup: 1000` in `helmrelease.yaml` so `kubectl exec` defaults to `paperless` instead of root. Verified safe (image supports non-root start natively; CIFS PVCs unaffected; Longhorn data PV already correctly owned) before rollout — see commit `177e9ce5`. Superseded the `gosu paperless`-discipline workaround in the troubleshooting table. |
 | `2026.08.30` | 2026-08-30 | Add §6a post-update verification (API-token canary from the openclaw pod — 401 = token failure, not missing docs; mail-ingestion 1366/login log grep; utf8mb4 charset invariant + SQL one-liner) and the token-audit gap. Root cause fixed same day: replatformed DB was utf8mb3, an emoji mail subject broke every mail cycle — full schema converted to utf8mb4_general_ci, `db-deployment.yaml` server args bumped utf8mb3→utf8mb4. |
+| `2026.08.30` | 2026-08-30 | Add §6b token-consumer table after the dead-token blast-radius audit: the Aug 27-29 token deletion had FOUR carriers (openclaw, arag-web, cluster-secrets→mcpo, Mac menubar config) but only openclaw was rotated at first. All four now aligned; documents the two-hop mcpo substitution, the Mac scraper's latent-failure trap, and the vestigial `PAPERLESS_TOKEN` key in the paperless-ngx secret (removal → cberg-agent). |
