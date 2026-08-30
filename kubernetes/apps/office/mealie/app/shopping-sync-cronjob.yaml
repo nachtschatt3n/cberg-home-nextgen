@@ -40,7 +40,12 @@ spec:
             runAsNonRoot: true
           containers:
             - name: sync
-              image: python:3.13.7-slim
+              # Keep this base image current: the script uses only stdlib
+              # (urllib, json), so it tracks the interpreter freely, and
+              # 3.14.7-slim already runs elsewhere in this cluster. The tag is
+              # inline, so the version checker does not track it and nothing
+              # will bump it for you (security_ref: F-b6a4bf95).
+              image: python:3.14.7-slim
               command: ["python", "/app/sync.py"]
               env:
                 # In-cluster service DNS; neither hop leaves the cluster.

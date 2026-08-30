@@ -105,7 +105,12 @@ spec:
             runAsNonRoot: true
           containers:
             - name: restart
-              image: docker.io/rancher/kubectl:v1.33.4
+              # v1.36.x tracks the cluster (apiserver + all kubelets v1.36.0).
+              # v1.33.4 was THREE minors behind, outside kubectl's supported
+              # +/-1 skew window. Bump this alongside Talos/k8s upgrades --
+              # the tag is inline here, so the version checker does not track
+              # it and nothing will bump it for you (security_ref: F-b6a4bf95).
+              image: docker.io/rancher/kubectl:v1.36.2
               # NO SHELL. rancher/kubectl ships the kubectl binary and nothing
               # else -- no /bin/sh, no coreutils. The previous form here was
               # ["/bin/sh","-c", ...], which could never start:
