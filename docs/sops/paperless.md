@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.08.24`
-> Last Updated: `2026-08-24`
+> Version: `2026.08.30`
+> Last Updated: `2026-08-30`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -207,6 +207,64 @@ process_mail_accounts.delay()
    twice, ~20s apart — the value must advance by `POLL_SECONDS`. A frozen
    heartbeat means the image lost `python3`/`pikepdf` or the CIFS inbox stalled.
 
+### 6a) Post-update verification (after ANY paperless-ngx or paperless-db update)
+
+Run all three after every image/chart bump of `paperless-ngx` or roll of
+`paperless-db`, and after any DB restore.
+
+1. **API-token canary.** From the openclaw pod (`ai` namespace):
+   ```bash
+   OPOD=$(mise exec -- kubectl get pod -n ai -l app.kubernetes.io/name=openclaw \
+     -o jsonpath='{.items[0].metadata.name}')
+   mise exec -- kubectl exec -n ai "$OPOD" -- paperless search ARAG | head -5
+   ```
+   Must return HTTP 200 with results. **A 401 means TOKEN failure — never
+   interpret it as "documents are missing"** (this exact mislabeling happened
+   2026-08-30: a silently deleted server-side token made a healthy library look
+   empty to API consumers). On 401, compare prefixes: pod-side
+   `printenv PAPERLESS_TOKEN | cut -c1-6` vs server-side
+   `Token.objects` in a `manage.py shell` — prefixes only, never print full
+   token values.
+2. **Mail-ingestion check.** Grep the app logs for `paperless_mail` errors —
+   specifically `OperationalError` **1366** (charset) and `mailbox.login`
+   failures:
+   ```bash
+   mise exec -- kubectl logs -n office "$PPOD" -c paperless-ngx --since=30m | \
+     grep -E "1366|OperationalError|mailbox.login|Login failed"
+   ```
+   Background (2026-08-30): the 2026-08-19 DB replatform created/restored the
+   schema as utf8mb3; a 4-byte emoji in a mail subject then broke **every**
+   mail-processing cycle with
+   `(1366, "Incorrect string value ... paperless_mail_processedmail.subject")`
+   — mail ingestion was dead for days while the beat kept reporting normally.
+3. **Charset invariant.** All paperless tables AND the database default must be
+   utf8mb4 (utf8mb4_general_ci). One-liner (in the `paperless-db` pod):
+   ```bash
+   mise exec -- kubectl exec -n office deploy/paperless-db -- sh -c \
+     'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "
+      SELECT table_collation, COUNT(*) FROM information_schema.tables
+        WHERE table_schema=\"paperless\" GROUP BY 1;
+      SELECT default_collation_name FROM information_schema.schemata
+        WHERE schema_name=\"paperless\";"'
+   ```
+   Expected: a single `utf8mb4_general_ci` row covering all tables, and
+   `utf8mb4_general_ci` as the DB default. The enforcing config is the
+   `--character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci` args
+   in `kubernetes/apps/office/paperless-ngx/app/db-deployment.yaml` — do not
+   drop them, or future Django migrations create wrong-charset tables again.
+   Fix for a stray table:
+   `ALTER TABLE paperless.<t> CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;`
+   (the varchar(1024) unique indexes on `documents_document` are long-unique
+   HASH indexes on MariaDB 11.x — no key-length limit, CONVERT is safe).
+
+**Token-audit gap (known):** token deletions leave **no trail** — deleting or
+regenerating a token in the profile UI kills API consumers silently (no log,
+no event). After suspicious 401s, check
+`rest_framework.authtoken.models.Token.objects.count()` and the per-user
+prefixes against what consumers hold. Case: 2026-08-27/29 an out-of-band row
+deletion removed the `mathiasuhl` token; a fresh one was minted 2026-08-30 and
+rotated into openclaw's SOPS secret (commit `b44fc170`).
+
 ---
 
 ## 7) Troubleshooting
@@ -214,6 +272,7 @@ process_mail_accounts.delay()
 | Symptom | Cause | Fix |
 |---|---|---|
 | Emailed PDF never ingested | rule `attachment_type=1` skips **inline** PDFs (forwarded invoices) | set `attachment_type=2` + `filter=*.pdf`; old mail also needs `maximum_age` lifted |
+| Every mail cycle throws `OperationalError (1366, "Incorrect string value: '\xF0...'")` on `paperless_mail_processedmail.subject` | a table (or the whole schema) is utf8mb3 — cannot store 4-byte UTF-8 (emoji in a mail subject); happened 2026-08-30 after the DB replatform restored utf8mb3 | convert to utf8mb4 (see §6a charset invariant); dump the DB first; verify the `db-deployment.yaml` charset args are utf8mb4 |
 | Mail consume `PermissionError /tmp/paperless/paperless-mail-*` | `process_mail_accounts` was run from a **root** shell (root-owned temp) | queue via `.delay()` or let the beat run; never trigger from a root exec |
 | Mail re-run says "No new documents" but INBOX has unread PDFs | UIDs are in the `ProcessedMail` table (even `FAILED`) | delete the `FAILED` rows to reprocess |
 | paperless CrashLoopBackOff, exit 137 OOMKilled | `OCR_MODE=force` re-OCRs a multi-page doc's pages concurrently > mem limit | keep limit **6Gi**; pull the wedging file out of `/consume` via the validator pod to recover |
@@ -324,3 +383,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.08.24` | 2026-08-24 | Add troubleshooting for the root-vs-uid1000 permission bug in `bulk_edit.split()`/`manage.py shell` writes (use `gosu paperless`) and the split chord's silent no-retry-no-delete failure mode — surfaced during the 9-doc/147-recipe HelloFresh/Marley Spoon batch split. |
 | `2026.08.24` | 2026-08-24 | Retire paperless-gpt and paperless-ai in favor of paperless-ngx 3.0.5's native AI module (`ApplicationConfiguration` DB row — `ai_enabled`/`llm_*`/`llm_embedding_*`, `ollama`/`gemma4:26b` + `nomic-embed-text:latest`). Add §4a (native AI operations), document the new manual-vision-review fallback for hard scans, drop vision-OCR/gpt/ai troubleshooting rows and references. |
 | `2026.08.24` | 2026-08-24 | Structural fix for the root-exec index-corruption bug: pin `podSecurityContext`/`securityContext` to `runAsUser/runAsGroup/fsGroup: 1000` in `helmrelease.yaml` so `kubectl exec` defaults to `paperless` instead of root. Verified safe (image supports non-root start natively; CIFS PVCs unaffected; Longhorn data PV already correctly owned) before rollout — see commit `177e9ce5`. Superseded the `gosu paperless`-discipline workaround in the troubleshooting table. |
+| `2026.08.30` | 2026-08-30 | Add §6a post-update verification (API-token canary from the openclaw pod — 401 = token failure, not missing docs; mail-ingestion 1366/login log grep; utf8mb4 charset invariant + SQL one-liner) and the token-audit gap. Root cause fixed same day: replatformed DB was utf8mb3, an emoji mail subject broke every mail cycle — full schema converted to utf8mb4_general_ci, `db-deployment.yaml` server args bumped utf8mb3→utf8mb4. |
