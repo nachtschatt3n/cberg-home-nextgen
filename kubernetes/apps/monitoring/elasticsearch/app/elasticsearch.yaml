@@ -25,14 +25,26 @@ spec:
           containers:
             - name: elasticsearch
               env:
+                # Heap stays at 4g: old gen has peaked at 2.33Gi with zero full
+                # GCs, so this is correctly sized, NOT oversized -- do not trim
+                # it to "fix" container memory. Because -Xms == -Xmx the JVM
+                # commits all 4Gi at start and RSS never falls back, so heap
+                # alone is a permanent floor under the container's usage.
                 - name: ES_JAVA_OPTS
                   value: "-Xms4g -Xmx4g"
+              # 8Gi, not 6Gi. At 6Gi the 4g committed heap was already 67% of
+              # the limit before indexing a single document, and off-heap
+              # (mmap'd Lucene segments over ~43Gi on disk, query cache,
+              # indexing buffers) pinned the container at ~90% permanently --
+              # ContainerMemoryNearLimit fired on a healthy node with heap at
+              # 23-64%. 8Gi restores the ~50% heap-to-container ratio ES
+              # expects, leaving the rest for the filesystem cache.
               resources:
                 requests:
                   cpu: "500m"
-                  memory: "6Gi"
+                  memory: "8Gi"
                 limits:
-                  memory: "6Gi"
+                  memory: "8Gi"
           securityContext:
             fsGroup: 1000
           nodeSelector: {}
