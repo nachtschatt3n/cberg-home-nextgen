@@ -40,9 +40,21 @@ spec:
         severity: warning
     - alert: SolarfocusScraperFailing
       annotations:
-        description: '{{ $value | printf "%.0f" }} navigation_failed or sanity_failed
-          cycles in the last 30 minutes. Check the captured screenshot at
-          solarfocus/scraper/last_error_image and re-calibrate the affected screen.'
+        description: |-
+          {{ $value | printf "%.0f" }} navigation_failed or sanity_failed cycles in
+          the last 30 minutes. Scraper has not completed a cycle. Triage in this order:
+          1. Check sensor.solarfocus_pellet_heater_scraper_status and the
+             solarfocus/alert/active MQTT topic - a heater alert modal blocking
+             navigation is the most common cause and needs a PHYSICAL action on
+             the boiler panel, not a code or config change.
+          2. Check scraper_last_run freshness to confirm the scraper is running
+             at all; the heater is often in idle/power-save and stable sensor
+             values are NOT a fault.
+          3. Check pod logs for alert_detected / navigate_no_safe_back /
+             screen_unknown to identify which stage is stuck, and the captured
+             screenshot at solarfocus/scraper/last_error_image.
+          Do NOT re-calibrate screen hashes as a first response - hashes
+          self-heal at runtime and are almost never the cause.
         summary: Solarfocus scraper failing repeatedly
       expr: |
         sum(increase(solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"}[30m])) > 3
