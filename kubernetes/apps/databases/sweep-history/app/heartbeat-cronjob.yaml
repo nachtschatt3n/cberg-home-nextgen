@@ -30,6 +30,19 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 1
+      # This CronJob is a DETECTOR: it signals "the sweep scheduler is dead" by
+      # exiting 1. That makes its failed Job the alert's only state, and without
+      # a TTL that Job is retained by failedJobsHistoryLimit indefinitely --
+      # KubeJobFailed then keeps firing long after the scheduler is fixed, and
+      # would mask the very recovery it exists to detect. (Same shape as the
+      # mealie-shopping-sync case fixed in 6029d3dd.)
+      #
+      # 21600s == one 6h interval, deliberately. On the next run the Job is
+      # replaced anyway: a still-broken scheduler produces a fresh failed Job
+      # (alert continues, correctly), while a recovered one produces a
+      # successful Job and lets this failure age out promptly. Do not raise
+      # this much above the schedule interval or recovery goes unnoticed.
+      ttlSecondsAfterFinished: 21600
       template:
         spec:
           restartPolicy: Never
