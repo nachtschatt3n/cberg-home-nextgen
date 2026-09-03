@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.08.30`
-> Last Updated: `2026-08-30`
+> Version: `2026.09.03`
+> Last Updated: `2026-09-03`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -39,7 +39,7 @@ metadata curation.
 | Chart / image | gabe565 `paperless-ngx` · app image `3.0.5`. The `scan-inbox-validator` Deployment **reuses the same tag** (it wants only the image's python3 + pikepdf runtime, and overrides the entrypoint) — bump `helmrelease.yaml` and `validator-deployment.yaml` in the SAME commit, or the validator silently keeps running a retired image. |
 | Ingress | `paperless.${SECRET_DOMAIN}` |
 | **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
-| DB / cache | `paperless-db` Deployment + Service — Docker Official `mariadb:11.8.8` on the `longhorn-static` volume `paperless-db-data` (2 replicas; Volume CR hand-applied, charset `utf8mb3`). Bundled MariaDB subchart retired 2026-08-19 — orphaned volume `paperless-mariadb` kept `Retain` as the rollback floor until its clean-week retirement. Cache: standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC — old PV `paperless-redis` kept Retain as rollback) |
+| DB / cache | `paperless-db` Deployment + Service — Docker Official `mariadb:11.8.9` on the `longhorn-static` volume `paperless-db-data` (2 replicas; Volume CR hand-applied, charset `utf8mb4`/`utf8mb4_general_ci` — the §6a invariant, enforced by the `--character-set-server` args in `db-deployment.yaml`). Bundled MariaDB subchart retired 2026-08-19; its rollback volume `paperless-mariadb` was **deleted 2026-08-30** (`aa825d8f`) — there is no rollback floor, the live DB is the only copy. Cache: standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC; the old `paperless-redis` PV is likewise gone) |
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
@@ -413,3 +413,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.08.24` | 2026-08-24 | Structural fix for the root-exec index-corruption bug: pin `podSecurityContext`/`securityContext` to `runAsUser/runAsGroup/fsGroup: 1000` in `helmrelease.yaml` so `kubectl exec` defaults to `paperless` instead of root. Verified safe (image supports non-root start natively; CIFS PVCs unaffected; Longhorn data PV already correctly owned) before rollout — see commit `177e9ce5`. Superseded the `gosu paperless`-discipline workaround in the troubleshooting table. |
 | `2026.08.30` | 2026-08-30 | Add §6a post-update verification (API-token canary from the openclaw pod — 401 = token failure, not missing docs; mail-ingestion 1366/login log grep; utf8mb4 charset invariant + SQL one-liner) and the token-audit gap. Root cause fixed same day: replatformed DB was utf8mb3, an emoji mail subject broke every mail cycle — full schema converted to utf8mb4_general_ci, `db-deployment.yaml` server args bumped utf8mb3→utf8mb4. |
 | `2026.08.30` | 2026-08-30 | Add §6b token-consumer table after the dead-token blast-radius audit: the Aug 27-29 token deletion had FOUR carriers (openclaw, arag-web, cluster-secrets→mcpo, Mac menubar config) but only openclaw was rotated at first. All four now aligned; documents the two-hop mcpo substitution, the Mac scraper's latent-failure trap, and the vestigial `PAPERLESS_TOKEN` key in the paperless-ngx secret (removal → cberg-agent). |
+| `2026.09.03` | 2026-09-03 | Fix the §2 overview DB row, which contradicted this SOP's own §6a charset invariant: image was `mariadb:11.8.8` (live and git are `11.8.9`), charset was `utf8mb3` (converted to `utf8mb4_general_ci` on 2026-08-30, `9cb10b76`), and `paperless-mariadb` was described as a live rollback floor after being deleted 2026-08-30 (`aa825d8f`). Same three facts corrected in `docs/applications.md`. |

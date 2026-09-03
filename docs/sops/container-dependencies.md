@@ -1,8 +1,8 @@
 # SOP: Container Dependency Wait-For Pattern
 
 > Description: Standard pattern for ensuring an app pod waits for its stateful dependencies (Postgres, Redis, Mongo, S3, etc.) to be reachable before its primary container starts. Eliminates cold-start crashloops when dependencies and their consumers reschedule on the same Talos upgrade or node reboot.
-> Version: `2026.05.01`
-> Last Updated: `2026-05-01`
+> Version: `2026.09.03`
+> Last Updated: `2026-09-03`
 > Owner: `cluster-ops`
 
 ---
@@ -112,7 +112,7 @@ mise exec -- kubectl get pods -A --no-headers | awk '$4 == "CrashLoopBackOff"'
 ### Bulk apply (priority order)
 
 Apps that crashlooped after the 2026-04-30 upgrade — apply first:
-- `office/paperless-ngx` (paperless-mariadb, paperless-redis)
+- `office/paperless-ngx` (paperless-db, paperless-redis)
 - `office/nextcloud` (nextcloud-mariadb, nextcloud-redis)
 - `office/penpot` (penpot-postgresql, penpot-redis)
 - `databases/superset` (superset-postgresql, superset-redis)
@@ -229,7 +229,7 @@ mise exec -- kubectl -n <ns> get endpoints <dep-svc>   # verify dep has endpoint
 ### After 2026-04-30 Talos v1.11→v1.13 upgrade
 
 Pods stuck in CrashLoopBackOff post-upgrade because they restarted before their stateful deps:
-- `paperless-ngx` waits for `paperless-mariadb` + `paperless-redis`
+- `paperless-ngx` waits for `paperless-db:3306` + `paperless-redis:6379` (the bundled `paperless-mariadb` subchart was retired 2026-08-19 and its volume deleted 2026-08-30)
 - `affine` waits for `affine-pg` + `affine-redis`
 - `nextcloud` waits for `nextcloud-mariadb` + `nextcloud-redis`
 

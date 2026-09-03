@@ -366,7 +366,10 @@ kubectl get pods -n kube-system -l app=csi-smb-controller
 
 **Deployment:** `kubernetes/apps/home-automation/solarfocus-scraper/`
 **Source:** [`github.com/nachtschatt3n/solarfocus-scraper`](https://github.com/nachtschatt3n/solarfocus-scraper) (separate public repo — MIT)
-**Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper:latest`
+**Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper` — **SHA-pinned**, currently
+`sha-a72e07e`. There is no `:latest` deployment; the tag is bumped by an explicit
+commit, so read the HelmRelease/Deployment for the live value rather than trusting
+this line.
 
 The heater (Solarfocus pellet^top) exposes no Modbus, so we drive its VNC
 touchscreen, OCR the visible values with Tesseract, and publish to MQTT
@@ -374,18 +377,30 @@ with Home Assistant auto-discovery.
 
 ### Architecture
 
-- **State machine** over 9 UI screens (main, auswahlmenü, kundenmenü,
-  betriebsstundenzähler p1–p3, kessel, heizkreise OG, heizkreise
-  Fussbodenheizung, warmwasser). Each screen is fingerprinted by a
+- **State machine** over 13 UI screens (`main`, `auswahlmenue`, `kundenmenue`,
+  `betriebsstunden_p1`–`p3`, `kessel`, `heizkreise_og`, `warmwasser`,
+  `alert_modal`, `heizkreise_fbh`, `saugaustragung`,
+  `automatische_saugsondenumschalteinheit`). Each screen is fingerprinted by a
   sha256 hash of a small static region (title text, version string);
   forward edges are click coordinates; back edges use the top-left back
   arrow (overridable per screen via `back_xy`).
 - **Coordinator** singleton serialises cycles (`try_begin_cycle()` gates
   concurrent `run_cycle` calls to `busy`) and owns the last screenshot
   + all value records for the status page.
-- **36 sensors** published as individual MQTT topics under
+- **40 sensors** published as individual MQTT topics under
   `solarfocus/<field>`; HA auto-discovers them via retained configs on
   `homeassistant/sensor/solarfocus_pellettop/<field>/config`.
+- **Per-field availability.** Each heater sensor carries TWO availability
+  sources with `availability_mode: all` — `solarfocus/scraper/availability`
+  (the whole cycle failed) and `solarfocus/<field>/available` (this one field
+  OCR'd to `None` for N consecutive cycles while the rest of the cycle
+  succeeded). Clearing the retained state topic would NOT achieve this: retain
+  only governs replay to new subscribers, so an already-connected HA keeps the
+  stale value. The scraper's own diagnostic entities (`scraper/status`,
+  `scraper/last_run`, `alert/*`) are deliberately NOT gated this way — they must
+  stay readable precisely when the heater sensors are unavailable, since they
+  are what explain why. Counter `solarfocus_scraper_field_missing_total`
+  tracks the per-field misses on `/metrics`.
 
 ### Endpoints (ClusterIP, port 8080)
 
@@ -401,11 +416,25 @@ with Home Assistant auto-discovery.
 | Topic | Payload | Retained |
 |-------|---------|----------|
 | `solarfocus/<field>` | sensor value (string) | no |
+| `solarfocus/<field>/available` | online \| offline — per-field availability | yes |
+| `solarfocus/scraper/availability` | online \| offline — whole-cycle availability | yes |
 | `solarfocus/scraper/status` | ok \| busy \| navigation_failed \| sanity_failed \| paused | yes |
 | `solarfocus/scraper/last_run` | ISO8601 timestamp | yes |
 | `solarfocus/scraper/pause` | on \| off — read at start of each cycle | yes |
 | `solarfocus/scraper/pause/set` | on \| off — HA writes here, scraper mirrors to `pause` | no |
-| `solarfocus/scraper/last_error_image` | base64 PNG, published on navigation_failed | yes |
+| `solarfocus/alert/active` | on \| off — heater alert modal present (`device_class: problem`) | yes |
+| `solarfocus/alert/title` | most recent alert title | yes |
+| `solarfocus/alert/body` | most recent alert body | yes |
+| `solarfocus/alert/last_seen` | ISO8601 timestamp of the last alert | yes |
+| **`solarfocus-diag/scraper/last_error_image`** | base64 PNG, published on navigation_failed | yes |
+
+> **The failure screenshot lives on a SEPARATE topic prefix.** It moved from
+> `solarfocus/scraper/last_error_image` to `solarfocus-diag/...` in `sha-87ba870`
+> so the ~250 KB retained base64 PNG is no longer redelivered to every
+> `solarfocus/#` subscriber on reconnect (retained dump: 19,224 B → 1,999 B).
+> The old topic still exists but is published empty as a tombstone — subscribing
+> to it during an incident gets you nothing. Prefix is configurable via
+> `MQTT_DIAG_TOPIC_PREFIX` (default `<MQTT_TOPIC_PREFIX>-diag`).
 
 ### Operational notes
 
@@ -416,7 +445,7 @@ with Home Assistant auto-discovery.
   toggles the retained `solarfocus/scraper/pause` topic. Useful when
   servicing the heater via VNC from a laptop.
 - **Navigation failures** capture the full screenshot as base64 and
-  publish it to `solarfocus/scraper/last_error_image` so you can see
+  publish it to `solarfocus-diag/scraper/last_error_image` so you can see
   what the heater was showing when the cycle bailed — usually means a
   firmware redraw shifted something, re-calibrate the affected screen's
   hash via `python main.py calibrate <screen>`.
