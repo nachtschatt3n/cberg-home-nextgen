@@ -24,16 +24,17 @@ spec:
   values:
     controllers:
       otbr:
-        # Scaled to 0 pending SMLIGHT RMA: the SLZB-06P7 Thread coordinator's
-        # Ethernet/LAN port is dead, forcing it onto WiFi. The Thread RCP
-        # spinel-over-TCP handshake can't tolerate the WiFi latency/jitter
-        # (48-378ms, spikes >1.7s) and otbr-agent crashloops
-        # (spinel_driver.cpp:83 Failure). A coordinator reboot didn't help —
-        # it's a hardware port fault. Running the pod just produced a
-        # permanent CrashLoopBackOff + KubeDeploymentReplicasMismatch alert
-        # + Wazuh mDNS noise with zero functional Thread/Matter service.
-        # Restore to 1 once the coordinator is on a wired link.
-        replicas: 0
+        # Re-enabled 2026-09-03 on a WIRED radio. History: the original
+        # SLZB-06P7 (192.168.32.70) lost its Ethernet port in 2026-05 and on
+        # WiFi the spinel-over-TCP RCP link crashlooped otbr-agent
+        # (48-378ms jitter; re-measured 2026-09-03: avg 98ms / max 260ms).
+        # The Thread RCP MUST stay on Ethernet: a flapping TCP RCP leaves
+        # stale routes on this host for up to 30 min and makes Thread devices
+        # unreachable for matter-server (same node). Now points at a second,
+        # Ethernet-attached SLZB-06P7 (192.168.33.238, 0.8ms / 0.5ms jitter
+        # from k8s-nuc14-03). If NETWORK_DEVICE ever moves to a WiFi unit,
+        # scale back to 0 instead.
+        replicas: 1
         pod:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
@@ -48,7 +49,7 @@ spec:
               - name: TZ
                 value: "Europe/Berlin"
               - name: NETWORK_DEVICE
-                value: "192.168.32.70:6638"
+                value: "192.168.33.238:6638"  # SLZB-06P7 "SLZB-06 Matter-over-Thread", Ethernet
               - name: DEVICE
                 value: "/tmp/ttyOTBR"
               - name: BAUDRATE
@@ -90,7 +91,7 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Thread Border Router"
-          gethomepage.dev/description: "OpenThread Border Router for SLZB-06P7"
+          gethomepage.dev/description: "OpenThread Border Router (SLZB-06P7 RCP, 192.168.33.238)"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "thread.png"
         labels:
