@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -115,6 +116,9 @@ def check(windows: list, tz: str, crons: list) -> list[str]:
 
 
 def render(windows: list, tz: str) -> str:
+    # The operations pane label. Changed 2026-09-03 from the historical
+    # daily-operation / server-operation to ai-server-ops.
+    ops_session = os.environ.get("OPERATION_SESSION", "ai-server-ops")
     out = []
     for w in windows:
         wid = w["id"]
@@ -126,8 +130,18 @@ def render(windows: list, tz: str) -> str:
             "  --session isolated \\\n"
             "  --command-argv '[\"sh\",\"-lc\",\"/home/node/.openclaw/bin/"
             f"maintenance-window run --window {wid}\"]' \\\n"
+            # OPERATION_SESSION pins the target pane by exact label. Without
+            # it, maintenance-window falls back to SESSION_CANDIDATES
+            # ["daily-operation", "server-operation"] -- and on 2026-08-27 the
+            # pane carrying those labels was repurposed into an unrelated
+            # conversation. Resolution still SUCCEEDED (the pane was a live
+            # Claude TUI, just the wrong one), so every window prompt was typed
+            # into a Paperless session for six days with no error anywhere.
+            # Pinning the label makes a future relabel fail loudly instead of
+            # silently redirecting the scheduler. See F-8eea4d9e.
             "  --command-cwd /home/node/clawd "
-            "--command-env MAINTENANCE_WINDOW_TRIGGER=cron \\\n"
+            "--command-env MAINTENANCE_WINDOW_TRIGGER=cron "
+            f"--command-env OPERATION_SESSION={ops_session} \\\n"
             "  --no-output-timeout-seconds 600 --timeout-seconds 600 --no-deliver\n")
     return "\n".join(out)
 
