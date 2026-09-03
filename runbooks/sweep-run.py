@@ -434,6 +434,21 @@ def _auto_close_stale_findings(
     Safe to call repeatedly: the WHERE clause excludes already-resolved
     rows and rows that the current cycle touched.
     """
+    # HONOUR THE SAME ENV ESCAPE HATCHES AS findings_writer.py. They were
+    # documented as applying to auto-close generally, but this reconcile path
+    # is a SECOND, independent implementation that read neither of them, so
+    # `SWEEP_AUTOCLOSE_DRYRUN=1` wrote for real here while printing
+    # "auto-closed ... ✓ resolved". On 2026-09-03 that cost four live findings
+    # -- including F-76d1d34e, the finding that documents this class of bug --
+    # closed by an operator who ran the dry-run *specifically* to avoid it.
+    # A safety flag that silently does nothing is worse than no flag: it buys
+    # confidence to proceed. Keep these two checks in sync with the writer.
+    _ac_mode = os.environ.get("SWEEP_AUTOCLOSE", "")
+    if _ac_mode == "0":
+        print("==> auto-close DISABLED by SWEEP_AUTOCLOSE=0 — nothing closed")
+        return []
+    _ac_dryrun = os.environ.get("SWEEP_AUTOCLOSE_DRYRUN", "") == "1"
+
     try:
         import psycopg  # imported lazily so --no-write paths don't need it
     except ImportError:
@@ -538,6 +553,14 @@ def _auto_close_stale_findings(
                 if len(held) > 20:
                     print(f"      … and {len(held) - 20} more held open")
                 if not closeable:
+                    return []
+                if _ac_dryrun:
+                    # Report and write NOTHING. Phrased in the conditional so
+                    # the output can never be mistaken for a completed close.
+                    print(f"==> DRY RUN: would close {len(closeable)} "
+                          f"finding(s); nothing written")
+                    for _cid, _sec, _t in [(c[1], c[2], c[3]) for c in closeable]:
+                        print(f"      would close {_sec}/{_cid}: {_t[:70]}")
                     return []
                 cur.execute(
                     """
