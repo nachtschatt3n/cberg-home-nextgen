@@ -14,8 +14,22 @@ spec:
     groupWait: 1s
     groupInterval: 15m  # Allow grouping similar alerts for 15 minutes
     repeatInterval: 4h   # Repeat every 4 hours if still firing
-    # Match all alerts from any namespace by not specifying namespace matchers
-    matchers: []
+    # SCOPED to category=storage. This used to be `matchers: []`, which matches
+    # EVERY alert -- and monitoring/telegram already does exactly that with the
+    # same `receiver: telegram`. The Prometheus Operator renders each
+    # AlertmanagerConfig as its own top-level route, so the generated config
+    # carried BOTH `- receiver: monitoring/telegram/telegram` and
+    # `- receiver: storage/telegram/telegram` with empty matchers: every
+    # severity=warning alert matched both and was delivered to Telegram TWICE.
+    # Confirmed 2026-09-03 from the running generated secret, and visible to the
+    # operator as duplicate phone messages with identical timestamps.
+    #
+    # Scoping the root here is safe: monitoring/telegram still catches
+    # everything, so nothing loses coverage -- this config now only handles the
+    # storage-specific routing it was written for.
+    matchers:
+      - name: category
+        value: storage
     routes:
       # Suppress Watchdog and InfoInhibitor (synthetic kube-prometheus-stack alerts,
       # not actionable — InfoInhibitor fires whenever any warning alert is active)
