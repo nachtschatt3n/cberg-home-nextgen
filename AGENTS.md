@@ -65,6 +65,38 @@ go/no-go by default — never run fully unattended.
 - Monitor reconciliation events in the Flux system
 - Do not make direct modifications to the Kubernetes cluster
 
+### Exception: app config with no GitOps path (operator-approved 2026-09-03)
+
+Some application config genuinely cannot be reconciled by Flux. The clearest
+case is Home Assistant: `/config` is mounted as a whole PVC
+(`home-assistant-config`, Longhorn) with no ConfigMap covering `packages/`, so
+files like `/config/packages/*.yaml` exist in NO git repository. Committing one
+to this repo would not deploy it -- it would create a second, false source of
+truth that silently diverges from the live file.
+
+**For such files an in-pod edit is the correct path and does NOT need
+per-change approval.** Requirements when you take it:
+
+1. **Prove there is no GitOps path first** -- confirm the file is absent from
+   every repo AND that no ConfigMap/Secret projects it. "I could not find it"
+   is not proof. If a GitOps path exists, use it; this exception does not apply.
+2. **Back up before writing**, using the convention already present in that
+   directory: `<file>.backup.YYYYMMDD_HHMMSS`.
+3. **Validate before writing, not after** -- render/parse the change (for HA
+   templates, `/api/template` covers every branch including the fallback).
+   A template that throws leaves the entity `unavailable`, which is worse than
+   the bug being fixed.
+4. **Reload, do not restart**, where the app supports it (`template.reload`
+   over `ha core restart`) -- see the HA memory-leak-vs-uptime finding.
+5. **Read back and verify** the file is byte-identical to what you intended.
+6. **Say in your report that you edited in-pod and why**, and name the backup
+   path so rollback is one command.
+
+This exception is narrow: it covers app config on a PVC with no GitOps path.
+It does NOT license editing Deployments, HelmReleases, ConfigMaps, Secrets or
+anything else Flux reconciles -- those remain git-only, and a direct edit there
+will be reverted by the next reconcile anyway.
+
 ### Committing in a SHARED worktree (several agents at once)
 
 Multiple sessions routinely work in this one checkout, and **git's index is
