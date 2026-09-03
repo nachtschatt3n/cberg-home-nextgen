@@ -54,10 +54,26 @@ spec:
                 # $$ = Flux postBuild envsubst escaping (cluster-wide substitution)
                 - |
                   set -e
-                  AGE=$$(psql "$$DSN" -tA -c "SELECT COALESCE(EXTRACT(EPOCH FROM now()-MAX(started_at)),1e9)::bigint FROM sweep_cycles")
-                  echo "newest sweep cycle: $${AGE}s ago (limit 259200s = 72h)"
-                  if [ "$$AGE" -gt 259200 ]; then
-                    echo "STALE: no sweep cycle in >72h — Mac-side pipeline is down or wedged"
+                  # trigger='cron' ONLY. sweep_cycles also collects rows from
+                  # alert-triage (trigger='alert') and hand-run sweeps
+                  # (trigger='manual'), and MAX(started_at) over all of them
+                  # reads fresh while the scheduler is dead. That is not
+                  # hypothetical: between 2026-08-28 and 2026-09-03 the cron
+                  # produced NOTHING for six days -- three missed 48h cycles --
+                  # while this heartbeat passed every run, because alert rows on
+                  # 08-28 and manual rows on 08-31 kept resetting the clock. The
+                  # operator found it by noticing dates on a dashboard.
+                  AGE=$$(psql "$$DSN" -tA -c "SELECT COALESCE(EXTRACT(EPOCH FROM now()-MAX(started_at)),1e9)::bigint FROM sweep_cycles WHERE trigger = 'cron'")
+                  # 50h, not 72h. The cadence is 48h, so 72h could not fail until
+                  # a cycle had been missed AND the next was already overdue --
+                  # it reported healthy through the first miss by construction.
+                  # 50h = one full period plus 2h of jitter: the FIRST miss trips.
+                  echo "newest CRON sweep cycle: $${AGE}s ago (limit 180000s = 50h)"
+                  if [ "$$AGE" -gt 180000 ]; then
+                    echo "STALE: no cron-triggered sweep in >50h — the Mac-side"
+                    echo "daily-operation session the cluster cron drives is"
+                    echo "probably absent or wedged. Manual/alert cycles do NOT"
+                    echo "clear this; the scheduler itself is what is broken."
                     exit 1
                   fi
                   echo "sweep heartbeat OK"
