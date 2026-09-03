@@ -63,7 +63,7 @@ spec:
           main:
             image:
               repository: ghcr.io/mealie-recipes/mealie
-              tag: v3.24.0
+              tag: v3.25.0
             env:
               TZ: ${TIMEZONE}
               # BASE_URL is load-bearing for OIDC: it builds the redirect_uri
