@@ -13,8 +13,39 @@ spec:
     - name: unifi.devices
       interval: 30s
       rules:
+        # GUARD — keep this FIRST and keep it working.
+        #
+        # Every rule below was inert from creation until 2026-09-04: they all
+        # queried `unifipoller_*`, a prefix that has NEVER existed in this
+        # cluster (the exporter emits `unpoller_*`). An alert whose selector
+        # matches nothing sits at state=inactive, which is exactly what a
+        # healthy non-firing alert looks like — so UniFi alerting was dead for
+        # months and every dashboard read green. The finding tracking it
+        # (F-f59ad7e5) was falsely auto-closed and re-emitted twice.
+        #
+        # This rule makes that failure mode LOUD: if the series backing these
+        # alerts disappears (exporter down, prefix renamed again by the pending
+        # unpoller v5 major), it pages instead of going quiet.
+        - alert: UnifiMetricsAbsent
+          expr: absent(unpoller_device_uptime_seconds)
+          for: 15m
+          labels:
+            severity: critical
+            category: network
+            component: unifi
+          annotations:
+            summary: "UniFi device metrics are absent — UniFi alerting is blind"
+            description: >-
+              `unpoller_device_uptime_seconds` has no series for 15m. Every other
+              rule in this group depends on the `unpoller_*` metric family, so
+              they are all silently inert right now. Either unpoller is down or
+              the metric names changed upstream (unpoller v5 renames metrics).
+              Do NOT treat the other UniFi alerts as meaningful until this clears.
+
+        # All 10 devices report a real uptime; `== 0` occurred in 0 of the 7d
+        # 5m buckets, so this is a clean signal rather than a noisy one.
         - alert: UnifiDeviceOffline
-          expr: unifipoller_device_uptime_seconds == 0
+          expr: unpoller_device_uptime_seconds == 0
           for: 5m
           labels:
             severity: critical
@@ -22,10 +53,20 @@ spec:
             component: unifi
           annotations:
             summary: "UniFi device {{ $labels.name }} is offline"
-            description: "UniFi device {{ $labels.name }} ({{ $labels.model }}) has been offline for 5 minutes. This may indicate a network or power failure."
+            description: "UniFi device {{ $labels.name }} ({{ $labels.type }}) has been offline for 5 minutes. This may indicate a network or power failure."
 
+        # Was `unifipoller_device_user_num_sta`, which has no `unpoller_*`
+        # equivalent — client count is now per-radio, so sum it per device.
+        #
+        # Threshold raised 50 -> 75. The inherited 50 was never exercised (the
+        # rule was inert), and it does not fit this household: Hallway-AP-U6 Pro
+        # runs a 7d average of 48.5 clients and sits at 52 right now, so a 50
+        # threshold would flap across the boundary permanently. ~74 of the
+        # clients here are IoT devices concentrated on 2.4GHz, which is normal
+        # for this deployment and well within a U6 Pro's capacity. 75 is clear
+        # of steady state while still catching a genuine pile-up.
         - alert: UnifiAccessPointHighClientCount
-          expr: unifipoller_device_user_num_sta > 50
+          expr: sum by (name, site_name) (unpoller_device_radio_stations) > 75
           for: 10m
           labels:
             severity: warning
@@ -33,10 +74,18 @@ spec:
             component: unifi
           annotations:
             summary: "High client count on {{ $labels.name }}"
-            description: "Access point {{ $labels.name }} has {{ $value }} connected clients, exceeding the recommended threshold of 50."
+            description: "Access point {{ $labels.name }} has {{ $value }} connected clients (summed across radios), exceeding the threshold of 75."
 
+        # Was `(unifipoller_device_sys_mem / 1024 / 1024) > 80` — that compared
+        # MEBIBYTES against 80, so it was semantically wrong as well as inert.
+        # The replacement is a 0-1 ratio. Threshold is 0.90, NOT 0.80: the
+        # DMP-CBERG gateway sits at 0.822 in normal steady state, so 0.80 would
+        # fire permanently. Over the last 7d, 0.90 would have fired for
+        # DMP-CBERG and Hallway-AP-U6 Pro (7d max 0.975) — believed real, and
+        # on the gateway it is a useful early warning for the known UniFi
+        # Network-app JVM Full-GC death spiral. Tune here if it proves noisy.
         - alert: UnifiDeviceHighMemory
-          expr: (unifipoller_device_sys_mem / 1024 / 1024) > 80
+          expr: unpoller_device_memory_utilization_ratio > 0.90
           for: 10m
           labels:
             severity: warning
@@ -44,10 +93,13 @@ spec:
             component: unifi
           annotations:
             summary: "High memory usage on {{ $labels.name }}"
-            description: "Device {{ $labels.name }} memory usage is {{ $value }}%, exceeding 80% threshold."
+            description: "Device {{ $labels.name }} memory utilization is {{ $value | humanizePercentage }}, exceeding the 90% threshold."
 
+        # Was `unifipoller_device_system_stats_cpu > 90`. The replacement is a
+        # 0-1 ratio, so the threshold is 0.90 and not 90 — a straight prefix
+        # rename here would have produced a rule that can never fire.
         - alert: UnifiDeviceHighCPU
-          expr: unifipoller_device_system_stats_cpu > 90
+          expr: unpoller_device_cpu_utilization_ratio > 0.90
           for: 10m
           labels:
             severity: warning
@@ -55,22 +107,29 @@ spec:
             component: unifi
           annotations:
             summary: "High CPU usage on {{ $labels.name }}"
-            description: "Device {{ $labels.name }} CPU usage is {{ $value }}%, exceeding 90% threshold."
+            description: "Device {{ $labels.name }} CPU utilization is {{ $value | humanizePercentage }}, exceeding the 90% threshold."
 
+        # Was `unifipoller_device_port_up == 0 and unifipoller_device_port_poe_enable == 1`.
+        # Neither metric exists in the unpoller schema — there is no port link-state
+        # and no poe_enable gauge. Closest faithful equivalent: the port is
+        # energised over PoE but negotiated no link speed. Currently matches 0
+        # series, so this ships without firing.
         - alert: UnifiSwitchPortDown
-          expr: unifipoller_device_port_up == 0 and unifipoller_device_port_poe_enable == 1
+          expr: unpoller_device_port_port_speed_bps == 0 and on(name, port_num) unpoller_device_port_poe_volts > 0
           for: 5m
           labels:
             severity: warning
             category: network
             component: unifi
           annotations:
-            summary: "PoE port down on {{ $labels.device_name }}"
-            description: "PoE-enabled port {{ $labels.port_idx }} on switch {{ $labels.device_name }} is down."
+            summary: "PoE port down on {{ $labels.name }}"
+            description: "Port {{ $labels.port_name }} (num {{ $labels.port_num }}) on {{ $labels.name }} is energised over PoE but has negotiated no link speed."
 
     - name: unifi.network
       interval: 30s
       rules:
+        # This one was always correct — `up{job="unpoller"}` is a scrape metric,
+        # not an unpoller_* series, so it was never affected by the prefix bug.
         - alert: UnifiControllerUnreachable
           expr: up{job="unpoller"} == 0
           for: 15m
@@ -82,13 +141,18 @@ spec:
             summary: "UnPoller cannot reach UniFi controller"
             description: "UnPoller has failed to scrape metrics from the UniFi controller for 15 minutes. Check controller availability and credentials. Note: UnPoller polls the controller inline per scrape, so transient UDM-Pro latency spikes can briefly mark the target down without the controller being truly unreachable."
 
-        - alert: UnifiHighWirelessInterference
-          expr: unifipoller_device_radio_channel_interference > 70
+        # RENAMED from UnifiHighWirelessInterference. There is no interference
+        # metric in the unpoller schema; channel UTILIZATION is the closest
+        # operational equivalent, and the alert is named for what it measures
+        # rather than inheriting a name it cannot support. Current max is 0.53,
+        # so 0.70 ships without firing.
+        - alert: UnifiHighChannelUtilization
+          expr: unpoller_device_radio_channel_utilization_total_ratio > 0.70
           for: 15m
           labels:
             severity: warning
             category: network
             component: unifi
           annotations:
-            summary: "High wireless interference on {{ $labels.name }}"
-            description: "Access point {{ $labels.name }} radio {{ $labels.radio }} is experiencing {{ $value }}% channel interference on channel {{ $labels.channel }}."
+            summary: "High channel utilization on {{ $labels.name }}"
+            description: "Access point {{ $labels.name }} radio {{ $labels.radio_name }} ({{ $labels.band }}) is at {{ $value | humanizePercentage }} total channel utilization."
