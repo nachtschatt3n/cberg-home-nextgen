@@ -66,8 +66,21 @@ finding_refs: [F-912f4778]          # "Talos Linux (cluster nodes): v1.13.8 -> v
                                     # section=version, first_seen 2026-08-24.
                                     # READ §1.3: executing this plan does NOT close
                                     # that finding.
-status: awaiting-go
-window: "sun-attended:2026-09-06"   # the ONLY allow_reboot:true slot. Provisional:
+status: reference                   # OPERATOR GO 2026-09-05. Option (C) chosen: run
+                                    # ATTENDED, OUTSIDE the window system, in one sitting.
+                                    # Deliberately NOT `scheduled`: `scheduled` + `window: null`
+                                    # is the contradiction the envoy-gateway-phase* plans call
+                                    # out — a scheduled plan needs a window occurrence for the
+                                    # window agent to pull, and NO window agent should drive
+                                    # this one. The operator executes it directly.
+window: null                        # (C) attended, outside the window system. The 110-min
+                                    # estimate stands unshaved; there is no 90-min clock to
+                                    # fit, which is precisely why this option was chosen.
+                                    # CONSEQUENCE, do not overlook: running outside a window
+                                    # means Step 0 (the safe-update batch) does NOT run first,
+                                    # and the window agent's health-gate + auto-revert harness
+                                    # does NOT wrap this. The §2 pre-checks and §4 per-node
+                                    # gates are therefore the ONLY safety net — run every one.
                                     # the work does not fit its 90 min (§6) — the
                                     # operator picks split-vs-extend at go/no-go.
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is DERIVED from
@@ -493,7 +506,32 @@ one-way`.
 
 ## 6) Interference notes
 
-### 6.1 Capacity — honest verdict: this does NOT fit sun-attended:2026-09-06
+### 6.1 Capacity — RESOLVED 2026-09-05: option (C), attended outside the window
+
+> **OPERATOR DECISION 2026-09-05 — option (C).** Run attended, outside the
+> window system, in one sitting. `window: null`, `status: reference`.
+>
+> This dissolves the capacity problem rather than working around it: there is no
+> 90-minute clock, so the 110-minute estimate stands unshaved and the last node's
+> gate — the one that matters most — is not run against a deadline.
+> `maintenance-plan.py --validate` no longer flags an overrun, because the plan
+> no longer claims a window it cannot fit.
+>
+> **Two things this decision gives up, and they are not small:**
+>
+> 1. **No Step 0.** Window runs begin with the safe-update batch applied,
+>    reconciled and health-gated by the `maintenance-window-agent`. Outside the
+>    window system that does not happen. Fine here — it is one less moving part
+>    during a node roll — but the safe updates still need a window to land in.
+> 2. **No auto-revert harness.** The window agent's health-gate-and-revert
+>    wrapper is not around this. The §2 pre-checks and the §4 per-node gates are
+>    the ONLY safety net. Run every one; skipping a gate has nothing behind it.
+>
+> The original three-option analysis is kept below for provenance.
+
+#### Original analysis (pre-decision)
+
+### 6.1-orig Capacity — honest verdict: this does NOT fit sun-attended:2026-09-06
 
 `sun-attended` is 90 minutes (`duration_min: 90`, `capacity_risk: 6`), and it is
 the **only** window with `allow_reboot: true`. Realistic cost here:
