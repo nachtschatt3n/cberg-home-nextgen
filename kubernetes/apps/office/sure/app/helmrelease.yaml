@@ -140,7 +140,55 @@ spec:
       # Fixes Contract#next_due freezing at first-detection value forever
       # (recomputes from the most recent matching transaction; scan-time
       # refresh restored too). No schema change.
-      tag: "sha-e683bcb8981d78e91b59a462248e100c237a6612"
+      #
+      # --- 2026-09-04 bump: sha-e683bcb8 -> sha-7b22a02a -------------------
+      # Stops AutoDetectMerchantsJob re-submitting unchanged transactions to
+      # the LLM on every rule run. 4 files, all under app/ and test/.
+      # NO MIGRATION: the migration Job runs but has nothing to do.
+      #
+      # Two behaviour changes an operator needs to know about:
+      #   * The detection gate drops the business_url requirement (name only).
+      #     The URL was acting as an unintended quality filter, so the first
+      #     sync run after this assigns AI merchants that were previously
+      #     discarded — created with website_url/logo_url nil, and locked.
+      #   * Enrichable gains record_enrichment_attempt /
+      #     without_recent_enrichment_attempt, so a transaction the detector
+      #     examined without changing is marked and suppressed for
+      #     AI_ENRICHMENT_ATTEMPT_TTL_DAYS (default 30). Set that env to 0 to
+      #     disable suppression and restore the old retry-every-pass
+      #     behaviour without a code change.
+      #
+      # ROLLBACK: revert this manifest to sha-e683bcb8981d78e91b59a462248e100c237a6612.
+      # NOTE that after the first sync run the revert alone does NOT remove the
+      # merchants this creates — that is Rules -> "Clear AI cache" in the UI,
+      # which unlocks and deletes everything source:"ai" and leaves
+      # user-modified merchants untouched. Residual: the ProviderMerchant rows
+      # created alongside remain as orphans and need separate cleanup.
+      #
+      # PRE-DEPLOY BASELINE, measured live 2026-09-04 21:08 UTC, before the
+      # roll. Re-measure after the 02:22 UTC (04:22 Berlin) sync_all_accounts
+      # run and compare; the run applies every active rule via
+      # app/models/family/syncer.rb, including the auto_detect_merchants rule
+      # 42d35788-0cf8-4c37-bb28-b7ec87c1627e (active=true).
+      #   transactions             14038
+      #   merchants total            431   (expect higher)
+      #   AI merchants (Family)       47   (expect ~366)
+      #   DataEnrichment source=ai 15655
+      #     of those merchant_id    5224
+      #   detection candidates       319   (expect ~0)
+      # Quality check that matters: the 47 pre-existing AI merchants have a max
+      # name length of 30 chars and none over 40, so a new name >40 chars is a
+      # good tripwire for leaked reasoning text rather than a real merchant.
+      #
+      # CO-INCIDENT VARIABLE, recorded so the two stay separable: the Ollama
+      # host moved to engine 0.33.3 (from 0.32.15) the same evening, and
+      # gemma4:26b-mlx was pulled to disk but NOT put in production. Sure
+      # still talks to gemma4:26b, unchanged. That host also had two MLX
+      # GPU-OOM events at 20:40 and 21:13 UTC which evicted models
+      # (including the GGUF gemma4:26b) before the pinned state was restored;
+      # an LLM timeout in sure-worker around then is a host event, not this
+      # deploy.
+      tag: "sha-7b22a02aede4195149d70ca931e85d21235675b8"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
