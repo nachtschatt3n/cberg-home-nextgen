@@ -1,0 +1,47 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app snapshot-controller-crds
+  namespace: &namespace storage
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  interval: 30m
+  path: ./kubernetes/apps/storage/snapshot-controller/crds
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: *namespace
+  timeout: 5m
+  wait: true
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/kustomization-kustomize-v1.json
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app snapshot-controller
+  namespace: &namespace storage
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  # The controller exits if the v1 CRDs are not available within
+  # --retry-crd-interval-max, so the CRD Kustomization must settle first.
+  dependsOn:
+    - name: snapshot-controller-crds
+      namespace: storage
+  interval: 30m
+  path: ./kubernetes/apps/storage/snapshot-controller/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: *namespace
+  timeout: 5m
+  wait: true

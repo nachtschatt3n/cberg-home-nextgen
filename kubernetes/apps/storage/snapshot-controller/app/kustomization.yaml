@@ -1,0 +1,10 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Rewrites the vendored kube-system references (including the ServiceAccount
+# subject in the ClusterRoleBindings) to the namespace this actually runs in.
+namespace: storage
+resources:
+  - ./rbac.yaml
+  - ./deployment.yaml
