@@ -8,3 +8,4 @@ namespace: storage
 resources:
   - ./rbac.yaml
   - ./deployment.yaml
+  - ./volumesnapshotclass.yaml

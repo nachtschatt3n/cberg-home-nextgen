@@ -1,0 +1,25 @@
+---
+# The CRDs and the controller alone do not make snapshots usable: a
+# VolumeSnapshotClass is what binds the API to a driver, and neither Longhorn
+# nor its chart creates one. Without this, `kubectl create volumesnapshot`
+# fails with "no VolumeSnapshotClass found".
+#
+# type: snap  -> an in-cluster Longhorn snapshot on the volume itself. Fast,
+#                needs no backupstore, and is the sane default.
+#                (type: bak would instead push a full backup to the backupstore;
+#                add a SECOND class for that if it is ever wanted, rather than
+#                changing this one — the type is not editable in place.)
+#
+# deletionPolicy: Delete removes the underlying LONGHORN SNAPSHOT when the
+# VolumeSnapshot object is deleted. It does NOT touch the PersistentVolume or
+# its data — the blast radius is the snapshot only. Retain here would instead
+# orphan Longhorn snapshots with no k8s object referencing them, which is how
+# snapshot sprawl silently eats volume space.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: longhorn-snapshot
+driver: driver.longhorn.io
+deletionPolicy: Delete
+parameters:
+  type: snap
