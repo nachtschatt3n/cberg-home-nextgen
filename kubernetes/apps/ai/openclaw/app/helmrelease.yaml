@@ -915,6 +915,28 @@ spec:
                   // they show up as "configured" alongside openai/gpt-5.5
                   // (openclaw models list / pickers honour this).
                   cfg.agents.defaults.models = cfg.agents.defaults.models || {};
+                  // PRUNE FIRST, then register. openclaw.json lives on the PVC
+                  // and this script PATCHES it — so anything we only ever add
+                  // survives forever. On 2026-09-05 that cost us the tail of the
+                  // gemma4 GGUF->MLX migration: this block had added
+                  // 'ollama/gemma4:26b' and 'ollama/gemma4:e2b' months earlier,
+                  // and after the migration they were still sitting in the PVC
+                  // config as "configured models" even though the catalog above
+                  // no longer listed them and gemma4:e2b was never pulled at all.
+                  // OpenClaw enumerated them (four /api/show calls, one 404 for
+                  // the model that does not exist), then ran a turn on the GGUF
+                  // — which needs 27.1 GiB and evicted the entire MLX warm set
+                  // from the 48 GiB host. A stale ADDITIVE key is not inert.
+                  // Registered ollama refs must therefore be exactly the catalog.
+                  const validOllamaRefs = new Set(
+                    ollamaModels.flatMap((m) => [`ollama/$${m.id}`, `ollama-native/$${m.id}`])
+                  );
+                  for (const ref of Object.keys(cfg.agents.defaults.models)) {
+                    if (/^ollama(-native)?\//.test(ref) && !validOllamaRefs.has(ref)) {
+                      delete cfg.agents.defaults.models[ref];
+                      console.log('Pruned stale ollama model ref from openclaw.json: ' + ref);
+                    }
+                  }
                   for (const m of ollamaModels) {
                     const ref = `ollama/$${m.id}`;
                     cfg.agents.defaults.models[ref] = cfg.agents.defaults.models[ref] || {};

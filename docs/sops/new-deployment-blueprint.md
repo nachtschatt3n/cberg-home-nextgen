@@ -872,6 +872,28 @@ grep for the old value returned *zero* hits while a live consumer was still
 requesting it. Fix by patching the file in-container, then restarting, then
 re-reading the file in-container.
 
+**(a2) PVC-persisted app config that an init script PATCHES rather than
+rewrites — and only ever ADDS to.** `ai/openclaw` keeps `openclaw.json` on a
+PVC; its init script reads the existing file and patches keys into it. The
+model catalog was migrated correctly, but a months-old additive block had
+written `ollama/gemma4:26b` and `ollama/gemma4:e2b` into
+`agents.defaults.models` and nothing ever removed them. After the migration
+those keys were still present as "configured models" — one of them naming a
+model that had never been pulled at all. OpenClaw enumerated them (four
+`/api/show` calls, one 404 for the nonexistent one), then ran a turn on the
+GGUF, which needs 27.1 GiB and evicted the entire MLX warm set from the 48 GiB
+host. **A stale additive key is not inert.** If a script patches persisted
+config, it must PRUNE the managed namespace of keys first, then re-add —
+otherwise it can only ever accumulate.
+
+Note what this defeats: env checks, ConfigMap checks, an exhaustive repo grep,
+*and* the live-process check from (a) — because the value lived in neither env
+nor a mounted file, but in an application-managed JSON on a PVC. For apps that
+keep their own state (OpenClaw, hermes-agent, Open WebUI, n8n, Nextcloud,
+paperless, AnythingLLM, LibreChat), **the application's own store is the
+authority, and the only complete check is to query that store.**
+`docs/ai-usage-map.md` marks which consumers are in this class.
+
 **(b) ConfigMap-backed env with no checksum annotation.** `ai/anythingllm`'s
 chart generates a ConfigMap consumed as env, and adds no pod-template checksum.
 Changing the ConfigMap does not change the pod template, so no rollout happens
