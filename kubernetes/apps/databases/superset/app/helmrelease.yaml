@@ -145,6 +145,19 @@ spec:
     cache:
       host: superset-redis-official
 
+    # Same trap on the DB side. `superset.db.host` in _helpers.tpl coalesces
+    # .Values.database.host FIRST and otherwise falls through to
+    # "<release>-postgresql", so the chart-generated superset-env Secret — the
+    # ONLY envFrom the wait-for-postgres INIT containers get — still carries
+    # DB_HOST=superset-postgresql even though the app itself moved to
+    # superset-pg via superset-secrets. That stale value is invisible only
+    # while the old Service exists; the moment the bundled postgres is
+    # disabled, every restart of superset / superset-worker /
+    # superset-celerybeat would hang 120s in the init gate and exit 1.
+    # Point the chart at the real metadata DB.
+    database:
+      host: superset-pg
+
     # --- Superset web/UI pods ---
     supersetNode:
       replicaCount: 1
