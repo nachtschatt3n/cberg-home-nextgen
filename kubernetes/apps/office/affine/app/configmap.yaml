@@ -55,14 +55,14 @@ data:
           "override_enabled": true,
           "scenarios": {
             "audio_transcribing": "gemini-2.5-flash",
-            "chat": "gemma4:26b",
+            "chat": "gemma4:26b-mlx",
             "embedding": "nomic-embed-text:latest",
             "image": "gpt-image-1",
-            "coding": "gemma4:26b",
-            "complex_text_generation": "gemma4:26b",
-            "quick_decision_making": "gemma4:26b",
-            "quick_text_generation": "gemma4:26b",
-            "polish_and_summarize": "gemma4:26b"
+            "coding": "gemma4:26b-mlx",
+            "complex_text_generation": "gemma4:26b-mlx",
+            "quick_decision_making": "gemma4:26b-mlx",
+            "quick_text_generation": "gemma4:26b-mlx",
+            "polish_and_summarize": "gemma4:26b-mlx"
           }
         },
         "providers": {

@@ -8,7 +8,7 @@ data:
   # Rails initializer mounted into /rails/config/initializers on web + worker.
   # Purpose: the upstream rule actions chunk LLM work into 20-tx batches,
   # which blows past Sure's OpenAI HTTP timeout when the backend is a slow
-  # local LLM (Ollama gemma4:26b on Mac Mini). We re-chunk at the common
+  # local LLM (Ollama gemma4:26b-mlx on Mac Mini). We re-chunk at the common
   # Family choke points so every job sends <= <N>_BATCH_SIZE transactions.
   # OPENAI_REQUEST_TIMEOUT (already env-configurable upstream) widens the
   # per-request window. Together they keep AI enrichment healthy on

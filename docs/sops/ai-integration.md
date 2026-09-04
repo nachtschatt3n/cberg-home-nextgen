@@ -25,7 +25,7 @@ Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
 
 In-cluster AI services (Open WebUI, hermes-agent, etc.) connect to this external endpoint.
 
-**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b` as its LLM backend. It is on the `internal` ingress class only; the Telegram bot token provides external reachability via the Telegram API, not via cluster ingress.
+**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b-mlx` as its LLM backend. It is on the `internal` ingress class only; the Telegram bot token provides external reachability via the Telegram API, not via cluster ingress.
 
 ---
 
@@ -43,7 +43,7 @@ Declarative source-of-truth for AI integrations is maintained in application man
 ## Operational Instructions
 
 1. All apps use the single endpoint: `http://192.168.30.111:11434`
-2. Use `gemma4:26b` for all LLM tasks (chat, reasoning, vision, voice).
+2. Use `gemma4:26b-mlx` for all LLM tasks (chat, reasoning, vision, voice).
 3. Use `nomic-embed-text:latest` for embeddings.
 4. Update the target app manifest/secret in Git with endpoint + model configuration.
 5. Commit and push changes to trigger Flux reconciliation.
@@ -60,7 +60,7 @@ env:
   - name: OLLAMA_HOST
     value: "http://192.168.30.111:11434"
   - name: OLLAMA_MODEL
-    value: "gemma4:26b"
+    value: "gemma4:26b-mlx"
 ```
 
 ### Example 2: OpenAI-Compatible Configuration
@@ -70,7 +70,7 @@ env:
   - name: OPENAI_BASE_URL
     value: "http://192.168.30.111:11434/v1"
   - name: OPENAI_MODEL
-    value: "gemma4:26b"
+    value: "gemma4:26b-mlx"
 ```
 
 ---
@@ -85,10 +85,10 @@ env:
 
 | Model | Purpose |
 |-------|---------|
-| `gemma4:26b` | All LLM tasks — chat, reasoning, vision, voice. Multimodal (text + image). |
+| `gemma4:26b-mlx` | All LLM tasks — chat, reasoning, vision, voice. Multimodal (text + image). |
 | `nomic-embed-text:latest` | Text embeddings |
 
-**Important:** The model name in API calls must be exactly `gemma4:26b` (not `gemma4` or `gemma4:26b-instruct`).
+**Important:** The model name in API calls must be exactly `gemma4:26b-mlx` (not `gemma4` or `gemma4:26b-mlx-instruct`).
 
 ---
 
@@ -97,7 +97,7 @@ env:
 - Base URL: `http://192.168.30.111:11434/api` (no trailing slash, no `/v1`)
 - Endpoints: `/api/chat`, `/api/generate`
 - API key: not required for native Ollama API
-- Model name: `gemma4:26b` (exact)
+- Model name: `gemma4:26b-mlx` (exact)
 - Embedding model: `nomic-embed-text:latest`
 
 Use OpenAI-compatible `/v1` endpoints only for apps that require OpenAI API format.
@@ -110,7 +110,7 @@ Use OpenAI-compatible `/v1` endpoints only for apps that require OpenAI API form
 # Test LLM (text)
 curl -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "gemma4:26b-mlx", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
 
 # Test embeddings
 curl -X POST http://192.168.30.111:11434/api/embed \
@@ -135,7 +135,7 @@ SSH into Mac Mini and use Ollama CLI, or use the Ollama API:
 # Pull model via API
 curl http://192.168.30.111:11434/api/pull \
   -H "Content-Type: application/json" \
-  -d '{"name": "gemma4:26b", "stream": false}'
+  -d '{"name": "gemma4:26b-mlx", "stream": false}'
 
 # Check pull status
 curl http://192.168.30.111:11434/api/tags
@@ -199,7 +199,7 @@ and no fallbacks. It now degrades to the local Ollama models instead:
 // ~/.openclaw/openclaw.json  (set declaratively by the init script in helmrelease.yaml)
 "agents": { "defaults": { "model": {
   "primary":   "openai/gpt-5.6-terra",              // Codex harness / ChatGPT OAuth
-  "fallbacks": ["ollama/gemma4:26b",                // quality tier, 131k ctx
+  "fallbacks": ["ollama/gemma4:26b-mlx",                // quality tier, 131k ctx
                 "ollama/gemma4:e2b-mlx"]            // small/fast last resort
 }}}
 ```
@@ -224,7 +224,7 @@ Schema facts (verified against the installed 2026.6.11 bundle, not guessed):
   `[reload] config hot reload applied (agents.defaults.model.fallbacks)`.
 - Only models that are BOTH in `models.providers.ollama.models[]` AND pulled on
   the Mac mini are valid rungs. `gemma4:e2b` is **not** pulled (the host has
-  `gemma4:26b` and `gemma4:e2b-mlx`); a dead rung only burns a retry.
+  `gemma4:26b-mlx` and `gemma4:e2b-mlx`); a dead rung only burns a retry.
 
 The init script sets `model.primary` unconditionally from `OPENCLAW_DEFAULT_MODEL`
 on every boot but never touched `fallbacks`, so the chain is now written there too
@@ -259,8 +259,8 @@ Confirm a failover actually happened (rather than a silent total failure):
 ```bash
 kubectl -n ai logs "$OC" -c app --tail=400 | grep "model-fallback/decision"
 # healthy degrade looks like:
-#   decision=candidate_failed  requested=openai/gpt-5.6-terra reason=rate_limit next=ollama/gemma4:26b
-#   decision=candidate_succeeded requested=openai/gpt-5.6-terra candidate=ollama/gemma4:26b
+#   decision=candidate_failed  requested=openai/gpt-5.6-terra reason=rate_limit next=ollama/gemma4:26b-mlx
+#   decision=candidate_succeeded requested=openai/gpt-5.6-terra candidate=ollama/gemma4:26b-mlx
 # "next=none" means NO fallbacks are configured — the chain is missing.
 ```
 
@@ -350,7 +350,7 @@ not in git-managed manifests. **Requires manual update.**
 
 | Integration | Endpoint | Model | Use Case |
 |------------|----------|-------|----------|
-| Ollama (all tasks) | `http://192.168.30.111:11434` | `gemma4:26b` | Voice, AI tasks, vision |
+| Ollama (all tasks) | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | Voice, AI tasks, vision |
 | OpenAI (ChatGPT) | Cloud | `gpt-4o-mini-tts` (TTS) | Conversation, AI Task, TTS, STT |
 | Google Generative AI | Cloud | (default) | Conversation, TTS, AI Task, STT |
 | Google Translate | Cloud | - | TTS |
@@ -362,7 +362,7 @@ RAG chat and document embedding.
 | Setting | Value |
 |---------|-------|
 | Endpoint | `http://192.168.30.111:11434` |
-| LLM Model | `gemma4:26b` |
+| LLM Model | `gemma4:26b-mlx` |
 | Embedding Model | `nomic-embed-text:latest` |
 | Config | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
 
@@ -375,7 +375,7 @@ Chat interface with multi-provider support.
 | Setting | Value |
 |---------|-------|
 | Endpoint | `http://192.168.30.111:11434/v1` |
-| Default Model | `gemma4:26b` (fetch=true for dynamic model list) |
+| Default Model | `gemma4:26b-mlx` (fetch=true for dynamic model list) |
 | Config | Custom endpoint "Ollama" with OpenAI-compatible API |
 
 **Configuration:** `kubernetes/apps/ai/librechat/app/helmrelease.yaml` (custom endpoint at ~line 94)
@@ -387,7 +387,7 @@ AI-powered diagram generation.
 | Setting | Value |
 |---------|-------|
 | Endpoint | `http://192.168.30.111:11434/api` |
-| Model | `gemma4:26b` |
+| Model | `gemma4:26b-mlx` |
 | Config | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` (native `/api`) |
 
 **Configuration:** `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml` (env vars at ~line 36)
@@ -399,7 +399,7 @@ Collaborative workspace with AI copilot features.
 | Setting | Value |
 |---------|-------|
 | Endpoint | `http://192.168.30.111:11434/v1` |
-| LLM Model | `gemma4:26b` (coding, text gen, summarize, decisions) |
+| LLM Model | `gemma4:26b-mlx` (coding, text gen, summarize, decisions) |
 | Embedding Model | `nomic-embed-text:latest` |
 | Config | OpenAI-compatible provider in copilot configmap |
 
@@ -412,12 +412,12 @@ All configured through the Nextcloud admin UI. **Requires manual update.**
 
 | Integration | Model | Use Case |
 |------------|-------|----------|
-| integration_openai | `gemma4:26b` | Text gen, chat, summary, translate, proofread, headlines, topics |
+| integration_openai | `gemma4:26b-mlx` | Text gen, chat, summary, translate, proofread, headlines, topics |
 | context_chat | `nomic-embed-text:latest` | RAG embeddings for file-based context chat |
 
 **Configuration:** NC admin UI > `integration_openai` app settings
 - Endpoint: `http://192.168.30.111:11434/v1`
-- Default model: `gemma4:26b`
+- Default model: `gemma4:26b-mlx`
 - NC apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai` (4.3.0)
 
 ```bash
@@ -436,7 +436,7 @@ n8n has AI provider credentials configured via its workflow UI (stored in SQLite
 
 | Credential | Provider | Model |
 |------------|----------|-------|
-| ollamaApi | Ollama (`http://192.168.30.111:11434`) | `gemma4:26b` |
+| ollamaApi | Ollama (`http://192.168.30.111:11434`) | `gemma4:26b-mlx` |
 | openAiApi | OpenAI Cloud | (default cloud models) |
 | anthropicApi | Anthropic Cloud | (available, usage varies by workflow) |
 
@@ -460,7 +460,7 @@ redundant with this native module. **Config is a DB row, not a manifest**
 | Setting | Value |
 |---------|-------|
 | Endpoint (LLM + embeddings) | `http://192.168.30.111:11434` |
-| LLM model | `gemma4:26b` (`llm_backend=ollama`) |
+| LLM model | `gemma4:26b-mlx` (`llm_backend=ollama`) |
 | Embedding model | `nomic-embed-text:latest` (`llm_embedding_backend=ollama`) |
 | Config | DB-stored `ApplicationConfiguration` singleton row |
 
@@ -486,7 +486,7 @@ AI-powered camera event descriptions.
 | Setting | Value |
 |---------|-------|
 | Endpoint | `http://192.168.30.111:11434/v1` |
-| Model | `gemma4:26b` (in encrypted configmap, **requires manual update**) |
+| Model | `gemma4:26b-mlx` (in encrypted configmap, **requires manual update**) |
 | Config | `OPENAI_BASE_URL` env var |
 
 ```bash
@@ -501,9 +501,9 @@ kubectl logs -n home-automation -l app.kubernetes.io/name=frigate-nvr --tail=50 
 
 | Use Case | Model | Notes |
 |---------|-------|-------|
-| Text processing, reasoning, chat | `gemma4:26b` | Multimodal — handles text and images |
-| Image/vision analysis | `gemma4:26b` | No separate vision model needed |
-| Voice/audio | `gemma4:26b` | Same model for all tasks |
+| Text processing, reasoning, chat | `gemma4:26b-mlx` | Multimodal — handles text and images |
+| Image/vision analysis | `gemma4:26b-mlx` | No separate vision model needed |
+| Voice/audio | `gemma4:26b-mlx` | Same model for all tasks |
 | Text embeddings | `nomic-embed-text:latest` | For RAG, search, similarity |
 
 ### Step 2: Configure the App
@@ -517,7 +517,7 @@ env:
   - name: OLLAMA_HOST
     value: "http://192.168.30.111:11434"
   - name: OLLAMA_MODEL
-    value: "gemma4:26b"
+    value: "gemma4:26b-mlx"
 ```
 
 **OpenAI-compatible API:**
@@ -528,7 +528,7 @@ env:
   - name: OPENAI_API_KEY
     value: "not-required"
   - name: OPENAI_MODEL
-    value: "gemma4:26b"
+    value: "gemma4:26b-mlx"
 ```
 
 ### Step 3: Update Integration Documentation
@@ -571,14 +571,14 @@ curl http://192.168.30.111:11434/api/tags | python3 -c \
 # Pull the model if missing
 curl -X POST http://192.168.30.111:11434/api/pull \
   -H "Content-Type: application/json" \
-  -d '{"name": "gemma4:26b"}'
+  -d '{"name": "gemma4:26b-mlx"}'
 ```
 
 ### Slow Response Times
 
-- Check Mac Mini load: `gemma4:26b` is 26B params, ensure adequate memory
+- Check Mac Mini load: `gemma4:26b-mlx` is 26B params, ensure adequate memory
 - Ollama loads models on demand and keeps them warm with `keep_alive`
-- Only `gemma4:26b` and `nomic-embed-text:latest` should be loaded
+- Only `gemma4:26b-mlx` and `nomic-embed-text:latest` should be loaded
 
 ### Wrong Endpoint Format
 
@@ -588,7 +588,7 @@ OpenAI format: http://192.168.30.111:11434/v1/chat/completions
 Ollama native: http://192.168.30.111:11434/api/chat
 ```
 
-Model name must be exactly `gemma4:26b` (not `gemma4` or `gemma4:26b-instruct`).
+Model name must be exactly `gemma4:26b-mlx` (not `gemma4` or `gemma4:26b-mlx-instruct`).
 
 ---
 
@@ -611,7 +611,7 @@ If failed:
 ```bash
 curl -sS -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemma4:26b","messages":[{"role":"user","content":"ping"}],"stream":false}'
+  -d '{"model":"gemma4:26b-mlx","messages":[{"role":"user","content":"ping"}],"stream":false}'
 ```
 
 Expected:
@@ -645,7 +645,7 @@ curl -s http://192.168.30.111:11434/api/tags | python3 -c \
 ```
 
 Expected:
-- `gemma4:26b` and `nomic-embed-text:latest` appear in the list.
+- `gemma4:26b-mlx` and `nomic-embed-text:latest` appear in the list.
 
 If unclear:
 - Pull the model and retest.
@@ -663,7 +663,7 @@ curl -sf http://192.168.30.111:11434/api/tags > /dev/null \
 curl -s http://192.168.30.111:11434/api/tags | python3 -c "
 import sys, json
 models = [m['name'] for m in json.load(sys.stdin)['models']]
-for required in ['gemma4:26b', 'nomic-embed-text:latest']:
+for required in ['gemma4:26b-mlx', 'nomic-embed-text:latest']:
     status = 'OK' if required in models else 'MISSING'
     print(f'{required}: {status}')
 "

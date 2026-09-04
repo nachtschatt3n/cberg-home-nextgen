@@ -8,7 +8,7 @@ data:
   config.yaml: |
     model:
       provider: "custom"
-      default: "gemma4:26b"
+      default: "gemma4:26b-mlx"
       base_url: "http://192.168.30.111:11434/v1"
       api_key: "ollama"
       context_length: 131072

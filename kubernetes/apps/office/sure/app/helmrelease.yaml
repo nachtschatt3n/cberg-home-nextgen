@@ -182,12 +182,14 @@ spec:
       #
       # CO-INCIDENT VARIABLE, recorded so the two stay separable: the Ollama
       # host moved to engine 0.33.3 (from 0.32.15) the same evening, and
-      # gemma4:26b-mlx was pulled to disk but NOT put in production. Sure
-      # still talks to gemma4:26b, unchanged. That host also had two MLX
-      # GPU-OOM events at 20:40 and 21:13 UTC which evicted models
-      # (including the GGUF gemma4:26b) before the pinned state was restored;
-      # an LLM timeout in sure-worker around then is a host event, not this
-      # deploy.
+      # gemma4:26b-mlx was pulled to disk. At the time THIS image tag was
+      # deployed Sure still talked to the GGUF gemma4:26b, unchanged. That
+      # host also had two MLX GPU-OOM events at 20:40 and 21:13 UTC which
+      # evicted models before the pinned state was restored; an LLM timeout
+      # in sure-worker around then is a host event, not this deploy.
+      #
+      # Sure was moved to gemma4:26b-mlx in the fleet-wide migration that
+      # followed (see OPENAI_MODEL below) — a SEPARATE change from this tag.
       tag: "sha-7b22a02aede4195149d70ca931e85d21235675b8"
       pullPolicy: IfNotPresent
       imagePullSecrets:
@@ -247,16 +249,16 @@ spec:
               name: sure-secret
               key: OPENAI_URI_BASE
         # Plain value (model name is not sensitive). Switched back to the
-        # larger gemma4:26b for the agentic assistant: gemma4:e2b-mlx was
+        # larger gemma4:26b-mlx for the agentic assistant: gemma4:e2b-mlx was
         # too small/weak for reliable multi-turn tool-use, so we go back to
         # the smarter 26b model on the same Ollama.
         - name: OPENAI_MODEL
-          value: "gemma4:26b"
+          value: "gemma4:26b-mlx"
         # Widen the OpenAI HTTP client timeout (upstream default 60s) so
         # slow local LLM inference (Ollama on Mac Mini) finishes before
         # Net::ReadTimeout. Bumped from 900 → 1800 to leave headroom for
         # larger merchant-detection models that produce reliable URLs
-        # (gemma4:26b returns names but rarely URLs, so the auto-detector
+        # (gemma4:26b-mlx returns names but rarely URLs, so the auto-detector
         # silently skips). Read once per-request in Provider::Openai.
         - name: OPENAI_REQUEST_TIMEOUT
           value: "1800"
@@ -273,8 +275,11 @@ spec:
         # silently sliced the batch of 5 above back down to 1-4 transactions per
         # call. This only stops that shredding; AUTO_*_BATCH_SIZE stays the real
         # cap, so raising this further buys nothing. Safe against the model:
-        # gemma4:26b serves num_ctx 131072 and Sure's longest observed prompt is
-        # ~4.2k tokens, leaving ~30x headroom — no truncation risk.
+        # gemma4:26b-mlx serves num_ctx 131072 and Sure's longest observed prompt is
+        # ~4.2k tokens, leaving ~30x headroom — no truncation risk. NOTE: unlike
+        # the GGUF, the MLX build has no baked num_ctx — it inherits
+        # OLLAMA_CONTEXT_LENGTH from the Mac mini's Guardian env, so that 131072
+        # is a host setting, not a model property.
         - name: LLM_CONTEXT_WINDOW
           value: "16384"
         # Pin the JSON strategy instead of inheriting the "auto" default. Under

@@ -35,7 +35,7 @@ spec:
               - name: AI_PROVIDER
                 value: "ollama"
               - name: AI_MODEL
-                value: "gemma4:26b"
+                value: "gemma4:26b-mlx"
               - name: OLLAMA_BASE_URL
                 value: "http://192.168.30.111:11434/api"
             probes:

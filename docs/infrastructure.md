@@ -46,7 +46,7 @@ All three nodes connect to Basement-SW-24-PoE.
 | Device | IP | Role |
 |--------|----|------|
 | UNAS-CBERG (NAS) | 192.168.55.240 | Bulk storage, SMB/NFS shares, backups |
-| Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (gemma4:26b multimodal) |
+| Mac Mini M4 Pro | 192.168.30.111 | Ollama AI inference (gemma4:26b-mlx multimodal) |
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
 | Plex Media Server | 192.168.55.30 | Plex direct LB (port 32400) |
@@ -93,7 +93,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 
 **Mac Mini M4 Pro:**
 - Single Ollama instance with Metal Performance Shaders (MPS) acceleration
-- Port 11434: `gemma4:26b` (multimodal — chat, reasoning, vision, voice) + `nomic-embed-text:latest` (embeddings)
+- Port 11434: `gemma4:26b-mlx` (multimodal — chat, reasoning, vision, voice) + `nomic-embed-text:latest` (embeddings)
 - Native Ollama API at `http://192.168.30.111:11434/api`
 
 **NAS (UNAS-CBERG):**

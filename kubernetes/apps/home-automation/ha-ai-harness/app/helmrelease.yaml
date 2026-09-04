@@ -38,7 +38,7 @@ spec:
               - name: EDGE_MODEL
                 value: "gemma4:e2b-mlx"
               - name: DENSE_MODEL
-                value: "gemma4:26b"
+                value: "gemma4:26b-mlx"
               - name: AUDIT_DB_PATH
                 value: "/data/audit.db"
               - name: RELOAD

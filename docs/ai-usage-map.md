@@ -1,7 +1,7 @@
 # AI Usage Map
 
 > Comprehensive mapping of all AI/LLM integrations across the cluster and Home Assistant.
-> Last Updated: 2026-08-24
+> Last Updated: 2026-09-04
 
 ---
 
@@ -14,27 +14,42 @@ Ports 11435 and 11436 are no longer in use.
 
 | Model | Purpose |
 |-------|---------|
-| `gemma4:26b` | All LLM tasks (chat, reasoning, vision, voice). Multimodal (text + image). |
+| `gemma4:26b-mlx` | All LLM tasks (chat, reasoning, vision, voice). Multimodal (text + image). |
 | `nomic-embed-text:latest` | Text embeddings |
 
 ### All Consumers
 
-| App | Namespace | Model | API Style | Config Location |
-|-----|-----------|-------|-----------|-----------------|
-| AnythingLLM | ai | `gemma4:26b` (LLM) | Native Ollama | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:82-83` |
-| AnythingLLM | ai | `nomic-embed-text:latest` (embeddings) | Native Ollama | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:87-88` |
-| OpenClaw | ai | `gemma4:26b` | OpenAI `/v1` | `kubernetes/apps/ai/openclaw/app/helmrelease.yaml:424-426` |
-| Next AI Draw.io | ai | `gemma4:26b` | Native Ollama `/api` | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
-| LibreChat | ai | `gemma4:26b` (default, fetch=true) | OpenAI `/v1` | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:93-103` |
-| Open WebUI | ai | (all available models) | Native Ollama | `kubernetes/apps/ai/open-webui/app/helmrelease.yaml:84` |
-| Paperless-ngx (native AI) | office | `gemma4:26b-mlx` (suggestions, 45s timeout — moved off the GGUF tag 2026-09-04) + `nomic-embed-text:latest` (RAG embeddings) | Native Ollama | DB-stored (`paperless.models.ApplicationConfiguration`), not a manifest — see `docs/sops/paperless.md` §4a. Replaces the retired Paperless-GPT/Paperless-AI sidecars (2026-08-24). |
-| AFFiNE | office | `gemma4:26b` (coding, text, summarize) | OpenAI `/v1` | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
-| Frigate NVR | home-automation | `gemma4:26b` (in encrypted configmap) | OpenAI `/v1` | `kubernetes/apps/home-automation/frigate-nvr/app/helmrelease.yaml:34` |
-| Nextcloud | office | `gemma4:26b` | OpenAI `/v1` | NC UI: `integration_openai` app (updated 2026-04-04) |
-| Nextcloud | office | `nomic-embed-text:latest` (context_chat RAG) | OpenAI `/v1` | NC UI: `context_chat` app |
-| n8n | home-automation | `gemma4:26b` | Ollama (UI) | n8n SQLite DB (updated 2026-04-04) |
-| Home Assistant | home-automation | `gemma4:26b` (all integrations) | Native Ollama | HA UI (updated 2026-04-04) |
-| Headlamp | kube-system | `gemma4:26b` | OpenAI `/v1` | Headlamp UI: AI Assistant plugin (updated 2026-04-05) |
+> **Completeness warning (2026-09-04).** This table was found to be MISSING
+> three live consumers — `sure`, `hermes-agent` and `ha-ai-harness` — during
+> the GGUF→MLX migration. Sure alone was ~85% of the day's load. Do NOT treat
+> this list as authoritative: verify with an exhaustive repo grep
+> (`gemma4`, `26b`, `192.168.30.111`, `11434`, `OPENAI_MODEL`, `LLM_MODEL`,
+> `OLLAMA_MODEL`, `AI_MODEL`, `genai`, `llm_backend`) **plus** the DB/UI-side
+> consumers below, which no grep can see.
+
+**Migrated column:** `git` = model name lives in this repo, changed by the
+2026-09-04 migration commit. `DB/UI` = configured outside GitOps; **still on
+the GGUF `gemma4:26b` unless its own owner has changed it.**
+
+| App | Namespace | Model | API Style | Migrated | Config Location |
+|-----|-----------|-------|-----------|----------|-----------------|
+| AnythingLLM | ai | `gemma4:26b-mlx` (LLM) | Native Ollama | git ✅ | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:83` |
+| AnythingLLM | ai | `nomic-embed-text:latest` (embeddings) | Native Ollama | n/a | `kubernetes/apps/ai/anythingllm/app/helmrelease.yaml:87-88` |
+| OpenClaw | ai | `gemma4:26b-mlx` | OpenAI `/v1` via `ollama-toolfix` | git ✅ | `kubernetes/apps/ai/openclaw/app/helmrelease.yaml` (env `OLLAMA_MODEL`, fallback rung, model catalog, memory-dreaming) **and** `skills-configmap.sops.yaml` (the model-switch skill) |
+| Next AI Draw.io | ai | `gemma4:26b-mlx` | Native Ollama `/api` | git ✅ | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
+| LibreChat | ai | `gemma4:26b-mlx` (default, **`fetch: true`**) | OpenAI `/v1` | git ⚠️ | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:162` — default only; `fetch: true` still lists every host model, so a user can pick the GGUF |
+| **Sure** | **office** | `gemma4:26b-mlx` | OpenAI `/v1` | git ✅ | **TWO places:** `kubernetes/apps/office/sure/app/helmrelease.yaml` (`OPENAI_MODEL`, plain env — this one wins) **and** `secret.sops.yaml` (`OPENAI_MODEL`). Was absent from this table until 2026-09-04 despite being the largest single consumer. |
+| **hermes-agent** | **ai** | `gemma4:26b-mlx` | OpenAI `/v1` | git ✅ | `kubernetes/apps/ai/hermes-agent/app/configmap.yaml:11`. Was absent from this table until 2026-09-04. |
+| **ha-ai-harness** | **home-automation** | `gemma4:26b-mlx` (`DENSE_MODEL`) + `gemma4:e2b-mlx` (`EDGE_MODEL`, already MLX) | Native Ollama | git ✅ | `kubernetes/apps/home-automation/ha-ai-harness/app/helmrelease.yaml:38-41`. Was absent from this table until 2026-09-04. |
+| AFFiNE | office | `gemma4:26b-mlx` (6 scenarios) | OpenAI `/v1` | git ✅ | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
+| Frigate NVR | home-automation | `gemma4:26b-mlx` — **vision**, 3 of 5 cameras have `genai.enabled: true` | OpenAI `/v1` | git ✅ | `configmap.sops.yaml` (`genai.model`, encrypted); host URL in `helmrelease.yaml:34` |
+| Open WebUI | ai | (human picks per chat) | Native Ollama | **DB ❌** | Not settable from the manifest. `ui.default_models`, the `model` table's `is_active`, and `ollama.api_configs[].model_ids` (per-connection allow-list) all live in `webui.db` and are PersistentConfig — env only seeds a fresh DB. The GGUF stays pickable until an admin hides it. |
+| Paperless-ngx (native AI) | office | `gemma4:26b-mlx` (suggestions, 45s timeout) + `nomic-embed-text:latest` (RAG) | Native Ollama | **DB ✅** | DB-stored `ApplicationConfiguration`; migrated 2026-09-04 by paperless-agent — see `docs/sops/paperless.md` §4a |
+| Nextcloud | office | `gemma4:26b` | OpenAI `/v1` | **DB ❌** | `occ config:app:get integration_openai default_completion_model_id` — verified still on the GGUF 2026-09-04 |
+| Nextcloud | office | `nomic-embed-text:latest` (context_chat RAG) | OpenAI `/v1` | n/a | NC UI: `context_chat` app |
+| n8n | home-automation | `gemma4:26b` | Ollama (UI) | **DB ❌** | n8n SQLite DB — 470 `lmChatOllama` nodes + `ollamaApi` credential, verified still on the GGUF 2026-09-04 |
+| Home Assistant | home-automation | `gemma4:26b` (2 subentries) + `gemma4:e2b-mlx` (voice) | Native Ollama | **UI ❌** | HA UI + **three direct-HTTP scripts in the `/config` PVC** that no integration list shows: `ai_person_check.py`, `ai_person_check_file.py` (**both vision**, `images:[b64]`), `ai_water_check.py` (probes `/api/ps` for the literal string `gemma4:26b` — needs 2 coordinated edits). All subentries set `keep_alive: -1`. Owner: `ha-agent` |
+| Headlamp | **monitoring** (not kube-system) | `gemma4:26b` | OpenAI `/v1` | **browser ❌** | AI Assistant plugin config lives in per-browser localStorage — no server-side config exists in the pod; cannot be fixed from cluster or repo |
 
 ---
 
@@ -61,18 +76,21 @@ Ports 11435 and 11436 are no longer in use.
 
 ---
 
-## UI-Configured Apps (Manual Updates Completed 2026-04-04)
+## UI/DB-Configured Apps — OUTSTANDING after the 2026-09-04 MLX migration
 
-These apps store their Ollama config in their own databases/UI, not in git manifests.
-All have been updated to `gemma4:26b` on `:11434`.
+These apps store their Ollama config in their own databases/UI, not in git
+manifests, so the migration commit could NOT touch them. **Each one still
+requesting `gemma4:26b` keeps the 27.1 GiB GGUF resident on the host.**
 
-| App | Status | Notes |
-|-----|--------|-------|
-| **Home Assistant** | Done | All 3 Ollama integrations updated via HA UI |
-| **Nextcloud** | Done | `integration_openai` settings updated via `occ config:app:set` |
-| **n8n** | Done | Ollama credential and workflow nodes updated via n8n UI |
-| **Frigate NVR** | Done | `configmap.sops.yaml` decrypted, updated, re-encrypted in git |
-| **Headlamp** | Done | AI Assistant plugin model updated via Headlamp UI |
+| App | Status | Owner | Notes |
+|-----|--------|-------|-------|
+| **Paperless-ngx** | Migrated 2026-09-04 | paperless-agent | `ApplicationConfiguration` DB row |
+| **Nextcloud** | **OUTSTANDING** | — | `occ config:app:set integration_openai default_completion_model_id gemma4:26b-mlx` |
+| **n8n** | **OUTSTANDING** | — | `ollamaApi` credential + every `lmChatOllama` node in the SQLite DB |
+| **Home Assistant** | **OUTSTANDING** | ha-agent | 2 Ollama subentries + 3 direct-HTTP scripts in `/config` (2 of them vision). All `keep_alive: -1` |
+| **Headlamp** | **OUTSTANDING** | — | Per-browser localStorage; no server-side config exists |
+| **Open WebUI** | **OUTSTANDING** | — | Human picks per chat; hide the GGUF via `is_active` or `model_ids` allow-list |
+| **Frigate NVR** | Migrated 2026-09-04 | git | `configmap.sops.yaml` — now in GitOps, not UI |
 
 ---
 
@@ -82,7 +100,7 @@ Nextcloud routes AI tasks through the `integration_openai` app.
 
 | Task Type | Provider | Model |
 |-----------|----------|-------|
-| text2text (all: chat, summary, translate, proofread, etc.) | integration_openai | `gemma4:26b` (after manual update) |
+| text2text (all: chat, summary, translate, proofread, etc.) | integration_openai | `gemma4:26b-mlx` (after manual update) |
 | context_chat (RAG) | context_chat + files | `nomic-embed-text:latest` (embeddings) |
 
 Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai` (4.3.0)
@@ -93,7 +111,7 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Credential | Provider | Notes |
 |------------|----------|-------|
-| `ollamaApi` | Ollama (Mac Mini) | Needs manual update to `:11434` endpoint and `gemma4:26b` model |
+| `ollamaApi` | Ollama (Mac Mini) | Needs manual update to `:11434` endpoint and `gemma4:26b-mlx` model |
 | `openAiApi` | OpenAI Cloud | No change needed |
 | `anthropicApi` | Anthropic Cloud | No change needed |
 
@@ -103,15 +121,15 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
-| `gemma4:26b-mlx` | Paperless-ngx (native AI suggestions) — migrated 2026-09-04. **The GGUF `gemma4:26b` and the MLX build are ~37 GB together on a 48 GB host; every remaining consumer in the row above keeps the GGUF resident.** Migrating the rest is an open item for ollama-agent. |
+| `gemma4:26b-mlx` | **Migrated:** AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Sure, hermes-agent, ha-ai-harness, AFFiNE, Frigate NVR, Paperless-ngx |
+| `gemma4:26b` (GGUF — **to be retired**) | **Still requesting it:** Nextcloud, n8n, Home Assistant, Headlamp, Open WebUI (user-selectable). **The GGUF needs 27.1 GiB (256k ctx alloc, `-np 2`, q8_0 KV) and the MLX build 18.7 GiB — 45.8 of 48 GiB. Any state where both are requested is guaranteed to OOM.** The GGUF cannot be unloaded until this row is empty. |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
 ---
 
 ## Consumer Count
 
-| Endpoint | Git-Managed Apps | UI-Configured Apps | Total |
-|----------|------------------|--------------------|-------|
-| Mac Mini :11434 | 9 | 4 (HA, Nextcloud, n8n, Headlamp) | 13 |
+| Endpoint | Git-Managed Apps | UI/DB-Configured Apps | Total |
+|----------|------------------|-----------------------|-------|
+| Mac Mini :11434 | 10 (AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, **Sure**, **hermes-agent**, **ha-ai-harness**, AFFiNE, Frigate NVR + embeddings) | 6 (Paperless, Nextcloud, n8n, HA, Headlamp, Open WebUI) | 16 |
 | Cloud APIs | 1 (Paperclip) | 5 (HA x3, n8n x2) | 6 |

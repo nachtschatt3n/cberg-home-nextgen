@@ -97,7 +97,7 @@ pipeline, because every other signal stays green.**
 The agent's global chain (`agents.defaults.model` in `openclaw.json`) is:
 
 ```
-openai/gpt-5.6-terra  →  ollama/gemma4:26b  →  ollama/gemma4:e2b-mlx
+openai/gpt-5.6-terra  →  ollama/gemma4:26b-mlx  →  ollama/gemma4:e2b-mlx
 ```
 
 A cron job may carry a **per-job model override** (`payload.model`). When it does,
@@ -131,7 +131,7 @@ EOF'
 ```
 
 **The fix is `--clear-model`, not a different pin.** Repointing the pin at
-`ollama/gemma4:26b` merely moves the single point of failure and needs a manual
+`ollama/gemma4:26b-mlx` merely moves the single point of failure and needs a manual
 flip back when quota returns. Clearing it restores normal cron model precedence,
 so the job self-heals on the next reset *and* survives the next outage:
 
@@ -140,7 +140,7 @@ kubectl exec -n ai "$OC" -c app -- \
   openclaw cron edit <job-id> --clear-model
 ```
 
-**Accept the latency change.** On the fallback the turn runs on `gemma4:26b`,
+**Accept the latency change.** On the fallback the turn runs on `gemma4:26b-mlx`,
 which is roughly 2–3× slower than `gpt-5.6-terra` (measured 2026-08-18: 489 s vs
 163–253 s for the same job). That is still well inside the job's
 `timeoutSeconds: 1200`, but a job with a tighter timeout would start failing on

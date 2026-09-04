@@ -481,7 +481,7 @@ spec:
 
                 # Dream-diary narrative timeout. Upstream hardcodes
                 # NARRATIVE_TIMEOUT_MS=6e4 (60s) in dreaming-narrative-*.js.
-                # Our local dreaming model (ollama/gemma4:26b) needs several
+                # Our local dreaming model (ollama/gemma4:26b-mlx) needs several
                 # minutes per narrative, so every nightly diary run blew the
                 # 60s budget and fell back to the "details were unavailable in
                 # this run." placeholder — while the longer-budget promotion
@@ -658,7 +658,7 @@ spec:
                 node - <<'NODE'
                   const fs = require('fs');
                   const path = '/home/node/.openclaw/openclaw.json';
-                  const modelName = process.env.OLLAMA_MODEL || 'gemma4:26b';
+                  const modelName = process.env.OLLAMA_MODEL || 'gemma4:26b-mlx';
                   // Route the MODEL PROVIDER through the toolfix proxy: OpenClaw sends
                   // tool_call arguments as an object, Ollama demands a JSON string, so
                   // direct calls 400 on every tool-using turn and the local fallback was
@@ -768,17 +768,21 @@ spec:
                   // switches from the codex plugin harness to the embedded openclaw
                   // runtime for the ollama rungs. Verified live: fallback decision
                   // candidate_failed(gpt-5.6-terra, rate_limit) -> candidate_succeeded
-                  // (ollama/gemma4:26b).
+                  // (ollama/gemma4:26b-mlx).
                   //
                   // Only models present in models.providers.ollama.models[] AND
                   // pulled on the Mac mini are valid rungs. gemma4:e2b is NOT pulled
-                  // (host has gemma4:26b + gemma4:e2b-mlx only) — do not add it, a
-                  // dead rung just burns a retry.
+                  // (host has gemma4:26b-mlx, gemma4:e2b-mlx and the now-retired
+                  // GGUF gemma4:26b on disk) — do not add gemma4:e2b, a dead rung
+                  // just burns a retry. Do NOT re-add the GGUF gemma4:26b either:
+                  // it needs 27.1 GiB (256k ctx alloc, -np 2, q8_0 KV) against the
+                  // MLX build's 18.7 GiB, and 45.8 of 48 GiB means any state where
+                  // both are requested is guaranteed to OOM. See 2026-09-04.
                   //
                   // rate_limit is a cooldown-probeable reason, so the primary is
                   // re-probed automatically and traffic returns to codex on its own
                   // once quota resets. No manual revert needed.
-                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b', 'ollama/gemma4:e2b-mlx'];
+                  cfg.agents.defaults.model.fallbacks = ['ollama/gemma4:26b-mlx', 'ollama/gemma4:e2b-mlx'];
                   delete cfg.agents.defaults.agentRuntime;
                   if (chosenModel.startsWith('openai/')) {
                     cfg.agents.defaults.models = cfg.agents.defaults.models || {};
@@ -846,13 +850,19 @@ spec:
                   // openai/gpt-5.5 via OPENCLAW_DEFAULT_MODEL.
                   const ollamaModels = [
                     {
-                      id: 'gemma4:26b',
-                      name: 'Gemma 4 (26B, quality)',
+                      id: 'gemma4:26b-mlx',
+                      name: 'Gemma 4 (26B MLX, quality)',
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      // Ollama loads gemma4:26b with num_ctx=131072 (arch max 256K).
-                      // The old 32768 under-reported it, risking over-compaction.
+                      // Serves num_ctx 131072 — but NOT the same way the GGUF did.
+                      // The GGUF had num_ctx=131072 BAKED as a model parameter; the
+                      // MLX build has no baked num_ctx (only temperature/top_k/top_p)
+                      // and inherits OLLAMA_CONTEXT_LENGTH=131072 from the Guardian
+                      // env on the Mac mini. Same number today, but host-env
+                      // dependent: if that env changes, this value silently becomes
+                      // a lie and over-compaction returns. Verified by needle test
+                      // at ~52k tokens (2026-09-04).
                       contextWindow: 131072,
                       maxTokens: 4096,
                     },
@@ -1290,7 +1300,7 @@ spec:
                   cfg.plugins.entries['memory-core'].config = cfg.plugins.entries['memory-core'].config || {};
                   cfg.plugins.entries['memory-core'].config.dreaming = cfg.plugins.entries['memory-core'].config.dreaming || {};
                   cfg.plugins.entries['memory-core'].config.dreaming.enabled = true;
-                  cfg.plugins.entries['memory-core'].config.dreaming.model = 'ollama/gemma4:26b';
+                  cfg.plugins.entries['memory-core'].config.dreaming.model = 'ollama/gemma4:26b-mlx';
 
                   // Reply delivery mode — keep heartbeats from swallowing
                   // user DMs. When unset, codex-backed runtimes default to
@@ -1691,7 +1701,7 @@ spec:
               - name: OLLAMA_BASE
                 value: "http://192.168.30.111:11434/v1"
               - name: OLLAMA_MODEL
-                value: "gemma4:26b"
+                value: "gemma4:26b-mlx"
               - name: OLLAMA_API_KEY
                 value: "ollama"
               # Route the embedded agent through the codex CLI backend.

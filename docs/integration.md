@@ -14,7 +14,7 @@ Metal Performance Shaders (MPS) for GPU acceleration.
 
 | Model | Purpose |
 |-------|---------|
-| `gemma4:26b` | All LLM tasks (chat, reasoning, vision, voice). Multimodal. |
+| `gemma4:26b-mlx` | All LLM tasks (chat, reasoning, vision, voice). Multimodal. |
 | `nomic-embed-text:latest` | Text embeddings |
 
 ### API Formats
@@ -24,7 +24,7 @@ Metal Performance Shaders (MPS) for GPU acceleration.
 Base URL: http://192.168.30.111:11434/api
 Endpoints: /api/chat, /api/generate
 API Key: Not required
-Model name: gemma4:26b (exact, not gemma4 or gemma4:26b-instruct)
+Model name: gemma4:26b-mlx (exact, not gemma4 or gemma4:26b-mlx-instruct)
 ```
 
 **OpenAI-compatible (for apps that require it):**
@@ -37,20 +37,20 @@ Endpoints: /v1/chat/completions
 
 | App | Endpoint | Model | Provider Config |
 |-----|---------|-------|-----------------|
-| anythingllm | `http://192.168.30.111:11434` | `gemma4:26b` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
-| openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b` | `OLLAMA_BASE`, `OLLAMA_MODEL` |
-| next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` |
-| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b` (fetch=true) | Custom endpoint "Ollama" |
+| anythingllm | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
+| openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `OLLAMA_BASE`, `OLLAMA_MODEL` |
+| next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b-mlx` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` |
+| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (fetch=true) | Custom endpoint "Ollama" |
 | open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` |
 | paperless-ngx (native AI) | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | DB-stored `ApplicationConfiguration` row (`ai_enabled`/`llm_*`/`llm_embedding_*`), not GitOps — see `docs/sops/paperless.md` §4a. Retired `paperless-gpt`/`paperless-ai` sidecars 2026-08-24. |
-| affine | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
-| frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b` (in encrypted config) | `OPENAI_BASE_URL` |
-| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |
-| n8n | (UI-configured) | `gemma4:26b` | n8n UI: `ollamaApi` credential |
+| affine | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
+| frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (in encrypted config) | `OPENAI_BASE_URL` |
+| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |
+| n8n | (UI-configured) | `gemma4:26b-mlx` | n8n UI: `ollamaApi` credential |
 | n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials |
-| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b-mlx` (edge) + `gemma4:26b` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` |
-| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b` (all integrations) | HA UI |
-| headlamp | `http://192.168.30.111:11434` | `gemma4:26b` | Headlamp UI: AI Assistant plugin |
+| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b-mlx` (edge) + `gemma4:26b-mlx` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` |
+| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (all integrations) | HA UI |
+| headlamp | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | Headlamp UI: AI Assistant plugin |
 | paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret |
 
 **Home Assistant cloud AI integrations (UI-configured, no change):**
@@ -75,12 +75,12 @@ openclaw-probe CronJob pages critical.
 # Test chat endpoint
 curl -X POST http://192.168.30.111:11434/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
+  -d '{"model": "gemma4:26b-mlx", "messages": [{"role": "user", "content": "Hello"}], "stream": false}'
 
 # Test OpenAI-compatible endpoint
 curl -X POST http://192.168.30.111:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "gemma4:26b", "messages": [{"role": "user", "content": "Hello"}]}'
+  -d '{"model": "gemma4:26b-mlx", "messages": [{"role": "user", "content": "Hello"}]}'
 
 # List available models
 curl http://192.168.30.111:11434/api/tags
