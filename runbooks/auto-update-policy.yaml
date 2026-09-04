@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.08.26.1"
+version: "2026.09.05.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -28,7 +28,24 @@ minimum_release_age_hours: 48
 
 # deps whose bumps skip the cooldown even without a security marker in the PR
 # (shell globs against depName, same syntax as deny.match). Keep short.
-age_waive: []
+#
+# Matched against BOTH the Renovate depName and, for coverage.py's direct-bump
+# lane, the image repository — so a repo glob covers every component mounting
+# that image (e.g. scan-inbox-validator rides the paperless-ngx image).
+#
+# The two entries below are the operator's 2026-09-04 call. Both components had
+# open findings for FIXABLE CRITICAL CVEs whose fix tags were <48h old, and the
+# direct-bump lane has no PR title for the security-marker waiver to read, so
+# G5 would have held the CVE fixes for the full cooldown. That is exactly the
+# case this file already calls out: "a known-bad current version outranks an
+# unknown-new one."
+#
+# NOTE these are PERMANENT until removed — they waive the cooldown for ALL
+# future mealie / paperless-ngx bumps, not just the CVE ones. Revisit if either
+# component starts shipping regressions.
+age_waive:
+  - "*mealie*"
+  - "*paperless-ngx*"
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
