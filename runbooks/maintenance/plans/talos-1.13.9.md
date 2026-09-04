@@ -33,7 +33,14 @@ touches:
 depends_on: []
 conflicts_with:
   - longhorn-1.12.1-engine            # both cycle Longhorn volumes; never the same window
-status: scheduled                     # OPERATOR GO 2026-08-26T17:40Z for sun-attended:2026-08-30,
+status: superseded                    # SUPERSEDED 2026-09-05 by talos-1.13.10.md.
+                                      # The 2026-08-26 operator GO for sun-attended:2026-08-30
+                                      # is VOID: that window passed unexecuted, this plan is now
+                                      # past stale_after_days:14, and its target v1.13.9 was
+                                      # overtaken (PR #208 now offers v1.13.10). Do NOT re-arm
+                                      # the old GO — the replacement carries its own decision.
+                                      # Original line follows for provenance:
+                                      # status: scheduled                     # OPERATOR GO 2026-08-26T17:40Z for sun-attended:2026-08-30,
                                       # recorded in OpenClaw (decision=approve, decided_by=operator,
                                       # exec_state=pending) and RE-CONFIRMED by the operator
                                       # 2026-08-28. The file was left at awaiting-go after that GO,
