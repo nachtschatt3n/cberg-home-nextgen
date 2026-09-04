@@ -20,7 +20,12 @@ update_type: patch
 risk: medium                        # patch content, but it reboots every node of a
                                     # 3-node hyper-converged cluster carrying 94
                                     # attached Longhorn volumes
-est_duration_min: 110               # 25-35 min per node incl. replica rebuild,
+est_duration_min: 70                # PART 1 = 2 nodes only: 10 pre-checks + 2 x (25-35) +
+                                    # 10 final verification = ~70-90, inside the 90-min slot.
+                                    # The full 3-node figure was 110 and did NOT fit; it was
+                                    # never shaved — the SCOPE shrank. Node 01 carries its own
+                                    # ~45 min in part 2. Original note follows:
+                                    # 25-35 min per node incl. replica rebuild,
                                     # + 10 pre-checks + 10 final verification.
                                     # EXCEEDS the 90-min sun-attended slot — see §6.
 needs_reboot: true                  # 3 sequential node reboots
@@ -66,23 +71,30 @@ finding_refs: [F-912f4778]          # "Talos Linux (cluster nodes): v1.13.8 -> v
                                     # section=version, first_seen 2026-08-24.
                                     # READ §1.3: executing this plan does NOT close
                                     # that finding.
-status: reference                   # OPERATOR GO 2026-09-05. Option (C) chosen: run
-                                    # ATTENDED, OUTSIDE the window system, in one sitting.
-                                    # Deliberately NOT `scheduled`: `scheduled` + `window: null`
-                                    # is the contradiction the envoy-gateway-phase* plans call
-                                    # out — a scheduled plan needs a window occurrence for the
-                                    # window agent to pull, and NO window agent should drive
-                                    # this one. The operator executes it directly.
-window: null                        # (C) attended, outside the window system. The 110-min
-                                    # estimate stands unshaved; there is no 90-min clock to
-                                    # fit, which is precisely why this option was chosen.
-                                    # CONSEQUENCE, do not overlook: running outside a window
-                                    # means Step 0 (the safe-update batch) does NOT run first,
-                                    # and the window agent's health-gate + auto-revert harness
-                                    # does NOT wrap this. The §2 pre-checks and §4 per-node
-                                    # gates are therefore the ONLY safety net — run every one.
-                                    # the work does not fit its 90 min (§6) — the
-                                    # operator picks split-vs-extend at go/no-go.
+status: scheduled                   # OPERATOR GO 2026-09-05, option (B) — SPLIT and SCHEDULED.
+                                    # Supersedes the brief option-(C) cut earlier the same night:
+                                    # (C) is what left this plan with no date at all, which is the
+                                    # exact shape that stranded talos-1.13.9 for 17 days. A dated
+                                    # window occurrence is what makes it actually happen.
+window: "sun-attended:2026-09-06"   # PART 1 of 2 — nodes k8s-nuc14-02 and -03 only.
+                                    # Node 01 runs in PART 2, sun-attended:2026-09-13, tracked in
+                                    # talos-1.13.10-node01.md. sun-attended is the ONLY
+                                    # allow_reboot:true slot (nightly and sat-attended are both
+                                    # allow_reboot:false, so a node roll cannot go there).
+                                    #
+                                    # WHY SPLIT rather than extend the window: two nodes fit the
+                                    # existing 90 min with margin, so no change to
+                                    # maintenance-windows.yaml is needed and no other Sunday is
+                                    # affected. Talos explicitly tolerates a mixed patch level
+                                    # across nodes, and etcd stays 3/3 the whole time — the
+                                    # cluster simply sits v1.13.10/v1.13.10/v1.13.8 for one week.
+                                    #
+                                    # COST, stated plainly: it is two sittings, not one, and the
+                                    # cluster is mixed-version in between. If a single sitting
+                                    # matters more, the alternative is to raise sun-attended's
+                                    # duration_min 90 -> 120 in maintenance-windows.yaml and run
+                                    # all three nodes on 09-06 — that is a global window change,
+                                    # so it is the operator's call, not this plan's.
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is DERIVED from
 # capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # rollback_class: one-way => HUMAN-GATED. Never unattended, never in `nightly`.
@@ -366,9 +378,26 @@ mise exec -- task talos:upgrade-node IP=192.168.55.12
 mise exec -- task talos:upgrade-node IP=192.168.55.13
 #   >>> run the FULL §4 per-node gate again.
 
-# --- NODE 3 of 3: k8s-nuc14-01 -----------------------------------------
-mise exec -- task talos:upgrade-node IP=192.168.55.11
-#   >>> §4 per-node gate, then §4.5 cluster-wide.
+# --- STOP. PART 1 ENDS HERE. -------------------------------------------
+#
+#   Nodes 02 and 03 are the ENTIRE scope of this window (split decision,
+#   §6.1). After node 03's §4 gate passes, run §4.5 cluster-wide and CLOSE
+#   the window. The cluster is now intentionally mixed-version:
+#       k8s-nuc14-02  v1.13.10
+#       k8s-nuc14-03  v1.13.10
+#       k8s-nuc14-01  v1.13.8   <- stays here for one week, on purpose
+#   Talos supports this and etcd remains 3/3. Do not "just finish" node 01
+#   to tidy it up: the 90-minute slot does not hold a third node, and node
+#   01 is the LAST control-plane node — draining it leaves etcd at 2 of 3
+#   with no failure budget, which is not something to start against a clock.
+#
+# --- NODE 01 IS PART 2 --------------------------------------------------
+#   runbooks/maintenance/plans/talos-1.13.10-node01.md
+#   window: sun-attended:2026-09-13
+#   The command below is kept for reference ONLY — it belongs to part 2:
+#
+#   mise exec -- task talos:upgrade-node IP=192.168.55.11
+#   >>> then §4 per-node gate, then §4.5 cluster-wide.
 ```
 
 Do **not** run `task talos:upgrade-k8s` — that is the kubelet, out of scope.
@@ -506,27 +535,35 @@ one-way`.
 
 ## 6) Interference notes
 
-### 6.1 Capacity — RESOLVED 2026-09-05: option (C), attended outside the window
+### 6.1 Capacity — RESOLVED 2026-09-05: option (B), split across two Sundays
 
-> **OPERATOR DECISION 2026-09-05 — option (C).** Run attended, outside the
-> window system, in one sitting. `window: null`, `status: reference`.
+> **FINAL OPERATOR DECISION 2026-09-05 — option (B).**
+> Part 1: nodes 02 + 03 on `sun-attended:2026-09-06`, ~70 min.
+> Part 2: node 01 on `sun-attended:2026-09-13`, ~45 min (`talos-1.13.10-node01.md`).
 >
-> This dissolves the capacity problem rather than working around it: there is no
-> 90-minute clock, so the 110-minute estimate stands unshaved and the last node's
-> gate — the one that matters most — is not run against a deadline.
-> `maintenance-plan.py --validate` no longer flags an overrun, because the plan
-> no longer claims a window it cannot fit.
+> **This supersedes the option-(C) cut made earlier the same night.** (C) — run
+> attended, outside the window system — was chosen first and then reversed for
+> one concrete reason: it left the plan with **no date at all**. Nothing pulls a
+> `window: null` plan, so it happens only if someone remembers. That is the exact
+> shape that stranded `talos-1.13.9` for 17 days behind a live operator GO. A
+> dated window occurrence is what converts an approval into an execution.
 >
-> **Two things this decision gives up, and they are not small:**
+> **What (B) restores that (C) gave up:**
+> - **Step 0 runs first** again, so the safe-update batch lands with its
+>   health-gate — budget it before the ~70 min.
+> - **The window agent's health-gate and auto-revert harness** wraps the run.
 >
-> 1. **No Step 0.** Window runs begin with the safe-update batch applied,
->    reconciled and health-gated by the `maintenance-window-agent`. Outside the
->    window system that does not happen. Fine here — it is one less moving part
->    during a node roll — but the safe updates still need a window to land in.
-> 2. **No auto-revert harness.** The window agent's health-gate-and-revert
->    wrapper is not around this. The §2 pre-checks and the §4 per-node gates are
->    the ONLY safety net. Run every one; skipping a gate has nothing behind it.
+> **What (B) costs, plainly:** two sittings instead of one, and the cluster runs
+> a **mixed patch level** (v1.13.10 / v1.13.10 / v1.13.8) for one week. Talos
+> supports this and etcd stays 3/3 throughout — it is an accepted state, not
+> drift.
 >
+> **If a single sitting matters more than the split**, the alternative is to
+> raise `sun-attended.duration_min` 90 -> 120 in `runbooks/maintenance-windows.yaml`
+> and run all three nodes on 09-06. That changes every Sunday window, so it is an
+> operator policy call rather than something this plan should assume.
+>
+> The estimate was never shaved to fit: the **scope** shrank from 3 nodes to 2.
 > The original three-option analysis is kept below for provenance.
 
 #### Original analysis (pre-decision)
