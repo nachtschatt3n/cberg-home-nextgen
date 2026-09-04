@@ -91,30 +91,17 @@ spec:
 
         FEATURE_FLAGS = {"EMBEDDED_SUPERSET": False, "ALERT_REPORTS": True}
 
-    # --- Bundled PostgreSQL (metadata DB) — binds to pre-created longhorn-static PVC ---
-    # Bitnami removed old tags from docker.io/bitnami/*; use bitnamilegacy mirror.
+    # --- Bundled PostgreSQL (metadata DB) — RETIRED 2026-09-05 ---
+    # bitnamilegacy is an ARCHIVED registry (last push 2025-08-28; security
+    # driver F-937701ef) and chart 0.22.4 pins
+    # bitnamilegacy/postgresql:14.17.0-debian-12-r3 itself, so no chart bump
+    # can fix it. The metadata DB is now postgres:17.11-alpine —
+    # pg-deployment.yaml in this folder — reached via DB_HOST in
+    # superset-secrets and database.host below.
+    # Data is RETAINED: pv.yaml / data-pvc.yaml / longhorn-volume.yaml for
+    # superset-postgresql-data stay in this folder, PV reclaimPolicy Retain.
     postgresql:
-      enabled: true
-      image:
-        registry: docker.io
-        repository: bitnamilegacy/postgresql
-      auth:
-        username: superset
-        database: superset
-        existingSecret: superset-secrets
-        secretKeys:
-          adminPasswordKey: postgres-password
-          userPasswordKey: postgresql-password
-      primary:
-        persistence:
-          enabled: true
-          existingClaim: superset-postgresql-data
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            memory: 1Gi
+      enabled: false
 
     # --- Bundled Redis (broker/cache) ---
     # Same Bitnami image-mirror workaround as above.
