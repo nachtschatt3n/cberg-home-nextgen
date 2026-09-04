@@ -1,8 +1,8 @@
 # SOP: Container Dependency Wait-For Pattern
 
 > Description: Standard pattern for ensuring an app pod waits for its stateful dependencies (Postgres, Redis, Mongo, S3, etc.) to be reachable before its primary container starts. Eliminates cold-start crashloops when dependencies and their consumers reschedule on the same Talos upgrade or node reboot.
-> Version: `2026.09.03`
-> Last Updated: `2026-09-03`
+> Version: `2026.09.05`
+> Last Updated: `2026-09-05`
 > Owner: `cluster-ops`
 
 ---
@@ -16,7 +16,24 @@ The fix is a one-line `initContainer` per app that blocks the main container unt
 **Status as of 2026-05-01** — wait-for is wired in:
 - `office/affine`, `ai/paperclip` (seed implementations, bjw-s app-template)
 - `office/paperless-ngx`, `office/nextcloud`, `kube-system/authentik`, `office/penpot`, `office/sure` (added 2026-05-01)
-- `databases/superset` — chart already ships default `wait-for-postgres` init; no edit needed
+- `databases/superset` — ⚠️ **CORRECTED 2026-09-05.** The chart DOES ship a
+  `wait-for-postgres` init container, but it resolves its host from
+  `.Values.supersetNode.connections.db_host` via `_helpers.tpl`, which defaulted
+  to the BUNDLED `superset-postgresql`. After the metadata DB was cut over to
+  `superset-pg`, four workloads (`superset`, `-worker`, `-celerybeat`, and the
+  `superset-init-db` hook Job) were still waiting on the *old* host through the
+  stale `superset-env.DB_HOST`. The init container was present and running — and
+  pointed at the wrong database. "No edit needed" was wrong, and this belief is
+  what armed the 2026-09-05 decommission: switching off the bundled Postgres
+  would have left every init container blocking on a host that no longer
+  existed. Fixed by pinning `database.host: superset-pg` (c4694b13) BEFORE
+  `postgresql.enabled: false` (90539942).
+
+  **Generalise this.** A bundled chart's wait-for init is only correct while the
+  dependency is the bundled one. Any bundled-datastore exit must re-point the
+  init container's host in the SAME change set as the cutover, and verify it is
+  *exercised* — roll the pods and read the init log for the NEW host — not
+  merely that the init container exists.
 - `ai/openclaw`, `home-automation/n8n` — no external dep (SQLite-only); skipped
 
 - **Scope**: every app with one or more upstream stateful dependencies (postgres, redis, mongo, mariadb, mqtt, MinIO, S3 endpoints, etc.)
@@ -300,5 +317,12 @@ The pattern is purely additive — removing it returns the app to its previous (
 ---
 
 ## Version History
+
+- `2026.09.05` — CORRECTED the `databases/superset` status line. It claimed the
+  chart's bundled `wait-for-postgres` init meant "no edit needed"; in fact the init
+  resolved its host from the bundled Postgres, so after the metadata cutover four
+  workloads were waiting on the wrong database. Added the generalised rule for
+  bundled-datastore exits: re-point the init host in the same change set as the
+  cutover, and verify it is exercised rather than merely present.
 
 - `2026.04.30`: Initial SOP — wait-for pattern documented + applied to high-priority apps after Talos v1.13 upgrade exposed the gap.
