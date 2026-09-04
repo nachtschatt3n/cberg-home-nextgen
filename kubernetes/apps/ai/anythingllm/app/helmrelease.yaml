@@ -33,6 +33,17 @@ spec:
               kind: Deployment
               name: anythingllm
             patch: |
+              # AnythingLLM's model name lives in the chart-generated ConfigMap
+              # (OLLAMA_MODEL_PREF), and the chart adds no checksum annotation —
+              # so a ConfigMap-only change reconciles green in Flux while the
+              # running pod keeps serving the OLD value indefinitely. That is
+              # exactly what happened during the 2026-09-04 gemma4 GGUF->MLX
+              # migration: the manifest said 26b-mlx, the pod was 6 days old and
+              # still requesting the GGUF. Reloader restarts the Deployment when
+              # a referenced ConfigMap/Secret changes, which closes that gap.
+              - op: add
+                path: /metadata/annotations/reloader.stakater.com~1auto
+                value: "true"
               - op: replace
                 path: /spec/strategy
                 value:

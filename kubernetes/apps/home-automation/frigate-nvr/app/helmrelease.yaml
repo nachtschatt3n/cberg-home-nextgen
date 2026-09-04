@@ -24,6 +24,24 @@ spec:
       retries: 1
   uninstall:
     keepHistory: false
+
+  # Frigate reads /config/config.yml ONCE at process start, and that file comes
+  # from the frigate-config ConfigMap. A ConfigMap-only change therefore lands in
+  # the API, reconciles green in Flux, and the running process keeps using the old
+  # config until something restarts it. During the 2026-09-04 gemma4 GGUF->MLX
+  # migration the ConfigMap said 26b-mlx while the live process was still sending
+  # vision requests to the GGUF; the only thing that would have fixed it on its own
+  # was the 02:30 frigate-restart CronJob, hours later. Reloader closes that window.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: frigate
+            patch: |
+              - op: add
+                path: /metadata/annotations/reloader.stakater.com~1auto
+                value: "true"
   values:
     image:
       repository: ghcr.io/blakeblackshear/frigate

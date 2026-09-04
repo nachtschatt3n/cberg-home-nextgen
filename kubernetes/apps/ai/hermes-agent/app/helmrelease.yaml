@@ -37,6 +37,24 @@ spec:
             fsGroupChangePolicy: OnRootMismatch
 
         initContainers:
+          # ⚠️ THIS CONFIGMAP IS A SEED, NOT THE LIVE CONFIG. ⚠️
+          # The seed script below copies /seed/config.yaml to /opt/data/config.yaml
+          # ONLY if that file does not already exist. /opt/data is the
+          # hermes-agent-data PVC, and once seeded the PVC copy is authoritative
+          # forever. Editing configmap.yaml therefore changes NOTHING on a running
+          # install — not on reconcile, not on restart, not with Reloader. Adding a
+          # reloader annotation here would be actively misleading for that reason.
+          #
+          # Cost of learning this the hard way (2026-09-04, gemma4 GGUF->MLX
+          # migration): the ConfigMap and the manifest both said gemma4:26b-mlx,
+          # Flux was green, the pod had been restarted — and the live process was
+          # still requesting the GGUF from a 17-day-old PVC file.
+          #
+          # To actually change the model (or any other setting) on a live install:
+          #   kubectl exec -n ai deploy/hermes-agent -c gateway -- \
+          #     sed -i 's/^  default: .*/  default: <new-model>/' /opt/data/config.yaml
+          #   kubectl rollout restart -n ai deploy/hermes-agent
+          # Then VERIFY the file in-container, not the ConfigMap.
           seed-config:
             image:
               repository: busybox
