@@ -22,7 +22,7 @@ touches:
     - pvc/paperless-mariadb                     # orphaned, Retain — the rollback data
   shared: [storage]                             # allocates a new 2-replica Longhorn volume
 depends_on: []  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 (2dcbfad2) — dependency satisfied  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
-conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-nextcloud-db, ]  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 — dead ref removed  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
+conflicts_with: [bitnamilegacy-exit-nextcloud-db]  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.  # RESOLVED 2026-08-18: bitnamilegacy-exit-paperless-redis EXECUTED 2026-08-18 — dead ref removed  # RESOLVED 2026-08-18: paperless-ngx-3.0.5 EXECUTED (cc6df965, 3.0.5 live) — dependency satisfied
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
 status: executed                                # EXECUTED 2026-08-19 (4604c711) in the
                                                 # operator-approved ad-hoc window. Dump

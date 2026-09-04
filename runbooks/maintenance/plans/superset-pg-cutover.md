@@ -20,7 +20,7 @@ touches:
     - "superset-postgresql (old, left RUNNING — it is the rollback)"
   shared: []
 depends_on: []  # RESOLVED 2026-08-18: superset-pg-standup EXECUTED 2026-08-18 (95322f1f, 47/47 tables verified) — dependency satisfied
-conflicts_with: [longhorn-1.12.1-engine]
+conflicts_with: []  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
 status: executed                      # EXECUTED 2026-08-19 (48ffc039) in the operator-approved
                                       # ad-hoc window. Contents asserted BEFORE the repoint:
                                       # 47 tables / 2985 rows identical on both servers,

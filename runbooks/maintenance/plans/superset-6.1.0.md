@@ -35,7 +35,7 @@ touches:
                                        # ingress/cert-manager/CNI untouched
 depends_on: [superset-pg-cutover]      # HARD. See §6 — this must not run against the DB
                                        # we are about to retire.
-conflicts_with: [superset-pg-cutover, superset-pg-decommission, longhorn-1.12.1-engine]
+conflicts_with: [superset-pg-cutover, superset-pg-decommission]  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
 security_ref: F-9d259837
 status: draft
 window: "sun-attended:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B
@@ -765,6 +765,10 @@ Authentik-adjacency pre-flight note.
   two together are ~125 min of serial work on the same database in one window.
 - `conflicts_with: superset-pg-decommission` — the decommission removes the
   deepest recovery floor listed in §5.
+  > **RESOLVED 2026-09-05:** this conflict no longer applies — `longhorn-1.12.1-engine`
+  > was EXECUTED 2026-08-29 (34abe2bb) and its file deleted; 94/94 volumes verified on
+  > engine v1.12.1, single engine image deployed. Removed from `conflicts_with` in the
+  > frontmatter. Text around this note kept for provenance.
 - `conflicts_with: longhorn-1.12.1-engine` — matches the sibling superset plans;
   the metadata PVC lives on Longhorn and a schema migration must not run under
   storage-engine work.

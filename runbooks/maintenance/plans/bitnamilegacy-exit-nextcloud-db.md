@@ -33,7 +33,7 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
                                                 # RESOLVED 2026-08-19:
                                                 # bitnamilegacy-exit-nextcloud-redis EXECUTED
                                                 # (d6070b82) — dependency satisfied
-conflicts_with: [longhorn-1.12.1-engine, bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis]
+conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis]  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
                                                 # nextcloud-redis EXECUTED 2026-08-19; the only
                                                 # residual coupling is the shared HelmRelease
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
@@ -1037,6 +1037,10 @@ baseline `oc_filecache` count, `status.php` `maintenance:false` /
   subchart, because `_helpers.tpl` still reads it to pick the URL form. Check
   whether any `mariadb.*` value steers the parent chart the same way before
   deleting that block.
+  > **RESOLVED 2026-09-05:** this conflict no longer applies — `longhorn-1.12.1-engine`
+  > was EXECUTED 2026-08-29 (34abe2bb) and its file deleted; 94/94 volumes verified on
+  > engine v1.12.1, single engine image deployed. Removed from `conflicts_with` in the
+  > frontmatter. Text around this note kept for provenance.
 - **`conflicts_with: longhorn-1.12.1-engine`** — this plan creates a new Longhorn
   volume and depends on healthy replica scheduling. Never pair storage-engine
   work with new-volume creation.

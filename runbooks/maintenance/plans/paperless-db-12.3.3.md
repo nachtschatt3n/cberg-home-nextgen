@@ -20,7 +20,7 @@ touches:
     - helmrelease/paperless-ngx                 # suspended during the quiesce (no edit)
   shared: []                                    # own Longhorn volume; no shared infra
 depends_on: []                        # bitnamilegacy-exit-paperless-db EXECUTED 2026-08-19
-conflicts_with: [longhorn-1.12.1-engine]  # engine upgrade perturbs every attached
+conflicts_with: []  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.  # engine upgrade perturbs every attached
                                           # volume incl. paperless-db-data — never
                                           # share a window (it holds sat-attended:2026-08-29)
 security_ref: null                    # version-currency driver, not a CVE driver
@@ -333,6 +333,10 @@ counts diff is non-silent, or paperless cannot serve its library.
   up during this window. It plays **no role** in this plan's rollback: its
   contents are the pre-replatform 11.8.2 Bitnami datadir, two migrations
   behind after this upgrade. Its retirement is a separate operator decision.
+  > **RESOLVED 2026-09-05:** this conflict no longer applies — `longhorn-1.12.1-engine`
+  > was EXECUTED 2026-08-29 (34abe2bb) and its file deleted; 94/94 volumes verified on
+  > engine v1.12.1, single engine image deployed. Removed from `conflicts_with` in the
+  > frontmatter. Text around this note kept for provenance.
 - **`conflicts_with: longhorn-1.12.1-engine`** — that plan holds
   **sat-attended:2026-08-29** and live-upgrades the engine of every attached
   volume, including `paperless-db-data`. Never co-window; schedule this no

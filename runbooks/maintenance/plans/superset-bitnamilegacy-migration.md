@@ -15,7 +15,7 @@ touches:
     - "see the individual stage plans — this file executes nothing"
   shared: []
 depends_on: []
-conflicts_with: [longhorn-1.12.1-engine]
+conflicts_with: []  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
 status: superseded                    # INDEX ONLY — split into 4 stage plans on 2026-08-15
 window: null                          # never schedule this file; schedule the stages
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
