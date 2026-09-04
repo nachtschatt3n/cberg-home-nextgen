@@ -169,22 +169,6 @@ spec:
         enabled: true
         mountPath: /usr/src/paperless/consume
         existingClaim: paperless-ngx-consume
-      prompts:
-        enabled: true
-        type: emptyDir
-        mountPath: /app/prompts
-      hocr:
-        enabled: true
-        type: emptyDir
-        mountPath: /app/hocr
-      pdf:
-        enabled: true
-        type: emptyDir
-        mountPath: /app/pdf
-      gptdb:
-        enabled: true
-        type: emptyDir
-        mountPath: /app/db
     postgresql:
       enabled: false
     # Bundled Bitnami mariadb retired 2026-08-19: bitnamilegacy is an ARCHIVED
