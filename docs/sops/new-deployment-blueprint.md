@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.08.23`
-> Last Updated: `2026-08-23`
+> Version: `2026.09.04`
+> Last Updated: `2026-09-04`
 > Owner: `Platform`
 
 ---
@@ -843,6 +843,69 @@ order and the attribution queries:
 
 ---
 
+### 14. A ConfigMap can be a SEED, not the live config — the live process is the truth, not the manifest
+
+**The rule: after changing a value, verify it by reading the running process,
+not by reading the manifest and not by reading `flux get`.** Green reconcile
+proves the API server has your YAML. It proves nothing about what the process
+is doing.
+
+There are three distinct ways a correct manifest silently fails to reach the
+workload, and the 2026-09-04 `gemma4` GGUF→MLX migration hit all three in one
+commit. In every case Flux was green.
+
+**(a) Seed-only ConfigMap — the worst, because grep cannot find it.**
+`ai/hermes-agent` mounts its ConfigMap at `/seed` and runs an init container:
+
+```sh
+if [ ! -f /opt/data/config.yaml ]; then
+  cp /seed/config.yaml /opt/data/config.yaml
+fi
+```
+
+`/opt/data` is a PVC. Once seeded, **the PVC copy is authoritative forever.**
+Editing `configmap.yaml` changes nothing — not on reconcile, not on restart,
+not with Reloader. The manifest said `gemma4:26b-mlx`, the ConfigMap in the
+API said `gemma4:26b-mlx`, the pod had just been restarted, and the process
+was reading a **17-day-old PVC file** naming the old model. An exhaustive repo
+grep for the old value returned *zero* hits while a live consumer was still
+requesting it. Fix by patching the file in-container, then restarting, then
+re-reading the file in-container.
+
+**(b) ConfigMap-backed env with no checksum annotation.** `ai/anythingllm`'s
+chart generates a ConfigMap consumed as env, and adds no pod-template checksum.
+Changing the ConfigMap does not change the pod template, so no rollout happens
+and the pod keeps its original env indefinitely — the pod was 6 days old.
+
+**(c) Config file read once at process start.** `home-automation/frigate`
+reads `/config/config.yml` at boot. The ConfigMap updates and the mounted file
+eventually updates, but the *running process* keeps its parsed copy. Only a
+restart applies it; here that would have been the 02:30 CronJob, hours later.
+
+For (b) and (c) the fix is `reloader.stakater.com/auto: "true"` (Reloader runs
+in this cluster; see `mosquitto`, `trmnl-ha`, `scrypted-nvr`, `mqttx-web`). For
+(a) **do not add a Reloader annotation** — it cannot work, and it creates false
+confidence in a mechanism that will never fire.
+
+**Verification pattern — cheap, and it is the only thing that actually proves
+the change landed:**
+
+```bash
+# env-based
+kubectl exec -n <ns> deploy/<app> -- sh -c 'echo $MY_SETTING'
+# file-based (mounted ConfigMap, or a PVC copy)
+kubectl exec -n <ns> deploy/<app> -- cat /path/to/config.yaml
+```
+
+**Before declaring a fleet-wide value change complete, diff the set of
+workloads you changed against the set whose live process you actually read.**
+Anything in the first set but not the second is unverified, and "Flux is green"
+is not evidence. The same lesson applies to DB/UI-configured apps
+(`docs/ai-usage-map.md` lists which ones those are) — for those the manifest
+never had the value in the first place.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely Cause | Action |
@@ -1002,4 +1065,5 @@ Rollback success criteria:
 | `2026.05.04` | `2026-05-04` | Add Known Gotcha #9: bjw-s app-template `resources` placement (top-level is a no-op → OOMKilled); update troubleshooting table; renumber WSGI gotcha to #10 |
 | `2026.05.06` | `2026-05-06` | Add Known Gotcha #11: external ingress requires `external-dns.alpha.kubernetes.io/target` annotation — without it Cloudflare rejects the A record (error 9003) and hostname returns NXDOMAIN |
 | `2026.08.18` | `2026-08-18` | Add Known Gotcha #13: probe endpoints must be static — a framework route probed at kubelet frequency (~480 req/h) produced 58% of all cluster log ingest; split-probe pattern, and why `startup` must stay on the deep route |
+| `2026.09.04` | `2026-09-04` | Add Known Gotcha #14: a ConfigMap can be a SEED, not the live config — the live process is the truth, not the manifest. Three failure modes (seed-only ConfigMap copied to a PVC, ConfigMap-backed env with no checksum annotation, config file read once at start), why Reloader fixes two of them and must NOT be used for the third, and the exec-based verification pattern. Learned during the gemma4 GGUF→MLX migration, where a repo grep returned zero hits while a live consumer still requested the old model |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |
