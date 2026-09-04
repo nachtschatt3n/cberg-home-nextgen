@@ -21,7 +21,15 @@ touches:
   shared: []
 depends_on: [superset-pg-cutover]
 conflicts_with: []
-status: draft
+status: executed                      # EXECUTED 2026-09-05 on operator GO. Two commits, in order:
+                                      #   c4694b13 database.host pin (prerequisite, see §3 step 5)
+                                      #   90539942 postgresql.enabled:false (the decommission)
+                                      # Old DB proved idle first (0 external backends, 0 rows changed
+                                      # since stats reset, newest logs row 2026-08-09); content md5
+                                      # identical old vs new. Recovery floor = pg_dump -Fc (455 TOC
+                                      # entries, pg_restore -l verified) + Longhorn backup
+                                      # predecom-superset-pg-final @ 2026-09-04T23:48:49Z.
+                                      # PVC/PV/Longhorn volume RETAINED as planned.
 window: "sat-attended:2026-09-05"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
