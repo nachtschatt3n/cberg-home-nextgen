@@ -3,6 +3,8 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: nas-share-alerts
+  labels:
+    release: kube-prometheus-stack
   namespace: monitoring
 spec:
   groups:
