@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.09.03`
-> Last Updated: `2026-09-03`
+> Version: `2026.09.04`
+> Last Updated: `2026-09-04`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -43,7 +43,7 @@ metadata curation.
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
 | Scanner | Epson ES-580W `192.168.32.201` (IoT VLAN), duplex sheet-feed; SMB destination in panel **Presets** |
 | Mail | document mailbox @ `imap.gmx.net:993` (SSL); MailRule id 1 |
-| Native AI | `ai_enabled=True` · LLM suggestions `ollama`/`gemma4:26b`/`http://192.168.30.111:11434` · embeddings (RAG) `ollama`/`nomic-embed-text:latest`/same endpoint. **DB-stored** (`paperless.models.ApplicationConfiguration`), not GitOps — see §4a. paperless-gpt/paperless-ai retired 2026-08-24. |
+| Native AI | `ai_enabled=True` · LLM suggestions `ollama`/`gemma4:26b-mlx`/`http://192.168.30.111:11434` (timeout 45s) · embeddings (RAG) `ollama`/`nomic-embed-text:latest`/same endpoint. **DB-stored** (`paperless.models.ApplicationConfiguration`), not GitOps — see §4a. paperless-gpt/paperless-ai retired 2026-08-24. |
 
 Key OCR/consumer env (`paperless-ngx` helmrelease): `OCR_LANGUAGE=deu+eng`,
 `OCR_MODE=force`, `OCR_ROTATE_PAGES_THRESHOLD=7`, `CONSUMER_BARCODE_SCANNER=ZXING`,
@@ -100,9 +100,26 @@ branches), push, let Flux reconcile.
 suggestions: title/correspondent/type/tags/date, text-only input) and
 `llm_embedding_backend`/`llm_embedding_model`/`llm_embedding_endpoint`/
 `llm_embedding_chunk_size` (RAG embedding/chat) live on the singleton
-`paperless.models.ApplicationConfiguration` row. **Always use `gosu paperless`**
-for the exec (SOP gotcha, see the permission-bug troubleshooting row) —
-never a bare/root shell.
+`paperless.models.ApplicationConfiguration` row.
+
+The `gosu paperless` prefix below is belt-and-braces only: since the
+2026-08-24 `securityContext` pin (`runAsUser/runAsGroup/fsGroup: 1000`) a bare
+`kubectl exec` already lands as `uid=1000(paperless)` — verify with `... exec
+... -- id` if in doubt. Do **not** drop the discipline of checking, but a plain
+exec is no longer the index-corruption hazard the older wording implied.
+
+The DB row wins over env: every field resolves as
+`app_config.<field> or settings.<FIELD>` (`paperless/config.py`, `AIConfig`).
+There are currently **no** `PAPERLESS_AI_*`/`PAPERLESS_LLM_*` env vars set on
+the deployment, so the row is the sole source of truth and the fallbacks are
+the code defaults. Note the `or` semantics: a field left `null`/`0`/`False`
+falls through to the default, so `ai_enabled=False` only actually disables AI
+because `settings.AI_ENABLED` is itself `False` here.
+
+**No restart needed.** `AIConfig()` is constructed inside each call site (never
+a module-level singleton) and `BaseConfig._get_config_instance()` re-queries the
+row every time; `AIClient.__init__` then builds a fresh `Ollama` client from it.
+A change to this row is picked up by the next AI operation in any worker.
 
 ```bash
 PPOD=$(mise exec -- kubectl get pod -n office -l app.kubernetes.io/name=paperless-ngx \
@@ -113,8 +130,9 @@ from paperless.models import ApplicationConfiguration
 ac = ApplicationConfiguration.objects.first()
 ac.ai_enabled = True
 ac.llm_backend = 'ollama'                      # LLMBackend choices: openai-like, ollama
-ac.llm_model = 'gemma4:26b'
+ac.llm_model = 'gemma4:26b-mlx'
 ac.llm_endpoint = 'http://192.168.30.111:11434'
+ac.llm_request_timeout = 45                     # fail fast; code default is 120
 ac.llm_embedding_backend = 'ollama'             # LLMEmbeddingBackend: openai-like, huggingface, ollama
 ac.llm_embedding_model = 'nomic-embed-text:latest'
 ac.llm_embedding_endpoint = 'http://192.168.30.111:11434'
@@ -122,14 +140,60 @@ ac.save()
 "
 ```
 
-Current cluster state (set 2026-08-24): `ai_enabled=True`, `llm_backend=ollama`,
-`llm_model=gemma4:26b`, `llm_endpoint=http://192.168.30.111:11434`,
+Current cluster state (set 2026-08-24, LLM model + timeout changed 2026-09-04):
+`ai_enabled=True`, `llm_backend=ollama`, **`llm_model=gemma4:26b-mlx`**,
+`llm_endpoint=http://192.168.30.111:11434`, **`llm_request_timeout=45`**,
 `llm_embedding_backend=ollama`, `llm_embedding_model=nomic-embed-text:latest`
 (already pulled/pinned on the shared Ollama host — used by AnythingLLM, AFFiNE,
 Nextcloud context_chat; see `docs/ai-usage-map.md`), `llm_embedding_endpoint`
-same as `llm_endpoint`. `llm_embedding_chunk_size`/`llm_context_size`/
-`llm_request_timeout` left `null` — falls back to the app's built-in defaults
-(1024/8192/120) via `paperless/settings/__init__.py`.
+same as `llm_endpoint`. `llm_embedding_chunk_size`/`llm_context_size` left
+`null` — falls back to the built-in defaults (1024/8192) via
+`paperless/settings/__init__.py`.
+
+Why `-mlx` (2026-09-04): the shared Ollama host moved to the MLX build of the
+26b model. Both 26b variants together are ~37 GB on a 48 GB machine, so every
+consumer still naming the GGUF tag `gemma4:26b` causes it to be pulled back into
+memory alongside the MLX one. `llm_request_timeout=45` (down from the inherited
+120) is deliberate: the suggestions path is button-only, and a user who clicks it
+should get an honest early failure rather than holding a slot in an overbooked
+queue for two minutes. **Caveat:** paperless is only one of ~13 consumers of the
+GGUF tag (see `docs/ai-usage-map.md`) and the only one that never fires
+unattended — migrating it alone does not stop the GGUF being loaded.
+
+**What silently triggers a full RAG re-embed.** The LLM index is a sqlite-vec
+store (~2,900 chunks for the current library). A *full rebuild* re-embeds every
+chunk through `nomic-embed-text` and is slow; an *incremental* update only
+touches changed documents. The nightly `llm_index` task (02:10) is incremental.
+Three things silently escalate it to a full rebuild — check before changing
+anything AI-related:
+
+| Trigger | Mechanism | Notes |
+|---|---|---|
+| **Changing `llm_embedding_model`** (or `llm_embedding_backend`, via its default) | `update_llm_index` compares `get_configured_model_name(config)` against the model name stamped in the store's schema metadata; `store.config_mismatch(...)` → `rebuild=True`, `drop_table()`, re-embed all | The single most common accidental cause. Treat an embedding-model change as a scheduled maintenance action, never a casual config tweak. |
+| **A schema migration needing re-embedding** | `_check_and_run_migrations(store)` returns `REEMBED_REQUIRED` → forces `rebuild=True` | Fires on a paperless-ngx upgrade that bumps the vector-store schema. Expect it after a major-version bump. |
+| **Losing the store file** (PVC recreate, restore from a backup predating the index, manual delete) | `not store.table_exists()` → rebuild branch | A DB/PVC restore is the sneaky one: it can also revert this whole `ApplicationConfiguration` row (it is **not** covered by Flux), so re-verify §4a's values after any restore. |
+
+Changing `llm_model`, `llm_endpoint`, `llm_request_timeout` or `llm_context_size`
+does **not** touch the index — only the *embedding* model name is recorded in the
+store metadata. Verify before/after with:
+
+```bash
+mise exec -- kubectl exec -n office "$PPOD" -c paperless-ngx -- \
+  python3 /usr/src/paperless/src/manage.py shell -c "
+from paperless.config import AIConfig
+from paperless_ai.embedding import get_configured_model_name
+from paperless_ai.indexing import read_store
+cfg = AIConfig()
+with read_store() as s:
+    print('stored   =', s.stored_model_name())
+    print('configured =', get_configured_model_name(cfg))
+    print('mismatch =', s.config_mismatch(get_configured_model_name(cfg)))  # False = no rebuild
+"
+```
+
+`mismatch = False` means the next nightly run stays incremental. A deliberate
+rebuild is `document_llmindex rebuild`; the code never escalates on its own
+outside the three triggers above.
 
 **Vision-OCR has no native equivalent.** paperless-gpt used to auto-OCR
 hard-to-read scans (garbled/decorative fonts, thermal receipts, rotated pages)
@@ -414,3 +478,4 @@ AI titles on German docs; foreign-language invoices scoring low on a German dict
 | `2026.08.30` | 2026-08-30 | Add §6a post-update verification (API-token canary from the openclaw pod — 401 = token failure, not missing docs; mail-ingestion 1366/login log grep; utf8mb4 charset invariant + SQL one-liner) and the token-audit gap. Root cause fixed same day: replatformed DB was utf8mb3, an emoji mail subject broke every mail cycle — full schema converted to utf8mb4_general_ci, `db-deployment.yaml` server args bumped utf8mb3→utf8mb4. |
 | `2026.08.30` | 2026-08-30 | Add §6b token-consumer table after the dead-token blast-radius audit: the Aug 27-29 token deletion had FOUR carriers (openclaw, arag-web, cluster-secrets→mcpo, Mac menubar config) but only openclaw was rotated at first. All four now aligned; documents the two-hop mcpo substitution, the Mac scraper's latent-failure trap, and the vestigial `PAPERLESS_TOKEN` key in the paperless-ngx secret (removal → cberg-agent). |
 | `2026.09.03` | 2026-09-03 | Fix the §2 overview DB row, which contradicted this SOP's own §6a charset invariant: image was `mariadb:11.8.8` (live and git are `11.8.9`), charset was `utf8mb3` (converted to `utf8mb4_general_ci` on 2026-08-30, `9cb10b76`), and `paperless-mariadb` was described as a live rollback floor after being deleted 2026-08-30 (`aa825d8f`). Same three facts corrected in `docs/applications.md`. |
+| `2026.09.04` | 2026-09-04 | Point native-AI suggestions at the MLX build (`llm_model` `gemma4:26b` -> `gemma4:26b-mlx`) and set `llm_request_timeout=45` (was inheriting the 120s code default), to stop paperless pulling the 18GB GGUF back onto the 48GB shared Ollama host. Document in SS4a that the DB row wins over env and is picked up without a pod restart, and add the RAG index rebuild-trigger table (embedding-model change / schema migration / lost store) after confirming an `llm_model` change cannot trigger a re-embed. Open issue at time of writing: `gemma4:26b-mlx` GPU-OOM-panics on every request on the host -> ollama-agent. |

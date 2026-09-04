@@ -27,7 +27,7 @@ Ports 11435 and 11436 are no longer in use.
 | Next AI Draw.io | ai | `gemma4:26b` | Native Ollama `/api` | `kubernetes/apps/ai/next-ai-draw-io/app/helmrelease.yaml:37-40` |
 | LibreChat | ai | `gemma4:26b` (default, fetch=true) | OpenAI `/v1` | `kubernetes/apps/ai/librechat/app/helmrelease.yaml:93-103` |
 | Open WebUI | ai | (all available models) | Native Ollama | `kubernetes/apps/ai/open-webui/app/helmrelease.yaml:84` |
-| Paperless-ngx (native AI) | office | `gemma4:26b` (suggestions) + `nomic-embed-text:latest` (RAG embeddings) | Native Ollama | DB-stored (`paperless.models.ApplicationConfiguration`), not a manifest — see `docs/sops/paperless.md` §4a. Replaces the retired Paperless-GPT/Paperless-AI sidecars (2026-08-24). |
+| Paperless-ngx (native AI) | office | `gemma4:26b-mlx` (suggestions, 45s timeout — moved off the GGUF tag 2026-09-04) + `nomic-embed-text:latest` (RAG embeddings) | Native Ollama | DB-stored (`paperless.models.ApplicationConfiguration`), not a manifest — see `docs/sops/paperless.md` §4a. Replaces the retired Paperless-GPT/Paperless-AI sidecars (2026-08-24). |
 | AFFiNE | office | `gemma4:26b` (coding, text, summarize) | OpenAI `/v1` | `kubernetes/apps/office/affine/app/configmap.yaml:58-65,71` |
 | Frigate NVR | home-automation | `gemma4:26b` (in encrypted configmap) | OpenAI `/v1` | `kubernetes/apps/home-automation/frigate-nvr/app/helmrelease.yaml:34` |
 | Nextcloud | office | `gemma4:26b` | OpenAI `/v1` | NC UI: `integration_openai` app (updated 2026-04-04) |
@@ -103,7 +103,8 @@ Nextcloud apps: `assistant` (3.3.0), `context_chat` (5.3.1), `integration_openai
 
 | Model | Consumers |
 |-------|-----------|
-| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, Paperless-ngx (native AI suggestions), AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
+| `gemma4:26b` | AnythingLLM, OpenClaw, Next AI Draw.io, LibreChat, Open WebUI, AFFiNE, Frigate NVR, Home Assistant, Nextcloud, n8n, Headlamp |
+| `gemma4:26b-mlx` | Paperless-ngx (native AI suggestions) — migrated 2026-09-04. **The GGUF `gemma4:26b` and the MLX build are ~37 GB together on a 48 GB host; every remaining consumer in the row above keeps the GGUF resident.** Migrating the rest is an open item for ollama-agent. |
 | `nomic-embed-text:latest` | AnythingLLM (embeddings), Nextcloud (context_chat RAG), AFFiNE (embeddings), Paperless-ngx (native AI RAG embeddings) |
 
 ---
