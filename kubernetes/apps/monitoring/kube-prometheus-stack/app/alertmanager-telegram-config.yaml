@@ -12,7 +12,9 @@ spec:
       - alertname
     groupWait: 1s
     groupInterval: 1s
-    repeatInterval: 120s
+    # Fallback for alerts matching none of the child routes below (no severity
+    # label, severity=info, ...). Was 120s, which re-paged every 2 minutes.
+    repeatInterval: 4h
     # Match all alerts from any namespace by not specifying namespace matchers
     matchers: []
     routes:
@@ -27,6 +29,22 @@ spec:
         matchers:
           - name: alertname
             value: InfoInhibitor
+      # Critical alerts - page immediately, then hourly.
+      # WITHOUT this route criticals match no child and are handled by the
+      # PARENT node, whose repeatInterval is the fallback set above. That is
+      # how SweepPipelineDead sent six identical pages between 08:10 and 08:20
+      # on 2026-09-04 - one every 2 minutes, indefinitely. Warnings were never
+      # affected (they have their own 4h route), so the highest-severity alerts
+      # were the noisiest, which trains the operator to ignore exactly the ones
+      # that matter.
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: critical
+        groupWait: 1s
+        groupInterval: 5m
+        repeatInterval: 1h
+        continue: false
       # General warning alerts - immediate first notification, then every 4 hours
       - receiver: telegram
         matchers:
