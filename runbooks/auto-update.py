@@ -15,16 +15,26 @@ Gates (all must pass) — see runbooks/auto-update-policy.yaml:
                 detect_breaking_changes, so a "patch-but-breaking" bump
                 (affine 0.27.3 env→config.json) is caught even if a human
                 forgot to deny-list it.
-  G5 age      : the PR's newest Renovate commit is at least
-                `minimum_release_age_hours` old (policy; operator set 48h).
-                Supply-chain cooldown: poisoned releases are usually yanked
-                within days, so an unattended merge WAITS unless the bump is
-                security-driven (CVE fixes merge at age 0 — a known-bad
-                current version outranks an unknown-new one). Measured from
-                the newest commit, not PR creation: Renovate retargets open
-                PRs to newer releases, and the new target must not inherit
-                the old target's age. Unknown age HOLDS — a cooldown that
-                cannot be proven has not elapsed.
+  G5 age      : the TARGET RELEASE is at least `minimum_release_age_hours`
+                old (policy; operator set 48h). Supply-chain cooldown:
+                poisoned releases are usually yanked within days, so an
+                unattended merge WAITS unless the bump is security-driven
+                (CVE fixes merge at age 0 — a known-bad current version
+                outranks an unknown-new one).
+                Measured from the UPSTREAM release timestamp of the target
+                version (GitHub release published_at, else the registry tag
+                publish date). Until 2026-09-04 it was measured from the
+                PR's newest Renovate commit — but fast-shipping upstreams
+                (n8n releases every ~1-2 days) force-push the PR on every
+                retarget, resetting that clock: PR #210 starved 9 days
+                without ever being "48h old". The cooldown defends against
+                a poisoned RELEASE, so the release's own age is the honest
+                measure; a retarget still restarts the clock because the
+                NEW target release is itself young. When the upstream date
+                cannot be determined we FALL BACK to the PR's newest commit
+                (the stricter measure — fail-closed) and say so in the log.
+                Unknown age on both measures HOLDS — a cooldown that cannot
+                be proven has not elapsed.
   G4 ci       : PR mergeable + all required CI checks green. The repo's
                 flux-local workflow renders every HelmRelease with Helm on
                 each PR, so a green check means the manifest actually renders.
@@ -315,21 +325,106 @@ def newest_commit_age_hours(number):
         return None
 
 
-def age_gate(pr, parsed, policy):
-    """None = pass; else (gate, reason) hold tuple. Fail-safe: unknown HOLDS."""
+_COVERAGE_MOD = None
+
+
+def _load_coverage():
+    """coverage.py's registry-date helper (image_publish_age_hours), lazily.
+    Loaded by file path (same trick as _load_version_checker) so the shared
+    OCI/Docker-Hub date code has ONE home instead of a copy here."""
+    global _COVERAGE_MOD
+    if _COVERAGE_MOD is None:
+        spec = importlib.util.spec_from_file_location(
+            "cberg_coverage", SCRIPT_DIR / "coverage.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore
+        _COVERAGE_MOD = mod
+    return _COVERAGE_MOD
+
+
+def _hours_since_iso(ts):
+    """Hours since an ISO-8601 timestamp string, or None."""
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    except Exception:
+        return None
+
+
+def upstream_release_age_hours(checker, dep, new_tag):
+    """(age_hours, source) from the UPSTREAM publish time of `new_tag`, else
+    (None, None).
+
+    This is the clock G5 actually cares about: the PR-commit measure resets on
+    every Renovate force-push, so a component that ships faster than the
+    cooldown (n8n, every ~1-2 days) could NEVER pass it — PR #210 sat 9 days
+    while each retarget restarted the clock. The release's own publish
+    timestamp ages monotonically; a retarget still restarts the cooldown, but
+    only because the new target release genuinely IS young.
+
+    Two sources, tried in order:
+      1. the GitHub release `published_at` for the tag (works for charts and
+         images with a resolvable source repo — same resolution as G3);
+      2. the registry publish date of the image tag (coverage.py's
+         image_publish_age_hours: Docker Hub last_updated / OCI config created).
+    """
+    # 1. GitHub release published_at (chart or image with a known source repo)
+    owner_repo = None
+    try:
+        if "/" in dep:
+            owner_repo = checker.get_repo_info_from_image(dep)
+        if not owner_repo:
+            owner_repo = checker.get_chart_repo_info(dep.split("/")[-1], "", "")
+    except Exception:
+        owner_repo = None
+    if owner_repo:
+        try:
+            notes = checker.fetch_release_notes(owner_repo[0], owner_repo[1], new_tag)
+            age = _hours_since_iso((notes or {}).get("published_at"))
+            if age is not None:
+                return age, f"upstream GitHub release ({owner_repo[0]}/{owner_repo[1]} {new_tag})"
+        except Exception:
+            pass
+    # 2. registry tag publish date (image-shaped deps only)
+    if "/" in dep:
+        try:
+            cov = _load_coverage()
+            for tag in (new_tag, new_tag.lstrip("vV"), f"v{new_tag.lstrip('vV')}"):
+                age = cov.image_publish_age_hours(dep, tag)
+                if age is not None:
+                    return age, f"registry publish date ({dep}:{tag})"
+        except Exception:
+            pass
+    return None, None
+
+
+def age_gate(pr, parsed, policy, checker=None):
+    """None = pass; else (gate, reason) hold tuple. Fail-safe: unknown HOLDS.
+
+    Prefers the upstream release timestamp; falls back to the PR's newest
+    commit (the stricter, force-push-resettable measure) when upstream is
+    unknowable, and names the measure used either way."""
     min_age = policy.get("minimum_release_age_hours") or 0
     if not min_age:
         return None
     waiver = security_waived({**pr, "_dep": parsed["dep"]}, policy)
     if waiver:
         return None
-    age = newest_commit_age_hours(pr["number"])
+    age = source = None
+    if checker is not None:
+        age, source = upstream_release_age_hours(checker, parsed["dep"], parsed["new"])
     if age is None:
-        return ("age", f"release age UNKNOWN (cannot prove the {min_age}h "
-                       f"cooldown elapsed) — holding")
+        age = newest_commit_age_hours(pr["number"])
+        source = "PR newest commit (upstream release date unavailable — stricter fallback)"
+    if age is None:
+        return ("age", f"release age UNKNOWN on both measures (cannot prove the "
+                       f"{min_age}h cooldown elapsed) — holding")
+    log(f"   G5 #{pr['number']}: age {age:.0f}h via {source}")
     if age < min_age:
-        return ("age", f"release only {age:.0f}h old (< {min_age}h cooldown); "
-                       f"auto-merges after the cooldown or on a security signal")
+        return ("age", f"release only {age:.0f}h old via {source} (< {min_age}h "
+                       f"cooldown); auto-merges after the cooldown or on a security signal")
     return None
 
 
@@ -388,7 +483,7 @@ def classify(pr, policy, checker):
     if blocked:
         return {**r, "verdict": "hold", "gate": "policy", "reason": blocked}
     # G5 age (before the expensive gates; cheap policy checks already passed)
-    held = age_gate(pr, parsed, policy)
+    held = age_gate(pr, parsed, policy, checker)
     if held:
         return {**r, "verdict": "hold", "gate": held[0], "reason": held[1]}
     # G3 breaking
