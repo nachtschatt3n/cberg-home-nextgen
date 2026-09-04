@@ -33,7 +33,9 @@ depends_on: [bitnamilegacy-exit-nextcloud-redis, bitnamilegacy-exit-paperless-db
                                                 # RESOLVED 2026-08-19:
                                                 # bitnamilegacy-exit-nextcloud-redis EXECUTED
                                                 # (d6070b82) — dependency satisfied
-conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis]  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
+conflicts_with: [bitnamilegacy-exit-paperless-db, bitnamilegacy-exit-nextcloud-redis, paperless-db-12.3.3]  # paperless-db-12.3.3 added 2026-09-05: both claim
+                                                # sat-attended:2026-09-12, both risk:high, and
+                                                # 80 + 60 = 140 min does not fit the 90-min slot.  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
                                                 # nextcloud-redis EXECUTED 2026-08-19; the only
                                                 # residual coupling is the shared HelmRelease
 security_ref: F-cb42f390                        # see also F-90dd1a52 (same image, fixable class)
@@ -41,7 +43,19 @@ status: blocked                                 # ROLLED BACK 2026-08-19 (revert
                                                 # Root cause + required fix in 3c. Do not
                                                 # re-run until the dump is proven to carry
                                                 # 4-byte characters.
-window: "sat-attended:2026-09-12"                 # RESHUFFLED 2026-08-16 onto the daily-window cadence
+window: null                                    # RELEASED 2026-09-05. This plan is `blocked` — rolled
+                                                # back 2026-08-19, and must not re-run until the dump is
+                                                # proven to carry 4-byte characters (§3c). A blocked plan
+                                                # cannot use a slot, but while it CLAIMED
+                                                # sat-attended:2026-09-12 the scheduler reported a
+                                                # permanent OVER-TIME (140m of work in a 90m window) and
+                                                # an INTERFERENCE with paperless-db-12.3.3 over the
+                                                # `office` namespace. A standing false warning is how a
+                                                # real future collision gets ignored, so the phantom
+                                                # booking is released. Status is UNCHANGED — this is not
+                                                # an unblocking. Give it a window again when §3c is
+                                                # proven; the conflicts_with guard with
+                                                # paperless-db-12.3.3 stays in place for when it is.
                                       # (7 windows/week, was 4). Deliberate soaks are
                                       # preserved, not compressed — see the windows YAML.
                                                 # how to pull this forward — 2 months on an

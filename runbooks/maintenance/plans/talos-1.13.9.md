@@ -7,7 +7,9 @@ component: Talos Linux              # MUST equal the version-check's component
                                     # Written as "talos" first, which matched
                                     # nothing, so the plan was invisible and
                                     # coverage kept the bump in NEEDS A PLAN.
-pr: 208                               # Renovate PR — deliberately NOT merged (the upgrade is a
+pr: null                              # was 208 — released 2026-09-05. A SUPERSEDED plan must
+                                      # not claim the PR: the matcher bound pr208 across three
+                                      # talos plans and picked arbitrarily. talos-1.13.10 owns it.                               # Renovate PR — deliberately NOT merged (the upgrade is a
                                       # Talos CR operation, not a git bump); recorded so the
                                       # plan↔held matcher's PR tier binds them (was null, which
                                       # plus component 'Talos Linux' vs dep basename 'installer'
@@ -31,8 +33,11 @@ touches:
     - kubernetes/bootstrap/talos/talconfig.yaml
   shared: [longhorn, cilium]          # storage detach/reattach + CNI restart on every node
 depends_on: []
-conflicts_with:
-  - longhorn-1.12.1-engine            # both cycle Longhorn volumes; never the same window
+conflicts_with: []
+  # longhorn-1.12.1-engine REMOVED 2026-09-05: that plan was EXECUTED
+  # 2026-08-29 (34abe2bb) and its file deleted; 94/94 volumes verified
+  # on engine v1.12.1. Guard enforced nothing. This plan is
+  # superseded by talos-1.13.10 anyway.
 status: superseded                    # SUPERSEDED 2026-09-05 by talos-1.13.10.md.
                                       # The 2026-08-26 operator GO for sun-attended:2026-08-30
                                       # is VOID: that window passed unexecuted, this plan is now

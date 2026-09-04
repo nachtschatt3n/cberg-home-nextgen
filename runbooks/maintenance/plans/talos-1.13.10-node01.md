@@ -3,7 +3,11 @@ plan_id: talos-1.13.10-node01
 component: Talos Linux              # same component string as part 1 — coverage.py
                                     # keys a plan on this field, so node 01 stays
                                     # covered after part 1 is marked executed.
-pr: 208                             # ghcr.io/siderolabs/installer v1.13.8 -> v1.13.10
+pr: null                            # Same underlying PR #208 as part 1, deliberately NOT
+                                    # claimed here: with both parts declaring pr:208 the
+                                    # matcher picked between them arbitrarily and chose
+                                    # part 2. Part 1 (talos-1.13.10) owns the PR binding;
+                                    # this plan stays covered via component: Talos Linux.
 kind: os
 current: "talosVersion v1.13.8 on k8s-nuc14-01 (nodes 02 and 03 already on v1.13.10 from part 1)"
 target: "talosVersion v1.13.10"
@@ -15,9 +19,11 @@ needs_reboot: true                  # 1 node reboot
 capability_change: false
 rollback_class: one-way             # node-image roll-forward, same as part 1
 touches:
-  - all namespaces (node drain)
-  - k8s-nuc14-01
-  - kubernetes/bootstrap/talos/talconfig.yaml
+  namespaces: [all]                 # every workload on node 01 is rescheduled on drain
+  resources:
+    - node/k8s-nuc14-01
+    - kubernetes/bootstrap/talos/talconfig.yaml
+  shared: [longhorn, cilium, coredns, ingress, etcd]
 depends_on:
   - talos-1.13.10                   # HARD dependency. Do NOT run this before part 1
                                     # has completed and been verified. If part 1 was

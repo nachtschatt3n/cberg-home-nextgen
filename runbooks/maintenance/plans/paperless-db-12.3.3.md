@@ -20,7 +20,12 @@ touches:
     - helmrelease/paperless-ngx                 # suspended during the quiesce (no edit)
   shared: []                                    # own Longhorn volume; no shared infra
 depends_on: []                        # bitnamilegacy-exit-paperless-db EXECUTED 2026-08-19
-conflicts_with: []  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.  # engine upgrade perturbs every attached
+conflicts_with: [bitnamilegacy-exit-nextcloud-db]  # REAL guard added 2026-09-05, replacing the dead longhorn-1.12.1-engine ref rather than just
+                                      # deleting it. Both plans claim sat-attended:2026-09-12, both are
+                                      # risk:high with rollback_class:backup-restore, and 60 + 80 = 140
+                                      # min cannot fit a 90-min window. nextcloud-db is currently
+                                      # `blocked` so the collision is latent, not live — but nothing
+                                      # else was stopping them sharing the slot if it unblocks.  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.  # engine upgrade perturbs every attached
                                           # volume incl. paperless-db-data — never
                                           # share a window (it holds sat-attended:2026-08-29)
 security_ref: null                    # version-currency driver, not a CVE driver
@@ -30,8 +35,18 @@ rollback_class: backup-restore        # MariaDB majors have NO downgrade — git
                                       # 12.3-format datadir)
 backup_gate: "logical dump taken in-window, verified non-empty + '-- Dump completed' + per-table counts captured, BEFORE the image bump"
 finding_refs: [F-1c080cce]
-status: draft
-window: null                          # recommend sat-attended:2026-09-05 (see notes)
+status: scheduled                     # OPERATOR GO 2026-09-04T21:48Z, synced to the plan
+                                      # 2026-09-05. Was `draft` while the decision store already
+                                      # held approve/pending-exec for 09-12 — a HIGH-risk one-way
+                                      # migration must not go into a window with its plan marked
+                                      # draft: the agent either runs a draft or refuses it and the
+                                      # approval strands silently (how talos-1.13.9 was lost).
+                                      # GO precondition 'fix the dead conflicts_with ref' is
+                                      # SATISFIED as of 3ec6269a.
+window: "sat-attended:2026-09-12"      # Matches the recorded operator decision. The older
+                                      # in-file note recommending 2026-09-05 predates that GO
+                                      # and is superseded — attended slot, allow_reboot:false,
+                                      # which is fine: this plan needs no reboot.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/mariadb-major-upgrade.md

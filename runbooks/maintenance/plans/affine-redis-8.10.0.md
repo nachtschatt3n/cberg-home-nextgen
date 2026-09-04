@@ -24,8 +24,18 @@ security_ref: null                 # no sweep finding dispatched this refresh; d
 capability_change: false
 rollback_class: git-revert
 finding_refs: []
-status: draft
-window: null                       # window agent assigns — any no-reboot weekday slot (mon/tue/wed/thu/fri/sat)
+status: scheduled                     # OPERATOR GO 2026-09-04T21:48Z, synced to the plan
+                                      # 2026-09-05. Was `draft` while the decision store already
+                                      # held approve/pending-exec for sat-attended:2026-09-05 —
+                                      # the same plan-vs-decision split found on
+                                      # paperless-db-12.3.3. A window agent facing a draft plan
+                                      # either runs it as a draft or refuses and strands the
+                                      # approval; neither is acceptable.
+window: "sat-attended:2026-09-05"      # Matches the recorded decision. Low risk, 10 min, no
+                                      # reboot — comfortably inside the 90-min attended slot,
+                                      # and it earns the FIRST of the two supervised runs the
+                                      # autonomy gate (first_runs_supervised: 2) requires
+                                      # before any category may run unattended.
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 sops_refs:
