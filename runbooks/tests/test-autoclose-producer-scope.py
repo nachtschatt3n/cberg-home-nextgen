@@ -113,5 +113,101 @@ class TestProducerScope(unittest.TestCase):
                          "only the genuinely-fixed script row may close")
 
 
+
+class TestBackstopProducerGate(unittest.TestCase):
+    """The ORCHESTRATOR's auto-close is a second, independent implementation.
+
+    F-73bcfaf6 (2026-09-05): the writer-side gate above was INERT on the path
+    that is actually armed. `sweep-run.py:_auto_close_stale_findings()` runs
+    after every step of a full orchestrated sweep -- the only mode where
+    auto-close fires at all -- and it never read `metadata->>'producer'`. So a
+    doc-agent row written in cycle N was still closed by the backstop in cycle
+    N+1, which is precisely the failure the writer gate was added to stop.
+
+    Every test in this file above drives the WRITER, so the suite stayed 10/10
+    green while the armed path was unguarded. That is the specific hole this
+    class exists to close: a gate is only real if the test drives the code
+    that is actually reached in production.
+
+    Third divergence between the two implementations -- SWEEP_AUTOCLOSE and
+    SWEEP_AUTOCLOSE_DRYRUN diverged the same way and cost four live findings on
+    2026-09-03. docs/sops/sweep-findings-lifecycle.md sec 4.8 is the standing rule.
+    """
+
+    @staticmethod
+    def _backstop_partition(candidates):
+        """Mirrors the producer gate in sweep-run.py:_auto_close_stale_findings.
+
+        candidates: [(pk, finding_id, section, title, metadata)]
+        returns (closeable_ids, foreign_ids)
+        """
+        closeable, foreign = [], []
+        for pk, fid, sec, title, meta in candidates:
+            producer = (meta or {}).get("producer")
+            if producer is not None and producer != "script":
+                foreign.append(fid)
+            else:
+                closeable.append(fid)
+        return closeable, foreign
+
+    def test_agent_row_survives_the_backstop(self):
+        cands = [(1, "F-agent", "doc", "still true", {"producer": "doc-agent"})]
+        closeable, foreign = self._backstop_partition(cands)
+        self.assertEqual(foreign, ["F-agent"])
+        self.assertEqual(closeable, [])
+
+    def test_script_row_still_closes_in_the_backstop(self):
+        # The FP fix must not blind the backstop -- script rows are its job.
+        cands = [(1, "F-script", "doc", "fixed", {"producer": "script"})]
+        closeable, foreign = self._backstop_partition(cands)
+        self.assertEqual(closeable, ["F-script"])
+        self.assertEqual(foreign, [])
+
+    def test_untagged_legacy_row_still_closes_in_the_backstop(self):
+        # Same deliberate compromise as the writer: rows predating the stamp
+        # keep historical behaviour or they leak open forever.
+        cands = [(1, "F-legacy", "doc", "old", {})]
+        closeable, foreign = self._backstop_partition(cands)
+        self.assertEqual(closeable, ["F-legacy"])
+
+    def test_null_metadata_does_not_crash_the_backstop(self):
+        cands = [(1, "F-nullmeta", "doc", "old", None)]
+        closeable, foreign = self._backstop_partition(cands)
+        self.assertEqual(closeable, ["F-nullmeta"])
+
+    def test_any_non_script_producer_is_foreign_not_just_doc_agent(self):
+        # The orchestrator cannot know WHICH agents ran, so the rule is
+        # "not script", not an allowlist of known agent names.
+        for prod in ("doc-agent", "media-manager", "security-agent", "future-thing"):
+            cands = [(1, "F-x", "doc", "t", {"producer": prod})]
+            _, foreign = self._backstop_partition(cands)
+            self.assertEqual(foreign, ["F-x"], f"producer={prod} must be held")
+
+    def test_the_2026_09_05_incident_would_not_recur_in_the_backstop(self):
+        agent_ids = ["F-e11a1d73", "F-4e3ae533", "F-3e646e36",
+                     "F-a1d008ba", "F-aff7ffd0", "F-ee4a28ef"]
+        cands = [(i, fid, "doc", "still true", {"producer": "doc-agent"})
+                 for i, fid in enumerate(agent_ids)]
+        cands.append((99, "F-68c3da92", "doc", "genuinely fixed",
+                      {"producer": "script"}))
+        closeable, foreign = self._backstop_partition(cands)
+        self.assertEqual(sorted(foreign), sorted(agent_ids))
+        self.assertEqual(closeable, ["F-68c3da92"])
+
+    def test_backstop_source_actually_reads_producer(self):
+        """Guard against the gate being removed or never wired up.
+
+        The mirror above can pass while the real code does not implement it --
+        which is exactly how this bug survived. Assert against the source.
+        """
+        import os as _os
+        src = open(_os.path.join(_HERE, "..", "sweep-run.py")).read()
+        self.assertIn('"producer"', src,
+                      "sweep-run.py must read metadata['producer'] — the "
+                      "writer-side gate alone is inert on the armed path")
+        self.assertIn('!= "script"', src,
+                      "sweep-run.py must hold non-script producers")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

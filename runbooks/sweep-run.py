@@ -537,8 +537,33 @@ def _auto_close_stale_findings(
                 )
                 candidates = cur.fetchall()
 
-                closeable, held = [], []
+                closeable, held, foreign = [], [], []
                 for pk, fid, sec, title, meta in candidates:
+                    # PRODUCER GATE — keep in sync with FindingsWriter.
+                    # This backstop closes on behalf of the SECTION STEP
+                    # SCRIPTS (the `sections` list is exactly those whose step
+                    # ran to a sane rc). It cannot speak for an agent: it does
+                    # not know which specialists ran, so an agent-authored row
+                    # being silent here is not evidence of anything.
+                    #
+                    # Added 2026-09-05 after the writer-side gate (69aef03c)
+                    # turned out to be INERT on the armed path: a full
+                    # orchestrated sweep runs this backstop after every step,
+                    # so a doc-agent row written in cycle N was still closed
+                    # here in cycle N+1 — the exact failure the writer gate was
+                    # meant to end. The regression suite was 10/10 green
+                    # throughout because every test drove the writer.
+                    #
+                    # This is the THIRD divergence between the two
+                    # implementations (see the SWEEP_AUTOCLOSE/_DRYRUN comment
+                    # above, which cost four live findings on 2026-09-03).
+                    # docs/sops/sweep-findings-lifecycle.md §4.8 states the
+                    # rule: if you add a gate to the writer, decide explicitly
+                    # whether the backstop needs it too.
+                    _producer = (meta or {}).get("producer")
+                    if _producer is not None and _producer != "script":
+                        foreign.append((pk, fid, sec, title, _producer))
+                        continue
                     comps = _uncovered.get(sec) or {}
                     hit = next(
                         (c for c in comps
@@ -547,6 +572,16 @@ def _auto_close_stale_findings(
                     ) if comps else None
                     (held if hit else closeable).append(
                         (pk, fid, sec, title, hit))
+                if foreign:
+                    print(f"==> auto-close HELD BACK {len(foreign)} finding(s) "
+                          f"emitted by a NON-SCRIPT producer — this backstop "
+                          f"closes for the step scripts and cannot speak for "
+                          f"an agent's rows:")
+                    for _pk, fid, sec, title, prod in foreign[:20]:
+                        print(f"      ⏸ kept open {sec}/{fid} — producer "
+                              f"{prod!r}: {title[:60]}")
+                    if len(foreign) > 20:
+                        print(f"      … and {len(foreign) - 20} more")
                 for _pk, fid, sec, title, hit in held[:20]:
                     print(f"      ⏸ kept open {sec}/{fid} — uncovered {hit}: "
                           f"{title[:70]}")
