@@ -67,27 +67,71 @@ spec:
                 # $$ = Flux postBuild envsubst escaping (cluster-wide substitution)
                 - |
                   set -e
-                  # trigger='cron' ONLY. sweep_cycles also collects rows from
-                  # alert-triage (trigger='alert') and hand-run sweeps
-                  # (trigger='manual'), and MAX(started_at) over all of them
-                  # reads fresh while the scheduler is dead. That is not
+                  # WHY BOTH AGES ARE MEASURED (history, both directions):
+                  #
+                  # MAX(started_at) over ALL rows reads fresh while the
+                  # scheduler is dead -- sweep_cycles also collects alert-triage
+                  # (trigger='alert') and hand-run (trigger='manual') rows. Not
                   # hypothetical: between 2026-08-28 and 2026-09-03 the cron
                   # produced NOTHING for six days -- three missed 48h cycles --
                   # while this heartbeat passed every run, because alert rows on
                   # 08-28 and manual rows on 08-31 kept resetting the clock. The
-                  # operator found it by noticing dates on a dashboard.
-                  AGE=$$(psql "$$DSN" -tA -c "SELECT COALESCE(EXTRACT(EPOCH FROM now()-MAX(started_at)),1e9)::bigint FROM sweep_cycles WHERE trigger = 'cron'")
+                  # operator found it by noticing dates on a dashboard. Hence
+                  # the trigger='cron' filter added 2026-09-04.
+                  #
+                  # But that filter alone then produced the OPPOSITE failure
+                  # (see the split below): it fixed one blind spot and opened
+                  # another, because it assumed the label was trustworthy. So
+                  # measure both, and let each age drive only the claim it can
+                  # actually support.
+                  # SPLIT INTO TWO SIGNALS (2026-09-05). Keying the job's exit
+                  # status on trigger='cron' alone made this a false-positive
+                  # generator that could never clear: the daily-operation skill
+                  # did not propagate SWEEP_TRIGGER=cron, so cron-driven sweeps
+                  # were stamped 'manual' and this job failed every run for 8
+                  # days while the pipeline was healthy (302 findings on the day
+                  # it was found). That pinned SweepPipelineDead critical --
+                  # "the cluster may be unwatched" -- on a false premise, which
+                  # is worse than no check: it makes a REAL pipeline death
+                  # indistinguishable from the standing noise, and it flapped
+                  # KubeJobFailed every ~15 min. Root cause fixed in 85c222ea;
+                  # this makes the detector itself state only what it can prove.
+                  ANY=$$(psql "$$DSN" -tA -c "SELECT COALESCE(EXTRACT(EPOCH FROM now()-MAX(started_at)),1e9)::bigint FROM sweep_cycles")
+                  CRON=$$(psql "$$DSN" -tA -c "SELECT COALESCE(EXTRACT(EPOCH FROM now()-MAX(started_at)),1e9)::bigint FROM sweep_cycles WHERE trigger = 'cron'")
                   # 50h, not 72h. The cadence is 48h, so 72h could not fail until
                   # a cycle had been missed AND the next was already overdue --
                   # it reported healthy through the first miss by construction.
                   # 50h = one full period plus 2h of jitter: the FIRST miss trips.
-                  echo "newest CRON sweep cycle: $${AGE}s ago (limit 180000s = 50h)"
-                  if [ "$$AGE" -gt 180000 ]; then
-                    echo "STALE: no cron-triggered sweep in >50h — the Mac-side"
-                    echo "daily-operation session the cluster cron drives is"
-                    echo "probably absent or wedged. Manual/alert cycles do NOT"
-                    echo "clear this; the scheduler itself is what is broken."
+                  echo "newest sweep cycle (any trigger): $${ANY}s ago (limit 180000s = 50h)"
+                  echo "newest CRON-stamped cycle:        $${CRON}s ago"
+                  # HARD FAIL = the pipeline is genuinely dead. Nothing is
+                  # sweeping at all, by any path. This is the claim
+                  # SweepPipelineDead's "the cluster may be unwatched" text
+                  # actually makes, and now the only thing that trips it.
+                  if [ "$$ANY" -gt 180000 ]; then
+                    echo "DEAD: no sweep cycle of ANY trigger in >50h — nothing"
+                    echo "is auditing the cluster. This is not a labelling"
+                    echo "artifact; check the Mac-side session AND the cron."
                     exit 1
+                  fi
+                  # WARN ONLY = sweeps ARE running, but none is cron-stamped.
+                  # From inside this pod that is genuinely ambiguous: either the
+                  # scheduler is dead and a human is sweeping by hand, or
+                  # SWEEP_TRIGGER simply is not propagating. Only the OpenClaw
+                  # cron's own state.lastRunAtMs distinguishes them, and this
+                  # pod cannot reach it -- so do NOT page a critical on a claim
+                  # this check cannot substantiate.
+                  # The scheduler-death case is NOT lost: health-check.sh
+                  # signal 2d asserts it every sweep from the cron's own
+                  # lastRunAtMs/lastRunStatus, which is authoritative and
+                  # immune to the label. That is the right home for it.
+                  if [ "$$CRON" -gt 180000 ]; then
+                    echo "WARN: sweeps are running but none is cron-stamped in"
+                    echo ">50h. Either the schedule is dead (operator sweeping"
+                    echo "by hand) or SWEEP_TRIGGER is not propagating."
+                    echo "Authoritative check: health-check.sh signal 2d reads"
+                    echo "the OpenClaw cron's own lastRunAtMs. Not failing the"
+                    echo "job — this check cannot tell those two apart."
                   fi
                   echo "sweep heartbeat OK"
               resources:
