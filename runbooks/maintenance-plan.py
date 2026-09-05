@@ -243,11 +243,20 @@ def reconcile(cfg, today):
     warnings = []
     for slot, ps in scheduled.items():
         w = win_by_slot.get(slot) or win_by_id.get(slot.split(":", 1)[0])
-        # missed window (date in the past, not executed)
+        # missed window (date in the past, plan neither ran nor was retired).
+        # `superseded` is NOT a miss: the plan was deliberately replaced by a
+        # newer one and will never run, so counting it warns forever about
+        # work that no longer exists (talos-1.13.9, superseded by
+        # talos-1.13.10, warned on sun-attended:2026-08-30 indefinitely).
+        # Everything else that is not `executed` — including `blocked` — stays
+        # a warning on purpose: those are open items, and narrowing this
+        # predicate further would trade a false positive for a false negative.
         try:
             wdate = date.fromisoformat(slot.split(":", 1)[1])
-            if wdate < today and any(p.get("status") != "executed" for p in ps):
-                warnings.append(f"MISSED window {slot}: {sum(1 for p in ps if p.get('status')!='executed')} plan(s) not executed")
+            unrun = unrun_plans(ps)
+            if wdate < today and unrun:
+                warnings.append(f"MISSED window {slot}: {len(unrun)} plan(s) "
+                                f"not executed")
         except Exception:
             wdate = None
         if not w:
@@ -603,6 +612,19 @@ def expected_slots(cfg, today, lookback_days=7):
             if (day == "daily" or d.weekday() == wd) and d >= WINDOW_LIVENESS_EPOCH:
                 out.append((w["id"], d.isoformat()))
     return sorted(out)
+
+
+# A plan in one of these states is NOT a missed occurrence: `executed` ran,
+# and `superseded` was deliberately replaced by a newer plan and will never
+# run — counting it warns forever about work that no longer exists.
+# Everything else (scheduled/draft/awaiting-go/vetted/blocked) IS a real miss.
+MISSED_EXEMPT_STATUSES = ("executed", "superseded")
+
+
+def unrun_plans(plans):
+    """Pure logic: the plans at a past slot that genuinely did not run."""
+    return [p for p in plans
+            if p.get("status") not in MISSED_EXEMPT_STATUSES]
 
 
 def missing_window_runs(expected, run_rows):

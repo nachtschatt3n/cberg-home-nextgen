@@ -242,7 +242,7 @@ next sweep — save `maintenance-plan.py --json` to a file and:
 
 ```bash
 SWEEP_PG_DSN=... python3 runbooks/window-run-record.py \
-  --slot <slot-id> --outcome <green|revert|partial|idle|aborted> \
+  --slot <bare-window-id> --outcome <green|revert|partial|idle|aborted> \
   --trigger <cron|ad-hoc> --plans-executed <n> --safe-updates <n> \
   [--notes "<one line>"]
 ```
@@ -251,8 +251,12 @@ SWEEP_PG_DSN=... python3 runbooks/window-run-record.py \
 secret + port-forward recipe; from inside the cluster the in-cluster FQDN works
 directly.) An **idle run is still a run**: "checked, nothing to do" writes
 `--outcome idle`. An operator-triggered run writes `--trigger ad-hoc` with the
-slot it stood in for. This row is the ONLY thing that distinguishes "the window
-ran and found nothing" from "the window never ran" — four of seven declared
+slot it stood in for. **`--slot` is the BARE id (`sat-attended`), never the
+dated occurrence form (`sat-attended:2026-09-05`)** — the date belongs in
+`--run-date`, and a dated `slot` is invisible to `maintenance-plan.py`'s
+liveness check, which reports the window as never-run. This row is the ONLY
+thing that distinguishes "the window ran and found nothing" from "the window
+never ran" — four of seven declared
 windows had no driving cron for weeks and nothing could tell. The sweep asserts
 a row exists for every dated slot; skipping this step makes an honest run look
 like a dead schedule, and the recorder prints loudly (exit 2) rather than

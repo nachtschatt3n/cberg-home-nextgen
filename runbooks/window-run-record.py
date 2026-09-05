@@ -15,6 +15,11 @@ Usage:
       --trigger cron --plans-executed 1 --safe-updates 7 [--notes "..."]
   (--run-date defaults to today; --started defaults to now)
 
+  --slot takes the BARE window id from maintenance-windows.yaml
+  ("sat-attended"), NOT the dated occurrence form ("sat-attended:2026-09-05").
+  The date goes in --run-date. A dated value is normalized with a warning --
+  see normalize_slot() for why it silently inverted the liveness check.
+
 Exit codes: 0 recorded; 2 no DSN (prints the exact row it WOULD have written,
 so a degraded environment is loud, never silent).
 """
@@ -22,8 +27,40 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime, timezone
+
+_DATED_SLOT = re.compile(r"^(?P<id>.+):(?P<date>\d{4}-\d{2}-\d{2})$")
+
+
+def normalize_slot(slot: str, run_date: str) -> tuple[str, str | None]:
+    """Return (bare_slot, warning). `slot` is the BARE window id.
+
+    Callers naturally say "sat-attended:2026-09-05" because that is how a
+    window OCCURRENCE is named in prose and in plan frontmatter — but the
+    table already carries the date in its own `run_date` column, so writing
+    the dated form makes `slot` disagree with what
+    `maintenance-plan.py:expected_slots()` emits (a bare id). Every dated row
+    is then invisible to `missing_window_runs()`, and a window that ran
+    correctly is reported as a missing occurrence. That inverted the liveness
+    check for the whole ledger (2026-09-05): 3 of 8 reported-missing slots had
+    rows, and the ONLY slot that "passed" was one recorded in the wrong form.
+
+    Normalizing here rather than on read is deliberate — one choke point, so a
+    future caller cannot poison the ledger again, and a read-side fallback
+    cannot hide that it happened.
+    """
+    m = _DATED_SLOT.match(slot)
+    if not m:
+        return slot, None
+    bare, embedded = m.group("id"), m.group("date")
+    warn = (f"window-run-record: --slot '{slot}' carries an embedded date; "
+            f"recording slot='{bare}' (the date belongs in --run-date). ")
+    if embedded != run_date:
+        warn += (f"NOTE: embedded date {embedded} != run_date {run_date}; "
+                 f"run_date wins.")
+    return bare, warn
 
 
 def main() -> int:
@@ -42,13 +79,16 @@ def main() -> int:
     now = datetime.now(timezone.utc)
     run_date = a.run_date or now.date().isoformat()
     started = a.started or now.isoformat()
-    row = (a.slot, run_date, started, now.isoformat(), a.trigger,
+    slot, warn = normalize_slot(a.slot, run_date)
+    if warn:
+        print(warn, file=sys.stderr)
+    row = (slot, run_date, started, now.isoformat(), a.trigger,
            a.outcome, a.plans_executed, a.safe_updates, a.notes)
 
     dsn = os.environ.get("SWEEP_PG_DSN")
     if not dsn:
         print("window-run-record: NO SWEEP_PG_DSN — run NOT recorded. "
-              f"Would have written: slot={a.slot} date={run_date} "
+              f"Would have written: slot={slot} date={run_date} "
               f"outcome={a.outcome} trigger={a.trigger}", file=sys.stderr)
         return 2
 
@@ -63,7 +103,7 @@ def main() -> int:
             " plans_executed=EXCLUDED.plans_executed,"
             " safe_updates=EXCLUDED.safe_updates, notes=EXCLUDED.notes",
             row)
-    print(f"recorded: {a.slot} {run_date} {a.outcome} "
+    print(f"recorded: {slot} {run_date} {a.outcome} "
           f"(plans={a.plans_executed}, safe={a.safe_updates}, {a.trigger})")
     return 0
 

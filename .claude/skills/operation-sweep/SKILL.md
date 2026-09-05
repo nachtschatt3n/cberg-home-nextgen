@@ -20,6 +20,15 @@ sections that did not report.
 - **One shared cycle id.** Mint it FIRST and put it in every specialist's
   environment; six sections land in ONE `sweep_cycles` row:
   `SWEEP_CYCLE_ID=$(uuidgen | tr 'A-Z' 'a-z')`
+- **Propagate the run trigger alongside it.** If the invoking prompt carries a
+  `[AUTOMATED SCHEDULED RUN — SWEEP_TRIGGER=<t>]` preamble (the every-48h cron
+  runs `operation sweep --wait --trigger cron`, which prepends exactly that),
+  export `SWEEP_TRIGGER=<t>` in EVERY specialist's environment too. Omitting it
+  silently records an autonomous run as `trigger='manual'`
+  (`runbooks/sweep-run.py` defaults it), which makes the `sweep-heartbeat`
+  CronJob — it queries `WHERE trigger = 'cron'` — alarm forever and never
+  clear. That false "sweep cron dead" finding has now shipped twice
+  (2026-07-17, 2026-09-05). No preamble = operator run = correctly `'manual'`.
 - **Probe behaviour, not Flux status.** Flux has been fully green during two
   total internal-DNS outages. `Ready=True` is not proof.
 - **ES field traps** (all verified): `log.level` is unmapped;
@@ -45,7 +54,8 @@ sections that did not report.
    `runbooks/sweep-run.py`'s port-forward setup or run specialists through it.
 
 2. **Dispatch the six specialists in parallel**, each with
-   `SWEEP_CYCLE_ID` exported: health-check-agent, security-agent,
+   `SWEEP_CYCLE_ID` **and `SWEEP_TRIGGER`** (when the prompt declares one —
+   see ground rules) exported: health-check-agent, security-agent,
    version-check-agent, doc-agent, media-manager, slo-agent. Brief each
    with the P4.1.6 contract: a recommendation that implies a state change
    (restart X, delete Y, resize Z) MUST be emitted as a finding — a
