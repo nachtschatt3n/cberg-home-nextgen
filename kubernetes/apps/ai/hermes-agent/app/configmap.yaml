@@ -11,4 +11,13 @@ data:
       default: "gemma4:26b-mlx"
       base_url: "http://192.168.30.111:11434/v1"
       api_key: "ollama"
-      context_length: 131072
+      # MIRRORS THE HOST's OLLAMA_CONTEXT_LENGTH — the MLX build has no baked
+      # num_ctx, so this is a host setting reflected here, not a model property.
+      # Lowered 131072 -> 65536 on 2026-09-05 with the host. hermes reaches Ollama
+      # over /v1, which has no num_ctx field, so this value is client-side
+      # budgeting only: too high does not force a reload, it just lets hermes
+      # build a prompt the host will refuse to serve.
+      # REMINDER: this ConfigMap is a SEED (see helmrelease.yaml). Changing this
+      # line does NOT update a running install — /opt/data/config.yaml on the PVC
+      # must be patched too. See Known Gotcha #14.
+      context_length: 65536

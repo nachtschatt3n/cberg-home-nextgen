@@ -275,11 +275,13 @@ spec:
         # silently sliced the batch of 5 above back down to 1-4 transactions per
         # call. This only stops that shredding; AUTO_*_BATCH_SIZE stays the real
         # cap, so raising this further buys nothing. Safe against the model:
-        # gemma4:26b-mlx serves num_ctx 131072 and Sure's longest observed prompt is
-        # ~4.2k tokens, leaving ~30x headroom — no truncation risk. NOTE: unlike
-        # the GGUF, the MLX build has no baked num_ctx — it inherits
-        # OLLAMA_CONTEXT_LENGTH from the Mac mini's Guardian env, so that 131072
-        # is a host setting, not a model property.
+        # the host serves num_ctx 65536 (lowered from 131072 on 2026-09-05) and
+        # Sure's longest observed prompt is ~4.2k tokens, leaving ~15x headroom —
+        # no truncation risk. NOTE: unlike the GGUF, the MLX build has no baked
+        # num_ctx — it inherits OLLAMA_CONTEXT_LENGTH from the Mac mini's Guardian
+        # env, so that ceiling is a HOST setting and can move again. Sure is safe
+        # across such a move because 16384 is a client-side cap well under it; do
+        # not raise this value to track the host without re-checking that margin.
         - name: LLM_CONTEXT_WINDOW
           value: "16384"
         # Pin the JSON strategy instead of inheriting the "auto" default. Under

@@ -855,15 +855,22 @@ spec:
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      // Serves num_ctx 131072 — but NOT the same way the GGUF did.
-                      // The GGUF had num_ctx=131072 BAKED as a model parameter; the
-                      // MLX build has no baked num_ctx (only temperature/top_k/top_p)
-                      // and inherits OLLAMA_CONTEXT_LENGTH=131072 from the Guardian
-                      // env on the Mac mini. Same number today, but host-env
-                      // dependent: if that env changes, this value silently becomes
-                      // a lie and over-compaction returns. Verified by needle test
-                      // at ~52k tokens (2026-09-04).
-                      contextWindow: 131072,
+                      // MUST TRACK THE HOST. The GGUF had num_ctx=131072 BAKED as a
+                      // model parameter; the MLX build has no baked num_ctx (only
+                      // temperature/top_k/top_p) and inherits OLLAMA_CONTEXT_LENGTH
+                      // from the Guardian env on the Mac mini. So this number is a
+                      // HOST SETTING mirrored here, not a model property — if the two
+                      // drift, OpenClaw promises its agents a context the host will
+                      // not serve, and compaction never fires in time.
+                      //
+                      // 2026-09-05: host lowered 131072 -> 65536 to free ~4-5 GiB of
+                      // context allocation (2 slots x 131072 cost 9-10 GiB) on a box
+                      // sitting at 42 GB used and 96% swap. Measured against 15,471
+                      // real prompts: median 1,080, p95 5,782, and only ONE prompt
+                      // ever exceeded 65536 (max 73,586). The earlier 32768 was too
+                      // tight — 257 prompts exceeded it — which is why this value is
+                      // 65536 and not a return to 32768.
+                      contextWindow: 65536,
                       maxTokens: 4096,
                     },
                     {
@@ -872,7 +879,9 @@ spec:
                       reasoning: false,
                       input: ['text'],
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                      contextWindow: 131072,
+                      // Same host-tracking rule as above — OLLAMA_CONTEXT_LENGTH is
+                      // global, so this model gets the same ceiling.
+                      contextWindow: 65536,
                       maxTokens: 4096,
                     },
                   ];
