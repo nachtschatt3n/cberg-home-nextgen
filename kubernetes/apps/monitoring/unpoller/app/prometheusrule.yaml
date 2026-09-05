@@ -78,14 +78,31 @@ spec:
 
         # Was `(unifipoller_device_sys_mem / 1024 / 1024) > 80` — that compared
         # MEBIBYTES against 80, so it was semantically wrong as well as inert.
-        # The replacement is a 0-1 ratio. Threshold is 0.90, NOT 0.80: the
-        # DMP-CBERG gateway sits at 0.822 in normal steady state, so 0.80 would
-        # fire permanently. Over the last 7d, 0.90 would have fired for
-        # DMP-CBERG and Hallway-AP-U6 Pro (7d max 0.975) — believed real, and
-        # on the gateway it is a useful early warning for the known UniFi
-        # Network-app JVM Full-GC death spiral. Tune here if it proves noisy.
+        # The replacement is a 0-1 ratio.
+        #
+        # THRESHOLD IS TYPE-AWARE, and the split is measured, not guessed.
+        # RETUNED 2026-09-05 after the first version fired on DMP-CBERG within
+        # hours. The original single 0.90 was set from the 7d MAX (0.975), which
+        # looked like plenty of headroom. The distribution says otherwise:
+        #   gateway (udm): 6h avg 0.889, 24h 0.76-0.93, and 5.7% of 7d ALREADY
+        #                  above 0.90 — roughly 9.6 hours of alerting per week
+        #                  for a device sitting at its normal baseline. 0.0% of
+        #                  7d above 0.95.
+        #   everything else: 7d max 0.975 on ONE AP (Hallway-U6 Pro), every
+        #                  other device <= 0.743. 0.90 is well clear of normal.
+        # Checking the max but not the distribution is what produced a false
+        # positive on the first night. The lesson is in the numbers above.
+        #
+        # The UDM runs the UniFi Network JVM with a pinned heap, so a high
+        # steady state is expected there and is NOT a fault. What IS a fault is
+        # memory PINNED near the ceiling — the Full-GC death spiral this cluster
+        # has hit before, where the JVM thrashes without ever OOMing (so it
+        # never restarts itself) and the control plane starts flapping. 0.95
+        # sustained for 30m never occurred in the last 7 days, so if it fires it
+        # means something. Recovery for that is `systemctl restart unifi.service`
+        # on the UDM.
         - alert: UnifiDeviceHighMemory
-          expr: unpoller_device_memory_utilization_ratio > 0.90
+          expr: unpoller_device_memory_utilization_ratio{type!="udm"} > 0.90
           for: 10m
           labels:
             severity: warning
@@ -93,7 +110,25 @@ spec:
             component: unifi
           annotations:
             summary: "High memory usage on {{ $labels.name }}"
-            description: "Device {{ $labels.name }} memory utilization is {{ $value | humanizePercentage }}, exceeding the 90% threshold."
+            description: "Device {{ $labels.name }} memory utilization is {{ $value | humanizePercentage }}, exceeding the 90% threshold for non-gateway devices."
+
+        - alert: UnifiGatewayMemoryPinned
+          expr: unpoller_device_memory_utilization_ratio{type="udm"} > 0.95
+          for: 30m
+          labels:
+            severity: warning
+            category: network
+            component: unifi
+          annotations:
+            summary: "UniFi gateway {{ $labels.name }} memory pinned near ceiling"
+            description: >-
+              {{ $labels.name }} memory utilization has been above 95% for 30m
+              ({{ $value | humanizePercentage }}). Its normal baseline is ~89%, and
+              0.95 was not reached at all in the preceding 7 days. This is the
+              shape of the UniFi Network-app Full-GC death spiral: the JVM thrashes
+              without OOMing, so it never restarts itself, and the control plane
+              begins to flap. Check `unifictl local health get`; recovery is
+              `systemctl restart unifi.service` on the UDM.
 
         # Was `unifipoller_device_system_stats_cpu > 90`. The replacement is a
         # 0-1 ratio, so the threshold is 0.90 and not 90 — a straight prefix
