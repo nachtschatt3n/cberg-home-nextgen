@@ -292,6 +292,27 @@ def reconcile(cfg, today):
                 if sa or sh:
                     warnings.append(f"INTERFERENCE {slot}: {a.get('plan_id')} ⋂ {b.get('plan_id')} share {sorted(sa|sh)}")
 
+        # RISK-CLASS STACKING. The check above keys on shared namespaces/infra,
+        # which cannot see the most dangerous collision there is: two
+        # IRREVERSIBLE plans in one slot. The four database-engine majors in
+        # flight on 2026-09-05 (paperclip-postgresql `ai`, superset-pg
+        # `databases`, paperless-db `office`, authentik-pg `kube-system`) all
+        # sit in DIFFERENT namespaces with empty `shared`, so they intersect on
+        # nothing and the interference check stays silent — while stacking any
+        # two of them means a window that cannot be rolled back if the second
+        # one fails. Two planner agents independently warned about exactly this
+        # in prose, and paperless-db-12.3.3.md already documents it, but no
+        # check enforced it. Blast radius is set by reversibility, not by
+        # namespace.
+        irreversible = [p for p in ps
+                        if p.get("rollback_class") in IRREVERSIBLE_ROLLBACK]
+        if len(irreversible) > 1:
+            ids = ", ".join(sorted(str(p.get("plan_id")) for p in irreversible))
+            warnings.append(
+                f"RISK-CLASS STACKING {slot}: {len(irreversible)} irreversible "
+                f"plans in one slot ({ids}) — if the second fails there is no "
+                f"rollback path for the window. Serialize across slots.")
+
     # DEAD CROSS-REFERENCES. A depends_on/conflicts_with naming a plan_id that does
     # not exist is silently UNENFORCED — the sequencer finds nothing to order against
     # and proceeds as if the constraint were satisfied. It reads as a guard while
@@ -612,6 +633,12 @@ def expected_slots(cfg, today, lookback_days=7):
             if (day == "daily" or d.weekday() == wd) and d >= WINDOW_LIVENESS_EPOCH:
                 out.append((w["id"], d.isoformat()))
     return sorted(out)
+
+
+# Rollback classes with no cheap undo. `git-revert` is reversible by design;
+# these are not — once the data directory is migrated or the dump is restored
+# over, getting back costs a restore from backup, not a commit.
+IRREVERSIBLE_ROLLBACK = ("one-way", "backup-restore")
 
 
 # A plan in one of these states is NOT a missed occurrence: `executed` ran,

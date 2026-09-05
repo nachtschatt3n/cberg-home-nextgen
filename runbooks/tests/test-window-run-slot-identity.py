@@ -131,5 +131,44 @@ class TestMissedWindowExcludesSuperseded(unittest.TestCase):
         self.assertEqual(len(self._unrun([{"plan_id": "x"}])), 1)
 
 
+
+class TestRiskClassStacking(unittest.TestCase):
+    """Two irreversible plans in one slot is the collision namespaces can't see."""
+
+    def test_irreversible_set_is_the_non_git_revert_ones(self):
+        self.assertIn("one-way", _plan.IRREVERSIBLE_ROLLBACK)
+        self.assertIn("backup-restore", _plan.IRREVERSIBLE_ROLLBACK)
+        self.assertNotIn("git-revert", _plan.IRREVERSIBLE_ROLLBACK)
+
+    def _stack(self, classes, namespaces=None):
+        # Distinct namespaces by default: proves the check does NOT rely on the
+        # namespace intersection that the older INTERFERENCE check uses.
+        ns = namespaces or [[f"ns{i}"] for i in range(len(classes))]
+        return [{"plan_id": f"p{i}", "rollback_class": c,
+                 "touches": {"namespaces": n, "shared": []}}
+                for i, (c, n) in enumerate(zip(classes, ns))]
+
+    def _irreversible(self, plans):
+        return [p for p in plans
+                if p.get("rollback_class") in _plan.IRREVERSIBLE_ROLLBACK]
+
+    def test_two_one_way_plans_in_disjoint_namespaces_are_caught(self):
+        plans = self._stack(["one-way", "backup-restore"])
+        self.assertEqual(len(self._irreversible(plans)), 2)
+
+    def test_single_irreversible_plan_is_fine(self):
+        plans = self._stack(["one-way", "git-revert", "git-revert"])
+        self.assertEqual(len(self._irreversible(plans)), 1)
+
+    def test_all_reversible_is_fine(self):
+        plans = self._stack(["git-revert", "git-revert"])
+        self.assertEqual(self._irreversible(plans), [])
+
+    def test_missing_rollback_class_does_not_count_as_irreversible(self):
+        # Unknown != irreversible; the frontmatter-invariant check owns that gap.
+        plans = [{"plan_id": "x", "rollback_class": None}]
+        self.assertEqual(self._irreversible(plans), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -108,6 +108,19 @@ deny:
   # operator override a hold that turns out to be real (0.176.0 drops a table).
   - match: "*nextcloud-mcp*"
     reason: "third-party MCP bridge; upstream ships BREAKING-tagged releases on minor hops (0.176.0 removed the webhook registration API and dropped its table; 0.177.0 tightened create_share). Read the release notes per hop — never an unattended bump."
+  # Same reasoning as *nextcloud-mcp* above, same required position: without
+  # this rule nextcloud-redis falls through to "*nextcloud*" and is held with
+  # the Nextcloud SERVER's chart-lockstep/occ/maintenance-mode reason, which is
+  # false for it. It is a plain Kustomize Deployment — no HelmRelease, no
+  # chart, no occ — decoupled from the server since the bitnamilegacy-exit
+  # cutover (2026-08-19). It still deserves a hold, but for its OWN reason:
+  # this redis holds live PHP sessions and file-locking state with NO
+  # persistence, so any swap signs out every logged-in user. Holding it for a
+  # false reason is the failure mode already documented above — an operator who
+  # disproves the stated reason overrides the hold, and the real risk (user
+  # impact) rides along unnoticed.
+  - match: "*nextcloud-redis*"
+    reason: "session + file-lock store with no persistence: any restart signs out every logged-in Nextcloud user and drops held locks. Not chart-coupled to the server and no occ migrations — hold is about user impact, so schedule an ATTENDED low-traffic slot, never the unattended nightly lane."
   - match: "*nextcloud*"
     reason: "chart+image must bump together and run occ migrations (Mail custom_app / stuck-maintenance trap) — operator-supervised only."
   # Pre-release CHANNEL, not a version pin. Upstream cuts GitHub releases on ODD
