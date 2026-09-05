@@ -190,7 +190,61 @@ spec:
       #
       # Sure was moved to gemma4:26b-mlx in the fleet-wide migration that
       # followed (see OPENAI_MODEL below) — a SEPARATE change from this tag.
-      tag: "sha-7b22a02aede4195149d70ca931e85d21235675b8"
+      #
+      # --- 2026-09-05 bump: sha-7b22a02a -> sha-dcf50c9d -------------------
+      # Fixes the merchant-detection PROMPT: it had been teaching the model to
+      # discard small local businesses as "generic" (a "Local diner" example
+      # rule), which wrongly rejected real merchants — restaurants, kebab
+      # shops, a florist. Measured on a 15-transaction sample: 6/15 recognised
+      # with the rule, 13/15 without it. Also records WHY a name was missing
+      # and ages the attempt markers on two clocks instead of one.
+      # 11 files, all under app/ and test/ (plus FORK_NOTES.md).
+      # NO MIGRATION: no db/migrate entry, db/schema.rb byte-identical between
+      # the two shas. The migration Job runs and is a no-op, as it did on the
+      # previous bump.
+      #
+      # Build provenance, verified BEFORE this bump rather than after:
+      # publish.yml dispatched as
+      #   gh workflow run publish.yml --ref integration -f ref=integration -f push=true
+      # The `--ref` is load-bearing — publish.yml passes
+      # `build-args: BUILD_COMMIT_SHA=${{ github.sha }}` and metadata-action
+      # derives `type=sha` from the same `github.sha`, so dispatching without
+      # `--ref integration` stamps BOTH the tag and the baked ENV from main's
+      # HEAD while still building integration's code. Verified on the
+      # published manifest (amd64 AND arm64):
+      #   BUILD_COMMIT_SHA=dcf50c9d5f4469120ee5ed808f96a1a5e1e83ab5
+      #
+      # OPERATOR NOTE — do not read a successful deploy as a failed one:
+      # an UNTARGETED `grep -ri 'local diner' app/` still returns 4 hits, in
+      # app/models/provider/{openai,anthropic}/provider_merchant_enhancer.rb.
+      # That is a DIFFERENT feature which supplies a business URL, not a name,
+      # and "null for local businesses" is correct there — a florist has no
+      # domain and inventing one is the failure mode the fork already guards.
+      # Leave it alone. The meaningful check is the targeted one:
+      #   grep -ri 'local diner' app/models/provider/*/auto_merchant_detector.rb  -> 0
+      #
+      # WHAT THE FIRST SYNC AFTER THIS DOES — and does not do: it only picks up
+      # NEW transactions. The 137 transactions the bad prompt suppressed on
+      # 2026-09-05 carry a retryable attempt marker; Enrichable's new
+      # DEFAULT_RETRYABLE_ATTEMPT_TTL_DAYS = 7 expires those markers on
+      # 2026-09-12, at which point they are re-examined on their own with no
+      # operator action. AI_ENRICHMENT_RETRYABLE_ATTEMPT_TTL_DAYS=0 would
+      # release them immediately WITHOUT destroying the markers (unlike
+      # "Clear AI cache"), but it is deliberately NOT set here: that is the
+      # user's separate call and is meant to run outside usage hours.
+      #
+      # CO-INCIDENT VARIABLES on the Ollama host, recorded so this deploy stays
+      # separable from them later. Neither is a change to Sure:
+      #   * engine 0.33.3 (was 0.32.15)
+      #   * OLLAMA_CONTEXT_LENGTH=65536, lowered from 131072 with every
+      #     consumer moved together in af67ee7e
+      # Sure's LLM_CONTEXT_WINDOW=16384 is unchanged and stays well under the
+      # new host ceiling, so nothing about Sure changes as a result. See the
+      # margin note on LLM_CONTEXT_WINDOW below before touching that value.
+      #
+      # ROLLBACK: pure manifest revert to
+      # sha-7b22a02aede4195149d70ca931e85d21235675b8 — no schema to unwind.
+      tag: "sha-dcf50c9d5f4469120ee5ed808f96a1a5e1e83ab5"
       pullPolicy: IfNotPresent
       imagePullSecrets:
         - name: arag-web-ghcr-pull
