@@ -1,8 +1,8 @@
 # SOP: Sweep Findings Lifecycle — emit, fingerprint, auto-close, and the coverage veto
 
 > Description: Defines how an audit finding is born, re-identified across cycles, and automatically resolved — and the independent safety gates that stop a partial, ad-hoc, or failed run from silently marking real problems "fixed".
-> Version: `2026.08.24`
-> Last Updated: `2026-08-24`
+> Version: `2026.09.05`
+> Last Updated: `2026-09-05`
 > Owner: `homelab-sre`
 
 ---
@@ -45,7 +45,7 @@ file — and we hit three separate production failure modes in one day (§7).
 | Tables | `sweep_cycles`, `sweep_findings` |
 | Board | `https://sweep.<DOMAIN>/` |
 | Valid sections | `health, security, version, doc, media, smarthome, slo, infra, carry` |
-| Auto-close owner | `FindingsWriter.close()` (primary, all gates) + `sweep-run.py` (backstop, gates 3 and 3b — §4.8) |
+| Auto-close owner | `FindingsWriter.close()` (primary, all gates) + `sweep-run.py` (backstop, gates 3, 3b — §4.8; **not** gate 5) |
 
 **The gates.** Auto-close **via `FindingsWriter.close()`** only fires
 when ALL of these hold. The orchestrator's backstop pass is a *separate*
@@ -58,6 +58,7 @@ implementation and honours only gates 3 and 3b — see §4.8.
 | 3 | **Incomplete veto** | the section called `mark_incomplete()` — **section-wide** | `close()` |
 | 3b | **Uncovered-component scope** | the section called `mark_uncovered()` — holds back only that component's rows, the section still closes the rest | `close()` |
 | 4 | Zero-emit breaker | run emitted 0 findings but has rows to close | `close()` |
+| 5 | **Producer scope** | the open row was written by a DIFFERENT producer than the run doing the closing — silence from producer A is not evidence about producer B's row | `close()` |
 
 Plus two always-on scoping invariants that are not gates but bounds:
 **section scoping** (never touches another section's rows) and the
@@ -485,6 +486,41 @@ window) and stores it. Auto-close adds `AND last_seen < <run_start>`, so a
 concurrent or out-of-band run of the same section cannot resolve rows the other
 run just wrote.
 
+### 4.9 Gate 5 — a section can have MORE THAN ONE producer
+
+Auto-close reasons from absence, and absence is only evidence about rows the
+run could have re-emitted. Section `doc` has **two** producers —
+`runbooks/doc-check.py` (the only script emitter) and the `doc-agent`, which
+emits findings a script cannot derive (git-history SOP gaps, prose drift). Until
+2026-09-05 a doc-check run closed the agent's rows as "fixed" simply because a
+script that never checks them did not re-emit them. On 2026-09-05 that resolved
+9 doc findings, **6 of which were verified still true**.
+
+Every row therefore carries its author in `metadata.producer`, stamped by
+`emit()`, and `_autoclose_stale` holds back anything the closing run does not
+own. `FindingsWriter(producer=...)` defaults to `"script"`, so every existing
+check script is correct without change.
+
+**If you emit findings into a section from an agent, pass `producer=`:**
+
+```python
+w = FindingsWriter(dsn=dsn, section="doc", trigger="manual",
+                   git_head=git_head(), producer="doc-agent")
+```
+
+Rows with **no** producer (written before 2026-09-05) keep the old behaviour and
+remain closeable by any producer — legacy rows cannot be attributed after the
+fact, and holding them all open forever would be a different kind of lie.
+
+**Known gap (finding F-73bcfaf6): the backstop does not enforce gate 5.**
+`sweep-run.py:_auto_close_stale_findings()` reads `metadata` only for the
+uncovered-component scope; it never looks at `producer`. That is the path armed
+on every orchestrated sweep, so until it is taught the producer dimension the
+2026-09-05 failure still recurs there. This is exactly the parity trap §4.8
+closes with: a gate added to the writer alone is not a gate.
+
+---
+
 ### 4.8 The backstop is a SEPARATE implementation — know what it does not check
 
 `sweep-run.py:_auto_close_stale_findings()` is not the writer. It is its own
@@ -498,6 +534,7 @@ runs after every step. It therefore does **not** apply:
 | 3 incomplete veto | yes | **yes — via `sweep_cycles.notes.incomplete`** |
 | 3b uncovered-component scope | yes | **yes — via `sweep_cycles.notes.uncovered`** |
 | 4 zero-emit breaker | yes | **no** |
+| 5 producer scope (§4.9) | yes | **no — F-73bcfaf6** |
 | run-start `last_seen` bound | yes | **no** |
 
 Gate 3 crosses the process boundary because the writer *persists* it:

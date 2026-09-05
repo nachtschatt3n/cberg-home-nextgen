@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.08.26`
-> Last Updated: `2026-08-26`
+> Version: `2026.09.05`
+> Last Updated: `2026-09-05`
 
 ## 1) Description
 
@@ -258,6 +258,34 @@ scheduled:
 → the window agent serializes them (ingress first, verify all ingressed apps,
 then affine) or defers affine to the next slot.
 
+### A window with two irreversible plans (RISK-CLASS STACKING)
+
+```
+⚠️  WARNINGS:
+  ! RISK-CLASS STACKING sun-attended:2026-09-14: 2 irreversible plans in one
+    slot (paperless-db-12.3.3, mariadb-11.4) — if the second fails there is no
+    rollback path for the window. Serialize across slots.
+```
+
+Interference by shared namespace/resource was never the whole story: **blast
+radius is set by reversibility, not by namespace.** Two plans that touch
+nothing in common still cannot share a slot if neither can be rolled back —
+once the first has migrated its data directory, a failure in the second leaves
+the window with no way back except a restore from backup, and an operator who
+already spent the slot's budget.
+
+`maintenance-plan.py` therefore warns when **more than one** plan in a slot
+declares `rollback_class` in `("one-way", "backup-restore")`
+(`IRREVERSIBLE_ROLLBACK`). Deliberately quiet in two cases: a **single**
+irreversible plan (that is normal, and the plan carries its own restore path),
+and a plan whose rollback is a **git revert** (reversible by construction).
+Added `656ffef8`; the convention was prose-only before that, and
+`paperless-db-12.3.3.md` documented it for itself while nothing enforced it.
+
+Resolution is the same as for interference: serialize across slots, so each
+irreversible change gets a window where it is the only thing that cannot be
+undone.
+
 ## 6) Verification Tests
 
 ### Test 1: reconciler is read-only and correct
@@ -388,6 +416,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.05 | 2026-09-05 | Documented the **RISK-CLASS STACKING** detector (`656ffef8`): >1 irreversible plan (`rollback_class` one-way/backup-restore) in one slot has no rollback path for the window; quiet on a single irreversible plan and on git-revert rollbacks. Blast radius is set by reversibility, not namespace. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |
 | 2026.08.19 | 2026-08-19 | Documented the **AUTO-lane disqualifiers** (pre-release channel gate incl. `CHANNEL_RULES`, 0.x release-line moves, chart↔image lockstep) and the two troubleshooting rows for them + the past-dated `next window` bug (F-f95a8b52). |

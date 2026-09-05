@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.05`
+> Last Updated: `2026-09-05`
 
 ## 1) Description
 
@@ -78,6 +78,27 @@ that SOP has the `vN`-rename fix and the detection command.
      gate is skipped and the merge relies on G2 + G4 (logged explicitly).
   4. **G4 ci** — PR `mergeable == MERGEABLE` and every CI check green. The
 - **G5 age**: the PR's newest Renovate commit must be ≥ `minimum_release_age_hours` old (48h, policy-set 2026-08-26) — supply-chain cooldown for the nightly unattended lane. CVE/security bumps waive it (age 0); unknown age HOLDS; measured from the newest commit so a retargeted PR cannot inherit its old target's age.
+
+  > **The security waiver cannot fire in the direct-bump lane.** It reads a
+  > security marker out of the **Renovate PR title**, and the no-PR direct-bump
+  > half (`coverage.py`) has no title to read — so a bump that *is* the
+  > remediation for an open finding is held by G5 for the full 48h precisely
+  > when speed matters. The only lever is `age_waive` in
+  > `runbooks/auto-update-policy.yaml`: a **retroactive, permanent,
+  > per-component** glob allowlist, so it never helps the first time a
+  > component needs it. Hit three times in two days —
+  > `3118a96f` (mealie, paperless-ngx) and `e813bba0` (music-assistant).
+  >
+  > Before waiving, confirm the held bump really is the fix (the flagged tag is
+  > the *current* one and the held tag is the remediation), then add the glob
+  > with a comment naming the finding ref. Note what you are buying: the waiver
+  > is permanent and applies to **all** future bumps of that component, not just
+  > security ones — revisit if the component starts shipping regressions.
+  >
+  > ```bash
+  > .venv/bin/python3 runbooks/auto-update.py --json | python3 -c \
+  >   "import sys,json; d=json.load(sys.stdin); print([(c['dep'],c['gate']) for c in d['held'] if c['gate']=='G5'])"
+  > ```
      repo's `flux-local` workflow renders every HelmRelease with Helm on each
      PR, so green = the manifest actually renders. Pending checks → hold this
      cycle (passes next cycle); failing checks → hold.
@@ -273,6 +294,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.05 | 2026-09-05 | Documented the G5 **direct-bump blind spot**: the security waiver reads a marker from the Renovate PR title, so the no-PR direct-bump lane can never trigger it and `age_waive` (retroactive, permanent, per-component) is the only lever. Three occurrences in two days — `3118a96f`, `e813bba0`. |
 | 2026.08.18 | 2026-08-18 | Cross-referenced `docs/sops/immutable-job-image-bumps.md` — an auto-applied image bump landing on a Job wedges the whole Kustomization. |
 | 2026.08.18 | 2026-08-18 | Documented the G0 parse gate; added Renovate's bare `update <dep> to <x.y.z>` shape (PR #205 held on `gate=parse` despite being a green version-only patch); corrected the window cadence to daily. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. Sweep-driven, health-gated auto-merge of patch+minor Renovate PRs; deny-by-default policy + release-notes breaking scan; cron-only apply guard; auto-revert on post-apply regression. |
