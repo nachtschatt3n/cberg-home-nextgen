@@ -2,9 +2,11 @@
 
 Tracks HA integration errors that are either **upstream service problems** (no local action possible) or **known issues requiring user action** (integration config change, token refresh, etc.). These all noise up the health check's error count.
 
-**Last reviewed:** 2026-04-18 (HA Core 2026.4.2)
+**Last reviewed:** 2026-09-05 (HA Core 2026.9.0)
 
 > **Quick summary**: sections below marked *(UPSTREAM — ACCEPTED)* need no action. Sections marked *(USER ACTION NEEDED)* require a manual fix.
+>
+> **2026-09-05 re-review (closes sweep finding F-d9bbd8ff):** re-checked all 5 tracked sections against the live `/api/error_log` on HA Core 2026.9.0 (up from 2026.4.2 in April — 5 releases). **4 of 5 have cleared** and were removed: Miele SSE, ha_hatch MQTT, Tibber Realtime 502s, and the Samsung FamilyHub OAuth 401s. Only the **Tesla Wall Connector WiFi-edge timeout** is still live. Full verification detail is under that section below.
 
 ---
 
@@ -12,19 +14,20 @@ Tracks HA integration errors that are either **upstream service problems** (no l
 
 **Symptom** (HA logs):
 ```
-ERROR (MainThread) [backoff] Giving up async_request(...) after 3 tries
-  (tesla_wall_connector.exceptions.WallConnectorConnectionTimeoutError:
-   Timeout while connecting to Wall Connector at 192.168.32.146)
 ERROR (MainThread) [homeassistant.components.tesla_wall_connector.coordinator]
-  Error fetching tesla-wallconnector data: ... Timeout
+  Error fetching tesla-wallconnector data: Could not fetch data from
+  Tesla WallConnector at 192.168.32.146: Timeout
 ```
 
 **Root cause:** Device is at the **edge of WiFi coverage**. When RSSI drops, polling requests time out before backoff retries succeed. Device remains functional for charging (ESS over powerline/local network), just loses HA telemetry briefly.
 
-**Verification** (2026-04-17):
-- Device IP `192.168.32.146` reachable via ping (24-97ms RTT, no loss)
-- HTTP API responds 200 on `/api/1/vitals`
-- Error clusters (~2h windows) — not continuous failure
+**Verification (2026-09-05, HA Core 2026.9.0):** Still live, unchanged symptom/text from the April finding.
+- `/api/error_log` since the last HA core restart (2026-09-04 23:55 → 2026-09-05 19:11, ~19.3h of runtime) shows **29 `tesla_wall_connector.coordinator` timeout errors**, clustered between 00:09 and 12:49 — same intermittent-cluster pattern as April, not continuous failure.
+- The Wall Connector's own entities are **not** in HA's "truly unavailable" list — confirms the outage is telemetry-poll-only, not a lost connection to the device.
+- Integration config entry state: `loaded` (no `setup_error`).
+- **Note for the operator:** 29 errors in a 19.3h window extrapolates close to or above the doc's own "~30/day sustained" revisit trigger from April (this was ~24/day back then). Worth a look at RSSI next time you're near the garage, even though nothing here requires action today.
+
+**Smarthome impact:** Home Assistant dashboard/history telemetry for the Wall Connector (charging session state, live power draw) shows intermittent gaps during these clusters. Actual EV charging is unaffected — the connector operates on its own local/powerline control path, not through HA. Any automation keyed off Wall Connector sensors (state-of-charge notifications, "charging started/stopped" triggers) can see a stale or `unavailable` reading during a gap window and may fire late or not at all until the next successful poll.
 
 **Decision:** **Accepted.** No local action — WiFi reception improvement would require relocating the AP. Impact: occasional gaps in HA dashboard telemetry, not charging functionality.
 
@@ -35,156 +38,25 @@ ERROR (MainThread) [homeassistant.components.tesla_wall_connector.coordinator]
 
 ---
 
-## Miele — pymiele SSE TransferEncodingError *(UPSTREAM BUG, NO FIX YET — ACCEPTED)*
-
-**Symptom** (HA logs):
-```
-ERROR (MainThread) [pymiele.pymiele] Listen_event: Response payload is not completed:
-  <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'>
-ERROR (MainThread) [homeassistant.components.miele.coordinator] Timeout fetching miele data
-```
-
-**Root cause:** Miele Cloud SSE (Server-Sent Events) endpoint closes connections abruptly without flushing the transfer-encoding frame. `pymiele` reports this as an error on every close, but the library does reconnect. Coordinator timeout errors are secondary — they fire when pymiele is mid-reconnect.
-
-**Current state:**
-- Deployed: **pymiele 0.6.1** (latest on PyPI as of 2026-04-17)
-- HA Core: 2026.4.2
-- No fix available upstream
-
-**Decision:** **Accept until pymiele releases a fix.** Devices continue to work — state updates arrive eventually via polling fallback.
-
-**When to revisit:**
-- **Next HA Core release** — check if `pymiele` bumped beyond `0.6.1`
-- `pip index versions pymiele` or check `https://pypi.org/pypi/pymiele/json`
-- Also check https://github.com/astrandb/pymiele/issues for active PRs
-- If fixed: upgrade triggers via HA Core bump (Renovate / manual image rollout)
-
----
-
-## ha_hatch (Hatch Rest baby device) — MQTT signature mismatch *(UPSTREAM BUG — ACCEPTED)*
-
-**Symptom** (HA logs, every ~10s):
-```
-ERROR [hatch_rest_api.util_bootstrap] MQTT connection failed with exception
-  function takes exactly 17 arguments (18 given)
-ERROR [custom_components.ha_hatch.hatch_data_update_coordinator]
-  function takes exactly 17 arguments (18 given)
-```
-
-**Root cause:** The `hatch_rest_api` Python library (pinned by the `ha_hatch` custom integration) calls an internal MQTT-client function with 18 positional args, but the currently-installed `paho-mqtt` version expects 17. This is a dependency-signature skew between the library and the current Python/MQTT environment — an upstream packaging bug, not something we can fix locally without forking.
-
-**Decision:** Accept until `hatch_rest_api` releases a fix. Added to `HA_FALSE_POSITIVES` in `runbooks/health-check.sh` so the error count isn't noised by this single integration's retry loop.
-
-**When to revisit:** HA Core release notes mention `hatch_rest_api` bump, or PyPI shows a newer version at https://pypi.org/project/hatch-rest-api/ resolving the signature issue. Quick check: `pip index versions hatch-rest-api`.
-
----
-
-## Tibber Realtime — 502 Bad Gateway *(UPSTREAM BACKEND — ACCEPTED)*
-
-**Symptom** (HA logs):
-```
-ERROR (MainThread) [tibber.home] Error in rt_subscribe
-  gql.transport.exceptions.TransportQueryError:
-  {'message': 'http://iot-api.prod.tibber.cloud/homes/.../active-iot-device
-  Response code 502 (Bad Gateway)', ...}
-ERROR (MainThread) [tibber.realtime] Watchdog: Connection is down
-```
-
-**Root cause:** **Tibber backend problem, not an integration bug.**
-- `iot-api.prod.tibber.cloud` returns HTTP 502 (Bad Gateway) — this is a server-side error from Tibber's IoT API.
-- The `pytibber` library (0.37.0 deployed, 0.37.1 latest on PyPI) correctly surfaces the upstream error.
-- Watchdog fires when the realtime websocket subscription has been down → reconnect loops.
-
-**Verification this is backend, not integration:**
-- 502 status originates from Tibber's reverse proxy, not from our client
-- Errors correlate with Tibber status page incidents when checked historically
-- `pytibber` reconnects automatically once upstream recovers — no manual intervention needed
-
-**Decision:** **Accept — no local fix possible.** Tibber's Pulse Bridge (192.168.32.229) continues pushing data via MQTT Home assistant integration as the primary path; realtime API is a secondary source.
-
-**When to revisit:**
-- If errors persist >24h without recovery → check https://status.tibber.com/
-- If pytibber bumps to a major version (0.38+) that changes API contract
-- If MQTT Pulse feed also drops (then investigate local — MQTT broker, Pulse bridge power)
-
----
-
-## Samsung FamilyHub Fridge — OAuth auto-refresh *(OAUTH MODE LIVE — camera-feed endpoint limitation)*
-
-**Status 2026-04-19:** fork deployed, config entry migrated to `auth_mode: oauth`, **zero 401 errors** since switch. OAuth2Session auto-refresh confirmed working end-to-end.
-
-- Fork: https://github.com/nachtschatt3n/smartthings_fridge_camera (branch `feat/oauth-via-ha-core-smartthings`)
-- Upstream PR: https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/23 (follow-up fix `af4afad` for reauth/reconfigure flow compatibility added)
-- Live HA version: `0.1.0` (synced from fork)
-- Config entry `01KNWFCMT2W8DNTWWEJMY01VGZ`: `auth_mode: oauth`, `linked_smartthings_entry_id: 01JWKXKXB3MFTHCDPVH7CDECVX`, `device_id: 0bd9c671-e43c-b212-afd8-9d79707188a7`
-- Remaining issue: the *in-fridge camera feed* endpoint returns `HTTP 400 "No samsung id available"`. This is a Samsung-specific API quirk — the camera view-inside capability requires an OEM token obtained via Samsung Account login (`SamsungAccountAuth` class in `auth.py`), not the standard SmartThings OAuth token. All OTHER fridge data (17 entities: temps, doors, ice maker, power, water filter) works fine via HA core smartthings.
-- Follow-up (lower priority): extend the fork to optionally authenticate via Samsung Account for the camera endpoint only, keeping SmartThings OAuth for the generic data. Not urgent — the HA core smartthings integration already covers everything except the camera feed.
-
-
-
-**Symptom** (HA logs, at startup or when polling tries to resume):
-```
-ERROR [custom_components.samsung_familyhub_fridge.api] SmartThings authentication failed
-  (HTTP 401). Token may have expired — SmartThings personal access tokens expire after 24 hours
-```
-
-### Root cause — verified
-
-**Samsung changed SmartThings PAT policy on 2024-12-30:** new PATs expire after **24 hours**; older PATs created before that date may retain expiration up to 50 years. This is an intentional Samsung policy, not an integration bug.
-
-**Integration**: `samsung_familyhub_fridge` v0.0.1 by [@ibielopolskyi](https://github.com/ibielopolskyi/smartthings_fridge_camera) (community HACS; not HA core).
-
-Investigation of the integration source (2026-04-18) shows:
-
-- `auth.py` defines `SmartThingsOAuth` (PKCE flow, refreshable) and `SamsungAccountAuth` (headless email/password) classes
-- **But** `config_flow.py` only accepts a plain `token` string — OAuth/Samsung Account flows are helpers not wired into the UI
-- Latest (PR #17, merged 2026-04-10) adds 401/403 detection → triggers HA's built-in re-auth flow (UI prompt), but still does **not** auto-refresh tokens
-
-So even on the newest version, the user has to manually re-enter a token whenever it expires.
-
-### Options (in order of least-to-most work)
-
-1. **Short-term patch** (what most users do): re-enter a PAT every 24h via HA reauth UI. Tedious but works.
-2. **Use a grandfathered PAT**: if you have one created before 2024-12-30 at https://account.smartthings.com/tokens, it still honors its original expiration (up to 50 years). Check `smartthings.com/tokens` — tokens created before the policy change list their expiration date.
-3. **Upgrade the custom integration to latest** (0.0.1 → main branch via HACS re-download): gets the 401 detection + re-auth UI prompt. Still manual refresh, but you get notified.
-4. **Generate OAuth access token externally**, paste into HA. Requires:
-   - Run `smartthings apps:create` (SmartThings CLI) → get `client_id` + `client_secret`
-   - Use the integration's `SmartThingsOAuth` helper (or your own script) to do PKCE flow → get `access_token` + `refresh_token`
-   - Paste `access_token` into HA. Still expires in 24h (OAuth access tokens are also short-lived); would need a cron job calling `/oauth/token` with refresh_token and updating HA config entry.
-5. **Switch to HA core SmartThings integration**: OAuth with automatic refresh built-in (supported officially). **Loses**: fridge camera feed, inventory, FamilyHub-specific door sensors — these aren't in HA core's SmartThings integration.
-6. **Fork and contribute auto-refresh upstream**: `auth.py` has `refresh(refresh_token)` already implemented; wire it into `DataCoordinator._async_update_data()` in `api.py` to refresh on 401 and call `update_token(...)` on the hub. Merge via PR to the repo.
-
-### Recommendation
-
-For now: **option 3** (upgrade to latest version) is the lowest effort — gets you notified when expiry hits instead of silent data staleness. Combine with **option 2** (hunt for a grandfathered PAT) if any of your previously-created PATs pre-date 2024-12-30.
-
-For durable fix: **option 6** is the right investment if the fridge camera/inventory features matter — `auth.py` already has the building blocks. Otherwise option 5 accepts feature loss for reliability.
-
-**When to revisit:** whenever the 401 returns. Sources:
-- [Samsung PAT policy change discussion (SmartThings Community)](https://community.smartthings.com/t/old-personal-access-token-stopped-working-after-the-expiration-change/293450)
-- [Integration repo](https://github.com/ibielopolskyi/smartthings_fridge_camera)
-- [PR #17 — auth refresh & OAuth flow](https://github.com/ibielopolskyi/smartthings_fridge_camera/pull/17)
-
----
-
 ## Historical HA long-lived token leak *(REVOKED — NOT AN ONGOING ISSUE)*
 
-A HA long-lived access token (`iss: bc0e1bf629c84ee288eb0a1cf3eb6609`) was committed in plaintext in a now-deleted script `add_shelly_devices_to_hass.sh` (commit `2b0665fd`, 2025-04-17). The repo is public.
+A HA long-lived access token was committed in plaintext in a now-deleted script `add_shelly_devices_to_hass.sh` (commit `2b0665fd`, 2025-04-17). The repo is public.
 
-**Verification (2026-04-18):** HA → Profile → Security shows only 2 long-lived tokens (`ai-harness`, `ai-harness-test`, both created last week). The leaked token is **not present** — either revoked or never re-created after the HA rebuild. No action required.
+**Verification (2026-04-18):** HA → Profile → Security showed only 2 long-lived tokens (`ai-harness`, `ai-harness-test`), both created that week. The leaked token was **not present** — either revoked or never re-created after the HA rebuild.
 
-Security scanner `runbooks/security-check.py` has the token's iss claim in `ACCEPTED_CRED_PATTERNS` so the pattern doesn't flag on every scan.
+**Re-check (2026-09-05):** searched the current `/api/error_log` for any reference to the leaked token or the deleted script name — zero hits, consistent with the token being dead/unused. (The HA token list itself isn't exposed via `hactl`/REST — this is a log-based sanity check, not a re-enumeration of active tokens. No new evidence contradicts the April finding.) No action required.
+
+Security scanner `runbooks/security-check.py` has the token's `iss` claim in `ACCEPTED_CRED_PATTERNS` so the pattern doesn't flag on every scan.
 
 ---
 
 ## Health check impact
 
-These three upstream issues accounted for **~58 of the 74 HA errors** flagged as MAJOR on 2026-04-17:
-- Tesla Wall Connector: 24
-- Miele SSE: 19
-- Tibber realtime: 15
+**2026-09-05:** Of the original 3 upstream sources tracked here (Tesla Wall Connector, Miele SSE, Tibber Realtime), only **Tesla Wall Connector remains live** — it accounted for 29 of the 71 strict `ERROR`-level lines in the current retained log (Miele and Tibber contributed 0). The other two cleared upstream sometime in the 5 HA Core releases since April and their sections were removed above.
 
-The `HA_FALSE_POSITIVES` allowlist in `runbooks/health-check.sh:132` is **intentionally not** expanded to cover these — we want visibility when the error rate spikes, even if the root cause is upstream. The health check threshold (>50 major = MAJOR issue) is the right tripwire.
+The current top error sources in `/api/error_log` are `tesla_wall_connector.coordinator` (29), `custom_components.frigate.api` (13), and `custom_components.teslafi` (8) — the last two are **not** covered by this doc (they weren't part of the original 2026-04-18 tracking and haven't been root-caused here). If they persist, they need their own investigation/doc rather than being folded into this one silently.
+
+The `HA_FALSE_POSITIVES` allowlist in `runbooks/health-check.sh:132` is **intentionally not** expanded to cover the Tesla Wall Connector errors — we want visibility when the error rate spikes, even if the root cause is upstream. The health check threshold (>50 major = MAJOR issue) is the right tripwire.
 
 If upstream issues cause false MAJOR alerts too often, revisit by either:
 - Raising the threshold
