@@ -1,5 +1,5 @@
 # VENDORED — do not hand-edit. Regenerate with ./revendor.sh.
-# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.0
+# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.1
 #   values: crds.gatewayAPI.enabled=true, crds.gatewayAPI.channel=standard
 ---
 # Source: gateway-crds-helm/templates/standard-gatewayapi-crds.yaml

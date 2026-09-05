@@ -20,7 +20,7 @@ spec:
       # hostname-less HTTPRoute) and ingress-nginx still serves all
       # ingresses — the coupled Gateway-API-CRD channel bump
       # (v1.5.1 -> v1.6.1) is cheapest to revert at this point.
-      version: 1.9.0
+      version: 1.9.1
       sourceRef:
         kind: HelmRepository
         name: envoyproxy

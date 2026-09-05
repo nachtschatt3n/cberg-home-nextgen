@@ -1,5 +1,5 @@
 # VENDORED — do not hand-edit. Regenerate with ./revendor.sh.
-# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.0
+# Source: oci://docker.io/envoyproxy/gateway-crds-helm:1.9.1
 #   values: crds.envoyGateway.enabled=true
 ---
 # Source: gateway-crds-helm/templates/generated/gateway.envoyproxy.io_backends.yaml
@@ -8871,8 +8871,9 @@ spec:
                                 kubebuilder:validation:Pattern=`^[a-f0-9]{64}$`
                               type: string
                             tls:
-                              description: TLS configuration when connecting to the
-                                Wasm code source.
+                              description: |-
+                                TLS configuration when connecting to the Wasm code source.
+                                If unset, system trust store is used for HTTPS url.
                               properties:
                                 caCertificateRef:
                                   description: |-
@@ -8994,8 +8995,9 @@ spec:
                                 kubebuilder:validation:Pattern=`^[a-f0-9]{64}$`
                               type: string
                             tls:
-                              description: TLS configuration when connecting to the
-                                Wasm code source.
+                              description: |-
+                                TLS configuration when connecting to the Wasm code source.
+                                If unset, system trust store is used.
                               properties:
                                 caCertificateRef:
                                   description: |-
@@ -37196,7 +37198,7 @@ spec:
                           Issuer MUST be a URI RFC 3986 [RFC3986] with a scheme component that MUST
                           be https, a host component, and optionally, port and path components and
                           no query or fragment components.
-                        minLength: 1
+                        pattern: ^https://[^/?#@]+(/[^?#]*)?$
                         type: string
                       tokenEndpoint:
                         description: |-
