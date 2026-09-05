@@ -40,6 +40,33 @@ PREDECESSOR's end state, not today: `grafana-chart-12` legitimately says
 "chart 11.6.1" while 10.5.15 is live. Verifying those against the cluster
 manufactures a false stale signal, so plans with unmet `depends_on` are skipped.
 
+## Known phantoms — coverage asks for these, do NOT plan them
+
+`coverage.py` reads the version snapshot, which reads MANIFEST PINS. It cannot
+tell whether a pin governs the LIVE workload or a retired-but-still-running
+artifact kept deliberately. When those differ, it reports a bump that must
+never be applied — and re-reports it every sweep, so a planner gets dispatched
+for it again and again. Check this list before planning; add to it when you
+find another.
+
+| Reported bump | Why it must not be applied | Owner |
+|---|---|---|
+| `authentik` image `17.11-bookworm → 18.6-bookworm` | `deployment/authentik-pg` has run **18.6 since the 2026-08-20 cutover**. The 17.11 pin in `helmrelease.yaml` governs only the bundled `statefulset/authentik-postgresql`, deliberately LEFT RUNNING as the rollback and still holding the pre-cutover data. The manifest says it outright: *"SAME major only: 18.x is a data-dir migration"* and *"do NOT set enabled: false here"*. Applying this bump migrates the data directory of the rollback — i.e. destroys the safety net while the thing it protects is fine. | `authentik-pg17-decommission` (status `awaiting-soak`). The pin disappears when that plan retires the StatefulSet; until then this row stays a phantom. Diagnosed by sweep finding `F-8ab2ee07`. |
+
+**The general shape:** if a plan's `current:` names a version that
+`kubectl get deploy/sts -o jsonpath='{...image}'` does not show on the workload
+that actually serves traffic, stop and find out which artifact the pin belongs
+to before writing any steps. A second, older copy kept as a rollback is the
+common cause.
+
+**Why this lives here and not in `auto-update-policy.yaml`:** a deny rule
+cannot express it. Deny globs match the component/dep key, and authentik's
+chart leg (`2026.8.0 → 2026.8.1`, a legitimate update) comes from the SAME
+snapshot row as the image leg — no glob separates them. And it would not help
+anyway: `coverage.py` returns `PLAN` for `dn or utype == "major"`, so a deny
+rule changes only the REASON TEXT, never removes the item from `needs_plan`.
+A rule here would over-block a real update and still not stop the re-planning.
+
 ## What counts as an "open plan" — three tiers
 
 `python3 runbooks/maintenance-plan.py --open` is the canonical answer. A flat

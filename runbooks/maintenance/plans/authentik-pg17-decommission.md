@@ -36,6 +36,15 @@ Follow-up to `authentik-postgres-18` (cutover executed 2026-08-20, ~6m43s SSO
 outage). The bundled StatefulSet was deliberately left running: it is the
 rollback and still holds the pre-cutover data.
 
+**This plan owns the 17.11 pin's disposition, and it is the ONLY thing that may
+touch it.** While this StatefulSet exists, `coverage.py` keeps reporting
+`authentik image 17.11-bookworm → 18.6-bookworm` as needing a plan — a phantom:
+it reads the manifest pin and cannot see that `deployment/authentik-pg` has
+served on 18.6 since the cutover. Applying that "bump" would migrate the data
+directory of the rollback itself. Do not write a plan for it; retire the
+StatefulSet here and the pin (and the phantom) disappear together. Listed in
+`README.md` → "Known phantoms"; diagnosed by `F-8ab2ee07`.
+
 ## Gate — do not run this early
 
 **This plan's only real risk is running it too soon.** It converts a
