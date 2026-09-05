@@ -13,9 +13,11 @@ spec:
       rules:
         # The in-cluster half of the sweep heartbeat (P0.5/G3). The CronJob
         # databases/sweep-heartbeat FAILS its job when the newest sweep_cycles
-        # row is >72h old. This rule turns that failure — or the CronJob never
-        # running at all — into a page over Alertmanager->Telegram, a path with
-        # no Mac-mini component anywhere in it.
+        # row is >50h old (180000s, hardcoded in heartbeat-cronjob.yaml — and
+        # it counts only CRON-triggered cycles, so manual sweeps never clear
+        # it). This rule turns that failure — or the CronJob never running at
+        # all — into a page over Alertmanager->Telegram, a path with no
+        # Mac-mini component anywhere in it.
         #
         # Two arms, both required (the frigate-restart lesson, twice over):
         # kube_cronjob_status_last_successful_time does not exist until the
@@ -39,7 +41,7 @@ spec:
             description: >-
               The in-cluster sweep-heartbeat CronJob (databases namespace) has not succeeded in
               over 8 hours (it runs every 6h), or its metrics are absent entirely. Either the
-              newest sweep cycle is older than 72h — meaning the Mac-side sweep pipeline is down,
+              newest CRON-triggered sweep cycle is older than 50h — meaning the Mac-side sweep pipeline is down,
               wedged, or the Mac itself is off — or the heartbeat mechanism has been removed.
               A quiet cluster is NOT evidence of a healthy one while this fires: nothing is
               sweeping. Check the Mac mini, the OpenClaw sweep cron (8163c139), and the
