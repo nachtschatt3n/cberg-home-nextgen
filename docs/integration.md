@@ -33,25 +33,101 @@ Base URL: http://192.168.30.111:11434/v1
 Endpoints: /v1/chat/completions
 ```
 
+### Host settings — the numbers live in one place, not here
+
+Engine version, `OLLAMA_CONTEXT_LENGTH`, `OLLAMA_KEEP_ALIVE`, `OLLAMA_NUM_PARALLEL`,
+`OLLAMA_MAX_LOADED_MODELS`, the warm set and the measurements behind them are
+documented in **`local-ollama-monitor/docs/ollama-model-setup.md`**. They are
+deliberately NOT duplicated here — two copies of a number drift, and a stale
+number in this file is what a consumer change would be built on.
+
+### ⚠️ Host/consumer context coupling — read before changing `OLLAMA_CONTEXT_LENGTH`
+
+The MLX build of gemma4 has **no baked `num_ctx`**. (The retired GGUF did: 131072
+was a model parameter.) The MLX build inherits `OLLAMA_CONTEXT_LENGTH` from the
+host env instead. Every consumer that declares a context window is therefore
+**mirroring a host setting, not describing the model** — and the two must move
+together.
+
+**Rule: lower the consumers FIRST, then the host. Raise the host FIRST, then the
+consumers.** Either way the consumer's declared window must never exceed what the
+host serves, or the consumer promises a context that will not be delivered and its
+compaction never fires in time.
+
+Consumers that declare a context window and must be moved in lockstep:
+
+| Consumer | Where | Sends `num_ctx` on the wire? |
+|---|---|---|
+| `openclaw` | `helmrelease.yaml` — `contextWindow` on all four `ollama`/`ollama-native` refs | No — uses `/v1`, which has no `num_ctx` field. Over-declaring only over-promises. |
+| `hermes-agent` | `configmap.yaml` **and** `/opt/data/config.yaml` on the PVC (the ConfigMap is a SEED — see Known Gotcha #14) | No — `/v1`. Client-side budgeting only. |
+| `home-assistant` | HA UI, per Ollama subentry | **YES — and it cannot be omitted.** |
+| `sure` | `LLM_CONTEXT_WINDOW` (client-side cap, currently far below the host ceiling) | No. Safe across host moves; re-check the margin before raising it. |
+
+**Home Assistant is the dangerous one.** Its Ollama integration **cannot leave
+`num_ctx` unset** — an omitted value does not mean "inherit the host default", it
+sends **8192**. So HA always transmits an explicit `num_ctx`, and if that value
+disagrees with the host's, **every HA call forces an evict-and-reload of the pinned
+18 GB model.** HA must be moved in lockstep with any `OLLAMA_CONTEXT_LENGTH`
+change — it is the one consumer where a mismatch is not a promise problem but a
+thrashing problem. HA also sets `keep_alive: -1` on its subentries, so a single
+call re-pins whatever it loads, permanently.
+
 ### Application Configuration
 
-| App | Endpoint | Model | Provider Config |
-|-----|---------|-------|-----------------|
-| anythingllm | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` |
-| openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `OLLAMA_BASE`, `OLLAMA_MODEL` |
-| next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b-mlx` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` |
-| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (fetch=true) | Custom endpoint "Ollama" |
-| open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` |
-| paperless-ngx (native AI) | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | DB-stored `ApplicationConfiguration` row (`ai_enabled`/`llm_*`/`llm_embedding_*`), not GitOps — see `docs/sops/paperless.md` §4a. Retired `paperless-gpt`/`paperless-ai` sidecars 2026-08-24. |
-| affine | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap |
-| frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (in encrypted config) | `OPENAI_BASE_URL` |
-| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` |
-| n8n | (UI-configured) | `gemma4:26b-mlx` | n8n UI: `ollamaApi` credential |
-| n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials |
-| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b-mlx` (edge) + `gemma4:26b-mlx` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` |
-| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (all integrations) | HA UI |
-| headlamp | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | Headlamp UI: AI Assistant plugin |
-| paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret |
+Verification provenance matters here: this table was wrong on 2026-09-04 in both
+directions (it listed apps as migrated that were not, and omitted `sure`, the
+largest single consumer). Each row says **how and when** its current value was
+confirmed, so a claim can be re-checked rather than trusted.
+
+| App | Endpoint | Model | Provider Config | Verified |
+|-----|---------|-------|-----------------|----------|
+| sure | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | **TWO places:** `OPENAI_MODEL` plain env in `helmrelease.yaml` (this one wins) **and** `OPENAI_MODEL` in `secret.sops.yaml`. Also `LLM_CONTEXT_WINDOW` (client-side cap) and `OPENAI_REQUEST_TIMEOUT`. | 2026-09-04, live pod env on `sure-web` + `sure-worker` |
+| hermes-agent | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `configmap.yaml` is a **SEED ONLY**; live config is `/opt/data/config.yaml` on the `hermes-agent-data` PVC. Also declares `context_length`. | 2026-09-04, file read in-container after restart |
+| anythingllm | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | `OLLAMA_BASE_PATH`, `EMBEDDING_BASE_PATH` | 2026-09-04, live container env after restart |
+| openclaw | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` | `OLLAMA_BASE`, `OLLAMA_MODEL` | 2026-09-05, live `openclaw.json` on the PVC after restart |
+| next-ai-draw-io | `http://192.168.30.111:11434/api` | `gemma4:26b-mlx` | `AI_PROVIDER: "ollama"`, `OLLAMA_BASE_URL` | 2026-09-04, live pod env |
+| librechat | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (fetch=true) | Custom endpoint "Ollama" | 2026-09-05, config + all 37 Mongo collections audited |
+| open-webui | `http://192.168.30.111:11434` | (all available) | `ollamaUrls` | 2026-09-05, `webui.db` config + `model` table |
+| paperless-ngx (native AI) | `http://192.168.30.111:11434` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | DB-stored `ApplicationConfiguration` row (`ai_enabled`/`llm_*`/`llm_embedding_*`), not GitOps — see `docs/sops/paperless.md` §4a. Retired `paperless-gpt`/`paperless-ai` sidecars 2026-08-24. | 2026-09-04, `ApplicationConfiguration` DB row |
+| affine | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | OpenAI-compat copilot configmap | 2026-09-04, live ConfigMap JSON |
+| frigate-nvr | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` (in encrypted config) | `OPENAI_BASE_URL` | 2026-09-04, `/config/config.yml` read in-container after restart |
+| nextcloud | `http://192.168.30.111:11434/v1` | `gemma4:26b-mlx` + `nomic-embed-text:latest` | NC UI: `integration_openai` + `context_chat` | 2026-09-04, `occ config:app:get` — all FOUR model keys |
+| n8n | (UI-configured) | `gemma4:26b-mlx` | `ollamaApi` credential holds only the base URL; the MODEL is a per-node parameter in the workflow JSON. One node in `ai-sysadmin-agent` (inactive). | 2026-09-05, `workflow_entity` queried **through the SQLite driver** — see the WAL note below |
+| n8n | Cloud | OpenAI, Anthropic (cloud models) | n8n UI: `openAiApi`, `anthropicApi` credentials | n/a — cloud only |
+| ha-ai-harness | `http://192.168.30.111:11434` | `gemma4:e2b-mlx` (edge) + `gemma4:26b-mlx` (dense) | `OLLAMA_URL`, `EDGE_MODEL`, `DENSE_MODEL` | 2026-09-04, live pod env |
+| home-assistant | `http://192.168.30.111:11434` | `gemma4:26b-mlx` (all integrations) | HA UI | 2026-09-05, ha-agent, confirmed with `/api/ps` snapshots |
+| headlamp | `http://192.168.30.111:11434` | `gemma4:26b-mlx` | Headlamp UI: AI Assistant plugin | NOT VERIFIABLE — per-browser localStorage, no server-side config |
+| paperclip | Cloud | OpenAI API (cloud) | `OPENAI_API_KEY` in SOPS secret | n/a — cloud only |
+
+### How to verify an app's model — and how NOT to
+
+**Never grep an application's database file.** On 2026-09-05 two agents reached
+opposite conclusions about n8n from the same 512 MB `database.sqlite`:
+
+- A raw `grep` over the file found **664** occurrences of the old tag and **zero**
+  of the new one, and concluded n8n was still on the GGUF.
+- A query through the SQLite driver found **14 workflows, 0 naming the old tag,
+  1 naming the new one.**
+
+Both reads were of real bytes; only one was of *live* data. Two things defeat a
+file-level grep:
+
+1. **WAL mode.** Recent writes live in `database.sqlite-wal` until a checkpoint.
+   The updated value was in the WAL, so the main file did not contain it at all.
+2. **Free pages.** SQLite does not zero deleted rows. `execution_entity` had been
+   pruned to **0 rows**, yet the file still carried the byte patterns of every
+   deleted execution record. That is where all 664 hits lived — dead pages, not
+   live rows.
+
+So a file grep can report the old value (from dead pages) *and* miss the new value
+(sitting in the WAL) simultaneously — wrong in both directions at once.
+
+**Always query through the application's own driver or CLI** (`n8n export:workflow`,
+`occ config:app:get`, `sqlite3`/driver, `mongosh`, `manage.py shell`). The same
+applies to any app that keeps its own state: AnythingLLM, LibreChat, Open WebUI,
+n8n, Nextcloud, paperless, OpenClaw, hermes-agent. A related false positive was hit
+on AnythingLLM the same night — three "hits" that turned out to be chat transcripts
+in `workspace_chats.response`, not configuration.
 
 **Home Assistant cloud AI integrations (UI-configured, no change):**
 - OpenAI (ChatGPT): conversation, AI task, TTS (`gpt-4o-mini-tts`), STT

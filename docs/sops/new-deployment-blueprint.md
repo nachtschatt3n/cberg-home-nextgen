@@ -3,8 +3,8 @@
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
 > Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.04`
-> Last Updated: `2026-09-04`
+> Version: `2026.09.05`
+> Last Updated: `2026-09-05`
 > Owner: `Platform`
 
 ---
@@ -894,6 +894,19 @@ paperless, AnythingLLM, LibreChat), **the application's own store is the
 authority, and the only complete check is to query that store.**
 `docs/ai-usage-map.md` marks which consumers are in this class.
 
+**(a3) …and query that store through its DRIVER, never by grepping its file.**
+On 2026-09-05 a raw `grep` over n8n's 512 MB `database.sqlite` found 664
+occurrences of a retired model tag and none of its replacement, and concluded the
+app had not been migrated. A query through the SQLite driver found the opposite:
+14 workflows, 0 on the old tag, 1 on the new. Both read real bytes; only one read
+live data. **SQLite WAL** keeps recent writes in `database.sqlite-wal` until a
+checkpoint, so the main file did not contain the new value at all — and **free
+pages** retain deleted rows verbatim, so a table pruned to 0 rows still carried
+every old string. A file grep can therefore report the stale value *and* miss the
+current one at the same time. Use `n8n export:workflow`, `occ config:app:get`,
+`manage.py shell`, `mongosh`, or the app's own driver. See
+`docs/integration.md` → "How to verify an app's model — and how NOT to".
+
 **(b) ConfigMap-backed env with no checksum annotation.** `ai/anythingllm`'s
 chart generates a ConfigMap consumed as env, and adds no pod-template checksum.
 Changing the ConfigMap does not change the pod template, so no rollout happens
@@ -1088,4 +1101,5 @@ Rollback success criteria:
 | `2026.05.06` | `2026-05-06` | Add Known Gotcha #11: external ingress requires `external-dns.alpha.kubernetes.io/target` annotation — without it Cloudflare rejects the A record (error 9003) and hostname returns NXDOMAIN |
 | `2026.08.18` | `2026-08-18` | Add Known Gotcha #13: probe endpoints must be static — a framework route probed at kubelet frequency (~480 req/h) produced 58% of all cluster log ingest; split-probe pattern, and why `startup` must stay on the deep route |
 | `2026.09.04` | `2026-09-04` | Add Known Gotcha #14: a ConfigMap can be a SEED, not the live config — the live process is the truth, not the manifest. Three failure modes (seed-only ConfigMap copied to a PVC, ConfigMap-backed env with no checksum annotation, config file read once at start), why Reloader fixes two of them and must NOT be used for the third, and the exec-based verification pattern. Learned during the gemma4 GGUF→MLX migration, where a repo grep returned zero hits while a live consumer still requested the old model |
+| `2026.09.05` | `2026-09-05` | Extend Known Gotcha #14 with (a2) PVC-persisted config that an init script only ever ADDS to (stale additive keys are not inert — a retired model ref still registered in OpenClaw evicted an 18 GB warm set), and (a3) query an app's store through its DRIVER, never by grepping its file (SQLite WAL hides new writes, free pages retain deleted ones — a file grep was wrong in both directions at once). Cross-links the host/consumer context-coupling invariant in `docs/integration.md` |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |
