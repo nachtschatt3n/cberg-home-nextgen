@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.05.1"
+version: "2026.09.05.2"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -46,6 +46,13 @@ minimum_release_age_hours: 48
 age_waive:
   - "*mealie*"
   - "*paperless-ngx*"
+  # Added 2026-09-05, same reason as the two above. music-assistant 2.10.1 has
+  # an open CRITICAL security finding (F-759a45b5) whose fix IS the 2.10.2 tag,
+  # and G5 held that fix for the full 48h because the DIRECT-BUMP lane has no
+  # PR title for the security-marker waiver to read. A known-bad current
+  # version outranks an unknown-new one -- this file already says so; the
+  # waiver just could not see the marker.
+  - "*music-assistant*"
 
 # ── Hard blocks by dependency name ──────────────────────────────────────────
 # `match` is a shell-style glob against the Renovate depName (the token between
