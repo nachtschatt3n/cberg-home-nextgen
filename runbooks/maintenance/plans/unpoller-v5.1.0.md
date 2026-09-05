@@ -17,13 +17,28 @@ touches:
     - runbooks/auto-update-policy.yaml   # deny-rule reason retargeted in the same commit
   shared: [influxdb]                  # writes renamed tags/fields into influxdb2 bucket `default` (databases ns) — schema drift for any InfluxDB consumer, no restart of anything shared
 depends_on: []
-conflicts_with: []
+conflicts_with:
+  - grafana-13.0.0                # same window + same namespace (monitoring).
+                                  # Run AFTER grafana-13.0.0: this plan renames
+                                  # influxdb tags/fields that grafana's
+                                  # datasources read, and grafana's own
+                                  # verification gate is "are the datasources
+                                  # alive?". Going first would drift the data
+                                  # under that gate and make a grafana failure
+                                  # unattributable. Serialize, do not
+                                  # interleave.
 security_ref: F-a5ceabc1
 capability_change: false              # scraper internals; all new v4/v5 features (UNAS, Protect) are opt-in and stay OFF
 rollback_class: git-revert
 finding_refs: [F-a5ceabc1]            # version-currency critical; the plan-or-page join keys on THIS field (the v4 plan only carried security_ref — that is why the finding read OVERDUE-UNPLANNED)
-status: draft
-window: null
+status: scheduled
+window: "sat-attended:2026-09-19"      # matches the recorded operator approval
+                                      # (decision `approve`, exec_state pending).
+                                      # Was `null` until 2026-09-05 despite that
+                                      # approval, so the reconciler could not see
+                                      # it and ran NO capacity/interference check.
+                                      # ORDER: run AFTER grafana-13.0.0 — see
+                                      # conflicts_with.
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/monitoring.md

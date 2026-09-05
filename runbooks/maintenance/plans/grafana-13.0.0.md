@@ -22,18 +22,50 @@ touches:
                                   # internal), not shared infra itself; the
                                   # alerting path does not run through it
 depends_on: []
-conflicts_with: []
+conflicts_with:
+  - unpoller-v5.1.0               # same window + same namespace (monitoring),
+                                  # and NOT merely co-located: unpoller v5
+                                  # renames influxdb tags/fields, and grafana
+                                  # consumes those influxdb datasources. Run
+                                  # THIS plan first and confirm its datasource
+                                  # gate green against UNCHANGED influx data —
+                                  # otherwise a dead panel is ambiguous between
+                                  # the distroless variant flip (F-de4d92cd
+                                  # killed 6/7 datasources) and unpoller's
+                                  # schema drift, and the gate this plan turns
+                                  # on stops meaning anything. Serialize, do
+                                  # not interleave.
 security_ref: null                # no security driver; F-de4d92cd is cited in
                                   # the body as the -slim variant EVIDENCE record
 capability_change: false          # same Grafana 13.2.0; packaging/hardening only
 rollback_class: git-revert        # same appVersion both sides — no forward-only
                                   # sqlite migration is crossed (see §1)
 finding_refs: [F-8c1f6717]
-status: draft
-window: null                      # recommend an ATTENDED window (sat-attended /
-                                  # sun-attended): the datasource gate is a
-                                  # judgement call, and this variant class has
-                                  # burned us before (F-de4d92cd)
+status: scheduled
+window: "sat-attended:2026-09-19"  # matches the recorded operator approval
+                                  # (decision `approve`, exec_state pending).
+                                  # Was `null` until 2026-09-05 despite that
+                                  # approval, so the reconciler could not see
+                                  # it and ran NO capacity/interference check.
+                                  # ATTENDED is required regardless: the
+                                  # datasource gate is a judgement call, and
+                                  # this variant class has burned us before
+                                  # (F-de4d92cd).
+                                  # ORDER: run this BEFORE unpoller-v5.1.0 in
+                                  # the same window — see conflicts_with.
+                                  # TARGET DRIFT, deliberately NOT taken:
+                                  # chart 13.2.1 is now newest, but it also
+                                  # moves appVersion 13.2.0 -> 13.2.1, which
+                                  # breaks this plan's whole safety argument
+                                  # ("appVersion stays 13.2.0, no sqlite
+                                  # migration crossed, git-revert IS safe").
+                                  # Chart 13.0.0 still exists and still ships
+                                  # app 13.2.0 (verified 2026-09-05), so the
+                                  # approved target remains correct and
+                                  # rollback-safe. Roll the VARIANT here; take
+                                  # the app version as a separate follow-up,
+                                  # per docs/sops/grafana-image-changes.md
+                                  # ("roll the variant, never the version").
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/grafana-image-changes.md   # THE gate for any grafana image change
