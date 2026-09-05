@@ -213,7 +213,7 @@ Authentik/Homepage/Longhorn objects.
   The crons run the `maintenance-window` skill (`maintenance-window run --window
   <id>`), which resolves the operation pane with the same fail-loud handoff as
   the `operation` skill and pages the operator on Telegram if the handoff fails
-  — so an unattended 05:00/09:00 window is never silently skipped. Firing while
+  — so an unattended 03:30/09:00 window is never silently skipped. Firing while
   the operator sleeps is by design: the agent notifies + defers on anything above
   low-risk (it does not auto-run risky/reboot changes unattended). Cron runs are
   tagged `MAINTENANCE_WINDOW_TRIGGER=cron`.

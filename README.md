@@ -463,7 +463,7 @@ quarterly.
 
 ## 📦 Applications
 
-~121 apps across 18 namespaces. Full inventory with per-app purpose, ingress
+~122 apps across 18 namespaces. Full inventory with per-app purpose, ingress
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 

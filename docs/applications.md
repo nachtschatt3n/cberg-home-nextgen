@@ -24,7 +24,7 @@
 | media | 5 |
 | download | 2 |
 | kube-system | 11 |
-| storage | 1 |
+| storage | 2 |
 | cert-manager | 1 |
 | network | 7 |
 | default | 2 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **121** |
+| **Total** | **122** |
 
 ---
 
@@ -197,6 +197,7 @@
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
 | longhorn | Distributed block storage with replication + backups. A benchmark-only DaemonSet, `longhorn-v2-bench-loopback` (`alpine:3.19`, manifest in `kubernetes/apps/storage/longhorn/bench/loopback-daemonset.yaml`), is committed but **deliberately NOT Flux-deployed** — apply it manually only when running the v2 data-engine benchmark in `docs/sops/longhorn-v2-benchmark.md`. Binds a 10 GiB sparse file to `/dev/loop50` per node; runs `privileged: true` with hostPath `/var` + `/dev`, so tear it down when the benchmark window ends. | Internal | System |
+| snapshot-controller | CSI volume-snapshot controller + its CRDs (`VolumeSnapshot`, `VolumeSnapshotContent`, `VolumeSnapshotClass`). Deployed as TWO Flux Kustomizations — `snapshot-controller-crds` and `snapshot-controller` — because the CRDs must exist before the controller starts. Provides the snapshot API that Longhorn's CSI driver implements; nothing else in the cluster serves it. | None | — |
 
 ---
 

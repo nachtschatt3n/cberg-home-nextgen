@@ -5,10 +5,18 @@
 
 ## 1) Description
 
-The daily (cron-triggered) sweep auto-merges the *safe* subset of open Renovate
-PRs so the cluster stays current without the operator hand-merging every
-patch/minor bump — while a mis-classified "safe" update (e.g. a patch tag that
-is actually breaking) is still held for review.
+Step 0 of EVERY maintenance window auto-applies the *safe* subset of open
+Renovate PRs so the cluster stays current without the operator hand-merging
+every patch/minor bump — while a mis-classified "safe" update (e.g. a patch tag
+that is actually breaking) is still held for review.
+
+**The sweep does NOT apply anything.** That changed on 2026-07-31 and the older
+"sweep-applies" wording here outlived it. The `daily-operation` sweep is
+READ-ONLY: it DRY-RUNS this script (rule 4c) purely to report what will land in
+the next window. The `maintenance-window-agent` is what applies, at Step 0 of
+every window including the unattended nightly one — so safe updates land DAILY,
+not once per 48h sweep. A reader who trusts the old wording will scope a window
+run to "just the assigned plans" and silently skip Step 0.
 
 The engine is `runbooks/auto-update.py`. It is **strict deny-by-default**: a PR
 merges only when every gate passes. **Where it APPLIES (updated 2026-07-31):**
@@ -35,8 +43,12 @@ that SOP has the `vN`-rename fix and the detection command.
 ## 2) Overview
 
 - **What runs:** `runbooks/auto-update.py` (+ `runbooks/auto-update-policy.yaml`).
-- **Who runs it:** the `daily-operation` sweep orchestrator, rule 4c, after the
-  version specialist finishes and the verdict is reconciled.
+- **Who APPLIES it:** the `maintenance-window-agent`, at Step 0 of every
+  window (`AUTO_UPDATE_APPLY=1 auto-update.py --apply`), before any assigned
+  plan runs. This is the only actor that merges.
+- **Who DRY-RUNS it:** the `daily-operation` sweep orchestrator, rule 4c, after
+  the version specialist finishes and the verdict is reconciled. Report only —
+  the sweep never applies.
 - **The parse gate + four gates (ALL must pass):**
   0. **G0 parse** — the PR title must attribute the bump to exactly ONE
      component and ONE full target version. Two shapes are accepted:

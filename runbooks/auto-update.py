@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""auto-update — merge SAFE Renovate PRs during the scheduled sweep.
+"""auto-update — merge SAFE Renovate PRs at Step 0 of a maintenance window.
 
-The daily (cron-triggered) sweep calls this to keep the cluster current
+The maintenance-window-agent calls this to keep the cluster current
 WITHOUT the operator hand-merging every patch/minor bump. It is a strict,
 deny-by-default classifier: an open Renovate PR is merged only when every
 gate passes, and only ever on the scheduled run.
@@ -649,8 +649,8 @@ def main(argv=None):
         if w:
             with w:
                 if safe:
-                    w.emit("monitor", f"{len(safe)} safe update(s) ready to auto-merge next scheduled sweep",
-                           action="Scheduled cron sweep will merge these; run with SWEEP_TRIGGER=cron to apply now",
+                    w.emit("monitor", f"{len(safe)} safe update(s) ready to auto-merge at the next maintenance window",
+                           action="The maintenance-window-agent applies these at Step 0 of the next window (nightly 03:30 daily, or sat/sun 09:00). The sweep is read-only and will NOT merge them. To apply now, run with AUTO_UPDATE_APPLY=1 --apply.",
                            subsection="auto-update",
                            metadata={"safe": [f"#{c['number']} {c['dep']}" for c in safe]})
         if args.json:

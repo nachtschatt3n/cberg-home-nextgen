@@ -441,6 +441,7 @@ class FindingsWriter:
         trigger: str = "manual",
         git_head: str | None = None,
         notes: str | None = None,
+        producer: str | None = None,
     ):
         if section not in VALID_SECTIONS:
             raise ValueError(
@@ -472,6 +473,18 @@ class FindingsWriter:
         self._trigger = trigger
         self._git_head = git_head
         self._notes = notes
+        # WHO emitted these rows. Auto-close reads "this run did not re-emit
+        # the row" as "the row is fixed" -- which is only sound if the run
+        # could have re-emitted it. A section with more than one producer
+        # breaks that: `doc-check.py` is the only SCRIPT emitter for section
+        # `doc`, but AGENT-authored doc findings share the section, so every
+        # orchestrated run silently closed agent rows the script never claimed
+        # to cover. On 2026-09-05 that closed 9 doc findings of which 6 were
+        # verified STILL TRUE by re-inspection and only 1 was genuinely fixed
+        # (F-9188fdb8). Rows carry their producer so auto-close can hold
+        # anything this run does not own. Default "script" keeps every existing
+        # check script behaving exactly as before.
+        self._producer = producer or "script"
         # The sweep_cycles row is created on the FIRST emit(), never on
         # construction. A writer that is built and then closed WITHOUT emitting
         # anything (a clean section that joins someone else's shared cycle, or a
@@ -616,6 +629,8 @@ class FindingsWriter:
         meta = dict(metadata or {})
         if subsection:
             meta.setdefault("subsection", subsection)
+        # Stamp the producer so _autoclose_stale can tell whose row this is.
+        meta.setdefault("producer", self._producer)
 
         with self._conn.cursor() as cur:
             # Create the shared cycle row lazily, on the first finding only.
@@ -952,6 +967,28 @@ class FindingsWriter:
                 (r[0], (r[1], r[2], r[3], str(r[4]), r[5] or {}))
                 for r in cur.fetchall()
             ]
+
+            # PRODUCER SCOPE (F-9188fdb8). Silence only means "fixed" for rows
+            # this run could actually have re-emitted. A row stamped with a
+            # DIFFERENT producer was written by something this run does not
+            # speak for, so its absence here is not evidence of anything.
+            # Untagged legacy rows keep the historical behaviour deliberately:
+            # they predate the stamp, and treating them as foreign would leak
+            # every pre-existing row open forever.
+            foreign = [c for c in candidates
+                       if (c[1][4] or {}).get("producer") not in (None, self._producer)]
+            if foreign:
+                candidates = [c for c in candidates if c not in foreign]
+                print(f"==> auto-close HELD BACK {len(foreign)} {self.section} "
+                      f"finding(s) emitted by a DIFFERENT producer (this run is "
+                      f"{self._producer!r}; silence is not evidence for a row it "
+                      f"never covered):")
+                for _id, row in foreign[:20]:
+                    print(f"      ⏸ kept open {self.section}/{row[0]} [{row[1]}] "
+                          f"— producer {(row[4] or {}).get('producer')!r}: "
+                          f"{row[2][:60]}")
+                if len(foreign) > 20:
+                    print(f"      … and {len(foreign) - 20} more")
 
             closeable, held = partition_by_uncovered(
                 [c[1] for c in candidates], sorted(self._uncovered),
