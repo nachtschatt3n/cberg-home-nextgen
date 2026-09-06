@@ -212,7 +212,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | cert-manager | v1.21.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
-| talosctl | v1.13.4 | CLI (client) — SIX patches behind the cluster OS (v1.13.10), still in-minor; `.mise.toml` pin. Renovate PR #212 would take it to 1.14.0, a minor AHEAD of the cluster; the verified move is aligning the pin to 1.13.10 and closing that PR (F-9a58f400) |
+| talosctl | v1.13.10 | CLI (client) — ALIGNED to the cluster OS (79b1b49b, 2026-09-06). Pinned in `.mise.toml` as `aqua:siderolabs/talos`. Renovate PR #212 proposed 1.14.0, a minor AHEAD of the cluster, and was closed rather than merged: a client ahead of the servers is not the same as up to date (F-9a58f400) |
 | talhelper | 3.1.11 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |

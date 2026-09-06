@@ -28,8 +28,24 @@ config-toggle once the collector is stable:
 name: ship-kmsg-to-otel, url: udp://192.168.55.18:5172/}'` then patch back to
 `5171`. (The toggle only takes once the collector is no longer churning.) So:
 **minimize collector restarts**, and after an unavoidable one, spot-check
-per-node kmsg counts in ES and toggle any node that went silent. Detecting a
-silent node is a candidate for a future `absent`-style alert per node.
+per-node kmsg counts in ES and toggle any node that went silent.
+
+**Detecting a silent node is no longer manual (2026-09-06).**
+`TalosKernelLogsMissingFromNode` in
+`kubernetes/apps/monitoring/kube-prometheus-stack/app/platform-alerts.yaml`
+fires when fewer than 3 nodes are shipping. It counts DISTINCT senders —
+`count(count by (net_peer_ip) (talos_kernel_kmsg_lines_total)) < 3` — rather
+than using a per-node `absent()`, because the `net_peer_ip` label only exists
+while that node sends: a silent node's series does not go to zero, it
+disappears, so there is nothing for `absent()` to match. A companion
+`TalosKernelLogsAbsent` covers the case where all three stop and the
+count-based rule therefore cannot fire either.
+
+Confirmed against a real occurrence the same day: node03 shipped for nine
+minutes after its 07:23 boot, then went silent for ~10h. Measured during
+recovery — **a same-value `apply-config` does NOT kick it** (senders sat at
+2/3 for 100s); only the url toggle above did, and it worked within one
+scrape.
 
 ### Tier 2 — what was actually built + learnings (differs from the draft below)
 

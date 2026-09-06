@@ -115,9 +115,21 @@ spec:
             description: >-
               At least one node has stopped sending kmsg to the collector.
               Compare `count by (net_peer_ip) (talos_kernel_kmsg_lines_total)`
-              against 192.168.55.11/12/13 to find which. Restarting the
-              COLLECTOR does not fix it — the sender is on the node. Re-applying
-              the Talos machine config to that node restarts its log sender.
+              against 192.168.55.11/12/13 to find which.
+              RECOVERY, verified on node03 2026-09-06 — two things that do NOT
+              work, then the one that does. Restarting the COLLECTOR does not
+              fix it: the dead sender is on the node. Re-applying the SAME
+              machine config does not fix it either (measured: senders stayed
+              at 2/3 for 100s) — kmsg shipping is a separate `KmsgLogConfig`
+              document, so an unchanged `url:` leaves its controller with
+              nothing to reconcile. What works is forcing a teardown/rebuild
+              by CHANGING the url and changing it back — the config-toggle
+              already documented in node-reboot-observability.md:
+              `talosctl -n <node> patch mc --patch '{apiVersion: v1alpha1,
+              kind: KmsgLogConfig, name: ship-kmsg-to-otel,
+              url: udp://192.168.55.18:5172/}'` then patch back to 5171.
+              Senders returned to 3/3 within one scrape. The toggle only takes
+              once the collector has stopped churning.
         - alert: TalosKernelLogsAbsent
           expr: absent(talos_kernel_kmsg_lines_total)
           for: 30m

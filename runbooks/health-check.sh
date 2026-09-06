@@ -312,6 +312,28 @@ _record_unmeasured() {   # label, reason  — subshell-safe
 # the 57 existing guards keep their arithmetic and cannot be broken by this
 # change; the difference is that the run can no longer be reported clean,
 # because report_unmeasured() raises a MAJOR issue naming what did not run.
+# require_selector_matches NAMESPACE SELECTOR LABEL
+#
+# The denominator control for `kubectl logs -l <selector>`. safe_count's FLOOR
+# cannot serve here: an error count of zero is a legitimate, healthy result, so
+# there is no floor to set. What is NEVER legitimate is scoring an error count
+# from a selector that matches no pods -- that returns 0 and reads as "clean".
+#
+# Exactly that shipped: the cilium check selected
+# `app.kubernetes.io/name=cilium` (the real label is `k8s-app=cilium`), matched
+# zero pods on every run, and reported a clean CNI error stream that had in
+# fact never been audited (F-19bd3488, fixed in bba07c54). A wrong selector is
+# indistinguishable from a healthy component unless something asserts the
+# denominator.
+require_selector_matches() {
+    local ns="$1" sel="$2" label="$3" n
+    n=$(kubectl get pods -n "$ns" -l "$sel" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${n:-0}" -lt 1 ] 2>/dev/null; then
+        _record_unmeasured "$label" \
+            "selector '$sel' in namespace '$ns' matched 0 pods -- the count that follows is 'no pods', not 'no errors'"
+    fi
+}
+
 safe_count() {
     local cmd="$1" label="${2:-}" floor="${3:-}"
     local out rc result
@@ -1533,16 +1555,27 @@ log_section "Section 11: Container Logs Analysis"
     # structural zero and the CNI error stream had never been audited by any
     # sweep since this check was written. The count it produced was not "no
     # errors", it was "no pods". A silent zero is never a pass.
-    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
+    # TAIL CAP REMOVED 2026-09-06 (F-a856cac7). This read `--tail=100`, which
+    # is 100 lines PER POD, so the four counts below were scored against an
+    # absolute CRITICAL threshold of fifty while being physically unable to
+    # exceed roughly 400. The 07:36 run's "High infrastructure error count:
+    # 100" was a saturated ceiling, not a measurement. Measured the same day:
+    # cilium emitted 31,750 lines in 24h and `--tail=100` sampled 300 of them
+    # -- 0.9%. `--since=24h` is the real bound; the tail cap only made the
+    # number meaningless. Do not reintroduce a cap without ALSO reporting it
+    # as `>=N (capped)` so a saturated value cannot be compared to a threshold.
+    require_selector_matches kube-system "k8s-app=cilium" "cilium-errors"
+    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=cilium --tail=-1 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
 
-    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "coredns-errors")
+    require_selector_matches kube-system "k8s-app=kube-dns" "coredns-errors"
+    COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=-1 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "coredns-errors")
     echo "CoreDNS errors (24h): $COREDNS_ERRORS"
 
-    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=50 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "flux-errors")
+    FLUX_ERRORS=$(safe_count "kubectl logs -n flux-system deployment/kustomize-controller --tail=-1 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "flux-errors")
     echo "Flux controller errors (24h): $FLUX_ERRORS"
 
-    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=50 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cert-errors")
+    CERT_ERRORS=$(safe_count "kubectl logs -n cert-manager deployment/cert-manager --tail=-1 --since=24h 2>&1 | grep -E 'level=error|\[ERROR\]|error:' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cert-errors")
     echo "cert-manager errors (24h): $CERT_ERRORS"
 
     TOTAL_ERRORS=$((CILIUM_ERRORS + COREDNS_ERRORS + FLUX_ERRORS + CERT_ERRORS))
