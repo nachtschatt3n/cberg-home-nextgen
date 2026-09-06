@@ -35,24 +35,51 @@ rollback_class: backup-restore        # MariaDB majors have NO downgrade — git
                                       # 12.3-format datadir)
 backup_gate: "logical dump taken in-window, verified non-empty + '-- Dump completed' + per-table counts captured, BEFORE the image bump"
 finding_refs: [F-1c080cce]
-status: blocked                       # BLOCKED 2026-09-06. Was `scheduled` on the
-                                      # OPERATOR GO 2026-09-04T21:48Z. That GO was
-                                      # given against a premise this plan states four
-                                      # times and which is FALSE — see CORRECTION
-                                      # below. The mechanism is fine; the DUMP
-                                      # VERIFICATION was not. Needs re-vetting and a
-                                      # FRESH go/no-go before it is scheduled again:
-                                      # the operator approved a procedure that
-                                      # skipped an integrity check on the document
-                                      # library, and that is not what they agreed to.
-                                      # 2026-09-05. Was `draft` while the decision store already
-                                      # held approve/pending-exec for 09-12 — a HIGH-risk one-way
-                                      # migration must not go into a window with its plan marked
-                                      # draft: the agent either runs a draft or refuses it and the
-                                      # approval strands silently (how talos-1.13.9 was lost).
-                                      # GO precondition 'fix the dead conflicts_with ref' is
-                                      # SATISFIED as of 3ec6269a.
+status: draft                         # UNBLOCKED 2026-09-07. The 2026-09-06 block was
+                                      # the FALSE utf8mb3 premise, which removed a
+                                      # data-integrity check from the dump that is this
+                                      # plan's rollback floor. Verified today that the
+                                      # corrections are real in the BODY, not merely
+                                      # claimed in the header: no live utf8mb3 assertion
+                                      # survives, the abort condition is inverted, and the
+                                      # 4-byte-lead-byte grep is MANDATORY with an explicit
+                                      # STOP on a zero count. Re-vetted against the live
+                                      # database the same day: image mariadb:11.8.9, and
+                                      # all 74 paperless tables utf8mb4_general_ci — the
+                                      # corrected premise holds. Deliberately `draft`:
+                                      # the 2026-09-04 operator GO was given against the
+                                      # defective procedure and must NOT carry over.
+                                      # Needs a FRESH go/no-go before scheduling.
 window: null                          # CLEARED 2026-09-06 (was "sat-attended:2026-09-12").
+premises:
+  # NOTE ON SCOPE: a premise may not `kubectl exec` (plan-premises.py refuses
+  # anything that is not read-only), so the COLLATION assertion — the one whose
+  # falsehood caused the block — cannot live here. It lives in §2's abort
+  # condition, which runs in-window and does query the live database. These
+  # premises cover what is checkable without exec; they do not replace it.
+  - id: still-on-11.8.9
+    why: >-
+      The migration is 11.8.9 -> 12.3.3. If the image already moved, the dump
+      baseline and the rollback target are both wrong.
+    run: kubectl get deploy -n office paperless-db -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: "mariadb:11.8.9"
+  - id: utf8mb4-conversion-still-in-history
+    why: >-
+      Commit 9cb10b76 (2026-08-30) converted all 74 tables to utf8mb4_general_ci
+      after a 4-byte emoji in a mail subject broke every mail-processing cycle
+      with OperationalError 1366. That commit is WHY the 4-byte dump check is
+      mandatory. A proxy for the live schema, not a substitute — §2 still
+      asserts the collation against the running database.
+    run: git log --oneline -1 9cb10b76
+    expect_contains: "9cb10b76"
+  - id: rollback-floor-is-backed-up
+    why: >-
+      rollback_class is backup-restore and a mariadb 12 datadir is not readable
+      by 11.8.9, so the volume backup is a genuine second recovery path
+      alongside the logical dump — unlike the paperclip PG18 case, where the
+      failure mode put writes outside the volume entirely.
+    run: kubectl get volume -n storage paperless-db-data -o jsonpath='{.metadata.labels}'
+    expect_contains: "recurring-job-group.longhorn.io/default"
                                       # Left scheduled, the window agent would have
                                       # picked this up on 09-12 with the false premise
                                       # intact. Re-set it only after re-vetting.
