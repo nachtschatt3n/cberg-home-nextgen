@@ -32,6 +32,21 @@ spec:
               repository: koush/scrypted
               tag: v0.143.0-noble-full
             env:
+              # WITHOUT THIS, SCRYPTED PERSISTS NOTHING. Scrypted's default
+              # SCRYPTED_VOLUME is /server/volume, which is on the container's
+              # EPHEMERAL overlay — not on either PVC. Verified on the live pod
+              # 2026-09-06: /proc/mounts showed only /data (Longhorn) and /media
+              # (CIFS); /server/volume held 16 KB of scrypted.db recreated at
+              # that pod's start, while the scrypted-data PVC contained nothing
+              # but lost+found. So every camera, plugin and user this NVR has
+              # ever been given was discarded at the next restart, and it had
+              # been that way since deployment.
+              # Fixed NOW rather than later precisely because the NVR is empty:
+              # there is no state to migrate, so this is the cheapest it will
+              # ever be. Once cameras exist, changing the volume path means
+              # moving live state.
+              - name: SCRYPTED_VOLUME
+                value: /data
               - name: SCRYPTED_DEBUG
                 value: "true"
               - name: SCRYPTED_DEBUG_LEVEL
