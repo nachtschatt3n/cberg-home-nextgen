@@ -55,10 +55,21 @@
 #         status='resolved' — an open row the board HIDES, which is the more
 #         dangerous half of the split. Also bounds ACCESS EXCLUSIVE lock
 #         acquisition so a stuck connection cannot stall the sweep.
+#   v7  — plan_executions table: the TRACK RECORD that `first_runs_supervised`
+#         needs. Pure additive CREATE TABLE IF NOT EXISTS + two indexes; no
+#         column change, no constraint, nothing to violate, so this cannot fail
+#         on existing data. Why it matters: autonomy-policy gates unattended
+#         execution on N clean supervised runs per plan CATEGORY, the window
+#         agent was told to read that from window_runs.notes, and no structured
+#         record existed — so the gate answered "no" every time and the nightly
+#         window executed 0 plans in its first 7 runs while 8 plans derived
+#         AUTO-*. Category is DERIVED as '<kind>/<execution_class>'; keying on
+#         plan_id could never accumulate because plans are retired after they
+#         execute.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sweep-history-init-v6  # v5b->v6: window_runs table (P1.3). Rename forces recreate (Job spec immutable).
+  name: sweep-history-init-v7  # v6->v7: plan_executions table. Rename forces recreate (Job spec immutable).
   namespace: databases
   labels:
     app.kubernetes.io/name: sweep-history

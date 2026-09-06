@@ -180,6 +180,44 @@ data:
     CREATE INDEX IF NOT EXISTS idx_window_runs_slot_date
       ON window_runs (slot, run_date DESC);
 
+    -- plan_executions — the TRACK RECORD that `first_runs_supervised` needs.
+    -- Added 2026-09-06. Until now that gate was UNSATISFIABLE: autonomy-policy
+    -- says a plan CATEGORY earns unattended execution after N clean supervised
+    -- runs, the window agent was told to "check the window_runs notes", and no
+    -- structured record existed anywhere — window_runs.notes is free prose, one
+    -- row per WINDOW, not per plan. The documented fallback is "when in doubt,
+    -- treat as unsupervised", so the answer was always no. The nightly window
+    -- executed 0 plans in its first 7 runs while 8 plans derived AUTO-*.
+    --
+    -- CATEGORY IS DERIVED, NEVER DECLARED: '<kind>/<execution_class>', e.g.
+    -- 'image/AUTO-NIGHT'. Keying on plan_id would never accumulate — plans are
+    -- one-shot and retired after execution, which is precisely why nothing ever
+    -- graduated. Keying on kind alone would let a git-revert image bump vouch
+    -- for a backup-restore one. A plan cannot claim its category any more than
+    -- it can claim its execution class.
+    --
+    -- `supervised` means a human could have intervened: an attended window, or
+    -- an unattended one explicitly babysat. It is recorded, not inferred, so a
+    -- cron run can never quietly count as supervision.
+    CREATE TABLE IF NOT EXISTS plan_executions (
+      id              BIGSERIAL PRIMARY KEY,
+      plan_id         TEXT NOT NULL,
+      category        TEXT NOT NULL,          -- '<kind>/<execution_class>'
+      execution_class VARCHAR(24) NOT NULL,   -- AUTO-NIGHT | AUTO-BACKUP-GATED | HUMAN-GATED
+      plan_kind       VARCHAR(32) NOT NULL,   -- image | chart | os | config | data | ...
+      window_slot     TEXT NOT NULL,
+      run_date        DATE NOT NULL,
+      supervised      BOOLEAN NOT NULL,
+      outcome         VARCHAR(16) NOT NULL,   -- green | blocked | reverted | aborted
+      notes           TEXT,
+      recorded_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- the graduation query: clean supervised runs per category
+    CREATE INDEX IF NOT EXISTS idx_plan_exec_category
+      ON plan_executions (category, supervised, outcome);
+    CREATE INDEX IF NOT EXISTS idx_plan_exec_plan
+      ON plan_executions (plan_id, run_date DESC);
+
     CREATE TABLE IF NOT EXISTS slo_snapshots (
       id                   BIGSERIAL PRIMARY KEY,
       slo_name             VARCHAR(64) NOT NULL,
