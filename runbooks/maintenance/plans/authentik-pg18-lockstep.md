@@ -66,6 +66,18 @@ status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
                  # postgresql is postgres:17.11-bookworm -- both halves of
                  # `current` hold.
 window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+premises:
+  - id: server-is-still-2026.8.0
+    why: "`current:` claims chart 2026.8.0 with server image :2026.8.0."
+    run: kubectl get deploy -n kube-system authentik-server -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: ghcr.io/goauthentik/server:2026.8.0
+  - id: postgres-still-pinned-17.11
+    why: >-
+      This plan DECLINES the bundled postgres 18.6 bump and depends on it
+      staying pinned at 17.11-bookworm. If postgres already moved, the lockstep
+      premise is broken and the plan must be re-assessed, not executed.
+    run: kubectl get sts -n kube-system authentik-postgresql -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "17.11-bookworm"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/authentik.md

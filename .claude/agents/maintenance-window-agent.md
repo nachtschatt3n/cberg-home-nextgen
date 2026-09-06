@@ -218,6 +218,33 @@ direction — a failed `ingest` — is already covered by the notify.py fallback
 
 ## Step 4 — execute the approved sequence (one plan at a time)
 For each approved plan, in order:
+
+0. **Re-check its declared premises FIRST, mechanically:**
+
+   ```bash
+   python3 runbooks/plan-premises.py <plan_id>     # exit 1 = do not execute
+   ```
+
+   A non-zero exit means the world moved since the plan was written. **Do not
+   execute it, and do not "fix it up" in the window** — mark it `blocked` with
+   the failing premise id and re-plan it later. A plan whose premise is stale
+   is not a plan that needs a small correction; it is a plan whose reasoning
+   was done against a different cluster.
+
+   This exists because on 2026-09-06 two plans were caught MID-EXECUTION as
+   data-loss traps — `paperclip-postgresql-18.6` (PGDATA relocation: version(),
+   row counts and the application would all have passed while the database sat
+   on the container's ephemeral layer) and `paperless-db` (a utf8mb4 premise
+   that would have dropped an integrity check from the document library's
+   dump). Both were caught by a human reading the body at the last moment.
+   Neither was wrong when written. This step is that reading, made mechanical.
+
+   A plan that declares NO premises still runs, but its assumptions are
+   unchecked — say so explicitly in the go/no-go rather than letting silence
+   imply verification. Premises are read-only by construction (the checker
+   refuses any mutating command), so this step can never itself change the
+   cluster.
+
 1. Run its **Pre-checks**; abort the plan if the pre-state is unsafe.
 2. Apply its **Steps** via GitOps — **delegate the actual manifest/SOPS/commit
    changes to `cberg-agent`** (this agent orchestrates; cberg-agent mutates).

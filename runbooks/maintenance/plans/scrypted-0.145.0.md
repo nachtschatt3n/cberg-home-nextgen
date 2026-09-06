@@ -44,6 +44,19 @@ status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
                  # home-automation -- the directory is named scrypted-nvr but
                  # the HelmRelease and the release are both named `scrypted`.
 window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+premises:
+  - id: image-is-still-0.143.0
+    why: >-
+      `current:` claims v0.143.0-noble-full and the rollback target is that tag.
+    run: kubectl get deploy -n home-automation scrypted -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: koush/scrypted:v0.143.0-noble-full
+  - id: scrypted-volume-still-set
+    why: >-
+      SCRYPTED_VOLUME=/data was added on 2026-09-06 to fix a persistence
+      defect. If it is missing at execution time, something reverted it and
+      upgrading on top would put the new version's state somewhere ephemeral.
+    run: kubectl get deploy -n home-automation scrypted -o jsonpath='{.spec.template.spec.containers[0].env}'
+    expect_contains: SCRYPTED_VOLUME
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/storage-safety.md

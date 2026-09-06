@@ -34,6 +34,16 @@ status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
                  # git-44ce6d0 and carries no python version, so the tag
                  # alone could NOT have confirmed this.
 window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+premises:
+  - id: artifact-under-test-is-unchanged
+    why: >-
+      The `3.11-slim` premise was established by running `python --version`
+      INSIDE the pod (3.11.2) on 2026-09-06 -- the image tag carries no python
+      version, so the tag alone cannot confirm it. What IS checkable read-only
+      is that the artifact is still the same one that was inspected. A
+      different tag means the python premise is unverified again.
+    run: kubectl get deploy -n ai mcpo -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: ghcr.io/open-webui/mcpo:git-44ce6d0
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-09-05"

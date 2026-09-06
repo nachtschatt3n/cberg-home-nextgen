@@ -39,6 +39,14 @@ status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
                  # live image is otel/opentelemetry-collector-
                  # contrib:0.158.0, matching `current`.
 window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+premises:
+  # Re-checked at EXECUTION time, not trusted from when this was written.
+  - id: image-is-still-0.158.0
+    why: >-
+      `current:` claims 0.158.0. If the collector already moved, this plan is
+      stale: its verification baseline and its rollback target are both wrong.
+    run: kubectl get deploy -n monitoring edot-collector -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: otel/opentelemetry-collector-contrib:0.158.0
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/monitoring.md         # "ES Rejected Documents" + edot-collector recipes

@@ -32,6 +32,16 @@ status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
                  # `base` and line 84 is `FROM base AS production`, so the
                  # inheritance the plan describes is real.
 window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+premises:
+  - id: artifact-under-test-is-unchanged
+    why: >-
+      npm 12.0.2 and node were confirmed present in the RUNNING production
+      container on 2026-09-06. `kubectl exec` is not permitted in a premise
+      (it can run anything), so what is asserted here is that the deployed
+      artifact is still the one that was inspected. A rebuild may already have
+      removed npm, which would make this plan a no-op rather than a refactor.
+    run: kubectl get deploy -n my-software-production absenty -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: ghcr.io/nachtschatt3n/absenty:production-20260818185444
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: changes the shape of the production runtime image)
