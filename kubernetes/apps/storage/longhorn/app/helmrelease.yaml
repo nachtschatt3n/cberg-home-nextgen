@@ -108,15 +108,29 @@ spec:
         # disabled it: 8 orphaned replica dirs had sat on nuc14-03 since the
         # 2026-08-02 reboot. Set live to "replica-data" and swept them within 30s,
         # reclaiming 7.6 GiB, with all 83 volumes healthy and the live replica
-        # count unchanged at 172. Deliberately NOT "instance" as well — there are
-        # no orphaned instances today, so enabling it would add a second class of
-        # automatic deletion with nothing to attribute a regression to.
-        # Longhorn only deletes orphans whose DataCleanable condition is True, and
-        # each of the 8 was cross-checked against every live replica's
-        # dataDirectoryName first (zero collisions).
+        # count unchanged at 172. Longhorn only deletes orphans whose
+        # DataCleanable condition is True, and each of the 8 was cross-checked
+        # against every live replica's dataDirectoryName first (zero collisions).
+        #
+        # "instance" ADDED 2026-09-06 (operator decision). The earlier exclusion
+        # was conditional, not principled — it read: "Deliberately NOT 'instance'
+        # as well — there are no orphaned instances today, so enabling it would
+        # add a second class of automatic deletion with nothing to attribute a
+        # regression to." THAT PREMISE EXPIRED. The 3-node Talos v1.13.10 roll
+        # this morning left exactly one: an engine-instance orphan for
+        # `n8n-config-e-0` in instance-manager-9e95d755 on nuc14-02, which
+        # survived precisely because the list omitted "instance". So node rolls
+        # DO generate instance orphans, and they accumulate silently — the
+        # attribution argument now cuts the other way.
+        # Verified immediately after the patch: value applied (status.applied
+        # true, admission webhook accepted), 93/93 attached volumes still
+        # `healthy`, 0 volumes short of their configured replica count, and the
+        # only `stopped` replicas are superset-postgresql-data's 2 (the retained
+        # rollback) plus superseded leftovers from the roll. Grace period is
+        # `orphan-resource-auto-deletion-grace-period: 300`.
         # NOTE this block is still inert (see header) — the live settings CR was
         # patched directly and this value mirrors it, so un-nesting stays a no-op.
-        orphanResourceAutoDeletion: "replica-data"
+        orphanResourceAutoDeletion: "replica-data;instance"
         detachManuallyAttachedVolumesWhenCordoned: false
         nodeDownPodDeletionPolicy: do-nothing
         allowEmptyDiskSelectorVolume: true
