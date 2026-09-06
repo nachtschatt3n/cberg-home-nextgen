@@ -210,10 +210,23 @@ data:
         resources:
           requests:
             cpu: 500m
-            memory: 2Gi
+            memory: 3Gi
           limits:
             cpu: 2000m
-            memory: 4Gi
+            # RAISED 4Gi -> 6Gi on 2026-09-06 (F-a0f92039). Measured, not guessed:
+            # the 48h working-set history read 1.8-2.7 GiB steady through 09-04/05,
+            # then climbed 2.71 -> 3.05 -> 3.68 GiB across today's Talos roll and
+            # TSDB migration, tripping ContainerMemoryNearLimit at 91.6% with
+            # ~235k head series and zero restarts. So this is a genuine new
+            # plateau, not a leak and not a spike.
+            # Why it matters more than an ordinary OOM: an OOMKill here discards
+            # the in-memory head, and Prometheus is the thing that would tell us
+            # anything else broke — it goes blind exactly when it is needed.
+            # 6Gi restores roughly the 2x headroom the 4Gi limit gave at the old
+            # ~2 GiB baseline, and is a PREREQUISITE for fixing the 21 unselected
+            # ServiceMonitors (F-0fa5b600): adding those scrape targets adds
+            # series, and doing that at 92% of the limit would OOM it.
+            memory: 6Gi
       additionalServiceMonitors:
         - name: longhorn
           namespaceSelector:

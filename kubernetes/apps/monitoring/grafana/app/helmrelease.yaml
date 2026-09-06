@@ -350,6 +350,17 @@ spec:
               path: /var/lib/grafana/dashboards/teslamate
     serviceMonitor:
       enabled: true
+      # WITHOUT THIS LABEL GRAFANA IS NEVER SCRAPED (F-66cb8d5f, found 2026-09-06
+      # after 244 days). The chart defaults the ServiceMonitor's `release` label
+      # to the HELM RELEASE NAME — here `grafana` — but the Prometheus CR selects
+      # `serviceMonitorSelector.matchLabels.release: kube-prometheus-stack`. A
+      # non-matching selector is not an error anywhere: the ServiceMonitor is
+      # created, Flux reports Ready, and Prometheus simply never picks it up. No
+      # `grafana` job appeared in the target list and `grafana_build_info` was
+      # empty the entire time.
+      # Same silent-ignore class as a PrometheusRule missing this label.
+      labels:
+        release: kube-prometheus-stack
     ingress:
       enabled: true
       ingressClassName: internal
