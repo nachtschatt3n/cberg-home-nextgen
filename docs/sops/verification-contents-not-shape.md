@@ -5,8 +5,8 @@
 > *contents*, so every green signal was true while the thing was broken. Now
 > also covers its sibling FIDELITY (2a): equal counts over unequal data. Rules,
 > per-class assertions, and the four worked examples from 2026-08-18/19.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.09.06`
+> Last Updated: `2026-09-06`
 > Owner: `operator + maintenance-window / upgrade-planner agents`
 
 ---
@@ -159,6 +159,55 @@ value survive?*
 - **binary / BLOB** — a text-mode transfer mangling `\r\n` or high bytes
 - **NULL vs empty string** — round-tripped through a CSV or a naive exporter
 - **JSON key order / unicode escaping** — where a checksum is taken over the text
+
+## 2b) The NEGATIVE CONTROL: an existence check is evidence only if a known-bad input FAILS
+
+A check that returns "present" for everything is not a check. It is a constant
+that happens to read `true`, and it will read `true` on the day the thing is
+absent.
+
+**The incident.** The Talos v1.13.10 plan carried a hard pre-check: does the
+Image Factory publish our schematic for the target version? It was run as
+
+```bash
+curl -k https://factory.talos.dev/... && echo OK
+```
+
+A TLS-intercepting middlebox on the network made every request return a 302, so
+the check printed OK. It also printed OK for a **nonsense `v9.9.9`** — which is
+the only reason anyone noticed. The check could not distinguish a published tag
+from a fabricated one, and had it not been probed with a bad input it would have
+"passed" the window straight into an unresolvable installer reference.
+
+**The rule.** Every existence/reachability check must be run twice: once with
+the real input, once with an input that is *known not to exist*. The check is
+evidence only if the second one FAILS.
+
+```bash
+SCHEM=43b3cbfc2957259b...
+for TAG in v1.13.10 v9.9.9; do
+  printf "%-10s HTTP %s\n" "$TAG" "$(curl -s -o /dev/null -w '%{http_code}' \
+    "https://factory.talos.dev/v2/installer/$SCHEM/manifests/$TAG")"
+done
+# EXPECT EXACTLY: v1.13.10 -> 200 AND v9.9.9 -> 404.
+# If the control also returns 200 (or both return 3xx) you are behind an
+# intercepting proxy and the result is INVALID — do not read the 200 as a pass.
+```
+
+**Two habits that follow from it.**
+
+- **Never add `-k` / `--insecure` to make a check "work".** It does not fix the
+  check, it removes the check's ability to fail. If TLS verification is the
+  thing blocking you, that IS the finding.
+- **State the expected NEGATIVE alongside the expected positive** when writing a
+  gate into a plan or SOP, so the next person can tell a working check from a
+  broken one without re-deriving it.
+
+This generalises past HTTP. Any query that answers "does X exist" — a registry
+manifest, a Prometheus series, a DNS name, a database row, a Kubernetes object —
+should be paired with an X that must not exist. It is the same discipline as the
+`absent()` guard on an alert rule and the "does this test fail on the bug"
+commissioning check on audit scripts.
 
 ## 3) Blueprints
 
@@ -477,4 +526,5 @@ itself part of the mitigation (see
 
 | Version | Date | Change |
 |---|---|---|
+| `2026.09.06` | 2026-09-06 | Added 2b, the negative-control rule, after a Talos factory-tag pre-check "passed" under a TLS-intercepting middlebox that returned 302 for every tag including a nonsense control. |
 | `2026.08.19` | 2026-08-19 | Initial. Names the failure class from the three 2026-08-18/19 instances (paperless-db empty restore, Longhorn scrape blocked by a patch-release NetworkPolicy, whiteboard Ready-pod-as-proof); adds the per-class assertions and the two corollaries. |

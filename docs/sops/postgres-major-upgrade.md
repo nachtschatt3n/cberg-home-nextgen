@@ -1,0 +1,202 @@
+# SOP: PostgreSQL Major Upgrades — the PGDATA relocation trap
+
+> Description: How to move a PostgreSQL instance across a major version without silently writing the new data directory into the container's ephemeral layer, and why "SELECT version() says 18.6 and the row counts match" is not evidence the upgrade worked.
+> Version: `2026.09.06`
+> Last Updated: `2026-09-06`
+> Owner: `homelab-sre`
+
+---
+
+## 1) Description
+
+Sibling to [`mariadb-major-upgrade.md`](mariadb-major-upgrade.md). Covers any
+PostgreSQL major bump on this cluster — `17.x → 18.x` and later — for instances
+running the official `postgres` image.
+
+It exists because on 2026-09-06 a plan for `paperclip-postgresql` 17.11 → 18.6
+was stopped at pre-check after it was found that, as written, it would have
+**silently destroyed the database while passing every verification gate in the
+plan**. The knowledge lived only in that plan file, and plan files are deleted
+once executed (`runbooks/maintenance/plans/README.md`), so `grep -rn PGDATA
+docs/` returned nothing. This SOP is where it lives now.
+
+## 2) Overview
+
+**The trap, in one table.** PostgreSQL's official image relocated `PGDATA` at 18:
+
+| image | `PGDATA` | `VOLUME` |
+|---|---|---|
+| `postgres:17.11-alpine` | `/var/lib/postgresql/data` | `/var/lib/postgresql/data` |
+| `postgres:18.6-alpine` | `/var/lib/postgresql/18/docker` | `/var/lib/postgresql` |
+
+A manifest that keeps `mountPath: /var/lib/postgresql/data` and merely repoints
+`subPath` therefore mounts the PVC at a path the 18.x image **no longer uses**.
+`initdb` runs, the restore succeeds, the server starts — all inside the
+container's **ephemeral writable layer**.
+
+**Why this is worse than an ordinary bug.** That failure is invisible to every
+check people habitually run:
+
+- `SELECT version()` reports 18.6 — true, the server really is 18.6
+- row counts match — true, the restore really did load the data
+- the application works — true, it is talking to a real database
+
+The data is lost at the **next pod restart**, arbitrarily later, with the
+maintenance window long since reported green. There is no alert for "your
+database is on tmpfs".
+
+## 3) Blueprints
+
+N/A — this is a procedure, not a deployment. The manifests it governs are the
+per-app `helmrelease.yaml` / `deployment.yaml` under `kubernetes/apps/*/`.
+
+## 4) Operational Instructions
+
+1. **Read the target image's own contract before writing any manifest.** Do not
+   infer it from the previous major:
+
+   ```bash
+   # authoritative: the image config, not the docs
+   docker run --rm --entrypoint sh postgres:18.6-alpine -c 'echo $PGDATA'
+   # or, without a runtime, read the config blob from the registry
+   ```
+
+2. **Decide the mount from that value**, not from what the 17.x manifest did.
+   Either mount the PVC at the image's `VOLUME` (`/var/lib/postgresql`) and let
+   the image place `PGDATA` beneath it, or set `PGDATA` explicitly to a path
+   that is definitely inside the mount.
+
+3. **Take a verified logical dump before touching anything.** `rollback_class`
+   for a major is `backup-restore`, never `git-revert`: the datadir format
+   change is one-way.
+
+   ```bash
+   kubectl -n <ns> exec deploy/<db> -- pg_dump -Fc -U <user> <db> > pre-<major>.dump
+   pg_restore -l pre-<major>.dump | head        # a dump that will not list is not a rollback
+   ```
+
+4. **Count tables across ALL schemas, not just `public`.** See §7.
+
+5. Apply, then run §6 in full. Do not skip the datadir assertion because the
+   application came up.
+
+## 5) Examples
+
+```bash
+# Correct shape for 18.x: mount at the image's VOLUME, let it own the subdir
+volumeMounts:
+  - name: data
+    mountPath: /var/lib/postgresql      # NOT /var/lib/postgresql/data
+
+# Or pin PGDATA explicitly inside the mount
+env:
+  - name: PGDATA
+    value: /var/lib/postgresql/data/pgdata
+volumeMounts:
+  - name: data
+    mountPath: /var/lib/postgresql/data
+```
+
+## 6) Verification Tests
+
+**The load-bearing one first. Prove the datadir is on the PVC, not the overlay.**
+Everything else in this section can pass while the database is ephemeral.
+
+```bash
+POD=$(kubectl -n <ns> get pod -l app=<db> -o jsonpath='{.items[0].metadata.name}')
+
+# 1. where does the server think its data lives?
+kubectl -n <ns> exec "$POD" -- psql -U <user> -tAc 'SHOW data_directory'
+
+# 2. is THAT path actually a mount, or the container layer?
+kubectl -n <ns> exec "$POD" -- sh -c 'df -h "$(psql -U <user> -tAc "SHOW data_directory")"'
+kubectl -n <ns> exec "$POD" -- cat /proc/mounts | grep -F "$(…data_directory…)"
+
+# A data_directory that does not appear in /proc/mounts under a PVC mount is
+# THE failure this SOP exists for. Stop and roll back.
+```
+
+Then, and only then:
+
+```bash
+kubectl -n <ns> exec "$POD" -- psql -U <user> -tAc 'SELECT version()'
+# table count across EVERY schema, not just public
+kubectl -n <ns> exec "$POD" -- psql -U <user> -tAc \
+  "SELECT table_schema, count(*) FROM information_schema.tables
+     WHERE table_schema NOT IN ('pg_catalog','information_schema')
+     GROUP BY 1 ORDER BY 1"
+```
+
+**Restart assertion.** The whole failure mode is deferred to the next restart,
+so make it happen on purpose while you are watching:
+
+```bash
+kubectl -n <ns> rollout restart deploy/<db> && kubectl -n <ns> rollout status deploy/<db>
+# then re-run the row counts. If they are gone, the datadir was ephemeral.
+```
+
+## 7) Troubleshooting
+
+**Row counts match but a table is missing after cutover.** The count gate
+probably covered only `public`. On `paperclip-postgresql` the 37th table is
+`drizzle.__drizzle_migrations`, in its own schema: losing it makes the
+application re-run migrations against a populated database. Always group by
+`table_schema`.
+
+**The dump-completion marker check passes on a truncated dump.** `pg_dump` 17.11
+appends a `\unrestrict` line *after* the completion marker, so a naive
+`tail -5 | grep` can miss it. Verify with `pg_restore -l` instead — a dump that
+cannot be listed is not a rollback.
+
+**The application works, so the upgrade must be fine.** No. See §2. Run the
+datadir assertion.
+
+## 8) Diagnose Examples
+
+```bash
+# is the data directory inside a PVC mount?
+kubectl -n <ns> exec deploy/<db> -- sh -c \
+  'D=$(psql -U postgres -tAc "SHOW data_directory"); echo "PGDATA=$D"; df -h "$D"; grep -F "$D" /proc/mounts || echo "NOT A MOUNT — EPHEMERAL"'
+
+# what does the image itself declare?
+kubectl -n <ns> get deploy <db> -o jsonpath='{.spec.template.spec.containers[0].env}' | jq
+```
+
+## 9) Health Check
+
+```bash
+kubectl -n <ns> get pods -l app=<db>
+kubectl -n <ns> exec deploy/<db> -- pg_isready -U <user>
+kubectl get pvc -n <ns> | grep <db>
+```
+
+## 10) Security Check
+
+Dumps contain the whole database. Write them outside the repo, `chmod 0600`,
+and never into a path that git tracks. Verify with `git status` before
+committing anything from that directory.
+
+## 11) Rollback Plan
+
+`rollback_class: backup-restore`. A major upgrade rewrites the data directory
+format, so there is no commit that undoes it.
+
+1. Scale the deployment to 0.
+2. Restore the manifest to the previous major (git revert of the manifest change).
+3. Restore data from the pre-upgrade dump taken in §4 step 3.
+4. Verify row counts against the numbers recorded before the upgrade.
+
+If the pre-upgrade dump was never verified with `pg_restore -l`, you do not have
+a rollback — you have a file.
+
+## 12) References
+
+- [`mariadb-major-upgrade.md`](mariadb-major-upgrade.md) — sibling SOP
+- [`verification-contents-not-shape.md`](verification-contents-not-shape.md) — why "it started" is not evidence
+- `runbooks/maintenance/plans/paperclip-postgresql-18.6.md` — the plan this was found in (carries a DO-NOT-EXECUTE header until reworked)
+
+## Version History
+
+| Version | Date | Change |
+|---|---|---|
+| `2026.09.06` | 2026-09-06 | Created after the PG18 PGDATA relocation was caught at pre-check on `paperclip-postgresql`. Knowledge previously existed only in a plan file, which the transient-plan convention deletes on execution. |

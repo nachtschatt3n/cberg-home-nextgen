@@ -122,6 +122,26 @@ patches:
 
 Also update the `talosImageURL` installer hash if you regenerate schematic via factory.talos.dev (keep current hash if intelgpu extras are already baked in).
 
+> **Before the first node is cordoned, prove the factory publishes your
+> schematic for the target tag — WITH A NEGATIVE CONTROL.** On 2026-09-06 this
+> check "passed" only because a TLS-intercepting middlebox forced `curl -k` and
+> returned 302 for every tag, *including a nonsense `v9.9.9`*. It could not tell
+> a real tag from a fabricated one.
+>
+> ```bash
+> SCHEM=<your-schematic-hash>
+> for TAG in <target> v9.9.9; do
+>   printf "%-10s HTTP %s\n" "$TAG" "$(curl -s -o /dev/null -w '%{http_code}' \
+>     "https://factory.talos.dev/v2/installer/$SCHEM/manifests/$TAG")"
+> done
+> # EXPECT EXACTLY: <target> -> 200 AND v9.9.9 -> 404.
+> # Control also 200, or both 3xx? You are behind an intercepting proxy and the
+> # result is INVALID. Never add -k to make it "work" — that removes the check's
+> # ability to fail.
+> ```
+>
+> Full rule: [`verification-contents-not-shape.md`](verification-contents-not-shape.md) §2b.
+
 ### Step 2 — Enhance `machine-sysctls.yaml`
 
 Patterns merged from:
