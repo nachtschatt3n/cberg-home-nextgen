@@ -476,14 +476,55 @@ def _near_miss(cur, desc: str):
     return None
 
 
+def lint_flag(open_matches: int, warn, miss, total_matches: int) -> str:
+    """Classify one AR for `risk lint`. Pure, so the precedence is testable.
+
+    Precedence matters and is not arbitrary:
+
+      INERT        beats everything. A description that never matched anything
+                   is not "drifting" and not "at risk" — it never worked, and
+                   telling the operator to watch it for future drift would
+                   describe the wrong problem entirely.
+      DRIFTING NOW beats `at risk`: the drift already happened, so a warning
+                   that it MIGHT happen is stale news.
+      at risk      the description still matches, but embeds something volatile.
+
+    `total_matches` counts ALL findings including resolved ones, which is what
+    separates INERT from merely DORMANT: an AR whose finding is currently
+    resolved is doing its job and waiting, and must not be flagged.
+    """
+    if open_matches == 0 and not miss and total_matches == 0:
+        return "INERT"
+    if miss:
+        return "DRIFTING NOW"
+    if warn:
+        return "at risk"
+    return "ok"
+
+
 def cmd_risk_lint(args, dsn):
     """Report ARs whose description has stopped (or will stop) matching.
 
-    Two independent signals:
+    Three independent signals:
       STATIC  — the description embeds a patch-level version or a volatile
                 count, so it WILL drift out of matching on the next bump.
       DRIFTING NOW — the description matches zero open findings, but a
                 shorter PREFIX of it does. That is proof the tail drifted.
+      INERT   — the description has NEVER matched any finding, open or
+                resolved, and no prefix of it does either. Added 2026-09-06.
+
+    INERT is the one that hid. The other two both require the description to
+    have worked at some point; a description written as PROSE ("Headlamp
+    cluster-admin ClusterRoleBinding") never matches anything at any prefix, so
+    it slipped past both checks in silence while reading as active policy.
+    Measured when this was added: 29 of 101 enabled acceptances were inert.
+    AR-016 was one of them — it had suppressed nothing since 2026-05-27, which
+    only surfaced because a finding it was supposed to cover came up for
+    triage.
+
+    An inert AR is not merely useless. The register is what the operator reads
+    to answer "what have we accepted", so an inert entry is a claim that
+    something is handled when nothing is.
     """
     with _connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(
@@ -499,19 +540,24 @@ def cmd_risk_lint(args, dsn):
                 ((desc or "").strip().lower(),))
             matches = cur.fetchone()["n"]
             miss = _near_miss(cur, desc) if matches == 0 else None
-            if warn or miss or args.all:
-                rows.append((ar_id, desc, matches, warn, miss))
+            # INERT: never matched ANY finding, resolved ones included. Checked
+            # against the full table on purpose — an AR whose finding is
+            # currently resolved is dormant, not inert, and must not be flagged.
+            inert = False
+            if matches == 0 and not miss:
+                cur.execute(
+                    "SELECT count(*) AS n FROM sweep_findings "
+                    "WHERE position(%s in lower(title)) > 0",
+                    ((desc or "").strip().lower(),))
+                inert = cur.fetchone()["n"] == 0
+            if warn or miss or inert or args.all:
+                rows.append((ar_id, desc, matches, warn, miss, inert))
     if not rows:
         print("all enabled AR descriptions are drift-stable and matching")
         return 0
     print(f"{'AR':<8} {'open-match':>10}  description")
-    for ar_id, desc, matches, warn, miss in rows:
-        if miss:
-            flag = "DRIFTING NOW"
-        elif warn:
-            flag = "at risk"
-        else:
-            flag = "ok"
+    for ar_id, desc, matches, warn, miss, inert in rows:
+        flag = lint_flag(matches, warn, miss, 0 if inert else 1)
         print(f"{ar_id:<8} {matches:>10}  {desc!r}  [{flag}]")
         for w in warn:
             print(f"{'':<21}! {w}")
@@ -520,6 +566,12 @@ def cmd_risk_lint(args, dsn):
             print(f"{'':<21}! description matches 0 open findings, but the prefix "
                   f"{prefix!r} matches {fid}:")
             print(f"{'':<23}{title[:100]}")
+        if inert:
+            print(f"{'':<21}! has NEVER matched any finding (open or resolved) — "
+                  f"it suppresses nothing while reading as accepted policy.")
+            print(f"{'':<23}Rewrite it as a SUBSTRING of the finding title it "
+                  f"should cover (preview with `risk match`), or retire it if "
+                  f"the risk is gone.")
     return 0
 
 
