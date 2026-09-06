@@ -93,7 +93,7 @@ class FakeConn:
 
 
 def _writer(rows, section="version"):
-    w = fw.FindingsWriter(dsn=None, section=section,
+    w = fw.FindingsWriter(dsn=None, section=section, producer="script",
                           cycle_id="11111111-2222-3333-4444-555555555555")
     conn = FakeConn(rows)
     w._conn = conn

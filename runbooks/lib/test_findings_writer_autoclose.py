@@ -108,7 +108,8 @@ def _writer(section="version", orchestrated=True):
     fan-out always hand a cycle id down, a hand-run script does not.
     """
     cid = "11111111-2222-3333-4444-555555555555" if orchestrated else None
-    w = fw.FindingsWriter(dsn=None, section=section, cycle_id=cid)
+    w = fw.FindingsWriter(dsn=None, section=section, cycle_id=cid,
+                          producer="script")
     conn = FakeConn()
     w._conn = conn
     w._enabled = True
@@ -592,7 +593,7 @@ def test_veto_survives_the_force_and_autoclose_env_overrides():
 
 def test_disabled_writer_never_touches_the_db():
     _clear_env()
-    w = fw.FindingsWriter(dsn=None, section="version")   # markdown-only mode
+    w = fw.FindingsWriter(dsn=None, section="version", producer="script")  # markdown-only
     w.emit("critical", "something")
     w.close(verdict="red")
     assert w._conn is None

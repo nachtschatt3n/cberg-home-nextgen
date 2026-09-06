@@ -40,16 +40,29 @@ def candidate(fid, producer=_fw and None, severity="warning", title="t"):
     return (hash(fid) & 0xffff, (fid, severity, title, "2026-09-01", meta))
 
 
-def foreign_rows(candidates, run_producer):
-    """The predicate under test, mirrored from _autoclose_stale."""
-    return [c for c in candidates
-            if (c[1][4] or {}).get("producer") not in (None, run_producer)]
+# CALL the implementation. This helper used to be a COPY ("mirrored from
+# _autoclose_stale"), which is why this suite stayed green through four
+# recurrences of the very bug it exists to prevent: it asserted the behaviour of
+# a duplicate. If the predicate moves, this import breaks loudly — which is the
+# point.
+foreign_rows = _fw.foreign_candidates
 
 
 class TestProducerStamp(unittest.TestCase):
-    def test_default_producer_is_script(self):
-        w = _fw.FindingsWriter(dsn=None, section="doc")
-        self.assertEqual(w._producer, "script")
+    def test_omitting_producer_is_a_hard_error(self):
+        # THE FIX FOR THE 4TH RECURRENCE (F-616c910d). `producer` used to
+        # default to "script", so an agent that just did not pass it was
+        # recorded AS a script — and no close-side gate can separate two
+        # writers that stamped the same name. Three attempts to fix this in
+        # the gate failed for exactly that reason. Omission must fail loudly.
+        with self.assertRaises(TypeError):
+            _fw.FindingsWriter(dsn=None, section="doc")
+
+    def test_blank_producer_is_rejected_too(self):
+        # A required arg only helps if it cannot be satisfied with nothing.
+        for blank in ("", "   ", None):
+            with self.subTest(blank=blank), self.assertRaises(ValueError):
+                _fw.FindingsWriter(dsn=None, section="doc", producer=blank)
 
     def test_producer_is_overridable(self):
         w = _fw.FindingsWriter(dsn=None, section="doc", producer="doc-agent")
@@ -76,9 +89,18 @@ class TestProducerScope(unittest.TestCase):
         cands = [candidate("F-script1", producer="script")]
         self.assertEqual(foreign_rows(cands, "script"), [])
 
-    def test_untagged_legacy_rows_keep_historical_behaviour(self):
-        # Rows written before the stamp existed have no producer. Treating
-        # them as foreign would leak every pre-existing row open forever.
+    def test_untagged_legacy_rows_stay_closeable(self):
+        # DO NOT INVERT THIS. It was inverted on 2026-09-06 as an attempted fix
+        # for the 4th recurrence and reverted within the hour: holding untagged
+        # rows broke 9 of 31 cases in test_findings_writer_autoclose.py, every
+        # one of them "auto-close did not run". Rows predate the stamp, so
+        # treating absence-of-stamp as foreign stops normal auto-close for the
+        # entire back-catalogue — 83 open rows carry a NULL producer.
+        #
+        # The recurrence is not fixable here. It was fixed at the WRITE side:
+        # `producer` is a required constructor argument, so an agent can no
+        # longer be recorded as a script by simply omitting it. See
+        # TestProducerStamp.test_omitting_producer_is_a_hard_error.
         cands = [candidate("F-legacy", producer=None)]
         self.assertEqual(foreign_rows(cands, "script"), [])
 
@@ -96,7 +118,9 @@ class TestProducerScope(unittest.TestCase):
                  candidate("F-agent1", producer="doc-agent"),
                  candidate("F-legacy", producer=None)]
         foreign = foreign_rows(cands, "script")
-        self.assertEqual([c[1][0] for c in foreign], ["F-agent1"])
+        # only the DIFFERENTLY-stamped row is held. The script's own row closes,
+        # and so does the untagged one (see test_untagged_legacy_rows_stay_closeable).
+        self.assertEqual(sorted(c[1][0] for c in foreign), ["F-agent1"])
 
     def test_the_2026_09_05_incident_would_not_recur(self):
         # 9 doc rows silent on a doc-check run: 1 genuinely the script's,

@@ -601,6 +601,7 @@ def _writer():
             cycle_id=cycle_id_from_env(),
             trigger=trigger_from_env(),
             git_head=git_head(),
+            producer="script",
         )
     except Exception as e:
         log(f"  (findings writer unavailable: {e})")

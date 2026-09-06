@@ -16,6 +16,10 @@ Usage:
         section="security",
         trigger="manual",
         git_head=current_git_sha(),
+        # REQUIRED. "script" for a runbooks/*.py check script; an agent that
+        # emits findings directly passes ITS OWN name. Auto-close closes rows
+        # on silence, so a run must only ever claim rows it could re-emit.
+        producer="script",
     )
     try:
         writer.emit("critical", "289 HA errors on Frigate integration",
@@ -420,6 +424,36 @@ def uncovered_from_notes(notes_json) -> dict[str, dict[str, str]]:
     return out
 
 
+def foreign_candidates(candidates, run_producer):
+    """Rows this run must NOT close, because it does not own them.
+
+    A row stamped with a DIFFERENT producer was written by something this run
+    does not speak for, so its absence here is not evidence of anything.
+
+    UNTAGGED (producer IS NULL) rows stay closeable, and that carve-out is
+    LOAD-BEARING — narrowing it was tried on 2026-09-06 and reverted within
+    minutes. Rows predate the stamp, so treating them as foreign stops normal
+    auto-close for the entire back-catalogue: it broke 9 of 31 cases in
+    test_findings_writer_autoclose.py, every one of them "auto-close did not
+    run". 83 open rows carry a NULL producer.
+
+    The real defect (F-616c910d) is NOT here. It is that an agent which
+    constructs a writer WITHOUT passing `producer=` silently inherits the
+    "script" default and becomes indistinguishable from a script, so a later
+    script run closes its rows as its own. That is fixed at the write side, by
+    requiring the caller to say who it is — see __init__.
+
+    Kept as a module-level pure function ON PURPOSE. The regression test used to
+    carry a COPY of this predicate ("mirrored from _autoclose_stale"), so the
+    suite asserted the behaviour of a duplicate and stayed green through four
+    recurrences. A test that mirrors an implementation tests the mirror.
+
+    `candidates` are (id, row) pairs where row[4] is the metadata mapping.
+    """
+    return [c for c in candidates
+            if (c[1][4] or {}).get("producer") not in (None, run_producer)]
+
+
 class FindingsWriter:
     """Append-or-update findings into sweep-history Postgres.
 
@@ -441,7 +475,7 @@ class FindingsWriter:
         trigger: str = "manual",
         git_head: str | None = None,
         notes: str | None = None,
-        producer: str | None = None,
+        producer: str,
     ):
         if section not in VALID_SECTIONS:
             raise ValueError(
@@ -482,9 +516,26 @@ class FindingsWriter:
         # to cover. On 2026-09-05 that closed 9 doc findings of which 6 were
         # verified STILL TRUE by re-inspection and only 1 was genuinely fixed
         # (F-9188fdb8). Rows carry their producer so auto-close can hold
-        # anything this run does not own. Default "script" keeps every existing
-        # check script behaving exactly as before.
-        self._producer = producer or "script"
+        # anything this run does not own.
+        #
+        # REQUIRED, with no default, and that is the fix for the FOURTH
+        # recurrence (F-616c910d, 2026-09-06). It previously defaulted to
+        # "script", so an agent that simply did not pass `producer=` was
+        # recorded as a script and became indistinguishable from one — and no
+        # close-side gate can separate two writers that stamped the same name.
+        # Three attempts to fix this in the gate all failed for that reason.
+        # Forcing the caller to say who it is fixes it at the only place the
+        # information exists. If you are an agent, pass your OWN name
+        # (`producer="doc-agent"`); "script" belongs to runbooks/*.py.
+        if not str(producer or "").strip():
+            raise ValueError(
+                "producer= is required: name the writer, e.g. producer='script' "
+                "from a runbooks/*.py check script, or producer='<agent-name>' "
+                "from an agent. Auto-close closes rows on silence, so a row "
+                "whose producer is wrong gets closed by a run that never "
+                "covered it (F-9188fdb8, F-616c910d)."
+            )
+        self._producer = producer
         # The sweep_cycles row is created on the FIRST emit(), never on
         # construction. A writer that is built and then closed WITHOUT emitting
         # anything (a clean section that joins someone else's shared cycle, or a
@@ -972,11 +1023,20 @@ class FindingsWriter:
             # this run could actually have re-emitted. A row stamped with a
             # DIFFERENT producer was written by something this run does not
             # speak for, so its absence here is not evidence of anything.
-            # Untagged legacy rows keep the historical behaviour deliberately:
-            # they predate the stamp, and treating them as foreign would leak
-            # every pre-existing row open forever.
-            foreign = [c for c in candidates
-                       if (c[1][4] or {}).get("producer") not in (None, self._producer)]
+            #
+            # UNTAGGED (producer IS NULL) rows stay closeable. Narrowing that
+            # was TRIED on 2026-09-06 and reverted the same hour: it broke 9 of
+            # 31 cases in test_findings_writer_autoclose.py, all of them
+            # "auto-close did not run", because rows predate the stamp and
+            # holding them stops normal auto-close for the back-catalogue.
+            # 83 open rows carry a NULL producer.
+            #
+            # The 4th recurrence (F-616c910d) is NOT fixed here. It is fixed in
+            # __init__: an agent that omitted `producer=` used to inherit the
+            # "script" default and become INDISTINGUISHABLE from a script, so
+            # this gate could not tell them apart no matter how it was written.
+            # The declaration is now mandatory.
+            foreign = foreign_candidates(candidates, self._producer)
             if foreign:
                 candidates = [c for c in candidates if c not in foreign]
                 print(f"==> auto-close HELD BACK {len(foreign)} {self.section} "
@@ -1307,7 +1367,7 @@ class DegradationLog:
         DEGRADED.record("image ghcr.io/foo/bar", "ghcr.io (HTTP 429)",
                         component=component_key("image", "ghcr.io/foo/bar"))
         ...
-        with FindingsWriter(...) as writer:
+        with FindingsWriter(..., producer="script") as writer:
             emit(...)
             DEGRADED.note_universe(len(all_components))
             DEGRADED.apply(writer)

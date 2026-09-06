@@ -3886,6 +3886,7 @@ def main(argv: list[str] | None = None):
                 cycle_id=cycle_id_from_env(),
                 trigger=trigger_from_env(),
                 git_head=git_head(),
+                producer="script",
             ) as writer:
                 writer.mark_incomplete(
                     f"version check aborted: {type(exc).__name__}: {exc}")
@@ -3922,6 +3923,7 @@ def main(argv: list[str] | None = None):
         cycle_id=cycle_id_from_env(),
         trigger=trigger_from_env(),
         git_head=git_head(),
+        producer="script",
     ) as writer:
         crit, warn = _emit_findings(writer, checker, evidence_path)
         verdict = "red" if crit > 0 else ("yellow" if warn > 0 else "green")

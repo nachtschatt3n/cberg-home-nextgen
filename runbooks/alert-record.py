@@ -135,7 +135,11 @@ def record(args, dsn) -> tuple[str, bool]:
     action = f"SURFACE'd by alert-triage: {args.why or 'no rationale given'}"
     if args.owner:
         action += f" — owner: {args.owner}"
-    w = FindingsWriter(dsn=dsn, section=SECTION, trigger="alert")
+    w = FindingsWriter(dsn=dsn, section=SECTION, trigger="alert",
+                       # its own producer, not "script": nothing else
+                       # emits into section `alert`, and a shared name
+                       # would let another writer close these rows.
+                       producer="alert-record")
     try:
         emitted = w.emit(
             args.severity, title,

@@ -151,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                 cycle_id=cycle_id_from_env(),
                 trigger=trigger_from_env(),
                 git_head=git_head(),
+                producer="script",
             ) as writer:
                 writer.mark_incomplete(f"slo-check aborted: {type(exc).__name__}: {exc}")
                 writer.close(verdict="red")
@@ -231,7 +232,7 @@ def _main_impl(args) -> int:
         # a sum-over-replicas numerator read burn -11.67, masking the real ~10).
         defective = [(s, ds) for s in snaps if (ds := defects(s))]
         if exhausted or defective:
-            fw = FindingsWriter(dsn=args.postgres_dsn, section="slo")
+            fw = FindingsWriter(dsn=args.postgres_dsn, section="slo", producer="script")
             try:
                 for s in exhausted:
                     fid = fw.emit(

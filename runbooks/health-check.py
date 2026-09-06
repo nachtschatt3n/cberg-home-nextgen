@@ -160,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 cycle_id=cycle_id_from_env(),
                 trigger=trigger_from_env(),
                 git_head=git_head(),
+                producer="script",
             ) as writer:
                 writer.mark_incomplete(f"health-check aborted: {type(exc).__name__}: {exc}")
                 writer.close(verdict="red")
@@ -228,6 +229,7 @@ def _main_impl(args) -> int:
         cycle_id=cycle_id_from_env(),
         trigger=trigger_from_env(),
         git_head=git_head(),
+        producer="script",
     ) as writer:
         evidence_path = str(issues_path) if issues_path else None
         if incomplete:
