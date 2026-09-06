@@ -1016,6 +1016,72 @@ def cmd_finding_add(args, dsn):
     print(_ref_block(row))
 
 
+def cmd_finding_close(args, dsn):
+    """Close a finding that no automated closer is allowed to touch.
+
+    WHY THIS EXISTS (F-94d62930). The auto-close producer gate is deliberately
+    strict: a run may only close rows IT could have re-emitted, so
+    `check-all-versions.py` (producer 'script') correctly refuses to close rows
+    stamped 'version-check-agent', and the reconcile backstop correctly refuses
+    to speak for agent rows at all. Both refusals are right.
+
+    The consequence nobody planned for: those rows became uncloseable. On
+    2026-09-06 version/F-42f5913e and F-8730d341 were genuinely stale — the
+    plans they referenced had been retired and coverage.py reported plan_drift
+    empty — and there was no way to retire them. `finding` had list/show/ref/
+    add/detail and no close, and a direct SQL UPDATE was blocked by the
+    permission classifier. A correctly-scoped gate that strands rows forever
+    just relocates the problem.
+
+    This is the HUMAN path, so it demands what an automated closer cannot
+    supply: an explicit reason, recorded on the row. A close with no stated
+    reason is indistinguishable from the silent false-closes this gate exists to
+    prevent.
+    """
+    with _connect(dsn) as conn, conn.cursor() as cur:
+        row = _finding_row(cur, args.finding_id)
+        if not row:
+            print(f"finding {args.finding_id} not found", file=sys.stderr); return 1
+
+        # Same two consent conditions as `detail`, for the same reason: closing
+        # the wrong row is a silent loss, and both can occur independently.
+        redirected = row["finding_id"] != args.finding_id
+        if redirected and not args.follow_rename:
+            print(f"{args.finding_id} resolves to {row['finding_id']} via a "
+                  f"recorded prior id. Re-run against {row['finding_id']}, or "
+                  f"pass --follow-rename to accept the redirect.", file=sys.stderr)
+            return 1
+        if row["resolved_at"] is not None:
+            print(f"{row['finding_id']} is already resolved "
+                  f"({row['resolved_at']}) — nothing to do.", file=sys.stderr)
+            return 1
+
+        # status and resolved_at are a SYMMETRIC pair under
+        # ck_findings_resolved_status: resolved_at IS NULL <=> status <> 'resolved'.
+        # Setting one without the other is rejected by the database, which is
+        # exactly the split-state bug that constraint was added for.
+        cur.execute(
+            """UPDATE sweep_findings
+                  SET status = 'resolved',
+                      resolved_at = now(),
+                      resolved_commit = %s,
+                      metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                          'closed_by', 'policy-cli',
+                          'close_reason', %s::text,
+                          'closed_at', now()::text)
+                WHERE id = %s
+             RETURNING finding_id, severity, title""",
+            (args.commit, args.reason, row["id"]))
+        # NOTE: this cursor uses a dict row factory (see _finding_row, which
+        # indexes by name). Positional access raises KeyError: 0 — and because
+        # the UPDATE has already committed by then, the row IS closed while the
+        # command exits non-zero. Caught exactly that way on first use.
+        out = cur.fetchone()
+    print(f"closed {out['finding_id']} [{out['severity']}] {out['title'][:70]}")
+    print(f"  reason: {args.reason}")
+    return 0
+
+
 def cmd_finding_detail(args, dsn):
     """Attach/replace the private vulnerability detail and plan linkage on an
     EXISTING finding (typically one the CVE check already emits)."""
@@ -1258,6 +1324,16 @@ def build_parser() -> argparse.ArgumentParser:
     fa.add_argument("--plan", action="append", help="plan_id this drives; repeatable")
     fa.add_argument("--component")
     fa.set_defaults(handler=cmd_finding_add)
+    fc = fnd.add_parser("close", help="retire a finding no automated closer may touch")
+    fc.add_argument("finding_id")
+    fc.add_argument("--reason", required=True,
+                    help="WHY it is being closed. Required: a close with no "
+                         "stated reason is indistinguishable from the silent "
+                         "false-closes the producer gate exists to prevent.")
+    fc.add_argument("--commit", help="commit sha that resolved it, if any")
+    fc.add_argument("--follow-rename", action="store_true",
+                    help="accept closing the finding this id was RENAMED to")
+    fc.set_defaults(handler=cmd_finding_close)
     fd = fnd.add_parser("detail", help="attach private detail / plan linkage to a finding")
     fd.add_argument("finding_id")
     fd.add_argument("--detail")
