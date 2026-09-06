@@ -34,7 +34,7 @@
 # scheduled plans' window: fields, the OpenClaw crons' payloads, and the live
 # GO/issue records — a rename without that migration orphans a live GO.
 # Edit freely (git-tracked); bump `version`.
-version: "2026.08.26.2"
+version: "2026.09.06.1"
 timezone: Europe/Berlin
 
 windows:
@@ -60,8 +60,21 @@ windows:
   - id: sun-attended
     day: sunday
     start: "09:00"
-    duration_min: 90
-    capacity_risk: 6
+    duration_min: 150         # RAISED 2026-09-06 from 90. A full 3-node Talos
+                              # roll is 70 min (nodes 02+03) + 45 min (node 01)
+                              # = 115 min, and 90 was already the binding
+                              # constraint that forced the roll to be split
+                              # across two Sundays. The operator asked for all
+                              # three in one window, so the slot has to be
+                              # honestly sized for it — leaving 90 here would
+                              # have made the reconciler's OVER-TIME check fire
+                              # on a window we intend to run, which trains
+                              # people to ignore that check.
+                              # 150 keeps a 35-min margin over 115 for the
+                              # Longhorn rebuild gate between node 03 and
+                              # node 01, which is the step most likely to run
+                              # long on 94 volumes.
+    capacity_risk: 6          # unchanged: risk-load 4 (both plans rated medium)
     allow_reboot: true        # rolling node reboots (Talos) go here, operator-present
     mode: attended
 

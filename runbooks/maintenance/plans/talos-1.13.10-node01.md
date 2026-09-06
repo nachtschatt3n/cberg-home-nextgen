@@ -36,8 +36,28 @@ finding_refs: [F-912f4778]
 status: scheduled                   # OPERATOR GO 2026-09-05 (same GO as part 1 —
                                     # the operator approved the upgrade, the split is
                                     # only how it is sequenced).
-window: "sun-attended:2026-09-13"   # PART 2 of 2. sun-attended is the only
+window: "sun-attended:2026-09-06"   # PART 2 of 2. sun-attended is the only
                                     # allow_reboot:true slot.
+                                    # PULLED IN 2026-09-06 from :2026-09-13 on a
+                                    # direct operator instruction at the window
+                                    # ("we should do all 3 nodes"). The operator
+                                    # is present and attended; that supersedes
+                                    # the earlier part-1 GO note ("do NOT extend
+                                    # this window to finish it"), which was
+                                    # written for an unattended run.
+                                    # WHAT DOES *NOT* CHANGE: the §2 gate below.
+                                    # The week between windows was never the
+                                    # safety mechanism — the GATE is (nodes
+                                    # 02+03 on v1.13.10 and Ready, etcd cleanly
+                                    # 3/3, Longhorn 0 degraded AND 0 rebuilding).
+                                    # A week merely made it easy to satisfy.
+                                    # Same window is fine ONLY if that gate is
+                                    # green on measurement, not assumption. If
+                                    # Longhorn is still rebuilding after part 1,
+                                    # STOP after node 03 and leave node 01 for
+                                    # :2026-09-13 — a partial roll is a
+                                    # documented, supported state (§1), an
+                                    # ungated last-control-plane reboot is not.
 sops_refs: []
 generated: "2026-09-05"
 ---
