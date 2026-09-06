@@ -78,6 +78,60 @@ spec:
               being scraped. Certificate expiry is currently UNMONITORED. Check the
               cert-manager ServiceMonitor is still selected by the Prometheus CR.
 
+    - name: node.kernel-logs
+      interval: 5m
+      rules:
+        # Talos pushes kmsg to the collector over UDP and, per the receiver
+        # config, its sender "does NOT reconnect after the sink closes". So when
+        # the collector is rescheduled — which happens on every node roll — a
+        # node's sender can stop permanently and NOTHING says so: UDP is
+        # fire-and-forget, the collector logs nothing about a peer that went
+        # quiet, and the remaining nodes keep reporting so no total-absence
+        # check fires either.
+        #
+        # That is what happened on 2026-09-06: k8s-nuc14-03 (192.168.55.13)
+        # shipped kmsg for nine minutes after its 07:23:52Z boot and then
+        # stopped, silently, for the rest of the day. Verified NOT a datapath
+        # problem — the LB entry on node03 correctly resolved
+        # 192.168.55.18:5171/UDP to the live collector pod, and there was no
+        # stale conntrack. The source was simply not sending.
+        #
+        # This matters more than a missing metric: Talos kernel logs are the
+        # documented blind spot for diagnosing why a node rebooted
+        # (docs/troubleshooting/node-reboot-observability.md). Losing them on
+        # the node that just rebooted is losing them exactly when needed.
+        - alert: TalosKernelLogsMissingFromNode
+          # Counts DISTINCT sending nodes, not total lines. A per-node absent()
+          # cannot work here: the label value only exists while that node sends,
+          # so the series does not go to zero, it disappears.
+          expr: count(count by (net_peer_ip) (talos_kernel_kmsg_lines_total)) < 3
+          for: 30m
+          labels:
+            severity: warning
+            category: platform
+            component: talos
+          annotations:
+            summary: "Only {{ $value }} of 3 nodes are shipping Talos kernel logs"
+            description: >-
+              At least one node has stopped sending kmsg to the collector.
+              Compare `count by (net_peer_ip) (talos_kernel_kmsg_lines_total)`
+              against 192.168.55.11/12/13 to find which. Restarting the
+              COLLECTOR does not fix it — the sender is on the node. Re-applying
+              the Talos machine config to that node restarts its log sender.
+        - alert: TalosKernelLogsAbsent
+          expr: absent(talos_kernel_kmsg_lines_total)
+          for: 30m
+          labels:
+            severity: warning
+            category: platform
+            component: talos
+          annotations:
+            summary: "No Talos kernel logs are being received from any node"
+            description: >-
+              The kmsg pipeline is entirely dead, so the count-based alert above
+              cannot fire either. Check the edot-collector udplog receiver on
+              :5171 and the edot-collector-talos-kmsg LoadBalancer.
+
     - name: flux.reconciliation
       interval: 2m
       rules:
