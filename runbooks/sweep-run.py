@@ -668,7 +668,7 @@ def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
         if not crit:
             verdict = "yellow" if warn else "green"
         else:
-            verdict = _ownership_verdict(warn)
+            verdict = _ownership_verdict(warn, dsn)
 
         with psycopg.connect(dsn) as conn:
             with conn.cursor() as cur:
@@ -683,22 +683,40 @@ def _reconcile_verdict(dsn: str, cycle_id: str) -> str | None:
         return None
 
 
-def _ownership_verdict(warn: int) -> str:
+def _ownership_verdict(warn: int, dsn: str | None = None) -> str:
     """red/yellow for a cycle WITH open criticals, by ownership.
 
-    Runs finding-triage.py --no-page (it re-reads the open criticals itself,
-    inheriting SWEEP_PG_DSN from our env) and reads counts + overdue from its
-    JSON. Every failure mode is RED, deliberately: a verdict that cannot
-    establish ownership must never report the calm color — that would be the
+    Runs finding-triage.py --no-page and reads counts + overdue from its JSON.
+    Every failure mode is RED, deliberately: a verdict that cannot establish
+    ownership must never report the calm color — that would be the
     silent-inert-check family wearing the verdict's clothes.
+
+    `dsn` MUST be passed through explicitly (F-4b27e81c). The docstring used to
+    claim the child "inherits SWEEP_PG_DSN from our env", and that is true only
+    when the OPERATOR exported it. When sweep-run self-provisions the DSN — its
+    own port-forward plus a decoded secret, which is the normal cron path — the
+    value lands on a per-step `env` dict (see the run loop), never on
+    os.environ. The child then died on KeyError SWEEP_PG_DSN, stdout came back
+    empty, counts were missing, and this function's own fail-safe forced RED on
+    every self-provisioned run regardless of actual ownership. Observed cycle
+    e0bb8d95 (2026-08-28): standalone triage reported CRACK=0 and overdue=[],
+    so the correct verdict was yellow.
+
+    The fail-safe is right and stays. What was wrong is that it was firing on a
+    plumbing bug rather than on genuine uncertainty — a permanently-red verdict
+    carries exactly as little information as a permanently-green one.
     """
     import json as _json
+    import os as _os
     import subprocess as _sp
     try:
+        child_env = _os.environ.copy()
+        if dsn:
+            child_env["SWEEP_PG_DSN"] = dsn
         pr = _sp.run(
             [sys.executable, str(SCRIPT_DIR / "finding-triage.py"),
              "--no-page", "--json"],
-            capture_output=True, text=True, timeout=300)
+            capture_output=True, text=True, timeout=300, env=child_env)
         d = _json.loads(pr.stdout or "{}")
     except Exception as e:  # noqa: BLE001
         print(f"==> ownership triage failed ({type(e).__name__}: {e}) — "
