@@ -190,6 +190,12 @@ data:
               #
               # volumeName pins the claim to the named static PV so the StatefulSet
               # can only ever re-bind to the intended volume.
+              # GUARD: this pin is correct only while prometheusSpec.replicas is 1
+              # (chart default, and unset here). Raising `replicas` or `shards`
+              # would make EVERY replica's PVC request this same RWO PV, leaving
+              # replica-1 Pending forever. volumeClaimTemplates are immutable, so
+              # unwinding that needs a StatefulSet delete. To scale out: remove
+              # this pin and pre-create one named static PV per replica first.
               #
               # The old `longhorn.io/number-of-replicas: "1"` annotation is REMOVED,
               # not kept: Longhorn reads replica count from StorageClass parameters,

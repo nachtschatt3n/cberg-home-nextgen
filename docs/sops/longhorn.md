@@ -285,6 +285,64 @@ kubectl patch pvc {pvc-name} -n {namespace} \
   -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
 ```
 
+### Shrink a Volume — you cannot; migrate to a new, smaller one
+
+**Longhorn can only EXPAND. There is no shrink path** (longhorn/longhorn#1132 is
+still open). Neither can you get there by backup/restore, clone, or `DataSource`:
+every block-level copy recreates the volume at the *backup's recorded
+`volumeSize`*, so restoring a 100Gi backup gives you another 100Gi volume. The
+only mechanism that changes geometry is a **file-level copy into a separately
+created smaller volume.**
+
+This matters because Longhorn schedules replicas against **declared** size, not
+actual usage, and `storage-over-provisioning-percentage: 100` caps total
+commitment at physical usable capacity. An over-declared volume therefore
+reserves cluster scheduling it never uses, and the only way back is this
+procedure. Executed 2026-09-06 on the Prometheus TSDB (100Gi → 30Gi, freeing
+~140 GiB of scheduling across two replicas).
+
+Shape of the migration (full worked example: git history of
+`runbooks/maintenance/plans/prometheus-volume-rightsize.md`, retired in the same
+commit that added this section):
+
+1. **Confirm the existing PV is `persistentVolumeReclaimPolicy: Retain`.** Under
+   `Delete`, deleting the PVC destroys your rollback. If it is not `Retain`,
+   patch it before anything else.
+2. Create the new Longhorn `Volume` CR + `PV` at the target size (§"Creating a
+   Static Volume"). **Gate on the new volume's `Scheduled` condition being
+   `True` before you touch the running app** — if the cluster cannot place the
+   new replicas alongside the old ones, abort here at zero cost.
+3. Bind a temporary *seed* PVC to the new PV so a Job can mount it.
+4. Stop the workload. For a StatefulSet owned by an operator, pause the operator
+   first (for prometheus-operator: `spec.paused: true` on the `Prometheus` CR),
+   **then** delete the StatefulSet — otherwise it is recreated under you.
+5. Copy with a Job mounting both PVCs: `cp -a /src/. /dst/`, then `chown -R` to
+   the app's runtime uid:gid.
+6. **Gate on CONTENTS before deleting anything** — identical file count, byte-exact
+   `du -sb`, and a full content checksum. Do this while the source is still
+   authoritative and the abort is still free.
+7. Delete the old PVC (safe only because of step 1), release the new PV from the
+   seed claim (`kubectl patch pv <new> --type json -p
+   '[{"op":"remove","path":"/spec/claimRef"}]'`), then let the app rebuild.
+
+**Two traps this procedure exists to teach:**
+
+- **A StatefulSet `volumeClaimTemplate` is immutable.** Editing
+  `storageClassName`/`size` in Helm values changes *nothing* on a live
+  StatefulSet — the edit sits inert and git silently disagrees with the cluster,
+  sometimes for months. You only find out the day the PVC is deleted and
+  regenerated from the (wrong) template. **Before deleting any StatefulSet PVC,
+  diff the live PVC against the rendered volumeClaimTemplate.** In the 2026-09-06
+  case git said `longhorn` while the live PVC had always been `longhorn-static`;
+  had that not been corrected in the same operation, the recreate would have
+  provisioned a fresh, empty, *dynamic*, `Delete`-reclaim volume.
+- **A detached volume still counts against `storageScheduled`.** Keeping the old
+  volume as a rollback means the new reservation is *added* to the old one until
+  you delete it, so the capacity win does not appear until reclamation. Decide
+  before you start whether you are soaking (and accept temporarily worse
+  headroom) or reclaiming immediately (and accept backup-restore as the only
+  rollback).
+
 ### Detach and Reattach a Volume
 
 ```bash

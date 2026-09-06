@@ -4,8 +4,6 @@ kind: Kustomization
 resources:
   - ./global-filesystem-trim.yaml
   - ./global-snapshot-cleanup.yaml
-  - ./prometheus-filesystem-trim.yaml
-  - ./prometheus-snapshot-cleanup.yaml
   - ./influxdb-filesystem-trim.yaml
   - ./influxdb-snapshot-cleanup.yaml
   - ./home-assistant-filesystem-trim.yaml

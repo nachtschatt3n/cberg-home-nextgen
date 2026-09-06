@@ -371,7 +371,7 @@ Disk capacity thresholds: **Critical** = <15% free, **Major** = 15-25% free. New
 | Time | Job | Scope | Purpose |
 |------|-----|-------|---------|
 | 02:00 | `global-filesystem-trim` | All volumes (default group) | `fstrim` reclaims freed blocks; prevents `actual_size_bytes` growing beyond filesystem usage |
-| Per-volume trim jobs (prometheus, influxdb, etc.) also run at 02:00 | | | Redundant but harmless |
+| Per-volume trim jobs (influxdb, home-assistant, adguard-home, openclaw) also run at 02:00 | | | Redundant but harmless. NOTE: a per-volume job only runs against a volume that carries the label `recurring-job.longhorn.io/<job-name>: enabled`. The `volume:` key under a job's `spec.labels` is NOT a selector — it is stamped onto the snapshots/backups the job creates. Several of these jobs are enrolled on no volume and are inert no-ops. |
 | 03:00 | `daily-backup-all-volumes` | All volumes (default group) | Remote backup to NAS, retain=7 |
 
 **`LonghornVolumeUsageWarning` alert** fires when `longhorn_volume_actual_size_bytes / capacity ≥ 80%`.
