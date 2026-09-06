@@ -361,8 +361,18 @@ data:
         log, log_event, anon_path, image_dims,
     )
 
-    POSTER_MIN_WIDTH = 600
+    POSTER_MIN_WIDTH = 600     # 2:3 MOVIE/TV posters
     FANART_MIN_WIDTH = 1280
+    # SQUARE album covers, a separate constant since 2026-09-06 (F-ae230057).
+    # check_album() previously reused POSTER_MIN_WIDTH, which the SOP defines
+    # for 2:3 posters and which says nothing about ~1:1 album art -- so the
+    # Music section was being scored against a threshold that had never been
+    # decided for it. The measurement was sound and triple-confirmed (32 of 39
+    # folder.jpg are exactly 500x500; only one 776x776 cleared 600), but 2.6%
+    # was the audit's printed headline and while it stood it MASKED any real
+    # regression in the other sections. Operator decision 2026-09-06: 500x500
+    # is adequate for album art. Now stated in the SOP's Music row.
+    ALBUM_COVER_MIN_WIDTH = 500
 
     def check_movie(folder: Path) -> dict:
         """Compliance record for one movie folder."""
@@ -533,7 +543,7 @@ data:
         return {
             "layout": layout_ok,
             "nfo":    nfo_ok,
-            "poster": pw >= POSTER_MIN_WIDTH,
+            "poster": pw >= ALBUM_COVER_MIN_WIDTH,
         }
 
     def audit_music():

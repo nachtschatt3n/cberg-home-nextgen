@@ -1,8 +1,8 @@
 # SOP: Media Library Standards (Plex + Jellyfin + Tube Archivist)
 
 > Description: Canonical on-disk layout, naming, sidecar/NFO conventions, and intake workflow for the shared Plex/Jellyfin/Tube Archivist media library.
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.09.06`
+> Last Updated: `2026-09-06`
 > Owner: `media-manager`
 
 | Field | Value |
@@ -159,10 +159,30 @@ The `library-tools` audit CronJob computes a per-item compliance record. Library
 | Movies | ≥ 99% | ≥ 95% | ≥ 95% | ≥ 90% |
 | TV Shows (series-level) | ≥ 99% | ≥ 95% | ≥ 95% | ≥ 90% |
 | TV Shows (episode-level) | ≥ 99% | ≥ 80% | n/a | n/a |
-| Music | ≥ 95% | ≥ 80% | ≥ 80% (folder.jpg) | n/a |
+| Music | ≥ 95% | ≥ 80% | ≥ 80% (folder.jpg, ≥ 500 px square) | n/a |
 | YouTube (Jellyfin-only) | n/a — TA-managed | ≥ 99% | ≥ 99% (folder.jpg) | ≥ 99% (backdrop.jpg) |
 
 Poster minimum: 600 px wide, aspect ratio ≈ 2:3. Fanart minimum: 1280 px wide, aspect ratio ≈ 16:9.
+
+**Album covers are square and have their OWN minimum: 500 px, aspect ratio ≈ 1:1.**
+Decided 2026-09-06; before that the Music row specified a folder.jpg *coverage*
+target but no dimension test at all, and `check_album()` silently reused the
+600 px 2:3 POSTER minimum defined above it. That is a movie-poster rule applied
+to album art, and it scored the section at 2.6% (1 of 39) — a real measurement
+against a threshold nobody had chosen for it. 32 of the 39 covers are exactly
+500×500, the signature of a single upstream default rather than a library
+problem. Because that number was also the audit's printed headline ("Worst
+compliance metric"), it masked any genuine regression elsewhere for as long as
+it stood. The constant is now `ALBUM_COVER_MIN_WIDTH` in
+`scripts-configmap.yaml`, separate from `POSTER_MIN_WIDTH`, so the two cannot
+drift into each other again.
+
+Measured across all 39 covers when the floor was set: **2.6% (1/39) at 600 px →
+94.9% (37/39) at 500 px**, against the ≥ 80% row above. The floor is
+deliberately NOT vacuous — two covers (486×500, 496×500) still fail on width,
+so the metric can still detect a regression. Had the test used `max(w, h)` it
+would read 39/39 and detect nothing, which is the failure mode where a
+threshold is "met" by being unable to fail.
 
 ### Phantom "Various Artists" artist (divergent `albumartist` tag)
 
