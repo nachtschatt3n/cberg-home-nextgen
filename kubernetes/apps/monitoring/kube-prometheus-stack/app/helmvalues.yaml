@@ -174,15 +174,33 @@ data:
         retentionSize: 20GB
         storageSpec:
           volumeClaimTemplate:
-            metadata:
-              annotations:
-                # Prometheus data is ephemeral - use single replica to save space
-                longhorn.io/number-of-replicas: "1"
             spec:
-              storageClassName: longhorn
+              # RIGHT-SIZED 2026-09-06: 100Gi -> 30Gi. Longhorn schedules on DECLARED
+              # size; 100Gi for an 8.2 GiB working set reserved ~140 GiB of cluster
+              # scheduling across two replicas and pushed k8s-nuc14-02 to 95.5%
+              # committed. 30Gi keeps retentionSize (20GiB) at 68% of allocated disk,
+              # inside upstream's 80-85% compaction-headroom guidance.
+              # Plan: runbooks/maintenance/plans/prometheus-volume-rightsize.md
+              #
+              # storageClassName CORRECTED longhorn -> longhorn-static: the live PVC
+              # has ALWAYS been longhorn-static (StatefulSet volumeClaimTemplates are
+              # immutable, so the earlier `longhorn` edit never took effect). Leaving
+              # it as `longhorn` meant any future PVC delete would silently
+              # regenerate a dynamic, EMPTY, Delete-reclaim 100Gi volume.
+              #
+              # volumeName pins the claim to the named static PV so the StatefulSet
+              # can only ever re-bind to the intended volume.
+              #
+              # The old `longhorn.io/number-of-replicas: "1"` annotation is REMOVED,
+              # not kept: Longhorn reads replica count from StorageClass parameters,
+              # never from PVC annotations, so it was inert and read as an applied
+              # setting that was not applied. Replica count now lives, visibly, on
+              # the hand-applied Volume CR (longhorn-volume-prometheus-tsdb.yaml).
+              storageClassName: longhorn-static
+              volumeName: prometheus-tsdb
               resources:
                 requests:
-                  storage: 100Gi
+                  storage: 30Gi
         resources:
           requests:
             cpu: 500m

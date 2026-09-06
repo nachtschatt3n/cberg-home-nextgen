@@ -1,0 +1,18 @@
+---
+# NOT in kustomization.yaml on purpose — hand-applied. See docs/sops/longhorn.md
+# "The one cost of a static volume".
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: prometheus-tsdb
+  namespace: storage
+spec:
+  size: "32212254720"      # 30Gi
+  numberOfReplicas: 2
+  dataEngine: v1
+  dataLocality: best-effort
+  accessMode: rwo
+  frontend: blockdev
+  migratable: false
+  encrypted: false
+  staleReplicaTimeout: 30
