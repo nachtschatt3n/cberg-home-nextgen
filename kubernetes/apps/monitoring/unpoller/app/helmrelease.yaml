@@ -48,6 +48,26 @@ spec:
 
     replicaCount: 1
 
+    # HARDENING 2026-09-06 (F-d5e5f1b0). Both pod and container securityContext
+    # were literally {} on a workload that mounts a config holding BOTH the
+    # UniFi controller user/password AND the InfluxDB auth_token. The image is
+    # distroless (no shell), so the runtime uid was unenforced rather than
+    # merely unverified.
+    #
+    # runAsNonRoot / runAsUser are deliberately NOT set here. The image's
+    # declared USER could not be read from the registry, and guessing it risks
+    # CreateContainerConfigError or a container that cannot read its own
+    # config — which would silently stop every unifi_* series. Pin the uid only
+    # after reading it off the image, not before.
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+
     # Service configuration
     # MUST stay false: chart 2.4.0 added a Service template (2.1.0 had none,
     # which is why this value was inert and service.yaml is hand-written).
