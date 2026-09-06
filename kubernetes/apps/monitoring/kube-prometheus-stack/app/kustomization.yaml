@@ -21,6 +21,7 @@ resources:
   - ./librechat-alerts.yaml
   - ./next-ai-draw-io-alerts.yaml
   - ./paperclip-alerts.yaml
+  - ./platform-alerts.yaml
   - ./node-hardware-alerts.yaml
   - ./container-memory-alerts.yaml
   - ./envoy-gateway-alerts.yaml

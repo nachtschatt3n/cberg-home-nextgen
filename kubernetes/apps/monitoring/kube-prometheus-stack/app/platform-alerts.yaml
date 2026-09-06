@@ -1,0 +1,135 @@
+---
+# Platform alerts — certificate expiry and Flux reconciliation.
+#
+# These could not exist before 2026-09-06. cert-manager's and flux-operator's
+# ServiceMonitors carried no `release` label while the Prometheus CR selected
+# `release: kube-prometheus-stack`, so neither was ever scraped and NO
+# `certmanager_*` or `flux_*` series existed at all. Alerting on them was not
+# broken, it was impossible (F-0fa5b600).
+#
+# It cost us the same day it was found: the Flux GitRepository sat Ready=False,
+# stuck three commits behind, for ~15 minutes, and nothing could page — the
+# series to alert on did not exist. That is what these rules close.
+#
+# Every expression below was written against labels VERIFIED on the live
+# series, not assumed: flux_resource_info carries kind/name/exported_namespace/
+# ready/suspended across 446 resources, and
+# certmanager_certificate_expiration_timestamp_seconds carries name/
+# exported_namespace/issuer_name across 11 certificates. A rule written against
+# a guessed label silently matches nothing and reports healthy forever.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-alerts
+  namespace: monitoring
+  labels:
+    # REQUIRED. A PrometheusRule without this label is never loaded, and
+    # nothing anywhere reports that as an error — the same silent-ignore class
+    # as the ServiceMonitor problem these rules exist because of.
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: certificates.expiry
+      interval: 5m
+      rules:
+        - alert: CertificateExpiringSoon
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < (14 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+            category: platform
+            component: cert-manager
+          annotations:
+            summary: "Certificate {{ $labels.name }} expires in under 14 days"
+            description: >-
+              {{ $labels.exported_namespace }}/{{ $labels.name }} (issuer
+              {{ $labels.issuer_name }}) expires in {{ $value | humanizeDuration }}.
+              cert-manager normally renews at 2/3 of lifetime, so reaching 14 days
+              means renewal is not happening — check the Certificate and its
+              CertificateRequest, do not just wait.
+        - alert: CertificateExpiringCritical
+          expr: (certmanager_certificate_expiration_timestamp_seconds - time()) < (3 * 24 * 3600)
+          for: 15m
+          labels:
+            severity: critical
+            category: platform
+            component: cert-manager
+          annotations:
+            summary: "Certificate {{ $labels.name }} expires in under 3 days"
+            description: >-
+              {{ $labels.exported_namespace }}/{{ $labels.name }} expires in
+              {{ $value | humanizeDuration }}. Ingress for the affected host will
+              start failing TLS when it lapses.
+        # Absence guard. Without this, losing the cert-manager scrape target
+        # returns the whole certificate estate to the invisible state it was in
+        # until 2026-09-06 — and a rule that matches nothing sits `inactive`,
+        # which is indistinguishable from healthy.
+        - alert: CertificateMetricsAbsent
+          expr: absent(certmanager_certificate_expiration_timestamp_seconds)
+          for: 30m
+          labels:
+            severity: warning
+            category: platform
+            component: cert-manager
+          annotations:
+            summary: "cert-manager certificate metrics have disappeared"
+            description: >-
+              No certmanager_certificate_expiration_timestamp_seconds series are
+              being scraped. Certificate expiry is currently UNMONITORED. Check the
+              cert-manager ServiceMonitor is still selected by the Prometheus CR.
+
+    - name: flux.reconciliation
+      interval: 2m
+      rules:
+        - alert: FluxResourceNotReady
+          # `suspended` is excluded deliberately: a suspended resource is not
+          # failing, it is parked on purpose, and paging on it trains people to
+          # ignore this alert.
+          expr: flux_resource_info{ready="False", suspended="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+            category: platform
+            component: flux
+          annotations:
+            summary: "Flux {{ $labels.kind }} {{ $labels.name }} not ready"
+            description: >-
+              {{ $labels.kind }} {{ $labels.exported_namespace }}/{{ $labels.name }}
+              has been not-ready for over 15m (reason {{ $labels.reason }}).
+              While a Kustomization or HelmRelease is stuck, its manifests are not
+              being applied.
+        - alert: FluxSourceStalled
+          # The specific failure that went unnoticed on 2026-09-06: the
+          # GitRepository could not fetch, so the whole cluster silently stopped
+          # deploying while every Kustomization still reported Ready against the
+          # LAST GOOD revision. Shorter `for` than the generic rule above,
+          # because a stalled source blocks everything downstream.
+          expr: flux_resource_info{kind="GitRepository", ready="False", suspended="False"} == 1
+          for: 10m
+          labels:
+            severity: critical
+            category: platform
+            component: flux
+          annotations:
+            summary: "Flux source {{ $labels.name }} cannot fetch"
+            description: >-
+              GitRepository {{ $labels.exported_namespace }}/{{ $labels.name }} has
+              been failing for over 10m. NOTHING IS DEPLOYING: downstream
+              Kustomizations keep reporting Ready against the last good revision, so
+              this does not surface anywhere else. On 2026-09-06 the cause was
+              wedged transport state in source-controller after a node roll —
+              egress from its own node was fine while the controller timed out; a
+              pod restart cleared it instantly.
+        - alert: FluxMetricsAbsent
+          expr: absent(flux_resource_info)
+          for: 30m
+          labels:
+            severity: warning
+            category: platform
+            component: flux
+          annotations:
+            summary: "Flux resource metrics have disappeared"
+            description: >-
+              No flux_resource_info series are being scraped, so Flux
+              reconciliation state is UNMONITORED — the condition that let a
+              stalled source go unnoticed. Check the flux-operator ServiceMonitor.
