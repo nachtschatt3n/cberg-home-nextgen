@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: grafana
-      version: 12.11.2
+      version: 13.0.1
       sourceRef:
         kind: HelmRepository
         name: grafana
@@ -57,6 +57,20 @@ spec:
     # Full evidence + the remaining options: security_ref: F-de4d92cd
     # Gate to re-run before ANY grafana image change (not just slim):
     # docs/sops/monitoring.md → "Image variants: plain vs -slim".
+    #
+    # 2026-09-06: chart 13.0.1 — the chart default image is now
+    # 13.2.0-distroless (readOnlyRootFilesystem: true, /tmp emptyDir, no
+    # /run.sh entrypoint, so no GF_*__FILE or GF_INSTALL_PLUGINS support).
+    # appVersion is UNCHANGED at 13.2.0, so no sqlite migration is crossed and
+    # `git revert` is a real rollback. Bundled datasource backends verified = 13
+    # on the distroless image before the roll (plain live image ships 11;
+    # elasticsearch/mysql are core-compiled, and the authoritative gate is the
+    # /api/plugins?type=datasource count = 18). There is NO shell on this pod —
+    # verify via the API only, never `kubectl exec ... sh`. Chart 13.1.0+ is
+    # deliberately NOT taken: it moves appVersion to 13.2.1, which would cross a
+    # version bump and break the git-revert rollback class. Roll the variant,
+    # never the version — docs/sops/grafana-image-changes.md.
+    # Plan: grafana-13.0.0 / findings F-8c1f6717, F-de4d92cd.
     deploymentStrategy:
       type: Recreate
     admin:
