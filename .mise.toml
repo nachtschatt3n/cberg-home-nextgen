@@ -25,7 +25,13 @@ uv = "latest"
 "aqua:kubernetes-sigs/kustomize" = "5.6.0"
 "aqua:kubernetes/kubectl" = "1.36.0"
 "aqua:mikefarah/yq" = "4.50.1"
-"aqua:siderolabs/talos" = "1.13.4"
+"aqua:siderolabs/talos" = "1.13.10"  # CLI pin — track the CLUSTER (talosVersion in
+                                     # kubernetes/bootstrap/talos/talconfig.yaml), not Renovate.
+                                     # Renovate PR #212 proposes 1.14.0, a minor AHEAD of a v1.13.10
+                                     # cluster: the siderolabs/* deny glob matches the dep NAME, so it
+                                     # cannot tell this dev-tool pin from the node image and the tooling
+                                     # mislabels it "needs a rolling node-reboot window" (F-9a58f400).
+                                     # It needs neither a window nor a plan — it is a local binary.
 "aqua:aquasecurity/trivy" = "0.70.0"
 "aqua:yannh/kubeconform" = "0.8.0"
 "cargo:unifictl" = "5.6.0"
