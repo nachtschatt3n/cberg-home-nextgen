@@ -442,10 +442,26 @@ kubectl get pods -n kube-system -l app=csi-smb-controller
 
 **Deployment:** `kubernetes/apps/home-automation/solarfocus-scraper/`
 **Source:** [`github.com/nachtschatt3n/solarfocus-scraper`](https://github.com/nachtschatt3n/solarfocus-scraper) (separate public repo — MIT)
-**Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper` — **SHA-pinned**, currently
-`sha-100f7af`. There is no `:latest` deployment; the tag is bumped by an explicit
-commit, so read the HelmRelease/Deployment for the live value rather than trusting
-this line.
+**Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper` — **SHA-pinned**. There is
+no `:latest` deployment; the tag is bumped by an explicit commit. **This page
+deliberately does not name the tag** — it drifted twice in two commits, so the
+value here could only ever be a guess. The source of truth is the HelmRelease:
+
+`kubernetes/apps/home-automation/solarfocus-scraper/app/helmrelease.yaml`
+→ `spec.values.controllers.scraper.containers.app.image.tag`
+
+```bash
+# Desired tag (what git/Flux want)
+kubectl -n home-automation get helmrelease solarfocus-scraper \
+  -o jsonpath='{.spec.values.controllers.scraper.containers.app.image.tag}{"\n"}'
+
+# Tag actually serving traffic (what the pod is running)
+kubectl -n home-automation get deploy solarfocus-scraper \
+  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+# Is the release reconciled at all?
+flux -n home-automation get helmrelease solarfocus-scraper
+```
 
 The heater (Solarfocus pellet^top) exposes no Modbus, so we drive its VNC
 touchscreen, OCR the visible values with Tesseract, and publish to MQTT
@@ -492,7 +508,7 @@ with Home Assistant auto-discovery.
 
 | Topic | Payload | Retained |
 |-------|---------|----------|
-| `solarfocus/<field>` | sensor value (string) | no |
+| `solarfocus/<field>` | sensor value (string) | yes |
 | `solarfocus/<field>/available` | online \| offline — per-field availability | yes |
 | `solarfocus/scraper/availability` | online \| offline — whole-cycle availability | yes |
 | `solarfocus/scraper/status` | ok \| busy \| navigation_failed \| sanity_failed \| paused | yes |
@@ -503,7 +519,7 @@ with Home Assistant auto-discovery.
 | `solarfocus/alert/title` | most recent alert title | yes |
 | `solarfocus/alert/body` | most recent alert body | yes |
 | `solarfocus/alert/last_seen` | ISO8601 timestamp of the last alert | yes |
-| `solarfocus/alarm_banner` | red header-banner text, the "Alarm" sensor (`sha-100f7af`) | no |
+| `solarfocus/alarm_banner` | `OK` when no banner is present; otherwise the red header-banner text, or `Alarm (unreadable)` if a red band is detected but cannot be read — the "Alarm" sensor | yes |
 | `solarfocus/command/+/set` | **scraper SUBSCRIBES here** — operator-pressed HA buttons | no |
 | `solarfocus/command/lagerraum_befuellt/set` | button press, "Lagerraum befuellt" | no |
 | `solarfocus/command/lagerraum_befuellt/result` | outcome of the last press | yes |
@@ -530,8 +546,18 @@ with Home Assistant auto-discovery.
   `navigation_failed`). `solarfocus/alarm_banner`, added in `sha-100f7af`, is
   the red banner in the screen HEADER — a fault surface the scraper did not
   watch before, which is why alarm 14 went unnoticed for six hours on
-  2026-09-06. A cycle that logs `alarm_banner` in `missing_fields` means no
-  banner was on screen, i.e. no active fault — that is the healthy case.
+  2026-09-06. **The healthy value is the retained string `OK`, not an absent
+  field.** Since `sha-fa90956` the no-alarm case publishes `OK`, so
+  `alarm_banner` appearing in `missing_fields` is a genuinely FAILED read — an
+  OCR/navigation problem to investigate, *not* a clean bill of health. (This
+  page previously said the opposite. That described a bug: the healthy case
+  used to publish `None`, which counted as a missing field every cycle and left
+  the sensor `unavailable` in HA except during a fault.) The distinction is
+  trustworthy because presence is decided by a **colour gate on the red
+  banner** — absence is therefore definitive rather than inferred from an empty
+  OCR result — and a red band that cannot be OCR'd returns `Alarm (unreadable)`,
+  never `OK`. **Automations must key off `state != "OK"`**, never off the field
+  being present.
 - **The command tree is not access-controlled.** The scraper subscribes to the
   wildcard `solarfocus/command/+/set`, and mosquitto runs with
   `allow_anonymous true` and no `acl_file`, on a LoadBalancer IP reachable from
