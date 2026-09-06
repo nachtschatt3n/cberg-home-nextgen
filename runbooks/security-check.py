@@ -3825,6 +3825,27 @@ def s11_unifi() -> tuple[str, Findings, str]:
     return f.worst(), f, "\n".join(lines)
 
 
+def flag_wazuh_groups(buckets, concerning, rare, volume_floor=5):
+    """Which rule.groups buckets deserve a finding. Pure, so it is testable.
+
+    Two tiers on purpose. `concerning` groups are noisy and only matter above
+    `volume_floor`; `rare` groups should be zero in a healthy cluster, so any
+    occurrence counts. Applying one floor to both is what made `recon` and
+    `web_scan` unreportable -- each returned 1 event over 7 days, and a `> 5`
+    floor can never surface a single-event category.
+
+    Kept module-level rather than inlined in the query path because the query
+    path needs a live indexer, and a check that can only be exercised against
+    production is a check nobody exercises.
+    """
+    out = []
+    for b in buckets:
+        key, n = b["key"], b["doc_count"]
+        if (key in concerning and n > volume_floor) or (key in rare and n > 0):
+            out.append((key, n))
+    return out
+
+
 def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     """Surface SIEM-identified issues from the Wazuh indexer.
 
@@ -3887,17 +3908,39 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     }
     data = wz.query(body)
     med_total = data["hits"]["total"]["value"] if data else 0
+    # VOLUME categories: noisy enough that a handful of events is normal, so
+    # they are only interesting above a floor.
+    #
+    # `attacks` (PLURAL) was missing until 2026-09-06 and that was a blind
+    # spot, not a typo: Wazuh ships both `attack` and `attacks` as distinct
+    # groups and only the singular was listed, so an `attacks` burst scored
+    # green. Verified against our OWN indexer rather than assumed -- a 7-day
+    # rule.groups aggregation returns `attacks` (19), `agent_flooding` (20)
+    # and `configuration_failure` (5) as live groups that this set did not
+    # name. Re-run that aggregation before editing this set; a group name
+    # guessed from upstream docs that we never emit is inert, and an inert
+    # entry looks exactly like a passing one.
     concerning = {
         "authentication_failed", "authentication_failures",
-        "web_attack", "attack", "intrusion_detection",
-        "privilege_escalation", "rootcheck", "syscheck",
-        "ids", "ipsec",
+        "web_attack", "attack", "attacks",
+        "rootcheck", "syscheck", "ids", "ipsec",
+        "agent_flooding",         # agent dropping events == blind SIEM
+        "configuration_failure",  # agent cannot apply manager config
+    }
+    # RARE categories: these should be ZERO in a healthy homelab, so the
+    # volume floor that protects the noisy groups would suppress exactly the
+    # events worth seeing. `recon` and `web_scan` each returned 1 in the last
+    # 7 days -- under the old `> 5` floor they could never have surfaced even
+    # if they had been in the set.
+    rare = {
+        "intrusion_detection", "privilege_escalation",
+        "recon", "web_scan",
     }
     flagged: list[tuple[str, int]] = []
     if data:
-        for b in data.get("aggregations", {}).get("by_groups", {}).get("buckets", []):
-            if b["key"] in concerning and b["doc_count"] > 5:
-                flagged.append((b["key"], b["doc_count"]))
+        flagged = flag_wazuh_groups(
+            data.get("aggregations", {}).get("by_groups", {}).get("buckets", []),
+            concerning, rare)
     if flagged:
         for cat, n in flagged:
             f.add(WARNING, f"Wazuh: {n} `{cat}` events (level 7-11, 24h)")
