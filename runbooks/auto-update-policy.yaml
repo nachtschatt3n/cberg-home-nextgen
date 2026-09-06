@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.05.2"
+version: "2026.09.06.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -150,6 +150,22 @@ deny:
   # unattended against a chart that templates for v3. Keep unpoller denied and
   # move it in a fresh PLAN-lane plan once a v5-aware chart ships (the old
   # unpoller-v5.1.0 plan was EXECUTED and retired 2026-09-06, commit b3cae4c1).
+  # grafana chart is CHART-VERSION-SAFE but APPVERSION-UNSAFE, and only a human
+  # knows the difference. On 2026-09-06 the operator approved 12.11.2 -> 13.0.1
+  # on one explicit condition: 13.0.1 ships appVersion 13.2.0, IDENTICAL to what
+  # was running, so `git revert` remains a real rollback. 13.1.0+ moves
+  # appVersion to 13.2.1 and crosses Grafana's sqlite migrations, destroying that
+  # property.
+  # Retiring the executed plan moved the 13.0.1 -> 13.2.1 residual into the AUTO
+  # lane as a "safe minor" (F-3c9029d5). Grafana has no open Renovate PR, so the
+  # no-PR DIRECT-BUMP half would have applied it at Step 0 of the very next
+  # unattended window (nightly 2026-09-07 03:30) and silently thrown away the
+  # operator's approval condition. A chart-level "minor" is not a safe minor when
+  # the appVersion moves underneath it.
+  # REMOVE THIS RULE only together with a plan that states which appVersion the
+  # target chart ships and what the rollback class becomes.
+  - match: "*grafana*"
+    reason: "chart minors can move appVersion (13.0.1 ships app 13.2.0; 13.1.0+ ships 13.2.1), which crosses forward-only sqlite migrations and downgrades the rollback from git-revert to restore-from-backup. Grafana bumps go through the PLAN lane so the appVersion delta is stated explicitly, per docs/sops/grafana-image-changes.md 'roll the variant, never the version'."
   - match: "*unpoller*"
     reason: "image v5.2.4 is pinned AHEAD of chart 2.4.0 (appVersion v3.5.0) as of 2026-09-06 (shipped by the now-retired plan unpoller-v5.1.0, commit b3cae4c1). This is the coredns shape: the pinned image.tag permanently outranks appVersion, so a future chart bump would score as a safe minor and land unattended while templating for v3 — and chart templates change semantics between releases (2.4.0 itself added a Service that would have collided with our hand-written one). Chart bumps must go through the PLAN lane until a chart ships appVersion >= the pinned tag AND its values diff is re-vetted against our Service/PodMonitor overrides."
   - match: "*openclaw*"

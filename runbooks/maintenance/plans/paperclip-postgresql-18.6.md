@@ -53,7 +53,14 @@ rollback_class: backup-restore        # postgres has NO downgrade path (upstream
                                       # replaying the dump, not `git revert`.
 backup_gate: "pg_dump of the paperclip database taken from the LIVE pg17 pod, verified non-empty + '-- PostgreSQL database dump complete' + per-table row counts captured, BEFORE the image/subPath edit is pushed"
 finding_refs: []
-status: draft
+status: blocked                       # BLOCKED 2026-09-06. Was `draft`, which is NOT a dead
+                                      # status: maintenance-plan.py still derived
+                                      # AUTO-BACKUP-GATED for it, and `blocked` is not in
+                                      # coverage.py DEAD_PLAN_STATUSES either — only
+                                      # `window: null` was keeping it out of an
+                                      # auto-executable lane. See the DO-NOT-EXECUTE
+                                      # header: as written this plan lands initdb and the
+                                      # restore in the container ephemeral layer. (F-61d8147e)
 window: null                          # operator schedules; do not self-assign
 sops_refs:
   - docs/sops/application-update.md
