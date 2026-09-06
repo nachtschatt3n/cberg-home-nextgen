@@ -31,7 +31,20 @@ spec:
     image:
       repository: ghcr.io/unpoller/unpoller
       pullPolicy: IfNotPresent
-      tag: v3.5.0
+      # 2026-09-06: image-only major v3.5.0 -> v5.2.4 (plan unpoller-v5.1.0,
+      # finding F-a5ceabc1). The chart stays 2.4.0 because NO v5-aware chart
+      # exists — the newest published is still 2.4.0/appVersion v3.5.0. That is
+      # safe here only because chart 2.4.0 is a version-agnostic wrapper: it
+      # renders our `upConfig` verbatim and we disable its Service, PodMonitor
+      # and dashboards below, so the sole chart-to-image coupling is this tag.
+      # This pin now permanently outranks appVersion (the coredns shape), which
+      # is why the *unpoller* deny rule in runbooks/auto-update-policy.yaml
+      # STAYS and was retargeted in the same commit rather than removed.
+      # v5.1.0 renamed InfluxDB tags/fields (clients.channel -> channel_name,
+      # uap_radios.channel -> channel_num, duplicate wan_ip/source/version
+      # fields dropped); in-repo dashboards are all Prometheus-datasource, so
+      # only operator-built InfluxDB panels could need repointing.
+      tag: v5.2.4
 
     replicaCount: 1
 

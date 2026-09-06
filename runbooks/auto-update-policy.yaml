@@ -148,9 +148,9 @@ deny:
   # chart 2.4.0 -> appVersion v3.5.0 (published 2026-08-18), so NO v4-aware
   # chart exists. With the rule gone, the v4 image major would be free to land
   # unattended against a chart that templates for v3. Keep unpoller denied and
-  # move it in plan unpoller-v4 once a v4 chart ships.
+  # move it in plan unpoller-v5.1.0 once a v5-aware chart ships.
   - match: "*unpoller*"
-    reason: "image v4.0.0 (2026-08-19) has no v4-aware chart — newest is chart 2.4.0/appVersion v3.5.0. Chart and image move together in plan unpoller-v4, never as an unattended half."
+    reason: "image v5.2.4 is pinned AHEAD of chart 2.4.0 (appVersion v3.5.0) as of 2026-09-06 (plan unpoller-v5.1.0). This is the coredns shape: the pinned image.tag permanently outranks appVersion, so a future chart bump would score as a safe minor and land unattended while templating for v3 — and chart templates change semantics between releases (2.4.0 itself added a Service that would have collided with our hand-written one). Chart bumps must go through the PLAN lane until a chart ships appVersion >= the pinned tag AND its values diff is re-vetted against our Service/PodMonitor overrides."
   - match: "*openclaw*"
     reason: "held at 2026.6.11 pending the Memory Core→SQLite migration (2026.7.1 blocked)."
   - match: "*@openclaw/*"
