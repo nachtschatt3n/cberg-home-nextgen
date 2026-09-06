@@ -20,8 +20,18 @@ depends_on: []
 conflicts_with: []
 capability_change: false
 rollback_class: git-revert
-status: vetted
-window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
+status: executed                      # EXECUTED 2026-09-07, operator present. Verified:
+                                      # HR reports chart 13.2.1 (not Ready-against-the-old-
+                                      # revision), image grafana:13.2.1-distroless,
+                                      # /api/health version 13.2.1 db ok, 81 dashboards and
+                                      # 7 datasources unchanged from baseline, and
+                                      # grafana_build_info STILL SCRAPED reporting 13.2.1.
+                                      # CVE benefit confirmed by re-scanning the LIVE
+                                      # image; the count dropped and the residue is all
+                                      # golang.org/x/crypto — vendored, upstream-rebuild-
+                                      # bound exactly as predicted. Numbers on the finding
+                                      # record, not here: security_ref F-e8894b9a.
+window: "sun-attended:2026-09-13"   # pulled forward and executed 2026-09-07   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 premises:
   - id: chart-still-13.0.1
     why: >-
@@ -58,13 +68,12 @@ wrong one returns nothing for 13.x).
 
 Scanned both image tags directly, `--ignore-unfixed --severity CRITICAL`:
 
-| image | fixable CRITICAL |
-|---|---|
-| `grafana/grafana:13.2.0-distroless` (current) | 5 |
-| `grafana/grafana:13.2.1-distroless` (target)  | 3 |
+The measured per-image counts live on the finding record, never in this file
+(`runbooks/policy-cli.py finding show F-e8894b9a`) — see
+docs/sops/vulnerability-disclosure.md.
 
-So this clears 2 and **leaves 3**. That is the honest reason to do it, and the
-honest reason not to expect the finding to disappear: the residue is Go stdlib
+So this clears part of the backlog and leaves a residue. That is the honest
+reason to do it, and the honest reason not to expect the finding to disappear: the residue is Go stdlib
 and `golang.org/x/crypto` in an image we do not build, so it needs an upstream
 rebuild, not another tag.
 
@@ -103,6 +112,20 @@ Bump `spec.chart.spec.version` 13.0.1 -> 13.2.1 in
 `kubernetes/apps/monitoring/grafana/app/helmrelease.yaml`, commit, push, let
 Flux reconcile. Change nothing else — in particular do not touch
 `serviceMonitor`.
+
+The owning Kustomization is **`grafana` in namespace `monitoring`**, not a
+`monitoring` Kustomization in `flux-system` (measured 2026-09-07 — that name
+does not exist):
+
+```bash
+flux reconcile kustomization grafana -n monitoring --with-source
+```
+
+Until that runs, `flux get helmrelease -n monitoring grafana` keeps reporting
+**Ready=True against chart 13.0.1** — the last good revision. That is the
+"Ready is not proof" trap in its natural habitat: the HelmRelease is genuinely
+healthy, it simply has not been handed the new manifest yet. Check the
+REVISION column, not the READY column.
 
 ## Verification
 
