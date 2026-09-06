@@ -64,10 +64,22 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: postgres:17.11-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+        image: postgres:18.6-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
         ports:
         - containerPort: 5432
         env:
+        # PIN PGDATA EXPLICITLY — load-bearing, do not remove (plan
+        # paperclip-postgresql-18.6). postgres:18 moved its DEFAULT PGDATA from
+        # /var/lib/postgresql/data to /var/lib/postgresql/18/docker, and its
+        # VOLUME from .../data to /var/lib/postgresql. The mount below is still
+        # at /var/lib/postgresql/data, so without this pin initdb and the
+        # restore would land OUTSIDE the mount, in the container's ephemeral
+        # layer: SELECT version() reports 18.6, row counts match, the app
+        # works — and the data is gone at the next pod restart. Pinning inside
+        # the mount also keeps this immune when PG19 relocates the default
+        # again. See docs/sops/postgres-major-upgrade.md.
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
         - name: POSTGRES_DB
           value: paperclip
         - name: POSTGRES_USER
@@ -87,7 +99,13 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
-          subPath: postgres
+          # FRESH, EMPTY dir for the 18.6 cluster. A major bump cannot reuse a
+          # 17 datadir in place (the 18 binary refuses it and crash-loops), so
+          # the restore goes into a new subdir. The old `postgres` subdir is
+          # deliberately LEFT ON THE PVC as the rollback floor — reverting this
+          # file restores the 17.11 image and this subPath in one step, with no
+          # data movement. Do not delete `postgres/`.
+          subPath: postgres18
         readinessProbe:
           exec:
             command:
