@@ -57,9 +57,24 @@ spec:
              PNG is no longer redelivered to every subscriber on reconnect).
           Do NOT re-calibrate screen hashes as a first response - hashes
           self-heal at runtime and are almost never the cause.
-        summary: Solarfocus scraper failing repeatedly
+          Expression note: the second branch exists because a counter series is
+          born at 1 on its first increment, so increase() over a series younger
+          than the window cannot see that first failure - it returned 0 right
+          after a real navigation_failed on 2026-09-06. When the failure series
+          did not exist 30m ago, its whole value IS the count for the window, so
+          the raw total is used instead. Both branches keep the >3 threshold, so
+          a single isolated failure still does not page.
+        summary: Solarfocus scraper failing repeatedly on pod {{ $labels.pod }}
       expr: |
-        sum(increase(solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"}[30m])) > 3
+        sum by (pod) (
+          increase(solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"}[30m])
+        ) > 3
+        or
+        (
+          sum by (pod) (solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"}) > 3
+          unless
+          sum by (pod) (solarfocus_scraper_runs_total{status=~"navigation_failed|sanity_failed"} offset 30m)
+        )
       for: 5m
       labels:
         category: home-automation
