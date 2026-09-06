@@ -178,6 +178,37 @@ def cmd_track_record(args) -> int:
     return 0
 
 
+# Statuses that mean "this plan must not execute", regardless of what its
+# declared facts derive to. Discovered the hard way 2026-09-06: paperless-db was
+# set `status: blocked` after its pre-check caught a premise that would have
+# dropped an integrity check from the document library's dump — and it STILL
+# derived AUTO-BACKUP-GATED, because the derivation reads facts and never looks
+# at status. `blocked` is likewise absent from coverage.py's DEAD_PLAN_STATUSES.
+# Only `window: null` was keeping it out of an auto lane, which is not a control.
+DEAD_STATUSES = ("blocked", "executed", "superseded")
+
+
+def eligibility_verdict(status, execution_class, threshold,
+                        clean_supervised, verified):
+    """(eligible, reason). Pure — no DB, no filesystem — so the refusals can be
+    tested directly instead of inferred from the source text.
+
+    Every unknown resolves to DENY. This tool exists because a gate that could
+    not be answered defaulted to no; the mirror-image bug would be an
+    unanswerable gate defaulting to yes."""
+    if status in DEAD_STATUSES:
+        return False, f"plan status is {status!r} — must not execute"
+    if not str(execution_class or "").startswith("AUTO"):
+        return False, "class is not auto-executable"
+    if threshold is None:
+        return False, "autonomy policy unreadable (fail-safe)"
+    if not verified:
+        return False, "track record unreadable — denied, not assumed"
+    if clean_supervised >= threshold:
+        return True, f"{clean_supervised} clean supervised run(s) of {threshold} required"
+    return False, f"{clean_supervised} clean supervised run(s) of {threshold} required"
+
+
 def cmd_eligible(args) -> int:
     """May this plan execute unattended tonight? Fail-safe in every direction."""
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -186,7 +217,7 @@ def cmd_eligible(args) -> int:
     mp = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mp)
 
-    plans = [p for p in mp.load_plans() if p.get("plan_id") == args.plan_id]
+    plans = [p for p in mp.load_plans(mp.load_windows()) if p.get("plan_id") == args.plan_id]
     if not plans:
         print(json.dumps({"eligible": False, "reason": f"no plan {args.plan_id!r}"}))
         return 1
@@ -196,26 +227,25 @@ def cmd_eligible(args) -> int:
     threshold = load_policy()
     category = derive_category(plan.get("kind"), klass)
 
-    verdict = {"plan_id": args.plan_id, "category": category,
+    status = str(plan.get("status") or "").strip()
+    verdict = {"plan_id": args.plan_id, "category": category, "status": status,
                "execution_class": klass, "class_reason": reason,
                "threshold": threshold}
 
-    if not klass.startswith("AUTO"):
-        verdict.update(eligible=False, reason="class is not auto-executable")
-    elif threshold is None:
-        verdict.update(eligible=False, reason="autonomy policy unreadable (fail-safe)")
-    else:
+    clean, verified = 0, False
+    # Only reach for the DB when the cheap, local refusals have not already
+    # decided it — a blocked plan is not eligible whether or not Postgres is up.
+    if status not in DEAD_STATUSES and str(klass).startswith("AUTO") and threshold is not None:
         conn = _connect()
-        if conn is None:
-            verdict.update(eligible=False, verified=False,
-                           reason="track record unreadable — denied, not assumed")
-        else:
+        if conn is not None:
             with conn, conn.cursor() as cur:
                 rows = _track_record(cur, category)
             clean = rows[0]["clean_supervised"] if rows else 0
-            verdict.update(verified=True, clean_supervised=clean,
-                           eligible=clean >= threshold,
-                           reason=(f"{clean} clean supervised run(s) of {threshold} required"))
+            verified = True
+
+    eligible, why = eligibility_verdict(status, klass, threshold, clean, verified)
+    verdict.update(eligible=eligible, reason=why,
+                   verified=verified, clean_supervised=clean)
     print(json.dumps(verdict, indent=2) if args.json else json.dumps(verdict))
     return 0 if verdict.get("eligible") else 1
 
