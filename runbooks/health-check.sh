@@ -2965,11 +2965,39 @@ PYEOF
     fi
     echo ""
 
+    # SATURATION CONTROL, added 2026-09-06. If EVERY device with a last_seen is
+    # stale, the sensor is broken, not the mesh -- and reporting that as a
+    # device problem is a false pass in both directions.
+    #
+    # Measured 2026-09-06: state.json held 24 entries, 24 of them stale, the
+    # NEWEST 9.1 days old, while zigbee2mqtt was actively publishing device
+    # messages and the payload on the wire carried a CURRENT last_seen
+    # ("2026-09-06T19:13..."). The persisted copy froze on 2026-08-28 ~15:40
+    # for every device at once. The registry (database.db) confirms 24
+    # non-coordinator devices, so the DENOMINATOR is right -- it is the
+    # timestamps that are dead. `/data/state.json`'s last_seen is therefore
+    # NOT a liveness signal, however current the file's mtime looks.
+    #
+    # That permanent 24-of-24 is also where the `baseline 23` below came from:
+    # a false positive was silenced with a magic number, and the silencing then
+    # hid a genuinely dead device (Soil Sensor 2, dark 14.4d, battery 0) inside
+    # the noise. Suppressing a symptom blinded the detector -- so refuse to
+    # score at all rather than emit a number that cannot mean anything.
+    #
+    # The real fix is to read the live MQTT `zigbee2mqtt/bridge/devices` topic
+    # instead; until then this must not report a pass.
+    if [ -n "$Z2M_OFFLINE_5D" ] && [ -n "$Z2M_TOTAL" ] && [ "$Z2M_TOTAL" -gt 0 ] \
+       && [ "$Z2M_OFFLINE_5D" -eq "$Z2M_TOTAL" ] 2>/dev/null; then
+        _record_unmeasured "zigbee-staleness" \
+            "every device with a last_seen is stale ($Z2M_OFFLINE_5D/$Z2M_TOTAL) -- state.json last_seen is frozen, so this is a dead SENSOR, not $Z2M_TOTAL dead devices; read zigbee2mqtt/bridge/devices over MQTT instead"
+        log_warning "Zigbee staleness detector is UNUSABLE: $Z2M_OFFLINE_5D/$Z2M_TOTAL devices stale — state.json last_seen is frozen, not the mesh"
     # Baseline: 23 stale entries from decommissioned devices (as of 2026-04-17) — see docs/troubleshooting/ha-upstream-integration-issues.md
     # These are state.json records of physically removed/replaced devices, not live Zigbee failures.
     # Trip only if count exceeds baseline by a clear margin OR increases unexpectedly.
-    Z2M_OFFLINE_BASELINE=23
-    if [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt $((Z2M_OFFLINE_BASELINE + 5)) ]; then
+    # NOTE the branch above runs FIRST and swallows the saturated case, so this
+    # baseline now only applies to a partially-stale reading -- the only shape
+    # in which it was ever meaningful.
+    elif Z2M_OFFLINE_BASELINE=23 && [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt $((Z2M_OFFLINE_BASELINE + 5)) ]; then
         log_warning "Zigbee devices offline >5 days above baseline: $Z2M_OFFLINE_5D (baseline: $Z2M_OFFLINE_BASELINE)"
         add_major_issue "Zigbee devices offline >5 days: $Z2M_OFFLINE_5D/${Z2M_TOTAL} (baseline $Z2M_OFFLINE_BASELINE)"
     elif [ -n "$Z2M_OFFLINE_5D" ] && [ "$Z2M_OFFLINE_5D" -gt 0 ]; then
