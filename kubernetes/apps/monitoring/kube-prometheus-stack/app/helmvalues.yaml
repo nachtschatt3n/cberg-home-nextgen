@@ -162,9 +162,32 @@ data:
           matchLabels:
             release: kube-prometheus-stack
         serviceMonitorSelectorNilUsesHelmValues: false
-        serviceMonitorSelector:
-          matchLabels:
-            release: kube-prometheus-stack
+        # SELECT ALL ServiceMonitors (F-0fa5b600, 2026-09-06). This previously
+        # carried `matchLabels: {release: kube-prometheus-stack}` and 21 of 55
+        # ServiceMonitors were therefore NEVER SCRAPED — cert-manager,
+        # flux-operator, metrics-server, spegel, both ingress-nginx controllers,
+        # grafana and 13 authentik outposts. Not degraded: absent. No
+        # `certmanager_*` or `gotk_*`/`flux_*` series existed at all, so
+        # cert-expiry and Flux-reconcile alerting were not broken, they were
+        # IMPOSSIBLE.
+        #
+        # That is not theoretical. On 2026-09-06 the Flux GitRepository sat
+        # stuck three commits behind for ~15 minutes with Ready=False, and
+        # nothing could page, because the series to alert on did not exist.
+        #
+        # Why select-all rather than labelling 21 charts: several of these
+        # ServiceMonitors are generated (the 13 ak-outpost ones are created by
+        # authentik at runtime), and the grafana chart HARDCODES
+        # `release: {{ .Release.Name }}` and rejects a values override with a
+        # duplicate-key render error. A per-chart fix is unmaintainable and
+        # silently regresses whenever a chart is added — which is exactly how
+        # this got to 21. `podMonitorSelector` and `scrapeConfigSelector` were
+        # already effectively select-all; ServiceMonitors were the outlier.
+        #
+        # ruleSelector deliberately KEEPS its label constraint: rules are all
+        # in-repo and do carry it, and a rule selector is a different risk (it
+        # governs what gets EVALUATED, not what gets scraped).
+        serviceMonitorSelector: {}
         podMonitorSelectorNilUsesHelmValues: false
         probeSelectorNilUsesHelmValues: false
         scrapeConfigSelectorNilUsesHelmValues: false
