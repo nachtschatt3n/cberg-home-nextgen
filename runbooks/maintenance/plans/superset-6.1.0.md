@@ -35,7 +35,7 @@ touches:
                                        # ingress/cert-manager/CNI untouched
 depends_on: [superset-pg-cutover]      # HARD. See §6 — this must not run against the DB
                                        # we are about to retire.
-conflicts_with: [superset-pg-cutover, superset-pg-decommission]  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
+conflicts_with: [superset-pg-cutover]  # RESOLVED 2026-09-06: 'superset-pg-decommission' removed — that plan was EXECUTED 2026-09-05 (c4694b13 + 90539942) and its file retired, so it can never be scheduled again and cannot collide with this one. The operator's Option-B ordering ("run 6.1.0 AFTER the decommission", see window: below) is SATISFIED, not discarded: the decommission landed 2026-09-05, this plan sits at sun-attended:2026-09-20. superset-pg-cutover is KEPT — its file still exists as the hard depends_on anchor below.  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
 security_ref: F-9d259837
 status: draft
 window: "sun-attended:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B

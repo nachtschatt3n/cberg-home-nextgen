@@ -234,13 +234,30 @@ def reconcile(cfg, today):
     # run for two-thirds of the queue is the same silent-skip class as the ES
     # field bugs. Resolve the window def by id so the checks cover all plans.
     win_by_id = {w["id"]: w for w in cfg["windows"]}
+    # A plan in a TERMINAL state (executed / superseded) is not schedulable
+    # work — but it stays in this map if its file still carries a `window:`,
+    # and then it inflates that slot's risk-load and time budget and lists as
+    # though it were queued. Both live cases did exactly that:
+    # superset-pg-decommission (executed 2026-09-05) held sat-attended:2026-09-05
+    # and talos-1.13.9 (superseded) held sun-attended:2026-08-30, a slot whose
+    # date had long passed. `unrun_plans` already exempts these two statuses
+    # from the MISSED warning, but nothing kept them out of OCCUPANCY.
+    # Excluding them silently would trade a false capacity signal for an
+    # invisible file-hygiene miss, so the exclusion is paired with its own
+    # warning below — the detector must not go blind to fix the symptom.
+    retired = retired_still_windowed(plans)
     scheduled = {}
     for p in plans:
         slot = p.get("window")
-        if slot:
+        if slot and p.get("status") not in MISSED_EXEMPT_STATUSES:
             scheduled.setdefault(slot, []).append(p)
 
     warnings = []
+    for p in retired:
+        warnings.append(
+            f"RETIRED PLAN STILL WINDOWED: {p.get('plan_id')} "
+            f"(status {p.get('status')}) still names {p.get('window')} — "
+            f"retire the file (plans/README.md: delete once executed)")
     for slot, ps in scheduled.items():
         w = win_by_slot.get(slot) or win_by_id.get(slot.split(":", 1)[0])
         # missed window (date in the past, plan neither ran nor was retired).
@@ -371,6 +388,8 @@ def reconcile(cfg, today):
         "open_issue_keys": open_issue_keys,
         "next_windows": occ[:6],
         "scheduled": {k: [p.get("plan_id") for p in v] for k, v in scheduled.items()},
+        "retired_windowed": [{"plan_id": p.get("plan_id"), "status": p.get("status"),
+                              "window": p.get("window")} for p in retired],
         "warnings": warnings,
         "plan_status": {s: sum(1 for p in plans if p.get("status") == s)
                         for s in ["draft", "vetted", "scheduled", "awaiting-go", "executed", "blocked", "superseded"]},
@@ -652,6 +671,16 @@ def unrun_plans(plans):
     """Pure logic: the plans at a past slot that genuinely did not run."""
     return [p for p in plans
             if p.get("status") not in MISSED_EXEMPT_STATUSES]
+
+
+def retired_still_windowed(plans):
+    """Pure logic: plans in a terminal state that STILL name a window.
+
+    Their work is done or abandoned, so they must not consume window
+    occupancy — but the stale `window:` is itself the finding (the file was
+    never retired), so this is reported rather than silently dropped."""
+    return [p for p in plans
+            if p.get("window") and p.get("status") in MISSED_EXEMPT_STATUSES]
 
 
 def missing_window_runs(expected, run_rows):
