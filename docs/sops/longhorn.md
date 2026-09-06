@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Longhorn distributed storage management.
 > Reference: `docs/infrastructure.md` for storage overview, `docs/integration.md` for storage class selection.
 > Description: Operating Longhorn storage classes, volumes, backups, and lifecycle workflows.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.09.06`
+> Last Updated: `2026-09-06`
 > Owner: `Platform`
 
 ---
@@ -324,6 +324,22 @@ commit that added this section):
 7. Delete the old PVC (safe only because of step 1), release the new PV from the
    seed claim (`kubectl patch pv <new> --type json -p
    '[{"op":"remove","path":"/spec/claimRef"}]'`), then let the app rebuild.
+8. **Re-check RecurringJob enrolment — it does NOT follow the data.** Enrolment
+   is a label on the *volume* (`recurring-job-group.longhorn.io/<group>` or
+   `recurring-job.longhorn.io/<job-name>: enabled`), so a new volume inherits
+   only what you or Longhorn's defaults put on it. Confirm the new volume is in
+   the `default` group (which buys trim 02:00, snapshot-cleanup 02:30 and backup
+   03:00), and either re-enrol it in, or delete, any per-volume job that named
+   the old one. The first nightly backup of the new volume is unproven until it
+   runs — until then your recovery floor is still the *old* volume's backup set,
+   which survives in the backupstore even after the source volume is deleted:
+
+   ```bash
+   kubectl get volume -n storage <new-volume> -o json \
+     | python3 -c "import sys,json;print({k:v for k,v in json.load(sys.stdin)['metadata']['labels'].items() if 'recurring-job' in k})"
+   # next morning: prove the first backup landed
+   kubectl get volume -n storage <new-volume> -o jsonpath='{.status.lastBackupAt}{"\n"}'
+   ```
 
 **Two traps this procedure exists to teach:**
 
