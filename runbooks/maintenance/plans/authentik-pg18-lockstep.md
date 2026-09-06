@@ -59,8 +59,13 @@ finding_refs: [F-8ab2ee07]  # plan-lane finding: "authentik postgres 17.11 findi
                             # "exclude the bundled block from version attribution" arm of its own
                             # prescribed remediation (the other arm, "finish the decommission", is
                             # authentik-pg17-decommission.md, not this plan).
-status: draft
-window: null
+status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+                 # cluster, not against the plan's own prose:
+                 # live authentik-server is
+                 # ghcr.io/goauthentik/server:2026.8.0 and authentik-
+                 # postgresql is postgres:17.11-bookworm -- both halves of
+                 # `current` hold.
+window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/authentik.md

@@ -24,8 +24,14 @@ rollback_class: git-revert    # DECLARED 2026-09-06. The production runtime is
                           # Removing it changes the image's SHAPE, not what the
                           # software can do, so capability_change is false.
                           # Undo is: revert the Dockerfile commit and rebuild.
-status: draft
-window: null
+status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+                 # cluster, not against the plan's own prose:
+                 # npm 12.0.2 and node confirmed present at /usr/local/bin in
+                 # the RUNNING my-software-production container, not merely
+                 # in the Dockerfile. Dockerfile line 39 installs npm in
+                 # `base` and line 84 is `FROM base AS production`, so the
+                 # inheritance the plan describes is real.
+window: "sun-attended:2026-09-13"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
 # from capability_change/rollback_class per runbooks/autonomy-policy.yaml.
 # (original rationale: changes the shape of the production runtime image)

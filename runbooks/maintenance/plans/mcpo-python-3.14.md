@@ -27,8 +27,13 @@ capability_change: false              # base-image bump only; mcpo's own image
                                        # its config.json are untouched
 rollback_class: git-revert
 finding_refs: []
-status: draft
-window: null
+status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+                 # cluster, not against the plan's own prose:
+                 # `python --version` in the running ai/mcpo pod reports
+                 # 3.11.2, matching the `3.11-slim` premise. The image tag is
+                 # git-44ce6d0 and carries no python version, so the tag
+                 # alone could NOT have confirmed this.
+window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 sops_refs:
   - docs/sops/application-update.md
 generated: "2026-09-05"

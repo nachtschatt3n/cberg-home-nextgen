@@ -34,8 +34,11 @@ capability_change: false          # no user-visible behaviour change; internal
 rollback_class: git-revert        # image tag only; config unchanged; bbolt queue
                                   # schema unchanged between 0.158/0.159/0.160
 finding_refs: []
-status: draft
-window: null
+status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+                 # cluster, not against the plan's own prose:
+                 # live image is otel/opentelemetry-collector-
+                 # contrib:0.158.0, matching `current`.
+window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/monitoring.md         # "ES Rejected Documents" + edot-collector recipes

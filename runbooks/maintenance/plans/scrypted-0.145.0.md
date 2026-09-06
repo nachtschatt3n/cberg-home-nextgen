@@ -37,8 +37,13 @@ capability_change: false          # see §2.4 — this is the one fact a reviewe
 rollback_class: git-revert        # see §2.3 — established from the live filesystem,
                                   # not assumed.
 finding_refs: [F-b885ec1b]
-status: draft
-window: null
+status: vetted   # VETTED 2026-09-06. Premise checked against the LIVE
+                 # cluster, not against the plan's own prose:
+                 # live koush/scrypted:v0.143.0-noble-full, matching
+                 # `current`. NOTE the workload is deployment/scrypted in
+                 # home-automation -- the directory is named scrypted-nvr but
+                 # the HelmRelease and the release are both named `scrypted`.
+window: "sat-attended:2026-09-12"   # AUTO-ASSIGNED 2026-09-06 by window-scheduler (AUTO-NIGHT; earning supervised runs — category not yet graduated)
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/storage-safety.md
