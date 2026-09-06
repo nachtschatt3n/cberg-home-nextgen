@@ -117,7 +117,16 @@ def main() -> int:
           if "| approved" in readme or "approved |" in readme else [], None)
     agent = (REPO / ".claude/agents/maintenance-window-agent.md").read_text()
     import re as _re
-    m2 = _re.search(r"status: ([a-z|-]+)", agent)
+    # Scope the search to the Step 1 section. This used to be a first-match
+    # regex over the WHOLE file, which made it match any `status: <word>` that
+    # happened to appear earlier — on 2026-09-06 a new paragraph mentioning a
+    # cron's `status: ok` shadowed the real load-set and failed the test with
+    # "outside VALID_STATUSES: ['ok']". Anchoring to the section it is actually
+    # asserting about keeps prose elsewhere in the file from breaking it.
+    # A missing section still fails (via the `<no load-set found>` path below):
+    # narrowing the search must not turn a real miss into a silent pass.
+    sect = _re.search(r"^## Step 1\b.*?(?=^## |\Z)", agent, _re.S | _re.M)
+    m2 = _re.search(r"status: ([a-z|-]+)", sect.group(0)) if sect else None
     loadset = set((m2.group(1) if m2 else "").split("|")) - {""}
     bad = sorted(loadset - mp.VALID_STATUSES) if loadset else ["<no load-set found>"]
     check("window-agent Step 1 load-set is a VALID_STATUSES subset",

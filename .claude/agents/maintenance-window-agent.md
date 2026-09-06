@@ -88,10 +88,33 @@ continue to the plans.
 - Read `runbooks/maintenance-windows.yaml`. Identify the target window (the one
   now / next, or the one named by the operator) and its `capacity_risk`,
   `duration_min`, `allow_reboot`.
+- **Bring up `SWEEP_PG_DSN` FIRST, then run the reconciler:**
+  ```bash
+  source runbooks/lib/sweep-pg-dsn.sh && sweep_pg_dsn_up || exit 1
+  .venv/bin/python3 runbooks/maintenance-plan.py --json
+  # ... Step 1-3 ...
+  sweep_pg_dsn_down
+  ```
+  **Without the DSN this check silently reports a false all-clear.**
+  `window_liveness()` returns `([], False)` when it cannot reach the DB — i.e.
+  `"missing": []`, which reads as "no windows were missed" in the JSON while
+  actually meaning "NOT CHECKED". On 2026-09-06 the nightly run reported
+  `missing: []` that way; re-run with the DSN, the same repo state showed
+  **five** un-run occurrences (`nightly` 08-30…09-02 and `sun-attended:2026-08-30`,
+  the slot that held talos-1.13.9's live operator GO).
+  This is the ONLY signal that a window actually ran. The driving OpenClaw
+  cron is *not* a second signal: it dispatches the trigger to the
+  `ai-server-ops` session and reports itself healthy on DELIVERY, not on
+  completion — a window whose agent never ran still leaves an `ok` cron behind.
+  Treat `verified: false` as a hard failure of this step, not a footnote.
 - Run `python3 runbooks/maintenance-plan.py --json`. Load every plan whose
   `window` is this slot, plus `status: vetted|scheduled|draft` plans that are
   unassigned but due (no window yet and a plan exists). Drop `executed`,
   `blocked`, `superseded`, and any `orphan` (PR no longer held).
+- Check `retired_windowed` / the `RETIRED PLAN STILL WINDOWED` warning: a plan
+  left `executed`/`superseded` while still naming a window is excluded from
+  occupancy (it cannot consume capacity), but its file was never retired —
+  fix the hygiene miss, don't ignore the warning.
 
 ## Step 2 — INTERFERENCE + SIDE-EFFECT analysis (your core job)
 For the candidate set, check every pair and the set as a whole:
