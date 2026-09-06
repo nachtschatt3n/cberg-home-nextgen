@@ -300,13 +300,42 @@ curl -s --data-urlencode 'query=count(etcd_server_has_leader)' http://localhost:
 
 ```bash
 # 2.10 Confirm the factory publishes the target for OUR schematic.
-#      COULD NOT BE VERIFIED FROM THE PLANNING HOST (a TLS-intercepting middlebox
-#      made factory.talos.dev return a self-signed-cert error, and -k turned every
-#      tag into a 302 — including a nonsense v9.9.9 control, so the check proves
-#      nothing). RUN THIS FOR REAL BEFORE STEP 3.4:
-mise exec -- crane manifest \
-  factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.13.10 >/dev/null && echo OK
-# no crane? then, from a node:
+#      RESOLVED 2026-09-06 08:05 CEST from the Mac mini (daily-operation host).
+#      `crane` is NOT installed here (`mise exec -- crane` => "couldn't exec
+#      process"), so the check was run against the OCI registry API directly.
+#      The old blocker does not apply on this host: the TLS chain is genuine
+#      (issuer Let's Encrypt YR2, subject factory.talos.dev), so NO -k is needed
+#      — which is what makes the result mean something this time.
+#
+#      RESULT, with the nonsense control that was missing before:
+#        v1.13.10 -> HTTP 200   digest sha256:545fcdacb7238c7aa4aacce198cd8f4a
+#                               ca84a2d3f96fb0dd9f5081ed3269b441
+#        v1.13.8  -> HTTP 200   (current release, sanity)
+#        v9.9.9   -> HTTP 404   <- CONTROL DISCRIMINATES. Previously -k turned
+#                               every tag into a 302 including this one, so the
+#                               check proved nothing. A 404 here is what makes
+#                               the 200 above evidence rather than noise.
+#      Live schematic re-confirmed identical on all three nodes (from each
+#      node's own machine config, not from the plan text):
+#        .11/.12/.13 -> factory.talos.dev/installer/43b3cbfc2957259b...:v1.13.7
+#      (the :v1.13.7 tag is the installer image recorded at the LAST apply;
+#      running version is v1.13.8. That is normal — talosctl upgrade sets the
+#      image at upgrade time. The SCHEMATIC is the part that must match, and
+#      it does.)
+#
+#      STILL RE-RUN THIS BEFORE STEP 3.4 — it is a hard gate and the window is
+#      an hour later than this check:
+SCHEM=43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3
+for TAG in v1.13.10 v9.9.9; do
+  printf "%-10s HTTP %s\n" "$TAG" "$(curl -s -o /dev/null -w '%{http_code}' \
+    -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
+    "https://factory.talos.dev/v2/installer/$SCHEM/manifests/$TAG")"
+done
+# EXPECT exactly: v1.13.10 -> 200 AND v9.9.9 -> 404. If the control also returns
+# 200 (or both return 3xx), you are behind an intercepting proxy and the check is
+# INVALID — do not read the 200 as a pass. That is the exact trap that made the
+# original attempt worthless.
+# Fallback if the registry API is unreachable, from a node:
 mise exec -- talosctl -n 192.168.55.11 image pull --namespace system \
   factory.talos.dev/installer/43b3cbfc2957259b4588d362709d47387607901d4d3506c1ea46d7ea74cb99a3:v1.13.10
 # A schematic is version-independent (it encodes extensions + kernel args, not the
@@ -318,6 +347,32 @@ mise exec -- talosctl -n 192.168.55.11 image pull --namespace system \
 etcd not 3/3 healthy · any Longhorn volume not `healthy` · any replica not
 `running` · oldest backup > 48h · a Flux kustomization/HR not Ready · the
 factory tag does not resolve.
+
+> **ONE DOCUMENTED EXCLUSION — `superset-postgresql-data` (added 2026-09-06).**
+> As written, two of these conditions now FALSE-ABORT this window. That volume
+> is `detached` / robustness `unknown` with **2 replicas `stopped`**, and that
+> is correct and deliberate: the `superset-pg-decommission` plan executed
+> 2026-09-05 (`c4694b13` + `90539942`) and RETAINED the PVC/PV/Longhorn volume
+> as the recovery floor while removing the StatefulSet that attached it. A
+> detached volume has no running replicas by definition. The abort conditions
+> predate that decommission, so they describe a cluster where every volume was
+> attached.
+>
+> Read both conditions as **"excluding `superset-postgresql-data`"**. Verified
+> baseline at 2026-09-06 08:0x CEST, immediately before this window:
+>
+> | check | value |
+> |---|---|
+> | volumes | 93 `attached`/`healthy`, 1 `detached`/`unknown` (superset only) |
+> | replicas | 186 `running`, 2 `stopped` (both superset only) |
+> | etcd | 3/3 members, raft index 376609975 term 53, leader on .13, 0 errors |
+> | backups | none older than 48h |
+> | Flux | all kustomizations + HelmReleases Ready |
+> | pods | 0 not Running/Completed, 0 Warning events |
+>
+> So the real gate is: **94th volume aside, nothing else may be unhealthy.** If
+> a SECOND volume or any non-superset replica is down at 09:00, that IS an
+> abort — do not widen this exclusion to cover it.
 
 ## 3) Steps — GitOps
 
