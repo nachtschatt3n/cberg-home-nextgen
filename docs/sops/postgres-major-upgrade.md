@@ -1,7 +1,7 @@
 # SOP: PostgreSQL Major Upgrades — the PGDATA relocation trap
 
 > Description: How to move a PostgreSQL instance across a major version without silently writing the new data directory into the container's ephemeral layer, and why "SELECT version() says 18.6 and the row counts match" is not evidence the upgrade worked.
-> Version: `2026.09.07`
+> Version: `2026.09.07b`
 > Last Updated: `2026-09-07`
 > Owner: `homelab-sre`
 
@@ -170,6 +170,49 @@ kubectl -n <ns> rollout restart deploy/<db> && kubectl -n <ns> rollout status de
 # then re-run the row counts. If they are gone, the datadir was ephemeral.
 ```
 
+### Two tooling traps that will silently ruin a rollback
+
+Both hit during the `paperclip-postgresql` 18.6 execution on 2026-09-07. Neither
+is postgres-specific and both fail in the direction that matters.
+
+**1. `pg_restore -l` must run with tooling AT LEAST AS NEW as the `pg_dump`
+that wrote the archive.** A dump from pg_dump 17.11 is archive format 1.16; a
+local pg_restore 16.14 rejects it with `unsupported version (1.16) in file
+header`. That reads exactly like a corrupt dump and would panic anyone
+mid-window. Run the gate INSIDE the database pod, whose client tooling matches
+the server by construction:
+
+```bash
+kubectl -n <ns> exec <pod> -- pg_restore -l /tmp/pre.dump | grep -c 'TABLE DATA'
+```
+
+Related: `pg_restore -l` only reads custom/directory/tar archives. On a PLAIN
+`pg_dump` (the default) it fails with *"input file appears to be a text format
+dump"* — so if a plan verifies with `pg_restore -l`, its dump step MUST use
+`-Fc`. Pairing a plain dump with a `pg_restore` gate makes the gate fail 100%
+of the time, which is at least loud; pairing a `-Fc` dump with a `tail | grep`
+gate makes it pass on a truncated file, which is not.
+
+**2. `kubectl exec -i <pod> -- sh -c 'cat > file'` CORRUPTS binary payloads.**
+Copying a 12,199,508-byte custom-format dump this way produced a 196,608-byte
+file — a 98% truncation, with no error from either side. Restoring from it
+would have looked like a mysteriously incomplete database. Use `kubectl cp`,
+which tars the payload:
+
+```bash
+kubectl cp ./pre.dump <ns>/<pod>:/tmp/pre.dump
+```
+
+**And checksum every transfer of a rollback artifact, in both directions:**
+
+```bash
+kubectl -n <ns> exec <pod> -- sha256sum /tmp/pre.dump
+shasum -a 256 ./pre.dump          # these MUST match
+```
+
+A dump you have not checksummed after moving is a dump whose integrity you are
+assuming at exactly the moment you cannot afford to.
+
 ## 7) Troubleshooting
 
 **Row counts match but a table is missing after cutover.** The count gate
@@ -235,4 +278,5 @@ a rollback — you have a file.
 | Version | Date | Change |
 |---|---|---|
 | `2026.09.06` | 2026-09-06 | Created after the PG18 PGDATA relocation was caught at pre-check on `paperclip-postgresql`. Knowledge previously existed only in a plan file, which the transient-plan convention deletes on execution. |
+| `2026.09.07b` | 2026-09-07 | Added the two tooling traps found executing the paperclip 18.6 upgrade: pg_restore version/format coupling, and kubectl exec truncating binary copies (12MB -> 196KB, silently). |
 | `2026.09.07` | 2026-09-07 | Added "Why the Longhorn backup does NOT save you here" after the operator asked exactly that. Both affected volumes ARE enrolled in the nightly backup and were captured that morning — the point is that a volume backup cannot cover writes that never reached the volume. |

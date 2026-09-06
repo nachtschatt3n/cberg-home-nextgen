@@ -53,14 +53,20 @@ rollback_class: backup-restore        # postgres has NO downgrade path (upstream
                                       # replaying the dump, not `git revert`.
 backup_gate: "pg_dump of the paperclip database taken from the LIVE pg17 pod, verified non-empty + '-- PostgreSQL database dump complete' + per-table row counts captured, BEFORE the image/subPath edit is pushed"
 finding_refs: []
-status: draft                         # UNBLOCKED 2026-09-07: all three defects named by
-                                      # the 2026-09-06 block are fixed (PGDATA pinned inside
-                                      # the mount, count gates span every schema, dump gated
-                                      # on `pg_restore -l`), plus a new §4.0 datadir-on-PVC
-                                      # gate. Deliberately `draft`, NOT `vetted`: the earlier
-                                      # operator GO was given against the defective procedure
-                                      # and must not carry over. Needs a re-vet and a FRESH
-                                      # go/no-go. (F-61d8147e)
+status: executed                      # EXECUTED 2026-09-07 ~23:30-23:40 CEST, operator
+                                      # present and asking. Verified end to end:
+                                      # §4.0 datadir gate PASSED (data_directory
+                                      # /var/lib/postgresql/data/pgdata, /proc/mounts shows
+                                      # /dev/longhorn/pvc-773cc06e-..., PG_VERSION=18 read
+                                      # back through the mount); 37 tables / 11,484 rows
+                                      # identical to baseline across ALL schemas; a
+                                      # DELIBERATE pod restart re-verified identical — that
+                                      # restart is the assertion the whole block existed
+                                      # for; the app logs "Migrations already applied" and
+                                      # drizzle.__drizzle_migrations still holds 26 rows.
+                                      # Old 17.11 datadir LEFT on the PVC under
+                                      # subPath: postgres as the rollback floor — do not
+                                      # delete it until the soak is over.
 window: null                          # operator schedules; do not self-assign
 premises:
   - id: still-on-17.11
@@ -297,8 +303,11 @@ wc -l /tmp/paperclip-pg-counts-pre.txt
 ```bash
 mkdir -p ~/backups/paperclip-postgresql && chmod 0700 ~/backups/paperclip-postgresql
 DUMP=~/backups/paperclip-postgresql/paperclip-pre-18.6-$(date +%Y%m%d%H%M).sql
+# -Fc (CUSTOM format) is REQUIRED, not cosmetic: the pg_restore -l gate below
+# cannot read a plain dump ("input file appears to be a text format dump").
+# Found 2026-09-07 while executing this plan.
 kubectl -n ai exec deploy/paperclip-postgresql -- \
-  pg_dump -U paperclip -d paperclip --no-owner --no-privileges > "$DUMP"
+  pg_dump -U paperclip -d paperclip --no-owner --no-privileges -Fc > "$DUMP"
 chmod 0600 "$DUMP"
 
 # Verify before trusting it. `pg_restore -l` is the gate, NOT a tail-grep
@@ -307,8 +316,20 @@ chmod 0600 "$DUMP"
 # was in fact complete — and, worse, a tail-grep cannot distinguish a
 # TRUNCATED dump from a complete one whose trailer moved. A dump that will
 # not list is not a rollback, it is a file.
-pg_restore -l "$DUMP" > /dev/null || { echo "ABORT: dump will not list — NOT a rollback"; exit 1; }
-pg_restore -l "$DUMP" | grep -c 'TABLE DATA' # expect >= the table count from 3.2
+# RUN THIS INSIDE THE POD. A local pg_restore older than the server's pg_dump
+# rejects the archive ("unsupported version (1.16) in file header") and reads
+# exactly like a corrupt dump — measured 2026-09-07 with local 16.14 vs server
+# 17.11. The pod's client tooling matches its server by construction.
+kubectl -n ai exec deploy/paperclip-postgresql -- pg_restore -l /tmp/pre18.dump > /dev/null \
+  || { echo "ABORT: dump will not list — NOT a rollback"; exit 1; }
+kubectl -n ai exec deploy/paperclip-postgresql -- sh -c "grep -c 'TABLE DATA' /tmp/toc.txt"
+# expect == the table count from 3.2 (37 on 2026-09-07)
+
+# COPY OUT WITH kubectl cp, NEVER `exec -i ... cat > file`: the latter silently
+# truncated this 12,199,508-byte dump to 196,608 bytes (2026-09-07). Checksum
+# both ends before trusting it.
+kubectl cp "ai/$POD:/tmp/pre18.dump" "$DUMP"
+kubectl -n ai exec "$POD" -- sha256sum /tmp/pre18.dump; shasum -a 256 "$DUMP"   # MUST match
 grep -c '^CREATE TABLE' "$DUMP"
 ls -lh "$DUMP"        # expect roughly in line with the app's own ~76MiB dump
 ```
