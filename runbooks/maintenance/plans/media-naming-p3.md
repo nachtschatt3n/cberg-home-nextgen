@@ -3,7 +3,7 @@ plan_id: media-naming-p3
 component: media-library
 pr: null
 kind: data
-current: "episode naming 49.9% (403/807) — 404 non-SOP filenames across 12 shows (was mis-reported as 87.7%/99 by a lax audit regex, corrected 2026-08-16)"
+current: "episode naming 76.3% (616/807) — 191 non-SOP filenames (RE-MEASURED 2026-09-06 by the sweep media audit; the previous 49.9%/404 figure predated the naming work already done and would have sized this at more than double reality — F-dc37c7ea)"
 target: "episode naming >= 99% (SOP floor) — `Show Name - S01E01 - Episode Title.ext`"
 update_type: n/a
 risk: high                            # a rename is the only step in this family that can LOSE a file
@@ -22,6 +22,20 @@ depends_on: [media-episode-backfill]  # was 'media-episode-backfill-bulk', a sta
                                       # nothing (flagged by every sweep since). Repointed to the
                                       # programme plan that actually exists (P0.4, 2026-08-26).
 conflicts_with: []
+capability_change: false
+rollback_class: backup-restore    # DECLARED 2026-09-06. NOT git-revert: a rename
+                          # mutates the file, and this plan already records a
+                          # folder rename that was reverted and did NOT restore
+                          # — Jellyfin had cached the failed identification, so
+                          # the revert left the library degraded. There is a
+                          # rollback script driven by a rename manifest, and the
+                          # plan notes rollback is slower than the rename itself.
+                          # That is restore-shaped, not commit-shaped.
+autonomy_override: human-gated  # A rename pass over the household media library,
+                                # on a plan whose own body documents a revert
+                                # that failed to restore, is not something to
+                                # run while nobody is watching — whatever the
+                                # derivation says.
 status: draft
 window: null                          # UNSCHEDULED 2026-08-16. Re-rated to 240m after the audit
                                       # regex was corrected (N-22): the real non-compliant surface is

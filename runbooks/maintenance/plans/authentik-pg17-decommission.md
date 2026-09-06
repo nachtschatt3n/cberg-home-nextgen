@@ -18,6 +18,14 @@ touches:
   shared: []
 depends_on: []
 conflicts_with: []
+capability_change: false
+rollback_class: one-way    # DECLARED 2026-09-06. The plan's own risk note says
+                          # it "destroys the rollback": this retires the bundled
+                          # 17.11 StatefulSet that still holds the pre-cutover
+                          # data and exists precisely as the fallback. Once gone,
+                          # recovery is a restore, not a commit. Same shape as
+                          # superset-pg-decommission, which used one-way.
+                          # Correctly stays HUMAN-GATED, and is awaiting-soak.
 status: awaiting-soak                 # do NOT run until the soak below is satisfied
 window: null
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED

@@ -15,6 +15,17 @@ est_duration_min: 45                  # per batch, NOT for all 17 — see §2
 needs_reboot: false
 window: null                          # DELIBERATE: this is a batched programme, not one window.
                                       # See §2 — batches attach to existing windows as filler.
+capability_change: false
+rollback_class: git-revert    # DECLARED 2026-09-06. Pinning a floating tag to a
+                          # concrete version/digest is a manifest edit; undo is
+                          # the revert commit.
+autonomy_override: human-gated  # This is a batched PROGRAMME, not one executable
+                                # unit — est_duration_min is per batch, not for
+                                # all 17, and window:null is deliberate. Batch C
+                                # is datastores and the plan says "do NOT batch
+                                # these with anything". Which batch runs when is
+                                # an operator judgement, so the scheduler must
+                                # not treat this as a single schedulable plan.
 status: draft
 security_ref: F-c58dd98e              # class reference; per-image detail lives in the ops DB
 touches:

@@ -17,6 +17,13 @@ touches:
   shared: []
 depends_on: []
 conflicts_with: []
+capability_change: false
+rollback_class: git-revert    # DECLARED 2026-09-06. The production runtime is
+                          # Rails + puma and never invokes npm — npm is present
+                          # only as an accident of Dockerfile stage inheritance.
+                          # Removing it changes the image's SHAPE, not what the
+                          # software can do, so capability_change is false.
+                          # Undo is: revert the Dockerfile commit and rebuild.
 status: draft
 window: null
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is now DERIVED
