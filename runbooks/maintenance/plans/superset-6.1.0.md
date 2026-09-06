@@ -15,6 +15,15 @@ est_duration_min: 75                  # needs a 90-min window; a 60-min weekday 
                                       # zero slack for the restore-from-dump rollback
 needs_reboot: false
 capability_change: true              # app major — user-visible behaviour changes
+rollback_class: backup-restore        # DECLARED 2026-09-07 (was UNDECLARED, which is why
+                                      # this derived HUMAN-GATED on missing facts rather
+                                      # than on its own merits). The chain runs 13 alembic
+                                      # migrations whose downgrade() is an explicit no-op,
+                                      # so `superset db downgrade` is NOT a rollback — the
+                                      # only way back is restoring the pre-upgrade dump and
+                                      # reverting the image, in that order. There is no
+                                      # commit that undoes a migrated schema.
+backup_gate: "pg_dump -Fc of the superset metadata DB taken from the LIVE 5.0.0 superset-pg, verified with `pg_restore -l` USING IN-POD TOOLING (a local pg_restore older than the server rejects the archive), TABLE DATA count captured, plus the §2f Longhorn backup of superset-pg-data confirmed fresh — ALL BEFORE the image/bootstrapScript commit is pushed"
 touches:
   namespaces: [databases]
   resources:
@@ -37,8 +46,47 @@ depends_on: [superset-pg-cutover]      # HARD. See §6 — this must not run aga
                                        # we are about to retire.
 conflicts_with: [superset-pg-cutover]  # RESOLVED 2026-09-06: 'superset-pg-decommission' removed — that plan was EXECUTED 2026-09-05 (c4694b13 + 90539942) and its file retired, so it can never be scheduled again and cannot collide with this one. The operator's Option-B ordering ("run 6.1.0 AFTER the decommission", see window: below) is SATISFIED, not discarded: the decommission landed 2026-09-05, this plan sits at sun-attended:2026-09-20. superset-pg-cutover is KEPT — its file still exists as the hard depends_on anchor below.  # RESOLVED 2026-09-05: dead ref 'longhorn-1.12.1-engine' removed — that plan was EXECUTED 2026-08-29 (34abe2bb) and its file deleted. Verified complete: 94/94 volumes on longhorn-engine v1.12.1, single engine image deployed. There is no engine upgrade left to collide with, so this guard protected nothing.
 security_ref: F-9d259837
-status: draft
+status: vetted                        # VETTED 2026-09-07. Premises verified against the
+                                      # LIVE cluster: superset/worker/celerybeat all on
+                                      # apache/superset:5.0.0, superset-pg on
+                                      # postgres:17.11-alpine, alembic at 74ad1125881c,
+                                      # superset-pg-data enrolled in the nightly backup,
+                                      # postgresql/pellets (the sole data source) up.
+                                      # Three defects fixed in the same pass: rollback_class
+                                      # and backup_gate were UNDECLARED; the §5 rollback used
+                                      # a bare `kubectl scale --replicas=0` that the plan's
+                                      # own warning says does not hold; and the alembic
+                                      # baseline had no abort gate. Still HUMAN-GATED and
+                                      # correctly so — capability_change: true, user-visible
+                                      # behaviour changes. Needs an operator GO at run time.
 window: "sun-attended:2026-09-20"         # SCHEDULED 2026-08-19 — OPERATOR DECISION: Option B
+premises:
+  - id: still-on-5.0.0
+    why: >-
+      The chain is 5.0.0 -> 6.1.0 across two majors. If the image already moved,
+      the alembic baseline and the rollback target are both wrong.
+    run: kubectl get deploy -n databases superset -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_exact: "apache/superset:5.0.0"
+  # SCOPE NOTE: the ALEMBIC BASELINE assertion — arguably the most important
+  # premise this plan has, since the 13-migration chain is computed from
+  # 74ad1125881c — cannot live here. plan-premises.py refuses `kubectl exec`
+  # (it can run anything), and reading alembic_version requires a DB query. It
+  # is asserted in §2 pre-checks instead, which run in-window and may exec.
+  # Do not "fix" this by weakening the read-only guard.
+  - id: metadata-db-volume-is-backed-up
+    why: >-
+      rollback_class is backup-restore and the alembic downgrade path is a
+      no-op, so the volume backup is the second recovery floor behind the dump.
+    run: kubectl get volume -n storage superset-pg-data -o jsonpath='{.metadata.labels}'
+    expect_contains: "recurring-job-group.longhorn.io/default"
+  - id: the-only-data-source-is-up
+    why: >-
+      §4 verification FAILS if postgresql/pellets is down — it is Superset's
+      sole data source. Checking it up front avoids reaching verification after
+      the one-way migrations and being unable to tell an upgrade failure from a
+      dependency outage.
+    run: kubectl get deploy -n databases postgresql -o jsonpath='{.status.readyReplicas}'
+    expect_matches: "^[1-9][0-9]*$"
                                        # (after superset-pg-decommission), NOT Option A.
                                        # Why B: A (sat 08-29) would close the security driver
                                        # ~2 weeks sooner but leaves only 3 days of soak on a
@@ -300,6 +348,19 @@ Redis, or its PVCs. It **reads** the shared `databases/postgresql` (pgvector) fo
 its one dataset connection but never writes to it.
 
 ## 2) Pre-checks
+
+**ABORT GATE — the alembic baseline.** Run this FIRST. The 13-migration chain
+in §1 is computed from `74ad1125881c`; starting anywhere else means the
+migrations that actually run are not the ones this plan was written against,
+and they are one-way. This cannot be a `premises:` entry — plan-premises.py
+refuses `kubectl exec`, and reading `alembic_version` needs a DB query.
+
+```bash
+mise exec -- kubectl exec -n databases deploy/superset-pg -- \
+  psql -U superset -d superset -tAc 'select version_num from alembic_version'
+# EXPECT EXACTLY: 74ad1125881c   (verified live 2026-09-07)
+# Anything else -> STOP and re-plan. Do not proceed on "close enough".
+```
 
 ```bash
 cd /Users/mu/code/cberg-home-nextgen
@@ -650,10 +711,31 @@ cd /Users/mu/code/cberg-home-nextgen
 STAMP=$(cat /tmp/superset-upgrade-stamp)
 NEW=$(mise exec -- kubectl get pods -n databases -l app=superset-pg -o jsonpath='{.items[0].metadata.name}')
 
-# 1. stop the writers (delegate live cluster actions to cberg-agent)
+# 1. stop the writers AND HOLD THEM DOWN. A bare `kubectl scale --replicas=0`
+#    DOES NOT HOLD for Superset: Flux drift-corrects the replica count on the
+#    reconcile that step 3's own `git push` triggers, so the app returns
+#    mid-restore, against a half-restored schema, on the wrong image — and the
+#    image revert is a values change, so it fires the superset-init-db hook
+#    which runs `superset db upgrade` against whatever DB_HOST resolves to.
+#    Suspending the Kustomization alone is NOT enough either: the
+#    HelmRelease-owned Deployment is reconciled back independently.
+#    (Sequence proven in superset-pg-cutover §3a; INLINED here 2026-09-07
+#    because a rollback that points at another plan's section for the step
+#    that makes it work is not a rollback you can run under pressure.)
+mise exec -- flux suspend helmrelease  superset -n databases
+mise exec -- flux suspend kustomization superset -n databases
 mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat \
   -n databases --replicas=0
-mise exec -- kubectl get pods -n databases | grep superset      # only superset-pg / redis remain
+
+# HOLD PROOF — do not proceed to step 2 until all three are true:
+mise exec -- kubectl get deploy -n databases superset superset-worker superset-celerybeat \
+  -o custom-columns=NAME:.metadata.name,SPEC:.spec.replicas --no-headers   # all 0
+mise exec -- kubectl get pods -n databases | grep -E 'superset(-worker|-celerybeat)?-[0-9a-f]' || echo "no app pods — good"
+mise exec -- kubectl exec -n databases $NEW -- sh -c \
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+   "select count(*) from pg_stat_activity where datname=current_database() and application_name ilike %s"' "'%superset%'"
+#    expect 0 connections. A non-zero count means a writer is still attached and
+#    the restore in step 2 would race it.
 
 # 2. restore the pre-upgrade metadata DB over a clean schema
 mise exec -- kubectl cp /tmp/superset-pre-6.1.0-$STAMP.dump databases/$NEW:/tmp/rollback.dump
@@ -669,7 +751,13 @@ mise exec -- kubectl exec -n databases $NEW -- sh -c \
 git revert --no-edit <upgrade-commit-sha>
 git push
 
-# 4. bring it back and CONFIRM both halves reverted together
+# 4. bring it back and CONFIRM both halves reverted together.
+#    RESUME ORDER MATTERS: Kustomization first so the reverted manifest is the
+#    one in play, THEN the HelmRelease, and only then let replicas return.
+#    Resuming the HelmRelease while the Kustomization still holds the upgrade
+#    manifest re-applies the 6.1.0 values.
+mise exec -- flux resume kustomization superset -n databases
+mise exec -- flux resume helmrelease  superset -n databases
 mise exec -- kubectl scale deploy/superset deploy/superset-worker deploy/superset-celerybeat \
   -n databases --replicas=1
 mise exec -- kubectl rollout status deploy/superset -n databases --timeout=900s
