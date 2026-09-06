@@ -511,7 +511,7 @@ with Home Assistant auto-discovery.
 | `solarfocus/<field>` | sensor value (string) | yes |
 | `solarfocus/<field>/available` | online \| offline — per-field availability | yes |
 | `solarfocus/scraper/availability` | online \| offline — whole-cycle availability | yes |
-| `solarfocus/scraper/status` | ok \| busy \| navigation_failed \| sanity_failed \| paused | yes |
+| `solarfocus/scraper/status` | ok \| partial \| busy \| paused \| maintenance \| navigation_failed \| sanity_failed | yes |
 | `solarfocus/scraper/last_run` | ISO8601 timestamp | yes |
 | `solarfocus/scraper/pause` | on \| off — read at start of each cycle | yes |
 | `solarfocus/scraper/pause/set` | on \| off — HA writes here, scraper mirrors to `pause` | no |
@@ -532,6 +532,32 @@ with Home Assistant auto-discovery.
 > The old topic still exists but is published empty as a tombstone — subscribing
 > to it during an incident gets you nothing. Prefix is configurable via
 > `MQTT_DIAG_TOPIC_PREFIX` (default `<MQTT_TOPIC_PREFIX>-diag`).
+
+> **`scraper/status` is not a two-valued healthy/failed flag — do not key
+> automations off `state == "ok"`.** Seven payloads are published, and two of
+> them were missing from this table until `sha-010146b`:
+>
+> - **`ok`** — cycle completed, every read value accepted.
+> - **`partial`** — the cycle *succeeded*, but the sanity layer rejected one or
+>   more fields (bounds / monotonicity / delta-breaker). The accepted fields
+>   were published and are good; only the rejected ones were withheld. An
+>   automation testing `state == "ok"` treats this as a failure, which it is
+>   not — test `state in ("ok", "partial")` for "the scraper is working", and
+>   watch `solarfocus_scraper_runs_total{status="partial"}` if you care about
+>   the rejection rate.
+> - **`busy`** — VNC was already in use (someone is at the physical
+>   touchscreen). Expected, not an error; nothing is published that cycle.
+> - **`paused`** — the operator toggled the `scraper/pause` switch in HA.
+> - **`maintenance`** — an operator-initiated stop from the status page.
+>   Distinct from `paused`: it is set from the web UI, not the HA switch.
+> - **`navigation_failed`** — the state machine could not reach a screen
+>   (commonly the heater's alert modal blocking it). Failure.
+> - **`sanity_failed`** — the whole cycle was rejected by the sanity layer.
+>   Failure.
+>
+> `error` appears in the status page's own styling map and in the terminal log
+> line, but is **never published to MQTT** — do not write an automation
+> expecting it on this topic.
 
 ### Operational notes
 
