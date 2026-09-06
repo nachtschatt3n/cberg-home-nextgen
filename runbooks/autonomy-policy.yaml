@@ -70,6 +70,7 @@ classes:
       rollback_class: backup-restore
       needs_reboot: false
     forbid_shared: [storage, longhorn]
+    forbid_risk: [high]                  # see the `risk: high` note in the header
     require_backup_gate: true            # plan must name its gate; gate must PASS at runtime
 
 default: human-gated

@@ -53,15 +53,49 @@ rollback_class: backup-restore        # postgres has NO downgrade path (upstream
                                       # replaying the dump, not `git revert`.
 backup_gate: "pg_dump of the paperclip database taken from the LIVE pg17 pod, verified non-empty + '-- PostgreSQL database dump complete' + per-table row counts captured, BEFORE the image/subPath edit is pushed"
 finding_refs: []
-status: blocked                       # BLOCKED 2026-09-06. Was `draft`, which is NOT a dead
-                                      # status: maintenance-plan.py still derived
-                                      # AUTO-BACKUP-GATED for it, and `blocked` is not in
-                                      # coverage.py DEAD_PLAN_STATUSES either — only
-                                      # `window: null` was keeping it out of an
-                                      # auto-executable lane. See the DO-NOT-EXECUTE
-                                      # header: as written this plan lands initdb and the
-                                      # restore in the container ephemeral layer. (F-61d8147e)
+status: draft                         # UNBLOCKED 2026-09-07: all three defects named by
+                                      # the 2026-09-06 block are fixed (PGDATA pinned inside
+                                      # the mount, count gates span every schema, dump gated
+                                      # on `pg_restore -l`), plus a new §4.0 datadir-on-PVC
+                                      # gate. Deliberately `draft`, NOT `vetted`: the earlier
+                                      # operator GO was given against the defective procedure
+                                      # and must not carry over. Needs a re-vet and a FRESH
+                                      # go/no-go. (F-61d8147e)
 window: null                          # operator schedules; do not self-assign
+premises:
+  - id: still-on-17.11
+    why: >-
+      The whole migration is 17.11 -> 18.6. If the image already moved, the
+      dump baseline and the rollback target are both wrong.
+    run: kubectl get deploy -n ai paperclip-postgresql -o jsonpath='{.spec.template.spec.containers[0].image}'
+    expect_contains: "17.11-alpine"
+  - id: old-subpath-untouched
+    why: >-
+      `subPath: postgres` holds the 17.11 datadir and is this plan's rollback
+      floor — §3.5 repoints to a NEW `postgres18` dir and must leave it alone.
+      If the mount already points elsewhere, someone has been here before and
+      the rollback floor is not where the plan thinks.
+    run: kubectl get deploy -n ai paperclip-postgresql -o jsonpath='{.spec.template.spec.containers[0].volumeMounts[0].subPath}'
+    expect_exact: "postgres"
+  - id: pvc-has-room-for-a-second-datadir
+    why: >-
+      The old datadir is kept in place as the rollback floor, so the PVC must
+      hold BOTH. Measured 2026-09-07 from inside the pod: 106 MiB used of
+      4.8 GiB. Asserted here via the Longhorn volume's own actualSize, because
+      `kubectl exec` is not permitted in a premise (it can run anything) — the
+      first version of this premise used exec and plan-premises.py refused it.
+      A plan that fills the PVC mid-restore fails in the worst possible place.
+    run: kubectl get volume -n storage pvc-773cc06e-4984-4bcf-ae38-64fe77f68a5c -o jsonpath='{.status.actualSize}'
+    expect_matches: "^[0-9]{1,9}$"
+  - id: rollback-floor-is-backed-up
+    why: >-
+      §3.5 keeps the 17.11 datadir on the PVC as the rollback floor. That floor
+      is only real if the volume is genuinely enrolled in the nightly backup —
+      NOT as a substitute for the §4.0 datadir gate (a volume backup cannot
+      cover writes that never reached the volume), but so a same-window abort
+      has something behind it.
+    run: kubectl get volume -n storage pvc-773cc06e-4984-4bcf-ae38-64fe77f68a5c -o jsonpath='{.metadata.labels}'
+    expect_contains: "recurring-job-group.longhorn.io/default"
 sops_refs:
   - docs/sops/application-update.md
   - docs/sops/backup.md
@@ -69,45 +103,40 @@ sops_refs:
 generated: "2026-09-05"
 ---
 
-> ## 🛑 DO NOT EXECUTE AS WRITTEN — 2026-09-06
+> ## ✅ BLOCK RESOLVED — 2026-09-07 (re-vet + fresh go/no-go still required)
 >
-> Stopped at pre-check on 2026-09-06, before any manifest edit. **As written,
-> this plan silently destroys the database.**
+> This plan was stopped at pre-check on 2026-09-06, before any manifest edit,
+> because as written it would have silently destroyed the database. Nothing was
+> touched. All three defects the block named are now fixed:
 >
-> **The defect:** PostgreSQL's official image relocated PGDATA at 18.
+> **1. PGDATA relocation — FIXED.** postgres:18 moved its default PGDATA from
+> `/var/lib/postgresql/data` to `/var/lib/postgresql/18/docker` and its VOLUME
+> from `.../data` to `/var/lib/postgresql`. With the mount left at
+> `.../data`, initdb and the restore would have landed in the container's
+> ephemeral layer. §3.5 now pins `PGDATA=/var/lib/postgresql/data/pgdata`
+> EXPLICITLY, inside the mount. Pinning was chosen over moving the mount to
+> `/var/lib/postgresql` deliberately: relying on the image default is what
+> broke here, and an explicit pin also survives PG19 relocating it again.
 >
-> | image | PGDATA | VOLUME |
-> |---|---|---|
-> | `postgres:17.11-alpine` | `/var/lib/postgresql/data` | `/var/lib/postgresql/data` |
-> | `postgres:18.6-alpine` | `/var/lib/postgresql/18/docker` | `/var/lib/postgresql` |
+> **2. Count gate scoped to `public` — FIXED.** Both gates now enumerate every
+> non-system schema and print `schema.table`. The 37th table is
+> `drizzle.__drizzle_migrations`; the old query reported 36=36 and would have
+> called a restore that dropped the migrations ledger a success.
 >
-> This plan keeps `mountPath: /var/lib/postgresql/data` and only repoints
-> `subPath` to `postgres18`. On 18.6 the `initdb` and the restore therefore land
-> in the container's **ephemeral writable layer**, not on the PVC.
+> **3. Dump completeness by tail-grep — FIXED.** `pg_restore -l` is now the
+> gate and aborts the plan. pg_dump 17.11 appends a `\unrestrict` line after
+> the completion marker, and a tail-grep cannot tell a truncated dump from a
+> complete one whose trailer moved.
 >
-> **Why this is worse than an ordinary bug:** that failure passes this plan's
-> ENTIRE §4 verification suite. `SELECT version()` reports 18.6, every row count
-> matches, the application works. The data is lost at the next pod restart —
-> arbitrarily later, with the window long since reported green.
+> **Added beyond the three:** §4.0, a datadir-on-the-PVC gate that runs BEFORE
+> every other check and aborts on failure. It is the only step that separates a
+> correct upgrade from an ephemeral one — `version()`, the row counts and the
+> application all pass in both cases. It also records why a Longhorn backup is
+> not a substitute: a volume backup cannot cover writes that never reached the
+> volume.
 >
-> **Before this can run, it needs:**
-> 1. `mountPath`/`subPath`/PGDATA reworked for PG18's layout, and a verification
->    step that proves the datadir is on the PVC (e.g. `SHOW data_directory` plus
->    a `df`/mount check), not merely that the server started.
-> 2. The count gate widened beyond `public`. The 37th table is
->    `drizzle.__drizzle_migrations`; losing it makes the app re-run migrations
->    against a populated database.
-> 3. The dump marker check fixed — `tail -5` nearly misfired because pg_dump
->    17.11 appends a `\unrestrict` line after the completion marker.
->
-> **A verified pre-upgrade backup already exists** from the stopped run, taken
-> while the DB was idle: `/Users/mu/backups/paperclip-postgresql/` —
-> `paperclip-pre-18.6-202609061302.sql` (76 MB, 14,102 lines) and
-> `.dump` (12 MB custom format). `pg_restore -l` lists 286 entries / 37 TABLE
-> DATA; both `0600`, outside the repo. Longhorn snapshot
-> `paperclip-postgresql-data-pre-18-6` deliberately retained.
->
-> The service was left untouched on 17.11, 2/2 Running, row counts byte-identical.
+> **Still required before this runs:** a fresh operator go/no-go. The previous
+> GO was given against the defective procedure and does not carry over.
 
 # paperclip-postgresql: postgres 17.11-alpine → 18.6-alpine (major)
 
@@ -246,11 +275,19 @@ technique as `superset-pg-cutover` §3.4):
 ```bash
 kubectl -n ai exec -i deploy/paperclip-postgresql -- \
   psql -U paperclip -d paperclip -At -f - <<'SQL' > /tmp/paperclip-pg-counts-pre.txt
-select c.relname||'='||(xpath('/row/c/text()',
+-- ALL schemas, not just `public` (FIX 2026-09-07). The 37th table is
+-- `drizzle.__drizzle_migrations`, in its own schema: a gate scoped to
+-- `public` reports 36=36 and calls a restore that silently dropped the
+-- migrations ledger a success. The app then re-runs every migration
+-- against a populated database.
+select n.nspname||'.'||c.relname||'='||(xpath('/row/c/text()',
     query_to_xml(format('select count(*) as c from %I.%I', n.nspname, c.relname),
                  false, true, '')))[1]::text::bigint
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-where c.relkind = 'r' and n.nspname = 'public' order by c.relname;
+where c.relkind = 'r'
+  and n.nspname not in ('pg_catalog','information_schema')
+  and n.nspname not like 'pg_toast%'
+order by n.nspname, c.relname;
 SQL
 wc -l /tmp/paperclip-pg-counts-pre.txt
 ```
@@ -264,8 +301,14 @@ kubectl -n ai exec deploy/paperclip-postgresql -- \
   pg_dump -U paperclip -d paperclip --no-owner --no-privileges > "$DUMP"
 chmod 0600 "$DUMP"
 
-# Verify before trusting it:
-tail -5 "$DUMP" | grep -q -- '-- PostgreSQL database dump complete' || echo "ABORT: dump incomplete"
+# Verify before trusting it. `pg_restore -l` is the gate, NOT a tail-grep
+# (FIX 2026-09-07): pg_dump 17.11 appends a `\unrestrict <token>` line AFTER
+# the completion marker, so `tail -5 | grep` nearly misfired on a dump that
+# was in fact complete — and, worse, a tail-grep cannot distinguish a
+# TRUNCATED dump from a complete one whose trailer moved. A dump that will
+# not list is not a rollback, it is a file.
+pg_restore -l "$DUMP" > /dev/null || { echo "ABORT: dump will not list — NOT a rollback"; exit 1; }
+pg_restore -l "$DUMP" | grep -c 'TABLE DATA' # expect >= the table count from 3.2
 grep -c '^CREATE TABLE' "$DUMP"
 ls -lh "$DUMP"        # expect roughly in line with the app's own ~76MiB dump
 ```
@@ -301,6 +344,31 @@ kubectl -n storage get snapshot.longhorn.io paperclip-postgresql-data-pre-18-6 -
 - `volumeMounts[0].subPath: postgres` → `subPath: postgres18` (fresh, empty
   dir on the same PVC — the old `postgres` subdir is deliberately left in
   place as the rollback floor; do NOT delete it as part of this edit)
+- **ADD an explicit `PGDATA` env var — this is THE fix for the 2026-09-06
+  block and is not optional:**
+
+  ```yaml
+  env:
+    # PIN PGDATA EXPLICITLY. postgres:18 moved its default from
+    # /var/lib/postgresql/data to /var/lib/postgresql/18/docker and its
+    # VOLUME from .../data to /var/lib/postgresql. With the mount still at
+    # /var/lib/postgresql/data, the image default would put initdb and the
+    # restore OUTSIDE the mount, in the container's ephemeral layer — the
+    # database would pass every check in §4 and vanish at the next pod
+    # restart. Pinning PGDATA inside the mount makes that impossible, and
+    # keeps it impossible when PG19 relocates the default again.
+    - name: PGDATA
+      value: /var/lib/postgresql/data/pgdata
+  ```
+
+  `mountPath` stays `/var/lib/postgresql/data`. Do NOT "fix" this by moving
+  the mount to `/var/lib/postgresql` and relying on the 18.x default — that
+  works today and breaks silently on the next relocation, which is exactly
+  how this plan got blocked.
+
+  Note `PGDATA` is a SUBDIRECTORY of the mount (`.../data/pgdata`), never the
+  mount root: initdb must own and chmod its datadir, and a mount root can
+  carry ownership or `lost+found` that trips it.
 - Add a comment above the `subPath` line explaining why it changed (major
   bump, in-place binary swap is not supported, old data preserved under
   `postgres/` for rollback).
@@ -342,6 +410,46 @@ Version alone (`SELECT version();` reporting 18.x) is a shape check — a
 freshly `initdb`'d, **empty** 18 cluster reports the same version string as
 a correctly restored one. Row counts are the real signal.
 
+### 4.0 GATE — is the datadir actually ON THE PVC? (run FIRST, abort on fail)
+
+**Every other check in this section passes while the database is ephemeral.**
+`version()` reports 18.6, the row counts match, the application works — and the
+data is gone at the next pod restart. This gate is the ONLY step that
+distinguishes the two, so it runs before anything else and a failure is an
+immediate abort, not a note.
+
+```bash
+POD=$(kubectl -n ai get pod -l app=paperclip-postgresql -o jsonpath='{.items[0].metadata.name}')
+
+# a) where does the server think its data lives?
+DD=$(kubectl -n ai exec "$POD" -- psql -U paperclip -tAc 'SHOW data_directory')
+echo "data_directory=$DD"
+# EXPECT: /var/lib/postgresql/data/pgdata   (the pinned PGDATA, inside the mount)
+
+# b) is THAT path inside a real mount, or the container's overlay?
+kubectl -n ai exec "$POD" -- sh -c "grep -F ' /var/lib/postgresql/data ' /proc/mounts" \
+  || { echo 'ABORT: the mount is not present at all'; exit 1; }
+kubectl -n ai exec "$POD" -- df -h "$DD"
+# EXPECT df to report /dev/longhorn/pvc-773cc06e-... — NOT overlay / tmpfs.
+
+# c) the decisive one: a file written through the server must appear on the PVC
+kubectl -n ai exec "$POD" -- sh -c "test -f '$DD/PG_VERSION' && cat '$DD/PG_VERSION'"
+# EXPECT: 18
+```
+
+If `df` shows `overlay`, or `PG_VERSION` is absent from the PVC path, **STOP and
+roll back**. Do not proceed on the grounds that the application is working; that
+is precisely the symptom (see `docs/sops/postgres-major-upgrade.md`).
+
+**Do not substitute a Longhorn backup for this gate.** A volume backup cannot
+cover writes that never reached the volume: with PGDATA outside the mount the
+PVC keeps the OLD datadir frozen at cutover, every nightly backup faithfully
+captures that frozen copy, and the backup job reports success throughout. The
+SOP's "Why the Longhorn backup does NOT save you here" section has the full
+argument.
+
+### 4.1 The rest
+
 ```bash
 # 1. Binary reports 18.6
 kubectl -n ai exec deploy/paperclip-postgresql -- psql -U paperclip -d paperclip -c 'SELECT version();'
@@ -351,11 +459,19 @@ kubectl -n ai exec deploy/paperclip-postgresql -- psql -U paperclip -d paperclip
 #    /tmp/paperclip-pg-counts-pre.txt. The diff MUST be silent.
 kubectl -n ai exec -i deploy/paperclip-postgresql -- \
   psql -U paperclip -d paperclip -At -f - <<'SQL' > /tmp/paperclip-pg-counts-post.txt
-select c.relname||'='||(xpath('/row/c/text()',
+-- ALL schemas, not just `public` (FIX 2026-09-07). The 37th table is
+-- `drizzle.__drizzle_migrations`, in its own schema: a gate scoped to
+-- `public` reports 36=36 and calls a restore that silently dropped the
+-- migrations ledger a success. The app then re-runs every migration
+-- against a populated database.
+select n.nspname||'.'||c.relname||'='||(xpath('/row/c/text()',
     query_to_xml(format('select count(*) as c from %I.%I', n.nspname, c.relname),
                  false, true, '')))[1]::text::bigint
 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-where c.relkind = 'r' and n.nspname = 'public' order by c.relname;
+where c.relkind = 'r'
+  and n.nspname not in ('pg_catalog','information_schema')
+  and n.nspname not like 'pg_toast%'
+order by n.nspname, c.relname;
 SQL
 diff /tmp/paperclip-pg-counts-pre.txt /tmp/paperclip-pg-counts-post.txt && echo COUNTS-MATCH
 

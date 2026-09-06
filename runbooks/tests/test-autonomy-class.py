@@ -37,6 +37,14 @@ def check(name, got, want):
         FAILURES.append(name)
 
 
+def assert_true(name, ok, detail=""):
+    """Boolean assert. `check` above compares a (class, reason) tuple, which
+    cannot express "this file contains X"."""
+    print(f"  {'PASS' if ok else 'FAIL'}  {name}" + ("" if ok else f"  {detail}"))
+    if not ok:
+        FAILURES.append(name)
+
+
 def plan(**kw):
     base = {"plan_id": "t", "capability_change": False,
             "rollback_class": "git-revert", "needs_reboot": False,
@@ -122,6 +130,33 @@ def main() -> int:
     check("risk:low cannot rescue a reboot-bearing plan",
           mp.execution_class(plan(risk="low", needs_reboot=True), POLICY),
           "HUMAN-GATED")
+
+    # ---- the LIVE policy file, not the fixture -----------------------------
+    # This block exists because the fixture above passed while the shipped
+    # policy was wrong. `forbid_risk: [high]` was added to auto-night on
+    # 2026-09-06 and the commit message claimed BOTH auto classes carried it;
+    # the edit to auto-backup-gated silently did not match, and nothing noticed
+    # until a risk:high Postgres major derived AUTO-BACKUP-GATED on 2026-09-07.
+    # A fixture tests the mechanism; only the real file tests the deployment.
+    import yaml
+    live = yaml.safe_load((REPO / "runbooks/autonomy-policy.yaml").read_text())
+    auto = {n: spec for n, spec in (live.get("classes") or {}).items()
+            if n.startswith("auto")}
+    assert_true("the live policy actually defines auto classes", bool(auto), str(list(auto)))
+    for name, spec in sorted(auto.items()):
+        assert_true(f"live class {name!r} forbids risk:high",
+                    "high" in [str(x).lower() for x in (spec.get("forbid_risk") or [])],
+                    f"forbid_risk={spec.get('forbid_risk')!r} — a high-risk plan "
+                    f"can derive {name.upper()}")
+
+    # And prove it end-to-end through the real derivation, per auto class.
+    for name, spec in sorted(auto.items()):
+        facts = dict(spec.get("require") or {})
+        pl = plan(risk="high", **facts)
+        if spec.get("require_backup_gate"):
+            pl["backup_gate"] = "some gate"
+        check(f"a risk:high plan matching {name!r} on mechanics is HUMAN-GATED",
+              mp.execution_class(pl, live), "HUMAN-GATED")
 
     print()
     if FAILURES:
