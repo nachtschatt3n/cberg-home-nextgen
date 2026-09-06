@@ -4,7 +4,7 @@ component: unpoller
 pr: null                              # no open Renovate PR (deny-listed; verified 2026-08-28)
 kind: image                           # image-only on chart 2.4.0 — see §1 for why that is now OK
 current: "image v3.5.0 (chart 2.4.0)"
-target: "image v5.2.3 (chart stays 2.4.0 unless a v5-aware chart ships — pre-check 2)"
+target: "image v5.2.4 (chart stays 2.4.0 unless a v5-aware chart ships — pre-check 2)"
 update_type: major
 risk: medium
 est_duration_min: 30
@@ -45,14 +45,14 @@ sops_refs:
 generated: "2026-08-28"
 ---
 
-# unpoller: image v3.5.0 → v5.2.3 (image-only, chart stays 2.4.0)
+# unpoller: image v3.5.0 → v5.2.4 (image-only, chart stays 2.4.0)
 
 Supersedes `unpoller-v4` (deleted in the commit that added this file). Upstream
 moved past v4: v4.0.0/v4.0.1 (2026-08-19/23), then v5.0.1 + v5.1.0 (both
 2026-08-27; there is no v5.0.0 GitHub release — the release tooling broke and
-v5.0.1 fixed it). Target is **v5.2.3** — tag verified present on ghcr
-(manifest HEAD 200, 2026-08-28 for v5.1.0; re-verified 200 for v5.2.3 on
-2026-09-05).
+v5.0.1 fixed it). Target is **v5.2.4** — tag verified present on ghcr
+(manifest HEAD 200, 2026-08-28 for v5.1.0; 200 for v5.2.3 on 2026-09-05;
+re-verified 200 for v5.2.4 on 2026-09-06).
 
 **Retargeted 2026-09-05** (v5.1.0 → v5.2.3): `coverage.py` stopped treating
 this plan as covering the pending update once v5.1.1..v5.2.3 published
@@ -69,6 +69,18 @@ fixes `default_site_name_override` in log entries — remote mode again; adds a
 `source` label to `unpoller_wan_interface_state`, see note below), v5.2.3
 (2026-09-03, defaults an unset `http_listen` instead of failing validation —
 we always set `http_listen` explicitly, so this is a no-op for us).
+
+**Retargeted again 2026-09-06** (v5.2.3 → v5.2.4), to satisfy the operator's
+GO condition ("retarget to current v5.2.x") and to stop `coverage.py`
+re-reporting drift on this plan every sweep. **v5.2.4 is source-IDENTICAL to
+v5.2.3** — GitHub `compare/v5.2.3...v5.2.4` returns `status: identical`,
+0 commits, 0 files changed, and both releases list the exact same two commits
+(`8cf64e1d` / `e2384b8b`). It is a re-tagged REBUILD, the same shape as the
+v5.0.0→v5.0.1 release-tooling re-run described above. The ghcr digests do
+differ (`…c0c6ac8e` vs `…e1fad2c2`), which is the rebuild itself — a fresher
+base layer, i.e. a small security gain and no functional change. Therefore
+NOTHING in the breaking-change review below changes: every claim made about
+v5.2.3 holds verbatim for v5.2.4.
 
 ## 1) Summary & why held
 
@@ -90,8 +102,8 @@ Aug-2026, published the day BEFORE image v4.0.0), while F-a5ceabc1 sits
 critical. Image-only bump is sound; the deny rule stays and is retargeted (§3
 step 4).
 
-Breaking-change review for the actual v3.5.0→v5.2.3 span (v5.1.1 through
-v5.2.3 covered in the retarget note above — no further influx-relevant
+Breaking-change review for the actual v3.5.0→v5.2.4 span (v5.1.1 through
+v5.2.4 covered in the retarget notes above — no further influx-relevant
 changes):
 
 - **v4.0.0** — opt-in UNAS Pro support; `refactor(unas): replace disable flag
@@ -116,9 +128,9 @@ changes):
   path — our `[influxdb]` block needs no edit. Also fixes
   `default_site_name_override` in remote mode (we don't use remote mode).
 
-**Influx schema-drift surface, re-verified at retarget (2026-09-05): unchanged
+**Influx schema-drift surface, re-verified at retarget (2026-09-06): unchanged
 from v5.1.0.** Walked every commit touching `pkg/influxunifi/` from v5.1.0
-through v5.2.3 on GitHub — there are none. The last commit to that package is
+through v5.2.4 on GitHub — there are none. The last commit to that package is
 still the v5.1.0 "Add InfluxDB v3 support and fix tag/field schema collisions"
 one already described above. v5.2.2's "WAN-status source label" change
 (`ca64173b`, PR #1073) and v5.1.1's earlier "label WAN metrics with site and
@@ -160,8 +172,25 @@ finding — no vulnerability detail exists to withhold; the record is cited via
    ours (the 2.1.0→2.4.0 move added a Service/PodMonitor that would have
    silently broken our scrape — see helmrelease.yaml comments) and bump chart
    `version:` + `image.tag` in the ONE commit of §3 instead.
-3. Image tag still published: `HEAD https://ghcr.io/v2/unpoller/unpoller/manifests/v5.2.3`
-   via token → expect 200 (was 200 on 2026-09-05).
+3. Image tag still published: `HEAD https://ghcr.io/v2/unpoller/unpoller/manifests/v5.2.4`
+   via token → expect 200 (was 200 on 2026-09-06).
+   **Then RE-RESOLVE the target instead of trusting this string.** This plan has
+   already been retargeted twice by drift alone (v5.1.0 → v5.2.3 → v5.2.4) and
+   its window is weeks out, so the pinned tag here is a snapshot, not a promise.
+   The operator's GO condition is "retarget to current v5.2.x", so at execution
+   take the newest v5.2.x tag and compare it to v5.2.4:
+   ```bash
+   curl -s "https://api.github.com/repos/unpoller/unpoller/releases?per_page=20" \
+     | python3 -c "import sys,json;[print(r['tag_name'],r['published_at'][:10]) for r in json.load(sys.stdin) if r['tag_name'].startswith('v5.2.')]"
+   # then, for any newer tag N:
+   curl -s "https://api.github.com/repos/unpoller/unpoller/compare/v5.2.4...N" \
+     | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['status'],d['total_commits'])"
+   ```
+   If `status: identical` / 0 commits, it is a REBUILD of the same source — take
+   the newer tag (fresher base layer) and this plan's analysis carries over
+   verbatim, no re-review. If it carries real commits, re-run the
+   breaking-change review in §1 for the delta (especially `pkg/influxunifi/`)
+   before bumping the target.
 4. Baselines for §4 (record the numbers):
    ```bash
    kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
@@ -182,27 +211,27 @@ finding — no vulnerability detail exists to withhold; the record is cited via
    `docs/sops/application-update.md` step 1): namespace `monitoring`,
    alertname regex `Unifi.*|Kube(Pod|Deployment).*`, TTL 4h.
 2. Edit `kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml`:
-   `image.tag: v3.5.0` → `image.tag: v5.2.3`. (Chart `version: 2.4.0`
+   `image.tag: v3.5.0` → `image.tag: v5.2.4`. (Chart `version: 2.4.0`
    unchanged unless pre-check 2 found a v5-aware chart.) No `upConfig` secret
    edit is needed (§1: v2 InfluxDB selection is unchanged; new features stay
    opt-out).
 3. **Do NOT remove the `*unpoller*` deny rule** — retarget its reason in
    `runbooks/auto-update-policy.yaml` (same commit). After this executes the
-   live state is image v5.2.3 pinned on chart 2.4.0 (appVersion v3.5.0): the
+   live state is image v5.2.4 pinned on chart 2.4.0 (appVersion v3.5.0): the
    coredns shape, where a future chart bump scores as a safe minor and lands
    unattended while the pinned `image.tag` permanently outranks appVersion and
    chart templates change semantics between releases (2.4.0 itself added a
    Service that would have collided with our hand-written one). New reason,
-   roughly: "image v5.2.3 pinned ahead of chart 2.4.0 (appVersion v3.5.0);
+   roughly: "image v5.2.4 pinned ahead of chart 2.4.0 (appVersion v3.5.0);
    chart bumps must go through the PLAN lane until a chart ships appVersion >=
    the pinned tag AND its values diff is re-vetted against our
    Service/PodMonitor overrides." Also fix the stale `plan unpoller-v4`
    pointer in the rule's comment → `unpoller-v5.1.0` (plan id kept stable
-   across the v5.2.3 retarget — see the note in §1).
+   across the v5.2.3 and v5.2.4 retargets — see the notes in §1).
 4. Commit BOTH files together, shared-worktree safe:
    ```bash
    git commit --only kubernetes/apps/monitoring/unpoller/app/helmrelease.yaml \
-     runbooks/auto-update-policy.yaml -m "feat(unpoller): image v3.5.0 -> v5.2.3 on chart 2.4.0 (plan unpoller-v5.1.0)"
+     runbooks/auto-update-policy.yaml -m "feat(unpoller): image v3.5.0 -> v5.2.4 on chart 2.4.0 (plan unpoller-v5.1.0)"
    git show --stat HEAD   # only these two files
    git push
    ```
@@ -217,7 +246,7 @@ finding — no vulnerability detail exists to withhold; the record is cited via
 identical to a healthy one. Wait ≥5 min after the new pod is Ready (scrape
 interval 60s, poll interval 2m), then:
 
-1. Pod Ready, 0 restarts, image is `ghcr.io/unpoller/unpoller:v5.2.3`
+1. Pod Ready, 0 restarts, image is `ghcr.io/unpoller/unpoller:v5.2.4`
    (`kubectl -n monitoring get pod -l app.kubernetes.io/name=unpoller -o jsonpath='{.items[0].spec.containers[0].image}'`).
 2. Logs show a successful UniFi controller login against 192.168.30.1, not an
    auth/parse-error loop — the unifi-lib v6 rework (§1) fails HERE if it fails.

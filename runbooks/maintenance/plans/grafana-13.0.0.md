@@ -6,7 +6,7 @@ pr: null                          # no Renovate PR yet (2026-08-28); if one
                                   # the hand-edit in §3, same verification.
 kind: chart
 current: "12.11.2"
-target: "13.0.0"
+target: "13.0.1"
 update_type: major
 risk: medium
 est_duration_min: 45
@@ -53,18 +53,28 @@ window: "sat-attended:2026-09-19"  # matches the recorded operator approval
                                   # (F-de4d92cd).
                                   # ORDER: run this BEFORE unpoller-v5.1.0 in
                                   # the same window — see conflicts_with.
-                                  # TARGET DRIFT, deliberately NOT taken:
-                                  # chart 13.2.1 is now newest, but it also
-                                  # moves appVersion 13.2.0 -> 13.2.1, which
-                                  # breaks this plan's whole safety argument
-                                  # ("appVersion stays 13.2.0, no sqlite
-                                  # migration crossed, git-revert IS safe").
-                                  # Chart 13.0.0 still exists and still ships
-                                  # app 13.2.0 (verified 2026-09-05), so the
-                                  # approved target remains correct and
-                                  # rollback-safe. Roll the VARIANT here; take
-                                  # the app version as a separate follow-up,
-                                  # per docs/sops/grafana-image-changes.md
+                                  # RETARGETED 2026-09-06, 13.0.0 -> 13.0.1, on
+                                  # the operator's explicit approval condition
+                                  # ("RETARGET to 13.0.1 first (premise
+                                  # drift)"). The earlier note here weighed
+                                  # only 13.0.0 vs the newest 13.2.1 and so
+                                  # concluded "the approved target remains
+                                  # correct" — it never considered 13.0.1,
+                                  # which is the target the GO actually names.
+                                  # Chart appVersions (index.yaml, verified
+                                  # 2026-09-06): 12.11.2 -> 13.2.0,
+                                  # 13.0.0 -> 13.2.0, 13.0.1 -> 13.2.0,
+                                  # 13.1.0 -> 13.2.1, 13.2.1 -> 13.2.1.
+                                  # So 13.0.1 keeps appVersion 13.2.0 and the
+                                  # whole safety argument intact ("appVersion
+                                  # stays 13.2.0, no sqlite migration crossed,
+                                  # git-revert IS safe") while picking up the
+                                  # chart-level fixes on top of 13.0.0.
+                                  # 13.1.0+ STILL deliberately NOT taken: those
+                                  # move appVersion to 13.2.1. Roll the VARIANT
+                                  # here; take the app version as a separate
+                                  # follow-up, per
+                                  # docs/sops/grafana-image-changes.md
                                   # ("roll the variant, never the version").
 sops_refs:
   - docs/sops/application-update.md
@@ -73,7 +83,7 @@ sops_refs:
 generated: "2026-08-28"
 ---
 
-# grafana: chart 12.11.2 → 13.0.0 (major — image variant flips to distroless)
+# grafana: chart 12.11.2 → 13.0.1 (major — image variant flips to distroless)
 
 ## 1) Summary & why held
 
@@ -165,10 +175,10 @@ curl -s -u "$U:$P" 'http://127.0.0.1:33001/api/plugins?embedded=0&type=datasourc
 # record the number (expected 18) — §4 compares against it
 kill %1
 
-# 2.4 Render gate: pull chart 13.0.0 and template OUR values through it
+# 2.4 Render gate: pull chart 13.0.1 and template OUR values through it
 #     (runs upstream validate.yaml; also proves flux-local/kubeconform will pass)
 mise exec -- helm repo add grafana-community https://grafana-community.github.io/helm-charts 2>/dev/null; mise exec -- helm repo update grafana-community
-mise exec -- helm template grafana grafana-community/grafana --version 13.0.0 \
+mise exec -- helm template grafana grafana-community/grafana --version 13.0.1 \
   -n monitoring -f <(python3 -c "
 import yaml,sys
 d=yaml.safe_load(open('kubernetes/apps/monitoring/grafana/app/helmrelease.yaml'))
@@ -185,11 +195,11 @@ datasource count could not be captured, or the render gate fails.
 ## 3) Steps (GitOps)
 
 1. Edit `kubernetes/apps/monitoring/grafana/app/helmrelease.yaml`:
-   - `spec.chart.spec.version: 12.11.2` → `13.0.0`
+   - `spec.chart.spec.version: 12.11.2` → `13.0.1`
    - **Update the comment block at the (absent) image tag** — it currently
-     documents "chart default (13.2.0)"; from 13.0.0 the chart default is
+     documents "chart default (13.2.0)"; from 13.0.1 the chart default is
      `13.2.0-distroless`. Append one dated line, e.g.:
-     `# 2026-08-XX: chart 13.0.0 — default image is now 13.2.0-distroless
+     `# 2026-09-XX: chart 13.0.1 — default image is now 13.2.0-distroless
       (readOnlyRootFilesystem, /tmp emptyDir, no /run.sh). Bundled datasource
       backends verified = 13 (same as plain) before the roll; no exec/sh on
       this pod — verify via API only. See plan grafana-13.0.0 / F-de4d92cd SOP.`
@@ -200,7 +210,7 @@ datasource count could not be captured, or the render gate fails.
 3. Commit **only** this file (shared worktree rules):
    ```bash
    git commit --only kubernetes/apps/monitoring/grafana/app/helmrelease.yaml \
-     -m "feat(grafana)!: chart 12.11.2 -> 13.0.0 (distroless default, readOnlyRootFilesystem)" \
+     -m "feat(grafana)!: chart 12.11.2 -> 13.0.1 (distroless default, readOnlyRootFilesystem)" \
      -m "Same appVersion 13.2.0 — packaging change only. Plan: grafana-13.0.0, finding F-8c1f6717."
    git show --stat HEAD          # exactly one file
    git push
@@ -282,7 +292,7 @@ mise exec -- flux -n monitoring reconcile hr grafana
 ```
 
 Fallback only if the datasource gate fails but the operator wants to keep
-chart 13.0.0 anyway: pin `image.tag: "13.2.0"` (plain) in values — the chart
+chart 13.0.1 anyway: pin `image.tag: "13.2.0"` (plain) in values — the chart
 permits non-distroless tags (validation only rejects `GF_*__FILE` **with**
 distroless). That contradicts the file's "no pin" stance, so it requires
 updating the comment block and `docs/sops/grafana-image-changes.md` in the
