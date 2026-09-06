@@ -443,7 +443,7 @@ kubectl get pods -n kube-system -l app=csi-smb-controller
 **Deployment:** `kubernetes/apps/home-automation/solarfocus-scraper/`
 **Source:** [`github.com/nachtschatt3n/solarfocus-scraper`](https://github.com/nachtschatt3n/solarfocus-scraper) (separate public repo — MIT)
 **Image:** `ghcr.io/nachtschatt3n/solarfocus-scraper` — **SHA-pinned**, currently
-`sha-a72e07e`. There is no `:latest` deployment; the tag is bumped by an explicit
+`sha-100f7af`. There is no `:latest` deployment; the tag is bumped by an explicit
 commit, so read the HelmRelease/Deployment for the live value rather than trusting
 this line.
 
@@ -463,9 +463,10 @@ with Home Assistant auto-discovery.
 - **Coordinator** singleton serialises cycles (`try_begin_cycle()` gates
   concurrent `run_cycle` calls to `busy`) and owns the last screenshot
   + all value records for the status page.
-- **40 sensors** published as individual MQTT topics under
-  `solarfocus/<field>`; HA auto-discovers them via retained configs on
-  `homeassistant/sensor/solarfocus_pellettop/<field>/config`.
+- **47 sensors** (plus 7 binary_sensors, 1 switch, 1 button) published as
+  individual MQTT topics under `solarfocus/<field>`; HA auto-discovers them via
+  retained configs on
+  `homeassistant/<component>/solarfocus_pellettop/<field>/config`.
 - **Per-field availability.** Each heater sensor carries TWO availability
   sources with `availability_mode: all` — `solarfocus/scraper/availability`
   (the whole cycle failed) and `solarfocus/<field>/available` (this one field
@@ -502,6 +503,10 @@ with Home Assistant auto-discovery.
 | `solarfocus/alert/title` | most recent alert title | yes |
 | `solarfocus/alert/body` | most recent alert body | yes |
 | `solarfocus/alert/last_seen` | ISO8601 timestamp of the last alert | yes |
+| `solarfocus/alarm_banner` | red header-banner text, the "Alarm" sensor (`sha-100f7af`) | no |
+| `solarfocus/command/+/set` | **scraper SUBSCRIBES here** — operator-pressed HA buttons | no |
+| `solarfocus/command/lagerraum_befuellt/set` | button press, "Lagerraum befuellt" | no |
+| `solarfocus/command/lagerraum_befuellt/result` | outcome of the last press | yes |
 | **`solarfocus-diag/scraper/last_error_image`** | base64 PNG, published on navigation_failed | yes |
 
 > **The failure screenshot lives on a SEPARATE topic prefix.** It moved from
@@ -520,6 +525,20 @@ with Home Assistant auto-discovery.
 - **Pause**: the `switch.solarfocus_pellet_heater_scraper_pause` HA entity
   toggles the retained `solarfocus/scraper/pause` topic. Useful when
   servicing the heater via VNC from a laptop.
+- **Two distinct alarm surfaces, do not confuse them.** `solarfocus/alert/*`
+  is the heater's modal dialog (it blocks navigation, hence
+  `navigation_failed`). `solarfocus/alarm_banner`, added in `sha-100f7af`, is
+  the red banner in the screen HEADER — a fault surface the scraper did not
+  watch before, which is why alarm 14 went unnoticed for six hours on
+  2026-09-06. A cycle that logs `alarm_banner` in `missing_fields` means no
+  banner was on screen, i.e. no active fault — that is the healthy case.
+- **The command tree is not access-controlled.** The scraper subscribes to the
+  wildcard `solarfocus/command/+/set`, and mosquitto runs with
+  `allow_anonymous true` and no `acl_file`, on a LoadBalancer IP reachable from
+  the LAN. Anything on that network can publish a button press. Today the only
+  handler is `lagerraum_befuellt` (a pellet-inventory flag, no path to the
+  heater's VNC control surface), but any future command inherits the same
+  unauthenticated surface — see the mosquitto app if that needs tightening.
 - **Navigation failures** capture the full screenshot as base64 and
   publish it to `solarfocus-diag/scraper/last_error_image` so you can see
   what the heater was showing when the cycle bailed — usually means a
