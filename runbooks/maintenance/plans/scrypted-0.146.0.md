@@ -20,6 +20,19 @@ security_ref: null
 capability_change: false
 rollback_class: git-revert
 finding_refs: []
+autonomy_override: human-gated  # ADDED 2026-09-06. This plan's own verdict is
+                                # DO NOT EXECUTE: v0.146.0 has no GitHub Release
+                                # and sits on upstream's even-minor dev channel,
+                                # which AR-081 forbids on a privileged NVR. The
+                                # body says so at length -- but the DERIVATION
+                                # reads facts, not prose, and was returning
+                                # AUTO-NIGHT. Only `status: draft` stood between
+                                # a do-not-execute plan and a window, and draft
+                                # also means "not reviewed yet" -- one value
+                                # doing two very different jobs.
+                                # Same shape as the paperclip PGDATA trap caught
+                                # earlier today: body says no, metadata says go,
+                                # machinery reads the metadata.
 status: draft
 window: null
 sops_refs:

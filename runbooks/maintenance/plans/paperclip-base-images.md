@@ -22,6 +22,11 @@ depends_on: []
 conflicts_with: ["paperclip-postgresql-18.6"]      # placeholder name for the parallel postgres 17->18 plan being
                                                     # written independently — confirm the ACTUAL plan_id at vetting
                                                     # time (see §6 Interference notes for why ordering matters)
+autonomy_override: human-gated  # ADDED 2026-09-06. The target field itself
+                                # reads "RECOMMENDED: DO NOT EXECUTE, see 1b",
+                                # yet this derived AUTO-NIGHT -- auto-schedulable
+                                # the moment anyone vetted it. The refusal now
+                                # lives in the field the derivation reads.
 status: draft
 window: null
 # auto_execute RETIRED 2026-08-26 (P2.1b) — execution class is derived from
