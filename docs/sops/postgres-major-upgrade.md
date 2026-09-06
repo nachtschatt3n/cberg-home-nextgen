@@ -1,8 +1,8 @@
 # SOP: PostgreSQL Major Upgrades — the PGDATA relocation trap
 
 > Description: How to move a PostgreSQL instance across a major version without silently writing the new data directory into the container's ephemeral layer, and why "SELECT version() says 18.6 and the row counts match" is not evidence the upgrade worked.
-> Version: `2026.09.06`
-> Last Updated: `2026-09-06`
+> Version: `2026.09.07`
+> Last Updated: `2026-09-07`
 > Owner: `homelab-sre`
 
 ---
@@ -44,6 +44,41 @@ check people habitually run:
 The data is lost at the **next pod restart**, arbitrarily later, with the
 maintenance window long since reported green. There is no alert for "your
 database is on tmpfs".
+
+### Why the Longhorn backup does NOT save you here
+
+The obvious objection is "we back this volume up nightly, so worst case we
+restore". For this specific failure that reasoning does not hold, and the reason
+generalises.
+
+**A backup protects the VOLUME. It cannot protect data that was never written
+to the volume.** When `PGDATA` lands outside the mount, the PVC keeps the OLD
+major's datadir, frozen at the moment of cutover, and every subsequent nightly
+backup faithfully captures that frozen copy. The backup job succeeds,
+`lastBackupAt` advances every night, robustness stays `healthy`, and the
+retention window fills with pristine snapshots of a database that stopped being
+the database. Nothing anywhere reports a problem.
+
+So restoring gets you the PRE-UPGRADE state and loses every write since
+cutover. And because this failure is silent by construction — `SELECT
+version()` says 18.x, row counts match, the application works — "since cutover"
+is not minutes. It is however long it takes someone to restart the pod, which
+can be days.
+
+Contrast a normal bad upgrade, where the new major writes to the PVC and the
+backup genuinely holds the last good state. There the backup IS the mitigation.
+The difference is not how good the backup is; it is whether the bytes ever
+reached the volume the backup covers.
+
+**This is why §6's datadir assertion runs FIRST and is not optional.** It is the
+only check in the procedure that distinguishes the two cases, and it must pass
+before the upgrade is called done — not after the application is observed
+working, which proves nothing about where the data lives.
+
+A useful sibling check when reasoning about any storage-shaped incident: ask
+whether the last backup contains data that CHANGED since the one before it. A
+series of identical backups of an allegedly-live database is not reassurance,
+it is the signature of this bug.
 
 ## 3) Blueprints
 
@@ -200,3 +235,4 @@ a rollback — you have a file.
 | Version | Date | Change |
 |---|---|---|
 | `2026.09.06` | 2026-09-06 | Created after the PG18 PGDATA relocation was caught at pre-check on `paperclip-postgresql`. Knowledge previously existed only in a plan file, which the transient-plan convention deletes on execution. |
+| `2026.09.07` | 2026-09-07 | Added "Why the Longhorn backup does NOT save you here" after the operator asked exactly that. Both affected volumes ARE enrolled in the nightly backup and were captured that morning — the point is that a volume backup cannot cover writes that never reached the volume. |
