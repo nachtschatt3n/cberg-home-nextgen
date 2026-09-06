@@ -350,17 +350,18 @@ spec:
               path: /var/lib/grafana/dashboards/teslamate
     serviceMonitor:
       enabled: true
-      # WITHOUT THIS LABEL GRAFANA IS NEVER SCRAPED (F-66cb8d5f, found 2026-09-06
-      # after 244 days). The chart defaults the ServiceMonitor's `release` label
-      # to the HELM RELEASE NAME — here `grafana` — but the Prometheus CR selects
-      # `serviceMonitorSelector.matchLabels.release: kube-prometheus-stack`. A
-      # non-matching selector is not an error anywhere: the ServiceMonitor is
-      # created, Flux reports Ready, and Prometheus simply never picks it up. No
-      # `grafana` job appeared in the target list and `grafana_build_info` was
-      # empty the entire time.
-      # Same silent-ignore class as a PrometheusRule missing this label.
-      labels:
-        release: kube-prometheus-stack
+      # DO NOT ADD `labels: {release: ...}` HERE. Tried 2026-09-06 and REVERTED:
+      # the chart hardcodes `release: {{ .Release.Name }}` on this ServiceMonitor
+      # and merges .Values.serviceMonitor.labels AFTER it, producing a DUPLICATE
+      # `release` mapping key. The rendered YAML is then invalid and the Helm
+      # upgrade fails at post-render with:
+      #   line 12: mapping key "release" already defined at line 7
+      # Grafana keeps serving on the previous release, so the symptom is a stuck
+      # HelmRelease rather than an outage — easy to miss.
+      # The real problem (F-66cb8d5f): this SM carries `release: grafana` while
+      # Prometheus selects `release: kube-prometheus-stack`, so grafana has never
+      # been scraped. That is fixed at the SELECTOR end, together with the 21
+      # other unselected ServiceMonitors (F-0fa5b600) — not here.
     ingress:
       enabled: true
       ingressClassName: internal
