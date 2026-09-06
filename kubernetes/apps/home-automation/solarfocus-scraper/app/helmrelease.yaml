@@ -30,7 +30,7 @@ spec:
           app:
             image:
               repository: ghcr.io/nachtschatt3n/solarfocus-scraper
-              tag: sha-e6f70fa
+              tag: sha-100f7af
               pullPolicy: IfNotPresent
             env:
               - name: TZ
