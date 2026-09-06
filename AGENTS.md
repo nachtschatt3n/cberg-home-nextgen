@@ -250,6 +250,44 @@ sops updatekeys kubernetes/apps/namespace/app/secret.sops.yaml
   publishable/not-publishable table: **`docs/sops/vulnerability-disclosure.md`**.
   Edit with `runbooks/policy-cli.py finding {list,show,ref,add,detail}`.
 
+### Third-party image CVEs: we bump, we never rebuild (operator rule, 2026-09-06)
+
+**We consume upstream container images. We do not rebuild them to patch CVEs —
+we wait for upstream to ship a fixed tag.** So the only remediation this
+household performs for a third-party image is *bump to a newer tag*, and when
+no newer tag exists there is no action available, however alarming the count.
+
+This is why `security-check.py` gates fixable-CVE findings on
+`_newer_upstream_tag_exists()` before rating them actionable, and emits
+already-newest images as ACCEPTED under `[AR-029]` instead. That branch is the
+rule, in code.
+
+**Do NOT propose these in response to an already-newest finding:** building our
+own image, pinning a patched base layer, or vendoring a fixed dependency. They
+are all "rebuild" wearing another name.
+
+**What IS in scope** when an already-newest image is genuinely unacceptable: a
+variant/base switch (e.g. `-alpine` → `-debian`), replacing the component, or a
+compensating control (drop its ingress, gate it behind Authentik, restrict its
+network policy). `_UNBUMPABLE_CRIT_ESCALATE` escalates to a human decision
+rather than absorbing it silently.
+
+**THE EXCEPTION — our own images.** ~31 images under
+`ghcr.io/nachtschatt3n/**` are BUILT BY US. For those, "wait for upstream" is a
+category error: we *are* upstream, a rebuild is exactly the remedy, and it is
+entirely within our control. A fixable CVE in a self-built image is ordinary
+work queue, never an AR-029 acceptance (F-3355f834). The same applies to any
+image whose Dockerfile lives in a repo we own.
+
+**Reading the counts.** A raw Trivy CRITICAL is not this household's
+`critical`. That tier means *external-unauth AND exploited-in-the-wild (CISA
+KEV) AND real vuln*, and `runbooks/lib/risk_model.py` applies it — a
+never-exploited CVE on an internal image is MEDIUM. Quote the board's
+contextual tier, not `sweep_findings.severity`, or you will report criticals
+that page nobody. Measured 2026-09-06: the raw count was in double digits while
+the contextual count was zero — the board is the source of truth for what
+pages.
+
 ## Operator-Curated Policy lives in sweep_history Postgres
 
 Since 2026-05-27, four categories of operator decisions live in the cluster
