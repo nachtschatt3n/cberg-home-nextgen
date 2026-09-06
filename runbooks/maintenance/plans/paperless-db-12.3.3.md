@@ -35,21 +35,21 @@ rollback_class: backup-restore        # MariaDB majors have NO downgrade — git
                                       # 12.3-format datadir)
 backup_gate: "logical dump taken in-window, verified non-empty + '-- Dump completed' + per-table counts captured, BEFORE the image bump"
 finding_refs: [F-1c080cce]
-status: draft                         # UNBLOCKED 2026-09-07. The 2026-09-06 block was
-                                      # the FALSE utf8mb3 premise, which removed a
-                                      # data-integrity check from the dump that is this
-                                      # plan's rollback floor. Verified today that the
-                                      # corrections are real in the BODY, not merely
-                                      # claimed in the header: no live utf8mb3 assertion
-                                      # survives, the abort condition is inverted, and the
-                                      # 4-byte-lead-byte grep is MANDATORY with an explicit
-                                      # STOP on a zero count. Re-vetted against the live
-                                      # database the same day: image mariadb:11.8.9, and
-                                      # all 74 paperless tables utf8mb4_general_ci — the
-                                      # corrected premise holds. Deliberately `draft`:
-                                      # the 2026-09-04 operator GO was given against the
-                                      # defective procedure and must NOT carry over.
-                                      # Needs a FRESH go/no-go before scheduling.
+status: executed                      # EXECUTED 2026-09-07 ~23:53-00:02 CEST, operator
+                                      # present and asking. mariadb 11.8.9 -> 12.3.3.
+                                      # Verified: mariadb-upgrade ran all 8 phases
+                                      # ("Major version upgrade detected from 11.8.8 to
+                                      # 12.3.3"); 74 tables / 22,889 rows identical to
+                                      # baseline; all 74 still utf8mb4_general_ci; the
+                                      # 4-byte emoji subject survived (HEX LIKE %F09F%)
+                                      # and the server still WRITES 4-byte content — the
+                                      # original OperationalError 1366 failure mode; a
+                                      # deliberate restart re-verified identical and logged
+                                      # "MariaDB upgrade not required", so the datadir
+                                      # marker is in lockstep; paperless_mail
+                                      # process_mail_accounts SUCCEEDS. 962 documents.
+                                      # Pre-migration Longhorn snapshot
+                                      # paperless-db-data-pre-12-3-3 retained for the soak.
 window: null                          # CLEARED 2026-09-06 (was "sat-attended:2026-09-12").
 premises:
   # NOTE ON SCOPE: a premise may not `kubectl exec` (plan-premises.py refuses
@@ -220,7 +220,7 @@ cberg-agent; the manifest change is GitOps.
 documents queue, nothing is lost):
 
 ```bash
-flux suspend kustomization paperless-ngx -n flux-system
+flux suspend kustomization paperless-ngx -n office   # NOT flux-system — measured 2026-09-07
 flux suspend helmrelease paperless-ngx -n office
 kubectl -n office scale deploy/paperless-ngx --replicas=0
 kubectl -n office wait --for=delete pod -l app.kubernetes.io/name=paperless-ngx --timeout=120s
@@ -251,11 +251,27 @@ subject was breaking every mail-processing cycle with `OperationalError 1366`.
 So this database is known to hold 4-byte content, and the SOP's check exists for
 exactly that content class. Run it against the dump before trusting the dump:
 
+**The grep form below DOES NOT WORK on macOS/BSD** — measured 2026-09-07: it
+returns 0 even on a file containing a known emoji, with or without `-a`. Since
+this plan reads a zero as "STOP, the dump lost 4-byte content", running it
+blindly ABORTS a perfectly good migration. Use the byte scan, and run the
+POSITIVE CONTROL first — a checker that cannot see 4-byte content makes its
+own zero meaningless:
+
 ```bash
-# 4-byte UTF-8 lead bytes (F0-F4) must survive the dump intact
-LC_ALL=C grep -c $'[\xf0-\xf4]' "$DUMP"   # expect > 0 — a ZERO here means the
-                                           # dump lost 4-byte content and is NOT
-                                           # a valid rollback. STOP.
+# POSITIVE CONTROL first — prove the checker can see 4-byte content at all
+printf 'ascii\nemoji \xf0\x9f\x93\x84 here\n' > /tmp/ctl.txt
+python3 -c "import sys;print(sum(1 for l in open(sys.argv[1],'rb') if any(0xf0<=b<=0xf4 for b in l)))" /tmp/ctl.txt
+# EXPECT 1. A 0 here means the CHECKER is broken, not the dump — stop and fix it.
+
+# then the real gate
+python3 -c "import sys;print(sum(1 for l in open(sys.argv[1],'rb') if any(0xf0<=b<=0xf4 for b in l)))" "$DUMP"
+# EXPECT > 0 (measured 1 on 2026-09-07 — the mail subject that caused the
+# original OperationalError 1366). A ZERO with a PASSING control means the dump
+# lost 4-byte content and is NOT a valid rollback. STOP.
+
+# NOT THIS — returns 0 on macOS/BSD grep regardless of content:
+#   LC_ALL=C grep -c $'[\xf0-\xf4]' "$DUMP"
 ```
 
 **3.3 Baseline per-table row counts** (the contents baseline for §4):
@@ -318,8 +334,8 @@ git push
 SOP-sanctioned here — mariadb SOP step 4):
 
 ```bash
-flux resume kustomization paperless-ngx -n flux-system   # resumes + reconciles
-flux reconcile kustomization paperless-ngx -n flux-system --with-source
+flux resume kustomization paperless-ngx -n office   # NOT flux-system
+flux reconcile kustomization paperless-ngx -n office --with-source
 kubectl -n office rollout status deploy/paperless-db --timeout=300s
 # WATCH the upgrade actually run — do not skip:
 kubectl -n office logs deploy/paperless-db | grep -iE 'upgrade|phase' | head -40
@@ -338,7 +354,12 @@ kubectl -n office exec deploy/paperless-db -- sh -c \
 
 ```bash
 flux resume helmrelease paperless-ngx -n office
-flux reconcile helmrelease paperless-ngx -n office   # restores replicas=1
+flux reconcile helmrelease paperless-ngx -n office
+# The reconcile does NOT restore replicas=1 (measured 2026-09-07): §3.1 scaled
+# the Deployment with kubectl, which is drift the HelmRelease does not correct
+# unless driftDetection is enabled. Scale it back explicitly, or the plan
+# finishes with the app silently at 0/0 and every check still green.
+kubectl -n office scale deploy/paperless-ngx --replicas=1
 kubectl -n office rollout status deploy/paperless-ngx --timeout=300s
 ```
 
