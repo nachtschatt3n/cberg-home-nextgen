@@ -35,7 +35,16 @@ rollback_class: backup-restore        # MariaDB majors have NO downgrade — git
                                       # 12.3-format datadir)
 backup_gate: "logical dump taken in-window, verified non-empty + '-- Dump completed' + per-table counts captured, BEFORE the image bump"
 finding_refs: [F-1c080cce]
-status: scheduled                     # OPERATOR GO 2026-09-04T21:48Z, synced to the plan
+status: blocked                       # BLOCKED 2026-09-06. Was `scheduled` on the
+                                      # OPERATOR GO 2026-09-04T21:48Z. That GO was
+                                      # given against a premise this plan states four
+                                      # times and which is FALSE — see CORRECTION
+                                      # below. The mechanism is fine; the DUMP
+                                      # VERIFICATION was not. Needs re-vetting and a
+                                      # FRESH go/no-go before it is scheduled again:
+                                      # the operator approved a procedure that
+                                      # skipped an integrity check on the document
+                                      # library, and that is not what they agreed to.
                                       # 2026-09-05. Was `draft` while the decision store already
                                       # held approve/pending-exec for 09-12 — a HIGH-risk one-way
                                       # migration must not go into a window with its plan marked
@@ -43,7 +52,10 @@ status: scheduled                     # OPERATOR GO 2026-09-04T21:48Z, synced to
                                       # approval strands silently (how talos-1.13.9 was lost).
                                       # GO precondition 'fix the dead conflicts_with ref' is
                                       # SATISFIED as of 3ec6269a.
-window: "sat-attended:2026-09-12"      # Matches the recorded operator decision. The older
+window: null                          # CLEARED 2026-09-06 (was "sat-attended:2026-09-12").
+                                      # Left scheduled, the window agent would have
+                                      # picked this up on 09-12 with the false premise
+                                      # intact. Re-set it only after re-vetting.
                                       # in-file note recommending 2026-09-05 predates that GO
                                       # and is superseded — attended slot, allow_reboot:false,
                                       # which is fine: this plan needs no reboot.
@@ -55,6 +67,38 @@ sops_refs:
   - docs/sops/longhorn.md
 generated: "2026-08-28"
 ---
+
+> ## ⚠ CORRECTION 2026-09-06 — READ BEFORE RE-SCHEDULING
+>
+> This plan was STOPPED at pre-check on 2026-09-06 by its own abort condition,
+> before anything was quiesced, dumped or changed. Nothing was touched.
+>
+> **What was wrong:** the plan asserted the `paperless` schema is
+> `utf8mb3_general_ci` "by design" and used that to declare the SOP's
+> 4-byte-lead-byte dump verification "N/A". Ground truth, measured against the
+> live database: **all 74 tables are `utf8mb4_general_ci`**. Commit `9cb10b76`
+> (2026-08-30) converted them, two days AFTER this plan was written, because a
+> 4-byte emoji in a mail subject was failing every mail-processing cycle with
+> `OperationalError 1366`.
+>
+> **Why that mattered more than a stale string:** the false premise was load
+> bearing. It removed a data-integrity check from the dump of the household's
+> document library, on precisely the content class that database is now known
+> to contain. A dump that silently lost 4-byte content would still have passed
+> every remaining gate — and that dump is the plan's `rollback_class:
+> backup-restore` recovery floor.
+>
+> **Fixed here:** all four utf8mb3 assertions corrected, the abort condition
+> inverted (utf8mb4 is now expected, utf8mb3 is the regression), and the 4-byte
+> grep reinstated as MANDATORY with an explicit STOP on a zero count.
+>
+> **Still required before this runs:** re-vet end to end against the current
+> schema and take a fresh operator go/no-go. The mariadb 11.8.9 → 12.3.3
+> mechanism itself was checked on 2026-09-06 and is sound — `VOLUME
+> /var/lib/mysql` is unchanged, entrypoint and CMD are identical, and
+> `MARIADB_AUTO_UPGRADE` is honored with `mariadb-upgrade
+> --upgrade-system-tables` intact. It is the verification around it that failed
+> review, not the upgrade path.
 
 # paperless-db: mariadb 11.8.9 → 12.3.3 (LTS → LTS major)
 
@@ -93,8 +137,8 @@ Why not auto-safe: one-way major on the household document library. Why it is
 still very doable: the mariadb-major SOP already covers both silent failure
 modes (skipped `mariadb-upgrade`; TLS-loopback resets) from the
 `databases/mariadb` 12.2.2→13.0.1 upgrade, and this instance holds exactly one
-user schema (`paperless`, 74 tables, all `utf8mb3_general_ci` by design — the
-charset pin in the Deployment args stays).
+user schema (`paperless`, 74 tables, all **`utf8mb4_general_ci`** — see the
+CORRECTION at the top of this file; the charset pin in the Deployment args stays).
 
 **Official-image trap (differs from the Bitnami SOP context):** the official
 `mariadb` entrypoint does **NOT** run `mariadb-upgrade` unless
@@ -121,8 +165,8 @@ kubectl -n office get deploy paperless-db -o jsonpath='{.spec.template.spec.cont
 kubectl get volume -n storage paperless-db-data \
   -o custom-columns=NAME:.metadata.name,STATE:.status.state,ROBUST:.status.robustness,LAST_BACKUP:.status.lastBackupAt
 
-# Schema inventory + collation gate (SOP step 1/2): expect paperless=74-ish
-# tables, all utf8mb3_general_ci (matches the charset pin in the args)
+# Schema inventory + collation gate (SOP step 1/2): expect paperless=74
+# tables, all utf8mb4_general_ci (converted 2026-08-30 by 9cb10b76)
 kubectl -n office exec deploy/paperless-db -- sh -c \
   'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e \
    "SELECT table_schema, COUNT(*) FROM information_schema.tables GROUP BY 1;
@@ -137,8 +181,8 @@ kubectl -n office logs deploy/paperless-ngx --tail=20 | grep -i consume || true
 ```
 
 Abort the window for this plan if the volume is not `attached/healthy`, the
-last backup is stale, or any paperless table is not `utf8mb3_*` (that would
-mean drift since the 2026-08-19 replatform — re-investigate first).
+last backup is stale, or any paperless table is not `utf8mb4_*` (utf8mb3 would
+now mean a REGRESSION of the 2026-08-30 conversion — re-investigate first).
 
 ## 3. Steps
 
@@ -171,9 +215,21 @@ grep -c 'CREATE TABLE' "$DUMP"          # expect ~74 (paperless) + system tables
 ls -lh "$DUMP"                          # non-trivial size
 ```
 
-(The 4-byte-lead-byte grep from the SOP is N/A here: the paperless schema is
-utf8mb3 by design and cannot hold 4-byte content. Dumping with the utf8mb4
-client charset is still correct — utf8mb3 ⊂ utf8mb4, no transcoding loss.)
+**The 4-byte-lead-byte grep from the SOP is MANDATORY here — do not skip it.**
+This paragraph previously said it was N/A "because the paperless schema is
+utf8mb3 by design and cannot hold 4-byte content". That justification is FALSE
+and was false when written: commit `9cb10b76` (2026-08-30) converted all 74
+tables to `utf8mb4_general_ci` precisely *because* a 4-byte emoji in a mail
+subject was breaking every mail-processing cycle with `OperationalError 1366`.
+So this database is known to hold 4-byte content, and the SOP's check exists for
+exactly that content class. Run it against the dump before trusting the dump:
+
+```bash
+# 4-byte UTF-8 lead bytes (F0-F4) must survive the dump intact
+LC_ALL=C grep -c $'[\xf0-\xf4]' "$DUMP"   # expect > 0 — a ZERO here means the
+                                           # dump lost 4-byte content and is NOT
+                                           # a valid rollback. STOP.
+```
 
 **3.3 Baseline per-table row counts** (the contents baseline for §4):
 

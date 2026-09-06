@@ -62,6 +62,46 @@ sops_refs:
 generated: "2026-09-05"
 ---
 
+> ## 🛑 DO NOT EXECUTE AS WRITTEN — 2026-09-06
+>
+> Stopped at pre-check on 2026-09-06, before any manifest edit. **As written,
+> this plan silently destroys the database.**
+>
+> **The defect:** PostgreSQL's official image relocated PGDATA at 18.
+>
+> | image | PGDATA | VOLUME |
+> |---|---|---|
+> | `postgres:17.11-alpine` | `/var/lib/postgresql/data` | `/var/lib/postgresql/data` |
+> | `postgres:18.6-alpine` | `/var/lib/postgresql/18/docker` | `/var/lib/postgresql` |
+>
+> This plan keeps `mountPath: /var/lib/postgresql/data` and only repoints
+> `subPath` to `postgres18`. On 18.6 the `initdb` and the restore therefore land
+> in the container's **ephemeral writable layer**, not on the PVC.
+>
+> **Why this is worse than an ordinary bug:** that failure passes this plan's
+> ENTIRE §4 verification suite. `SELECT version()` reports 18.6, every row count
+> matches, the application works. The data is lost at the next pod restart —
+> arbitrarily later, with the window long since reported green.
+>
+> **Before this can run, it needs:**
+> 1. `mountPath`/`subPath`/PGDATA reworked for PG18's layout, and a verification
+>    step that proves the datadir is on the PVC (e.g. `SHOW data_directory` plus
+>    a `df`/mount check), not merely that the server started.
+> 2. The count gate widened beyond `public`. The 37th table is
+>    `drizzle.__drizzle_migrations`; losing it makes the app re-run migrations
+>    against a populated database.
+> 3. The dump marker check fixed — `tail -5` nearly misfired because pg_dump
+>    17.11 appends a `\unrestrict` line after the completion marker.
+>
+> **A verified pre-upgrade backup already exists** from the stopped run, taken
+> while the DB was idle: `/Users/mu/backups/paperclip-postgresql/` —
+> `paperclip-pre-18.6-202609061302.sql` (76 MB, 14,102 lines) and
+> `.dump` (12 MB custom format). `pg_restore -l` lists 286 entries / 37 TABLE
+> DATA; both `0600`, outside the repo. Longhorn snapshot
+> `paperclip-postgresql-data-pre-18-6` deliberately retained.
+>
+> The service was left untouched on 17.11, 2/2 Running, row counts byte-identical.
+
 # paperclip-postgresql: postgres 17.11-alpine → 18.6-alpine (major)
 
 ## 1. Summary & why held
