@@ -1527,7 +1527,13 @@ log_section "Section 11: Container Logs Analysis"
 
     INFRA_EXCLUDE=$(build_grep_exclude "${INFRA_LOG_FALSE_POSITIVES[@]}")
 
-    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l app.kubernetes.io/name=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
+    # SELECTOR FIX 2026-09-06 (F-19bd3488): this read
+    # `-l app.kubernetes.io/name=cilium`, which matches ZERO pods — the cilium
+    # DaemonSet labels its pods `k8s-app=cilium`. So CILIUM_ERRORS was a
+    # structural zero and the CNI error stream had never been audited by any
+    # sweep since this check was written. The count it produced was not "no
+    # errors", it was "no pods". A silent zero is never a pass.
+    CILIUM_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=cilium --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal|critical)|\[(ERROR|FATAL|CRITICAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "cilium-errors")
     echo "Cilium errors (24h): $CILIUM_ERRORS"
 
     COREDNS_ERRORS=$(safe_count "kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100 --since=24h 2>&1 | grep -E 'level=(error|fatal)|\[(ERROR|FATAL)\]' | grep -vE '$INFRA_EXCLUDE' | wc -l" "coredns-errors")

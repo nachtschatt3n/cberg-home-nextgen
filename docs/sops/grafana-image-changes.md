@@ -1,8 +1,8 @@
 # SOP: Grafana Image Changes — the datasource pre-flight gate
 
 > Description: How to change the Grafana container image (tag, variant, or chart-driven bump) without silently breaking datasources, and why "the pod started and the UI loads" is not evidence that it worked.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.06`
+> Last Updated: `2026-09-06`
 > Owner: `homelab-sre`
 
 ---
@@ -37,6 +37,7 @@ this SOP exists as a gate rather than a checklist item.
 | Image | chart default — **no `image.tag` override**, deliberately |
 | Config store | sqlite on the `grafana-config` Longhorn PVC (`longhorn-static`) |
 | Provisioned datasources | 7 — Alertmanager, Prometheus, Elasticsearch, InfluxDB, Unpoller InfluxDB, TeslaMate, Pellets |
+| Current variant | **`-distroless`** — the chart default since 13.0.0 (chart 13.0.1 shipped 2026-09-06). **NO SHELL, NO `wget`, NO `ls`**: every `kubectl exec ... -- sh` in this SOP was rewritten to an API/port-forward form on 2026-09-06 because they could not run at all. Do not reintroduce an exec form. |
 | Rejected variant | `-slim` on 13.x — see §7 |
 | Evidence record | `security_ref: F-de4d92cd` |
 
@@ -125,8 +126,18 @@ mise exec -- kubectl -n monitoring get deploy grafana \
 mise exec -- kubectl -n monitoring logs $POD -c grafana | grep "migrations completed"
 
 # 3. GATE: the image actually ships the datasource backends
-mise exec -- kubectl -n monitoring exec $POD -c grafana -- \
-  sh -c 'echo bundled=$(ls /usr/share/grafana/data/plugins-bundled 2>/dev/null | wc -l)'
+#    DISTROLESS-SAFE (2026-09-06): the chart default image is now
+#    13.2.0-distroless — no `sh`, no `ls`, no `wget`. `kubectl exec ... -- sh`
+#    fails with `exec: "sh": executable file not found in $PATH`, so the old
+#    exec form of this gate CANNOT RUN. Use the API, which is also a stronger
+#    check: it counts what Grafana actually LOADED, not what is on disk.
+U=$(mise exec -- kubectl -n monitoring get secret grafana-admin-secret -o jsonpath='{.data.admin-user}' | base64 -d)
+P=$(mise exec -- kubectl -n monitoring get secret grafana-admin-secret -o jsonpath='{.data.admin-password}' | base64 -d)
+mise exec -- kubectl -n monitoring port-forward svc/grafana 33001:80 &
+sleep 4
+curl -s -u "$U:$P" 'http://127.0.0.1:33001/api/plugins?embedded=0&type=datasource' \
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); print("bundled="+str(len(d)))'
+kill %1
 # Compare against the incumbent baseline from §8 command A. A DROP is a failure,
 # even if the UI works.
 
@@ -193,10 +204,22 @@ Not a variant option.
 ```bash
 # A. BASELINE — capture BEFORE any change
 POD=$(mise exec -- kubectl -n monitoring get pods -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}')
-mise exec -- kubectl -n monitoring exec $POD -c grafana -- sh -c \
-  'grafana server -v; echo bundled=$(ls /usr/share/grafana/data/plugins-bundled | wc -l)'
+# DISTROLESS-SAFE: no shell in the image. Version + loaded-plugin count via API.
+U=$(mise exec -- kubectl -n monitoring get secret grafana-admin-secret -o jsonpath='{.data.admin-user}' | base64 -d)
+P=$(mise exec -- kubectl -n monitoring get secret grafana-admin-secret -o jsonpath='{.data.admin-password}' | base64 -d)
+mise exec -- kubectl -n monitoring port-forward svc/grafana 33001:80 & sleep 4
+curl -s -u "$U:$P" http://127.0.0.1:33001/api/health          # version + commit
+curl -s -u "$U:$P" 'http://127.0.0.1:33001/api/plugins?embedded=0&type=datasource' \
+  | python3 -c 'import sys,json; print("bundled="+str(len(json.load(sys.stdin))))'
+kill %1
+# NOTE: this counts LOADED datasource plugins, which is the property that
+# actually matters. The old on-disk `plugins-bundled` count is not comparable
+# to it — do not mix baselines taken with the two different methods.
 
 # B. PRE-FLIGHT a candidate WITHOUT the live PVC — the trap-proof check.
+#    CAVEAT (2026-09-06): this form needs a SHELLED candidate tag. The chart
+#    default is now distroless, so for a distroless candidate use the API form
+#    in command A against a temporary Deployment instead of `sh -c`.
 #    A throwaway pod mounts no grafana-config, so /var/lib/grafana/plugins is
 #    empty and what you count is exactly what the IMAGE ships. This is the one
 #    check the PVC-leftover trap cannot fool.
@@ -211,9 +234,15 @@ mise exec -- kubectl -n monitoring run grafana-preflight --rm -i --restart=Never
 # `persisted=0` is the proof the count is untainted. The pod self-deletes.
 
 # C. Distinguish shipped plugins from PVC leftovers on a running pod
-mise exec -- kubectl -n monitoring exec $POD -c grafana -- sh -c \
-  'echo "shipped:"; ls /usr/share/grafana/data/plugins-bundled 2>/dev/null | wc -l;
-   echo "persisted on PVC:"; ls /var/lib/grafana/plugins 2>/dev/null | wc -l'
+# DISTROLESS-SAFE: cannot exec into the running pod. Read the PVC from a
+# throwaway shelled pod that mounts the SAME claim read-only, and take the
+# shipped count from the API above.
+mise exec -- kubectl -n monitoring run grafana-pvc-peek --rm -i --restart=Never \
+  --image=busybox:1.37 --overrides='{"spec":{"containers":[{"name":"p","image":"busybox:1.37",
+  "command":["sh","-c","echo persisted-on-PVC:; ls /var/lib/grafana/plugins 2>/dev/null | wc -l"],
+  "volumeMounts":[{"name":"c","mountPath":"/var/lib/grafana","readOnly":true}]}],
+  "volumes":[{"name":"c","persistentVolumeClaim":{"claimName":"grafana-config","readOnly":true}}]}}'
+# readOnly on both the mount and the claim: this must never write to the live PVC.
 
 # D. Did the values actually land before the upgrade ran?
 mise exec -- kubectl -n monitoring get hr grafana -o jsonpath='{.spec.values.image}{"\n"}'
@@ -231,8 +260,9 @@ mise exec -- kubectl -n monitoring logs $POD -c grafana | grep -iE 'plugin.*not 
 mise exec -- kubectl -n monitoring get pods -l app.kubernetes.io/name=grafana
 mise exec -- kubectl -n monitoring get hr grafana
 mise exec -- kubectl -n monitoring get pvc grafana-config
-mise exec -- kubectl -n monitoring exec deploy/grafana -c grafana -- \
-  wget -qO- localhost:3000/api/health
+# DISTROLESS-SAFE: no wget in the image — port-forward instead.
+mise exec -- kubectl -n monitoring port-forward svc/grafana 33001:80 & sleep 4
+curl -s http://127.0.0.1:33001/api/health; kill %1
 ```
 
 Expect the pod `3/3 Running` with 0 restarts, HelmRelease `Ready=True`, PVC

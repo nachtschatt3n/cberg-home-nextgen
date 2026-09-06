@@ -427,7 +427,7 @@ Daily schedule (UTC):
 |-------|---------------------------|--------|
 | 02:00 | `global-filesystem-trim`  | `fstrim` inside every volume — releases freed-but-still-allocated blocks back to Longhorn |
 | 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
-| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 1` |
+| 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 7` |
 
 ```bash
 # Inspect the recurring job pipeline
