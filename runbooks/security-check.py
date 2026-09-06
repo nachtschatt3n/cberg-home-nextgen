@@ -389,15 +389,52 @@ def load_sensitive() -> bool:
 
     _sensitive["DOMAIN"] = domain_raw
     _sensitive["NAME"]   = git_name
-    # Only treat git user.email as a scannable EMAIL literal if it's actually
-    # email-shaped. Here git_email is a bare username ("mathiasuhl", no @), and
-    # fixed-string scanning that across the repo matched legitimate reverse-DNS
-    # launchd labels (com.mathiasuhl.*) as a "[EMAIL] literal" — a false
-    # positive. A bare handle isn't a meaningful email-leak signal.
-    _sensitive["EMAIL"]  = (
-        git_email if ("@" in git_email and "." in git_email.rsplit("@", 1)[-1]) else ""
-    )
+    # Only treat a value as a scannable EMAIL literal if it is actually
+    # email-shaped. `git config user.email` here is a bare username (no "@"),
+    # and fixed-string scanning THAT across the repo matched legitimate
+    # reverse-DNS launchd labels (com.<handle>.*) as an "[EMAIL] literal" — a
+    # false positive. A bare handle is not a meaningful email-leak signal.
+    #
+    # BUT the shape guard alone left the email scan INERT (F-13354b57): with a
+    # bare handle in git config, EMAIL became "" and section 2A silently
+    # skipped email entirely, printing nothing at all rather than a green line.
+    # Operator PII then reached public history with no check watching. Fixing a
+    # false positive had created a false negative — the same trade this repo
+    # has now made three times.
+    #
+    # FALLBACK: the dominant AUTHOR email from this repo's own git log. It is
+    # email-shaped by construction, it is the identity actually at risk of
+    # being pasted into a file, and — critically — it is ALREADY in the public
+    # history it is derived from, so nothing new is committed by using it. The
+    # needle is computed at runtime and never written to a tracked file.
+    if "@" in git_email and "." in git_email.rsplit("@", 1)[-1]:
+        _sensitive["EMAIL"] = git_email
+    else:
+        _sensitive["EMAIL"] = _dominant_author_email()
     return True
+
+
+def _dominant_author_email() -> str:
+    """Most frequent email-shaped author address in this repo's history.
+
+    Returns "" if none is email-shaped, and the caller must then treat the
+    email scan as UNMEASURED rather than clean — see s2_sensitive_exposure.
+    """
+    import collections
+    try:
+        out = subprocess.run(["git", "log", "--format=%ae"],
+                             capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            return ""
+        addrs = [a.strip() for a in out.stdout.splitlines() if a.strip()]
+        shaped = [a for a in addrs
+                  if "@" in a and "." in a.rsplit("@", 1)[-1]
+                  and not a.endswith(("noreply.github.com", "users.noreply.github.com"))]
+        if not shaped:
+            return ""
+        return collections.Counter(shaped).most_common(1)[0][0]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def redact(text: str) -> str:
@@ -743,6 +780,13 @@ def s2_sensitive_exposure() -> tuple[str, Findings, str]:
     # --- A: personal literals (domain / git name / email) -----------------
     for label, val in [("domain", domain), ("name", name), ("email", email)]:
         if not val:
+            # An absent needle is NOT a clean scan. Skipping silently is how
+            # the email check sat inert while operator PII reached public
+            # history (F-13354b57): the section printed no email line at all,
+            # and no line reads as no problem.
+            f.add(WARNING, f"[{label.upper()}] scan did NOT run — no needle "
+                           f"available, so this is unmeasured, not clean")
+            cprint(C.YELLOW, f"  🟡 {label} scan skipped — no needle (UNMEASURED)")
             continue
         hits = run_lines(
             f"git ls-files | grep -v '\\.sops\\.yaml$' "
