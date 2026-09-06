@@ -91,9 +91,37 @@ def main() -> int:
           mp.execution_class(plan(autonomy_override="human-gated"), POLICY),
           "HUMAN-GATED")
 
-    # risk deliberately does NOT gate: medium-risk reversible work stays AUTO
+    # risk:medium deliberately does NOT gate. This is doctrine, not an
+    # oversight: "a medium-risk change that is reversible, non-interrupting and
+    # capability-neutral is exactly what nights are for". Do not tighten it.
     check("risk:medium does not human-gate (by design)",
           mp.execution_class(plan(risk="medium"), POLICY), "AUTO-NIGHT")
+
+    # risk:high DOES gate, added 2026-09-06. Found by audit: superset-pg-18.6
+    # derived AUTO-NIGHT while being a 90-minute dump/restore cutover of
+    # Superset's entire metadata DB plus a SOPS secret repoint. Every
+    # MECHANICAL fact was individually defensible -- the old 17.11 Deployment
+    # is kept running, so rollback genuinely is a revert -- which is the point:
+    # capability_change/rollback_class/needs_reboot/shared cannot express
+    # "moves live data between two systems", and risk:high is where the
+    # operator says so. Only `status: draft` was keeping it out of a window,
+    # and status is clerical state, not a control.
+    check("risk:high human-gates a plan that matches on mechanics",
+          mp.execution_class(plan(risk="high"), POLICY), "HUMAN-GATED")
+
+    # the veto must survive the trailing comments these files actually carry
+    check("risk:high still gates when the value has a trailing comment",
+          mp.execution_class(plan(risk="high   # metadata DB"), POLICY),
+          "HUMAN-GATED")
+
+    # ...and it must VETO only, never grant. A risk level cannot rescue a plan
+    # that fails on mechanics, or the gate becomes an escalation path.
+    check("risk:low cannot rescue a capability-changing plan",
+          mp.execution_class(plan(risk="low", capability_change=True), POLICY),
+          "HUMAN-GATED")
+    check("risk:low cannot rescue a reboot-bearing plan",
+          mp.execution_class(plan(risk="low", needs_reboot=True), POLICY),
+          "HUMAN-GATED")
 
     print()
     if FAILURES:

@@ -747,12 +747,26 @@ def execution_class(plan: dict, policy: dict | None) -> tuple[str, str]:
     if facts["capability_change"] is None or facts["rollback_class"] is None:
         return "HUMAN-GATED", "facts not declared (capability_change/rollback_class)"
     shared = {str(x).lower() for x in ((plan.get("touches") or {}).get("shared") or [])}
+    # `risk:` frequently carries a trailing comment in these files, so take the
+    # first token. `.split()` on an empty/absent value yields [], NOT [""] --
+    # indexing it raised IndexError for every plan without a risk (caught by
+    # test-autonomy-class.py on the first run of this code).
+    _risk_tokens = str(plan.get("risk") or "").split()
+    risk = _risk_tokens[0].strip().lower() if _risk_tokens else None
     for cname, spec in policy.get("classes", {}).items():
         req = spec.get("require", {})
         if any(facts.get(k) != v for k, v in req.items()):
             continue
         if shared & {str(x).lower() for x in spec.get("forbid_shared", [])}:
             continue
+        # A declared risk level can VETO an otherwise-matching class, but never
+        # grant one. See the `risk: high` note in autonomy-policy.yaml: the
+        # mechanical fact set cannot express "moves live data between two
+        # systems", and `risk: high` is where the operator says so.
+        forbidden = {str(x).lower() for x in spec.get("forbid_risk", [])}
+        if risk is not None and risk in forbidden:
+            return "HUMAN-GATED", (f"matches {cname} on mechanics but is "
+                                   f"risk: {risk}, which that class forbids")
         if spec.get("require_backup_gate") and not plan.get("backup_gate"):
             return "HUMAN-GATED", (f"matches {cname} but names no backup_gate — "
                                    f"an ungated backup-restore plan is not pre-approved")

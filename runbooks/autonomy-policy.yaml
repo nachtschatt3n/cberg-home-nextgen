@@ -63,6 +63,7 @@ classes:
       rollback_class: git-revert
       needs_reboot: false
     forbid_shared: [storage, longhorn]   # storage-wide blast radius is never unattended
+    forbid_risk: [high]                  # see the `risk: high` note in the header
   auto-backup-gated:
     require:
       capability_change: false
