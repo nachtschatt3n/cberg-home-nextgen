@@ -105,6 +105,51 @@ spec:
             summary: "Bank refresh has not succeeded in over 24 hours"
             description: "The last successful bank refresh on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago."
 
+        # Sure sync is DELIBERATELY isolated from the rest of the pipeline
+        # (62e7e0a): if Sure is down, Actual sync and categorization still run.
+        # But isolated is not the same as unobservable — until 2026-09-06 a Sure
+        # failure reached neither the metrics nor any alert, because visualState
+        # reads lastResultText and lastSyncResultText and never
+        # lastSureSyncResultText. These two rules restore visibility without
+        # giving up the isolation.
+        - alert: BankRefreshSureSyncFailing
+          expr: bank_refresh_sure_sync_state{state="failed"} == 1
+          # 30m, not 15m: the cycle is 2h and the stage self-retries for ~65s,
+          # so 30m is one full failed cycle plus margin. A single bad cycle —
+          # the exact shape of the 2026-09-06 ingress-reschedule incident —
+          # must not page.
+          for: 30m
+          labels:
+            severity: warning
+            category: macos
+            component: bank-refresh
+          annotations:
+            summary: "Sure sync is failing"
+            description: >-
+              The Sure sync stage on {{ $labels.instance }} has been failing for
+              over 30m. The rest of the pipeline (Actual Budget sync,
+              categorization) is unaffected by design, so transactions are
+              reaching Actual but not Sure. The failure reason is in
+              /Users/mu/code/bank-refresh/.categorizer/swift-debug.log.
+        # NOT alerted on: state="not_configured" (sure-monmon exit 2) and
+        # state="not_installed" (binary absent). Those are configuration facts,
+        # not incidents — a boolean ok/not-ok gauge would have collapsed all
+        # three into one page, which is why the exporter models them separately.
+        - alert: BankRefreshSureSyncStale
+          # The `> 0` guard is MANDATORY: the timestamp is in-memory and resets
+          # to 0 on every restart, and this app is reinstalled often enough that
+          # three restarts happened on 2026-09-06 alone. Without the guard each
+          # one would fire a false stale alert. Same guard as BankRefreshStale.
+          expr: bank_refresh_sure_sync_last_success_timestamp_seconds > 0 and (time() - bank_refresh_sure_sync_last_success_timestamp_seconds) > 86400
+          for: 15m
+          labels:
+            severity: warning
+            category: macos
+            component: bank-refresh
+          annotations:
+            summary: "Sure sync has not succeeded in over 24 hours"
+            description: "The last successful Sure sync on {{ $labels.instance }} was {{ $value | humanizeDuration }} ago."
+
     - name: arag-scrape.health
       interval: 30s
       rules:
