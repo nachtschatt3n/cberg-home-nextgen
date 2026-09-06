@@ -70,7 +70,9 @@ spec:
     # deliberately NOT taken: it moves appVersion to 13.2.1, which would cross a
     # version bump and break the git-revert rollback class. Roll the variant,
     # never the version — docs/sops/grafana-image-changes.md.
-    # Plan: grafana-13.0.0 / findings F-8c1f6717, F-de4d92cd.
+    # Plan: grafana-13.0.0 (plan id; it SHIPPED 13.0.1 — the id was kept stable
+    # because the operator decision record binds to it). Retired 2026-09-06.
+    # Findings F-8c1f6717, F-de4d92cd.
     deploymentStrategy:
       type: Recreate
     admin:
