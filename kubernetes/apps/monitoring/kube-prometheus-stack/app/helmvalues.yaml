@@ -251,6 +251,21 @@ data:
             # series, and doing that at 92% of the limit would OOM it.
             memory: 6Gi
       additionalServiceMonitors:
+        # ingress-nginx and mosquitto additionalServiceMonitors REMOVED
+        # 2026-09-06: each duplicated an app-native ServiceMonitor, scraping the
+        # IDENTICAL endpoint twice.
+        #   network/{external,internal}-ingress-nginx-controller  (chart-native)
+        #   home-automation/mosquitto-metrics                     (app-native)
+        # The ingress pair only became a live duplicate when serviceMonitorSelector
+        # was widened to select-all in this same file — the chart-native monitors
+        # carry no `release` label and had been inert. The mosquitto one was
+        # duplicated already, since both sides carried the label.
+        # This is not cosmetic: ingress-nginx-availability-alerts.yaml sums
+        # rate(nginx_ingress_controller_requests{status=~"5.."}) with NO job
+        # selector, so a double scrape inflates the measured 5xx rate by 2x.
+        # The app-native side was kept in both cases: the mosquitto SLO keys on
+        # up{job="mosquitto-metrics"}, and chart-native monitors track their own
+        # chart instead of a cross-namespace selector maintained here.
         - name: longhorn
           namespaceSelector:
             any: true
@@ -259,17 +274,6 @@ data:
               app: longhorn-manager
           endpoints:
             - port: manager
-              path: /metrics
-              interval: 30s
-        - name: ingress-nginx
-          namespaceSelector:
-            matchNames: ["network"]
-          selector:
-            matchLabels:
-              app.kubernetes.io/name: ingress-nginx
-              app.kubernetes.io/component: controller
-          endpoints:
-            - port: metrics
               path: /metrics
               interval: 30s
         - name: external-dns
@@ -312,16 +316,6 @@ data:
           endpoints:
             - port: http
               path: /api/prometheus
-              interval: 30s
-        - name: mosquitto
-          namespaceSelector:
-            matchNames: ["home-automation"]
-          selector:
-            matchLabels:
-              app.kubernetes.io/name: mosquitto
-          endpoints:
-            - port: metrics
-              path: /metrics
               interval: 30s
     prometheusOperator:
       resources:
