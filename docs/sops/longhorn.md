@@ -429,6 +429,36 @@ Daily schedule (UTC):
 | 02:30 | `global-snapshot-cleanup` | Deletes user-created snapshots that aren't kept by `retain` rules — picks up orphans the per-backup auto-cleanup misses |
 | 03:00 | `daily-backup-all-volumes`| Backs up all volumes to the CIFS target (`192.168.55.240/backups`), `retain: 7` |
 
+**Continuous, not scheduled — orphan reaping.** Longhorn also deletes orphaned
+resources on its own, governed by `orphanResourceAutoDeletion` (grace period
+`orphan-resource-auto-deletion-grace-period: 300`s). It is set to
+**`replica-data;instance`** as of 2026-09-06:
+
+| Value | Reaps | Enabled |
+|-------|-------|---------|
+| `replica-data` | replica DIRECTORIES with no owning volume, left by rebuilds and node reboots | since 2026-08-09 |
+| `instance` | orphaned ENGINE/REPLICA instances left in an instance-manager | since 2026-09-06 |
+
+`instance` was added after the three-node Talos v1.13.10 roll left exactly one:
+an engine instance for `n8n-config-e-0` on nuc14-02, which survived precisely
+because the list omitted `instance`. Node rolls produce these, and they
+accumulate silently.
+
+**Do not mistake this for data loss mid-incident.** Longhorn only deletes
+orphans whose `DataCleanable` condition is True, and an orphan is by definition
+not referenced by a live volume. If you are debugging a storage problem and see
+orphan records disappear, that is this setting working, not your data going
+away. Check with:
+
+```bash
+kubectl get orphans.longhorn.io -n storage          # should normally be empty
+kubectl get settings.longhorn.io -n storage orphan-resource-auto-deletion -o jsonpath='{.value}'
+```
+
+Note the live value is authoritative: the `longhorn:` block in the HelmRelease
+is INERT (nested under a key the chart has no subchart for, so Helm discards
+it), and git mirrors the live settings CR rather than driving it.
+
 ```bash
 # Inspect the recurring job pipeline
 kubectl get recurringjobs.longhorn.io -n storage

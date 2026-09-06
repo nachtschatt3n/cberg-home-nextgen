@@ -14,7 +14,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Attribute | Value |
 |-----------|-------|
 | Kubernetes | v1.36.0 |
-| Talos Linux | v1.13.8 |
+| Talos Linux | v1.13.10 |
 | Flux | v2.9.3 |
 | Nodes | 3 × Intel NUC14 Pro |
 | CNI | Cilium v1.20.1 |
@@ -124,8 +124,8 @@ manages all subsequent deployments including upgrades to these components.
 
 | Component | Details |
 |-----------|---------|
-| OS | Talos Linux v1.13.8 (immutable, minimal, Kubernetes-focused; kernel 6.18.42, Clang/ThinLTO) |
-| Container Runtime | Containerd 2.2.6 + Spegel (distributed image caching) |
+| OS | Talos Linux v1.13.10 (immutable, minimal, Kubernetes-focused; kernel 6.18.48-talos, Clang/ThinLTO) |
+| Container Runtime | Containerd 2.2.7 + Spegel (distributed image caching) |
 | CNI | Cilium v1.20.1 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
 | Ingress | ingress-nginx (internal) + ingress-nginx (external) |
@@ -205,14 +205,14 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Kubernetes | v1.36.0 | Container orchestration |
-| Talos Linux | v1.13.8 | Cluster OS |
+| Talos Linux | v1.13.10 | Cluster OS |
 | Flux | v2.9.3 | GitOps operator |
 | Cilium | v1.20.1 | CNI / network |
 | Longhorn | v1.11.2 | Distributed storage |
 | cert-manager | v1.21.0 | TLS management |
 | Helm | 3.20.0 | Package manager |
 | kubectl | 1.36.x | CLI |
-| talosctl | v1.13.4 | CLI (client) — a few patches behind cluster OS (v1.13.8), still in-minor; `.mise.toml` pin |
+| talosctl | v1.13.4 | CLI (client) — SIX patches behind the cluster OS (v1.13.10), still in-minor; `.mise.toml` pin. Renovate PR #212 would take it to 1.14.0, a minor AHEAD of the cluster; the verified move is aligning the pin to 1.13.10 and closing that PR (F-9a58f400) |
 | talhelper | 3.1.11 | Talos config helper |
 | sops | 3.12.1 | Secrets encryption |
 | age | 1.3.1 | Encryption backend |

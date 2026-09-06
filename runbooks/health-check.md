@@ -329,7 +329,7 @@ kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 kubectl get prometheusrules -A -o json | jq -r '.items[].spec.groups[].rules[] | select(.alert != null) | .alert' | sort | uniq -c | sort -nr | head -10
 
 # Check Prometheus error logs (last 24h)
-kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-prometheus --tail=50 --since=24h 2>&1 | grep -i error | wc -l
+kubectl logs -n monitoring statefulset/prometheus-kube-prometheus-stack --tail=50 --since=24h 2>&1 | grep -i error | wc -l
 ```
 
 **AI Analysis**: Verify monitoring components are running, check for active alerts.
@@ -350,7 +350,7 @@ kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 kubectl get prometheusalerts -A 2>/dev/null | grep -i silenced | wc -l
 
 # Check Alertmanager logs for errors
-kubectl logs -n monitoring deployment/prometheus-kube-prometheus-stack-alertmanager --tail=50 --since=24h 2>&1 | grep -i error | wc -l
+kubectl logs -n monitoring statefulset/alertmanager-kube-prometheus-stack --tail=50 --since=24h 2>&1 | grep -i error | wc -l
 ```
 
 **AI Analysis**: Verify alert processing is working correctly.
