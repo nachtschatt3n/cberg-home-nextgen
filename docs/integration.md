@@ -486,14 +486,27 @@ with Home Assistant auto-discovery.
 - **Per-field availability.** Each heater sensor carries TWO availability
   sources with `availability_mode: all` — `solarfocus/scraper/availability`
   (the whole cycle failed) and `solarfocus/<field>/available` (this one field
-  OCR'd to `None` for N consecutive cycles while the rest of the cycle
-  succeeded). Clearing the retained state topic would NOT achieve this: retain
+  OCR'd to `None` for 3 consecutive cycles — `FIELD_UNAVAILABLE_AFTER_CYCLES`,
+  deliberately matching the delta-confirmation threshold — while the rest of the
+  cycle succeeded). Clearing the retained state topic would NOT achieve this: retain
   only governs replay to new subscribers, so an already-connected HA keeps the
   stale value. The scraper's own diagnostic entities (`scraper/status`,
   `scraper/last_run`, `alert/*`) are deliberately NOT gated this way — they must
   stay readable precisely when the heater sensors are unavailable, since they
   are what explain why. Counter `solarfocus_scraper_field_missing_total`
   tracks the per-field misses on `/metrics`.
+- **Availability survives a restart, and is adopted rather than assumed.** The
+  in-memory `_FIELD_AVAILABLE` map is empty on every pod start, so since
+  `sha-010146b` the scraper subscribes to `solarfocus/+/available` and adopts
+  whatever retained state the broker already holds. Discovery deliberately seeds
+  nothing. It used to, and that published a retained `online` for every field on
+  every start — overwriting the `offline` of a legitimately-unavailable field
+  while its stale value still sat on the value topic, re-advertising a reading
+  the scraper had not taken as live for the ~3 cycles the miss streak took to
+  re-trip. Two visible consequences: a restart emits **no** 46-field
+  `field_available` burst (its reappearance means the seeding regressed), and on
+  a genuinely first-ever deploy every entity reads `Unavailable` for one cycle
+  (~90 s) until its first successful read — expected, not a fault.
 
 ### Endpoints (ClusterIP, port 8080)
 
@@ -509,7 +522,7 @@ with Home Assistant auto-discovery.
 | Topic | Payload | Retained |
 |-------|---------|----------|
 | `solarfocus/<field>` | sensor value (string) | yes |
-| `solarfocus/<field>/available` | online \| offline — per-field availability | yes |
+| `solarfocus/<field>/available` | online \| offline — per-field availability. **The scraper also SUBSCRIBES** (`solarfocus/+/available`, since `sha-010146b`) and adopts the retained value at connect instead of assuming `online` | yes |
 | `solarfocus/scraper/availability` | online \| offline — whole-cycle availability | yes |
 | `solarfocus/scraper/status` | ok \| partial \| busy \| paused \| maintenance \| navigation_failed \| sanity_failed | yes |
 | `solarfocus/scraper/last_run` | ISO8601 timestamp | yes |
@@ -534,10 +547,16 @@ with Home Assistant auto-discovery.
 > `MQTT_DIAG_TOPIC_PREFIX` (default `<MQTT_TOPIC_PREFIX>-diag`).
 
 > **`scraper/status` is not a two-valued healthy/failed flag — do not key
-> automations off `state == "ok"`.** Seven payloads are published, and two of
-> them were missing from this table until `sha-010146b`:
+> automations off `state == "ok"`.** Seven payloads are published. `partial`
+> (since `sha-c2d617b`, 2026-04-20) and `maintenance` (since `sha-182e954`,
+> 2026-04-23) were missing from this table until 2026-09-06 — they are not new
+> behaviour, only newly documented, and a pre-`sha-010146b` build emits them too:
 >
-> - **`ok`** — cycle completed, every read value accepted.
+> - **`ok`** — the cycle completed and every value that was *read* passed sanity.
+>   It does **not** mean all 47 fields are fresh: a field that OCR'd to `None` is
+>   in neither `accepted` nor `rejected`, so it does not make the cycle
+>   `partial`. That case surfaces on `<field>/available` (see "Per-field
+>   availability"), never here.
 > - **`partial`** — the cycle *succeeded*, but the sanity layer rejected one or
 >   more fields (bounds / monotonicity / delta-breaker). The accepted fields
 >   were published and are good; only the rejected ones were withheld. An
