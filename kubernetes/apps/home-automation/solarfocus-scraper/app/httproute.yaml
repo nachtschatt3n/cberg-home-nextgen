@@ -1,0 +1,89 @@
+---
+# Envoy migration phase 2 — solarfocus-scraper off nginx (forward-auth).
+# Pattern + the gotchas: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: solarfocus-scraper
+  namespace: home-automation
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Solarfocus pellet boiler status"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "Home Automation"
+    gethomepage.dev/icon: "mdi-fire"
+    gethomepage.dev/name: "Solarfocus"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "solarfocus.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: solarfocus-scraper
+          port: 8080
+---
+# Callback route — separate and MORE specific than `/`; Gateway API resolves by
+# longest match, so folding it in would loop the login callback into the app.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: solarfocus-scraper-authentik-outpost
+  namespace: home-automation
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "solarfocus.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real Service cross-namespace, NOT an ExternalName shim — Envoy
+        # resolves backends via EndpointSlices and ExternalName has none.
+        - group: ""
+          kind: Service
+          name: ak-outpost-solarfocus-scraper-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: solarfocus-scraper-forward-auth
+  namespace: home-automation
+spec:
+  targetRefs:                    # app route ONLY, never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: solarfocus-scraper
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-solarfocus-scraper-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

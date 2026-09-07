@@ -4,5 +4,4 @@ kind: Kustomization
 resources:
   - ./secret.sops.yaml
   - ./helmrelease.yaml
-  - ./ingress.yaml
-  - ./authentik-outpost-ingress.yaml
+  - ./httproute.yaml

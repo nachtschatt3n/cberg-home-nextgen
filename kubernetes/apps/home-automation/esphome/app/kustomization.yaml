@@ -5,7 +5,6 @@ namespace: home-automation
 resources:
   - ./pvc.yaml
   - ./helmrelease.yaml
-  - ./ingress.yaml
-  - ./authentik-outpost-ingress.yaml
+  - ./httproute.yaml
   - ./secret.sops.yaml
 
