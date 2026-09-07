@@ -88,6 +88,37 @@ SecurityPolicy. Reference: `headlamp/app/httproute.yaml`.
     plan's "switch the provider to envoy mode" step does not exist. Do not edit
     the SOPS blueprint.
 
+## 13. The Authentik outpost publishes its OWN Ingress — this WILL break the app
+
+Authentik's Kubernetes outpost controller creates an Ingress per forward-auth
+outpost, in `kube-system`, carrying the **app's** hostname on the **default**
+ingress class — and `internal` IS the default here, so it points at .100. It
+holds only the `/outpost.goauthentik.io` path. It is in NO git repository and
+has NO ownerRefs.
+
+Consequence: withdrawing the app's own Ingress does not move the host to Envoy.
+That outpost Ingress becomes the ONLY remaining record, k8s-gateway keeps
+answering .100, nginx has no `/` route there, and **real clients get a 404
+while the app is perfectly healthy on .103.** This happened to headlamp on
+2026-09-07 and went unnoticed because the gate was run with `curl --resolve`.
+
+Per app, as it converts (never in bulk — the outpost Ingress is what routes the
+callback for every app still on nginx):
+
+1. In `configmap.sops.yaml`, set on THAT outpost's `config`:
+   `kubernetes_disabled_components: [ingress]`.
+   The block already contains `kubernetes_disabled_components: []` — REPLACE it.
+   Appending a second key is silently overridden (YAML last-wins).
+2. Apply it: `kubectl exec -n kube-system deploy/authentik-worker -c worker --
+   ak apply_blueprint /blueprints/<app>-blueprint.yaml`. A ConfigMap change
+   alone does nothing; blueprints are applied by a periodic task.
+3. Confirm it took:
+   `ak shell -c "from authentik.outposts.models import Outpost;
+   print(Outpost.objects.get(name='<outpost>').config.kubernetes_disabled_components)"`
+4. **Delete the existing Ingress by hand.** Disabling the component stops the
+   controller MANAGING it; it does not delete what is already there. Once
+   disabled, the delete sticks (verified).
+
 ## Verification gate — per app, before moving on
 
 Neither of the phase 1 failures surfaced at apply time. Check STATUS, not
@@ -101,10 +132,38 @@ kubectl get httproute -n <ns> <name> -o json | \
 
 kubectl get securitypolicy -n <ns> <name> -o json | grep -A3 conditions   # auth apps
 dig +short @192.168.55.101 <host>            # must become 192.168.55.103
-curl -o /dev/null -w '%{http_code}' --resolve <host>:443:192.168.55.103 https://<host>/
+
+# CURL WITHOUT --resolve. This is not a style preference: --resolve pins the IP
+# and therefore tests Envoy directly, bypassing the very DNS record the
+# conversion is supposed to move. Gate B passed on headlamp with --resolve
+# while real clients were getting a 404. Use the real name, then assert the
+# remote_ip came back as .103.
+curl -o /dev/null -w '%{http_code} %{remote_ip}' https://<host>/
 # plain app => 200 ; forward-auth app => 302 to auth host (NEVER 200, that is a
 # fail-open and means the SecurityPolicy did not attach)
 ```
+
+## 14. Two corrections to shape A (found in the first batch)
+
+- "rules can be omitted" holds ONLY with exactly one enabled Service. With two,
+  `_validate.tpl` hard-fails (`An explicit rule is required...`) — write the
+  rule explicitly.
+- `app-template` picks the route apiVersion from Helm **Capabilities**, so an
+  offline `helm template` renders `v1alpha2`, which this cluster's CRD does not
+  serve. Validate with
+  `--api-versions gateway.networking.k8s.io/v1/HTTPRoute`, or you are checking
+  a shape the API would reject. Affects CI too (`flux-local test` runs without
+  cluster capabilities).
+
+## 15. Not one-to-one convertible — needs per-app design, do not guess
+
+- `backend-protocol: HTTPS` + `proxy-ssl-verify: "off"` (e.g. wazuh-dashboard):
+  the Gateway API equivalent is `BackendTLSPolicy`, whose v1 schema has NO
+  `insecureSkipVerify` and REQUIRES `hostname`. Converting means going from no
+  verification to must-verify: the backend CA has to be wired in and the SAN
+  has to match. Leave as an Ingress until designed.
+- `proxy-buffer-size` / `proxy-buffers-number`: maps to `ClientTrafficPolicy`,
+  not to any route field.
 
 ## Rollback
 
