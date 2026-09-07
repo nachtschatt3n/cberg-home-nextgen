@@ -53,7 +53,45 @@ its `kustomization.yaml`. Reference: `headlamp` (commit ff019ee5).
    resolves backends through EndpointSlices; ExternalName has none. Point at
    the real Service, cross-namespace if needed (see 6).
 
-## Forward-auth apps (9 of them) — the expensive extra
+## Forward-auth apps — the expensive extra
+
+### Screen on the OUTPOST, never on the app's own Ingress
+
+An app is forward-auth protected if an Authentik proxy outpost publishes an
+Ingress for its hostname — and that Ingress lives in `kube-system`, not next to
+the app. Some apps ALSO carry `nginx.ingress.kubernetes.io/auth-url` on their
+own Ingress; others carry nothing at all and are protected purely by the
+outpost. **The absence of `auth-url` is not evidence of an unprotected app.**
+
+Measured 2026-09-07: 9 outpost Ingresses exist, but only 6 app Ingresses carry
+`auth-url`. The three the annotation screen MISSES are `arag-web`,
+`uptime-kuma` and `kubernetes-dashboard`. Screening on the annotation put
+`arag-web` into a plain-app batch (`04f9abc7`); it broke exactly as gotcha 13
+below predicts — route healthy on .103, every real client getting a 404 from
+.100 — and was reverted (`d7ab1b74`).
+
+Run this per hostname, BEFORE every conversion:
+
+```bash
+kubectl get ingress -A -o json | python3 -c "
+import sys, json
+host = '<app>.\${SECRET_DOMAIN}'
+for i in json.load(sys.stdin)['items']:
+    if any(r.get('host') == host for r in i['spec'].get('rules', [])):
+        print(i['metadata']['namespace'], i['metadata']['name'],
+              i['spec'].get('ingressClassName'))"
+```
+
+**Any `ak-outpost-*-forward-auth` row => forward-auth app.** Do not put it in a
+plain batch whatever its own annotations say. More than one row for a hostname
+means more than one thing publishes that name, and removing only the app's
+Ingress will not move DNS.
+
+**The ReferenceGrant set is NOT the list of forward-auth apps.**
+`referencegrants.yaml` was itself built from the annotation screen, so those
+same three apps have no grant. Derive the list from the outposts
+(`kubectl get ingress -n kube-system | grep ak-outpost-`), then add the missing
+grants — do not treat the file as authoritative.
 
 Per app: a second HTTPRoute for the callback path, a ReferenceGrant, and a
 SecurityPolicy. Reference: `headlamp/app/httproute.yaml`.
@@ -89,6 +127,8 @@ SecurityPolicy. Reference: `headlamp/app/httproute.yaml`.
     the SOPS blueprint.
 
 ## 13. The Authentik outpost publishes its OWN Ingress — this WILL break the app
+
+This is the mechanism behind the screening rule above; read that first.
 
 Authentik's Kubernetes outpost controller creates an Ingress per forward-auth
 outpost, in `kube-system`, carrying the **app's** hostname on the **default**

@@ -136,7 +136,7 @@
 | penpot | Design and prototyping platform | Internal | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
-| arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster) | Internal | Office |
+| arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster). **Authentik forward-auth is PROVISIONED BUT NOT ENFORCED** — provider `arag-web-forward-auth` (`mode: forward_single`) and outpost `kube-system/ak-outpost-arag-web-forward-auth` both exist, and the outpost publishes its own Ingress for this host, but the app's own Ingress has never carried the `auth-url`/`auth-signin` annotations that actually enforce it, so the app currently answers 200 unauthenticated. Pre-existing, not a migration regression. The outpost Ingress still holds this hostname on the internal class, which is why removing the app's Ingress broke it (converted `04f9abc7`, reverted `d7ab1b74`). Held on nginx pending a decision to wire up enforcement. | Internal, auth NOT enforced | Office |
 
 > **Shared Sure API key — rotate in two places.** `openclaw` and `arag-web` both
 > authenticate to `sure` with the **same** Sure API key (sent via the `X-Api-Key`
@@ -219,7 +219,7 @@
 | k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101). Chart 3.7.2 / app 1.8.0 — upstream moved orgs (ori-edge → k8s-gateway); the old repo is frozen at chart 2.4.0 / app 0.4.0, which fails closed when Gateway API CRDs are present. Image tag is pinned in the HR because the chart default lags. See `docs/sops/k8s-gateway-dns.md`. | None |
 | cloudflared | `network/external/` | Cloudflare Tunnel client | None |
 | external-dns | `network/external/` | Automated Cloudflare DNS record management | None |
-| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — Gateway API control plane for the ingress-nginx replacement. Phase 0 + 0.5: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx with no app traffic yet. Gateway API + EG CRDs are vendored under `crds/` (standard channel) — gateway-api v1.6.1, 10 standard-channel CRDs — not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
+| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — Gateway API control plane for the ingress-nginx replacement. Phase 0 + 0.5: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx. **`envoy-internal` carries production traffic as of phase 2 (2026-09-07)** — app hostnames are being migrated from ingress-nginx to `HTTPRoute` in batches, so the two data planes are live simultaneously and per-app conversion state is tracked in `docs/troubleshooting/ingress-migration-plan.md`, not here. Gateway API + EG CRDs are vendored under `crds/` (standard channel) — gateway-api v1.6.1, 10 standard-channel CRDs — not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
 
 ---
 
@@ -314,7 +314,7 @@ Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails,
 | see-edv-ibspm | IBSPM service management | Internal |
 | stepbystepguide | Step-by-step guide | Internal |
 | u-zeit | U-Zeit time management | Internal |
-| uzeit-de | Uzeit corporate website (TYPO3 6.2) | Internal |
+| uzeit-de | Uzeit corporate website (TYPO3 6.2). **Deliberately held on ingress-nginx** — carries `nginx.ingress.kubernetes.io/proxy-body-size: 50m`, which has no HTTPRoute equivalent (it maps to a policy object, not a route field). Converting it would silently change upload behaviour. See `docs/troubleshooting/envoy-phase2-conversion-pattern.md` §15. | Internal |
 | zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app, `/health/{liveness,readiness,startup}` probes, Flux image automation on the `production-*` tag, 5Gi Longhorn RWO PVC (`strategy: Recreate`) | Internal |
 
 ---

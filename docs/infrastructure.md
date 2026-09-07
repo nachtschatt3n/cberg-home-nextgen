@@ -128,7 +128,7 @@ manages all subsequent deployments including upgrades to these components.
 | Container Runtime | Containerd 2.2.7 + Spegel (distributed image caching) |
 | CNI | Cilium v1.20.1 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
-| Ingress | ingress-nginx (internal) + ingress-nginx (external) |
+| Ingress | **Migrating (Envoy Gateway phase 2, 2026-09).** ingress-nginx internal `192.168.55.100` + external `192.168.55.102`, alongside Envoy Gateway `envoy-internal` `192.168.55.103` + `envoy-external` `192.168.55.104`. Both data planes are live simultaneously and k8s-gateway publishes DNS for **both** `Ingress` and `HTTPRoute` — an app holding one of each resolves non-deterministically, so conversions must remove the Ingress and add the route in a single commit. Plan: `docs/troubleshooting/ingress-migration-plan.md`; conversion pattern: `docs/troubleshooting/envoy-phase2-conversion-pattern.md`. |
 | Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
