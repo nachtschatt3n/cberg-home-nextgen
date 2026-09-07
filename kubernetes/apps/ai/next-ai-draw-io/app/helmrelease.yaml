@@ -74,10 +74,27 @@ spec:
           http:
             port: 3000
 
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # The swap happens in ONE commit. k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving both alive would publish two A records for this host (.100
+    # nginx and .103 envoy) and it would resolve non-deterministically.
+    #
+    # DROPPED deliberately: the `tls:` block. Gateway API terminates TLS at the
+    # LISTENER, not per route, and the envoy-internal https listener already
+    # presents the wildcard *.${SECRET_DOMAIN} certificate.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "next-ai-draw-io.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "AI Draw.io"
@@ -87,14 +104,14 @@ spec:
           gethomepage.dev/pod-selector: app.kubernetes.io/name=next-ai-draw-io
         labels:
           gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host "next-ai-draw-io.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - *host
+        # Rule written out explicitly. The chart's "rules may be omitted"
+        # shortcut only holds while exactly one Service is enabled; with two,
+        # _validate.tpl hard-fails. Being explicit is future-proof.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
