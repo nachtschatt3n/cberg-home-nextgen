@@ -1,0 +1,57 @@
+---
+# Envoy migration — kibana onto envoy-internal.
+#
+# Kibana's backend speaks TLS (the nginx Ingress carried
+# `backend-protocol: HTTPS`), so a plain HTTPRoute would send cleartext at a
+# TLS port and hard-fail. Gateway API expresses that with a BackendTLSPolicy,
+# below.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kibana
+  namespace: monitoring
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "kibana.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: kibana-kb-http
+          port: 5601
+---
+# This is a SECURITY IMPROVEMENT over what nginx did, not just parity.
+# The Ingress set backend-protocol: HTTPS but no proxy-ssl-verify, and nginx
+# defaults proxy_ssl_verify to OFF — so the old path encrypted to the backend
+# without ever validating it. ECK issues kibana a proper cert with SANs, and
+# publishes its CA, so real verification is available for free here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: kibana-backend-tls
+  namespace: monitoring
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: kibana-kb-http
+      # sectionName is the port NAME, not the number. `5601` is silently wrong.
+      sectionName: https
+  validation:
+    # ECK maintains this Secret and rotates the CA in it, so referencing it
+    # keeps verification working across renewals with no manual step.
+    caCertificateRefs:
+      - group: ""
+        kind: Secret
+        name: kibana-kb-http-certs-public
+    # Must match a SAN on the backend cert. Verified live: the cert carries
+    # DNS:kibana-kb-http.monitoring.svc among its SANs.
+    hostname: kibana-kb-http.monitoring.svc

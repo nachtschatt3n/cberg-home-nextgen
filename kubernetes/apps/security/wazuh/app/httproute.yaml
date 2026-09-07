@@ -1,0 +1,68 @@
+---
+# Envoy migration — wazuh-dashboard onto envoy-internal.
+#
+# The hard case of the whole migration. The Ingress carried
+# `backend-protocol: HTTPS` AND `proxy-ssl-verify: off`, and that second
+# annotation is not laziness — it is REQUIRED here:
+#
+#   the wazuh-dashboard certificate has NO subjectAltName extension at all.
+#   Subject is CN=wazuh-dashboard only, issued by CN=wazuh-root-ca, valid to
+#   2036. Modern TLS verification matches on SANs and ignores CN, so hostname
+#   validation against this cert is IMPOSSIBLE, not merely unconfigured.
+#
+# Gateway API's BackendTLSPolicy cannot express this: its validation block has
+# no insecureSkipVerify and REQUIRES a hostname to match. So the standard
+# resource is a dead end until the Wazuh cert chain is regenerated with SANs —
+# which touches indexer/dashboard/admin certs all signed by the same root CA
+# and is its own change, not a routing one.
+#
+# Envoy Gateway's own Backend resource does express it, so this uses that:
+# encrypted to the backend exactly as before, verification off exactly as
+# before. Parity, and no worse than nginx was.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: wazuh-dashboard-tls
+  namespace: security
+spec:
+  endpoints:
+    - fqdn:
+        hostname: wazuh-dashboard.security.svc.cluster.local
+        port: 5601
+  tls:
+    # Parity with nginx `proxy-ssl-verify: off`. See the SAN explanation above:
+    # this is not a shortcut, it is the only option until the cert is reissued.
+    insecureSkipVerify: true
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wazuh-dashboard
+  namespace: security
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "wazuh.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        # Targets the Backend above, NOT the Service — that is what carries the
+        # TLS settings.
+        - group: gateway.envoyproxy.io
+          kind: Backend
+          name: wazuh-dashboard-tls
+      timeouts:
+        # nginx set proxy-buffer-size 16k / proxy-buffers-number 8 for the SAML
+        # login flow's large headers. Those map to a Gateway-scoped
+        # ClientTrafficPolicy, not to a route, and imposing them cluster-wide
+        # for one app is worse than leaving Envoy's defaults. Recorded rather
+        # than silently dropped: if SAML login fails with header-size errors,
+        # this is the first thing to look at.
+        request: 60s
+        backendRequest: 60s

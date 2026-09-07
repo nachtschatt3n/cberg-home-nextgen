@@ -5,6 +5,7 @@ components:
   - ../../../../flux/components/common
 resources:
   - ./kibana.yaml
+  - ./httproute.yaml
 patches:
   - target:
       kind: Namespace

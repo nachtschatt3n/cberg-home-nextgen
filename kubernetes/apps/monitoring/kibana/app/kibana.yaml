@@ -29,36 +29,7 @@ spec:
   config:
     server.publicBaseUrl: https://kibana.${SECRET_DOMAIN}
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: kibana
-  namespace: monitoring
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-production"
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-    gethomepage.dev/enabled: "true"
-    gethomepage.dev/name: "Kibana"
-    gethomepage.dev/group: "Monitoring"
-    gethomepage.dev/icon: "kibana.png"
-    gethomepage.dev/description: "Elastic log search and dashboards"
-    gethomepage.dev/pod-selector: "kibana.k8s.elastic.co/name=kibana"
-  labels:
-    gethomepage.dev/enabled: "true"
-spec:
-  ingressClassName: internal
-  rules:
-    - host: kibana.${SECRET_DOMAIN}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: kibana-kb-http
-                port:
-                  number: 5601
-  tls:
-    - hosts:
-        - kibana.${SECRET_DOMAIN}
-      secretName: kibana-tls
+# The kibana Ingress was REMOVED 2026-09-07 (Envoy migration). It is now
+# httproute.yaml, with a BackendTLSPolicy carrying the ECK CA — the Ingress
+# set backend-protocol: HTTPS but nginx defaults proxy_ssl_verify off, so the
+# new path actually VALIDATES the backend cert where the old one did not.
