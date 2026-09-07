@@ -94,9 +94,13 @@ spec:
         ipFamilies:
 
 
+    # Envoy Gateway migration phase 2 (2026-09-07): the web UI moved to an
+    # HTTPRoute in ./httproute.yaml. This chart has no Gateway API support, so
+    # the Ingress is disabled here rather than rewritten, and stays as the
+    # rollback target until phase 4 removes nginx.
     ingresses:
       http:
-        enabled: true
+        enabled: false
         className: "internal"
         annotations:
           cert-manager.io/cluster-issuer: "letsencrypt-production"

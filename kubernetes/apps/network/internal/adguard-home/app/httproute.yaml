@@ -1,0 +1,54 @@
+---
+# Envoy Gateway migration phase 2 (2026-09-07): replaces the chart's
+# ingresses.http Ingress, disabled in helmrelease.yaml in the SAME commit.
+# k8s-gateway watches Ingress AND HTTPRoute, so leaving both would publish two
+# A records (.100 and .103) for this host and it would resolve
+# non-deterministically.
+#
+# Scope: the AdGuard WEB UI only. DNS service itself is a separate
+# LoadBalancer Service and is untouched by this change.
+#
+# DROPPED, deliberately: cert-manager.io/cluster-issuer and the per-host
+# `adguard-home-tls` Secret. Gateway API terminates TLS at the LISTENER, not
+# per route, and the envoy-internal https listener already presents the
+# wildcard ${SECRET_DOMAIN} certificate -- so this host keeps a valid,
+# cert-manager-issued cert without a per-app Certificate. The old Secret is
+# left in place untouched so the disabled Ingress remains a working rollback.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: adguard-home-http
+  namespace: network
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "AdGuard Home"
+    gethomepage.dev/description: "Network-wide ad blocking and DNS server"
+    gethomepage.dev/group: "Network Services"
+    gethomepage.dev/icon: "adguard-home.png"
+    gethomepage.dev/pod-selector: app.kubernetes.io/instance=adguard-home
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only -- the http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "adguard.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        # The Ingress used pathType: ImplementationSpecific, which nginx treats
+        # as a regex-capable prefix; the value was a bare "/", so PathPrefix "/"
+        # is the exact equivalent and there is no rewrite to reproduce.
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: adguard-home-http
+          port: 80

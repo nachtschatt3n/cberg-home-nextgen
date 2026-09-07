@@ -8,3 +8,4 @@ resources:
   - ./config-backup.sops.yaml
   - ./exporter.yaml
   - ./servicemonitor.yaml
+  - ./httproute.yaml
