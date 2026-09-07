@@ -5,21 +5,6 @@ originRequest:
 ingress:
   - hostname: "${SECRET_DOMAIN}"
     service: http://external-ingress-nginx-controller.network.svc.cluster.local:80
-  # PHASE 3 CANARY (2026-09-07). Ordered rules: cloudflared matches top-down,
-  # so these per-hostname entries take precedence over the wildcard below while
-  # everything else still reaches nginx. This is what lets the cutover happen
-  # host-by-host with a revert measured in seconds.
-  #
-  # Target is :443, NOT :80. The gateway's http listener is owned by the
-  # cluster-wide httproute-https-redirect which 301s every host to https — a
-  # plain-HTTP origin would send Cloudflare into a redirect loop.
-  # originServerName sets the TLS SNI so the gateway serves the wildcard cert
-  # and cloudflared can verify it; without it the handshake fails.
-  - hostname: "auth.${SECRET_DOMAIN}"
-    service: https://envoy-external.network.svc.cluster.local:443
-    originRequest:
-      originServerName: "auth.${SECRET_DOMAIN}"
-      http2Origin: true
   - hostname: "*.${SECRET_DOMAIN}"
     service: http://external-ingress-nginx-controller.network.svc.cluster.local:80
   - service: http_status:404

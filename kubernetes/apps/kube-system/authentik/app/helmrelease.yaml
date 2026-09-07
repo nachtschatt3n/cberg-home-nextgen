@@ -140,12 +140,7 @@ spec:
           subPath: settings.py
           readOnly: true
       ingress:
-        # Replaced by httproute.yaml on envoy-external (phase 3 canary #1,
-        # 2026-09-07). The block below is left INERT as the rollback target
-        # until ingress-nginx is removed in phase 4. Do not re-enable without
-        # removing the HTTPRoute — two live routes for one host give
-        # k8s-gateway two records and resolution flaps between .102 and .104.
-        enabled: false
+        enabled: true
         ingressClassName: external
         annotations:
           gethomepage.dev/enabled: "true"
