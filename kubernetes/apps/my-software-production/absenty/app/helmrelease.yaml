@@ -104,30 +104,40 @@ spec:
         ports:
           http:
             port: 3000
-    ingress:
+    # Envoy migration PHASE 3: Ingress -> HTTPRoute on envoy-EXTERNAL.
+    #
+    # NO external-dns target annotation. With --source=gateway-httproute
+    # external-dns reads the target from the parent GATEWAY and silently
+    # ignores it on the route; it is already set on Gateway/envoy-external.
+    # Putting it here took a hostname dark publicly on 2026-09-07.
+    #
+    # NO SecurityPolicy / ext-auth. This app authenticates in-app and never
+    # had nginx forward-auth; adding ext-auth would put a second login in
+    # front of an app that already has one.
+    #
+    # rules omitted deliberately: exactly one enabled Service, so
+    # app-template defaults the backendRef to it.
+    route:
       main:
-        enabled: true
-        className: external
+        kind: HTTPRoute
+        hostnames:
+          - "absenty.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-external
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Absenty"
           gethomepage.dev/description: "Employee management system"
           gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "ruby-on-rails.png"
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host "absenty.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - *host
     persistence:
       data:
         suffix: data
