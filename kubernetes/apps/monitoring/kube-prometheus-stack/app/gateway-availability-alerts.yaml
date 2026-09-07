@@ -1,0 +1,68 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    # REQUIRED: without release=kube-prometheus-stack the rule is never loaded
+    # by the operator, silently and with no error.
+    release: kube-prometheus-stack
+  name: gateway-availability-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: gateway.availability
+    rules:
+    # Sustained 5xx at the gateway = a real backend AVAILABILITY outage (IT-ops).
+    # Prometheus counterpart to the 2026-08-02 Wazuh N-04 retune: rule 100504 was
+    # reclassified out of the `attack` SIEM bucket into `availability`, so
+    # intrusion detection no longer double-duties as outage detection. This rule
+    # is where a genuine sustained 5xx flood surfaces.
+    #
+    # REBUILT ON ENVOY METRICS 2026-09-08 (F-0df13b66). It previously keyed on
+    # nginx_ingress_controller_requests, which went to ZERO series the moment
+    # ingress-nginx was deleted. Sustained-5xx paging therefore stopped with no
+    # successor, while the rule sat `inactive` and read as coverage — the inert
+    # rule trap. envoy_http_downstream_rq_xx carries 150 series today.
+    #
+    # `for: 10m` is deliberate: a deploy/rollout/node-reboot blip clears in <2m
+    # (Longhorn reconverges, pods reschedule) and must NOT page; only a backend
+    # 5xx-ing for 10m+ is a real outage.
+    - alert: EnvoyGateway5xxSustained
+      annotations:
+        summary: Envoy gateway serving sustained 5xx ({{ $labels.envoy_http_conn_manager_prefix }})
+        description: |
+          The Envoy data plane has served a sustained 5xx rate over the last 10
+          minutes ({{ $value | printf "%.1f%%" }} of requests). This is a real
+          backend availability outage, not a deploy/reboot blip — those clear
+          well within the 10m window. Check backend pods, upstream health, and
+          recent Flux changes. Per-route detail: envoy_cluster_upstream_rq.
+      expr: |
+        sum(rate(envoy_http_downstream_rq_xx{envoy_response_code_class="5", namespace="network"}[5m]))
+          /
+        clamp_min(sum(rate(envoy_http_downstream_rq_xx{namespace="network"}[5m])), 0.001)
+          > 0.05
+      for: 10m
+      labels:
+        category: availability
+        component: envoy-gateway
+        severity: warning
+    # Guards the rule above against becoming inert the way its predecessor did.
+    # If the metric family disappears (renamed, scrape lost, gateway replaced),
+    # the ratio silently stops evaluating and nothing pages. absent() makes that
+    # visible instead.
+    - alert: EnvoyGatewayMetricsAbsent
+      annotations:
+        summary: Envoy data-plane request metrics are absent
+        description: |
+          envoy_http_downstream_rq_xx has reported no series for 15 minutes.
+          Every gateway availability and 5xx alert depends on this family, so
+          they are all currently blind. This is the failure that let
+          nginx-keyed rules sit green for a day after their metric vanished.
+      expr: absent(envoy_http_downstream_rq_xx)
+      for: 15m
+      labels:
+        category: availability
+        component: envoy-gateway
+        severity: warning

@@ -13,8 +13,17 @@ spec:
   - interval: 30s
     name: envoy-gateway.pods.health
     rules:
-    # Matches BOTH the control plane (envoy-gateway-*) and the data-plane
-    # deployments EG generates per Gateway (envoy-network-envoy-<gw>-<hash>).
+    # Matches the control plane (envoy-gateway-*) AND both data planes
+    # (envoy-internal-*, envoy-external-*).
+    #
+    # The old selector said `envoy-network-.*`, which is the naming EG uses when
+    # the Gateway lives in a different namespace from its deployment. Here they
+    # share `network`, so the pods are envoy-internal-<hash>/envoy-external-<hash>
+    # and that alternation matched NOTHING. Measured 2026-09-08: the old
+    # selector returned 3 series (control plane only), the corrected one returns
+    # 9. The six pods actually serving all 104 routes had no NotReady,
+    # CrashLoop or restart alerting at all, while the rules sat green and looked
+    # like coverage (F-60cdee6e).
     - alert: EnvoyGatewayPodNotReady
       annotations:
         description: Envoy Gateway pod {{ $labels.pod }} in {{ $labels.namespace }}
@@ -25,7 +34,7 @@ spec:
         summary: Envoy Gateway pod {{ $labels.pod }} is not ready ({{ $labels.namespace }})
       expr: |
         sum by (namespace, pod) (
-          kube_pod_status_ready{namespace="network", pod=~"envoy-gateway-.*|envoy-network-.*", condition="true"}
+          kube_pod_status_ready{namespace="network", pod=~"envoy-(gateway|internal|external)-.*", condition="true"}
         ) == 0
       for: 5m
       labels:
@@ -41,7 +50,7 @@ spec:
           than an image bump.
         summary: Envoy Gateway pod {{ $labels.pod }} is crash looping ({{ $labels.namespace }})
       expr: |
-        rate(kube_pod_container_status_restarts_total{namespace="network", pod=~"envoy-gateway-.*|envoy-network-.*"}[15m]) * 900 > 2
+        rate(kube_pod_container_status_restarts_total{namespace="network", pod=~"envoy-(gateway|internal|external)-.*"}[15m]) * 900 > 2
       for: 5m
       labels:
         category: network
@@ -53,7 +62,7 @@ spec:
           has restarted at least once in the last 15 minutes.
         summary: Envoy Gateway pod {{ $labels.pod }} restarted ({{ $labels.namespace }})
       expr: |
-        increase(kube_pod_container_status_restarts_total{namespace="network", pod=~"envoy-gateway-.*|envoy-network-.*"}[15m]) > 0
+        increase(kube_pod_container_status_restarts_total{namespace="network", pod=~"envoy-(gateway|internal|external)-.*"}[15m]) > 0
       for: 1m
       labels:
         category: network

@@ -164,11 +164,17 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: High authentication failures on {{ $labels.host }}
       expr: |
-        rate(nginx_ingress_controller_requests{status=~"401|403", exported_service=~".*authentik.*"}[5m]) > 0.1
+        # Rebuilt on Envoy ext_authz metrics 2026-09-08 (F-0df13b66). The old
+        # expression keyed on nginx_ingress_controller_requests, which dropped to
+        # ZERO series when ingress-nginx was deleted — Authentik auth-failure
+        # paging silently stopped and the rule sat `inactive`, looking healthy.
+        # envoy_http_ext_authz_denied counts requests the outpost REJECTED, which
+        # is the direct equivalent of the old 401/403-through-the-proxy signal.
+        sum(rate(envoy_http_ext_authz_denied{namespace="network"}[5m])) > 0.1
       for: 5m
       labels:
         category: authentication
-        component: ingress
+        component: gateway
         severity: warning
     - alert: AuthentikIngressAuthBackendError
       annotations:
@@ -177,11 +183,20 @@ spec:
         runbook_url: https://docs.goauthentik.io/docs/troubleshooting/
         summary: Authentication backend errors on {{ $labels.host }}
       expr: |
-        rate(nginx_ingress_controller_requests{status=~"5..", exported_service=~".*authentik.*"}[5m]) > 0.05
+        # Rebuilt on Envoy ext_authz metrics 2026-09-08 (F-0df13b66).
+        # _error counts ext_authz calls that FAILED to reach a verdict — the
+        # outpost being down or unreachable — which is what this alert was for.
+        # _failure_mode_allowed is included deliberately and is the sharper
+        # signal: it counts requests ALLOWED THROUGH because the auth check
+        # failed. Every SecurityPolicy here sets failOpen: false, so that series
+        # should be flat zero; any value at all means something is serving an
+        # authenticated app without authentication.
+        sum(rate(envoy_http_ext_authz_error{namespace="network"}[5m]))
+          + sum(rate(envoy_http_ext_authz_failure_mode_allowed{namespace="network"}[5m])) > 0.05
       for: 3m
       labels:
         category: authentication
-        component: ingress
+        component: gateway
         severity: critical
   - interval: 30s
     name: authentik.database
