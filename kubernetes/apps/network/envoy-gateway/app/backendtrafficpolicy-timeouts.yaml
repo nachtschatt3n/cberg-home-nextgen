@@ -1,0 +1,39 @@
+---
+# Restores nginx's request-timeout behaviour across the whole gateway.
+#
+# WHY THIS EXISTS: ingress-nginx defaults proxy-read-timeout/proxy-send-timeout
+# to 60s. Envoy's default route timeout is 15s. Phase 2 moved apps across
+# without setting any per-route timeout — 48 rules, none of them — which
+# silently TIGHTENED every converted app from 60s to 15s.
+#
+# Nothing visibly broke, and nothing would: a `curl /` gate returns in
+# milliseconds and can never surface this. It shows up later as truncated
+# long-running requests on exactly the apps least likely to be tested by hand
+# (bulk downloaders, dev previews, media servers, BI query pages).
+#
+# Set at the Gateway level rather than per route so the default matches the
+# behaviour apps were written against, instead of depending on each conversion
+# remembering to restore it.
+#
+# Apps needing MORE than this set it per route via HTTPRoute.rules[].timeouts,
+# which takes precedence — e.g. anythingllm carried proxy-read-timeout: 3600
+# for streaming LLM responses and is deliberately still on nginx until that is
+# expressed explicitly.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: default-request-timeout
+  namespace: network
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+  timeout:
+    http:
+      # Matches nginx's proxy-read-timeout default. NOT a tuning decision —
+      # a parity restoration. Change it deliberately, not by drift.
+      requestTimeout: 60s
