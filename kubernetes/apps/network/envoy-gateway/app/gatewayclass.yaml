@@ -45,8 +45,19 @@ spec:
               # 2 envoy-internal on one node and 0 on another - the exact
               # concentration this constraint exists to prevent. Keying on the
               # owning gateway makes each gateway spread independently.
+              #
+              # pod-template-hash is REQUIRED here, not optional polish.
+              # Spread is evaluated only at SCHEDULING time and k8s never
+              # rebalances afterwards. Without this key, a rolling update
+              # counts the outgoing ReplicaSet's pods while they terminate,
+              # the scheduler's view shifts underneath it, and replicas pile
+              # onto one node - then STAY there. Measured on the first roll of
+              # this very change (2026-09-07): both gateways settled 2/1/0,
+              # skew=2, in violation of maxSkew=1. Keying on the template hash
+              # makes each ReplicaSet spread among its own pods only.
               matchLabelKeys:
                 - gateway.envoyproxy.io/owning-gateway-name
+                - pod-template-hash
         container:
           resources:
             requests:
