@@ -26,48 +26,9 @@ spec:
   uninstall:
     keepHistory: false
 
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Deployment
-              name: anythingllm
-            patch: |
-              # AnythingLLM's model name lives in the chart-generated ConfigMap
-              # (OLLAMA_MODEL_PREF), and the chart adds no checksum annotation —
-              # so a ConfigMap-only change reconciles green in Flux while the
-              # running pod keeps serving the OLD value indefinitely. That is
-              # exactly what happened during the 2026-09-04 gemma4 GGUF->MLX
-              # migration: the manifest said 26b-mlx, the pod was 6 days old and
-              # still requesting the GGUF. Reloader restarts the Deployment when
-              # a referenced ConfigMap/Secret changes, which closes that gap.
-              - op: add
-                path: /metadata/annotations/reloader.stakater.com~1auto
-                value: "true"
-              - op: replace
-                path: /spec/strategy
-                value:
-                  type: Recreate
-              - op: add
-                path: /spec/template/spec/terminationGracePeriodSeconds
-                value: 60
-              - op: add
-                path: /spec/template/spec/initContainers
-                value:
-                  - name: clear-vector-cache
-                    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
-                    command: ["sh", "-c", "rm -rf /storage/vector-cache/* /storage/comkey && echo 'Cache and key files cleared'"]
-                    volumeMounts:
-                      - name: storage
-                        mountPath: /storage
-          - target:
-              kind: Ingress
-              name: anythingllm
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
-
+  # postRenderers REMOVED 2026-09-07: it targeted `kind: Ingress`, which
+  # matches nothing once the Ingress is gone, and kustomize then fails the
+  # ENTIRE post-render, stopping the HelmRelease installing.
   values:
     replicaCount: 1
 
@@ -115,7 +76,9 @@ spec:
       port: 3001
 
     ingress:
-      enabled: true
+      # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
+      # as the rollback target until ingress-nginx is removed.
+      enabled: false
       className: internal
       annotations:
         nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"

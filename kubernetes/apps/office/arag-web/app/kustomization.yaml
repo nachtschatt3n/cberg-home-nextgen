@@ -7,3 +7,4 @@ resources:
   - ./secret.sops.yaml
   - ./ghcr-secret.sops.yaml
   - ./helmrelease.yaml
+  - ./httproute.yaml

@@ -7,3 +7,4 @@ resources:
   - ./secret.sops.yaml
   - ./server-dns-alias.yaml
   - ./helmrelease.yaml
+  - ./httproute.yaml

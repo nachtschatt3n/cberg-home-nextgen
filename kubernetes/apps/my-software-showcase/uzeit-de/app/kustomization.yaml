@@ -10,6 +10,7 @@ resources:
   # persistence block (storageClass: longhorn-static + volumeName).
   - pv-uzeit-de-fileadmin.yaml
   - pv-uzeit-de-uploads.yaml
+  - httproute.yaml
 
 # Deliberately NOT listed above (see docs/sops/new-deployment-blueprint.md):
 #   longhorn-volume-uzeit-de-fileadmin.yaml

@@ -5,3 +5,4 @@ resources:
   - secret.sops.yaml
   - postgres-helmrelease.yaml
   - helmrelease.yaml
+  - httproute.yaml

@@ -1,0 +1,35 @@
+---
+# Envoy migration — teslamate onto envoy-internal.
+#
+# Annotation notes: proxy-body-size 100m
+#   Body-size limits have no route-level equivalent; Envoy streams uncapped
+#   unless a requestBuffer is set and none is, so this loosens rather than
+#   breaks. A cap would have to be Gateway-scoped and hit every other app.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: teslamate
+  namespace: home-automation
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "teslamate.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: teslamate
+          port: 4000
+      timeouts:
+        # Replaces nginx proxy-read/send-timeout: 600. Left off, the route
+        # inherits the gateway-wide 60s default — a tightening invisible to a
+        # `curl /` check.
+        request: 600s
+        backendRequest: 600s

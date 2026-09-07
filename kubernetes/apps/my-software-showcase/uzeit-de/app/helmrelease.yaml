@@ -125,7 +125,9 @@ spec:
             port: 80
     ingress:
       main:
-        enabled: true
+        # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
+        # as the rollback target until ingress-nginx is removed.
+        enabled: false
         # className: internal. The replaced ingress.yaml used class `nginx`, an
         # invented non-routable hostname, a per-app cluster-issuer annotation and
         # its own TLS secret. Internal ingresses in this cluster instead ride the

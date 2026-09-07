@@ -1,0 +1,38 @@
+---
+# Envoy migration — arag-web onto envoy-internal.
+#
+# Annotation notes: NO auth by operator decision AR-118 — see below
+#   Body-size limits have no route-level equivalent; Envoy streams uncapped
+#   unless a requestBuffer is set and none is, so this loosens rather than
+#   breaks. A cap would have to be Gateway-scoped and hit every other app.#
+# NO SecurityPolicy, and that is a DECISION not an omission (AR-118, 2026-09-07).
+# This app answers unauthenticated. Its Authentik provider is mode=forward_single,
+# which enforces nothing on its own and needs the ingress to call it via
+# auth-url/auth-signin — wiring that was never done, long before this migration
+# (traced to 4926bfa5). The operator accepted that on the basis that exposure is
+# INTERNAL ONLY. Adding ext-auth here would change the auth structure during a
+# routing migration, which is explicitly not what was asked for.
+# RE-REVIEW if this host ever gains external exposure; the acceptance rests on
+# it being LAN-only, not on the data being unimportant.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: arag-web
+  namespace: office
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "arag.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: arag-web
+          port: 80
