@@ -1,0 +1,93 @@
+---
+# Envoy migration phase 2 — longhorn-ui off nginx.
+# Pattern + the traps: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: longhorn-ui
+  namespace: storage
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Longhorn"
+    gethomepage.dev/group: "Storage"
+    gethomepage.dev/icon: "longhorn.png"
+    gethomepage.dev/description: "Kubernetes storage management UI"
+    gethomepage.dev/pod-selector: "app=longhorn-ui"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "longhorn.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: longhorn-frontend
+          port: 80
+---
+# Callback path. Separate route, MORE specific than `/` — Gateway API resolves
+# by longest match, so folding it into the app route would proxy the login
+# callback to Longhorn itself and loop.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: longhorn-authentik-outpost
+  namespace: storage
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "longhorn.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real Service cross-namespace, never the ExternalName shim the nginx
+        # form used — Envoy resolves backends via EndpointSlices and an
+        # ExternalName has none. Authorised by ReferenceGrant
+        # `longhorn-ui-outpost-access` in kube-system.
+        - group: ""
+          kind: Service
+          name: ak-outpost-longhorn-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: longhorn-ui-forward-auth
+  namespace: storage
+spec:
+  targetRefs:                       # app route ONLY — never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: longhorn-ui
+  extAuth:
+    failOpen: false                 # outpost down => deny, never publish the UI
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-longhorn-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy     # /auth/nginx returns 500 here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid
