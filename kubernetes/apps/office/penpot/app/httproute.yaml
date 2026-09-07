@@ -1,0 +1,50 @@
+---
+# Envoy migration PHASE 3: replaces the penpot chart's nginx `external`
+# Ingress (chart 1.9.0 has no Gateway API support, so the route is a
+# standalone manifest and ingress.enabled was set to false in the HelmRelease).
+#
+# Pure routing change: the Ingress carried one host, one path, one backend and
+# no behaviour-bearing nginx annotation (no timeouts, body size, websocket,
+# buffering, snippets, rewrites). Backend is the frontend Service `penpot`
+# on 8080, exactly as the Ingress had it.
+#
+# NO external-dns target annotation: with --source=gateway-httproute
+# external-dns reads the target from the parent GATEWAY and silently ignores it
+# on the route. It is already set on Gateway/envoy-external.
+#
+# NO SecurityPolicy / ext-auth: Penpot authenticates in-app
+# (disable-registration + enable-login-with-password) and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: penpot
+  namespace: office
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Penpot"
+    gethomepage.dev/description: "Open-source design and prototyping platform"
+    gethomepage.dev/group: "Office"
+    gethomepage.dev/icon: "penpot.png"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/instance=penpot,app.kubernetes.io/name=penpot-backend"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "penpot.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: penpot
+          port: 8080

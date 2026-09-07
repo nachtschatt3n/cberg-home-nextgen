@@ -36,13 +36,6 @@ spec:
   postRenderers:
     - kustomize:
         patches:
-          - target:
-              kind: Ingress
-              name: penpot
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
           # Inject wait-for initContainers into the backend Deployment so it
           # blocks until the standalone DB + cache are reachable. The penpot
           # chart exposes no initContainers values key.
@@ -174,9 +167,12 @@ spec:
         existingClaim: penpot-assets
         size: 20Gi
 
-    # Ingress configuration
+    # Ingress configuration — DISABLED by Envoy migration phase 3. The route
+    # now lives in ./httproute.yaml on Gateway/envoy-external. The block is
+    # kept (inert) as the documented rollback target until phase 4 removes
+    # nginx; `git revert` of this commit restores it verbatim.
     ingress:
-      enabled: true
+      enabled: false
       className: external
       annotations:
         external-dns.alpha.kubernetes.io/target: external.${SECRET_DOMAIN}
