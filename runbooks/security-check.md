@@ -541,24 +541,58 @@ if not found:
 
 **Objective**: Confirm only expected services are publicly reachable; flag surprises.
 
-Expected external ingresses: `authentik`, `flux-webhook`, `music-assistant` (alexa endpoints), `uptime-kuma`, `nextcloud`, `paperless-ngx`
+> **What "external" means here changed on 2026-09-08** (code: `98372390`,
+> `security-check.py::s8_external_exposure`). This section used to enumerate
+> `Ingress` objects with `ingressClassName: external`. The Envoy Gateway
+> migration (`ad1ea7c2`) deleted the last `Ingress` in the cluster, so the
+> section scored **green on an empty set** — "0 external ingresses, all
+> expected" — while 25 hostnames sat behind the Cloudflare tunnel. Every
+> assertion (unexpected exposure, off-domain host, DNS traceability) was
+> passing vacuously.
+>
+> **A workload is externally reachable iff its `HTTPRoute` attaches to the
+> `envoy-external` Gateway** (`parentRefs[].name == envoy-external`). No class
+> name is involved. Ingresses are still enumerated so a reintroduced one is
+> not invisible.
+
+Expected external routes: `authentik-server`, `flux-webhook`,
+`music-assistant-alexa-{api,stream}`, `uptime-kuma`, `nextcloud`,
+`paperless-ngx` — the authoritative list is the `security_acceptances` table
+(`runbooks/policy-cli.py sec`), not this doc.
+
+**Excluded as plumbing, not exposure:** `https-redirect` (attaches to both
+gateways, carries no hostname, only 301s) and every `*-authentik-outpost` route
+(forward-auth callback paths). Counting them would raise criticals for objects
+with no attack surface.
 
 **Commands:**
 
 ```bash
-echo "=== All external-class ingresses ==="
-kubectl get ingress -A -o json | python3 -c "
+echo "=== All externally-routed HTTPRoutes (parentRef envoy-external) ==="
+kubectl get httproute -A -o json | python3 -c "
 import sys, json, os
 items = json.load(sys.stdin)['items']
 domain = os.environ.get('DOMAIN', '[DOMAIN]')
-for i in items:
-    if i['spec'].get('ingressClassName') == 'external':
-        ns = i['metadata']['namespace']
-        name = i['metadata']['name']
-        hosts = [r.get('host','').replace(domain, '[DOMAIN]')
-                 for r in i['spec'].get('rules', [])]
-        print(f'  {ns}/{name}: {hosts}')
+for r in items:
+    parents = {(p.get('name') or '') for p in (r['spec'].get('parentRefs') or [])}
+    if 'envoy-external' not in parents:
+        continue
+    ns   = r['metadata']['namespace']
+    name = r['metadata']['name']
+    if name == 'https-redirect' or name.endswith('-authentik-outpost'):
+        continue
+    hosts = [h.replace(domain, '[DOMAIN]') for h in (r['spec'].get('hostnames') or [])]
+    print(f'  {ns}/{name}: {hosts}')
 " | sort
+
+echo ""
+echo "=== Any Ingress objects at all (expected: none) ==="
+kubectl get ingress -A
+
+echo ""
+echo "=== DNS traceability: the target annotation lives on the GATEWAY ==="
+kubectl -n network get gateway envoy-external \
+  -o jsonpath='{.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target}{"\n"}'
 
 echo ""
 echo "=== LoadBalancer services with external IPs ==="
@@ -571,10 +605,35 @@ kubectl get svc -A --field-selector spec.type=NodePort \
   -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,PORT:.spec.ports[*].nodePort'
 ```
 
-**Expected results:** Only the listed expected services appear with `ingressClassName: external`.
+**Expected results:** Only accepted services appear with a `parentRef` of
+`envoy-external`, every hostname ends in `${SECRET_DOMAIN}`, and the Gateway
+carries the `external-dns.alpha.kubernetes.io/target` annotation.
+
+### Why DNS traceability is asserted on the Gateway, not per route
+
+With `--source=gateway-httproute`, **external-dns reads the target from the
+parent Gateway and silently ignores the same annotation on an `HTTPRoute`.**
+Verified the hard way on 2026-09-07: a route that carried the annotation still
+had its record published to the RFC1918 gateway address and the hostname went
+dark publicly.
+
+Asserting it per-route would flag all 25 external routes as misconfigured while
+the real single point of failure — the Gateway losing its annotation, which
+takes every external hostname down at once — went unwatched. The check is
+therefore one assertion against `network/envoy-external`. See
+`docs/sops/gateway-api-httproute.md` and `docs/integration.md` § External DNS.
+
+### Blindness guard
+
+Zero routable objects of **either** kind (no `Ingress` *and* no `HTTPRoute`)
+means the query broke, not that nothing is exposed. That case is reported as
+**"exposure inventory did NOT run"**, never as a pass. An unverified inventory
+is not a clean inventory.
 
 **Severity:**
-- 🔴 Critical if unexpected service found in external ingress class
+- 🔴 Critical if an unaccepted service is externally routed
+- 🟡 Warning if the `envoy-external` Gateway is missing its external-dns target annotation
+- 🟡 Warning if the inventory is blind (0 objects of either kind)
 - 🟡 Warning for unexpected NodePort or LoadBalancer service with public IP
 
 ---
@@ -1045,31 +1104,43 @@ kubectl get configmap cloudflared-configmap -n network -o jsonpath='{.data.confi
 ```
 
 For each exposed hostname, verify it is either:
-a) Protected by Authentik forward-auth (check ingress annotations)
+a) Protected by Authentik forward-auth — since the Envoy migration this is a
+   **`SecurityPolicy`** targeting the route, *not* an `nginx.ingress.kubernetes.io/auth-url`
+   annotation. Those annotations no longer exist anywhere and are not evidence of anything.
 b) Has its own robust authentication (open-webui, home-assistant, n8n, iobroker — see accepted risks AR-004)
 c) Intentionally public (echo-server — AR-003)
 
 ```bash
-# Cross-reference: all external-facing ingresses
-kubectl get ingress -A -o json | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for ing in data['items']:
-    ns = ing['metadata']['namespace']
-    name = ing['metadata']['name']
-    annotations = ing['metadata'].get('annotations', {})
-    hosts = [r.get('host','') for r in ing['spec'].get('rules', [])]
-    auth = annotations.get('nginx.ingress.kubernetes.io/auth-url', 'NONE')
-    is_external = 'external' in ing['metadata'].get('labels', {}).get('app.kubernetes.io/name', '') \
-        or 'external' in annotations.get('kubernetes.io/ingress.class', '') \
-        or 'external' in ing['spec'].get('ingressClassName', '')
-    if is_external or 'external' in name:
-        print(f'{ns}/{name}: hosts={hosts} auth={\"Authentik\" if \"authentik\" in auth else \"NONE\"}')"
+# Cross-reference: every externally-routed hostname and whether a SecurityPolicy covers it
+kubectl get httproute -A -o json > /tmp/routes.json
+kubectl get securitypolicy -A -o json > /tmp/secpol.json
+python3 -c "
+import json
+routes = json.load(open('/tmp/routes.json'))['items']
+pols   = json.load(open('/tmp/secpol.json'))['items']
+protected = set()
+for p in pols:
+    t = p['spec'].get('targetRef') or {}
+    for tr in ([t] if t else []) + (p['spec'].get('targetRefs') or []):
+        if tr.get('kind') == 'HTTPRoute':
+            protected.add((p['metadata']['namespace'], tr.get('name')))
+for r in routes:
+    parents = {(x.get('name') or '') for x in (r['spec'].get('parentRefs') or [])}
+    if 'envoy-external' not in parents:
+        continue
+    ns, name = r['metadata']['namespace'], r['metadata']['name']
+    if name == 'https-redirect' or name.endswith('-authentik-outpost'):
+        continue
+    hosts = r['spec'].get('hostnames') or []
+    auth = 'Authentik(SecurityPolicy)' if (ns, name) in protected else 'NONE (needs own auth or an AR)'
+    print(f'{ns}/{name}: hosts={hosts} auth={auth}')
+"
 ```
 
 **Severity:**
 - 🔴 Critical if a new external hostname has no auth and is not in accepted-risks
-- 🟡 Warning if an ingress uses external-nginx class but lacks Authentik and is not in AR list
+- 🟡 Warning if an externally-routed hostname has no `SecurityPolicy`, no documented
+  in-app auth, and no AR entry
 
 ### 12.4 Cloudflare Configuration Version Drift
 

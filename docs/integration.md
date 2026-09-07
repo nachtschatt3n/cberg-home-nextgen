@@ -353,20 +353,56 @@ external-dns automatically manages DNS records in Cloudflare.
 
 ### Behavior
 
-- Watches ingress resources with `ingressClassName: external`
-- Creates CNAME records in Cloudflare: `service.domain → external.domain`
+- Sources: `--source=crd --source=gateway-httproute`. The `ingress` source was
+  dropped on 2026-09-08 (`4de88601`) — the cluster holds **zero `Ingress` and zero
+  `IngressClass` objects** since the Envoy Gateway migration completed
+  (`ad1ea7c2`), so an Ingress-based recipe publishes nothing.
+- "External" now means: **an `HTTPRoute` whose `parentRefs` include the
+  `envoy-external` Gateway** (`network/envoy-external`, 192.168.55.104).
+  Routes parented only to `envoy-internal` get no public record.
+- Scoped with `--gateway-name=envoy-external --gateway-namespace=network`, so
+  external-dns ignores every internal route by construction.
+- Creates CNAME records in Cloudflare: `service.${SECRET_DOMAIN} → external.${SECRET_DOMAIN}`
 - Uses Cloudflare API token (stored in `secret.sops.yaml`)
 - TXT ownership records prefixed with `k8s.`
 
 ### Adding External DNS for an App
 
-Add annotation to ingress:
+**Attach the app's `HTTPRoute` to `envoy-external`.** That is the whole action —
+there is no per-app DNS annotation to add:
+
 ```yaml
-annotations:
-  external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+spec:
+  parentRefs:
+    - name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "myapp.${SECRET_DOMAIN}"
 ```
 
-The ingress must also use `ingressClassName: external`.
+> **The `external-dns.alpha.kubernetes.io/target` annotation belongs on the
+> GATEWAY, not on the route.** With `--source=gateway-httproute` external-dns
+> reads the target from the parent Gateway and **silently ignores** the same
+> annotation on an `HTTPRoute`. A route carrying it still gets its record
+> published to the Gateway's RFC1918 address, and the hostname goes dark
+> publicly — with no error anywhere. Verified the hard way on 2026-09-07.
+>
+> The single annotation lives on `network/envoy-external`
+> (`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`) and every external
+> route inherits it. Losing it is a single point of failure for all external
+> hostnames, which is why `security-check.py` §8 asserts it on the Gateway.
+
+Verify:
+```bash
+kubectl -n network get gateway envoy-external \
+  -o jsonpath='{.metadata.annotations.external-dns\.alpha\.kubernetes\.io/target}'; echo
+kubectl -n <ns> get httproute <name> \
+  -o jsonpath='{.spec.parentRefs[*].name}{"\n"}'
+```
+
+Full routing model, per-app route shapes, and the verification gate:
+`docs/sops/gateway-api-httproute.md`.
 
 ---
 

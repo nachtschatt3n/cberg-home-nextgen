@@ -180,20 +180,31 @@ graph TB
 **Configuration:**
 - **Service IP**: `192.168.55.101` (LoadBalancer via Cilium LBIPAM)
 - **Domain**: `*.${SECRET_DOMAIN}` (configured in cluster secrets)
-- **Function**: Resolves DNS queries for services with `ingress-class: internal`
-- **Watched Resources**: Ingress and Service objects in the cluster
-- **TTL**: 1 second for fast failover and updates
+- **Function**: Resolves in-cluster hostnames to the LB IP of the Gateway that serves them
+- **Watched Resources**: `resources Ingress Service HTTPRoute` (Corefile) — in
+  practice **`HTTPRoute` is the only one that matters**: the Envoy Gateway
+  migration completed in `ad1ea7c2` and the cluster now holds zero `Ingress`
+  and zero `IngressClass` objects
+- **TTL**: 60 seconds
 
 **How It Works:**
-1. k8s-gateway watches all Ingress resources with `ingressClassName: internal`
+1. k8s-gateway watches `HTTPRoute` objects and reads each route's `parentRefs`
 2. When a client queries `service.${SECRET_DOMAIN}`, AdGuard Home forwards to k8s-gateway
-3. k8s-gateway returns the internal ingress LoadBalancer IP
-4. Client connects directly to the service via internal network
+3. k8s-gateway answers with the **parent Gateway's** LoadBalancer IP —
+   `192.168.55.103` for `envoy-internal`, `192.168.55.104` for `envoy-external`
+4. Client connects directly to that Gateway over the LAN
+
+> The old ingress-nginx VIPs `192.168.55.100` (internal) and `192.168.55.102`
+> (external) **no longer exist**. Any doc, bookmark, or firewall rule still
+> pointing at them is dead.
 
 **Example:**
 ```
-home-assistant.${SECRET_DOMAIN} → 192.168.55.101 → Internal Ingress → Home Assistant Pod
+grafana.${SECRET_DOMAIN} → 192.168.55.103 (envoy-internal)  → HTTPRoute → Grafana Pod
+hass.${SECRET_DOMAIN}    → 192.168.55.104 (envoy-external)  → HTTPRoute → Home Assistant Pod
 ```
+
+See `docs/sops/k8s-gateway-dns.md` and `docs/sops/gateway-api-httproute.md`.
 
 ### external-dns - Automated DNS Management
 
@@ -202,13 +213,19 @@ home-assistant.${SECRET_DOMAIN} → 192.168.55.101 → Internal Ingress → Home
 **Configuration:**
 - **Provider**: Cloudflare DNS with API token authentication
 - **Domain Filter**: `${SECRET_DOMAIN}` (configured in cluster secrets)
-- **Sources**: Ingress resources with `ingressClassName: external` and DNSEndpoint CRDs
+- **Sources**: `--source=crd --source=gateway-httproute`, scoped to
+  `--gateway-name=envoy-external --gateway-namespace=network`. The `ingress`
+  source was dropped in `4de88601` — there are no `Ingress` objects left to watch.
 - **Record Type**: CNAME records proxied through Cloudflare
 - **TXT Ownership**: `k8s.` prefix for record ownership tracking
 
 **How It Works:**
-1. external-dns watches Ingress resources with `ingressClassName: external`
-2. For each external ingress with annotation `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"`
+1. external-dns watches `HTTPRoute` objects whose `parentRefs` include the
+   `envoy-external` Gateway — that attachment, not a class name, is what makes
+   a hostname external
+2. It reads `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"`
+   from **the Gateway**. The same annotation on an `HTTPRoute` is silently
+   ignored, so never put it there — see `docs/integration.md` § External DNS.
 3. Creates a CNAME record: `service.${SECRET_DOMAIN} → external.${SECRET_DOMAIN}`
 4. Cloudflare proxies the request through their CDN for DDoS protection
 
@@ -307,8 +324,8 @@ PiKVM devices provide hardware-level remote access to Kubernetes nodes for troub
 ```
 Client → AdGuard Home (192.168.55.5)
        → k8s-gateway (192.168.55.101)
-       → Internal Ingress
-       → Service Pod
+       → envoy-internal Gateway (192.168.55.103)
+       → HTTPRoute → Service Pod
 ```
 
 **External Access (Internet → Public Service):**
@@ -317,8 +334,8 @@ Internet → Cloudflare DNS (${SECRET_DOMAIN})
         → Cloudflare CDN (proxied)
         → Cloudflare Tunnel (QUIC/TLS)
         → cloudflared pod
-        → External Ingress
-        → Service Pod
+        → envoy-external Gateway (192.168.55.104)
+        → HTTPRoute → Service Pod
 ```
 
 ---

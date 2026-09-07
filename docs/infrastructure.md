@@ -50,11 +50,9 @@ All three nodes connect to Basement-SW-24-PoE.
 | DMP-CBERG | 192.168.30.1 | Router/gateway, WireGuard VPN, IDS/IPS |
 | AdGuard Home | 192.168.55.5 | Default DNS server (ad-blocking, DNS filtering) |
 | Plex Media Server | 192.168.55.30 | Plex direct LB (port 32400) |
-| internal-ingress-nginx | 192.168.55.100 | Internal Ingress LB IP (cluster-private services) |
 | k8s-gateway | 192.168.55.101 | Split-DNS (`*.${SECRET_DOMAIN}` → cluster) |
-| external-ingress-nginx | 192.168.55.102 | External Ingress LB IP (public via Cloudflared) |
-| envoy-internal (Gateway) | 192.168.55.103 | Envoy Gateway internal-class Gateway (EG migration phase 0) |
-| envoy-external (Gateway) | 192.168.55.104 | Envoy Gateway external-class Gateway (EG migration phase 0) |
+| envoy-internal (Gateway) | 192.168.55.103 | **The** internal data plane — all LAN-only `HTTPRoute`s attach here |
+| envoy-external (Gateway) | 192.168.55.104 | **The** external data plane — public via cloudflared; `.100`/`.102` (ingress-nginx) were deleted 2026-09-07 (`ad1ea7c2`) |
 | Wazuh syslog/CEF | 192.168.55.27 | UniFi → Wazuh manager UDP/514 (LB IP for SIEM ingest) |
 | PiKVM (per node) | — | KVM-over-IP for out-of-band node management |
 

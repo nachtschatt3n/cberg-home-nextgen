@@ -1,8 +1,8 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.09.07`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cberg-agent / operator`
 
 ---
@@ -125,7 +125,7 @@ Normal changes (TTL, resources, values):
 
 ```bash
 # Resolve an internal host through k8s-gateway directly
-mise exec -- dig +short @192.168.55.101 <internal-host>.${SECRET_DOMAIN} A   # expect 192.168.55.100
+mise exec -- dig +short @192.168.55.101 <internal-host>.${SECRET_DOMAIN} A   # expect 192.168.55.103 (envoy-internal)
 
 # Through the household resolver
 mise exec -- dig +short @192.168.55.5 <internal-host>.${SECRET_DOMAIN} A
@@ -137,8 +137,8 @@ mise exec -- dig +short @192.168.55.5 <internal-host>.${SECRET_DOMAIN} A
 
 ```bash
 # 1. one internal-class and one external-class host answer with the right VIP
-mise exec -- dig +short @192.168.55.101 <internal-host>.${SECRET_DOMAIN} A   # 192.168.55.100
-mise exec -- dig +short @192.168.55.101 <external-host>.${SECRET_DOMAIN} A   # 192.168.55.102
+mise exec -- dig +short @192.168.55.101 <internal-host>.${SECRET_DOMAIN} A   # 192.168.55.103 (envoy-internal)
+mise exec -- dig +short @192.168.55.101 <external-host>.${SECRET_DOMAIN} A   # 192.168.55.104 (envoy-external)
 # 2. zero informer-sync errors in the CURRENT pod
 mise exec -- kubectl logs -n network deploy/k8s-gateway --tail=100 | grep -c "Could not sync required resources"   # must be 0
 ```

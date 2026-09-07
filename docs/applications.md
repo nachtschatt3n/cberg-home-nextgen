@@ -60,7 +60,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| home-assistant | Central home automation platform | Internal | Home Automation |
+| home-assistant | Central home automation platform | **External** — `hass.${SECRET_DOMAIN}` on `envoy-external` (public via cloudflared; its own auth + MFA, AR-004). Also a direct LB on 192.168.55.24 for LAN/mDNS integrations | Home Automation |
 | esphome | ESP32/ESP8266 device management | Internal | Home Automation |
 | node-red | Flow-based automation and integrations | Internal | Home Automation |
 | frigate-nvr | AI-powered network video recorder (Intel NPU / OpenVINO) | Internal | Home Automation |
@@ -217,7 +217,7 @@
 | k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101). Chart 3.7.2 / app 1.8.0 — upstream moved orgs (ori-edge → k8s-gateway); the old repo is frozen at chart 2.4.0 / app 0.4.0, which fails closed when Gateway API CRDs are present. Image tag is pinned in the HR because the chart default lags. See `docs/sops/k8s-gateway-dns.md`. | None |
 | cloudflared | `network/external/` | Cloudflare Tunnel client | None |
 | external-dns | `network/external/` | Automated Cloudflare DNS record management | None |
-| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — the Gateway API control plane, and since 2026-09-07 the **only** data plane in the cluster. `GatewayClass` + two Gateways: `envoy-internal` (192.168.55.103, LAN-only) and `envoy-external` (192.168.55.104, internet-facing via the cloudflared wildcard). **The ingress-nginx migration is COMPLETE (`ad1ea7c2`)** — both nginx controllers are deleted and 104 `HTTPRoute`s carry all traffic; there are zero `Ingress` and zero `IngressClass` objects, so an `Ingress` created here is inert. The cluster-wide `https-redirect` HTTPRoute owns both `:80` listeners. Gateway API + EG CRDs are vendored under `crds/` (standard channel, gateway-api v1.6.1, 10 CRDs) — not chart-installed. See `docs/sops/gateway-api-httproute.md` and `docs/sops/k8s-gateway-dns.md`. | None |
+| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — the Gateway API control plane, and since 2026-09-07 the **only** data plane in the cluster. `GatewayClass` + two Gateways: `envoy-internal` (192.168.55.103, LAN-only) and `envoy-external` (192.168.55.104, internet-facing via the cloudflared wildcard). **The ingress-nginx migration is COMPLETE (`ad1ea7c2`)** — both nginx controllers are deleted and 103 `HTTPRoute`s carry all traffic (79 attached to `envoy-internal`, 25 to `envoy-external`); there are zero `Ingress` and zero `IngressClass` objects, so an `Ingress` created here is inert. The cluster-wide `https-redirect` HTTPRoute owns both `:80` listeners — it attaches to BOTH gateways but carries **no hostname**, so envoy-gateway itself owns no external hostname and its own exposure is None. (The `dns-canary` route that briefly made it look externally exposed was deleted in `b504ce72`.) Gateway API + EG CRDs are vendored under `crds/` (standard channel, gateway-api v1.6.1, 10 CRDs) — not chart-installed. See `docs/sops/gateway-api-httproute.md` and `docs/sops/k8s-gateway-dns.md`. | None |
 
 ---
 
@@ -234,7 +234,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| flux-operator | Flux GitOps operator + webhook receiver | Internal (webhook) | — |
+| flux-operator | Flux GitOps operator + webhook receiver | **External (webhook)** — `flux-webhook.${SECRET_DOMAIN}` on `envoy-external`; GitHub must reach it, so it is internet-facing and authenticated by HMAC signature, not by network position | — |
 | flux-guardrails | Policy-only, deploys no workload. Cluster-scoped `ValidatingAdmissionPolicy` + Binding pinning which namespaces may cross-reference the write-capable `flux-system` GitRepository from an `ImageUpdateAutomation` (confused-deputy guardrail, `failurePolicy: Fail`). Its `ks.yaml` deliberately carries **no** `targetNamespace` — both objects are cluster-scoped. See `docs/sops/flux-image-automation-push-auth.md`. | None | — |
 
 ---
