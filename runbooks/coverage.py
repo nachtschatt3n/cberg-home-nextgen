@@ -721,6 +721,108 @@ def image_publish_age_hours(image_ref: str, tag: str):
     return age
 
 
+# ── Chart publish age (the direct-bump cooldown, chart half) ────────────────
+# Added 2026-09-07. The chart branch of direct_bump_age_gate used to return
+# None ("may auto-apply") with the rationale "auto-update.py still gates their
+# PRs". That premise is FALSE for exactly the items this gate governs: a
+# DIRECT bump is by definition the no-PR path, so auto-update.py never sees it
+# and no cooldown applied anywhere. Measured case that exposed it: plex chart
+# 1.9.0, published 2026-09-07T20:22Z, would have been applied by the 03:30
+# nightly ~5.5h old, while the identical hazard for IMAGES had been closed on
+# 2026-09-05. Chart repos publish a per-version `created` in index.yaml, so
+# the age IS measurable for HTTP repos and this closes the hole properly
+# rather than by blanket-holding every chart.
+_CHART_AGE_CACHE: dict = {}
+_HELM_REPO_URL_CACHE: dict = {}
+
+
+def _helm_repo_urls() -> dict:
+    """HelmRepository name -> url, from the manifests in git."""
+    if _HELM_REPO_URL_CACHE:
+        return _HELM_REPO_URL_CACHE
+    for f in sorted((REPO_ROOT / "kubernetes").rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(f.read_text(errors="ignore")))
+        except Exception:
+            continue
+        for d in docs:
+            if isinstance(d, dict) and d.get("kind") == "HelmRepository":
+                nm = (d.get("metadata") or {}).get("name")
+                url = (d.get("spec") or {}).get("url")
+                if nm and url:
+                    _HELM_REPO_URL_CACHE[nm] = url
+    return _HELM_REPO_URL_CACHE
+
+
+def _chart_source_for(item):
+    """(chart_name, repo_url) for a chart item, or (None, None).
+
+    The HelmRelease is pinned by matching its DEPLOYED chart version against
+    item['current'] within the item's namespace, rather than guessing from the
+    component label -- report-side names (`otel-operator`, `open-webui`) do not
+    map onto directory or release names, which is the same trap _namespace_text
+    documents.
+    """
+    ns, cur = (item.get("namespace") or "").strip(), item.get("current")
+    if not ns or not cur:
+        return None, None
+    d = REPO_ROOT / "kubernetes" / "apps" / ns
+    if not d.is_dir():
+        return None, None
+    for f in sorted(d.rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(f.read_text(errors="ignore")))
+        except Exception:
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "HelmRelease":
+                continue
+            cs = (((doc.get("spec") or {}).get("chart") or {}).get("spec") or {})
+            if str(cs.get("version") or "").strip() != str(cur).strip():
+                continue
+            chart = cs.get("chart")
+            ref = (cs.get("sourceRef") or {}).get("name")
+            if chart and ref:
+                return chart, _helm_repo_urls().get(ref)
+    return None, None
+
+
+def chart_publish_age_hours(item):
+    """Hours since this chart item's TARGET version was published, or None.
+
+    None means UNKNOWABLE (OCI repo, unreachable index, or no `created` on the
+    entry) -- the caller must treat that as hold-fail-safe, never as a pass.
+    """
+    import datetime
+    key = f"{item.get('namespace')}/{item.get('component')}:{item.get('target')}"
+    if key in _CHART_AGE_CACHE:
+        return _CHART_AGE_CACHE[key]
+    age = None
+    chart, url = _chart_source_for(item)
+    # oci:// indexes carry no per-version created date -- unverifiable, not old.
+    if chart and url and not str(url).startswith("oci://"):
+        import urllib.request
+        try:
+            req = urllib.request.Request(url.rstrip("/") + "/index.yaml",
+                                         headers={"User-Agent": "coverage.py"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                entries = (yaml.safe_load(r.read()) or {}).get("entries") or {}
+            for e in entries.get(chart) or []:
+                if str(e.get("version") or "").strip() != str(item["target"]).strip():
+                    continue
+                c = e.get("created")
+                if not c:
+                    break
+                dt = datetime.datetime.fromisoformat(str(c).replace("Z", "+00:00"))
+                now = datetime.datetime.now(datetime.timezone.utc)
+                age = (now - dt).total_seconds() / 3600.0
+                break
+        except Exception:
+            age = None
+    _CHART_AGE_CACHE[key] = age
+    return age
+
+
 def direct_bump_age_gate(item, policy):
     """None = may auto-apply; else a reason string that HOLDS it."""
     min_age = (policy or {}).get("minimum_release_age_hours") or 0
@@ -732,9 +834,22 @@ def direct_bump_age_gate(item, policy):
         if fnmatch.fnmatch(dep, str(pat).lower()) or any(
                 fnmatch.fnmatch((r or "").lower(), str(pat).lower()) for r in repos):
             return None
+    if item.get("kind") == "chart":
+        # Charts ARE gated (2026-09-07). See chart_publish_age_hours above for
+        # why the old blanket exemption was wrong: the direct-bump lane is the
+        # no-PR path, so "auto-update.py gates their PRs" did not apply to it.
+        cage = chart_publish_age_hours(item)
+        if cage is None:
+            return (f"chart release age UNKNOWN for {item['component']} "
+                    f"{item['target']} (OCI repo or no `created` in index.yaml) "
+                    f"— cannot prove the {min_age:g}h cooldown elapsed; holding "
+                    f"(fail-safe). Add an `age_waive` entry to accept it.")
+        if cage < min_age:
+            return (f"chart published {cage:.0f}h ago (< {min_age:g}h cooldown) "
+                    f"— eligible in {min_age - cage:.0f}h")
+        return None
     if item.get("kind") != "image":
-        # Charts have no registry manifest to date here. Out of scope for this
-        # gate rather than silently held -- auto-update.py still gates their PRs.
+        # Non-chart, non-image (external infra rows) keep the old behaviour.
         return None
     if not repos:
         # An IMAGE whose repository could not be resolved from the snapshot is

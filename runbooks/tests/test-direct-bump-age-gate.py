@@ -9,9 +9,20 @@ the same window.
 
 Directions pinned here: young holds, old passes, UNKNOWN AGE HOLDS (fail-safe
 — a check that cannot see must not report a pass), an unresolved image repo
-holds, `age_waive` globs waive, knob=0 disables, charts are out of scope, and
-the threshold is SOURCED from auto-update-policy.yaml (single source of
-truth), never a constant local to coverage.py.
+holds, `age_waive` globs waive, knob=0 disables, and the threshold is SOURCED
+from auto-update-policy.yaml (single source of truth), never a constant local
+to coverage.py.
+
+CHARTS (2026-09-07): this file used to assert "chart kind -> out of scope
+(pass)". That assertion encoded the bug rather than guarding against it. The
+exemption's stated rationale was "auto-update.py still gates their PRs", which
+is false for exactly the items the gate governs — a DIRECT bump is the no-PR
+path, so nothing gated them. plex chart 1.9.0 would have been applied by the
+03:30 nightly at ~5.5h old. Charts are now measured from the per-version
+`created` in the Helm repo's index.yaml, so the directions pinned below are the
+same three as for images: young holds, old passes, unknowable HOLDS fail-safe.
+A blanket hold would also satisfy "young holds", so the old-passes case is the
+one that proves this is a real cooldown.
 
 Run:  python3 runbooks/tests/test-direct-bump-age-gate.py
 """
@@ -89,9 +100,43 @@ def main() -> int:
           cov.direct_bump_age_gate(item(), {"minimum_release_age_hours": 0}), False)
     check("knob absent disables gate", cov.direct_bump_age_gate(item(), {}), False)
 
-    # charts have no registry manifest to date — out of scope, not silently held
-    check("chart kind -> out of scope (pass)",
-          cov.direct_bump_age_gate(item(kind="chart"), POLICY), False)
+    # ── charts: same three directions as images ────────────────────────────
+    # A chart whose source cannot be resolved is UNMEASURABLE, not safe.
+    # (item() has component "x" in no namespace, so nothing resolves.)
+    cov._CHART_AGE_CACHE.clear()
+    check("chart, unresolvable source -> hold (fail-safe)",
+          cov.direct_bump_age_gate(item(kind="chart"), POLICY), True)
+
+    def with_chart_age(hours):
+        """Pin chart_publish_age_hours without touching the network."""
+        cov._CHART_AGE_CACHE.clear()
+        cov.chart_publish_age_hours = lambda it, _h=hours: _h
+
+    _real_chart_age = cov.chart_publish_age_hours
+    try:
+        with_chart_age(3)      # the measured plex 1.9.0 case
+        check("3h-old chart -> hold",
+              cov.direct_bump_age_gate(item(kind="chart"), POLICY), True)
+
+        # THE LOAD-BEARING ONE: an old chart must PASS. Without this, a blanket
+        # hold would satisfy every other chart assertion here.
+        with_chart_age(250)
+        check("250h-old chart -> pass",
+              cov.direct_bump_age_gate(item(kind="chart"), POLICY), False)
+
+        with_chart_age(None)   # OCI repo / no `created` / index unreachable
+        check("chart age unknown -> hold (fail-safe)",
+              cov.direct_bump_age_gate(item(kind="chart"), POLICY), True)
+
+        # an operator waive still wins for charts, as it does for images
+        with_chart_age(1)
+        check("chart age_waive glob waives",
+              cov.direct_bump_age_gate(
+                  item(kind="chart"),
+                  {"minimum_release_age_hours": 48, "age_waive": ["x"]}), False)
+    finally:
+        cov.chart_publish_age_hours = _real_chart_age
+        cov._CHART_AGE_CACHE.clear()
 
     # SINGLE SOURCE OF TRUTH: the threshold comes from auto-update-policy.yaml
     # via load_policy(), never a constant duplicated in coverage.py.
