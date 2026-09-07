@@ -1,0 +1,60 @@
+---
+# Envoy Gateway migration phase 2 (2026-09-07): replaces ingress.yaml, which is
+# deleted in the SAME commit. k8s-gateway watches Ingress AND HTTPRoute, so
+# leaving both alive would publish two A records for this host (.100 nginx and
+# .103 envoy) and it would resolve non-deterministically.
+#
+# DROPPED deliberately, both with consequences worth knowing:
+#
+#  1. cert-manager.io/cluster-issuer and the per-host `superset-tls` Secret.
+#     Gateway API terminates TLS at the LISTENER, not per route, and the
+#     envoy-internal https listener already presents the wildcard
+#     *.${SECRET_DOMAIN} certificate. No loss. The Secret is left in the cluster
+#     untouched so `git revert` of this commit is a working rollback.
+#
+#  2. nginx.ingress.kubernetes.io/proxy-body-size: "50m". This has NO
+#     route-level equivalent in Gateway API -- request body limits live in an
+#     Envoy Gateway ClientTrafficPolicy, which is Gateway-scoped, not per app.
+#     The effect of dropping it is a LOOSENING, not a break: Envoy applies no
+#     request body size limit by default, so Superset's CSV/file uploads that
+#     worked under the 50m cap keep working, and larger ones now also pass.
+#     If the cap is wanted back it has to be reintroduced deliberately as a
+#     ClientTrafficPolicy on envoy-internal, where it would apply to every app
+#     on that gateway -- do not add it as a side effect of this migration.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: superset
+  namespace: databases
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Superset"
+    gethomepage.dev/description: "Data exploration & visualization"
+    gethomepage.dev/group: "Databases"
+    # dashboard-icons catalog has no Superset entry; simpleicons 404s on
+    # "apachesuperset". Use the Apache project's own logo PNG directly.
+    gethomepage.dev/icon: "https://raw.githubusercontent.com/apache/superset/master/superset-frontend/src/assets/images/superset-logo-horiz.png"
+    gethomepage.dev/pod-selector: "app=superset"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only -- the http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "superset.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: superset
+          port: 8088
