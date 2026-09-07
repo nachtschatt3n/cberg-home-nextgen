@@ -160,8 +160,12 @@ spec:
           http:
             port: 5173
 
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both nginx Ingresses below are kept DISABLED as the rollback target
+    # until phase 4 removes nginx.
     ingress:
       opencode:
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
@@ -184,6 +188,7 @@ spec:
           - hosts:
               - *host-opencode
       preview:
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
@@ -205,6 +210,63 @@ spec:
         tls:
           - hosts:
               - *host-preview
+
+    # Envoy Gateway migration phase 2 (2026-09-07).
+    # Explicit `rules:` are REQUIRED here: this release exposes TWO Services
+    # (opencode :4096 and preview :5173), so the chart cannot auto-detect a
+    # primary backend and refuses to render without them.
+    route:
+      opencode:
+        kind: HTTPRoute
+        hostnames:
+          - *host-opencode
+        parentRefs: &internal-gw
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "OpenCode andreamosteller"
+          gethomepage.dev/description: "AI coding agent for andreamosteller"
+          gethomepage.dev/group: "Software Development"
+          gethomepage.dev/icon: "mdi-code-braces"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=opencode-andreamosteller"
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: opencode
+                port: http
+      preview:
+        kind: HTTPRoute
+        hostnames:
+          - *host-preview
+        parentRefs: *internal-gw
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Preview andreamosteller"
+          gethomepage.dev/description: "Live app preview for andreamosteller"
+          gethomepage.dev/group: "Software Development"
+          gethomepage.dev/icon: "mdi-eye"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=opencode-andreamosteller"
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: preview
+                port: http
 
     persistence:
       home:
