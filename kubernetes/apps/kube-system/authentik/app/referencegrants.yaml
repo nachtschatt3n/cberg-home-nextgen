@@ -1,0 +1,35 @@
+---
+# ReferenceGrants authorising apps in other namespaces to send their traffic to
+# the Authentik forward-auth outposts that live here in kube-system.
+#
+# WHY THESE LIVE HERE AND NOT WITH THE APPS: a ReferenceGrant must be in the
+# namespace of the TARGET (the outpost Service), and every app's Flux
+# Kustomization sets targetNamespace: <app-ns>, which silently rewrites any
+# namespace: field in that app's directory. A grant written next to the app
+# lands in the app's namespace, authorises nothing, and fails at REQUEST time
+# with ResolvedRefs=False/RefNotPermitted rather than at apply time.
+#
+# TWO consumer kinds are required per app, and forgetting the second is the
+# easy mistake:
+#   - HTTPRoute            (gateway.networking.k8s.io) for the callback path
+#   - SecurityPolicy       (gateway.envoyproxy.io)     for the ext-auth check
+# The SecurityPolicy reference is a separate grant subject; an HTTPRoute-only
+# grant leaves the policy stuck at Accepted=False and the app unprotected-but-
+# broken.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: headlamp-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: monitoring
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-headlamp-forward-auth

@@ -77,23 +77,14 @@ spec:
           namespace: kube-system
           port: 9000
 ---
-# Cross-namespace backendRefs are DENIED by default in Gateway API. Without
-# this the route above reports ResolvedRefs=False/RefNotPermitted and silently
-# serves 500s — it does not fail loudly at apply time.
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: headlamp-outpost-from-monitoring
-  namespace: kube-system
-spec:
-  from:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: monitoring
-  to:
-    - group: ""
-      kind: Service
-      name: ak-outpost-headlamp-forward-auth
+# NOTE: the ReferenceGrant that authorises the two cross-namespace refs below
+# does NOT live here. It must exist in kube-system (the namespace of the TARGET
+# service), and this app's Flux Kustomization sets targetNamespace: monitoring,
+# which SILENTLY REWRITES any namespace: field in this directory. A grant
+# declared here lands in monitoring, where it authorises nothing, and the only
+# symptom is ResolvedRefs=False/RefNotPermitted at runtime.
+# It lives with the outpost it protects instead:
+#   kubernetes/apps/kube-system/authentik/app/referencegrants.yaml
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy

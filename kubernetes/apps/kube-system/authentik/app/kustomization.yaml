@@ -8,6 +8,9 @@ resources:
   - ./metrics-service.yaml
   - ./prometheusrule.yaml
   - ./cronjob-channels-cleanup.yaml
+  # ReferenceGrants letting other namespaces reach the forward-auth outposts.
+  # Must be here (target ns), not next to each app — see the file header.
+  - ./referencegrants.yaml
   # plan authentik-postgres-18: replacement DB, additive until cutover.
   # pg-longhorn-volume.yaml is deliberately NOT listed — targetNamespace
   # would override its namespace: storage. Applied by hand (docs/sops/longhorn.md).
