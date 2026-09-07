@@ -93,9 +93,12 @@ spec:
             port: 5900
             targetPort: 5900
 
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # The nginx Ingress below is kept DISABLED as the rollback target until
+    # phase 4 removes nginx.
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
@@ -116,6 +119,39 @@ spec:
         tls:
           - hosts:
               - *host
+
+    route:
+      main:
+        kind: HTTPRoute
+        hostnames:
+          - *host
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "JDownloader"
+          gethomepage.dev/description: "JDownloader is a free and open-source download manager"
+          gethomepage.dev/group: "Download"
+          gethomepage.dev/icon: "jdownloader.png"
+        # Explicit rule: the `main` Service exposes http (5800) AND vnc (5900),
+        # and only the http port must be published. Without it the chart would
+        # pick the primary port implicitly.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
 
     persistence:
       config:
