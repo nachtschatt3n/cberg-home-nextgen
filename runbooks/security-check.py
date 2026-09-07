@@ -3210,15 +3210,51 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
     f = Findings()
     domain = _sensitive.get("DOMAIN", "")
 
+    # 2026-09-08: reads HTTPRoutes as well as Ingresses (F-6fb6c6bf / F-92b55a68).
+    # This section enumerated Ingresses only. After the Envoy Gateway migration
+    # deleted the last one it scored GREEN — "0 external ingresses, all
+    # expected" — on a cluster with 25 externally-routed hostnames. Every
+    # assertion below (unexpected exposure, off-domain host, DNS traceability)
+    # was passing vacuously against an empty set, which is the worst possible
+    # failure for an exposure inventory: it is silent and it looks clean.
     ingresses = kubectl_json("get ingress -A")
+    routes = kubectl_json("get httproute -A")
     external: list[str] = []
+    ext_hosts: list[tuple[str, str, str]] = []   # (ns, name, host)
+
     if ingresses:
         for i in ingresses["items"]:
             if i["spec"].get("ingressClassName") == "external":
                 ns    = i["metadata"]["namespace"]
                 name  = i["metadata"]["name"]
-                hosts = [redact(r.get("host", "")) for r in i["spec"].get("rules", [])]
-                external.append(f"`{ns}/{name}`: {hosts}")
+                hosts = [r.get("host", "") for r in i["spec"].get("rules", [])]
+                external.append(f"`{ns}/{name}`: {[redact(h) for h in hosts]}")
+                ext_hosts += [(ns, name, h) for h in hosts if h]
+
+    # An HTTPRoute is externally reachable iff it attaches to envoy-external.
+    if routes:
+        for r in routes["items"]:
+            parents = {(p.get("name") or "") for p in (r["spec"].get("parentRefs") or [])}
+            if "envoy-external" not in parents:
+                continue
+            ns    = r["metadata"]["namespace"]
+            name  = r["metadata"]["name"]
+            # Plumbing, not an app: the cluster-wide https-redirect carries no
+            # hostname and only 301s, and the …-authentik-outpost routes are
+            # callback paths. Counting them as "unexpected external exposure"
+            # would raise criticals for objects with no attack surface.
+            if name == "https-redirect" or name.endswith("-authentik-outpost"):
+                continue
+            hosts = [h for h in (r["spec"].get("hostnames") or []) if h]
+            external.append(f"`{ns}/{name}`: {[redact(h) for h in hosts]}")
+            ext_hosts += [(ns, name, h) for h in hosts]
+
+    # BLINDNESS GUARD. Zero routable objects of EITHER kind means the query
+    # broke, not that nothing is exposed — and every check below would pass.
+    if not ingresses and not routes:
+        f.add(WARNING, "External exposure inventory did NOT run — no Ingress and no "
+                       "HTTPRoute could be read, so the empty result proves nothing")
+        cprint(C.YELLOW, "  🟡 exposure inventory is BLIND (0 objects of either kind)")
 
     # Known accepted externals — list lives in security_check_acceptances.py
     # (one focused file for all whitelist edits; each entry there has the
@@ -3228,11 +3264,11 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
     for entry in external:
         name_part = entry.split("/")[1].split("`")[0]
         if name_part not in ACCEPTED:
-            f.add(CRITICAL, f"Unexpected external ingress: {entry}")
+            f.add(CRITICAL, f"Unexpected external exposure: {entry}")
             cprint(C.RED, f"  🔴 Unexpected: {entry}")
 
     cprint(C.GREEN if f.worst() == OK else C.YELLOW,
-           f"  {'🟢' if f.worst() == OK else '🟡'} {len(external)} external ingresses "
+           f"  {'🟢' if f.worst() == OK else '🟡'} {len(external)} external routes/ingresses "
            f"({'all expected' if f.worst() == OK else 'review above'})")
 
     # LoadBalancer services
@@ -3262,23 +3298,36 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
     # 1. Verify every external ingress hostname is under SECRET_DOMAIN
     # 2. Verify every external ingress carries an external-dns target annotation
     # 3. (Best-effort) DNS-resolve each hostname and check it's a Cloudflare IP
-    if ingresses:
+    if ingresses or routes:
         misconfigured: list[str] = []
         missing_extdns: list[str] = []
-        for i in ingresses["items"]:
-            if i["spec"].get("ingressClassName") != "external":
-                continue
-            ns = i["metadata"]["namespace"]
-            name = i["metadata"]["name"]
-            ann = i["metadata"].get("annotations", {}) or {}
-            target_ann = ann.get("external-dns.alpha.kubernetes.io/target", "")
-            for r in i["spec"].get("rules", []):
-                host = r.get("host", "")
-                if domain and host and not host.endswith(domain):
-                    misconfigured.append(f"`{ns}/{name}`: host {redact(host)} not under SECRET_DOMAIN")
-            # external-dns target annotation expected on every external ingress
-            if not target_ann:
-                missing_extdns.append(f"`{ns}/{name}`")
+
+        for ns, name, host in ext_hosts:
+            if domain and host and not host.endswith(domain):
+                misconfigured.append(f"`{ns}/{name}`: host {redact(host)} not under SECRET_DOMAIN")
+
+        # DNS TRACEABILITY MOVED TO THE GATEWAY. For --source=gateway-httproute,
+        # external-dns reads the target from the PARENT GATEWAY and silently
+        # IGNORES the same annotation on a route. Asserting it per-route would
+        # now flag all 25 external routes as misconfigured while the real
+        # single point of failure — the Gateway losing its annotation — would
+        # go unnoticed. Verified the hard way on 2026-09-07: a route carrying
+        # the annotation still had its record published to the RFC1918 gateway
+        # IP and the hostname went dark.
+        if routes:
+            gw = kubectl_json("get gateway -n network envoy-external")
+            gw_ann = ((gw or {}).get("metadata", {}) or {}).get("annotations", {}) or {}
+            if not gw_ann.get("external-dns.alpha.kubernetes.io/target"):
+                missing_extdns.append("`network/envoy-external` Gateway (all external routes inherit from it)")
+
+        # Ingresses, if any are reintroduced, still carry it per-object.
+        if ingresses:
+            for i in ingresses["items"]:
+                if i["spec"].get("ingressClassName") != "external":
+                    continue
+                ann = i["metadata"].get("annotations", {}) or {}
+                if not ann.get("external-dns.alpha.kubernetes.io/target"):
+                    missing_extdns.append(f"`{i['metadata']['namespace']}/{i['metadata']['name']}`")
 
         if misconfigured:
             for entry in misconfigured:
@@ -3290,7 +3339,7 @@ def s8_external_exposure() -> tuple[str, Findings, str]:
                 cprint(C.YELLOW, f"  🟡 Missing external-dns annotation: {entry}")
 
         if not misconfigured and not missing_extdns:
-            cprint(C.GREEN, f"  🟢 All {len(external)} external ingresses are domain-bound + DNS-tracked")
+            cprint(C.GREEN, f"  🟢 All {len(external)} external routes/ingresses are domain-bound + DNS-tracked")
 
         lines.append(f"\n**Drift check:** "
                      f"{len(misconfigured)} off-domain, "
