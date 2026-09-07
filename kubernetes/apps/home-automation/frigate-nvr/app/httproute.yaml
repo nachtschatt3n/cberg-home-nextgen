@@ -1,6 +1,6 @@
 ---
 # Envoy migration phase 2 — frigate off nginx (forward-auth). Last of the ten.
-# Pattern + gotchas: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+# Pattern + gotchas: docs/sops/gateway-api-httproute.md
 #
 # The Service exposes 5000/8971/1935/8554/8555 (UI, auth, RTMP, RTSP, WebRTC),
 # but only 5000 was ever routed through the ingress — the streaming ports are

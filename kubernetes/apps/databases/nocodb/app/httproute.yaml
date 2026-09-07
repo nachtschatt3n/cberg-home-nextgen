@@ -1,6 +1,6 @@
 ---
 # Envoy migration phase 2 — nocodb off nginx (forward-auth).
-# Pattern + the 13 gotchas: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+# Pattern + the 13 gotchas: docs/sops/gateway-api-httproute.md
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

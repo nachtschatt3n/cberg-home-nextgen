@@ -314,7 +314,7 @@ Portfolio showcase of 15 containerized legacy client apps (TYPO3 4.2/6.2, Rails,
 | see-edv-ibspm | IBSPM service management | Internal |
 | stepbystepguide | Step-by-step guide | Internal |
 | u-zeit | U-Zeit time management | Internal |
-| uzeit-de | Uzeit corporate website (TYPO3 6.2). **Deliberately held on ingress-nginx** — carries `nginx.ingress.kubernetes.io/proxy-body-size: 50m`, which has no HTTPRoute equivalent (it maps to a policy object, not a route field). Converting it would silently change upload behaviour. See `docs/troubleshooting/envoy-phase2-conversion-pattern.md` §15. | Internal |
+| uzeit-de | Uzeit corporate website (TYPO3 6.2). Converted to an HTTPRoute on `envoy-internal` (2026-09-07). Its `nginx.ingress.kubernetes.io/proxy-body-size: 50m` has no route-level equivalent and was deliberately NOT carried across: Envoy streams request bodies uncapped unless a Gateway-scoped `ClientTrafficPolicy` sets a buffer, so this loosens the limit rather than breaking uploads. See `docs/sops/gateway-api-httproute.md` §4.2. | Internal |
 | zuhause-betreut | Caretaker Management System ("Zuhause Betreut") — Rails app, `/health/{liveness,readiness,startup}` probes, Flux image automation on the `production-*` tag, 5Gi Longhorn RWO PVC (`strategy: Recreate`) | Internal |
 
 ---

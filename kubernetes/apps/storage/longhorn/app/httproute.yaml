@@ -1,6 +1,6 @@
 ---
 # Envoy migration phase 2 — longhorn-ui off nginx.
-# Pattern + the traps: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+# Pattern + the traps: docs/sops/gateway-api-httproute.md
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
