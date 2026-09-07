@@ -26,9 +26,52 @@ spec:
   uninstall:
     keepHistory: false
 
-  # postRenderers REMOVED 2026-09-07: it targeted `kind: Ingress`, which
-  # matches nothing once the Ingress is gone, and kustomize then fails the
-  # ENTIRE post-render, stopping the HelmRelease installing.
+  postRenderers:
+    - kustomize:
+        patches:
+          # RESTORED 2026-09-07. This Deployment patch was destroyed by a
+          # careless removal of the whole postRenderers block during the Envoy
+          # migration: the block also held an Ingress-targeting patch, and the
+          # removal keyed on the block containing `kind: Ingress` anywhere.
+          # Losing `strategy: Recreate` immediately deadlocked the rollout —
+          # RollingUpdate plus an RWO Longhorn PVC leaves the new pod stuck in
+          # ContainerCreating on Multi-Attach while the old pod holds the
+          # volume. Only the Ingress patch below it was meant to go.
+          - target:
+              kind: Deployment
+              name: anythingllm
+            patch: |
+              # AnythingLLM's model name lives in the chart-generated ConfigMap
+              # (OLLAMA_MODEL_PREF), and the chart adds no checksum annotation —
+              # so a ConfigMap-only change reconciles green in Flux while the
+              # running pod keeps serving the OLD value indefinitely. That is
+              # exactly what happened during the 2026-09-04 gemma4 GGUF->MLX
+              # migration: the manifest said 26b-mlx, the pod was 6 days old and
+              # still requesting the GGUF. Reloader restarts the Deployment when
+              # a referenced ConfigMap/Secret changes, which closes that gap.
+              - op: add
+                path: /metadata/annotations/reloader.stakater.com~1auto
+                value: "true"
+              - op: replace
+                path: /spec/strategy
+                value:
+                  type: Recreate
+              - op: add
+                path: /spec/template/spec/terminationGracePeriodSeconds
+                value: 60
+              - op: add
+                path: /spec/template/spec/initContainers
+                value:
+                  - name: clear-vector-cache
+                    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+                    command: ["sh", "-c", "rm -rf /storage/vector-cache/* /storage/comkey && echo 'Cache and key files cleared'"]
+                    volumeMounts:
+                      - name: storage
+                        mountPath: /storage
+          # The Ingress-targeting patch that used to follow was correctly
+          # removed: with no Ingress rendered its target matches nothing and
+          # kustomize fails the ENTIRE post-render. Its gethomepage label now
+          # lives on the HTTPRoute.
   values:
     replicaCount: 1
 
