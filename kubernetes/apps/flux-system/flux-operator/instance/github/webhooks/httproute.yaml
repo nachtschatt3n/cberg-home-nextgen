@@ -1,0 +1,40 @@
+---
+# Envoy migration PHASE 3: replaces the nginx `external` Ingress for the GitHub
+# push webhook that drives Flux reconciliation.
+#
+# THE PATH IS `/hook/`, NOT `/`. GitHub posts to
+# https://flux-webhook.<domain>/hook/<receiver-token>; a wrong or broadened
+# path silently breaks GitOps delivery (pushes stop reconciling and nothing
+# alerts on it). PathPrefix /hook/ matches the Ingress's `path: /hook/` +
+# `pathType: Prefix` exactly.
+#
+# NO external-dns target annotation: with --source=gateway-httproute
+# external-dns reads the target from the parent GATEWAY and silently ignores it
+# on the route. It is already set on Gateway/envoy-external.
+#
+# NO SecurityPolicy / ext-auth: the receiver authenticates GitHub itself via
+# the HMAC token in the shared secret. Putting a login in front of it would
+# break every push.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: flux-webhook
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "flux-webhook.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /hook/ }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: webhook-receiver
+          port: 80
