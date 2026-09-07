@@ -42,9 +42,12 @@ spec:
           http:
             port: 5800
 
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # The nginx Ingress below is kept DISABLED as the rollback target until
+    # phase 4 removes nginx.
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
@@ -65,6 +68,28 @@ spec:
         tls:
           - hosts:
               - *host
+
+    route:
+      main:
+        kind: HTTPRoute
+        hostnames:
+          - *host
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "MakeMKV"
+          gethomepage.dev/description: "DVD and Blu-ray ripping software"
+          gethomepage.dev/group: "Media"
+          gethomepage.dev/icon: "makemkv.png"
 
     persistence:
       config:
