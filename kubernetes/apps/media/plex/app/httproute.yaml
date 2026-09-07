@@ -1,0 +1,54 @@
+---
+# Envoy Gateway migration phase 2 (2026-09-07): replaces ingress.yaml, deleted
+# in the SAME commit. k8s-gateway watches Ingress AND HTTPRoute, so keeping
+# both would publish two A records (.100 and .103) for this host and it would
+# resolve non-deterministically.
+#
+# DROPPED, deliberately: external-dns.alpha.kubernetes.io/target. It was inert
+# on the Ingress it came from -- external-dns runs with --ingress-class=external
+# and this Ingress was class `internal`, so no public record was ever created
+# from it. It stays inert after the move for the mirror-image reason: the
+# gateway-httproute source is fenced to --gateway-name=envoy-external, and this
+# route parents to envoy-internal. Carrying the annotation across would have
+# changed nothing except to imply a public record exists. Public exposure for
+# this host, if ever wanted, is a phase 3 envoy-external decision.
+#
+# The plex Flux Kustomization sets targetNamespace: media, which rewrites
+# metadata.namespace here (intended). It does NOT rewrite parentRefs[].namespace,
+# so the cross-namespace Gateway reference survives -- same shape as the
+# headlamp phase 1 pilot.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: plex
+  namespace: media
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Plex"
+    gethomepage.dev/description: "Media streaming server"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "plex.png"
+    gethomepage.dev/pod-selector: app.kubernetes.io/instance=plex
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only -- the http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "plex.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: plex-plex-media-server
+          port: 32400
