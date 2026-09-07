@@ -80,9 +80,38 @@ spec:
             path: /metrics
             interval: 1m
             scrapeTimeout: 10s
-    ingress:
+    # PILOT A of the Envoy Gateway migration (phase 1), 2026-09-07.
+    # Ingress -> HTTPRoute in ONE commit: the Ingress must disappear in the same
+    # change that adds the route, or k8s-gateway would hold BOTH records and the
+    # host would resolve non-deterministically to .102 and .103 in turn.
+    #
+    # Deliberately moved to envoy-INTERNAL, not envoy-external, even though this
+    # app was external-class. Rationale: cloudflared still points at
+    # external-ingress-nginx (192.168.55.102) until phase 3, so attaching to
+    # envoy-external now would delete the only nginx route while nothing else
+    # served it. Internal is the low-blast-radius pilot the plan asks for.
+    #
+    # CONSEQUENCES accepted for the duration of the pilot, both intentional:
+    #  - external-dns.alpha.kubernetes.io/target is dropped, so the public
+    #    record goes away and this host becomes internal-only. Fine for an echo
+    #    server; it is restored on envoy-external in phase 3 if wanted.
+    #  - this host is the blackbox EXTERNAL http probe target, so that probe now
+    #    exercises an internal path. probe_success should stay 1, but it stops
+    #    being evidence about the external chain until phase 3 retargets it.
+    #    Do not read a green external probe as "cloudflared is fine" meanwhile.
+    route:
       app:
-        className: external
+        kind: HTTPRoute
+        hostnames:
+          - "{{ .Release.Name }}.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned by the cluster-wide
+            # httproute-https-redirect, which 301s to https for every host.
+            sectionName: https
         labels:
           gethomepage.dev/enabled: "true"
         annotations:
@@ -91,12 +120,3 @@ spec:
           gethomepage.dev/description: "A simple echo server"
           gethomepage.dev/group: "Network Services"
           gethomepage.dev/icon: "traefik.png"
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-
-        hosts:
-          - host: "{{ .Release.Name }}.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                service:
-                  identifier: app
-                  port: http
