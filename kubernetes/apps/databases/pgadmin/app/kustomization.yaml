@@ -6,4 +6,4 @@ resources:
   - data-pvc.yaml
   - secret.sops.yaml
   - deployment.yaml
-  - ingress.yaml
+  - httproute.yaml
