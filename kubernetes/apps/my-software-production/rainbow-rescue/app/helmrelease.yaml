@@ -72,25 +72,37 @@ spec:
         ports:
           http:
             port: *port
-    ingress:
+    # Envoy migration PHASE 3: Ingress -> HTTPRoute on envoy-EXTERNAL.
+    #
+    # NO external-dns target annotation. With --source=gateway-httproute
+    # external-dns reads the target from the parent GATEWAY and silently
+    # ignores it on the route; it is already set on Gateway/envoy-external.
+    # Putting it here took a hostname dark publicly on 2026-09-07.
+    #
+    # NO SecurityPolicy / ext-auth. This app authenticates in-app and never
+    # had nginx forward-auth; adding ext-auth would put a second login in
+    # front of an app that already has one.
+    #
+    # rules omitted deliberately: exactly one enabled Service, so
+    # app-template defaults the backendRef to it.
+    route:
       app:
-        className: external
+        kind: HTTPRoute
+        hostnames:
+          - "rainbow-rescue.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-external
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
         labels:
           gethomepage.dev/enabled: "true"
         annotations:
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Rainbow Rescue"
           gethomepage.dev/group: "Software Development"
           gethomepage.dev/icon: "mdi-rainbow-#ffb4e7"
           gethomepage.dev/description: "Offline-capable PWA voice controller for the kids party hunt"
-        hosts:
-          - host: "rainbow-rescue.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                service:
-                  identifier: app
-                  port: http
-        tls:
-          - hosts:
-              - "rainbow-rescue.${SECRET_DOMAIN}"
