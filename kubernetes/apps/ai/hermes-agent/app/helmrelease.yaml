@@ -223,10 +223,32 @@ spec:
             port: 8642
             targetPort: 8642
 
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): both Ingresses -> HTTPRoutes.
+    # The swap happens in ONE commit. k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving both alive would publish two A records per host (.100 nginx and
+    # .103 envoy) and they would resolve non-deterministically.
+    #
+    # The rules are MANDATORY here, not optional: this release exposes two ports
+    # on one Service and the chart's "omit rules and default to the primary
+    # port" shortcut would send BOTH hostnames to the primary port (dashboard),
+    # silently breaking hermes-api. Each route names its port explicitly.
+    #
+    # DROPPED deliberately: the `tls:` blocks. Gateway API terminates TLS at the
+    # LISTENER, not per route, and the envoy-internal https listener already
+    # presents the wildcard *.${SECRET_DOMAIN} certificate.
+    route:
       dashboard:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "hermes.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Hermes Agent"
@@ -234,38 +256,38 @@ spec:
           gethomepage.dev/icon: "mdi-robot-outline"
           gethomepage.dev/description: "Self-improving AI agent — Telegram + gemma4:26b-mlx"
           # Pod label is `app.kubernetes.io/name=hermes-agent`, not
-          # `hermes-agent-dashboard` (homepage's default guess from
-          # ingress name). Set explicitly so status probes resolve.
+          # `hermes-agent-dashboard` (homepage's default guess from the
+          # route name). Set explicitly so status probes resolve.
           gethomepage.dev/pod-selector: "app.kubernetes.io/name=hermes-agent"
         labels:
           gethomepage.dev/enabled: "true"
-        hosts:
-          - host: hermes.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: dashboard
-        tls:
-          - hosts:
-              - hermes.${SECRET_DOMAIN}
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: dashboard
 
       api:
-        enabled: true
-        className: internal
-        hosts:
-          - host: hermes-api.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: api
-        tls:
-          - hosts:
-              - hermes-api.${SECRET_DOMAIN}
-
+        kind: HTTPRoute
+        hostnames:
+          - "hermes-api.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: api
     persistence:
       data:
         type: persistentVolumeClaim
