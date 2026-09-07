@@ -1,0 +1,51 @@
+---
+# Envoy migration PHASE 3: replaces the nginx `external` Ingress.
+#
+# Public-internet route. The app has no auth of its own; owner explicitly
+# approved public exposure on 2026-05-12 — see the recorded override in the
+# source repo at ~/code/gas-price-monitor/CLAUDE.md (Architecture Decision #3,
+# updated in commit 9bad278). Known accepted risks tracked there:
+#   - Tankerkoenig API key may be banned for abuse from public callers
+#   - Photon (komoot) may flag the User-Agent if traffic misbehaves
+#   - No rate-limiting on /api/stations, /api/geocode, /api/history
+# Mitigation if any bite: rotate TANKERKOENIG_API_KEY, change PHOTON_USER_AGENT,
+# or move the parentRef to envoy-internal.
+#
+# NO external-dns target annotation: with --source=gateway-httproute
+# external-dns reads the target from the parent GATEWAY and silently ignores it
+# on the route. It is already set on Gateway/envoy-external.
+#
+# NO SecurityPolicy / ext-auth: this app never had nginx forward-auth and is
+# intentionally public per the decision above.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gas-price-monitor
+  namespace: my-software-production
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Gas Price Monitor"
+    gethomepage.dev/description: "German fuel prices (Tankerkoenig)"
+    gethomepage.dev/group: "Software Development"
+    gethomepage.dev/icon: "mdi-gas-station"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "gas-price-monitor.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gas-price-monitor
+          port: 80
