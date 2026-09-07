@@ -1,0 +1,48 @@
+---
+# Envoy migration PHASE 3 — canary #1: authentik's own hostname.
+#
+# Deliberately first. Every other external app's login depends on this host, so
+# if the external path through Envoy is wrong, we want to find out here, on the
+# one service whose failure is immediately obvious, rather than discover it
+# later behind an app.
+#
+# DNS TARGET: deliberately NOT set here. For --source=gateway-httproute
+# external-dns reads the target from the PARENT GATEWAY, and an
+# external-dns.alpha.kubernetes.io/target annotation on the route is silently
+# IGNORED. This route carried exactly that annotation on 2026-09-07 and the
+# host still went dark publicly, because external-dns published an A record to
+# the gateway address 192.168.55.104 which Cloudflare refuses for a proxied
+# record. The annotation now lives on Gateway/envoy-external, verified against
+# a throwaway hostname before any real service depended on it.
+# Putting it back here would imply it does something. It does not.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik-server
+  namespace: kube-system
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Authentik"
+    gethomepage.dev/description: "Identity Provider and SSO"
+    gethomepage.dev/group: "Network Services"
+    gethomepage.dev/icon: "authentik.png"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/instance=authentik"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external          # EXTERNAL gateway (.104), not envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "auth.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: authentik-server
+          port: 80
