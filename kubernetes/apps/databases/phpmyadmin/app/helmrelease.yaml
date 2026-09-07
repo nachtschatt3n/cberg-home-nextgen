@@ -97,6 +97,12 @@ spec:
             port: 80
 
     ingress:
+      # Replaced by httproute.yaml (Envoy phase 2, 2026-09-07). The nginx
+      # forward-auth annotation block below is intentionally left in place but
+      # INERT while this is false — it is the rollback target until phase 4
+      # deletes ingress-nginx. Do not re-enable without removing the HTTPRoute:
+      # two live routes for one host give k8s-gateway two records.
+      enabled: false
       app:
         enabled: true
         className: internal
