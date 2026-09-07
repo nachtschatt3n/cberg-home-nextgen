@@ -1,5 +1,11 @@
 ---
-# ExternalName service to reference the outpost service in kube-system
+# ExternalName service pointing at the Authentik proxy outpost in kube-system.
+#
+# NO LONGER ON THE SERVING PATH since Envoy migration phase 3: the HTTPRoute in
+# ./httproute.yaml references the real kube-system Service directly, because
+# Envoy Gateway resolves backends through EndpointSlices and an ExternalName
+# has none. Kept because reverting the phase 3 commit restores an Ingress that
+# needs it, and because other in-cluster callers may still resolve this name.
 apiVersion: v1
 kind: Service
 metadata:
@@ -12,29 +18,3 @@ spec:
     - port: 9000
       targetPort: 9000
       protocol: TCP
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: uptime-kuma-authentik-outpost
-  namespace: monitoring
-  annotations:
-    nginx.ingress.kubernetes.io/priority: "100"
-    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-spec:
-  ingressClassName: external
-  rules:
-    - host: "kuma.${SECRET_DOMAIN}"
-      http:
-        paths:
-          - path: /outpost.goauthentik.io
-            pathType: Prefix
-            backend:
-              service:
-                name: uptime-kuma-authentik-outpost
-                port:
-                  number: 9000
-  tls:
-    - hosts:
-        - "kuma.${SECRET_DOMAIN}"
-

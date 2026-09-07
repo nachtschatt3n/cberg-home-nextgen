@@ -1,0 +1,72 @@
+---
+# Envoy migration PHASE 3: replaces BOTH nginx `external` Ingresses for
+# kuma.<domain> — `uptime-kuma` (path /) and `uptime-kuma-authentik-outpost`
+# (path /outpost.goauthentik.io). They shared a hostname, so they must move
+# together; one route with two rules is the Gateway API equivalent, which
+# resolves by LONGEST PATH MATCH regardless of rule order (nginx needed the
+# `priority: 100` annotation for the same effect — that annotation has no
+# Gateway API equivalent and none is needed).
+#
+# THIS IS PURE ROUTING. Authentik runs this provider in PROXY mode: the
+# outpost sits IN FRONT of uptime-kuma and enforces auth itself, which is why
+# BOTH paths pointed at the outpost, not at the app. Consequences:
+#
+#   - NO SecurityPolicy / ext-auth here. The outpost is the authentication;
+#     an ext-auth policy would be a second, redundant check.
+#   - `/` MUST keep pointing at the outpost. Repointing it at the uptime-kuma
+#     Service (:3001) would look tidier and would REMOVE the app's
+#     authentication entirely. Do not.
+#
+# BACKEND IS THE REAL SERVICE IN kube-system, NOT the local
+# `uptime-kuma-authentik-outpost` Service. That local Service is an
+# ExternalName, and Envoy Gateway resolves backends through EndpointSlices —
+# an ExternalName has none, so a backendRef to it would never resolve.
+# Cross-namespace refs are authorised by ReferenceGrant
+# `uptime-kuma-outpost-access` in kube-system (already present).
+#
+# NO external-dns target annotation: with --source=gateway-httproute
+# external-dns reads the target from the parent GATEWAY and silently ignores it
+# on the route. It is already set on Gateway/envoy-external.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: uptime-kuma
+  namespace: monitoring
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Uptime Kuma"
+    gethomepage.dev/description: "Uptime monitoring tool"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "uptime-kuma.png"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "kuma.${SECRET_DOMAIN}"
+  rules:
+    # Auth callback path first for readability only.
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-uptime-kuma-forward-auth
+          namespace: kube-system
+          port: 9000
+    # Everything else ALSO goes to the outpost — proxy mode, see header.
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-uptime-kuma-forward-auth
+          namespace: kube-system
+          port: 9000
