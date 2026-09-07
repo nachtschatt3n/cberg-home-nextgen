@@ -1,0 +1,50 @@
+---
+# Envoy migration PHASE 3 — immich-server onto envoy-external.
+#
+# NO SecurityPolicy: this app authenticates in-app and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+# NO external-dns target annotation: for --source=gateway-httproute that is read
+# from the parent Gateway and silently ignored on the route.
+#
+# Annotation notes: proxy-body-size 0 = unlimited
+#   Body-size limits have no route-level equivalent. Envoy streams request
+#   bodies with no cap unless a requestBuffer is set, and none is — so this
+#   LOOSENS the limit rather than breaking uploads. A cap would have to be a
+#   Gateway-scoped ClientTrafficPolicy and would hit every other app too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich-server
+  namespace: media
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Self-hosted photo and video library"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "immich.png"
+    gethomepage.dev/name: "Immich"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "immich.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: immich-server
+          port: 2283
+      timeouts:
+        # Replaces nginx proxy-read/send-timeout: 3600. Without this the
+        # route inherits the gateway-wide 60s default — a TIGHTENING that a
+        # `curl /` check cannot see, surfacing later as long operations
+        # failing partway.
+        request: 3600s
+        backendRequest: 3600s

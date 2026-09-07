@@ -1,0 +1,50 @@
+---
+# Envoy migration PHASE 3 — mealie onto envoy-external.
+#
+# NO SecurityPolicy: this app authenticates in-app and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+# NO external-dns target annotation: for --source=gateway-httproute that is read
+# from the parent Gateway and silently ignored on the route.
+#
+# Annotation notes: proxy-body-size 100m
+#   Body-size limits have no route-level equivalent. Envoy streams request
+#   bodies with no cap unless a requestBuffer is set, and none is — so this
+#   LOOSENS the limit rather than breaking uploads. A cap would have to be a
+#   Gateway-scoped ClientTrafficPolicy and would hit every other app too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mealie
+  namespace: office
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Recipe manager and meal planner"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "Office"
+    gethomepage.dev/icon: "mealie.png"
+    gethomepage.dev/name: "Mealie"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "mealie.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: mealie
+          port: 9000
+      timeouts:
+        # Replaces nginx proxy-read/send-timeout: 900. Without this the
+        # route inherits the gateway-wide 60s default — a TIGHTENING that a
+        # `curl /` check cannot see, surfacing later as long operations
+        # failing partway.
+        request: 900s
+        backendRequest: 900s

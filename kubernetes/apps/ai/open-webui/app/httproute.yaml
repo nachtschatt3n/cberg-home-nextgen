@@ -1,0 +1,51 @@
+---
+# Envoy migration PHASE 3 — open-webui onto envoy-external.
+#
+# NO SecurityPolicy: this app authenticates in-app and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+# NO external-dns target annotation: for --source=gateway-httproute that is read
+# from the parent Gateway and silently ignored on the route.
+#
+# Annotation notes: named port http -> Service port 80
+#   Body-size limits have no route-level equivalent. Envoy streams request
+#   bodies with no cap unless a requestBuffer is set, and none is — so this
+#   LOOSENS the limit rather than breaking uploads. A cap would have to be a
+#   Gateway-scoped ClientTrafficPolicy and would hit every other app too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: open-webui
+  namespace: ai
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Web UI for Ollama"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "open-webui.png"
+    gethomepage.dev/name: "Open WebUI"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/instance=open-webui"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "open-webui.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: open-webui
+          port: 80
+      timeouts:
+        # Replaces nginx proxy-read/send-timeout: 3600. Without this the
+        # route inherits the gateway-wide 60s default — a TIGHTENING that a
+        # `curl /` check cannot see, surfacing later as long operations
+        # failing partway.
+        request: 3600s
+        backendRequest: 3600s

@@ -14,4 +14,5 @@ resources:
   - helmrelease.yaml
   - validator-configmap.yaml
   - validator-deployment.yaml
+  - httproute.yaml
 

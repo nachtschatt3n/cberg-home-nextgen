@@ -11,3 +11,4 @@ resources:
   - machine-learning-helmrelease.yaml
   - servicemonitor.yaml
   - grafana-dashboard.yaml
+  - httproute.yaml

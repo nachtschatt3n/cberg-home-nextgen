@@ -1,0 +1,63 @@
+---
+# Envoy migration PHASE 3 — librechat onto envoy-external.
+#
+# NO SecurityPolicy: this app authenticates in-app and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+# NO external-dns target annotation: for --source=gateway-httproute that is read
+# from the parent Gateway and silently ignored on the route.
+#
+# Annotation notes: proxy-body-size 100m
+#   Body-size limits have no route-level equivalent. Envoy streams request
+#   bodies with no cap unless a requestBuffer is set, and none is — so this
+#   LOOSENS the limit rather than breaking uploads. A cap would have to be a
+#   Gateway-scoped ClientTrafficPolicy and would hit every other app too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: librechat
+  namespace: ai
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "AI chat interface"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "AI"
+    gethomepage.dev/icon: "librechat.png"
+    gethomepage.dev/name: "LibreChat"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "librechat.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: librechat-librechat
+          port: 3080
+      timeouts:
+        # Replaces nginx proxy-read/send-timeout: 3600. Without this the
+        # route inherits the gateway-wide 60s default — a TIGHTENING that a
+        # `curl /` check cannot see, surfacing later as long operations
+        # failing partway.
+        request: 3600s
+        backendRequest: 3600s
+      filters:
+        # Replaces the nginx configuration-snippet `proxy_set_header X-Tenant-Id ""`.
+        # nginx used `proxy_set_header X-Tenant-Id ""` to blank any
+        # client-supplied value before it reached the backend. Gateway API
+        # REJECTS an empty `set` value (must be >=1 char), so the equivalent is
+        # `remove`. Semantically at least as strong: nginx delivered an empty
+        # header, this delivers none, and both stop a client from injecting a
+        # tenant id. Worth knowing if librechat ever distinguishes empty from
+        # absent.
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            remove:
+              - X-Tenant-Id

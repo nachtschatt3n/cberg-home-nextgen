@@ -213,7 +213,11 @@ spec:
 
     ingress:
       main:
-        enabled: true
+        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
+        # Block kept INERT as the rollback target until ingress-nginx is
+        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
+        # two live routes for one host give k8s-gateway two records.
+        enabled: false
         className: external
         annotations:
           external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"

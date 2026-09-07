@@ -1,0 +1,43 @@
+---
+# Envoy migration PHASE 3 — paperless-ngx onto envoy-external.
+#
+# NO SecurityPolicy: this app authenticates in-app and never had nginx
+# forward-auth. Adding ext-auth would put a second login in front of it.
+# NO external-dns target annotation: for --source=gateway-httproute that is read
+# from the parent Gateway and silently ignored on the route.
+#
+# Annotation notes: proxy-body-size 64m; NO read-timeout annotation, so nginx 60s default applied and the gateway default of 60s is already parity
+#   Body-size limits have no route-level equivalent. Envoy streams request
+#   bodies with no cap unless a requestBuffer is set, and none is — so this
+#   LOOSENS the limit rather than breaking uploads. A cap would have to be a
+#   Gateway-scoped ClientTrafficPolicy and would hit every other app too.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: paperless-ngx
+  namespace: office
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/description: "Document management system"
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: "Office"
+    gethomepage.dev/icon: "paperless.png"
+    gethomepage.dev/name: "Paperless-ngx"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "paperless.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: paperless-ngx
+          port: 8000

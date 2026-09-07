@@ -1,0 +1,44 @@
+---
+# Envoy migration PHASE 3 — nextcloud-whiteboard onto envoy-external.
+#
+# Separate file from httproute.yaml deliberately: that one owns drive.<domain>
+# (nextcloud + notify-push). Whiteboard is a DIFFERENT hostname and a different
+# backend, and writing it into the same file would clobber the drive route —
+# which is exactly what happened on the first attempt at this batch.
+#
+# NO SecurityPolicy (in-app auth), NO external-dns target on the route (read
+# from the parent Gateway).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nextcloud-whiteboard
+  namespace: office
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "whiteboard.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nextcloud-whiteboard
+          port: 3002
+      timeouts:
+        # Replaces proxy-read/send-timeout: 3600. Whiteboard holds a WebSocket
+        # for collaborative editing; the gateway-wide 60s default would sever
+        # sessions on a cycle.
+        request: 3600s
+        backendRequest: 3600s
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=31536000; includeSubDomains; preload"

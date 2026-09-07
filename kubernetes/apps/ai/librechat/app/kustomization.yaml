@@ -5,3 +5,4 @@ resources:
   - ./helmrelease.yaml
   - ./secret.sops.yaml
   - ./mongodb-secret.sops.yaml
+  - ./httproute.yaml

@@ -6,3 +6,4 @@ resources:
   - config-pv.yaml
   - config-pvc.yaml
   - helmrelease.yaml
+  - httproute.yaml

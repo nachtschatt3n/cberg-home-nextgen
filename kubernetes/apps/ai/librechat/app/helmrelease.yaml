@@ -25,16 +25,11 @@ spec:
       retries: 1
   uninstall:
     keepHistory: false
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Ingress
-              name: librechat-librechat
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
+  # postRenderers REMOVED 2026-09-07 (Envoy phase 3). It patched a label
+  # onto `kind: Ingress`. With no Ingress rendered that target matches
+  # NOTHING and kustomize fails the ENTIRE post-render rather than
+  # skipping it — which stops the HelmRelease installing at all. The
+  # label now lives on the HTTPRoute.
   values:
     # Pin the app image explicitly. Chart 2.0.7 already defaults to appVersion
     # v0.8.7 via `image.tag: ""` -> .Chart.AppVersion, so this is a no-op today
@@ -172,7 +167,11 @@ spec:
         storageClassName: longhorn
 
     ingress:
-      enabled: true
+        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
+        # Block kept INERT as the rollback target until ingress-nginx is
+        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
+        # two live routes for one host give k8s-gateway two records.
+      enabled: false
       className: external
       annotations:
         external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
