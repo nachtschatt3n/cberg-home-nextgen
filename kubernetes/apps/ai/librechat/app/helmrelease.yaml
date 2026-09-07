@@ -31,6 +31,19 @@ spec:
   # skipping it — which stops the HelmRelease installing at all. The
   # label now lives on the HTTPRoute.
   values:
+    # MUST stay. Unlike every other chart in this repo, the librechat chart
+    # DEFAULTS ingress.enabled to true (host chat.example.com), so this key is
+    # not leftover rollback config — it actively SUPPRESSES a chart default.
+    #
+    # Removing it during the 2026-09-08 rollback cleanup immediately recreated
+    # an Ingress for chat.example.com with no ingressClassName. Harmless while
+    # no controller exists, but wrong, and it would have quietly become a live
+    # route if an Ingress controller were ever reinstalled.
+    #
+    # Checked the other 22 cleaned charts: all opt-in, so their blocks were
+    # genuinely dead and their removal stands. This one is the exception.
+    ingress:
+      enabled: false
     # Pin the app image explicitly. Chart 2.0.7 already defaults to appVersion
     # v0.8.7 via `image.tag: ""` -> .Chart.AppVersion, so this is a no-op today
     # (verified by `helm template`). It is kept as a guard: chart 2.0.8 ships
