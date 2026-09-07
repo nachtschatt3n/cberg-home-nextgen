@@ -15,7 +15,6 @@ resources:
   - ./grafana.yaml
   - ./guerzon.yaml
   - ./headlamp.yaml
-  - ./ingress-nginx.yaml
   - ./intel.yaml
   - ./influxdata.yaml
   - ./jellyfin.yaml
