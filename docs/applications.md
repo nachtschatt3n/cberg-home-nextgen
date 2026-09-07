@@ -42,7 +42,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| open-webui | Chat interface for AI models (LLM frontend) | Internal | AI |
+| open-webui | Chat interface for AI models (LLM frontend) | External | AI |
 | librechat | Multi-provider AI chat interface (Ollama via Mac Mini). Authentik OIDC SSO — local registration stays disabled; users are auto-provisioned on first OIDC login | External | AI |
 | openclaw | AI agent platform. Local-model fallback runs through the standalone `ollama-toolfix` Deployment — a translating proxy in front of the Mac Mini's Ollama instance (`python:3.12-slim`, no chart, plain manifest in `ollama-toolfix.yaml`) that rewrites `tool_calls[].function.arguments` from a JSON object to a JSON string, which Ollama's OpenAI-compatible endpoint requires but OpenClaw does not send. Without it the local fallback silently 400s on any tool call, which is nearly every turn — the family went fully dark on two prior Codex-quota lapses before this existed. | Internal | AI |
 | anythingllm | Private RAG workspace with local AI | Internal | AI |
@@ -70,13 +70,13 @@
 | zigbee2mqtt | Zigbee device integration via MQTT | Internal | Home Automation |
 | mosquitto | MQTT broker for IoT communications | Internal (cluster) | — |
 | music-assistant-server | Multi-room audio management + Alexa skill bridge (alexa-skill sidecar, digest-pinned) | Internal UI; External `music-api`/`music-stream` (Alexa endpoints via Cloudflare) | Home Automation |
-| iobroker | IoT integration platform | Internal | Home Automation |
-| n8n | Workflow automation | Internal | Home Automation |
+| iobroker | IoT integration platform | External | Home Automation |
+| n8n | Workflow automation | External | Home Automation |
 | teslamate | Tesla data logger and analytics | Internal | Home Automation |
 | mqttx-web | Web-based MQTT client | Internal | Home Automation |
 | matter-server | Matter and Thread protocol server | Internal (cluster) | — |
 | otbr | OpenThread Border Router (Matter/Thread) — re-enabled 2026-04-30 with Talos v1.13.0 (kernel 6.18.24 has `CONFIG_IPV6_MROUTE=y`) | Internal (cluster) | — |
-| traccar | GPS/location tracking server | Internal | Home Automation |
+| traccar | GPS/location tracking server | External | Home Automation |
 | trmnl-ha | TRMNL e-ink display integration for Home Assistant | Internal (cluster) | — |
 | ha-ai-harness | AI assistant server for Home Assistant (FastAPI + Vue dashboard, dual-model Ollama) | Internal (`ha-harness.${SECRET_DOMAIN}`) | Home Automation |
 | zero-export-controller | Balcony PV zero-export controller (Tibber Pulse + OpenDTU via HA REST → per-inverter `number.set_value`) — holds grid at −50 W, caps summed feed at 800 W (Bagatellgrenze), live-tunable via HA helpers, killed by `input_boolean.solar_zero_export_enabled`. Source: [github.com/nachtschatt3n/tibber-openDTU-home-assitant-solar-monitor](https://github.com/nachtschatt3n/tibber-openDTU-home-assitant-solar-monitor) | Internal (cluster, /metrics ServiceMonitor) | — |
@@ -90,7 +90,7 @@
 | postgresql | PostgreSQL database (shared cluster DB) | None | Databases |
 | mariadb | MariaDB database (shared cluster DB). Server 13.0.1 on chart 27.0.1. The image is pinned **by digest** (Bitnami's free tier publishes no versioned tags) — the `image.tag` field is inert, so never read a version off it; see `docs/sops/mariadb-major-upgrade.md` before any major bump. | None | Databases |
 | redis | Redis in-memory cache/queue | None | Databases |
-| influxdb | InfluxDB time-series database | None | Databases |
+| influxdb | InfluxDB time-series database | Internal | Databases |
 | nocodb | NocoDB — open-source Airtable alternative | Internal | Databases |
 | phpmyadmin | phpMyAdmin — MySQL/MariaDB admin UI | Internal | Databases |
 | pgadmin | pgAdmin — PostgreSQL admin UI | Internal | Databases |
@@ -107,7 +107,7 @@
 |-----|---------|---------|---------------|
 | kube-prometheus-stack | Prometheus + Alertmanager + rules | Internal | Monitoring |
 | grafana | Dashboards and data visualization | Internal | Monitoring |
-| uptime-kuma | Service monitoring and status pages | Internal | Monitoring |
+| uptime-kuma | Service monitoring and status pages | External | Monitoring |
 | headlamp | Kubernetes web UI | Internal | Monitoring |
 | eck-operator | Elastic Cloud on Kubernetes operator | None | — |
 | elasticsearch | Elasticsearch cluster (via ECK) | Internal | Monitoring |
@@ -118,7 +118,7 @@
 | unpoller | UniFi metrics exporter for Prometheus | None | — |
 | prometheus-pushgateway | Push endpoint for metrics from short-lived jobs (CronJobs/scripts) that cannot be scraped. | None | Monitoring |
 | prometheus-blackbox-exporter | Synthetic DNS + HTTPS probes (chart 11.17.2 / blackbox v0.28.0, prometheus-community OCI). 4 `Probe` CRs: 2 answer-validating DNS probes against k8s-gateway 192.168.55.101, 2 HTTPS probes (one representative host per ingress class). Emits `probe_success` — the SLI behind the `internal-dns-resolution` and `internal-ingress-availability` SLOs. Alerts in `kube-prometheus-stack/app/blackbox-exporter-alerts.yaml`. | None | — |
-| sweep-dashboard | Web UI over the sweep_history DB — browse operator policy (`/policies/`) and sweep findings. JSON API at `/api/policies/{accepted-risks,slos,noise,security}`. | External | Monitoring |
+| sweep-dashboard | Web UI over the sweep_history DB — browse operator policy (`/policies/`) and sweep findings. JSON API at `/api/policies/{accepted-risks,slos,noise,security}`. | Internal | Monitoring |
 
 ---
 
@@ -129,11 +129,11 @@
 | affine | Collaborative knowledge base and workspace | Internal | Office |
 | nextcloud | Self-hosted cloud storage + collaboration. Cache, file locks and PHP sessions run on the standalone `nextcloud-redis` Deployment — official `redis:8.10.0-alpine`, no PVC, plain manifests in `redis-deployment.yaml` (the chart-bundled Redis subchart was retired 2026-08-19; its orphaned `longhorn-static` volume `redis-data-nextcloud-redis-master-0` was **deleted 2026-08-30** (`aa825d8f`); it held cache contents only). Metadata DB is still the bundled MariaDB subchart — replatform tracked as `bitnamilegacy-exit-nextcloud-db`. **A backing-service hostname change does not reach `notify_push` through the HelmRelease** — it reads the host persisted in `config.php`; see the note in `kubernetes/apps/office/nextcloud/app/notify-push.yaml`.  Real-time push (desktop/mobile client sync triggers) runs on the standalone `nextcloud-notify-push` Deployment — same `nextcloud:34.0.3` image kept in lockstep with the main server tag (the `notify_push` binary must match the server version), plain manifest in `notify-push.yaml`, port 7867. Collaborative editing runs on the standalone `nextcloud-whiteboard` Deployment (`ghcr.io/nextcloud-releases/whiteboard:v1.5.9`, plain manifest in `whiteboard-proxy.yaml`, websocket on port 3002). | Internal + External | Office |
 | mealie | Recipe manager and meal planner. Recipes imported from the Paperless-ngx recipe archive (`document_type=12`, 154 scans holding 159 cards) by `runbooks/mealie-import.py` — Paperless stays the archival source of truth and is never mutated. The importer re-extracts from the archived PDF with `pdftotext -layout` rather than reusing Paperless' flattened `content`, because the cards carry per-serving quantity columns that flat OCR collapses onto one line; the semantic parse is done by agents, not by Mealie's built-in AI importer (benchmarked at ~10 min/card against local Ollama for unusable output). See `runbooks/mealie-import.md`. Metadata DB runs on the standalone `mealie-pg` Deployment + Service — Docker Official `postgres:18.6-bookworm`, plain manifests in `pg-deployment.yaml`/`pg-pv.yaml`/`pg-pvc.yaml`, on the `longhorn-static` volume `mealie-pg-data` (its Longhorn `Volume` CR, `pg-longhorn-volume.yaml`, is hand-applied and deliberately out of `kustomization.yaml`; same for the app's own `mealie-data`). **Internet-facing** on the external ingress, gated by Authentik OIDC at the app rather than forward-auth at the edge, so the Mealie login page itself is publicly reachable (same posture as librechat). Access is restricted to the `mealie-users` Authentik group via `OIDC_USER_GROUP`. Shopping-list items push one-way into the Home Assistant `todo` list the household already uses. | External | Office |
-| paperless-ngx | Document management with OCR. Document DB runs on the standalone `paperless-db` Deployment + `paperless-db` Service — Docker Official `mariadb:11.8.9`, plain manifests in `db-deployment.yaml`/`db-pv.yaml`/`db-pvc.yaml`, on the 2-replica `longhorn-static` volume `paperless-db-data` (its Longhorn `Volume` CR, `db-longhorn-volume.yaml`, is hand-applied and deliberately out of `kustomization.yaml`). The chart-bundled MariaDB subchart and its generated Secret were retired 2026-08-19 (plan `bitnamilegacy-exit-paperless-db`); its rollback volume/PVC/PV `paperless-mariadb` was **deleted 2026-08-30** (`aa825d8f`), so no rollback floor exists — the live DB is the only copy. Cache runs on the standalone `paperless-redis` Deployment — official `redis:8.10.0-alpine`, no PVC. Server charset pinned `utf8mb4`/`utf8mb4_general_ci` (converted 2026-08-30 in `9cb10b76` after a 4-byte emoji in a mail subject broke every mail cycle on utf8mb3); this is the invariant checked in `docs/sops/paperless.md` §6a.  Scan intake QC runs on the standalone `scan-inbox-validator` Deployment — reuses the paperless-ngx image (ships python3 + pikepdf + qpdf, nothing extra to build), polls the SMB inbox the Epson ES-580W writes to, validates each scan (complete + valid PDF), and atomically moves good ones into the consume share. **Native AI (2026-08-24):** the `paperless-gpt`/`paperless-ai` sidecars were retired in favor of paperless-ngx 3.0.5's built-in AI module — `ai_enabled=True`, `llm_backend`/`llm_model`/`llm_endpoint` = `ollama`/`gemma4:26b-mlx`/`http://192.168.30.111:11434` (LLM suggestions), `llm_embedding_backend`/`llm_embedding_model`/`llm_embedding_endpoint` = `ollama`/`nomic-embed-text:latest`/same endpoint (RAG). This is **DB-stored config** (`paperless.models.ApplicationConfiguration`, singleton row), not GitOps — set/read via `manage.py shell` (use `gosu paperless`, never a bare/root exec). Vision-OCR has no native replacement; hard-to-OCR scans go through manual review (operator + Claude Code reading the page image) instead of an automated pipeline stage. See `docs/sops/paperless.md`. | Internal | Office |
+| paperless-ngx | Document management with OCR. Document DB runs on the standalone `paperless-db` Deployment + `paperless-db` Service — Docker Official `mariadb:11.8.9`, plain manifests in `db-deployment.yaml`/`db-pv.yaml`/`db-pvc.yaml`, on the 2-replica `longhorn-static` volume `paperless-db-data` (its Longhorn `Volume` CR, `db-longhorn-volume.yaml`, is hand-applied and deliberately out of `kustomization.yaml`). The chart-bundled MariaDB subchart and its generated Secret were retired 2026-08-19 (plan `bitnamilegacy-exit-paperless-db`); its rollback volume/PVC/PV `paperless-mariadb` was **deleted 2026-08-30** (`aa825d8f`), so no rollback floor exists — the live DB is the only copy. Cache runs on the standalone `paperless-redis` Deployment — official `redis:8.10.0-alpine`, no PVC. Server charset pinned `utf8mb4`/`utf8mb4_general_ci` (converted 2026-08-30 in `9cb10b76` after a 4-byte emoji in a mail subject broke every mail cycle on utf8mb3); this is the invariant checked in `docs/sops/paperless.md` §6a.  Scan intake QC runs on the standalone `scan-inbox-validator` Deployment — reuses the paperless-ngx image (ships python3 + pikepdf + qpdf, nothing extra to build), polls the SMB inbox the Epson ES-580W writes to, validates each scan (complete + valid PDF), and atomically moves good ones into the consume share. **Native AI (2026-08-24):** the `paperless-gpt`/`paperless-ai` sidecars were retired in favor of paperless-ngx 3.0.5's built-in AI module — `ai_enabled=True`, `llm_backend`/`llm_model`/`llm_endpoint` = `ollama`/`gemma4:26b-mlx`/`http://192.168.30.111:11434` (LLM suggestions), `llm_embedding_backend`/`llm_embedding_model`/`llm_embedding_endpoint` = `ollama`/`nomic-embed-text:latest`/same endpoint (RAG). This is **DB-stored config** (`paperless.models.ApplicationConfiguration`, singleton row), not GitOps — set/read via `manage.py shell` (use `gosu paperless`, never a bare/root exec). Vision-OCR has no native replacement; hard-to-OCR scans go through manual review (operator + Claude Code reading the page image) instead of an automated pipeline stage. See `docs/sops/paperless.md`. | External | Office |
 | vaultwarden | Bitwarden-compatible password manager | Internal + External | Office |
 | actual-budget | Personal finance management (budgeting, envelope method) | Internal | Office |
 | sure | Personal finance (accounts, budgets, investments, Contracts tracking w/ AI-enrichment, AI assistant) | Internal | Office |
-| penpot | Design and prototyping platform | Internal | Office |
+| penpot | Design and prototyping platform | External | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
 | arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster). **Authentik forward-auth is PROVISIONED BUT NOT ENFORCED** — provider `arag-web-forward-auth` (`mode: forward_single`) and outpost `kube-system/ak-outpost-arag-web-forward-auth` both exist, and the outpost publishes its own Ingress for this host, but the app's own Ingress has never carried the `auth-url`/`auth-signin` annotations that actually enforce it, so the app currently answers 200 unauthenticated. Pre-existing, not a migration regression. The outpost Ingress still holds this hostname on the internal class, which is why removing the app's Ingress broke it (converted `04f9abc7`, reverted `d7ab1b74`). Held on nginx pending a decision to wire up enforcement. | Internal, auth NOT enforced | Office |
@@ -154,8 +154,8 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| immich | Self-hosted photo and video library — read-only external-library viewer over the NAS iCloud backup, Intel iGPU ML, Authentik OIDC SSO. See `docs/sops/immich.md`. | Internal | Media |
-| jellyfin | Open-source media server | Internal | Media |
+| immich | Self-hosted photo and video library — read-only external-library viewer over the NAS iCloud backup, Intel iGPU ML, Authentik OIDC SSO. See `docs/sops/immich.md`. | External | Media |
+| jellyfin | Open-source media server | External | Media |
 | plex | Plex media server | Internal | Media |
 | makemkv | Blu-ray/DVD ripping utility | Internal | Media |
 | library-tools | Audit + organize + sidecar + episode-sidecar + rescan + cleanup + per-item-refresh + plex-fs-classifier CronJobs for the shared media library; ConfigMap-of-Python pattern. All are suspended and invoked on demand. `media-episode-sidecar` (`episode_sidecar.py`, added 2026-08-15) writes per-EPISODE `.nfo` for one show, dry-run by default and never deletes — it is **not** `media-sidecar`, which unlinks every `.nfo` in its target folder first. Owned by the `media-manager` sub-agent; standard in `docs/sops/media-library-standards.md`. | None | — |
@@ -167,7 +167,7 @@
 
 | App | Purpose | Ingress | Homepage Group |
 |-----|---------|---------|---------------|
-| tube-archivist | YouTube content archival and management. Hourly NFO + image sync CronJobs write Kodi-style sidecars next to each video; Jellyfin scans this tree directly. Plex is intentionally not configured for YouTube. | Internal | Download |
+| tube-archivist | YouTube content archival and management. Hourly NFO + image sync CronJobs write Kodi-style sidecars next to each video; Jellyfin scans this tree directly. Plex is intentionally not configured for YouTube. | External | Download |
 | jdownloader | Download manager. Intake source for the `media-manager` sub-agent. | Internal | Download |
 
 ---
@@ -283,7 +283,7 @@ calendars, mail, Health) is tracked in `kubernetes/apps/backup/TODO.md`.
 | absenty | Absence/time tracking app (production) | External |
 | andreamosteller | Portfolio site (production) | External |
 | gas-price-monitor | German fuel-price dashboard backed by the [Tankerkönig](https://creativecommons.tankerkoenig.de/) API; Bun + TypeScript, ephemeral cache + history (`emptyDir`), single-replica fair-use cap. Geocoding via komoot Photon (requires `PHOTON_USER_AGENT` env at boot). Source: [github.com/nachtschatt3n/gas-price-monitor](https://github.com/nachtschatt3n/gas-price-monitor) (public). Currently using the public Tankerkönig demo key (fixed example payloads, not real prices) wired via SOPS-encrypted Secret — rotate by editing `kubernetes/apps/my-software-production/gas-price-monitor/app/secret.sops.yaml` in place. Public exposure approved by owner on 2026-05-12 (recorded override of source-repo Architecture Decision #3); no auth, no rate-limiting — accepted risks tracked in the source repo's `CLAUDE.md`. | External |
-| rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | Internal |
+| rainbow-rescue | Offline-capable PWA voice controller for kids party hunt | External |
 
 ### `my-software-showcase`
 
