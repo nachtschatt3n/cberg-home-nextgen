@@ -24,16 +24,12 @@ spec:
       retries: 3
   uninstall:
     keepHistory: false
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Ingress
-              name: phpmyadmin
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
+  # postRenderers REMOVED 2026-09-07 (Envoy phase 2). It patched a
+  # gethomepage label onto `kind: Ingress name: phpmyadmin`. With no Ingress
+  # rendered that target matches NOTHING and kustomize fails the ENTIRE
+  # post-render rather than skipping it — which stops the HelmRelease
+  # installing at all. The label now lives directly on the HTTPRoute.
+  # Grep postRenderers for `kind: Ingress` before converting any app.
   values:
     controllers:
       phpmyadmin:
@@ -102,9 +98,11 @@ spec:
       # INERT while this is false — it is the rollback target until phase 4
       # deletes ingress-nginx. Do not re-enable without removing the HTTPRoute:
       # two live routes for one host give k8s-gateway two records.
-      enabled: false
       app:
-        enabled: true
+        # app-template keys this PER INGRESS (ingress.<name>.enabled); a parent
+        # `ingress.enabled` is not in the schema. Verified by rendering the
+        # chart both ways, not by reading the values file.
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
