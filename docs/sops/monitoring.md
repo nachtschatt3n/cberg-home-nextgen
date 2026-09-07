@@ -3,8 +3,8 @@
 > Standard Operating Procedures for the cluster monitoring stack.
 > Stack: Prometheus + Alertmanager + Grafana + ELK (Elasticsearch + Kibana + edot-collector).
 > Description: Operating, validating, and troubleshooting metrics/logging/alerting components.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.07`
+> Last Updated: `2026-09-07`
 > Owner: `Platform`
 
 ---
@@ -31,7 +31,7 @@ alerts, dashboards, and log pipeline health.
 | Headlamp | Kubernetes web UI | monitoring |
 | Unpoller | UniFi metrics exporter | monitoring |
 | ECK Operator | Elastic Cloud on Kubernetes | monitoring |
-| prometheus-blackbox-exporter | Synthetic DNS + HTTPS probes (`probe_success`) — the DNS/ingress SLI | monitoring |
+| prometheus-blackbox-exporter | Synthetic DNS + HTTPS probes (`probe_success`) — the DNS/routing SLI | monitoring |
 
 ---
 
@@ -65,7 +65,7 @@ AragScrapeDown/Stale/Failing/EmulatorDown, etc.)
 > to be latent no-ops (metric-based rules still work).
 
 The arag-scrape app also ships OTLP/HTTP JSON logs (`service.name=arag-scrape`)
-to the edot-collector via the internal ingress `otlp.${SECRET_DOMAIN}` (backend
+to the edot-collector via the internal route `otlp.${SECRET_DOMAIN}` (HTTPRoute `monitoring/edot-collector` on `envoy-internal`; backend
 `edot-collector:4318`); logs land in `logs-generic-default`.
 
 Source: `kubernetes/apps/monitoring/kube-prometheus-stack/app/macos-scrapeconfigs.yaml`
@@ -398,7 +398,7 @@ curl -su "$U:$P" -X POST localhost:33001/api/ds/query -H 'Content-Type: applicat
 ### Access
 
 ```bash
-# Via ingress (if configured)
+# Via its HTTPRoute (envoy-internal)
 # https://grafana.${SECRET_DOMAIN}
 
 # Via port-forward
@@ -535,7 +535,7 @@ Always use port-forward from your local machine for Elasticsearch access.
 ### Kibana Access
 
 ```bash
-# Via ingress
+# Via its HTTPRoute (envoy-internal)
 # https://kibana.${SECRET_DOMAIN}
 
 # Via port-forward
@@ -618,8 +618,8 @@ curl http://localhost:13133/
 Service uptime monitoring with status pages.
 
 ```bash
-# Access via ingress
-# https://uptime.${SECRET_DOMAIN}
+# Access via its HTTPRoute (envoy-external)
+# https://kuma.${SECRET_DOMAIN}
 
 # Via port-forward
 kubectl port-forward -n monitoring svc/uptime-kuma 3001:3001 &
@@ -648,7 +648,7 @@ Observed 2026-06-07 after the VLAN-55 reorg: UNAS/DreamMachine monitors were re-
 
 ---
 
-## Blackbox Exporter (synthetic DNS + ingress probes)
+## Blackbox Exporter (synthetic DNS + HTTPS route probes)
 
 Deployed 2026-08-15 (N-15) after internal DNS went down twice and produced
 **zero** SLO signal — `probe_success` did not exist. Manifests:
@@ -692,7 +692,7 @@ Three things here are NOT derivable from the manifests:
 ## Headlamp (Kubernetes UI)
 
 ```bash
-# Access via ingress
+# Access via its HTTPRoute (envoy-internal)
 # https://headlamp.${SECRET_DOMAIN}
 ```
 
@@ -785,6 +785,63 @@ pkill -f "kubectl port-forward"
 ---
 
 ## Troubleshooting
+
+### Chart-bump rollout noise — expected transient signals, NOT a broken chart
+
+`security_ref: F-23caf8d0`
+
+**Every kube-prometheus-stack chart bump emits warnings that look like a
+configuration break and are not one.** The risk this subsection exists to
+prevent is a *false rollback*: reverting a perfectly healthy chart because the
+rollout narrated itself alarmingly.
+
+Observed on the `nightly:2026-09-07` window applying chart `89.2.2 → 89.2.3`
+(`85a1dc6c`), and expected on every subsequent bump:
+
+| Signal | Where | What it actually is |
+|---|---|---|
+| `InvalidConfiguration ... context canceled` on ServiceMonitors (seen on `kube-prometheus-stack-operator` and `uptime-kuma`) | operator log / events | the **outgoing** pod's client teardown — its watch context is cancelled mid-reconcile as it shuts down. No ServiceMonitor was edited |
+| readiness-probe connection refused | events on the old operator pod | the same teardown: the probe races the terminating pod |
+
+Both are emitted by the pod that is **going away**, not by the incoming one.
+Neither indicates that any `ServiceMonitor` is malformed.
+
+**Do not revert on these alone. Verify the outcome instead** — the rule is
+`verification-contents-not-shape`: assert the stack's post-roll state, not the
+absence of scary log lines.
+
+```bash
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+
+# 1. The two ServiceMonitors that warned must be scraping. Expect health=up.
+curl -s http://localhost:9090/api/v1/targets | python3 -c "
+import sys, json
+t = json.load(sys.stdin)['data']['activeTargets']
+print(f'targets {len(t)} total, {sum(1 for x in t if x[\"health\"]==\"up\")} up')
+for x in t:
+    j = x['labels'].get('job','')
+    if 'kube-prometheus-stack-operator' in j or 'uptime-kuma' in j:
+        print(' ', j, x['health'])"
+
+# 2. The rule set must be intact and every group healthy.
+curl -s http://localhost:9090/api/v1/rules | python3 -c "
+import sys, json
+g = json.load(sys.stdin)['data']['groups']
+r = [x for gg in g for x in gg['rules']]
+print('groups', len(g), 'rules', len(r), 'health!=ok', sum(1 for x in r if x.get('health') != 'ok'))"
+```
+
+Healthy result: **every** target `up`, and `health!=ok` is **0**.
+
+Measured at the 89.2.2→89.2.3 bump: 97/97 targets up, 113 groups / 456 rules,
+0 unhealthy. Re-measured 2026-09-07 after the roll settled: 99/99 up, still 113
+groups / 456 rules, 0 unhealthy. **Treat the totals as drifting baselines, not
+constants** — targets legitimately grow as apps are added. The invariants are
+"all up" and "0 unhealthy", not any particular count.
+
+Escalate only if a ServiceMonitor is still `down` after the new operator pod is
+`Ready`, or if the rule-group count drops — those are real breaks, and the
+transient warnings above are not.
 
 ### Prometheus Not Scraping a Target
 

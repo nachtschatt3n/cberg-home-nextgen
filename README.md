@@ -36,9 +36,9 @@ My Kubernetes cluster is deployed on [Talos Linux](https://www.talos.dev) runnin
 - **Container Runtime**: [Containerd 2.2.6](https://containerd.io/) with [Spegel](https://github.com/spegel-org/spegel) for distributed container image caching
 - **Networking**: [Cilium v1.19.4](https://github.com/cilium/cilium) provides eBPF-based networking, load balancing, and network security
 - **Storage**: [Longhorn v1.11.2](https://github.com/longhorn/longhorn) provides distributed storage with replication and backup capabilities
-- **Service Mesh**: Internal and external ingress via [ingress-nginx](https://github.com/kubernetes/ingress-nginx)
+- **Ingress / Routing**: [Envoy Gateway](https://gateway.envoyproxy.io/) (Gateway API) — two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), in namespace `network`. All HTTP(S) traffic is carried by `HTTPRoute`s. ingress-nginx was removed on 2026-09-07; there are no `Ingress` or `IngressClass` objects in the cluster
 - **Identity**: [Authentik](https://goauthentik.io/) is the cluster IdP — forward-auth for internal apps, SAML SSO for Wazuh, OIDC for selected apps. Blueprints are managed as code in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml` (see `docs/sops/authentik.md`).
-- **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation).
+- **Security / SIEM**: [Wazuh 4.14.5](https://wazuh.com/) (single-node Manager + Indexer + Dashboard) ingests Talos node logs, K8s container logs, UniFi CEF syslog, and [Falco](https://falco.org/) runtime syscall events. Custom decoders for UniFi and ingress-nginx (cf_connecting_ip correlation; the nginx decoder set is retained for historical log analysis — the controller itself was removed 2026-09-07).
 - **DNS & Security**: [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) provides network-wide ad blocking and recursive DNS resolution
 - **GitOps**: [Flux v2.9.3](https://github.com/fluxcd/flux2) (distribution) monitors this repository and keeps the cluster in sync
 - **Secrets Management**: [SOPS](https://github.com/getsops/sops) with [age encryption](https://github.com/FiloSottile/age) for storing secrets in Git
@@ -131,8 +131,8 @@ graph TB
         K8sGW[k8s-gateway<br/>192.168.55.101]
         ExtDNS[external-dns]
         CloudFlared[cloudflared tunnel]
-        ExtIngress[External Ingress<br/>ingress-nginx]
-        IntIngress[Internal Ingress<br/>ingress-nginx]
+        ExtIngress[envoy-external<br/>192.168.55.104]
+        IntIngress[envoy-internal<br/>192.168.55.103]
         Apps[Applications]
     end
 
@@ -225,15 +225,15 @@ external.${SECRET_DOMAIN} → ${TUNNEL_ID}.cfargotunnel.com
 **Configuration:**
 - **Tunnel Mode**: Runs as a Cloudflare Tunnel client
 - **Protocol**: QUIC with post-quantum encryption support
-- **Target**: Routes to external ingress-nginx LoadBalancer
+- **Target**: Routes to the `envoy-external` Gateway LoadBalancer (192.168.55.104)
 - **Authentication**: Tunnel credentials stored in secret
 
 **How It Works:**
 1. cloudflared establishes an outbound connection to Cloudflare's network
 2. External requests to `*.${SECRET_DOMAIN}` hit Cloudflare's edge
 3. Cloudflare proxies the request through the encrypted tunnel
-4. Request arrives at external ingress-nginx in the cluster
-5. ingress-nginx routes to the appropriate service
+4. Request arrives at the `envoy-external` Gateway in the cluster
+5. Envoy matches an `HTTPRoute` and forwards to the appropriate Service
 
 **Security Benefits:**
 - No inbound firewall rules required
@@ -333,8 +333,9 @@ SIEM + runtime-security stack and a central IdP.
 [Authentik](kubernetes/apps/kube-system/authentik) is the identity provider for
 the cluster. It backs:
 
-- **Forward-auth** for internal apps via ingress-nginx annotations (Homepage,
-  most admin UIs).
+- **Forward-auth** for internal apps via Envoy Gateway `SecurityPolicy`/`extAuth`
+  (Homepage, most admin UIs). The old ingress-nginx `auth-url` annotations are
+  gone with the controller — see `docs/sops/authentik.md`.
 - **SAML SSO** for Wazuh Dashboard (`run_as: false`, blueprint-managed).
 - **OIDC** for selected apps that prefer direct OIDC over forward-auth.
 
@@ -463,7 +464,7 @@ quarterly.
 
 ## 📦 Applications
 
-~122 apps across 18 namespaces. Full inventory with per-app purpose, ingress
+~120 apps across 18 namespaces. Full inventory with per-app purpose, exposure
 posture, and Homepage group lives in [`docs/applications.md`](docs/applications.md),
 which is the authoritative per-namespace count; this section is a category-level map.
 
@@ -506,10 +507,10 @@ jdownloader · tube-archivist
 ### 🛡️ Security (`security` — 2)
 wazuh · falco — see the dedicated SIEM section above.
 
-### 🌐 Network (`network` — 7)
-external: cloudflared · external-dns · ingress-nginx  
-internal: adguard-home · k8s-gateway · ingress-nginx  
-envoy-gateway (Gateway API control plane, running alongside ingress-nginx)
+### 🌐 Network (`network` — 5)
+external: cloudflared · external-dns  
+internal: adguard-home · k8s-gateway  
+envoy-gateway (Gateway API control plane + the cluster's only data plane)
 
 ### 🔧 Cluster system services (`kube-system` — 11)
 authentik · cilium · coredns · crash-ghost-reaper · csi-driver-smb ·

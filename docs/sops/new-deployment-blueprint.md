@@ -1,10 +1,10 @@
 # SOP: New Deployment Blueprint
 
 > Standard Operating Procedure for onboarding and rolling out new applications in this repository.
-> Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
+> Reference: `docs/applications.md`, `docs/infrastructure.md`, `docs/sops/gateway-api-httproute.md`, `docs/sops/homepage-integration.md`, `docs/sops/longhorn.md`, `docs/sops/log-volume-runaway.md`, `docs/sops/monitoring.md`, `docs/sops/sops-encryption.md`.
 > Description: Default deployment blueprint that combines namespace rules, Homepage integration, storage rules, monitoring requirements, Flux webhook GitOps workflow, and code standards.
-> Version: `2026.09.05`
-> Last Updated: `2026-09-05`
+> Version: `2026.09.07`
+> Last Updated: `2026-09-07`
 > Owner: `Platform`
 
 ---
@@ -73,7 +73,7 @@ Declarative source of truth:
 - `kubernetes/apps/{namespace}/{app}/ks.yaml`
 - `kubernetes/apps/{namespace}/{app}/app/kustomization.yaml`
 - `kubernetes/apps/{namespace}/{app}/app/helmrelease.yaml`
-- Optional: `secret.sops.yaml`, `pvc.yaml`, `servicemonitor.yaml`, ingress resources
+- Optional: `secret.sops.yaml`, `pvc.yaml`, `servicemonitor.yaml`, `httproute.yaml`
 - Mandatory: `kubernetes/apps/monitoring/kube-prometheus-stack/app/{app}-alerts.yaml` — PrometheusRule for AlertManager
 
 Minimal new app blueprint:
@@ -87,23 +87,89 @@ kubernetes/apps/{namespace}/{app}/
     secret.sops.yaml        # if credentials are needed
     pvc.yaml                # if persistent storage is needed
     servicemonitor.yaml     # if custom monitoring target is needed
+    httproute.yaml          # if the app is reachable over HTTP(S)
 
 kubernetes/apps/monitoring/kube-prometheus-stack/app/
   {app}-alerts.yaml         # PrometheusRule — mandatory for every new app
 ```
 
-Ingress/Homepage metadata blueprint:
+HTTPRoute / Homepage metadata blueprint:
+
+**There is no Ingress in this cluster.** ingress-nginx was deleted on
+2026-09-07 (`ad1ea7c2`) at the end of the Envoy Gateway migration: zero
+`Ingress` objects, zero `IngressClass` objects, zero nginx controllers.
+Creating an `Ingress` here does nothing at all — no controller reads it, no
+DNS record is published, and the app is simply unreachable. Every HTTP(S)
+app is exposed with an `HTTPRoute` attached to one of the two gateways in
+namespace `network`. Full pattern and gotchas:
+`docs/sops/gateway-api-httproute.md`.
+
+| Gateway (ns `network`) | LB VIP | Use for | DNS |
+|---|---|---|---|
+| `envoy-internal` | `192.168.55.103` | LAN-only apps (replaces `className: internal`) | k8s-gateway A record → `.103` |
+| `envoy-external` | `192.168.55.104` | internet-facing apps (replaces `className: external`) | proxied Cloudflare CNAME → the tunnel; internally A → `.104` |
 
 ```yaml
-annotations:
-  gethomepage.dev/enabled: "true"
-  gethomepage.dev/name: "My App"
-  gethomepage.dev/group: "Office"
-  gethomepage.dev/icon: "my-app.png"
-  gethomepage.dev/description: "Short app description"
-labels:
-  gethomepage.dev/enabled: "true"
+# kubernetes/apps/{namespace}/{app}/app/httproute.yaml
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {app}
+  namespace: {namespace}
+  labels:
+    # Homepage runs `kubernetes.gateway: true` and discovers HTTPRoutes.
+    # The LABEL and the ANNOTATION are both required — label alone is not
+    # enough, annotation alone is not enough.
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "My App"
+    gethomepage.dev/group: "Office"
+    gethomepage.dev/icon: "my-app.png"
+    gethomepage.dev/description: "Short app description"
+    gethomepage.dev/pod-selector: "app={app}"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal        # or envoy-external for internet-facing
+      namespace: network          # the gateways do NOT live in the app namespace
+      # https ONLY. The `http` (:80) listener is owned cluster-wide by the
+      # `https-redirect` HTTPRoute in namespace `network`
+      # (kubernetes/apps/network/envoy-gateway/app/httproute-https-redirect.yaml),
+      # which 301s every host. Attaching an app to `http` fights it.
+      sectionName: https
+  hostnames:
+    - "{app}.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {app}
+          port: 80
 ```
+
+Three things NOT to carry over from the Ingress era:
+
+- **No `external-dns.alpha.kubernetes.io/target` on the route.** external-dns
+  runs `--source=gateway-httproute`, which derives the record target from the
+  **parent Gateway**, not from the route. The annotation on an HTTPRoute is
+  read from the Gateway and silently ignored on the route. It is already set
+  once on `envoy-external`
+  (`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`), so every route
+  attached there publishes the proxied CNAME automatically. See Known Gotcha #11.
+- **No `cert-manager.io/cluster-issuer` and no per-host TLS Secret.** Gateway
+  API terminates TLS at the **listener**, and both `https` listeners already
+  present the wildcard `*.${SECRET_DOMAIN}` certificate.
+- **No `className:`.** The gateway choice replaces it (see the table above).
+
+Reference implementation: `kubernetes/apps/databases/pgadmin/app/httproute.yaml`
+(internal) and `kubernetes/apps/media/jellyfin/app/httproute.yaml` (external).
 
 Storage blueprint:
 
@@ -250,9 +316,12 @@ Using `state: present` with `identifiers.name` makes the blueprint idempotent �
    - Run the 3-step pre-flight from `docs/sops/storage-safety.md` (inspect `volumeAttributes.subdir`, `persistentVolumeReclaimPolicy`, StorageClass defaults) **before** any `kubectl delete pvc`.
    - For CIFS/SMB/NFS PVCs on a `Delete` reclaim class with `subdir: /` or any path containing user data beyond the PVC's scope: patch the PV to `Retain` first, then delete the PVC. Do not rely on the PVC's stated quota — it does not bound deletes.
    - Sub-agent dispatch (`health-check-agent`, `version-check-agent`, `security-agent`, `doc-agent`) must include the storage-safety rules in the brief if the task touches storage.
-6. Configure ingress and Homepage metadata for user-facing web apps (annotations + label).
-   - Use `className: internal` for LAN-only access; `className: external` for internet-facing apps.
-   - **External ingresses MUST include the `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"` annotation.** Without it, external-dns falls back to the internal LoadBalancer IP, which Cloudflare rejects (error 9003) for proxied records — the DNS record will never be created and the hostname will return NXDOMAIN.
+6. Expose user-facing web apps with an `HTTPRoute` and put the Homepage metadata on it (annotations + label).
+   - **Never create an `Ingress`.** There is no ingress controller and no IngressClass in this cluster since 2026-09-07 — an `Ingress` is inert and the app stays unreachable. See the HTTPRoute blueprint above and `docs/sops/gateway-api-httproute.md`.
+   - `parentRefs` → `envoy-internal` (ns `network`) for LAN-only; `envoy-external` (ns `network`) for internet-facing. This replaces `className: internal` / `className: external`.
+   - Always `sectionName: https`. The `http` listener is owned cluster-wide by the `https-redirect` HTTPRoute, which 301s every host.
+   - **Do NOT put `external-dns.alpha.kubernetes.io/target` on the route** — external-dns reads it from the parent Gateway and ignores it on the route. It is already set on `envoy-external`. See Known Gotcha #11.
+   - Homepage discovers HTTPRoutes (`kubernetes.gateway: true`), so the `gethomepage.dev/*` annotations **and** the `gethomepage.dev/enabled` label go on the HTTPRoute, not on any Ingress.
 7. If the app has user login, declare the Authentik provider in the blueprint ConfigMap (`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`):
    - Forward-auth proxy providers for apps without their own auth.
    - OAuth2/OIDC providers for apps with their own user model.
@@ -341,7 +410,7 @@ python3 runbooks/check-all-versions.py
 ```bash
 mkdir -p kubernetes/apps/office/my-app/app
 # Add ks.yaml, app/kustomization.yaml, app/helmrelease.yaml
-# Add ingress with Homepage metadata and className: internal
+# Add app/httproute.yaml with Homepage metadata, parentRef envoy-internal (ns network), sectionName https
 # Add secret.sops.yaml if needed
 ```
 
@@ -413,12 +482,12 @@ Failure hint:
 ### Test 4: Homepage Registration Is Correct
 
 ```bash
-kubectl get ingress {ingress-name} -n {namespace} -o yaml | rg "gethomepage.dev/"
+kubectl get httproute {app} -n {namespace} -o yaml | rg "gethomepage.dev/"
 kubectl logs -n default -l app.kubernetes.io/name=homepage --tail=200
 ```
 
 Expected:
-- Ingress contains required Homepage annotations and label.
+- HTTPRoute contains required Homepage annotations and label.
 - No relevant discovery errors in Homepage logs.
 
 Failure hint:
@@ -661,9 +730,9 @@ values:
 
 Symptom: pod runs without OOM limit → `Exit Code: 137 (OOMKilled)` if it grows unbounded. The HelmRelease shows `Ready: True` — there is no chart-level error for a misplaced `resources` block.
 
-### 10. Python WSGI apps behind TLS-terminating ingress
+### 10. Python WSGI apps behind a TLS-terminating gateway
 
-Flask, Django, and other WSGI apps see the request as `http://` internally because nginx-ingress terminates TLS at the edge. Any URL the app generates from the request (OAuth `redirect_uri`, absolute asset URLs, `url_for(_external=True)`, cookie `secure` flags) will come out wrong unless the app trusts the ingress's `X-Forwarded-*` headers.
+Flask, Django, and other WSGI apps see the request as `http://` internally because TLS is terminated at the edge — formerly by nginx-ingress, since 2026-09-07 by the Envoy Gateway `https` listener. Any URL the app generates from the request (OAuth `redirect_uri`, absolute asset URLs, `url_for(_external=True)`, cookie `secure` flags) will come out wrong unless the app trusts the proxy's `X-Forwarded-*` headers.
 
 Symptoms:
 - OAuth provider returns "Redirect URI mismatch / invalid redirect_uri"
@@ -701,20 +770,44 @@ N8N_PROTOCOL: https
 WEBHOOK_URL: https://n8n.${SECRET_DOMAIN}/
 ```
 
-Our `internal` / `external` nginx ingress controllers already set `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For`, `X-Real-IP` — no ingress-side config needed.
+The `envoy-internal` / `envoy-external` gateways already set `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-For` — no gateway-side config needed, exactly as the retired nginx controllers behaved. Only the app-side ProxyFix is required.
 
-### 11. External ingress — missing `external-dns.alpha.kubernetes.io/target` annotation causes NXDOMAIN
+### 11. External exposure — `external-dns.alpha.kubernetes.io/target` belongs on the GATEWAY, never on the HTTPRoute
 
-When switching an ingress from `className: internal` to `className: external`, external-dns must know to create a CNAME pointing to the Cloudflare tunnel rather than an A record pointing at the internal LoadBalancer IP. Without the target annotation, external-dns tries to register the LB IP (`192.168.55.x`) as a proxied Cloudflare A record, which Cloudflare rejects with error 9003 — "Target is not allowed for a proxied record." The DNS record is never created and the hostname returns NXDOMAIN.
+The underlying hazard is unchanged: external-dns must create a proxied CNAME to
+the Cloudflare tunnel, not an A record pointing at an internal LoadBalancer IP.
+Cloudflare rejects a private A target for a proxied record with error 9003
+("Target is not allowed for a proxied record"), the record is never created, and
+the hostname returns NXDOMAIN.
 
-**Fix:** always add this annotation to every `className: external` ingress:
+**What changed on 2026-09-07: where the annotation goes.** external-dns runs
+`--source=gateway-httproute`. For that source it derives each record's target
+from the **parent Gateway**, not from the route — so an
+`external-dns.alpha.kubernetes.io/target` annotation on an `HTTPRoute` is
+**silently ignored**. Not an error, not a warning; it simply has no effect, which
+is the worst possible failure shape.
+
+This was proven the hard way the same day: the authentik canary carried the
+annotation verbatim on its route, external-dns still tried to publish `auth` as
+an A record to `192.168.55.104`, Cloudflare refused it, and because the CNAME had
+already been withdrawn along with the Ingress the hostname went dark publicly
+until the commit was reverted.
+
+**Fix:** the annotation is set **once**, on the `envoy-external` Gateway in
+`kubernetes/apps/network/envoy-gateway/app/gateways.yaml`:
 
 ```yaml
-annotations:
-  external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
+# Gateway envoy-external, namespace network — set ONCE, cluster-wide
+metadata:
+  annotations:
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 ```
 
-This makes external-dns create a proxied CNAME pointing to `external.${SECRET_DOMAIN}` (the cloudflared tunnel entry point), consistent with all other internet-facing services in the cluster.
+Every HTTPRoute attached to `envoy-external` then publishes a proxied CNAME to
+`external.${SECRET_DOMAIN}` (the cloudflared tunnel entry point) automatically —
+exactly what the Ingresses did. **Add nothing to the route.** If you find that
+annotation on an HTTPRoute, delete it: it is inert, and it misleads the next
+reader into thinking the route controls its own DNS target.
 
 ### 12. Single-replica Deployment on an RWO volume — set the rollout strategy
 
@@ -832,7 +925,7 @@ server {
 }
 ```
 
-Keep that port off the Service and the ingress. Reference implementation:
+Keep that port off the Service and the HTTPRoute. Reference implementation:
 `kubernetes/apps/my-software-showcase/ibgastro/app/configmap-nginx-healthz.yaml`.
 
 **Do not "fix" a probe storm by relaxing the intervals** (palliative, costs
@@ -947,8 +1040,9 @@ never had the value in the first place.
 |---------|--------------|--------|
 | Push completed but app did not update | Webhook or source sync issue | Check `Receiver`, Flux events, and source-controller logs |
 | HelmRelease not ready | Invalid values/chart mismatch | `kubectl describe helmrelease {app} -n {namespace}` and fix values |
-| App running but missing from Homepage | Missing/misplaced metadata | Add Homepage annotations and label to ingress |
-| External hostname returns NXDOMAIN | Missing `external-dns.alpha.kubernetes.io/target` annotation | Add `external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"` to ingress annotations — see Known Gotcha #11 |
+| App running but missing from Homepage | Missing/misplaced metadata | Add Homepage annotations **and** the `gethomepage.dev/enabled` label to the **HTTPRoute** (Homepage runs `kubernetes.gateway: true`) |
+| External hostname returns NXDOMAIN | Route not attached to `envoy-external`, or the target annotation was put on the HTTPRoute (where it is ignored) | Attach `parentRefs` to Gateway `envoy-external` in ns `network`; the target annotation lives on that Gateway only — see Known Gotcha #11 |
+| App unreachable, manifest looks correct, no controller events at all | An `Ingress` was created — there is no ingress controller or IngressClass in this cluster since 2026-09-07, so it is inert | Replace it with an `HTTPRoute` (`sectionName: https`, parentRef to `envoy-internal`/`envoy-external` in ns `network`) — see the HTTPRoute blueprint |
 | PVC pending | Wrong storage class or missing static volume | Validate `longhorn`/`longhorn-static` workflow and PV binding |
 | Pods crash looping | Secret/config/runtime mismatch | Check pod events/logs and verify SOPS secrets |
 | Metrics missing | No ServiceMonitor or label mismatch | Validate ServiceMonitor selector and service labels |
@@ -962,7 +1056,7 @@ never had the value in the first place.
 | Helm chart with bundled Postgres needs custom PG driver | Image lacks `psycopg2` / other connector | Use chart's `bootstrapScript` value — install into the runtime venv path (e.g. Superset: `uv pip install --python /app/.venv/bin/python psycopg2-binary==X`) |
 | Chart `envFromSecret`/`configFromSecret` breaks chart's default config | Chart default secret is replaced (not merged) when these values are set | Use `envFromSecrets` (plural array) to add your secret on top of the chart's default |
 | Celery-based app OOM-kills on fat nodes | Default concurrency = CPU count (18 on nuc14) → huge memory | Set explicit `--concurrency=N` in container `command` and bump memory limit |
-| OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust ingress's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #10 |
+| OAuth provider rejects `redirect_uri` with scheme mismatch (`http://` vs `https://`) | WSGI app sees request as `http://` internally; doesn't trust the gateway's `X-Forwarded-Proto` | Enable framework's ProxyFix (Flask: `ENABLE_PROXY_FIX=True` + `PROXY_FIX_CONFIG`, Django: `SECURE_PROXY_SSL_HEADER`) — see Known Gotcha #10 |
 | HelmRelease times out on FIRST install, pods look fine | A from-scratch schema/app install exceeds Helm's 5m default timeout — the work is still running when Flux gives up, and the retry restarts it from the beginning | Set `spec.timeout: 15m` (and `spec.install.timeout`) on the HelmRelease. Seen on uzeit-de's from-scratch TYPO3 install (`152cb651`, 2026-08-18) and on a Superset `Recreate` transition (`8b0075ed`). Check pod logs for forward progress before assuming a real failure |
 | Pod OOMKilled despite `resources:` in HelmRelease | `resources:` placed at wrong nesting level in app-template (no-op) | Move `resources:` inside `controllers.<name>.containers.<name>` — see Known Gotcha #9 |
 
@@ -985,7 +1079,7 @@ Interpretation:
 ### Diagnose Example 2: App Deployed but Missing in Homepage
 
 ```bash
-kubectl get ingress {ingress-name} -n {namespace} -o yaml | rg "gethomepage.dev/"
+kubectl get httproute {app} -n {namespace} -o yaml | rg "gethomepage.dev/"
 kubectl logs -n default -l app.kubernetes.io/name=homepage --tail=200 | rg -i "{app}|error"
 ```
 
@@ -1102,4 +1196,5 @@ Rollback success criteria:
 | `2026.08.18` | `2026-08-18` | Add Known Gotcha #13: probe endpoints must be static — a framework route probed at kubelet frequency (~480 req/h) produced 58% of all cluster log ingest; split-probe pattern, and why `startup` must stay on the deep route |
 | `2026.09.04` | `2026-09-04` | Add Known Gotcha #14: a ConfigMap can be a SEED, not the live config — the live process is the truth, not the manifest. Three failure modes (seed-only ConfigMap copied to a PVC, ConfigMap-backed env with no checksum annotation, config file read once at start), why Reloader fixes two of them and must NOT be used for the third, and the exec-based verification pattern. Learned during the gemma4 GGUF→MLX migration, where a repo grep returned zero hits while a live consumer still requested the old model |
 | `2026.09.05` | `2026-09-05` | Extend Known Gotcha #14 with (a2) PVC-persisted config that an init script only ever ADDS to (stale additive keys are not inert — a retired model ref still registered in OpenClaw evicted an 18 GB warm set), and (a3) query an app's store through its DRIVER, never by grepping its file (SQLite WAL hides new writes, free pages retain deleted ones — a file grep was wrong in both directions at once). Cross-links the host/consumer context-coupling invariant in `docs/integration.md` |
+| `2026.09.07` | `2026-09-07` | **Envoy Gateway migration complete — ingress-nginx DELETED (`ad1ea7c2`).** Zero Ingress objects, zero IngressClasses, zero nginx controllers; an `Ingress` created here is now inert. Replace the Ingress/Homepage blueprint with the HTTPRoute pattern (parentRef `envoy-internal` `.103` / `envoy-external` `.104` in ns `network`, always `sectionName: https` because the `http` listener is owned by the cluster-wide `https-redirect` route, no `className`, no per-host cert). Homepage metadata (annotations + label) now goes on the HTTPRoute (`kubernetes.gateway: true`). Rewrite Gotcha #11: the `external-dns` target annotation belongs on the **Gateway** and is silently ignored on a route. Reframe Gotcha #10 for the Envoy `https` listener |
 | `2026.08.23` | `2026-08-23` | F-750d8a3c — realign with 2026-08 practice: Gotcha #1 reframed (`bitnamilegacy/*` is an unblock, not a target; new deployments stand the datastore up standalone per `bundled-datastore-exit.md`); new Gotcha #1b requiring version- or digest-pinned tags for every image (a floating tag never emits a Renovate PR, so the image ages invisibly — 19 of them, cleared in batches A–D); troubleshooting row for a from-scratch install exceeding Helm's 5m default timeout (uzeit-de `152cb651`) |

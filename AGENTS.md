@@ -268,7 +268,7 @@ are all "rebuild" wearing another name.
 
 **What IS in scope** when an already-newest image is genuinely unacceptable: a
 variant/base switch (e.g. `-alpine` → `-debian`), replacing the component, or a
-compensating control (drop its ingress, gate it behind Authentik, restrict its
+compensating control (drop its HTTPRoute, gate it behind Authentik, restrict its
 network policy). `_UNBUMPABLE_CRIT_ESCALATE` escalates to a human decision
 rather than absorbing it silently.
 
@@ -378,7 +378,8 @@ Minimum mandatory rules:
 - Use GitOps only: change manifests in git, push, and rely on Flux webhook flow (no direct cluster edits and no manual reconcile by default)
 - Follow code/style standards from this file (naming, formatting, schema-first config, secret handling)
 - Follow namespace placement and directory structure rules from `docs/applications.md` and `docs/infrastructure.md`
-- Register all user-facing web apps in Homepage via ingress annotations + labels
+- **Expose every HTTP(S) app with an `HTTPRoute`, never an `Ingress`.** ingress-nginx was DELETED on 2026-09-07 (`ad1ea7c2`) — there are zero `Ingress` objects, zero `IngressClass` objects and no ingress controller in this cluster, so an `Ingress` is inert and the app is simply unreachable. `parentRefs` → Gateway `envoy-internal` (192.168.55.103, LAN-only) or `envoy-external` (192.168.55.104, internet-facing), both in namespace `network`, always `sectionName: https` (the `http` listener is owned cluster-wide by the `https-redirect` route, which 301s every host). Do NOT put `external-dns.alpha.kubernetes.io/target` on the route — external-dns reads it from the parent Gateway and silently ignores it on the route. Pattern: `docs/sops/gateway-api-httproute.md`
+- Register all user-facing web apps in Homepage via `gethomepage.dev/*` annotations **and** the `gethomepage.dev/enabled` label **on the HTTPRoute** (Homepage runs `kubernetes.gateway: true`)
 - Apply Longhorn storage-class rules (`longhorn` vs `longhorn-static`) from `docs/sops/longhorn.md`
 - Execute rollout verification using the SOP test structure (deployment checks, health checks, security checks, rollback path)
 
@@ -829,12 +830,13 @@ kubectl get volumes -n storage -o custom-columns=NAME:.metadata.name,LAST_BACKUP
 
 ## Authentik Blueprint Management
 
-Detailed Authentik blueprint workflows, UUIDs, ingress patterns, and troubleshooting are documented in:
+Detailed Authentik blueprint workflows, UUIDs, routing patterns, and troubleshooting are documented in:
 - `docs/sops/authentik.md`
 
 Required policy in this AGENTS file:
 - Always use blueprints (GitOps), never UI-only configuration.
 - Keep Authentik blueprint data in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`.
+- **Every Kubernetes outpost MUST set `kubernetes_disabled_components: [ingress]`.** Otherwise Authentik's outpost controller publishes its OWN `Ingress` holding the app's hostname on the default ingress class — an object that exists in no git repo and carries no ownerRefs, so it is invisible to a repo grep and survives deleting the app's own routing. It has mis-routed a hostname three times, once costing 40 minutes on headlamp. Deleting that Ingress does not hold (the outpost recreates it); disabling the component does. See `docs/sops/authentik.md` §"Outpost-published Ingress".
 
 ## Documentation Conventions
 

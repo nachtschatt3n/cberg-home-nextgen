@@ -1,8 +1,8 @@
 # SOP: k8s-gateway Split-Horizon DNS (and the Gateway API CRD Incompatibility)
 
 > Description: Operating and troubleshooting the internal split-horizon DNS at 192.168.55.101 (CoreDNS k8s_gateway plugin), including the (RESOLVED on app 1.8.0) incompatibility with Gateway API CRDs that caused a full internal-DNS outage on 2026-08-15.
-> Version: `2026.08.19`
-> Last Updated: `2026-08-19`
+> Version: `2026.09.07`
+> Last Updated: `2026-09-07`
 > Owner: `cberg-agent / operator`
 
 ---
@@ -40,12 +40,62 @@ mandatory restart-and-verify gate for future CRD/chart changes.
 | Source of truth | `kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml` |
 | Chart / app | `k8s-gateway` 3.7.2 / k8s_gateway plugin 1.8.0 (upstream moved orgs: ori-edge → k8s-gateway; image `ghcr.io/k8s-gateway/k8s_gateway`, tag pinned in HR because the chart default lags) |
 | LB IP | 192.168.55.101 (lbipam, UDP 53) |
-| Watched resources | `["Ingress", "Service"]` — adding `HTTPRoute` is deliberate phase-1 work of the EG migration, behind the §8 restart-and-verify gate |
+| Watched resources | `["Ingress", "Service", "HTTPRoute"]` — all three, since EG-migration phase 1. Verify live, not from git: `kubectl get cm -n network k8s-gateway -o jsonpath='{.data.Corefile}'` must show `resources Ingress Service HTTPRoute`. The `Ingress` informer is now **vestigial** (zero Ingress objects cluster-wide since 2026-09-07) but is kept so the informer set does not change — the §8 restart-and-verify gate applies to ANY edit of this list |
 | TTL | 60 (matches SOA negative TTL; do not lower — see comment in HR) |
-| Expected answers | internal-class hosts → 192.168.55.100, external-class → 192.168.55.102 |
+| Expected answers | HTTPRoutes on `envoy-internal` → **192.168.55.103**, on `envoy-external` → **192.168.55.104**. (Was `.100`/`.102` — the nginx `internal`/`external` controller VIPs — until ingress-nginx was deleted on 2026-09-07, `ad1ea7c2`. Those two IPs now answer nothing.) A LoadBalancer **Service** carrying `external-dns.alpha.kubernetes.io/hostname` outranks an HTTPRoute for the same name — see §2a |
 | Critical dependency | **BOTH** AdGuard (for LAN clients) **and cluster CoreDNS** — CoreDNS's `${SECRET_DOMAIN}` server block forwards to this IP (`kubernetes/apps/kube-system/coredns/app/helm-values.yaml`), so in-cluster resolution of internal hosts fails with it too. (Corrected 2026-08-19: this row previously read "none in-cluster", which understated the blast radius of a k8s-gateway outage in the exact SOP written to handle one.) |
 | Upstream retry policy | CoreDNS forwards to this IP with `max_connect_attempts 6`, set explicitly (was `0`/unbounded from the 1.14.7 bump on 2026-08-19; bounded the same evening in `a9ff7b6c`). CoreDNS >= 1.14.7 defaults the cap to 2 x upstreams, and this forward block has a SINGLE upstream — exactly the shape that cap bites. Derivation, from the 1.14.7 forward plugin: the per-request deadline is 5s and a silent upstream costs `read_timeout` 2s per attempt, so at most three attempts can ever start (t=0, 2, 4); any cap >= 3 is non-binding there and the deadline governs, while the default of 2 does bind. The other failure shape — a connect error returning instantly, e.g. ICMP port unreachable while k8s-gateway has no ready endpoint — is paced by nothing, so `0` spins until the 5s deadline (the busy loop upstream capped on purpose). 6 is three complete passes: double the deadline-implied maximum, binding only on the instant-error path. Re-derive if `read_timeout`, the 5s deadline, or the upstream count changes. |
 | Alerting | **NONE** — the 2026-08-15 full outage fired zero alerts (known gap) |
+
+---
+
+## 2a) What a hostname resolves to, and which source wins
+
+Since the Envoy Gateway migration completed (2026-09-07, `ad1ea7c2`) there are
+**zero `Ingress` objects and zero `IngressClass` objects** in this cluster. The
+old answer table — `internal` → `.100`, `external` → `.102` — described the two
+nginx controller VIPs and is now obsolete; **both IPs answer nothing.** Reading
+a stale mapping here mis-triages every hostname, so start from this table:
+
+| Record source | Answer | Meaning |
+|---|---|---|
+| HTTPRoute parented to `envoy-internal` (ns `network`) | `192.168.55.103` | LAN-only app |
+| HTTPRoute parented to `envoy-external` (ns `network`) | `192.168.55.104` | internet-facing app (also published publicly as a proxied CNAME to the tunnel) |
+| LoadBalancer `Service` with `external-dns.alpha.kubernetes.io/hostname` | that Service's LB VIP | a raw-TCP/UDP service that owns the name outright |
+| `Ingress` | — | none exist; the informer is vestigial |
+
+**A LoadBalancer Service outranks an HTTPRoute for the same hostname.** The
+plugin serves the Service's LB VIP, not the gateway VIP, even when a perfectly
+valid HTTPRoute claims the identical name. This is intended, and it is the
+correct behaviour for anything whose real protocol is not HTTP: Gateway API
+`HTTPRoute` cannot carry native MQTT, syslog, or DNS.
+
+The live example — verify it whenever you touch this SOP:
+
+```bash
+dig +short @192.168.55.101 mqtt.${SECRET_DOMAIN} A     # -> 192.168.55.15, NOT .103
+```
+
+Both sources genuinely claim `mqtt.${SECRET_DOMAIN}`:
+
+- Service `home-automation/mosquitto-main`, type LoadBalancer, VIP
+  `192.168.55.15`, annotated
+  `external-dns.alpha.kubernetes.io/hostname: mqtt.${SECRET_DOMAIN}`, exposing
+  `1883` (native MQTT) and `9001` (MQTT over WebSocket).
+- HTTPRoute `home-automation/mosquitto` on `envoy-internal`, same hostname,
+  backend `mosquitto-main:9001`.
+
+`.15` is the **right** answer: native MQTT clients speak raw TCP to `:1883` and
+must not be sent to an HTTP gateway. **So do not "fix" this to `.103`.** A
+`mqtt` host answering `.15` is healthy; a `mqtt` host answering `.103` would
+break every MQTT client in the house.
+
+> Consequence worth knowing when debugging: because DNS answers `.15`, the
+> `mosquitto` HTTPRoute is **shadowed** — nothing reaches it by name, since
+> `.15` has no `:443` listener. WebSocket clients work by hitting
+> `mqtt.${SECRET_DOMAIN}:9001` on the LB directly. The route is inert rather
+> than harmful, but do not use its existence as evidence that WS-over-TLS is
+> being served by Envoy.
 
 ---
 
@@ -100,11 +150,11 @@ mise exec -- kubectl logs -n network deploy/k8s-gateway --tail=100 | grep -c "Co
 ```bash
 mise exec -- kubectl get pods -n network -l app.kubernetes.io/name=k8s-gateway
 mise exec -- kubectl logs -n network deploy/k8s-gateway --tail=50 | grep -E "ERROR|failed to list" || echo OK
-mise exec -- dig +short @192.168.55.101 <any-ingress-host> A   # must answer
+mise exec -- dig +short @192.168.55.101 <any-internal-host> A   # must answer (see §2a for the expected IP)
 ```
 
-An empty `dig` answer for a host that has an Ingress = outage, even if the
-pod is Running/Ready (the plugin fails closed while CoreDNS itself stays up —
+An empty `dig` answer for a host that has an HTTPRoute (or an annotated
+LoadBalancer Service) = outage, even if the pod is Running/Ready (the plugin fails closed while CoreDNS itself stays up —
 readiness does NOT cover informer sync).
 
 That sentence is now **machine-enforced** — it is the whole rationale for
@@ -141,7 +191,7 @@ family at `v1alpha2` **as soon as any `gateway.networking.k8s.io` CRD exists
 in the cluster** — no Gateway or HTTPRoute needed. Gateway API v1.5.1 serves
 GRPCRoute only at `v1` and TLSRoute's `v1alpha2` is `served: false`, so the
 informers never sync and the plugin fails closed for EVERY name it serves,
-including all Ingress-backed hosts. The v1.6.1 bundle (current) keeps that
+including all Ingress-backed hosts (as the estate then was; today read that as HTTPRoute-backed). The v1.6.1 bundle (current) keeps that
 exact shape and **adds two more instances of it**: TCPRoute and UDPRoute
 also ship `v1alpha2` with `served: false`. The trap surface got wider, not
 narrower.
@@ -265,7 +315,7 @@ Two scoping flags do that, one per source — **both are load-bearing**:
 
 | external-dns source | scoping flag | keeps out |
 |---|---|---|
-| `ingress` | `--ingress-class=external` | every `className: internal` Ingress |
+| `ingress` | `--ingress-class=external` | every `className: internal` Ingress — **vestigial since 2026-09-07**: zero Ingress objects exist, so this source matches nothing. Still listed in `sources:` (dropping it is Phase-4 cleanup, tracked separately). Harmless, but do not read it as evidence that Ingress still routes anything |
 | `gateway-httproute` | `--gateway-name=envoy-external` + `--gateway-namespace=network` | every HTTPRoute parented to `envoy-internal` |
 
 **`--ingress-class` filters Ingress objects ONLY — it has no effect whatsoever

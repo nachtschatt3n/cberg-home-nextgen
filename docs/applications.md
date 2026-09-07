@@ -26,7 +26,7 @@
 | kube-system | 11 |
 | storage | 2 |
 | cert-manager | 1 |
-| network | 7 |
+| network | 5 |
 | default | 2 |
 | flux-system | 2 |
 | backup | 2 |
@@ -34,7 +34,7 @@
 | my-software-development | 3 |
 | my-software-production | 4 |
 | my-software-showcase | 15 |
-| **Total** | **122** |
+| **Total** | **120** |
 
 ---
 
@@ -136,7 +136,7 @@
 | penpot | Design and prototyping platform | External | Office |
 | omni-tools | Productivity utilities collection | Internal | Office |
 | nextcloud-mcp | MCP server bridge for Nextcloud AI integration | Internal | Office |
-| arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster). **Authentik forward-auth is PROVISIONED BUT NOT ENFORCED** — provider `arag-web-forward-auth` (`mode: forward_single`) and outpost `kube-system/ak-outpost-arag-web-forward-auth` both exist, and the outpost publishes its own Ingress for this host, but the app's own Ingress has never carried the `auth-url`/`auth-signin` annotations that actually enforce it, so the app currently answers 200 unauthenticated. Pre-existing, not a migration regression. The outpost Ingress still holds this hostname on the internal class, which is why removing the app's Ingress broke it (converted `04f9abc7`, reverted `d7ab1b74`). Held on nginx pending a decision to wire up enforcement. | Internal, auth NOT enforced | Office |
+| arag-web | ARAG health insurance data visualiser (Rails 8.1, SQLite, Solid Queue via Thruster). **Authentik forward-auth is PROVISIONED BUT NOT ENFORCED** — provider `arag-web-forward-auth` (`mode: forward_single`) and outpost `kube-system/ak-outpost-arag-web-forward-auth` both exist, but nothing invokes the outpost: there is no `SecurityPolicy` and no `/outpost.goauthentik.io` callback route, so the provider is inert. Operator-accepted under AR-118; pre-existing, not a migration regression. LAN-only (`envoy-internal`), never published externally. A `forward_single` outpost enforces nothing on its own. Now served by HTTPRoute `office/arag-web` on `envoy-internal`; the outpost's self-published Ingress that previously held this hostname was disabled in `22f14fe3` via `kubernetes_disabled_components: [ingress]`. To enforce, add the callback route + `SecurityPolicy` per `docs/sops/authentik.md` Step 3. | Internal, auth NOT enforced | Office |
 
 > **Shared Sure API key — rotate in two places.** `openclaw` and `arag-web` both
 > authenticate to `sure` with the **same** Sure API key (sent via the `X-Api-Key`
@@ -213,13 +213,11 @@
 
 | App | Sub-path | Purpose | Ingress |
 |-----|---------|---------|---------|
-| ingress-nginx (internal) | `network/internal/` | Internal reverse proxy | — (is the ingress) |
-| ingress-nginx (external) | `network/external/` | External reverse proxy | — (is the ingress) |
 | adguard-home | `network/internal/` | DNS + ad blocking (IP: 192.168.55.5). Metrics exported by the standalone `adguard-exporter` Deployment (`ghcr.io/henrywhitaker3/adguard-exporter:v1.2.1`, plain manifest in `exporter.yaml`) — polls the AdGuard Home API every 30s and serves Prometheus metrics on :9618. | Internal |
 | k8s-gateway | `network/internal/` | Internal service DNS (IP: 192.168.55.101). Chart 3.7.2 / app 1.8.0 — upstream moved orgs (ori-edge → k8s-gateway); the old repo is frozen at chart 2.4.0 / app 0.4.0, which fails closed when Gateway API CRDs are present. Image tag is pinned in the HR because the chart default lags. See `docs/sops/k8s-gateway-dns.md`. | None |
 | cloudflared | `network/external/` | Cloudflare Tunnel client | None |
 | external-dns | `network/external/` | Automated Cloudflare DNS record management | None |
-| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — Gateway API control plane for the ingress-nginx replacement. Phase 0 + 0.5: `GatewayClass` + two Gateways, `envoy-internal` (192.168.55.103) and `envoy-external` (192.168.55.104), running alongside ingress-nginx. **`envoy-internal` carries production traffic as of phase 2 (2026-09-07)** — app hostnames are being migrated from ingress-nginx to `HTTPRoute` in batches, so the two data planes are live simultaneously and per-app conversion state is tracked in `docs/troubleshooting/ingress-migration-plan.md`, not here. Gateway API + EG CRDs are vendored under `crds/` (standard channel) — gateway-api v1.6.1, 10 standard-channel CRDs — not chart-installed. See `docs/troubleshooting/ingress-migration-plan.md` and `docs/sops/k8s-gateway-dns.md` §8. | None |
+| envoy-gateway | `network/envoy-gateway/` | Envoy Gateway (chart `gateway-helm` 1.9.0) — the Gateway API control plane, and since 2026-09-07 the **only** data plane in the cluster. `GatewayClass` + two Gateways: `envoy-internal` (192.168.55.103, LAN-only) and `envoy-external` (192.168.55.104, internet-facing via the cloudflared wildcard). **The ingress-nginx migration is COMPLETE (`ad1ea7c2`)** — both nginx controllers are deleted and 104 `HTTPRoute`s carry all traffic; there are zero `Ingress` and zero `IngressClass` objects, so an `Ingress` created here is inert. The cluster-wide `https-redirect` HTTPRoute owns both `:80` listeners. Gateway API + EG CRDs are vendored under `crds/` (standard channel, gateway-api v1.6.1, 10 CRDs) — not chart-installed. See `docs/sops/gateway-api-httproute.md` and `docs/sops/k8s-gateway-dns.md`. | None |
 
 ---
 

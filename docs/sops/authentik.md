@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.08.23`
-> Last Updated: `2026-08-23`
+> Version: `2026.09.07`
+> Last Updated: `2026-09-07`
 > Owner: `Platform`
 
 ---
@@ -12,7 +12,7 @@
 ## Description
 
 This SOP defines the required blueprint-driven workflow for Authentik integrations, including
-provider/application/outpost wiring, ingress integration, and post-deploy validation.
+provider/application/outpost wiring, HTTPRoute integration, and post-deploy validation.
 
 ---
 
@@ -74,7 +74,7 @@ All Authentik changes must be declarative and committed to Git (no UI-only confi
 Operational flow:
 1. Create or update app blueprint manifest.
 2. Merge blueprint entry into Authentik SOPS ConfigMap.
-3. Update app ingress and outpost ingress paths.
+3. Add the app HTTPRoute, the `/outpost.goauthentik.io` callback HTTPRoute, the `SecurityPolicy`, and the `ReferenceGrant`; set `kubernetes_disabled_components: [ingress]` on the outpost.
 4. Commit/push and verify outpost resources and login flow.
 
 Detailed implementation steps are in `Integrating a New Application` below.
@@ -101,6 +101,11 @@ Detailed implementation steps are in `Integrating a New Application` below.
     service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
     providers:
       - !KeyOf my-app-provider
+    config:
+      # MANDATORY. Without it the outpost controller publishes its own Ingress
+      # holding the app's hostname. See "Outpost-published Ingress" below.
+      kubernetes_disabled_components:
+        - ingress
 ```
 
 ---
@@ -211,7 +216,7 @@ Most apps in this cluster use the forward-auth proxy outpost pattern (see "Integ
        - "mu"
    ```
 
-4. **Ingress** — drop the forward-auth annotations (`auth-url`, `auth-signin`, `auth-response-headers`). The dashboard handles auth itself once SAML is wired.
+4. **Routing** — drop the forward-auth wiring (the `SecurityPolicy` and the `/outpost.goauthentik.io` callback route; historically the nginx `auth-url`/`auth-signin`/`auth-response-headers` annotations). The dashboard handles auth itself once SAML is wired.
 
 ### Gotchas
 
@@ -375,6 +380,135 @@ kubectl exec -n kube-system deploy/authentik-server -- \
 
 ---
 
+## Outpost-published Ingress — the invisible object that steals a hostname
+
+**Read this before converting, moving, or debugging any Authentik-protected
+host.** This mechanism has mis-routed a hostname three times, most expensively
+on headlamp: a 404 that took 40 minutes to explain, because every artifact an
+operator would normally consult said the config was correct.
+
+### The mechanism
+
+Authentik's **Kubernetes outpost controller** reconciles a set of Kubernetes
+objects for each outpost — Deployment, Service, Secret **and an `Ingress`**.
+That Ingress carries the **application's own hostname**, on the **default
+ingress class**, holding the `/outpost.goauthentik.io` path.
+
+Two properties make it nearly undiscoverable:
+
+- **It exists in no git repository.** It is created by the authentik server at
+  runtime from the blueprint's `config`, so `rg` across this repo returns
+  nothing and the GitOps model gives you no hint it exists.
+- **It carries no `ownerReferences`.** Nothing garbage-collects it, and it does
+  not show up as owned by the app, the HelmRelease, or the outpost Deployment.
+
+While ingress-nginx was alive, `internal` was the default class, so these
+Ingresses resolved their host to `192.168.55.100`. When an app's own Ingress
+was withdrawn during the Envoy migration, the outpost's Ingress **silently
+became the only remaining record for that hostname** — and because k8s-gateway
+watches `Ingress` as well as `HTTPRoute`, it kept answering `.100`. The app's
+new HTTPRoute on `.103` never won. The app looked correctly configured at every
+layer except DNS.
+
+> **Deleting the Ingress does not hold — the outpost recreates it.
+> Disabling the component does.**
+
+### The fix
+
+Set `kubernetes_disabled_components: [ingress]` in the outpost's `config`
+block in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`:
+
+```yaml
+entries:
+  - id: <app>-outpost
+    model: authentik_outposts.outpost
+    state: present
+    identifiers:
+      name: <app>-forward-auth
+    attrs:
+      name: <app>-forward-auth
+      type: proxy
+      providers:
+        - !KeyOf <app>-forward-auth-provider
+      service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"
+      config:
+        # In-cluster service, NOT the public ingress hostname (backchannel fix
+        # 8c3059bf). Shown in the short `.svc` form, which resolves identically;
+        # the live blueprint spells out the fully-qualified name.
+        authentik_host: "http://authentik-server.kube-system.svc"
+        authentik_host_browser: "https://auth.${SECRET_DOMAIN}"
+        kubernetes_namespace: kube-system
+        kubernetes_replicas: 1
+        kubernetes_ingress_class_name: ""
+        kubernetes_service_type: "ClusterIP"
+        # THE KEY. Stops the controller managing an Ingress for this outpost.
+        kubernetes_disabled_components:
+          - ingress
+        container_network: null
+```
+
+Three rules that are easy to get wrong:
+
+1. **REPLACE the existing key, never append a second one.** Every outpost block
+   in this repo already ships `kubernetes_disabled_components: []`. YAML is
+   last-wins, so adding a second key with the same name is silently discarded
+   and you will believe you fixed something you did not. *(Verified 2026-09-07:
+   all 12 blueprint-managed outposts already contained the key as `[]` — so in
+   this repo it is always an edit, never an addition. If you ever author an
+   outpost block from scratch, include it.)*
+2. **Disabling stops MANAGEMENT; it does not DELETE the existing object.** The
+   already-published Ingress stays until you remove it once by hand. After the
+   component is disabled, that delete sticks:
+   ```bash
+   kubectl delete ingress -n <app-namespace> <outpost-ingress-name>
+   ```
+   Do the delete **after** the blueprint change has reconciled, not before, or
+   the outpost simply recreates it.
+3. **`kubernetes_ingress_class_name: ""` is the trap, not a safe default.**
+   Empty string means "default class" — it does not mean "no Ingress". Only
+   `kubernetes_disabled_components` suppresses the object.
+
+### The two provider modes behave completely differently
+
+Whether removing that Ingress is a no-op or a traffic change depends entirely
+on the proxy provider's `mode`. Check it before you touch anything:
+
+| `mode` | Who enforces auth | What the outpost Ingress/route served | Removing it |
+|---|---|---|---|
+| `forward_single` | the **gateway/proxy** in front of the app, by calling out to the outpost | the `/outpost.goauthentik.io` **callback path only** | safe once the app's own HTTPRoute serves the callback path |
+| `proxy` | the **outpost itself** — it is the reverse proxy and fronts the whole app | **`/` for the app as well** as the callback | must be replaced by a route pointing at the **outpost Service**, not at the app |
+
+In this cluster `uptime-kuma` is the **only** `mode: proxy` provider. Its
+replacement HTTPRoute therefore has two rules, **both backed by
+`ak-outpost-uptime-kuma-forward-auth`** (`/outpost.goauthentik.io` and `/`), so
+authentication is preserved exactly and only the fronting proxy changed. Point
+a `mode: proxy` app's route at the app Service instead and you publish it
+**unauthenticated**.
+
+Every other provider here is `forward_single`, where the outpost enforces
+nothing on its own: the protected route must actively invoke it (see Step 3's
+`SecurityPolicy`). A `forward_single` outpost with nothing calling it is dead
+weight — which is exactly the case for `arag-web` (AR-118), where the wiring
+was never completed, so removing its Ingress changed no behaviour at all.
+
+### Auditing
+
+```bash
+# Any outpost still publishing an Ingress? (expect: No resources found)
+kubectl get ingress -A
+
+# Which outposts exist, vs which are blueprint-managed?
+kubectl get deploy -n kube-system -o name | grep ak-outpost
+```
+
+**Not every live outpost is in the blueprints.**
+`kubernetes-dashboard-forward-auth` runs in `kube-system` with **no blueprint
+entry**, no Service behind it and no route — it is unmanaged by GitOps and
+cannot be fixed by editing the ConfigMap. Do not assume the blueprint file is a
+complete inventory of outposts.
+
+---
+
 ## Integrating a New Application
 
 ### Step 1: Create Blueprint File
@@ -461,84 +595,170 @@ mv kubernetes/apps/kube-system/authentik/app/configmap-new.sops.yaml \
 rm /tmp/configmap.yaml
 ```
 
-### Step 3: Configure App Ingress with Auth Annotations
+### Step 3: Route the app and attach forward-auth (`SecurityPolicy`)
+
+**There is no Ingress in this cluster** — ingress-nginx was deleted on
+2026-09-07 (`ad1ea7c2`). The `nginx.ingress.kubernetes.io/auth-*` annotation
+pattern that used to live in this step is gone with it: those annotations are
+inert, and an `Ingress` carrying them routes nothing. Forward-auth is now
+expressed as an Envoy Gateway **`SecurityPolicy`** with `extAuth`.
+
+Three objects per protected app, all in the app's namespace:
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+---
+# 1) The app route. Homepage metadata (annotations AND label) goes HERE.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: my-app
   namespace: my-namespace
+  labels:
+    gethomepage.dev/enabled: "true"
   annotations:
-    # Authentik forward auth
-    nginx.ingress.kubernetes.io/auth-url: "http://ak-outpost-my-app-forward-auth.kube-system.svc.cluster.local:9000/outpost.goauthentik.io/auth/nginx"
-    nginx.ingress.kubernetes.io/auth-signin: "https://auth.${SECRET_DOMAIN}/outpost.goauthentik.io/start?rd=$scheme://$http_host$request_uri"
-    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie,X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid"
-    nginx.ingress.kubernetes.io/auth-snippet: |
-      proxy_set_header X-Forwarded-Host $http_host;
-    # Homepage
     gethomepage.dev/enabled: "true"
     gethomepage.dev/name: "My App"
     gethomepage.dev/group: "Group Name"
     gethomepage.dev/icon: "my-app.png"
     gethomepage.dev/description: "Description"
-  labels:
-    gethomepage.dev/enabled: "true"
 spec:
-  ingressClassName: internal
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal          # or envoy-external
+      namespace: network
+      sectionName: https            # the http listener is the cluster-wide redirect
+  hostnames:
+    - "myapp.${SECRET_DOMAIN}"
   rules:
-    - host: myapp.${SECRET_DOMAIN}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: my-app
-                port:
-                  number: 8080
-```
-
-**Important:** Do not inline `proxy_set_header X-Proxy-Secret ...` values in ingress annotations.
-Ingress annotations do not support reading values from Kubernetes `Secret` objects.
-If a custom auth header is ever required, use `nginx.ingress.kubernetes.io/auth-proxy-set-headers`
-with a same-namespace `ConfigMap` reference.
-
-### Step 4: Create Outpost Ingress
-
-The `/outpost.goauthentik.io/*` paths must be exposed via a separate ingress:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: my-app
+          port: 8080
+---
+# 2) The callback route — SEPARATE, and more specific than `/`.
+# Gateway API resolves by longest match, so folding it into the app route
+# would loop the login callback back into the application.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
 metadata:
   name: my-app-authentik-outpost
   namespace: my-namespace
 spec:
-  ingressClassName: internal
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "myapp.${SECRET_DOMAIN}"
   rules:
-    - host: myapp.${SECRET_DOMAIN}
-      http:
-        paths:
-          - path: /outpost.goauthentik.io
-            pathType: Prefix
-            backend:
-              service:
-                name: ak-outpost-my-app-forward-auth
-                port:
-                  number: 9000
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # A REAL cross-namespace Service, never an ExternalName shim — Envoy
+        # resolves backends via EndpointSlices and ExternalName has none.
+        - group: ""
+          kind: Service
+          name: ak-outpost-my-app-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+# 3) The enforcement. Without this, a `forward_single` outpost enforces
+# NOTHING and the app is published unauthenticated.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: my-app-forward-auth
+  namespace: my-namespace
+spec:
+  targetRefs:                    # the app route ONLY, never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: my-app
+  extAuth:
+    failOpen: false              # outpost down => deny, never publish
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-my-app-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid
 ```
 
-The outpost service (`ak-outpost-my-app-forward-auth`) is automatically created in `kube-system`
-when the blueprint runs and the outpost is created.
+Non-obvious points, each of which has cost time:
+
+- **`path` must be `/auth/envoy`, not `/auth/nginx`.** The nginx variant
+  returns 500 against this outpost.
+- **`targetRefs` must exclude the callback route.** Targeting both makes the
+  callback require the auth it is supposed to establish — an instant redirect
+  loop.
+- **`failOpen: false` is deliberate.** If the outpost is unavailable the app
+  must 403, never fall open to the internet.
+- **Cross-namespace backendRefs require a `ReferenceGrant`** in `kube-system`
+  permitting the app namespace to reference the outpost Services. They are
+  maintained one-per-app in
+  `kubernetes/apps/kube-system/authentik/app/referencegrants.yaml` — add yours
+  there in the same commit, or the backend silently fails to resolve.
+- A `mode: proxy` provider does NOT use this shape — see the mode table in
+  "Outpost-published Ingress" above; there the route points at the outpost.
+
+Reference implementation: `kubernetes/apps/default/homepage/app/httproute.yaml`
+(all three objects in one file). Full routing pattern:
+`docs/sops/gateway-api-httproute.md`.
+
+### Step 4: Disable the outpost's self-published Ingress
+
+The outpost Service (`ak-outpost-my-app-forward-auth`) is created automatically
+in `kube-system` when the blueprint runs. What is **not** automatic is stopping
+the outpost from also publishing its own `Ingress` for your app's hostname.
+
+Set this in the outpost's `config` block in the blueprint ConfigMap — replacing
+the existing `kubernetes_disabled_components: []`, never appending a second key:
+
+```yaml
+        kubernetes_disabled_components:
+          - ingress
+```
+
+Then, once the blueprint has reconciled, delete the already-published object
+once by hand (disabling the component stops management but does not delete it):
+
+```bash
+kubectl get ingress -A                      # find it; expect none afterwards
+kubectl delete ingress -n my-namespace <outpost-ingress-name>
+```
+
+**Why this is a required step and not a tidy-up:** that Ingress holds your app's
+hostname, exists in no git repo, and has no ownerRefs — it will quietly outrank
+your HTTPRoute in DNS. Full mechanism and the three-times-bitten history:
+"Outpost-published Ingress" above.
 
 ### Step 5: Commit and Verify
 
 ```bash
-# Commit changes
-git add kubernetes/apps/{namespace}/{app}/
-git add kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-git commit -m "feat(authentik): add my-app forward auth"
+# Commit changes. `--only` with explicit paths, never `git add`: the worktree
+# index is SHARED between concurrent sessions, so a bare `git add` lets another
+# agent's staged hunk ride into your commit (see AGENTS.md).
+git commit --only \
+  kubernetes/apps/{namespace}/{app}/httproute.yaml \
+  kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml \
+  kubernetes/apps/kube-system/authentik/app/referencegrants.yaml \
+  -F msg.txt
+git show --stat HEAD    # is every file here actually yours?
 git push
 
 # Wait for Flux reconciliation, then verify
@@ -548,6 +768,14 @@ kubectl exec -n kube-system deployment/authentik-server -- \
 # Check outpost was created
 kubectl get deployment -n kube-system ak-outpost-my-app-forward-auth
 kubectl get svc -n kube-system ak-outpost-my-app-forward-auth
+
+# The outpost must NOT have published an Ingress (expect: No resources found)
+kubectl get ingress -A
+
+# Resolve the real hostname — do NOT curl with --resolve pinned to the gateway
+# IP, which bypasses the DNS record that actually decides where traffic lands.
+# That exact shortcut is why the headlamp misroute passed its verification gate.
+dig +short @192.168.55.101 myapp.${SECRET_DOMAIN} A    # expect .103 or .104
 ```
 
 ---
@@ -567,8 +795,8 @@ rm /tmp/configmap.yaml
 # 2. If a per-app blueprint file exists, remove it
 # rm kubernetes/apps/{namespace}/{app}/app/authentik-blueprint.yaml  # only if present
 
-# 3. Remove auth annotations from ingress
-# 4. Remove outpost ingress
+# 3. Remove the SecurityPolicy that invoked the outpost
+# 4. Remove the /outpost.goauthentik.io callback HTTPRoute and the ReferenceGrant
 # 5. Commit and push
 ```
 
@@ -595,7 +823,7 @@ tag while the chart moves, the new server runs an old `settings.py` that imports
 modules the new release dropped (2026.5.6 → 2026.8.0 replaced
 `drf_orjson_renderer` with `msgspec`) — Django fails at import and **every
 server and worker replica crashloops simultaneously**. There is no partial
-outage here; SSO is fully down and most of the estate's ingress with it.
+outage here; SSO is fully down and most of the estate's routing with it.
 
 Pre-flight the new image before committing — a moved path fails the `cp` and
 blocks startup just as hard, and a renamed setting makes the `sed` silently
@@ -708,9 +936,15 @@ Before deploying a new Authentik integration, verify:
    - Uses `providers: [!KeyOf <provider-id>]`
    - Includes `service_connection: "162f6c4f-053d-4a1a-9aa6-d8e590c49d70"`
    - Sets `kubernetes_namespace: kube-system`
-4. Ingress
-   - Main ingress includes `auth-url`, `auth-signin`, and auth response headers
-   - Separate ingress exists for `/outpost.goauthentik.io/*`
+   - Sets `kubernetes_disabled_components: [ingress]` (REPLACING the existing
+     `[]`, not appended alongside it) — otherwise the outpost publishes an
+     Ingress that steals the app's hostname
+4. Routing
+   - App `HTTPRoute` parented to `envoy-internal`/`envoy-external` in ns `network`, `sectionName: https`
+   - Separate, more-specific `HTTPRoute` for `/outpost.goauthentik.io` backed by the outpost Service
+   - `SecurityPolicy` with `extAuth` targeting the APP route only, `path: /outpost.goauthentik.io/auth/envoy`, `failOpen: false`
+   - `ReferenceGrant` in `kube-system` for the app namespace
+   - `kubectl get ingress -A` returns nothing
 5. Verification
    - `show_blueprints` includes the new blueprint
    - `ak-outpost-{app}-forward-auth` deployment and service exist in `kube-system`
@@ -719,12 +953,23 @@ Before deploying a new Authentik integration, verify:
 
 ## Reference Implementations
 
+The separate `authentik-outpost-ingress.yaml` files these entries used to point
+at **no longer exist** — the callback is now a second HTTPRoute inside each
+app's `httproute.yaml`, alongside the app route and the `SecurityPolicy`.
+
+- Homepage — the fullest `forward_single` example, all three objects in one file:
+  - `kubernetes/apps/default/homepage/app/httproute.yaml`
 - Frigate NVR (blueprint in central ConfigMap only):
-  - Outpost ingress: `kubernetes/apps/home-automation/frigate-nvr/app/authentik-outpost-ingress.yaml`
+  - `kubernetes/apps/home-automation/frigate-nvr/app/httproute.yaml`
 - phpMyAdmin (blueprint in central ConfigMap only):
-  - Outpost ingress: `kubernetes/apps/databases/phpmyadmin/app/authentik-outpost-ingress.yaml`
+  - `kubernetes/apps/databases/phpmyadmin/app/httproute.yaml`
+- Uptime Kuma — the ONLY `mode: proxy` provider; both rules point at the
+  outpost Service, not at the app:
+  - `kubernetes/apps/monitoring/uptime-kuma/app/httproute.yaml`
 - Longhorn (has per-app blueprint file + entry in central ConfigMap):
   - Blueprint file: `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml`
+- ReferenceGrants for every app's cross-namespace outpost backend:
+  - `kubernetes/apps/kube-system/authentik/app/referencegrants.yaml`
 
 For all apps: blueprint entry is in `kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`.
 
@@ -795,7 +1040,8 @@ kubectl get all -n kube-system -l goauthentik.io/outpost-name={app}-forward-auth
 |-------|-------------|-----|
 | Blueprint not loading | ConfigMap not updated | Verify blueprint in decrypted ConfigMap |
 | Outpost deployment not created | Missing `service_connection` | Add `service_connection: "162f6c4f-..."` |
-| Auth redirect loop | Outpost ingress missing | Create ingress for `/outpost.goauthentik.io/*` |
+| Auth redirect loop | Callback route missing, or the `SecurityPolicy` also targets the callback route | Add a separate, more-specific `/outpost.goauthentik.io` HTTPRoute; `targetRefs` must list the app route only |
+| Host resolves to a dead IP / 404 after a routing change, config looks correct everywhere | Outpost published its own Ingress holding the hostname — in no git repo, no ownerRefs | `kubectl get ingress -A`; set `kubernetes_disabled_components: [ingress]`, then delete the object once (deleting alone does not hold) |
 | 401 on auth-url | Wrong outpost service name | Check `ak-outpost-{app}-forward-auth.kube-system.svc.cluster.local` |
 | Blueprint fails with UUID error | Using slug instead of UUID | Replace slug with UUID in blueprint |
 
@@ -806,12 +1052,17 @@ kubectl get all -n kube-system -l goauthentik.io/outpost-name={app}-forward-auth
 ### Diagnose Example 1: Redirect Loop After Login
 
 ```bash
-kubectl get ingress -n {namespace} -o yaml | rg "outpost.goauthentik.io|auth-url|auth-signin"
+kubectl get httproute -n {namespace} -o yaml | rg "outpost.goauthentik.io|hostnames|sectionName"
+kubectl get securitypolicy -n {namespace} -o yaml | rg "targetRefs|path:|failOpen" -A2
 kubectl get svc -n kube-system ak-outpost-{app}-forward-auth
 ```
 
 Expected:
-- Main ingress has auth annotations and outpost ingress path exists.
+- A separate, more-specific `/outpost.goauthentik.io` route exists, and the
+  `SecurityPolicy` targets the APP route ONLY. Targeting the callback route too
+  makes the callback require the auth it is meant to establish — that is the
+  redirect loop.
+- `path` is `/auth/envoy`, not `/auth/nginx` (the nginx variant 500s here).
 
 If unclear:
 - Check outpost logs with `kubectl logs -n kube-system -l app.kubernetes.io/name=authentik --tail=200 | grep -i outpost`.
