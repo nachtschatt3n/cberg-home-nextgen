@@ -38,6 +38,13 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
   name: envoy-compression
+  annotations:
+    # Envoy Gateway permits exactly ONE BackendTrafficPolicy per Gateway. A
+    # second policy targeting these gateways is rejected Accepted=False
+    # reason=Conflicted and silently does nothing — it does NOT merge. So every
+    # gateway-wide backend setting must live in THIS object, whatever its name
+    # suggests. Add here; never create a sibling.
+    cberg.home/scope: "all gateway-wide backend settings, not just compression"
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
@@ -51,3 +58,16 @@ spec:
   compressor:
     - type: Brotli
     - type: Gzip
+  timeout:
+    http:
+      # Parity with ingress-nginx's 60s proxy-read/proxy-send default. Envoy's
+      # own default route timeout is 15s, and phase 2 converted apps without
+      # setting any per-route timeout (48 rules, zero timeouts), which silently
+      # tightened every migrated app 60s -> 15s. A `curl /` gate returns in
+      # milliseconds and can never catch that; it would have surfaced later as
+      # truncated long requests on bulk downloaders, dev previews, media
+      # servers and BI query pages.
+      #
+      # This is a parity restoration, not a tuning choice. Apps needing more
+      # override per route via HTTPRoute.rules[].timeouts, which wins.
+      requestTimeout: 60s

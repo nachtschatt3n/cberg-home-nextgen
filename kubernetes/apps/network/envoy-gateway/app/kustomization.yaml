@@ -9,5 +9,4 @@ resources:
   - ./gateways.yaml
   - ./policies.yaml
   - ./httproute-https-redirect.yaml
-  - ./backendtrafficpolicy-timeouts.yaml
   - ./podmonitor.yaml
