@@ -59,8 +59,12 @@ spec:
           level:
             default: info
     # The topology injector is a MutatingWebhookConfiguration on pods/binding.
-    # It only injects zone/topology labels into data-plane Envoy pods, which
-    # buys nothing at replicas: 1 on a 3-node cluster. Disabling it also drops
+    # It only injects zone/topology labels into data-plane Envoy pods. The
+    # original note here said this "buys nothing at replicas: 1" — that premise
+    # expired on 2026-09-07 when the data plane went to 3. It stays disabled
+    # anyway: this is a single-rack, single-zone cluster, so there is no
+    # topology for it to express, and the RBAC argument below was always the
+    # real reason. Disabling it also drops
     # a cluster-wide pods + pods/binding get/list/patch/update/watch grant from
     # the control-plane ClusterRole — that RBAC reduction is the real reason.
     # (Corrected 2026-08-16: the webhook DOES carry a namespaceSelector scoped
@@ -69,8 +73,30 @@ spec:
     # here was wrong. The decision stands on the RBAC argument.)
     topologyInjector:
       enabled: false
+    # Control plane: 3 replicas, one per node. EG uses leader election, so the
+    # extra two are standby rather than active-active — losing the leader costs
+    # a re-election, not a config outage, and the data plane keeps serving its
+    # last good config throughout. Was 1 until 2026-09-07: it sat on
+    # k8s-nuc14-03 alongside envoy-external, so one node event took out the
+    # control plane and half the data plane together (F-f2b89d20).
+    podDisruptionBudget:
+      minAvailable: 2                 # chart default is 0, i.e. no protection
     deployment:
-      replicas: 1
+      replicas: 3
+      pod:
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: gateway-helm
+                app.kubernetes.io/instance: envoy-gateway
+            # See the data-plane comment in gatewayclass.yaml: without the
+            # template hash, a rolling update counts the outgoing ReplicaSet
+            # and replicas pile onto one node permanently. Measured today.
+            matchLabelKeys:
+              - pod-template-hash
       envoyGateway:
         resources:
           requests:
