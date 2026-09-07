@@ -5357,59 +5357,115 @@ except Exception:
 } >> "$OUTPUT_FILE" 2>&1
 
 
-log_section "Section 35: Ingress Backend Health"
+log_section "Section 35: Route Backend Health (Gateway API + Ingress)"
 {
-    echo "Checking ingress backend health..."
+    echo "Checking route backend health..."
 
-    # Check for ingresses with no backend endpoints
-    MISSING_BACKENDS=0
-    kubectl get ingress -A -o json 2>/dev/null | python3 -c "
+    # 2026-09-07: rewritten for the Envoy Gateway migration. This section used
+    # to walk `kubectl get ingress -A` only. After ingress-nginx was deleted it
+    # enumerated ZERO objects and still printed "All ingress backends healthy" —
+    # a textbook silent zero, reporting success about a surface it could no
+    # longer see. It now audits HTTPRoutes, keeps the Ingress arm for the case
+    # where one is reintroduced, and REFUSES to pass when it finds nothing.
+
+    ROUTE_ISSUES=0
+
+    N_ING=$(kubectl get ingress -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    N_RT=$(kubectl get httproute -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    echo "Discovered: $N_RT HTTPRoute(s), $N_ING Ingress(es)"
+
+    # --- the silent-zero guard: measuring nothing is not a pass ---
+    if [ "$N_RT" = "0" ] && [ "$N_ING" = "0" ]; then
+        log_error "Section 35 found NEITHER HTTPRoutes NOR Ingresses — the check cannot see the routing surface"
+        add_major_issue "Route health check enumerated 0 objects (broken query or total routing loss)"
+        ROUTE_ISSUES=$((ROUTE_ISSUES + 1))
+    fi
+
+    # --- HTTPRoute status: both conditions must hold ---
+    # Accepted alone is not enough. Both real failures during the migration
+    # (RefNotPermitted from a missing ReferenceGrant, and a disabled Backend
+    # extension API) surfaced ONLY in ResolvedRefs, and neither failed at apply
+    # time — the object applied cleanly and served 500s at request time.
+    BAD_ROUTES=$(kubectl get httproute -A -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
-    data = json.load(sys.stdin)
-    for ing in data.get('items', []):
-        ns = ing['metadata']['namespace']
-        name = ing['metadata']['name']
-        rules = ing.get('spec', {}).get('rules', [])
-        for rule in rules:
-            host = rule.get('host', 'unknown')
-            paths = rule.get('http', {}).get('paths', [])
-            for path in paths:
-                backend = path.get('backend', {})
-                svc_name = backend.get('service', {}).get('name')
-                if svc_name:
-                    print(f'{ns}|{host}|{svc_name}')
-except Exception as e:
-    pass
-" 2>/dev/null | while IFS='|' read ns host svc; do
-        if [ -n "$ns" ] && [ -n "$svc" ]; then
-            # Check if this is an ExternalName service (Authentik outposts) - these resolve via DNS, not Endpoints
-            SVC_TYPE=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
-            if [ "$SVC_TYPE" = "ExternalName" ]; then
-                echo "ℹ️  ExternalName service $ns/$svc (DNS-resolved, no Endpoints object expected)"
-            else
-                ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
-                if [ -z "$ENDPOINTS" ]; then
-                    echo "⚠️  No backends for $host (service: $ns/$svc)"
-                    MISSING_BACKENDS=$((MISSING_BACKENDS + 1))
-                fi
-            fi
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in d.get('items', []):
+    ns = r['metadata']['namespace']; name = r['metadata']['name']
+    for p in r.get('status', {}).get('parents', []):
+        st = {c['type']: c['status'] for c in p.get('conditions', [])}
+        bad = [k for k, v in st.items() if v != 'True']
+        if bad:
+            print(f\"{ns}/{name} parent={p.get('parentRef',{}).get('name','?')} failing={','.join(bad)}\")
+" 2>/dev/null)
+    if [ -n "$BAD_ROUTES" ]; then
+        echo "$BAD_ROUTES" | while read -r line; do echo "⚠️  HTTPRoute not healthy: $line"; done
+        ROUTE_ISSUES=$((ROUTE_ISSUES + 1))
+        add_major_issue "HTTPRoutes not Accepted/ResolvedRefs: $(echo "$BAD_ROUTES" | wc -l | tr -d ' ')"
+    fi
+
+    # --- backend Services referenced by routes must have Endpoints ---
+    # kind: Backend (Envoy Gateway extension) is skipped: it addresses an FQDN
+    # directly and has no Endpoints object by design.
+    kubectl get httproute -A -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in d.get('items', []):
+    ns = r['metadata']['namespace']
+    for rule in r.get('spec', {}).get('rules', []):
+        for b in rule.get('backendRefs', []) or []:
+            if b.get('kind', 'Service') != 'Service':
+                continue
+            print(f\"{b.get('namespace', ns)}|{b.get('name')}\")
+" 2>/dev/null | sort -u | while IFS='|' read -r bns bsvc; do
+        [ -z "$bns" ] || [ -z "$bsvc" ] && continue
+        SVC_TYPE=$(kubectl get svc "$bsvc" -n "$bns" -o jsonpath='{.spec.type}' 2>/dev/null || echo "")
+        if [ "$SVC_TYPE" = "ExternalName" ]; then
+            echo "⚠️  $bns/$bsvc is ExternalName — Envoy resolves backends via EndpointSlices and cannot use it"
+        elif [ -z "$SVC_TYPE" ]; then
+            echo "⚠️  Route backend service $bns/$bsvc does not exist"
+        else
+            EP=$(kubectl get endpoints "$bsvc" -n "$bns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
+            [ -z "$EP" ] && echo "⚠️  No endpoints for route backend $bns/$bsvc"
         fi
     done
 
-    # Check ingress controller errors
-    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l" "ingress-errors")
-    echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
-
-    if [ "$MISSING_BACKENDS" -gt 0 ]; then
-        log_warning "Ingresses with missing backends: $MISSING_BACKENDS"
-        add_major_issue "Ingress backends unavailable: $MISSING_BACKENDS services"
-    elif [ "$INGRESS_ERRORS" -gt 10 ]; then
-        log_warning "High ingress controller error count: $INGRESS_ERRORS"
-        add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
-    else
-        log_success "All ingress backends healthy"
+    # --- gateways must be Programmed ---
+    BAD_GW=$(kubectl get gateway -A -o json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for g in d.get('items', []):
+    st = {c['type']: c['status'] for c in g.get('status', {}).get('conditions', [])}
+    if st.get('Programmed') != 'True':
+        print(f\"{g['metadata']['namespace']}/{g['metadata']['name']}\")
+" 2>/dev/null)
+    if [ -n "$BAD_GW" ]; then
+        echo "⚠️  Gateway not Programmed: $BAD_GW"
+        add_major_issue "Gateway not Programmed: $BAD_GW"
+        ROUTE_ISSUES=$((ROUTE_ISSUES + 1))
     fi
+
+    # --- data-plane 5xx, replacing the old nginx controller error count ---
+    ENVOY_5XX=$(kubectl logs -n network -l app.kubernetes.io/managed-by=envoy-gateway \
+        --since=1h --all-containers --tail=2000 2>/dev/null \
+        | grep -c '"response_code":5' || true)
+    if [ "${ENVOY_5XX:-0}" -gt 50 ]; then
+        log_warning "High Envoy 5xx count in the last hour: $ENVOY_5XX"
+        add_minor_issue "Envoy data plane 5xx: $ENVOY_5XX in last hour"
+    fi
+
+    if [ "$ROUTE_ISSUES" = "0" ]; then
+        log_success "Route backends healthy ($N_RT HTTPRoutes, $N_ING Ingresses examined)"
+    fi
+
 } >> "$OUTPUT_FILE" 2>&1
 
 log_section "Section 36: PVC Capacity Monitoring"

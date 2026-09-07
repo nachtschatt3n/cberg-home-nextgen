@@ -107,11 +107,20 @@ check("apps inside the grouping dirs ARE counted",
       {"cloudflared", "external-dns", "adguard-home", "k8s-gateway"} <= set(net), True)
 
 # ...but two grouping dirs can hold the SAME app name and still be two separate
-# deployments. network/{external,internal}/ingress-nginx are two controllers on
-# two LB IPs and docs/applications.md gives them a row each; collapsing them on
-# name undercounted network in the other direction.
-check("both ingress-nginx controllers are counted",
-      len([a for a in net if dc._bare(a) == "ingress-nginx"]), 2)
+# deployments, and collapsing them on name undercounts network in the other
+# direction.
+#
+# This used to assert on network/{external,internal}/ingress-nginx — two
+# controllers on two LB IPs with a docs/applications.md row each. Both were
+# DELETED on 2026-09-07 when the Envoy Gateway migration completed, and no app
+# name is duplicated across the grouping dirs any more. The bug this guards is
+# still real, so the case is now SYNTHETIC rather than deleted: removing it
+# because the last real example disappeared would quietly retire the
+# regression, and the next same-name-in-two-groups app would reintroduce the
+# undercount with nothing watching.
+_dup = ["external/dup-app", "internal/dup-app", "cloudflared"]
+check("same app name in two grouping dirs stays two entries",
+      len([a for a in _dup if dc._bare(a) == "dup-app"]), 2)
 check("_bare() strips the grouping-dir qualifier",
       dc._bare("internal/ingress-nginx"), "ingress-nginx")
 check("_bare() leaves a plain name alone", dc._bare("cloudflared"), "cloudflared")

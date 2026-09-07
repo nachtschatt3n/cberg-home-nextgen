@@ -1292,10 +1292,17 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
     else:
         cprint(C.GREEN, f"  {OK} Ollama model name formats are correct (colon separator)")
 
-    # Check Homepage ingress annotations: both annotation AND label must have enabled=true
+    # Check Homepage annotations: both annotation AND label must have enabled=true.
+    #
+    # 2026-09-07: reads HTTPRoutes as well as Ingresses. This check used to walk
+    # Ingresses only, and the Envoy Gateway migration moved every app to an
+    # HTTPRoute and then deleted ingress-nginx — so it silently lost coverage of
+    # ALL ~104 routed apps while continuing to report cleanly. Homepage runs with
+    # `gateway: true`, so a route carrying the annotation without the label is
+    # exactly as broken as an Ingress was, and just as invisible.
     ingress_raw = run(
-        "kubectl get ingress -A -o json 2>/dev/null", timeout=20,
-        scope="s5_integration_docs", dep="kubectl (ingress list)",
+        "kubectl get ingress,httproute -A -o json 2>/dev/null", timeout=20,
+        scope="s5_integration_docs", dep="kubectl (ingress+httproute list)",
     )
     if not ingress_raw:
         # There is no else branch below: on an empty read this check produces
@@ -1308,7 +1315,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
             annotation_only: list[str] = []
             for ing in ingresses:
                 ns = ing["metadata"]["namespace"]
-                name = ing["metadata"]["name"]
+                name = f'{ing.get("kind","?")}/{ing["metadata"]["name"]}' if ing.get("kind") else ing["metadata"]["name"]
                 annotations = ing["metadata"].get("annotations", {})
                 labels = ing["metadata"].get("labels", {})
                 ann_enabled = annotations.get("gethomepage.dev/enabled", "")
@@ -1317,7 +1324,7 @@ def s5_integration_docs() -> tuple[str, Findings, str]:
                     annotation_only.append(f"{ns}/{name}")
             if annotation_only:
                 for ing_name in annotation_only[:5]:
-                    f.add(WARNING, f"Ingress `{ing_name}` has Homepage annotation but missing label — won't appear in dashboard")
+                    f.add(WARNING, f"`{ing_name}` has Homepage annotation but missing label — won't appear in dashboard")
                     cprint(C.YELLOW, f"  {WARNING} {ing_name}: annotation ✓ but label missing")
                 if len(annotation_only) > 5:
                     cprint(C.YELLOW, f"  {WARNING} ... and {len(annotation_only) - 5} more")
