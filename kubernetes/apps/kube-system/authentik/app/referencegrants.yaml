@@ -33,3 +33,172 @@ spec:
     - group: ""
       kind: Service
       name: ak-outpost-headlamp-forward-auth
+
+# ---------------------------------------------------------------------------
+# Phase 2 forward-auth apps. Landed AHEAD of their HTTPRoutes deliberately: a
+# ReferenceGrant with no route referencing it is completely inert, so there is
+# no ordering hazard, and it removes the single most likely phase-2 failure
+# (RefNotPermitted at request time) from the critical path of each conversion.
+# ---------------------------------------------------------------------------
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: nocodb-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: databases
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: databases
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-nocodb-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: phpmyadmin-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: databases
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: databases
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-phpmyadmin-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: homepage-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: default
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: default
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-homepage-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: esphome-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: home-automation
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: home-automation
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-esphome-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: frigate-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: home-automation
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: home-automation
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-frigate-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: solarfocus-scraper-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: home-automation
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: home-automation
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-solarfocus-scraper-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: alertmanager-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: monitoring
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-alertmanager-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: prometheus-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: monitoring
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-prometheus-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: longhorn-ui-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: storage
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: storage
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-longhorn-forward-auth
