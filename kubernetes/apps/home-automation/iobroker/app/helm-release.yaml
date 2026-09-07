@@ -183,9 +183,13 @@ spec:
             protocol: TCP
             enabled: true
             port: 53388
+    # Envoy migration PHASE 3 — replaced by `route:` below on envoy-external
+    # (2026-09-07). Kept INERT as the rollback target until ingress-nginx is
+    # removed in phase 4. Do NOT re-enable while the route exists: two live
+    # records for one hostname make k8s-gateway resolution flap.
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: "external"
         annotations:
           gethomepage.dev/enabled: "true"
@@ -249,6 +253,63 @@ spec:
             # - "vis.${SECRET_DOMAIN}"
             # - "iobrokerapi.${SECRET_DOMAIN}"
             # - "lovelace.${SECRET_DOMAIN}"
+
+    # Envoy migration PHASE 3 — moved to envoy-external (2026-09-07).
+    #
+    # NO external-dns target annotation on the route, deliberately: with
+    # --source=gateway-httproute external-dns reads the target from the parent
+    # GATEWAY and silently ignores it on the route. It is already set on
+    # Gateway/envoy-external. (Proven 2026-09-07: putting it on a route took a
+    # hostname dark publicly.)
+    #
+    # NO SecurityPolicy. This app authenticates in-app and never had nginx
+    # forward-auth; ext-auth would add a second login in front of the app's own.
+    route:
+      main:
+        kind: HTTPRoute
+        hostnames:
+          - "iobroker.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-external
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "IoBroker"
+          gethomepage.dev/description: "IoBroker is an open-source home automation platform"
+          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/icon: "iobroker.png"
+        # Three paths on ONE hostname, exactly as the Ingress had them.
+        # Gateway API resolves by LONGEST path match, so /nodered and /vis win
+        # over / regardless of the order they are written in.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /nodered
+            backendRefs:
+              - identifier: main
+                port: nodered
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /vis
+            backendRefs:
+              - identifier: main
+                port: vis
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
     persistence:
       config-replicated:
         enabled: true
