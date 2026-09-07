@@ -1,0 +1,43 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/gateway.networking.k8s.io/httproute_v1.json
+# Envoy Gateway migration phase 2 (2026-09-07) — conversion shape B. Replaces
+# ingress.yaml, which is deleted in the SAME commit: k8s-gateway watches Ingress
+# AND HTTPRoute, so leaving both alive would publish two A records for this host
+# (.100 nginx and .103 envoy) resolving non-deterministically.
+#
+# SCOPE: the OTLP/HTTP receiver on 4318 only — exactly what the Ingress fronted.
+# The collector's OTLP/gRPC receiver on 4317 was never exposed through nginx and
+# is not exposed here either; gRPC needs a GRPCRoute, not an HTTPRoute, and that
+# is a separate design if it is ever wanted.
+#
+# The Ingress carried no annotations. The per-host tls: block is dropped because
+# Gateway API terminates TLS at the LISTENER and envoy-internal already presents
+# the wildcard *.${SECRET_DOMAIN} certificate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: edot-collector
+  namespace: monitoring
+  labels:
+    app: edot-collector
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "otlp.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: edot-collector
+          port: 4318

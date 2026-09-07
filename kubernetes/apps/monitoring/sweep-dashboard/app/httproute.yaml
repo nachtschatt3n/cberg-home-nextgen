@@ -1,0 +1,64 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/gateway.networking.k8s.io/httproute_v1.json
+# Envoy Gateway migration phase 2 (2026-09-07) — conversion shape B. Replaces
+# ingress.yaml, which is deleted in the SAME commit: k8s-gateway watches Ingress
+# AND HTTPRoute, so leaving both alive would publish two A records for this host
+# (.100 nginx and .103 envoy) resolving non-deterministically.
+#
+# LAN-only exposure is UNCHANGED. envoy-internal is the Gateway counterpart of
+# ingressClassName: internal — no Cloudflare tunnel, no public record. The
+# dashboard stays read-only via the sweep_reader role and reachable only on the
+# Trusted VLAN / tailnet, as before; no Authentik gating is added or removed.
+#
+# DROPPED deliberately: cert-manager.io/cluster-issuer and the per-host
+# `sweep-dashboard-tls` Secret. Gateway API terminates TLS at the LISTENER, not
+# per route, and the envoy-internal https listener already presents the wildcard
+# *.${SECRET_DOMAIN} certificate. The Secret is left in the cluster untouched so
+# `git revert` of this commit is a working rollback.
+#
+# Every gethomepage.dev annotation moves across verbatim, INCLUDING the customapi
+# widget mappings — Homepage runs gateway: true and ingress: true in parallel, so
+# the tile survives the migration as long as the annotations do.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sweep-dashboard
+  namespace: monitoring
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Sweep"
+    gethomepage.dev/description: "Daily sweep findings + history"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "mdi-clipboard-list-outline"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=sweep-dashboard"
+    # Live counts on the Homepage card — pulled from the dashboard's JSON API.
+    gethomepage.dev/widget.type: "customapi"
+    gethomepage.dev/widget.url: "http://sweep-dashboard.monitoring.svc.cluster.local/api/cycles/latest"
+    gethomepage.dev/widget.mappings.0.label: "Verdict"
+    gethomepage.dev/widget.mappings.0.field: "cycle.verdict"
+    gethomepage.dev/widget.mappings.1.label: "Open findings"
+    gethomepage.dev/widget.mappings.1.field: "findings"
+    gethomepage.dev/widget.mappings.1.format: "size"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "sweep.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: sweep-dashboard
+          port: 80

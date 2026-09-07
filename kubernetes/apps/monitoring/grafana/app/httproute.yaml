@@ -1,0 +1,53 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/gateway.networking.k8s.io/httproute_v1.json
+# Envoy Gateway migration phase 2 (2026-09-07) — conversion shape B.
+#
+# The upstream grafana chart (13.2.1) has no Gateway API support and no `route:`
+# values key, so the route is a standalone manifest rather than a HelmRelease
+# values block. The chart's `ingress.enabled` is flipped to false in the SAME
+# commit: the two must never coexist, because k8s-gateway watches Ingress AND
+# HTTPRoute and the host would end up with two records (.100 nginx, .103 envoy)
+# resolving at random between them.
+#
+# The `ingress:` block is left in the HelmRelease behind enabled: false rather
+# than deleted. It is the documented rollback target until phase 4 retires
+# nginx, and flipping the one flag restores the previous path exactly.
+#
+# Grafana's Ingress carried NO annotations at all — no Homepage tile, no nginx
+# tuning — so there is nothing to move across and nothing being dropped. The
+# per-host tls: block goes, because Gateway API terminates TLS at the LISTENER
+# and envoy-internal already presents the wildcard *.${SECRET_DOMAIN}
+# certificate.
+#
+# Grafana Live (dashboard streaming) uses a websocket on /api/live/ws. It rides
+# an HTTP/1.1 Upgrade, which Envoy passes through on a plain HTTPRoute; the
+# Ingress had no websocket annotation to carry over either.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "grafana.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        # The `grafana` Service, numeric port 80 (targetPort `grafana`).
+        # backendRef.port must be numeric — the Gateway API has no named-port
+        # form, unlike the Ingress backend this replaces.
+        - group: ""
+          kind: Service
+          name: grafana
+          port: 80

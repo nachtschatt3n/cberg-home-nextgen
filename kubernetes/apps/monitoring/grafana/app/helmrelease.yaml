@@ -362,8 +362,15 @@ spec:
       # Prometheus selects `release: kube-prometheus-stack`, so grafana has never
       # been scraped. That is fixed at the SELECTOR end, together with the 21
       # other unselected ServiceMonitors (F-0fa5b600) — not here.
+    # Envoy Gateway migration phase 2 (2026-09-07), conversion shape B.
+    # The grafana chart has no Gateway API support, so the route lives in
+    # ./httproute.yaml and this block is switched OFF -- not deleted. It is the
+    # documented rollback target until phase 4 retires nginx; flipping this one
+    # flag back to true restores the previous path exactly. The two must never
+    # be enabled at once: k8s-gateway watches Ingress AND HTTPRoute and the host
+    # would get two records (.100 nginx, .103 envoy) resolving at random.
     ingress:
-      enabled: true
+      enabled: false
       ingressClassName: internal
       annotations: {}
       hosts:
