@@ -93,8 +93,16 @@ spec:
           enabled: true
           port: 8088
 
+    # Envoy Gateway migration phase 2 (2026-09-07). The influxdb2 chart has no
+    # Gateway API support, so the route lives in httproute.yaml next to this
+    # file and the chart Ingress is switched off here, in the SAME commit --
+    # k8s-gateway watches both kinds and two live records (.100 nginx / .103
+    # envoy) resolve non-deterministically.
+    #
+    # The rest of the block is left intact but inert, deliberately: it is the
+    # rollback target until phase 4 retires nginx. Do not delete it yet.
     ingress:
-      enabled: true
+      enabled: false
       className: internal
       annotations:
         gethomepage.dev/enabled: "true"
@@ -111,7 +119,6 @@ spec:
       tls:
         - hosts:
             - *host
-
     ## Persist data to a persistent volume
     ##
     persistence:

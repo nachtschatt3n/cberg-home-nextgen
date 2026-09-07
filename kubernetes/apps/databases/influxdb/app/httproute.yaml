@@ -1,0 +1,58 @@
+---
+# Envoy Gateway migration phase 2 (2026-09-07). The influxdb2 chart has no
+# Gateway API support, so the route is hand-written here and the chart's
+# `ingress.enabled` is set to false in helmrelease.yaml in the SAME commit.
+# k8s-gateway watches Ingress AND HTTPRoute, so leaving both alive would publish
+# two A records for this host (.100 nginx / .103 envoy) and it would resolve
+# non-deterministically.
+#
+# Scope: the InfluxDB HTTP API / UI on service port `http` (8086) only. The RPC
+# port 8088 was never exposed through the Ingress and is untouched.
+#
+# DROPPED deliberately: the `tls:` block. Gateway API terminates TLS at the
+# LISTENER, not per route, and the envoy-internal https listener already
+# presents the wildcard *.${SECRET_DOMAIN} certificate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: influxdb
+  namespace: databases
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Influx DB"
+    gethomepage.dev/description: "InfluxDB is an open-source time series database"
+    gethomepage.dev/group: "Databases"
+    gethomepage.dev/icon: "influxdb.png"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/instance=influxdb"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only -- the http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "influx.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          # The chart names the Service <release>-<chart>. The Ingress this
+          # replaces referenced the backend by its NAMED port `http`;
+          # HTTPRoute backendRefs take a number, so it is resolved here.
+          #
+          # That number is 80, NOT 8086. The chart's `service.http.port: 8086`
+          # value above is rendered as the container targetPort -- the Service
+          # port itself is hardcoded to 80 by the chart. Verified live:
+          #   kubectl get svc -n databases influxdb-influxdb2
+          #   -> port 80 (name http) -> targetPort 8086
+          name: influxdb-influxdb2
+          port: 80
