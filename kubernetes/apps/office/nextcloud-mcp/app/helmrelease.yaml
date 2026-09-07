@@ -66,18 +66,32 @@ spec:
           http:
             port: *port
 
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 and .103) and it resolves non-deterministically.
+    route:
       main:
-        enabled: true
-        className: internal
-        hosts:
-          - host: nextcloud-mcp.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - nextcloud-mcp.${SECRET_DOMAIN}
+        kind: HTTPRoute
+        hostnames:
+          - "nextcloud-mcp.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        # Rule written out explicitly rather than relying on the chart default:
+        # the "rules may be omitted" shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a second
+        # one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http

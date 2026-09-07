@@ -24,16 +24,6 @@ spec:
       retries: 3
   uninstall:
     keepHistory: false
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Ingress
-              name: omni-tools
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
   values:
     controllers:
       main:
@@ -90,28 +80,46 @@ spec:
           http:
             port: *port
 
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 and .103) and it resolves non-deterministically.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "omni-tools.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Omni Tools"
           gethomepage.dev/group: "Office"
           gethomepage.dev/icon: "omni-tools.png"
           gethomepage.dev/description: "Multi-purpose toolkit for PDF, text, date, math, and data tools"
-        hosts:
-          - host: omni-tools.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - omni-tools.${SECRET_DOMAIN}
-
+        labels:
+          # Was applied by a postRenderers kustomize patch onto the rendered
+          # Ingress (that patch is removed in this commit -- with no Ingress it
+          # would match nothing and fail the render). route takes labels natively.
+          gethomepage.dev/enabled: "true"
+        # Rule written out explicitly rather than relying on the chart default:
+        # the "rules may be omitted" shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a second
+        # one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
     persistence:
       cache:
         type: emptyDir
