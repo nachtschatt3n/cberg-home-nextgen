@@ -1,0 +1,84 @@
+---
+# Envoy migration phase 2 — alertmanager off nginx.
+# Pattern + traps: docs/troubleshooting/envoy-phase2-conversion-pattern.md
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "alertmanager.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: kube-prometheus-stack-alertmanager
+          port: 9093
+---
+# Callback path — separate and MORE specific than `/`. Gateway API resolves by
+# longest match; folded into the app route the login callback would proxy to
+# the app itself and loop.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager-authentik-outpost
+  namespace: monitoring
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "alertmanager.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /outpost.goauthentik.io }
+      backendRefs:
+        # Real Service cross-namespace — never an ExternalName shim; Envoy
+        # resolves backends via EndpointSlices and ExternalName has none.
+        # Authorised by ReferenceGrant `alertmanager-outpost-access` in kube-system,
+        # which must cover BOTH HTTPRoute and SecurityPolicy.
+        - group: ""
+          kind: Service
+          name: ak-outpost-alertmanager-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: alertmanager-forward-auth
+  namespace: monitoring
+spec:
+  targetRefs:                     # app route ONLY, never the callback route
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: alertmanager
+  extAuth:
+    failOpen: false               # outpost down => deny, never publish
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-alertmanager-forward-auth
+          namespace: kube-system
+          port: 9000
+      path: /outpost.goauthentik.io/auth/envoy   # /auth/nginx 500s here
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

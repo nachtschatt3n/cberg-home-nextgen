@@ -34,10 +34,8 @@ resources:
   - ./pallet-price-monitor-alerts.yaml
   - ./gas-price-monitor-alerts.yaml
   - ./mosquitto-alerts.yaml
-  - ./prometheus-ingress.yaml
-  - ./prometheus-outpost-ingress.yaml
-  - ./alertmanager-ingress.yaml
-  - ./alertmanager-outpost-ingress.yaml
+  - ./prometheus-httproute.yaml
+  - ./alertmanager-httproute.yaml
   - ./memgraph-alerts.yaml
   - ./macos-apps-alerts.yaml
   - ./macos-scrapeconfigs.yaml
