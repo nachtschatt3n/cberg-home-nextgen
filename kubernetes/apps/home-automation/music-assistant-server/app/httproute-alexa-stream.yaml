@@ -1,0 +1,47 @@
+---
+# Envoy migration PHASE 3 — the Alexa audio-stream host.
+#
+# Attached to BOTH listeners, deliberately, which no other route here does.
+#
+# The Ingress carried ssl-redirect: false / force-ssl-redirect: false because
+# the Alexa dispatcher fetches the stream over plain HTTP. The cluster-wide
+# httproute-https-redirect owns the `http` listener and 301s everything — but
+# it carries NO hostname, and Gateway API ranks a route with an explicit
+# hostname above a hostname-less one. So attaching here with the hostname
+# spelled out preserves plain-HTTP delivery without touching the cluster-wide
+# redirect, which is what the annotation was for.
+#
+# The https listener is also attached because traffic arriving through the
+# Cloudflare tunnel is HTTPS regardless (the edge has Always Use HTTPS), so
+# that is the path that actually serves Amazon today.
+#
+# This host is called by a MACHINE with nobody watching. "No users today" does
+# not cover it — a silent break here looks exactly like the AR-049 Bot Fight
+# Mode incident, where Alexa dispatch failed with no human-visible symptom.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: music-assistant-alexa-stream
+  namespace: home-automation
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: http          # plain HTTP, no redirect — see above
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "music-stream.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: music-assistant-server
+          port: 8097

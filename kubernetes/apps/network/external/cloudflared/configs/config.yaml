@@ -4,32 +4,25 @@ originRequest:
 
 ingress:
   - hostname: "${SECRET_DOMAIN}"
-    service: http://external-ingress-nginx-controller.network.svc.cluster.local:80
-  # PHASE 3 CANARY (2026-09-07). Ordered rules: cloudflared matches top-down,
-  # so these per-hostname entries take precedence over the wildcard below while
-  # everything else still reaches nginx. This is what lets the cutover happen
-  # host-by-host with a revert measured in seconds.
+    service: https://envoy-external.network.svc.cluster.local:443
+    originRequest:
+      originServerName: "${SECRET_DOMAIN}"
+  # PHASE 3 WILDCARD FLIP (2026-09-07). Every external app now has an
+  # HTTPRoute on envoy-external, so the whole surface moves in one rule.
+  # Rollback is reverting this commit and restarting cloudflared: seconds.
   #
-  # Target is :443, NOT :80. The gateway's http listener is owned by the
-  # cluster-wide httproute-https-redirect which 301s every host to https — a
-  # plain-HTTP origin would send Cloudflare into a redirect loop.
-  # originServerName sets the TLS SNI so the gateway serves the wildcard cert
-  # and cloudflared can verify it; without it the handshake fails.
-  - hostname: "auth.${SECRET_DOMAIN}"
-    service: https://envoy-external.network.svc.cluster.local:443
-    originRequest:
-      originServerName: "auth.${SECRET_DOMAIN}"
-      http2Origin: true
-  - hostname: "drive.${SECRET_DOMAIN}"
-    service: https://envoy-external.network.svc.cluster.local:443
-    originRequest:
-      originServerName: "drive.${SECRET_DOMAIN}"
-      http2Origin: true
-      # Nextcloud moves large files and holds a WebSocket on /push. The route
-      # itself sets timeouts (300s for the app, none for /push); these keep
-      # cloudflared from being the shorter link in the chain.
-      connectTimeout: 30s
-      tcpKeepAlive: 30s
+  # :443 not :80 — the gateway's http listener is owned by the cluster-wide
+  # https-redirect route, so a plain-HTTP origin would loop.
+  #
+  # originServerName supplies the TLS SNI so the gateway serves the wildcard
+  # cert and cloudflared can verify it. It is a fixed name here rather than
+  # per-host because one wildcard cert covers every hostname.
+  #
+  # http2Origin is deliberately NOT set. WebSocket-over-HTTP/2 requires
+  # Extended CONNECT, which is not enabled on this gateway, and hass and the
+  # whiteboard both hold WebSockets. HTTP/1.1 to origin keeps Upgrade working.
   - hostname: "*.${SECRET_DOMAIN}"
-    service: http://external-ingress-nginx-controller.network.svc.cluster.local:80
+    service: https://envoy-external.network.svc.cluster.local:443
+    originRequest:
+      originServerName: "${SECRET_DOMAIN}"
   - service: http_status:404
