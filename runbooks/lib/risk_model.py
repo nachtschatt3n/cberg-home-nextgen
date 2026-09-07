@@ -504,9 +504,15 @@ def load_exposure_index() -> ExposureIndex:
     # external_unauth it would silently disable the only tier that pages.
     # Loud on stderr rather than a silent downgrade of every finding.
     if not (idx.external_unauth or idx.external_auth or idx.internal_apps):
-        print("risk_model: WARNING — exposure index is EMPTY "
-              f"(ingress={len(ing)} httproute={len(routes)}). Contextual tiers "
-              "cannot be computed; nothing can reach `critical`.", file=sys.stderr)
+        msg = ("risk_model: WARNING — exposure index is EMPTY "
+               f"(ingress={len(ing)} httproute={len(routes)}). Contextual tiers "
+               "cannot be computed; nothing can reach `critical`.")
+        # BOTH streams on purpose (F-62086b98). The first version of this guard
+        # wrote to stderr only, and sweep-run.py discards stderr — so a cycle
+        # ran with an empty index, recorded 16 HIGH findings as MEDIUM, and the
+        # warning was never seen. A guard nobody can read is not a guard.
+        print(msg, file=sys.stderr)
+        print(msg, flush=True)
     return idx
 
 

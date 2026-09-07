@@ -2905,13 +2905,16 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
             # matched `phpMyAdmin` and `.env` respectively. All 45 hits in the
             # 2026-09-07 sweep were that — zero were client requests.
             #
-            # Requiring `":path"` restricts matching to Envoy JSON ACCESS LOG
-            # entries, which is the only place a client-controlled string can
-            # appear. Diagnostic stdout has no such field, so it can no longer
-            # masquerade as an attack. If the access-log format ever changes,
-            # the control query below fails and the section reports BLIND
-            # rather than clean.
-            _wc('":path"'),
+            # The anchor is `x-envoy-origin-path`, NOT `:path`. Envoy Gateway's
+            # default JSON access log has no `:path` key — verified against a
+            # live log line, and measured over 24h in ns=network: `":path"`
+            # matched 0 documents while `"x-envoy-origin-path"` matched 5908.
+            # An earlier attempt at this fix used `":path"` and made the section
+            # report BLIND (honest, because the control carried the same anchor)
+            # but still measure nothing. Restricting to access-log entries is
+            # the point: diagnostic stdout has no such field and can no longer
+            # masquerade as an attack.
+            _wc('"x-envoy-origin-path"'),
             {"bool": {"should": [
                 _wc("../"),
                 _wc("etc/passwd"),
@@ -2919,7 +2922,11 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
                 _wc("<script"),
                 _wc("wp-login"),
                 _wc(".env"),
-                _wc("phpMyAdmin"),
+                # `phpMyAdmin` REMOVED as a needle. _wc() wildcards the whole
+                # JSON blob, and we HOST phpmyadmin.<domain> — so it matched our
+                # own `:authority` on every ordinary request to that app and can
+                # never be anything but a false positive here. Scanner traffic
+                # probing /phpmyadmin still trips the path-based needles below.
                 _wc("cmd.exe"),
                 _wc("/bin/sh"),
                 _wc("UNION SELECT"),
@@ -2944,7 +2951,7 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         # Control must carry the SAME anchor as the assertion, otherwise it
         # proves a different query than the one that returned zero.
         _ctl = _control_seen(es, [{"term": {"resource.attributes.k8s.namespace.name": "network"}},
-                                  _wc('":path"')],
+                                  _wc('"x-envoy-origin-path"')],
                              "GET", "now-24h")
         if _ctl == 0:
             f.add(WARNING, "Attack-pattern assertion did NOT run — control query matched nothing, "
