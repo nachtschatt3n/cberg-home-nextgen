@@ -202,3 +202,53 @@ spec:
     - group: ""
       kind: Service
       name: ak-outpost-longhorn-forward-auth
+
+# ---------------------------------------------------------------------------
+# ADDED 2026-09-07 after the original set proved incomplete. The first pass
+# screened for forward-auth apps by the nginx `auth-url` annotation, which
+# finds 6 apps — but 9 Authentik outpost Ingresses exist. The three the
+# annotation screen misses are arag-web, uptime-kuma and kubernetes-dashboard,
+# and because the grants were generated from that same screen, those three had
+# none. SCREEN ON THE OUTPOST, NOT THE ANNOTATION:
+#   kubectl get ingress -n kube-system | grep ak-outpost-
+#
+# kubernetes-dashboard is deliberately NOT granted: its outpost has no app
+# behind it at all (no Service, no Ingress outside the outpost's own). It is an
+# orphan squatting a hostname and should be deleted, not authorised.
+# ---------------------------------------------------------------------------
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: arag-web-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: office
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: office
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-arag-web-forward-auth
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: uptime-kuma-outpost-access
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: monitoring
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-uptime-kuma-forward-auth
