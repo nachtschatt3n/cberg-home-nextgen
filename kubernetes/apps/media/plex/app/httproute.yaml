@@ -6,12 +6,21 @@
 #
 # DROPPED, deliberately: external-dns.alpha.kubernetes.io/target. It was inert
 # on the Ingress it came from -- external-dns runs with --ingress-class=external
-# and this Ingress was class `internal`, so no public record was ever created
-# from it. It stays inert after the move for the mirror-image reason: the
+# and that Ingress was class `internal`, so it did not match the ingress source.
+# It stays inert after the move for the mirror-image reason: the
 # gateway-httproute source is fenced to --gateway-name=envoy-external, and this
 # route parents to envoy-internal. Carrying the annotation across would have
-# changed nothing except to imply a public record exists. Public exposure for
-# this host, if ever wanted, is a phase 3 envoy-external decision.
+# changed nothing except to imply a public record exists.
+#
+# Scope of that claim, narrowed after review: NO public record exists now, and
+# none has existed since ad8a46b1 (2025-04-20). Do NOT read it as "never".
+# Between b934c5e7 and ad8a46b1 (2025-04-07..04-20) this Ingress was class
+# `external` WITH this annotation, so external-dns did match it and would have
+# published a record; --policy=sync reaped it when the class flipped back,
+# which is consistent with today's NXDOMAIN and absent TXT ownership record.
+#
+# Public exposure for this host, if ever wanted, is a phase 3 envoy-external
+# decision -- and a deliberate one, not a leftover annotation.
 #
 # The plex Flux Kustomization sets targetNamespace: media, which rewrites
 # metadata.namespace here (intended). It does NOT rewrite parentRefs[].namespace,
