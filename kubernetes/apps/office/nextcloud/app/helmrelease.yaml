@@ -495,7 +495,21 @@ spec:
         cpu: 1000m
         memory: 1Gi
       limits:
-        memory: 2Gi
+        # 2Gi -> 3Gi on 2026-09-07 after an OOMKill at 09:15Z (1 restart, pod
+        # recovered on its own). The limit was the problem, not a leak:
+        #  - steady state is ~990 MiB, i.e. already AT the 1Gi request, so only
+        #    ~1Gi of the old limit was ever available as spike headroom;
+        #  - the 7d max_over_time of the working set is 1401 MiB and NEVER shows
+        #    2048. That is not evidence it stayed under the limit — cAdvisor
+        #    samples every 30s and the cgroup kills on memory.current the
+        #    instant it crosses. A PHP preview-generation / large-upload spike
+        #    allocates hundreds of MiB in seconds and dies BETWEEN scrapes, so
+        #    the metric can never witness the event that killed the pod. Do not
+        #    "verify" this class of OOM from a working-set graph.
+        # The REQUEST is deliberately left at 1Gi: scheduling pressure is
+        # unchanged, and only the burst ceiling moves (1401 MiB peak now has
+        # ~1.6Gi of headroom instead of ~0.6Gi).
+        memory: 3Gi
 
     livenessProbe:
       enabled: true
