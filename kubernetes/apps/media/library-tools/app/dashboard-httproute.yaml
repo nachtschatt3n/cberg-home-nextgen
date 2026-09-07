@@ -1,0 +1,44 @@
+---
+# Envoy Gateway migration phase 2 (2026-09-07): replaces dashboard-ingress.yaml,
+# which was deleted in the SAME commit. k8s-gateway watches Ingress AND
+# HTTPRoute, so keeping both alive would publish two A records (.100 and .103)
+# for this host and it would resolve non-deterministically.
+#
+# The library-tools Flux Kustomization sets targetNamespace: media, which
+# rewrites metadata.namespace here -- that is correct and intended. It does NOT
+# rewrite parentRefs[].namespace, so the cross-namespace reference to the
+# Gateway in `network` survives (same shape as the headlamp phase 1 pilot).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: media-dashboard
+  namespace: media
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Media Dashboard"
+    gethomepage.dev/description: "Audit + intake + Plex/Jellyfin rescan triggers"
+    gethomepage.dev/group: "Media"
+    gethomepage.dev/icon: "mdi-folder-cog"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      # https only -- the http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "media-dashboard.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: media-dashboard
+          port: 80
