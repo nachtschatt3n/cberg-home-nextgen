@@ -1,0 +1,50 @@
+---
+# Envoy migration PHASE 3 — n8n onto envoy-external.
+#
+# Shape B: the n8n chart has no `route:` values key, so the route is a
+# standalone manifest and the chart's own ingress is disabled in the
+# HelmRelease (same commit — leaving both alive gives k8s-gateway two records
+# for one hostname).
+#
+# NO external-dns target annotation here, deliberately: with
+# --source=gateway-httproute external-dns reads the target from the parent
+# GATEWAY and silently ignores it on the route. It is already set on
+# Gateway/envoy-external. (Proven 2026-09-07: putting it on a route took a
+# hostname dark publicly.)
+#
+# NO SecurityPolicy. n8n authenticates in-app (owner account) and never had
+# nginx forward-auth; ext-auth would add a second login in front of its own.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: n8n
+  namespace: home-automation
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "n8n"
+    gethomepage.dev/description: "Workflow automation platform"
+    gethomepage.dev/group: "Home Automation"
+    gethomepage.dev/icon: "n8n.png"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "n8n.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: n8n
+          port: 5678
