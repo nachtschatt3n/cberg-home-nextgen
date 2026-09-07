@@ -1,0 +1,46 @@
+---
+# Envoy migration PHASE 3 — music-api onto envoy-external.
+#
+# Direct replacement for ingress-alexa-api.yaml (removed in the same commit —
+# leaving both alive gives k8s-gateway two records for one hostname). The old
+# Ingress carried exactly one annotation, the external-dns target, and nothing
+# behavioural: no timeouts, no body size, no websocket, no rewrites.
+#
+# NO external-dns target annotation here, deliberately: with
+# --source=gateway-httproute external-dns reads the target from the parent
+# GATEWAY and silently ignores it on the route. It is already set on
+# Gateway/envoy-external. (Proven 2026-09-07: putting it on a route took a
+# hostname dark publicly.)
+#
+# NO SecurityPolicy. This host is the Alexa skill's API endpoint, called by
+# Amazon's dispatcher — it never had nginx forward-auth and must not gain an
+# interactive login.
+#
+# Routing surface ONLY. music-assistant-server is a hostNetwork workload with
+# an RWO Longhorn PVC; nothing about the HelmRelease is touched here.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: music-assistant-alexa-api
+  namespace: home-automation
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      # https only. The http listener is owned cluster-wide by
+      # httproute-https-redirect, which 301s every host.
+      sectionName: https
+  hostnames:
+    - "music-api.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: music-assistant-server
+          port: 5000
