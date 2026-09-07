@@ -20,7 +20,33 @@ spec:
     type: Kubernetes
     kubernetes:
       envoyDeployment:
-        replicas: 1
+        # 3 replicas, one per node. Was 1 until 2026-09-07: on that morning a
+        # single-replica ingress controller going down with its node took every
+        # internal hostname to NXDOMAIN for ~6 min (F-f2b89d20). Envoy had the
+        # identical topology, so the cutover would have moved that SPOF rather
+        # than removed it.
+        replicas: 3
+        pod:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              # DoNotSchedule, not ScheduleAnyway: during a node outage the
+              # replacement must stay Pending rather than double up on a
+              # surviving node and give us fake redundancy.
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/managed-by: envoy-gateway
+                  app.kubernetes.io/component: proxy
+              # This EnvoyProxy is shared by BOTH gateways via the GatewayClass
+              # parametersRef, and both deployments' pods carry the same
+              # managed-by/component labels. Without matchLabelKeys the skew
+              # would be computed across all 6 pods as ONE group, which permits
+              # 2 envoy-internal on one node and 0 on another - the exact
+              # concentration this constraint exists to prevent. Keying on the
+              # owning gateway makes each gateway spread independently.
+              matchLabelKeys:
+                - gateway.envoyproxy.io/owning-gateway-name
         container:
           resources:
             requests:
@@ -28,6 +54,11 @@ spec:
               memory: 128Mi
             limits:
               memory: 1Gi
+      # Native in EG 1.9.x (provider.kubernetes.envoyPDB). minAvailable 2 of 3
+      # so a node drain - including the Talos v1.14.0 roll - can never take the
+      # data plane below 2.
+      envoyPDB:
+        minAvailable: 2
       envoyService:
         # Matches the ingress-nginx controllers we run today: Cilium answers
         # the VIP via L2, and real client IP comes from XFF/CF-Connecting-IP
