@@ -1,0 +1,133 @@
+---
+# PILOT B of the Envoy Gateway migration (phase 1), 2026-09-07.
+# This is the load-bearing pilot: it proves forward-auth works on Envoy. If it
+# fails, the documented decision is the Traefik fallback and nginx stays.
+#
+# The nginx form this replaces was four annotations on one Ingress
+# (auth-url / auth-signin / auth-response-headers / auth-snippet) plus a second
+# Ingress for the /outpost.goauthentik.io callback path. Gateway API has no
+# annotation equivalent, so the same behaviour is expressed as: two HTTPRoutes,
+# a ReferenceGrant for the cross-namespace outpost backend, and a SecurityPolicy
+# carrying the ext-auth config.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: headlamp
+  namespace: monitoring
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Headlamp"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "headlamp.png"
+    gethomepage.dev/description: "Kubernetes cluster dashboard"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https        # http listener belongs to httproute-https-redirect
+  hostnames:
+    - "headlamp.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: headlamp
+          port: 80
+---
+# The outpost callback path. MUST be a separate route with a MORE SPECIFIC
+# path than the app route above: Gateway API resolves conflicts by longest
+# path match, so /outpost.goauthentik.io wins over / without needing explicit
+# ordering. Fold it into the app route and the login callback would be
+# proxied to headlamp itself, which is a redirect loop.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: headlamp-authentik-outpost
+  namespace: monitoring
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "headlamp.${SECRET_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /outpost.goauthentik.io
+      backendRefs:
+        # Direct cross-namespace ref, NOT the ExternalName service that served
+        # the nginx form. Envoy Gateway resolves backends via EndpointSlices and
+        # an ExternalName Service has none, so it cannot be used as a backendRef.
+        # This is why the ReferenceGrant below is required.
+        - group: ""
+          kind: Service
+          name: ak-outpost-headlamp-forward-auth
+          namespace: kube-system
+          port: 9000
+---
+# Cross-namespace backendRefs are DENIED by default in Gateway API. Without
+# this the route above reports ResolvedRefs=False/RefNotPermitted and silently
+# serves 500s — it does not fail loudly at apply time.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: headlamp-outpost-from-monitoring
+  namespace: kube-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: monitoring
+  to:
+    - group: ""
+      kind: Service
+      name: ak-outpost-headlamp-forward-auth
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: headlamp-forward-auth
+  namespace: monitoring
+spec:
+  # Targets ONLY the app route. Targeting the outpost route too would make the
+  # callback path require the auth it is trying to establish.
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: headlamp
+  extAuth:
+    # failOpen: false — an outpost outage must deny access, never silently
+    # publish an authenticated-only dashboard to anyone who asks.
+    failOpen: false
+    http:
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ak-outpost-headlamp-forward-auth
+          namespace: kube-system
+          port: 9000
+      # /auth/envoy, NOT /auth/nginx. The nginx endpoint returns 401 with
+      # headers the nginx auth_request module understands; the envoy endpoint
+      # speaks the ext_authz contract. Pointing at the nginx path is the most
+      # likely way to get a confusing half-working login.
+      path: /outpost.goauthentik.io/auth/envoy
+      # Same header list the nginx auth-response-headers annotation carried.
+      headersToBackend:
+        - Set-Cookie
+        - X-authentik-username
+        - X-authentik-groups
+        - X-authentik-email
+        - X-authentik-name
+        - X-authentik-uid

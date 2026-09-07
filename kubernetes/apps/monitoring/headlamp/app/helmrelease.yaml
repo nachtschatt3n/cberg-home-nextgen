@@ -65,7 +65,16 @@ spec:
             source: https://artifacthub.io/packages/headlamp/headlamp-plugins/headlamp_ai_assistant
 
     ingress:
-      enabled: true
+      # Replaced by httproute.yaml (Envoy Gateway migration phase 1, pilot B,
+      # 2026-09-07). The chart has no Gateway API support, so the routes,
+      # ReferenceGrant and ext-auth SecurityPolicy are declared directly there.
+      # The whole annotation block below is intentionally left in place but
+      # INERT while enabled is false: it is the nginx forward-auth form, kept
+      # as the rollback target until phase 4 deletes ingress-nginx. Do not
+      # delete it before then, and do not re-enable it without also removing
+      # the HTTPRoute — two live routes for one host give k8s-gateway two
+      # records and the host resolves non-deterministically.
+      enabled: false
       ingressClassName: internal
       annotations:
         gethomepage.dev/enabled: "true"
