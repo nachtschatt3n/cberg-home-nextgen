@@ -86,9 +86,13 @@ spec:
         ports:
           http:
             port: 80
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # The nginx Ingress below is kept disabled as the rollback target until
+    # phase 4 removes nginx; re-enabling it (and deleting `route:`) restores
+    # the old path within one 60s DNS TTL.
     ingress:
       main:
-        enabled: true
+        enabled: false
         className: internal
         annotations:
           gethomepage.dev/enabled: "true"
@@ -109,6 +113,27 @@ spec:
         tls:
           - hosts:
               - *host
+    route:
+      main:
+        kind: HTTPRoute
+        hostnames:
+          - *host
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only -- the http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/name: "Andrea Mosteller Dev"
+          gethomepage.dev/description: "Development preview of andreamosteller.com"
+          gethomepage.dev/group: "Software Development"
+          gethomepage.dev/icon: "mdi-web"
     persistence:
       cache:
         type: emptyDir
