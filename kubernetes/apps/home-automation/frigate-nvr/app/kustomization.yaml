@@ -6,7 +6,6 @@ resources:
   - ./storageclass.yaml
   - ./helmrelease.yaml
   - ./restart-cronjob.yaml
-  - ./ingress.yaml
-  - ./authentik-outpost-ingress.yaml
+  - ./httproute.yaml
   - ./configmap.sops.yaml
   - ./secret.sops.yaml
