@@ -51,6 +51,7 @@ that way.
 from __future__ import annotations
 
 import json
+import sys
 import os
 import re
 import subprocess
@@ -347,11 +348,25 @@ def _token_matches(token: str, pool: set[str]) -> bool:
     return False
 
 
-def build_exposure_index(ingress_items: list[dict], svc_items: list[dict] | None = None) -> ExposureIndex:
-    """Pure builder: cluster ingress/service JSON items → ExposureIndex.
+def build_exposure_index(ingress_items: list[dict], svc_items: list[dict] | None = None,
+                        route_items: list[dict] | None = None,
+                        secpolicy_items: list[dict] | None = None) -> ExposureIndex:
+    """Pure builder: cluster ingress/HTTPRoute/service JSON items → ExposureIndex.
 
-    Mirrors s8_external_exposure's `ingressClassName == "external"` enumeration
-    and adds the AR-059 posture step (outpost-backed root path = gated).
+    Ingress enumeration is kept for the case where one is reintroduced, but as
+    of the 2026-09-07 Envoy Gateway migration the cluster has ZERO Ingress
+    objects and every app is an HTTPRoute — so the Ingress pass alone returned
+    an entirely empty index. That silently disabled the whole contextual model:
+    `critical` requires external_unauth, so with an empty index NOTHING could
+    reach the tier that pages, and every internet-facing app scored as
+    internal. The routing layer changed underneath a detector that keyed on the
+    old kind (F-ee6213cb).
+
+    Exposure now comes from the parent Gateway: a route attached to
+    `envoy-external` is externally reachable, one attached to `envoy-internal`
+    is not. Gating comes from either an ext-auth SecurityPolicy targeting the
+    route, or an outpost-backed rule (Authentik proxy mode, where the outpost
+    itself fronts the app).
     """
     idx = ExposureIndex()
 
@@ -410,6 +425,54 @@ def build_exposure_index(ingress_items: list[dict], svc_items: list[dict] | None
                 if svc:
                     idx.internal_apps.add(_strip_outpost(svc).lower())
 
+    # ---- HTTPRoute pass (the live routing kind since 2026-09-07) ----------
+    routes = route_items or []
+    secpolicies = secpolicy_items or []
+
+    # Which route names carry an ext-auth SecurityPolicy? Those apps are gated.
+    gated_routes: set[tuple[str, str]] = set()
+    for sp in secpolicies:
+        if not (sp.get("spec", {}) or {}).get("extAuth"):
+            continue
+        ns = (sp.get("metadata", {}) or {}).get("namespace", "")
+        for tr in ((sp.get("spec", {}) or {}).get("targetRefs") or []):
+            if tr.get("kind") == "HTTPRoute" and tr.get("name"):
+                gated_routes.add((ns, tr["name"]))
+
+    for rt in routes:
+        meta = rt.get("metadata", {}) or {}
+        spec = rt.get("spec", {}) or {}
+        ns, name = meta.get("namespace", ""), (meta.get("name", "") or "").lower()
+        parents = {(p.get("name") or "") for p in (spec.get("parentRefs") or [])}
+        is_external = "envoy-external" in parents
+
+        tokens = {name} if name else set()
+        outpost_backed = False
+        for rule in (spec.get("rules") or []):
+            for b in (rule.get("backendRefs") or []):
+                svc = (b.get("name") or "")
+                if not svc:
+                    continue
+                if _OUTPOST_SVC_RE.search(svc):
+                    outpost_backed = True
+                tokens.add(_strip_outpost(svc).lower())
+
+        # Plumbing routes are not apps and must not enter the exposure pools:
+        # the …-authentik-outpost callback, and the cluster-wide https-redirect
+        # (which carries no hostname and only 301s). Counting them inflates the
+        # external-unauth pool with things that have no attack surface.
+        _PLUMBING = {"https-redirect", "dns-canary"}
+        tokens = {t for t in tokens
+                  if t and not t.endswith("-authentik-outpost") and t not in _PLUMBING}
+        if not tokens:
+            continue
+
+        gated = (ns, meta.get("name", "")) in gated_routes or outpost_backed
+        if is_external:
+            (idx.external_auth if gated else idx.external_unauth).update(tokens)
+        else:
+            idx.internal_apps |= tokens
+
     # Don't let an app appear in both external and internal pools; external wins.
     idx.internal_apps -= (idx.external_auth | idx.external_unauth)
     return idx
@@ -427,7 +490,24 @@ def load_exposure_index() -> ExposureIndex:
         svc = _kubectl_json(["get", "svc", "-A"]).get("items", [])
     except Exception:
         svc = []
-    return build_exposure_index(ing, svc)
+    try:
+        routes = _kubectl_json(["get", "httproute", "-A"]).get("items", [])
+    except Exception:
+        routes = []
+    try:
+        sps = _kubectl_json(["get", "securitypolicy", "-A"]).get("items", [])
+    except Exception:
+        sps = []
+    idx = build_exposure_index(ing, svc, routes, sps)
+    # BLINDNESS GUARD. An empty index is not "nothing is exposed" — it is a
+    # detector that enumerated nothing, and because `critical` requires
+    # external_unauth it would silently disable the only tier that pages.
+    # Loud on stderr rather than a silent downgrade of every finding.
+    if not (idx.external_unauth or idx.external_auth or idx.internal_apps):
+        print("risk_model: WARNING — exposure index is EMPTY "
+              f"(ingress={len(ing)} httproute={len(routes)}). Contextual tiers "
+              "cannot be computed; nothing can reach `critical`.", file=sys.stderr)
+    return idx
 
 
 # ---------------------------------------------------------------------------
