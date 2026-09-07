@@ -50,25 +50,43 @@ spec:
         ports:
           http:
             port: 10000
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "trmnl-ha.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "TRMNL HA"
           gethomepage.dev/description: "Home Assistant screenshots for TRMNL e-ink display"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "trmnl.png"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "trmnl-ha.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                service:
-                  identifier: app
-                  port: http
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: app
+                port: http
     persistence:
       data:
         enabled: true

@@ -62,10 +62,39 @@ spec:
         ports:
           http:
             port: 8080
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    #
+    # DROPPED: external-dns.alpha.kubernetes.io/hostname. It was already inert
+    # on this object -- external-dns runs with --ingress-class=external and this
+    # Ingress was class `internal`, and there is in fact no public record for
+    # the host (verified against 1.1.1.1: NXDOMAIN, no k8s. TXT registry entry).
+    # Carrying it onto an HTTPRoute would be worse than inert: external-dns also
+    # runs --source=gateway-httproute, and the only thing keeping it from
+    # publishing this route is the --gateway-name=envoy-external filter. One
+    # flag change away, that annotation would put a PRIVATE address (the
+    # envoy-internal LB, 192.168.55.103) into public Cloudflare DNS. Removing it
+    # keeps today's behaviour identical and removes the latent hazard.
+    #
+    # pathType ImplementationSpecific becomes PathPrefix "/" -- on a bare "/"
+    # nginx already treated it as a prefix match. The frontend's websocket rides
+    # HTTP/1.1 Upgrade, which Envoy passes through; no websocket annotation
+    # existed here to carry over.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "zigbee2mqtt.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
         labels:
           gethomepage.dev/enabled: "true"
         annotations:
@@ -74,15 +103,18 @@ spec:
           gethomepage.dev/description: "Zigbee to MQTT bridge"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "zigbee2mqtt.png"
-          external-dns.alpha.kubernetes.io/hostname: zigbee2mqtt.${SECRET_DOMAIN}
-        hosts:
-          - host: "zigbee2mqtt.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: ImplementationSpecific
-                service:
-                  name: zigbee2mqtt
-                  port: 8080
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
     persistence:
       data:
         enabled: true

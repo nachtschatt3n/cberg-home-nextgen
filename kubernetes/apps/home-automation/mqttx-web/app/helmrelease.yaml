@@ -21,16 +21,6 @@ spec:
     remediation:
       strategy: rollback
       retries: 3
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Ingress
-              name: mqttx-web
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
   values:
     controllers:
       mqttx-web:
@@ -57,20 +47,48 @@ spec:
         ports:
           http:
             port: 80
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    #
+    # The postRenderers block that used to sit above is REMOVED, not retargeted.
+    # It existed solely to bolt gethomepage.dev/enabled onto the RENDERED
+    # Ingress, because the ingress values here carried no labels: key. With no
+    # Ingress rendered its target matches nothing, and a kustomize patch that
+    # matches nothing fails the WHOLE post-render -- the HelmRelease would stop
+    # installing. app-template's route object takes labels natively, so the
+    # workaround has no reason to exist any more.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "mqtt-web.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "MQTTX Web"
           gethomepage.dev/description: "Web-based MQTT 5.0 client tool"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "mqtt.png"
-        hosts:
-          - host: "mqtt-web.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                service:
-                  identifier: app
-                  port: http
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: app
+                port: http

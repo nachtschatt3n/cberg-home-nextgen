@@ -53,26 +53,50 @@ spec:
         ports:
           http:
             port: 1880
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    #
+    # pathType ImplementationSpecific becomes PathPrefix "/". Under nginx,
+    # ImplementationSpecific on a bare "/" already behaved as a prefix match,
+    # so this is the same routing, spelled in the only vocabulary the Gateway
+    # API has. Node-RED's editor websocket (/comms) rides HTTP/1.1 Upgrade,
+    # which Envoy passes through on a plain HTTPRoute -- no annotation existed
+    # here to carry over.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "node.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Node-RED"
           gethomepage.dev/description: "Flow-based programming tool for wiring together hardware devices, APIs and online services"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "node-red.png"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "node.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: ImplementationSpecific
-                service:
-                  name: node-red
-                  port: 1880
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
     persistence:
       data:
         enabled: true

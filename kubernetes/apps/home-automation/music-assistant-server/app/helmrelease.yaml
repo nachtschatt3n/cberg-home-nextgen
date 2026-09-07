@@ -108,29 +108,62 @@ spec:
           alexa-skill:
             port: 5000
             targetPort: 5000
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    #
+    # SCOPE: this converts the internal WEB UI host (music.${SECRET_DOMAIN})
+    # ONLY. The two Alexa ingresses -- ingress-alexa-api.yaml and
+    # ingress-alexa-stream.yaml -- are external-class and are NOT touched here.
+    # The Alexa stream path is load-bearing and fragile (MA publishes
+    # http://music-stream.<domain>:80 with no separate publish_port, and the
+    # skill rewrites to https), so it stays on nginx until phase 3 designs it.
+    #
+    # ROUTING ONLY. The controller is hostNetwork; its pod spec, ports and the
+    # LoadBalancer Service on 192.168.55.29 are unchanged. MASS_SERVER_URL still
+    # points at https://music.${SECRET_DOMAIN}, which now terminates on Envoy.
+    #
+    # The per-host tls: block is dropped: Gateway API terminates TLS at the
+    # LISTENER, and envoy-internal's https listener already presents the
+    # wildcard *.${SECRET_DOMAIN} certificate.
+    #
+    # MA's web UI is websocket-heavy, but this Ingress carried NO nginx
+    # websocket or timeout annotation, so nothing is being silently dropped --
+    # Envoy passes HTTP/1.1 Upgrade through on a plain HTTPRoute.
+    route:
       main:
-        enabled: true
-        className: internal
+        kind: HTTPRoute
+        hostnames:
+          - "music.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Music Assistant"
           gethomepage.dev/description: "Music for Home Assistant"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "music-assistant.png"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "music.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - "music.${SECRET_DOMAIN}"
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: http
     persistence:
       data:
         enabled: true

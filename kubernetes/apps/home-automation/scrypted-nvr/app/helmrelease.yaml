@@ -85,25 +85,52 @@ spec:
             enabled: true
             port: 11080
             targetPort: 11080
-    ingress:
+    # Envoy Gateway migration phase 2 (2026-09-07): Ingress -> HTTPRoute.
+    # Both halves in ONE commit -- k8s-gateway watches Ingress AND HTTPRoute,
+    # so leaving the Ingress alongside the route gives this host two records
+    # (.100 nginx and .103 envoy) and it resolves non-deterministically.
+    #
+    # This Ingress carried no className at all and so landed on the cluster
+    # DEFAULT class, which is `internal` -- i.e. it was an internal-class
+    # Ingress by default rather than by declaration. The route makes the target
+    # explicit instead of implicit.
+    #
+    # The `main` Service stays type LoadBalancer on 192.168.55.26. Scrypted's
+    # own LAN clients (HomeKit/rebroadcast) reach it on that IP directly and are
+    # untouched by this change; only the hostname path moves to Envoy.
+    route:
       scrypted:
-        enabled: true
+        kind: HTTPRoute
+        hostnames:
+          - "scrypted.${SECRET_DOMAIN}"
+        parentRefs:
+          - group: gateway.networking.k8s.io
+            kind: Gateway
+            name: envoy-internal
+            namespace: network
+            # https only. The http listener is owned cluster-wide by
+            # httproute-https-redirect, which 301s every host.
+            sectionName: https
+        labels:
+          gethomepage.dev/enabled: "true"
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/name: "Scrypted"
           gethomepage.dev/description: "Scrypted is a home automation platform that supports various camera and device integrations"
           gethomepage.dev/group: "Home Automation"
           gethomepage.dev/icon: "scrypted.png"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "scrypted.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: scrypted
-                  port: 11080
+        # Rule written out explicitly rather than relying on the chart's
+        # single-Service default: that shortcut only holds while exactly one
+        # Service is enabled, and _validate.tpl hard-fails the moment a
+        # second one appears.
+        rules:
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /
+            backendRefs:
+              - identifier: main
+                port: web
     persistence:
       data:
         enabled: true
