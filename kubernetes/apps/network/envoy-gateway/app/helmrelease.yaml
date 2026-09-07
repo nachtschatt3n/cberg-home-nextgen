@@ -55,6 +55,19 @@ spec:
               # Data-plane Envoy Deployment/Service land in the SAME namespace
               # as the Gateway (network), not in the EG control-plane namespace.
               type: GatewayNamespace
+        extensionApis:
+          # Required for the Backend resource (2026-09-07). It is an OPT-IN
+          # extension API: without this, a route referencing a Backend reports
+          # ResolvedRefs=False "Backend is disabled in Envoy Gateway
+          # configuration" and serves 500 — it does not fail at apply time.
+          #
+          # Needed because wazuh-dashboard's backend speaks TLS with a cert that
+          # has NO subjectAltName (CN=wazuh-dashboard only), so hostname
+          # validation is impossible and Gateway API's BackendTLSPolicy — which
+          # requires a hostname and offers no insecureSkipVerify — cannot
+          # express it. EG's Backend can, via tls.insecureSkipVerify, matching
+          # what the nginx Ingress did with proxy-ssl-verify: off.
+          enableBackend: true
         logging:
           level:
             default: info
