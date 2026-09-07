@@ -28,9 +28,14 @@ spec:
   dependsOn:
     - name: sure-pg
     - name: sure-redis
-  # Post-render patch: the Sure chart hard-codes ingress metadata.labels
-  # and doesn't expose a values pass-through, so we inject the Homepage
-  # discovery label here (doc-check.py enforces both annotation + label).
+  # Post-render patch: the Sure chart only exposes a fixed db-migrate
+  # initContainer, so we inject wait-for-pg / wait-for-redis via
+  # strategic-merge patches on the rendered Deployments.
+  #
+  # The Ingress label patch that used to head this list is GONE as of the
+  # Envoy Gateway phase 2 conversion: the chart no longer renders an Ingress,
+  # and a kustomize patch whose target matches nothing fails the whole
+  # post-render. The Homepage label now lives on httproute.yaml instead.
   # Same chart limitation applies to extraInitContainers — the chart only
   # exposes a fixed db-migrate initContainer, so we inject wait-for-pg /
   # wait-for-redis via strategic-merge patches on the rendered Deployments.
@@ -38,13 +43,6 @@ spec:
   postRenderers:
     - kustomize:
         patches:
-          - target:
-              kind: Ingress
-              name: sure
-            patch: |
-              - op: add
-                path: /metadata/labels/gethomepage.dev~1enabled
-                value: "true"
           - target:
               kind: Deployment
               name: sure-web
@@ -466,9 +464,20 @@ spec:
                   app.kubernetes.io/component: web
               topologyKey: kubernetes.io/hostname
 
-    # ---------------- Ingress (internal, Homepage-registered) ----------------
+    # ---------------- Ingress: RETIRED, kept as the rollback target ----------
+    # Envoy Gateway migration phase 2 (2026-09-07). This host is now served by
+    # ./httproute.yaml on the envoy-internal Gateway. The Sure chart has no
+    # Gateway API support, so the route is a standalone manifest rather than a
+    # values key (conversion shape B).
+    #
+    # The block below is deliberately left in place behind `enabled: false`
+    # until phase 4 retires nginx: it is the documented rollback target, and
+    # flipping this one flag back to true restores the old path exactly.
+    # The Ingress and the HTTPRoute must never both exist -- k8s-gateway
+    # watches both kinds and the host would get two records, .100 and .103,
+    # resolving non-deterministically.
     ingress:
-      enabled: true
+      enabled: false
       className: internal
       annotations:
         gethomepage.dev/enabled: "true"
