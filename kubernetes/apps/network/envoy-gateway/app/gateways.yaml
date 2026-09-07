@@ -37,6 +37,23 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: envoy-external
+  annotations:
+    # REQUIRED for phase 3, and the route-level equivalent does NOT work.
+    #
+    # external-dns runs --source=gateway-httproute with --cloudflare-proxied.
+    # For that source it derives each HTTPRoute record target from the PARENT
+    # GATEWAY, not from the route: an
+    # external-dns.alpha.kubernetes.io/target annotation on the HTTPRoute
+    # itself is ignored. Proven the hard way on 2026-09-07 - the authentik
+    # canary carried that annotation verbatim and external-dns still tried to
+    # publish auth as an A record to 192.168.55.104, which Cloudflare refuses
+    # as a private target for a proxied record. The CNAME had already been
+    # withdrawn with the Ingress, so the hostname went dark publicly until the
+    # commit was reverted.
+    #
+    # Set here, every route attached to this Gateway publishes a CNAME to the
+    # tunnel hostname - exactly what the Ingresses did.
+    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
 spec:
   gatewayClassName: envoy
   infrastructure:

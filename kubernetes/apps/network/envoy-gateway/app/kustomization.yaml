@@ -9,4 +9,5 @@ resources:
   - ./gateways.yaml
   - ./policies.yaml
   - ./httproute-https-redirect.yaml
+  - ./httproute-dns-canary.yaml
   - ./podmonitor.yaml
