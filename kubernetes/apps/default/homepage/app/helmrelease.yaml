@@ -198,10 +198,10 @@ spec:
       kubernetes:
         # change mode to 'cluster' to use RBAC service account
         mode: cluster
-        ingress: true
-        # Enabled during the Envoy Gateway migration so HTTPRoute-backed apps
-        # keep their dashboard entry as they move off Ingress. Both are on
-        # during the parallel run.
+        # `ingress` dropped 2026-09-08: the parallel run is over and the
+        # cluster holds zero Ingress objects, so this source discovers nothing.
+        # Dashboard entries now come entirely from HTTPRoute annotations.
+        ingress: false
         gateway: true
         services: true
         pods: true
