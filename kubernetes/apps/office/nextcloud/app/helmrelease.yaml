@@ -34,53 +34,6 @@ spec:
       tag: 34.0.3
       pullPolicy: IfNotPresent
     replicaCount: 1
-    ingress:
-        # Replaced by httproute.yaml on envoy-external (phase 3 canary #2,
-        # 2026-09-07). Block kept INERT as the rollback target until
-        # ingress-nginx is removed in phase 4. Do not re-enable without
-        # removing the HTTPRoute: two live routes for one host give
-        # k8s-gateway two records and resolution flaps.
-        enabled: false
-        className: external
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Nextcloud"
-          gethomepage.dev/description: "Self-hosted file sharing and collaboration platform"
-          gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "nextcloud.png"
-          gethomepage.dev/pod-selector: "app.kubernetes.io/component=app"
-          nginx.ingress.kubernetes.io/proxy-body-size: "4G"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-          nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
-          nginx.ingress.kubernetes.io/proxy-buffering: "off"
-          nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-          nginx.ingress.kubernetes.io/websocket-services: "nextcloud"
-          nginx.ingress.kubernetes.io/ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-          nginx.ingress.kubernetes.io/configuration-snippet: |
-            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-            add_header X-Content-Type-Options "nosniff" always;
-            add_header X-Frame-Options "SAMEORIGIN" always;
-            add_header X-XSS-Protection "1; mode=block" always;
-            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "drive.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                backend:
-                  service:
-                    name: main
-                    port:
-                      number: http
-        tls:
-          - secretName: nextcloud-tls
-            hosts:
-              - "drive.${SECRET_DOMAIN}"
     nextcloud:
       host: drive.${SECRET_DOMAIN}
       existingSecret:

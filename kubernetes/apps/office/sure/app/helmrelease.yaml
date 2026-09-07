@@ -463,35 +463,3 @@ spec:
                   app.kubernetes.io/instance: sure
                   app.kubernetes.io/component: web
               topologyKey: kubernetes.io/hostname
-
-    # ---------------- Ingress: RETIRED, kept as the rollback target ----------
-    # Envoy Gateway migration phase 2 (2026-09-07). This host is now served by
-    # ./httproute.yaml on the envoy-internal Gateway. The Sure chart has no
-    # Gateway API support, so the route is a standalone manifest rather than a
-    # values key (conversion shape B).
-    #
-    # The block below is deliberately left in place behind `enabled: false`
-    # until phase 4 retires nginx: it is the documented rollback target, and
-    # flipping this one flag back to true restores the old path exactly.
-    # The Ingress and the HTTPRoute must never both exist -- k8s-gateway
-    # watches both kinds and the host would get two records, .100 and .103,
-    # resolving non-deterministically.
-    ingress:
-      enabled: false
-      className: internal
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Sure"
-        gethomepage.dev/group: "Office"
-        # simpleicons 404s on "maybefinance"; dashboard-icons has no entry.
-        # Use the Sure project's own favicon from its GitHub repo.
-        gethomepage.dev/icon: "https://raw.githubusercontent.com/we-promise/sure/main/public/favicon.ico"
-        gethomepage.dev/description: "Personal finance — accounts, budgets, investments"
-      hosts:
-        - host: sure.${SECRET_DOMAIN}
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - sure.${SECRET_DOMAIN}

@@ -132,36 +132,6 @@ spec:
           http:
             port: 8000
 
-    # Envoy migration PHASE 3 — replaced by `route:` below on envoy-external
-    # (2026-09-07). Kept INERT as the rollback target until ingress-nginx is
-    # removed in phase 4. Do NOT re-enable while the route exists: two live
-    # records for one hostname make k8s-gateway resolution flap.
-    ingress:
-      main:
-        enabled: false
-        className: "external"
-        annotations:
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Tube Archivist"
-          gethomepage.dev/description: "Tube Archivist is a self-hosted YouTube media server"
-          gethomepage.dev/group: "Download"
-          gethomepage.dev/icon: "youtube.png"
-        labels:
-            gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host "tube-archivist.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  name: tube-archivist
-                  port: 8000
-        tls:
-          - hosts:
-              - *host
-
-
     # Envoy migration PHASE 3 — moved to envoy-external (2026-09-07).
     #
     # NO external-dns target annotation on the route, deliberately: with

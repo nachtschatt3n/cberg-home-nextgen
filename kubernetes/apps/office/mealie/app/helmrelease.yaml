@@ -211,46 +211,6 @@ spec:
           http:
             port: *port
 
-    ingress:
-      main:
-        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
-        # Block kept INERT as the rollback target until ingress-nginx is
-        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
-        # two live routes for one host give k8s-gateway two records.
-        enabled: false
-        className: external
-        annotations:
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-          nginx.ingress.kubernetes.io/proxy-body-size: "100m"   # recipe image uploads
-          # Mealie's AI import holds the request open for the whole model call.
-          # Against the local Ollama host that is minutes, not seconds, so the
-          # 60s default read timeout returns a 504 while the request is still
-          # being served — the import looks broken but actually completes
-          # server-side, orphaning a half-written recipe. Verified 2026-08-24.
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Mealie"
-          gethomepage.dev/description: "Recipe manager and meal planner"
-          gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "mealie.png"
-        labels:
-          # The LABEL is required, not just the annotations — without it the
-          # service never appears on Homepage even with every annotation
-          # correct (docs/sops/homepage-integration.md).
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host mealie.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - *host
-
     persistence:
       data:
         enabled: true

@@ -140,30 +140,6 @@ spec:
         ports:
           metrics:
             port: 9234
-    ingress:
-      main:
-        # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
-        # as the rollback target until ingress-nginx is removed.
-        enabled: false
-        className: internal
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Mosquitto"
-          gethomepage.dev/description: "Mosquitto is an open-source message broker that implements the MQTT protocol"
-          gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "mosquitto.png"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "mqtt.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: websockets
     persistence:
       data:
         existingClaim: mosquitto-config

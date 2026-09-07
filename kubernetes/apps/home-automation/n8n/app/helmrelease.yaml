@@ -30,33 +30,6 @@ spec:
       pullPolicy: IfNotPresent
       tag: "2.38.3"
 
-    # Envoy migration PHASE 3 — replaced by ./httproute.yaml on
-    # envoy-external (2026-09-07). The n8n chart has no Gateway API support,
-    # so the route is a standalone manifest. Block kept INERT as the rollback
-    # target until ingress-nginx is removed in phase 4. Do NOT re-enable while
-    # the route exists: two live records for one hostname make k8s-gateway
-    # resolution flap.
-    ingress:
-      enabled: false
-      className: external
-      annotations:
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "n8n"
-        gethomepage.dev/description: "Workflow automation platform"
-        gethomepage.dev/group: "Home Automation"
-        gethomepage.dev/icon: "n8n.png"
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-      labels:
-        gethomepage.dev/enabled: "true"
-      hosts:
-        - host: n8n.${SECRET_DOMAIN}
-          paths:
-            - path: /
-              pathType: Prefix
-      tls:
-        - hosts:
-            - n8n.${SECRET_DOMAIN}
-
     # ── Main n8n application ──
     main:
       config:

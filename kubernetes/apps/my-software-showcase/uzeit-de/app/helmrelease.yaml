@@ -123,38 +123,6 @@ spec:
         ports:
           http:
             port: 80
-    ingress:
-      main:
-        # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
-        # as the rollback target until ingress-nginx is removed.
-        enabled: false
-        # className: internal. The replaced ingress.yaml used class `nginx`, an
-        # invented non-routable hostname, a per-app cluster-issuer annotation and
-        # its own TLS secret. Internal ingresses in this cluster instead ride the
-        # shared *.${SECRET_DOMAIN} wildcard held by the internal controller's
-        # default-ssl-certificate -- no per-app Certificate, no issuer annotation,
-        # no secretName.
-        className: internal
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Uzeit.de"
-          gethomepage.dev/description: "Uzeit corporate website"
-          gethomepage.dev/group: "Software Portfolio"
-          gethomepage.dev/icon: "typo3.png"
-          nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host "uzeit-de.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - *host
     persistence:
       # storageClass was `standard`, which does not exist in this cluster --
       # both PVCs would have stayed Pending forever. Now longhorn-static with

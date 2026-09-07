@@ -92,36 +92,6 @@ spec:
             port: 5055
             protocol: TCP
 
-    # Envoy migration PHASE 3 — replaced by `route:` below on envoy-external
-    # (2026-09-07). Kept INERT as the rollback target until ingress-nginx is
-    # removed in phase 4. Do NOT re-enable while the route exists: two live
-    # records for one hostname make k8s-gateway resolution flap.
-    ingress:
-      main:
-        enabled: false
-        className: external
-        annotations:
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Traccar"
-          gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "mdi-map-marker-path"
-          gethomepage.dev/description: "AirTag GPS tracking"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: traccar.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - traccar.${SECRET_DOMAIN}
-
-
     # Envoy migration PHASE 3 — moved to envoy-external (2026-09-07).
     #
     # NO external-dns target annotation on the route, deliberately: with

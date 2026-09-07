@@ -95,32 +95,6 @@ spec:
           http:
             port: 80
 
-    ingress:
-      main:
-        # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
-        # as the rollback target until ingress-nginx is removed.
-        enabled: false
-        className: internal
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "ARAG"
-          gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "mdi-hospital-box"
-          gethomepage.dev/description: "ARAG health insurance tracker"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: arag.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - arag.${SECRET_DOMAIN}
-
     persistence:
       data:
         existingClaim: arag-web-data

@@ -166,25 +166,3 @@ spec:
         enabled: true
         existingClaim: penpot-assets
         size: 20Gi
-
-    # Ingress configuration — DISABLED by Envoy migration phase 3. The route
-    # now lives in ./httproute.yaml on Gateway/envoy-external. The block is
-    # kept (inert) as the documented rollback target until phase 4 removes
-    # nginx; `git revert` of this commit restores it verbatim.
-    ingress:
-      enabled: false
-      className: external
-      annotations:
-        external-dns.alpha.kubernetes.io/target: external.${SECRET_DOMAIN}
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Penpot"
-        gethomepage.dev/description: "Open-source design and prototyping platform"
-        gethomepage.dev/group: "Office"
-        gethomepage.dev/icon: "penpot.png"
-        gethomepage.dev/pod-selector: "app.kubernetes.io/instance=penpot,app.kubernetes.io/name=penpot-backend"
-      hosts:
-        - penpot.${SECRET_DOMAIN}
-      tls:
-        - secretName: penpot-tls
-          hosts:
-            - penpot.${SECRET_DOMAIN}

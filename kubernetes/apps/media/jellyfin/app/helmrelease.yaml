@@ -144,35 +144,6 @@ spec:
       # -- NodePort for the service (if applicable).
       # nodePort:
 
-    # -- Ingress configuration. See: https://kubernetes.io/docs/concepts/services-networking/ingress/
-    ingress:
-        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
-        # Block kept INERT as the rollback target until ingress-nginx is
-        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
-        # two live routes for one host give k8s-gateway two records.
-      enabled: false
-      className: "external"
-      annotations:
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Jellyfin"
-        gethomepage.dev/description: "Media streaming server"
-        gethomepage.dev/group: "Media"
-        gethomepage.dev/icon: "jellyfin.png"
-        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-        nginx.ingress.kubernetes.io/proxy-buffering: "off"
-      labels:
-        gethomepage.dev/enabled: "true"
-      hosts:
-        - host: &host "jellyfin.${SECRET_DOMAIN}"
-          paths:
-            - path: /
-              pathType: ImplementationSpecific
-      tls:
-        - hosts:
-            - *host
-
     # -- Resource requests and limits for the Jellyfin container.
     resources:
       requests:

@@ -135,31 +135,6 @@ spec:
       nodePort: ""
       labels: {}
       loadBalancerClass: ""
-    ingress:
-        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
-        # Block kept INERT as the rollback target until ingress-nginx is
-        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
-        # two live routes for one host give k8s-gateway two records.
-      enabled: false
-      class: external
-      # -- Use appropriate annotations for your Ingress controller, e.g., for NGINX:
-      # nginx.ingress.kubernetes.io/rewrite-target: /
-      host: &host "open-webui.${SECRET_DOMAIN}"
-      tls: true
-      existingSecret: ""
-      annotations:
-        external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        nginx.ingress.kubernetes.io/enable-websocket: "true"
-        nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-        nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-        gethomepage.dev/enabled: "true"
-        gethomepage.dev/name: "Open WebUI"
-        gethomepage.dev/description: "Web UI for Ollama"
-        gethomepage.dev/group: "AI"
-        gethomepage.dev/icon: "open-webui.png"
-        gethomepage.dev/pod-selector: app.kubernetes.io/instance=open-webui
-      labels:
-        gethomepage.dev/enabled: "true"
     persistence:
       enabled: true
       existingClaim: open-webui-20g
@@ -184,7 +159,8 @@ spec:
 #      - name: USER_AGENT
 #        value: "Open WebUI"
       - name: WEBUI_URL
-        value: *host
+        # was `*host`, an anchor defined inside the now-removed ingress block.
+        value: "open-webui.${SECRET_DOMAIN}"
       - name: GLOBAL_LOG_LEVEL
         value: "DEBUG"
       # --- Text-to-Speech: self-hosted mini OpenAI-compatible TTS server ---

@@ -126,32 +126,6 @@ spec:
         ports:
           http:
             port: 8000
-    ingress:
-      main:
-        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
-        # Block kept INERT as the rollback target until ingress-nginx is
-        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
-        # two live routes for one host give k8s-gateway two records.
-        enabled: false
-        ingressClassName: "external"
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Paperless-ngx"
-          gethomepage.dev/description: "Document management system"
-          gethomepage.dev/group: "Office"
-          gethomepage.dev/icon: "paperless.png"
-          nginx.ingress.kubernetes.io/proxy-body-size: 64m
-          external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host "paperless.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-        tls:
-          - hosts:
-              - *host
     persistence:
       data:
         enabled: true

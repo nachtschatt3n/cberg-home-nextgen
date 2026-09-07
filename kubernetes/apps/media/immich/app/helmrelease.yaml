@@ -207,38 +207,6 @@ spec:
           metrics-ms:
             port: 8082
 
-    ingress:
-      main:
-        # Replaced by httproute.yaml on envoy-external (phase 3, 2026-09-07).
-        # Block kept INERT as the rollback target until ingress-nginx is
-        # removed in phase 4. Do not re-enable without deleting the HTTPRoute:
-        # two live routes for one host give k8s-gateway two records.
-        enabled: false
-        className: external
-        annotations:
-          external-dns.alpha.kubernetes.io/target: external.${SECRET_DOMAIN}
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Immich"
-          gethomepage.dev/group: "Media"
-          gethomepage.dev/icon: "immich.png"
-          gethomepage.dev/description: "Self-hosted photo and video library"
-          nginx.ingress.kubernetes.io/proxy-body-size: "0"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: &host immich.${SECRET_DOMAIN}
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
-        tls:
-          - hosts:
-              - *host
-
     persistence:
       # Immich media location (/data): thumbnails, encoded video, profile and
       # Immich's own DB dumps. NOW ON THE NAS (CIFS), not Longhorn.

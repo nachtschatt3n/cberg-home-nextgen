@@ -50,31 +50,6 @@ spec:
         ports:
           http:
             port: 5580
-    ingress:
-      main:
-        # Replaced by httproute.yaml (Envoy migration 2026-09-07). Kept INERT
-        # as the rollback target until ingress-nginx is removed.
-        enabled: false
-        className: internal
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/name: "Matter Server"
-          gethomepage.dev/description: "Matter Server for Home Assistant"
-          gethomepage.dev/group: "Home Automation"
-          gethomepage.dev/icon: "matter.png"
-          nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-          nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
-        labels:
-          gethomepage.dev/enabled: "true"
-        hosts:
-          - host: "matter.${SECRET_DOMAIN}"
-            paths:
-              - path: /
-                pathType: Prefix
-                service:
-                  identifier: main
-                  port: http
     persistence:
       data:
         enabled: true
