@@ -16,6 +16,7 @@ resources:
   - ./redis-deployment.yaml
   - ./whiteboard-proxy.yaml
   - ./notify-push.yaml
+  - ./httproute.yaml
 configMapGenerator:
   # Custom Nextcloud app — gives the OpenClaw agent a route that saves
   # IMAP drafts WITH attachments (upstream nextcloud/mail#458 has been

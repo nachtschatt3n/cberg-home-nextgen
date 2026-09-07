@@ -101,29 +101,9 @@ spec:
           persistentVolumeClaim:
             claimName: nextcloud-data
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: nextcloud-notify-push
-  namespace: office
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    external-dns.alpha.kubernetes.io/target: "external.${SECRET_DOMAIN}"
-spec:
-  ingressClassName: external
-  rules:
-    - host: "drive.${SECRET_DOMAIN}"
-      http:
-        paths:
-          - path: /push
-            pathType: Prefix
-            backend:
-              service:
-                name: nextcloud-notify-push
-                port:
-                  number: 7867
-  tls:
-    - secretName: nextcloud-tls
-      hosts:
-        - "drive.${SECRET_DOMAIN}"
+# The nextcloud-notify-push Ingress was REMOVED 2026-09-07 (Envoy phase 3).
+# Its /push path is now a rule on the shared `nextcloud` HTTPRoute in
+# httproute.yaml, with timeouts.request: 0s — notify-push holds a persistent
+# WebSocket and the gateway-wide 60s request timeout would sever it on a cycle,
+# breaking Nextcloud live notifications in a way no `curl /` check would show.
+# Both Ingresses served the same hostname, so they had to move together.

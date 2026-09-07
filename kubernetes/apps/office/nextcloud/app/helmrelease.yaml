@@ -35,7 +35,12 @@ spec:
       pullPolicy: IfNotPresent
     replicaCount: 1
     ingress:
-        enabled: true
+        # Replaced by httproute.yaml on envoy-external (phase 3 canary #2,
+        # 2026-09-07). Block kept INERT as the rollback target until
+        # ingress-nginx is removed in phase 4. Do not re-enable without
+        # removing the HTTPRoute: two live routes for one host give
+        # k8s-gateway two records and resolution flaps.
+        enabled: false
         className: external
         annotations:
           gethomepage.dev/enabled: "true"

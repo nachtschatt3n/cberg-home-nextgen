@@ -1,0 +1,93 @@
+---
+# Envoy migration PHASE 3 — canary #2: nextcloud (drive).
+#
+# Chosen as a canary because it is the websocket case AND the one app whose
+# nginx annotations carry the most real behaviour. It is NOT a pure routing
+# change; each item below replaces something that would otherwise be silently
+# lost or tightened.
+#
+# NO SecurityPolicy here, deliberately. Nextcloud authenticates in-app and
+# never had nginx forward-auth. Adding ext-auth would be introducing a new
+# login in front of an app that already has one.
+#
+# NO external-dns target annotation here either: for --source=gateway-httproute
+# external-dns reads the target from the parent Gateway, and on the route it is
+# silently ignored (proven on 2026-09-07 when it took auth.<domain> dark).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: nextcloud
+  namespace: office
+  labels:
+    gethomepage.dev/enabled: "true"
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Nextcloud"
+    gethomepage.dev/description: "Self-hosted file sharing and collaboration platform"
+    gethomepage.dev/group: "Office"
+    gethomepage.dev/icon: "nextcloud.png"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/component=app"
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: envoy-external
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "drive.${SECRET_DOMAIN}"
+  rules:
+    # /push FIRST for readability, though Gateway API resolves by longest
+    # match regardless of order. This was a SEPARATE Ingress
+    # (nextcloud-notify-push) sharing the same hostname.
+    - matches:
+        - path: { type: PathPrefix, value: /push }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nextcloud-notify-push
+          port: 7867
+      timeouts:
+        # notify-push holds a PERSISTENT WebSocket. The gateway-wide
+        # BackendTrafficPolicy sets requestTimeout: 60s, which would sever it
+        # every 60 seconds and break Nextcloud's live update/notification
+        # channel in a way no `curl /` check would reveal. 0s = no timeout,
+        # per the Gateway API spec.
+        request: 0s
+        backendRequest: 0s
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: nextcloud
+          port: 8080
+      timeouts:
+        # Replaces nginx proxy-read-timeout/proxy-send-timeout: 300. Without
+        # this the route would inherit the gateway default of 60s — a
+        # TIGHTENING from 300s on the household file server, which would show
+        # up as large uploads and long sync operations failing partway.
+        request: 300s
+        backendRequest: 300s
+      filters:
+        # Replaces the nginx configuration-snippet that added HSTS. Snippets
+        # have no Gateway API equivalent, but this particular one is just a
+        # response header, so it converts exactly.
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=31536000; includeSubDomains; preload"
+#
+# NOT carried across, each for a stated reason:
+#   proxy-body-size: 4G      -> no route-level equivalent. Envoy streams request
+#                               bodies with no size cap unless a requestBuffer
+#                               is configured, and none is. This LOOSENS the
+#                               limit rather than breaking uploads. A cap would
+#                               have to be a Gateway-scoped ClientTrafficPolicy,
+#                               which would impose it on every other app too.
+#   proxy-buffering: off     -> Envoy streams by default; nothing to express.
+#   proxy-request-buffering  -> same.
+#   websocket-services       -> Envoy passes HTTP/1.1 Upgrade natively.
+#   force-ssl-redirect       -> the cluster-wide httproute-https-redirect
+#   ssl-redirect                already 301s every host on the http listener.

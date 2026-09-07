@@ -20,6 +20,16 @@ ingress:
     originRequest:
       originServerName: "auth.${SECRET_DOMAIN}"
       http2Origin: true
+  - hostname: "drive.${SECRET_DOMAIN}"
+    service: https://envoy-external.network.svc.cluster.local:443
+    originRequest:
+      originServerName: "drive.${SECRET_DOMAIN}"
+      http2Origin: true
+      # Nextcloud moves large files and holds a WebSocket on /push. The route
+      # itself sets timeouts (300s for the app, none for /push); these keep
+      # cloudflared from being the shorter link in the chain.
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
   - hostname: "*.${SECRET_DOMAIN}"
     service: http://external-ingress-nginx-controller.network.svc.cluster.local:80
   - service: http_status:404
