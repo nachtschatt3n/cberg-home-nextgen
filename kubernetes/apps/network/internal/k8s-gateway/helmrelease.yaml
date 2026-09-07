@@ -23,6 +23,32 @@ spec:
       retries: 3
   values:
     fullnameOverride: k8s-gateway
+    # 3 replicas, one per node. Was 1 until 2026-09-07, when a single-replica
+    # ingress controller dying with its node took every internal hostname to
+    # NXDOMAIN for ~6 min (F-f2b89d20) — k8s-gateway stayed up and answering,
+    # just with no records, which is why Ready=True told us nothing. This is
+    # also the SECOND full internal-DNS outage from this component (see §8 of
+    # docs/sops/k8s-gateway-dns.md for the 2026-08-15 fail-closed one), and
+    # phase 1 of the Envoy migration edits watchedResources — the same class of
+    # change. Do that on one replica and it is a third outage.
+    replicaCount: 3
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: k8s-gateway
+            app.kubernetes.io/instance: k8s-gateway
+        # pod-template-hash is REQUIRED, not polish. Spread is evaluated only
+        # at SCHEDULING time and k8s never rebalances. Without this key a
+        # rolling update counts the outgoing ReplicaSet while it terminates and
+        # replicas pile onto one node, then stay — measured on the Envoy half
+        # of this same change today (both gateways settled skew=2 against a
+        # declared maxSkew of 1). Scoping to the template hash makes each
+        # ReplicaSet spread among its own pods.
+        matchLabelKeys:
+          - pod-template-hash
     # Chart 3.7.2's default image tag lags at 1.7.0 despite appVersion 1.8.0.
     # Pin 1.8.0 explicitly: it is built against sigs.k8s.io/gateway-api v1.5.1
     # (verified in the tag's go.mod) — the exact CRD set Envoy Gateway installs,

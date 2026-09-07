@@ -1,0 +1,23 @@
+---
+# The k8s-gateway chart (3.7.2) ships NO PodDisruptionBudget template — its
+# templates are only _helper/configmap/deployment/rbac/service/serviceaccount —
+# so unlike ingress-nginx and Envoy Gateway this one has to be declared by hand.
+#
+# Without it, a node drain evicts internal DNS with nothing to object. That
+# matters concretely for the Talos v1.14.0 roll: three drains, and at
+# replicas: 1 each one was a full internal-DNS outage.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: k8s-gateway
+  namespace: network
+spec:
+  minAvailable: 2
+  selector:
+    # MUST match the chart's selectorLabels exactly (_helper.tpl:
+    # app.kubernetes.io/name + app.kubernetes.io/instance). A PDB whose
+    # selector matches nothing is silently inert and protects nothing —
+    # same trap as an alert rule that matches no series.
+    matchLabels:
+      app.kubernetes.io/name: k8s-gateway
+      app.kubernetes.io/instance: k8s-gateway
