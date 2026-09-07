@@ -2895,6 +2895,23 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         "size": 50,
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "network"}},
+            # ANCHOR TO THE REQUEST SURFACE (2026-09-08, F-78ef4a34).
+            #
+            # These needles used to run against the whole log body of every pod
+            # in `network`, which meant the ingress controller's OWN diagnostic
+            # stdout counted as attacks: lines like
+            #   Service "databases/phpmyadmin" does not have any active Endpoint
+            #   ...gateway.envoyproxy.io/gatewayclass...
+            # matched `phpMyAdmin` and `.env` respectively. All 45 hits in the
+            # 2026-09-07 sweep were that — zero were client requests.
+            #
+            # Requiring `":path"` restricts matching to Envoy JSON ACCESS LOG
+            # entries, which is the only place a client-controlled string can
+            # appear. Diagnostic stdout has no such field, so it can no longer
+            # masquerade as an attack. If the access-log format ever changes,
+            # the control query below fails and the section reports BLIND
+            # rather than clean.
+            _wc('":path"'),
             {"bool": {"should": [
                 _wc("../"),
                 _wc("etc/passwd"),
@@ -2924,7 +2941,10 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
     if total == 0:
         # Control: "GET" in the ingress namespace returns ~214k when the shape
         # works. Without this, "no attack patterns" is unfalsifiable.
-        _ctl = _control_seen(es, [{"term": {"resource.attributes.k8s.namespace.name": "network"}}],
+        # Control must carry the SAME anchor as the assertion, otherwise it
+        # proves a different query than the one that returned zero.
+        _ctl = _control_seen(es, [{"term": {"resource.attributes.k8s.namespace.name": "network"}},
+                                  _wc('":path"')],
                              "GET", "now-24h")
         if _ctl == 0:
             f.add(WARNING, "Attack-pattern assertion did NOT run — control query matched nothing, "

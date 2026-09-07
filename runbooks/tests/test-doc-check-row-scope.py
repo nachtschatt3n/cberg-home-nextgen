@@ -132,7 +132,14 @@ real = (ROOT / "docs" / "applications.md").read_text()
 real_surface = dc._documented_name_surface(real)
 check("real applications.md yields a non-empty surface", bool(real_surface.strip()), True)
 # Sanity anchors: things that genuinely have entries must not start failing.
-for app in ("grafana", "immich", "nextcloud", "paperless-ngx", "ingress-nginx",
+# `ingress-nginx` was an anchor here until 2026-09-08. It was DELETED when the
+# Envoy Gateway migration completed, so applications.md correctly stopped
+# documenting it and this list started failing on a doc that had become right.
+# Replaced with k8s-gateway, the component that now resolves internal names —
+# an anchor is only useful while the thing it anchors to exists.
+# (The DOC_REAL_SHAPES fixture above still exercises the `foo (qualified)` row
+# shape using ingress-nginx; that one is synthetic and stays.)
+for app in ("grafana", "immich", "nextcloud", "paperless-ngx", "k8s-gateway",
             "wazuh", "superset", "penpot", "jellyfin", "n8n"):
     check(f"real doc still documents {app}", documented(real, app), True)
 
