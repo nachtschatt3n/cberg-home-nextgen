@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.06.1"
+version: "2026.09.08.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -84,6 +84,22 @@ deny:
       k8s-gateway pod restarts. Never unattended."
   - match: "*envoy-gateway*"
     reason: "Catch-all for Envoy Gateway artifacts (image/chart aliases) — same hold as gateway-helm."
+  # Added 2026-09-08 after an ATTENDED image pin (v0.21.0 -> v0.22.0 under chart
+  # 1.21.1) took public DNS down for 94s and was reverted (aa79cf7a). Chart
+  # 1.22.x will ship appVersion 0.22.0 and would classify as a safe MINOR — i.e.
+  # it would land at Step 0 of an UNATTENDED nightly window, with nobody
+  # watching and nothing to revert it. The bound on tonight's outage was the
+  # operator being awake; that is not a control. security_ref: F-14528040
+  - match: "*external-dns*"
+    reason: "public DNS for every internet-facing hostname, and `policy: sync` DELETES a
+      record before it can fail to recreate it — so a misconfigured target is an outage, not
+      a no-op. v0.22.x changes how the `external-dns.alpha.kubernetes.io/target` annotation
+      on the PARENT Gateway is honoured: the annotation is no longer read from the Gateway,
+      the private LAN address is published instead, and the provider rejects every create.
+      The chart bump therefore requires a MANIFEST change (`--default-targets` in extraArgs)
+      landed in the SAME change — a bare version bump is known-broken, whatever its semver
+      label says. PLAN lane only, attended, with the record set captured before and after.
+      security_ref: F-14528040"
   - match: "*mariadb*"
     reason: "A DB-engine bump is never unattended-safe. The bitnami entrypoint can SKIP
       mariadb-upgrade on a server-major roll while reporting Ready and the right
