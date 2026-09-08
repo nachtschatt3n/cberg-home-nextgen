@@ -177,8 +177,8 @@ forward-auth pattern only; OIDC and SAML integrations follow `docs/sops/authenti
 - [ ] Create proxy provider entry with hardcoded flow UUIDs (not slugs)
 - [ ] Create application entry using `!KeyOf` to reference provider
 - [ ] Create outpost entry with `service_connection` UUID and `kubernetes_namespace: kube-system`
-- [ ] Add `gethomepage.dev/enabled: "true"` auth annotations to ingress
-- [ ] Create separate ingress for `/outpost.goauthentik.io/*` paths
+- [ ] Add `gethomepage.dev/*` annotations **and** the `gethomepage.dev/enabled: "true"` label to the app's **HTTPRoute** (Homepage runs `kubernetes.gateway: true`; annotations on an Ingress register nothing, silently)
+- [ ] Add a second HTTPRoute for the `/outpost.goauthentik.io/*` paths pointing at the `ak-outpost-*` Service, plus a `SecurityPolicy` for the forward-auth extAuth — not an Ingress: ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`), so an Ingress is inert
 - [ ] Deploy and verify: `kubectl exec -n kube-system deployment/authentik-server -- python3 manage.py show_blueprints`
 
 ### Blueprint Pattern

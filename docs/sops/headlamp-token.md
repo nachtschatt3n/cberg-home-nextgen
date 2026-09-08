@@ -1,8 +1,8 @@
 # SOP: Headlamp Short-Lived Token Generation
 
 > Description: How to generate a short-lived cluster-admin token for Headlamp when manual kubectl or UI access is needed. Long-lived tokens are intentionally not stored in the repo.
-> Version: `2026.05.04`
-> Last Updated: `2026-05-04`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `ops`
 
 ---
@@ -285,14 +285,20 @@ sa_tokens = [s['metadata']['name'] for s in secrets if s['type'] == 'kubernetes.
 print('Long-lived SA tokens:', sa_tokens or 'none')
 "
 
-# Confirm Authentik forward auth still present on ingress
-kubectl get ingress -n monitoring headlamp -o jsonpath='{.metadata.annotations.nginx\.ingress\.kubernetes\.io/auth-url}'
+# Confirm Authentik forward auth is still in front. ingress-nginx was deleted
+# 2026-09-07 (ad1ea7c2), so the old nginx auth-url annotation no longer exists --
+# reading it returned empty for every app, i.e. a check that could not fail.
+# Forward auth is now an Envoy Gateway SecurityPolicy plus the outpost route:
+kubectl get securitypolicy -n monitoring headlamp-forward-auth \
+  -o jsonpath='{.spec.extAuth.http.backendRefs[*].name}{"\n"}'
+kubectl get httproute -n monitoring headlamp-authentik-outpost \
+  -o jsonpath='{.spec.rules[*].matches[*].path.value}{"\n"}'
 ```
 
 Expected:
 - No matches in repo for `service-account-token` under headlamp
 - `Long-lived SA tokens: none`
-- Auth URL points to the Authentik outpost
+- The `SecurityPolicy` exists and its extAuth backend is the `ak-outpost-*` Service, and the outpost route matches `/outpost.goauthentik.io`. Empty output from either command means the forward-auth gate is GONE, not that it is fine
 
 ---
 

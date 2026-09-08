@@ -172,7 +172,7 @@ Homepage provides an auto-discovering dashboard via Kubernetes integration (RBAC
 
 ### Service Discovery
 
-Homepage auto-discovers services via ingress annotations. Both annotations AND labels are required.
+Homepage auto-discovers services from **HTTPRoute** annotations — it runs `kubernetes.gateway: true` / `ingress: false`, and ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`), so annotations placed on an Ingress register nothing and report no error. Both annotations AND the `gethomepage.dev/enabled` label are required, on the HTTPRoute.
 
 **Required annotations:**
 ```yaml
@@ -215,9 +215,9 @@ labels:
 # Check Homepage logs
 kubectl logs -n default -l app.kubernetes.io/name=homepage
 
-# Verify ingress has both annotations AND labels
-kubectl get ingress {name} -n {ns} -o yaml | grep -A5 "annotations:"
-kubectl get ingress {name} -n {ns} -o yaml | grep -A5 "labels:"
+# Verify the HTTPRoute has both annotations AND labels
+kubectl get httproute {name} -n {ns} -o yaml | grep -A5 "annotations:"
+kubectl get httproute {name} -n {ns} -o yaml | grep -A5 "labels:"
 ```
 
 *See `docs/sops/homepage-integration.md` for step-by-step procedures.*
