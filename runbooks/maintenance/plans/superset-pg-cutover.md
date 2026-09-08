@@ -391,11 +391,10 @@ saved queries.
 Everything in §4 passed. What is worth carrying forward:
 
 - **§4(e) cannot be automated through the REST API.** `POST /api/v1/security/login`
-  with `provider: db` returns `401 Not authorized` — `AUTH_TYPE = AUTH_OAUTH` means
-  there is no database-password path for the admin user, and the value in
-  `superset-secrets.ADMIN_PASSWORD` does not authenticate against it. Use Superset's
-  own app context in-pod instead (`create_app()` + `app_context()`), which exercises
-  the same ORM and the same datasource layer the UI does:
+  with `provider: db` returned `401 Not authorized` for the value this plan tried, so
+  the smoke test could not be driven that way. Use Superset's own app context in-pod
+  instead (`create_app()` + `app_context()`), which exercises the same ORM and the
+  same datasource layer the UI does:
 
   ```bash
   mise exec -- kubectl exec -n databases deploy/superset -c superset -- python - <<'PY'
@@ -408,6 +407,22 @@ Everything in §4 passed. What is worth carrying forward:
           print(d.dashboard_title, "charts:", len(d.slices))
   PY
   ```
+
+  > **CORRECTION 2026-09-08 — this bullet used to explain that 401 with "`AUTH_TYPE =
+  > AUTH_OAUTH` means there is no database-password path". That was FALSE, and the
+  > false belief is why nobody went looking for 4.7 months.** FAB's `db` provider does
+  > **not** gate on `AUTH_TYPE`: `/api/v1/security/login` advertises it unconditionally
+  > — posting an unknown provider returns `{"provider": ["Must be one of: db, ldap."]}`
+  > (re-verified in-cluster 2026-09-08), and a nonexistent user over `provider: db`
+  > returns `401`, i.e. a *credential rejection*, not a closed door. So a 401 here means
+  > only "that value is not the admin's password"; it is **not** evidence that no
+  > password path exists. A valid db-provider password grants full Superset **Admin**
+  > and **bypasses Authentik entirely** — no OIDC, no MFA, no Authentik audit record.
+  > Treat `AUTH_TYPE = AUTH_OAUTH` as "OIDC is the intended front door", never as
+  > "passwords are disabled". The only things that actually close that path are having
+  > no usable password on the FAB user and keeping `init.createAdmin: false` (both now
+  > in force, `dad8922c`). See `docs/applications.md` → Superset for the current auth
+  > model and the rollback caveat.
 
 - **Rendering a chart needs a request context.** `ChartDataCommand(...).run()` raises a
   bare `AttributeError: user` outside one, which reads like a data failure and is not.
