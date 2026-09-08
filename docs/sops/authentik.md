@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.07`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `Platform`
 
 ---
@@ -966,8 +966,9 @@ app's `httproute.yaml`, alongside the app route and the `SecurityPolicy`.
 - Uptime Kuma — the ONLY `mode: proxy` provider; both rules point at the
   outpost Service, not at the app:
   - `kubernetes/apps/monitoring/uptime-kuma/app/httproute.yaml`
-- Longhorn (has per-app blueprint file + entry in central ConfigMap):
-  - Blueprint file: `kubernetes/apps/storage/longhorn/app/authentik-blueprint.yaml`
+- Longhorn (blueprint in central ConfigMap only — under the
+  `longhorn-forward-auth-blueprint.yaml` key):
+  - `kubernetes/apps/storage/longhorn/app/httproute.yaml`
 - ReferenceGrants for every app's cross-namespace outpost backend:
   - `kubernetes/apps/kube-system/authentik/app/referencegrants.yaml`
 
