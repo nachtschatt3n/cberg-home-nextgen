@@ -203,15 +203,28 @@ spec:
       podAnnotations:
         secret.reloader.stakater.com/reload: "superset-secrets"
 
-    # --- init/boot: creates admin user, initdb, runs migrations ---
+    # --- init/boot: initdb + schema migrations ONLY (no admin creation) ---
+    #
+    # createAdmin is FALSE and MUST STAY FALSE. The chart renders
+    # `.Values.init.adminUser.password` into superset_init.sh as a
+    # SINGLE-QUOTED shell literal (`superset fab create-admin ... --password
+    # '<value>'`), so it is never expanded from the environment. A previous
+    # comment here claimed an ADMIN_PASSWORD env var from superset-secrets
+    # "overrides" it — that was FALSE in both directions: the chart does not
+    # read ADMIN_PASSWORD at all, and the literal that WAS here got published
+    # to this public repo (and its git history) as a working FAB `provider=db`
+    # credential. FAB's db login does not gate on AUTH_TYPE, so it bypassed
+    # Authentik entirely and granted Superset Admin.
+    #
+    # The `admin` user already exists in the metadata DB and is retained
+    # deliberately (SSO role mapping needs something to map onto). Its password
+    # now lives ONLY in superset-secrets (SOPS) as ADMIN_PASSWORD and in the
+    # DB's own hash. Nothing in this file, and nothing in the chart, applies it
+    # — rotating that key requires running, inside a superset pod:
+    #   superset fab reset-password --username admin --password "$ADMIN_PASSWORD"
+    # Do NOT reintroduce a literal password here to "make it declarative".
     init:
-      createAdmin: true
-      adminUser:
-        username: admin
-        firstname: Admin
-        lastname: User
-        email: admin@${SECRET_DOMAIN}
-        password: placeholder   # overridden by ADMIN_PASSWORD env from Secret
+      createAdmin: false
 
     # Expose via our ingress.yaml, not chart's built-in
     service:
