@@ -25,19 +25,6 @@ spec:
       strategy: rollback
       retries: 3
   values:
-    # IMAGE TAG PINNED AHEAD OF THE CHART. Chart 1.21.1 is the newest
-    # external-dns chart and still ships appVersion 0.21.0, so there is no
-    # chart that delivers v0.22.0. This override is the only way to remediate
-    # security_ref: F-14528040 (detail lives in the ops DB, not in this repo).
-    #
-    # REMOVE this override once the chart's appVersion is >= 0.22.0 -- at that
-    # point the chart's own default is correct and this block is dead weight.
-    #
-    # CAUTION: because this pins AHEAD of the chart, a future chart bump that
-    # re-asserts its own appVersion will SILENTLY revert the image unless this
-    # block is carried forward. Check this comment on every chart bump.
-    image:
-      tag: v0.22.0
     fullnameOverride: *app
     provider: cloudflare
     env:
