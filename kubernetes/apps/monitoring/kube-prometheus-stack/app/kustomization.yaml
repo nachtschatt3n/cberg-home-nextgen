@@ -26,6 +26,7 @@ resources:
   - ./container-memory-alerts.yaml
   - ./envoy-gateway-alerts.yaml
   - ./etcd-alerts.yaml
+  - ./external-dns-alerts.yaml
   - ./gateway-availability-alerts.yaml
   - ./tube-archivist-alerts.yaml
   - ./library-tools-alerts.yaml

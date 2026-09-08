@@ -1,0 +1,169 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: kube-prometheus-stack
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    # Load-bearing: without this label the rule is SILENTLY never loaded by the
+    # Prometheus operator -- no error, no event, and the file looks fine in git.
+    # Verify with /api/v1/rules after any change, never with `kubectl apply`.
+    release: kube-prometheus-stack
+  name: external-dns-alerts
+  namespace: monitoring
+spec:
+  groups:
+  # external-dns had ZERO alert coverage until 2026-09-08. On that day a v0.22.0
+  # image pin published the wrong target, Cloudflare rejected every create, and
+  # `policy: sync` had already deleted the old records -- a 94s total public-DNS
+  # outage for every internet-facing hostname. None of the 382 loaded alerting
+  # rules matched external-dns, so nothing fired. It was caught only because the
+  # operator happened to be awake. These rules replace that with a signal.
+  #
+  # Every threshold below is derived from MEASURED series, not guessed; the
+  # measurement is stated on each rule.
+  - name: external-dns.sync.health
+    interval: 30s
+    rules:
+    # MEASURED: increase(...[7d] offset 1d) == 0 on all three pods, i.e. not a
+    # single registry error in the 7 days before the incident. The incident pod
+    # (external-dns-5447855d4f-*) booked 4.5. Steady state is exactly zero, so
+    # "> 0" is the measured boundary rather than an arbitrary tolerance.
+    #
+    # increase() over a 10m window (not rate/irate) is deliberate: the outage
+    # lasted 94s. An instantaneous expression would go true and false again well
+    # inside any sane `for:`, and the alert would never fire. increase([10m])
+    # stays > 0 for a full 10 minutes after the last error, which is what makes
+    # a 94-second failure survivable by a 5m `for:`.
+    - alert: ExternalDNSRegistryErrors
+      annotations:
+        summary: external-dns is failing to write records to the DNS provider
+        description: >-
+          external-dns booked {{ $value }} registry error(s) in the last 10
+          minutes (7-day baseline before 2026-09-08: zero). Records are failing
+          to be created or updated at the provider. With `policy: sync` the old
+          record is deleted BEFORE the replacement is written, so provider
+          rejections mean hostnames are already unresolvable -- treat as an
+          active public-DNS outage, not a warning.
+          Check: kubectl logs -n network -l app.kubernetes.io/name=external-dns --tail=100
+      expr: increase(external_dns_registry_errors_total[10m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: external-dns
+        category: network
+    # MEASURED: increase(...[7d]) == 0 on every pod, including through the
+    # incident -- the source side never errored. Same "> 0" measured boundary.
+    # Warning rather than critical: a source error stops external-dns reading
+    # Gateways/HTTPRoutes, which stalls reconciliation but does not by itself
+    # delete a published record. The stall alert below is the one that escalates.
+    - alert: ExternalDNSSourceErrors
+      annotations:
+        summary: external-dns cannot read its Kubernetes sources
+        description: >-
+          external-dns booked {{ $value }} source error(s) in the last 10
+          minutes (7-day baseline: zero). It is failing to read the configured
+          sources (crd, gateway-httproute), so new or changed hostnames will not
+          be published and the record set will drift from cluster state.
+          Check: kubectl logs -n network -l app.kubernetes.io/name=external-dns --tail=100
+      expr: increase(external_dns_source_errors_total[10m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+        component: external-dns
+        category: network
+    # MEASURED: normal sync staleness peaks at 63-65s over 6h (the controller's
+    # default 1m interval), with a single 147s excursion over 24h. 900s is ~6x
+    # the worst observed excursion and ~14x normal, so it cannot fire on routine
+    # jitter but still catches a wedged reconcile loop within a quarter hour.
+    #
+    # Deliberately covers the restart case: the gauge reads 0 between pod start
+    # and first sync, which makes this expression enormous. `for: 5m` rides
+    # through a healthy start (first sync lands inside ~60s) but still fires if
+    # the controller comes up and never syncs at all.
+    - alert: ExternalDNSSyncStalled
+      annotations:
+        summary: external-dns has not completed a sync in over 15 minutes
+        description: >-
+          Last successful external-dns sync was {{ $value | humanizeDuration }}
+          ago (normal interval is ~60s, worst observed 147s). The controller is
+          not reconciling: DNS records are frozen at their last state and any
+          cluster change is unpublished. A stalled sync is invisible to the
+          error-rate alerts above, because a controller that never tries also
+          never books an error.
+          Check: kubectl logs -n network -l app.kubernetes.io/name=external-dns --tail=100
+      expr: time() - external_dns_controller_last_sync_timestamp_seconds > 900
+      for: 5m
+      labels:
+        severity: critical
+        component: external-dns
+        category: network
+    # MEASURED: 25 verified CNAMEs at steady state; min_over_time(...[24h]) == 24
+    # on healthy pods, and 1 on the incident pod. So healthy drift is +/-1 record
+    # and the incident collapsed the set almost completely. 20 sits below the
+    # observed healthy floor (24) with room for a few legitimate route removals,
+    # while still catching a mass deletion.
+    #
+    # This is the rule that most directly targets the 2026-09-08 failure mode:
+    # records deleted and NOT recreated. `for: 3m` rather than 5m because a
+    # collapsed record set is unambiguous and already user-visible; 3m is still
+    # 6 scrape intervals, enough to ride out a pod restart.
+    - alert: ExternalDNSRecordsCollapsed
+      annotations:
+        summary: external-dns verified record count has collapsed
+        description: >-
+          external-dns reports only {{ $value }} verified CNAME records
+          (steady state 25, healthy 24h floor 24). Published DNS records have
+          been deleted and not recreated -- this is the shape of the 2026-09-08
+          outage, where a bad target made every create fail after `policy: sync`
+          had already removed the originals. Public hostnames are likely
+          unresolvable right now.
+          Check: kubectl logs -n network -l app.kubernetes.io/name=external-dns --tail=100
+      expr: external_dns_controller_verified_records{record_type="cname"} < 20
+      for: 3m
+      labels:
+        severity: critical
+        component: external-dns
+        category: network
+
+  # ── Blindness guards ──────────────────────────────────────────────────────
+  # A rule whose metric family stops reporting does not fail -- it matches no
+  # series and sits at state=inactive, i.e. it looks exactly like "healthy"
+  # forever. This repo has been bitten by that (see EnvoyGatewayMetricsAbsent,
+  # and the nginx-keyed rules that sat green for a day after their metric
+  # vanished). These absent() guards are what make the rules above visibly
+  # blind instead of quietly blind.
+  - name: external-dns.metrics.presence
+    interval: 30s
+    rules:
+    - alert: ExternalDNSErrorMetricsAbsent
+      annotations:
+        summary: external-dns error metrics are absent
+        description: |
+          external_dns_registry_errors_total has reported no series for 15
+          minutes. ExternalDNSRegistryErrors and ExternalDNSSourceErrors both
+          depend on this family, so both are currently blind and will stay
+          green no matter what the provider does. Either external-dns is not
+          running or its ServiceMonitor has stopped being scraped.
+          Check: kubectl get servicemonitor -n network external-dns
+      expr: absent(external_dns_registry_errors_total)
+      for: 15m
+      labels:
+        severity: warning
+        component: external-dns
+        category: network
+    - alert: ExternalDNSSyncMetricsAbsent
+      annotations:
+        summary: external-dns sync/record metrics are absent
+        description: |
+          external_dns_controller_last_sync_timestamp_seconds has reported no
+          series for 15 minutes. ExternalDNSSyncStalled and
+          ExternalDNSRecordsCollapsed both depend on this exporter, so the
+          stall and mass-deletion detectors are currently blind.
+          Check: kubectl get servicemonitor -n network external-dns
+      expr: absent(external_dns_controller_last_sync_timestamp_seconds)
+      for: 15m
+      labels:
+        severity: warning
+        component: external-dns
+        category: network
