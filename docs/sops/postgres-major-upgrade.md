@@ -1,8 +1,8 @@
 # SOP: PostgreSQL Major Upgrades — the PGDATA relocation trap
 
 > Description: How to move a PostgreSQL instance across a major version without silently writing the new data directory into the container's ephemeral layer, and why "SELECT version() says 18.6 and the row counts match" is not evidence the upgrade worked.
-> Version: `2026.09.07b`
-> Last Updated: `2026-09-07`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `homelab-sre`
 
 ---
@@ -131,6 +131,50 @@ volumeMounts:
   - name: data
     mountPath: /var/lib/postgresql/data
 ```
+
+### Executions of this procedure
+
+Kept here deliberately: plan files are deleted on execution
+(`runbooks/maintenance/plans/README.md`), so without this list the evidence that
+the procedure has been *exercised* — and the shape a clean run takes — vanishes
+with them. Append one row per execution; do not rewrite earlier rows.
+
+| Date | Instance | From → To | Outage | Result |
+|---|---|---|---|---|
+| 2026-09-07 | `paperclip-postgresql` (`ai`) | 17.11 → 18.6 | — | First execution. Surfaced the two tooling traps in §6 (`pg_restore` version/format coupling; `kubectl exec` truncating a binary dump 12,199,508 → 196,608 bytes). |
+| 2026-09-08 | `superset-pg` → `superset-pg18` (`databases`) | 17.11 → 18.6 | ~4 min | **Second, clean execution. No new traps.** Plan `superset-pg-18.6`. |
+
+#### 2026-09-08 — `superset-pg18`, the reference clean run
+
+Worth reading as the worked example, because it is what this SOP looks like when
+nothing goes wrong.
+
+- **Side-by-side, not in-place.** A NEW Deployment/Service/PV/PVC
+  (`pg18-*.yaml`, `longhorn-static` volume `superset-pg18-data`) was stood up
+  alongside the running 17.11 instance (`a753e95e`) and only then repointed
+  (`d9863640`). The old `superset-pg` is **retained as the rollback** and is not
+  to be cleaned up — see §11: a major upgrade has no manifest rollback, so the
+  previous instance IS the recovery path until the soak ends.
+- **`PGDATA` pinned inside the mount**, `/var/lib/postgresql/data/pgdata`, per
+  §5 — the whole reason this SOP exists. `POSTGRES_INITDB_ARGS` was dropped
+  because PG18 enables data checksums by default, and that was **asserted with
+  `SHOW data_checksums` after initdb rather than inferred from the release notes**.
+- **Contents diffed before the repoint, not counted.** 53/53 tables, 50
+  sequences, 127 indexes and 111 foreign keys compared identical old vs new. Row
+  counts alone would not have caught a lost index or a dropped FK, and a table
+  count alone would not have caught the schema-scoped miss described in §7 —
+  see [`verification-contents-not-shape.md`](verification-contents-not-shape.md).
+- **Restart assertion run TWICE**, per §6. Once is enough to prove the datadir is
+  on the PVC; the second pass is what proves it stayed there after the cutover
+  repoint, which is a different moment and a different risk.
+- **The one thing that still got missed** was not a postgres failure: the app's
+  init-container gate kept probing the OLD host, because `DB_HOST` in the SOPS
+  Secret and `.Values.database.host` in the HelmRelease are two independent env
+  sources and only the first was moved (`f297f4b5`). A PG cutover on this cluster
+  is therefore not complete when the datadir assertions pass — run the datastore
+  cutover checklist in
+  [`container-dependencies.md`](container-dependencies.md) §4 as well, and do it
+  before scheduling the old instance's decommission.
 
 ## 6) Verification Tests
 
@@ -278,5 +322,6 @@ a rollback — you have a file.
 | Version | Date | Change |
 |---|---|---|
 | `2026.09.06` | 2026-09-06 | Created after the PG18 PGDATA relocation was caught at pre-check on `paperclip-postgresql`. Knowledge previously existed only in a plan file, which the transient-plan convention deletes on execution. |
+| `2026.09.08` | 2026-09-08 | Added an **Executions of this procedure** log and recorded the second application (`superset-pg` 17.11 -> 18.6, ~4 min outage, contents diffed 53/53 tables + 50 sequences + 127 indexes + 111 FKs before the repoint, restart assertion passed twice). Clean run, no new traps — which is itself the finding, since the first execution produced two. Cross-referenced the one thing it did miss: the app-side init-gate host, which is `container-dependencies.md` §4, not a postgres failure. |
 | `2026.09.07b` | 2026-09-07 | Added the two tooling traps found executing the paperclip 18.6 upgrade: pg_restore version/format coupling, and kubectl exec truncating binary copies (12MB -> 196KB, silently). |
 | `2026.09.07` | 2026-09-07 | Added "Why the Longhorn backup does NOT save you here" after the operator asked exactly that. Both affected volumes ARE enrolled in the nightly backup and were captured that morning — the point is that a volume backup cannot cover writes that never reached the volume. |
