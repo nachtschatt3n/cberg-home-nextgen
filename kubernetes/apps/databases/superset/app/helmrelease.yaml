@@ -43,7 +43,14 @@ spec:
   values:
     image:
       repository: apache/superset
-      tag: 5.0.0
+      # 6.1.0 stable. Chart 0.22.4 already declares appVersion 6.1.0 (as has every
+      # chart since 0.16.0) — this REMOVES a pin-down, it does not outrun the chart.
+      # Do NOT bump spec.chart.spec.version to "match": the selector-relabel trap
+      # above is triggered by a CHART change, and there is nothing to gain.
+      # Multi-arch OCI index digest, re-verified 2026-09-08 (upstream re-pushes this
+      # tag in place: the plan recorded ...08e3be59 on 2026-08-17, the live index is
+      # now ...16b50bbe pushed 2026-09-07). Never pin a per-platform digest here.
+      tag: 6.1.0@sha256:16b50bbef6648912a79e3293d418fefa743ce555d36c5af6b85d859119ed7f88
       pullPolicy: IfNotPresent
 
     # Keep chart's default config Secret (contains bootstrap script + superset_config.py scaffold);
@@ -57,9 +64,16 @@ spec:
     # site-packages, matching where the app imports from.
     bootstrapScript: |
       #!/bin/bash
+      # Superset 6.1.0 hard-requires redis>=5.0.0,<6.0 (pyproject.toml) and the image
+      # already ships redis==5.3.1 (requirements/base.txt). The old `redis==4.5.4`
+      # line here silently DOWNGRADED the client two majors below that floor on every
+      # pod start — removed deliberately, DO NOT restore it.
+      # psycopg2-binary and authlib ARE still needed: neither is in base.txt, and the
+      # published `lean` image does not install the `postgres` extra. 6.1.0 pins
+      # psycopg2-binary==2.9.9 in that extra; authlib 1.3.0 satisfies
+      # flask-appbuilder[oauth] 5.0.2's Authlib<2.0.0,>=0.14.
       uv pip install --python /app/.venv/bin/python \
-        psycopg2-binary==2.9.6 \
-        redis==4.5.4 \
+        psycopg2-binary==2.9.9 \
         authlib==1.3.0
       if [ ! -f ~/bootstrap ]; then echo "Running Superset with UID $(id -u)" > ~/bootstrap; fi
 
