@@ -323,7 +323,7 @@ echo "app SOPS superset-secrets   DB_HOST = $APPS"
 agree — see §4 "Datastore cutover checklist". This exact mismatch shipped on
 2026-09-05 and again on 2026-09-08.
 
-### Test 3: cluster cold-start (full cluster reboot or major upgrade)
+### Test 4: cluster cold-start (full cluster reboot or major upgrade)
 
 After a node reboot or cluster-wide upgrade, audit `kubectl get pods -A --no-headers | awk '$4 == "CrashLoopBackOff"'`. Apps that have the wait-for pattern should be absent.
 

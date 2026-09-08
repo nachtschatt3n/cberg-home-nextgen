@@ -315,7 +315,7 @@ Two scoping flags do that, one per source — **both are load-bearing**:
 
 | external-dns source | scoping flag | keeps out |
 |---|---|---|
-| `ingress` | `--ingress-class=external` | every `className: internal` Ingress — **vestigial since 2026-09-07**: zero Ingress objects exist, so this source matches nothing. Still listed in `sources:` (dropping it is Phase-4 cleanup, tracked separately). Harmless, but do not read it as evidence that Ingress still routes anything |
+| ~~`ingress`~~ | `--ingress-class=external` | **REMOVED from `sources:` on 2026-09-08.** The flag is still in `extraArgs` but now has no source behind it, so it scopes nothing. Removing the source was safe *only* because the Ingress count was verified zero first: under `policy: sync`, an unlisted source whose objects still exist has its records **deleted**. If an Ingress is ever reintroduced, add the source back BEFORE creating the object — see [`external-dns.md`](external-dns.md) §2 |
 | `gateway-httproute` | `--gateway-name=envoy-external` + `--gateway-namespace=network` | every HTTPRoute parented to `envoy-internal` |
 
 **`--ingress-class` filters Ingress objects ONLY — it has no effect whatsoever
