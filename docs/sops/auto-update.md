@@ -1,7 +1,7 @@
 # SOP: auto-update — SAFE Renovate PRs auto-applied at Step 0 of each maintenance window (sweep is read-only)
 
-> Version: `2026.09.05`
-> Last Updated: `2026-09-05`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 
 ## 1) Description
 
@@ -194,8 +194,21 @@ print('held:', [(c['dep'],c['gate']) for c in d['held']])"
 ```
 
 Every `safe` entry MUST be patch/minor, absent from the deny-list, and have
-green CI. Every known-risky component (affine, app-template, mariadb-minor,
-Talos, nextcloud, openclaw, scrypted, unpoller) MUST appear in `held`.
+green CI. Every component carrying a `deny` rule MUST appear in `held` — the
+authoritative list is `runbooks/auto-update-policy.yaml`, not this paragraph.
+Derive it rather than trusting a prose enumeration:
+
+```bash
+.venv/bin/python3 -c "
+import yaml
+p = yaml.safe_load(open('runbooks/auto-update-policy.yaml'))
+for r in p['deny']:
+    print(f\"{r['match']:<24} max={r.get('max','<none: blocked at every update_type>')}\")"
+```
+
+A `max:` value means the rule allows up to and including that update_type and
+holds everything above it (`*mariadb*` is `max: patch`, i.e. patch may land
+unattended, minor+ is held). Every other rule blocks the component outright.
 
 Note there are now TWO safe definitions, deliberately: G1 above governs the
 PR-MERGE half, while the no-PR **direct-bump** half reads `coverage.py`'s AUTO
@@ -205,11 +218,77 @@ release-line moves and lockstep-coupled items. See
 
 ### Test 2: policy + parse gates (offline unit check)
 
-Run the synthetic matrix (affine/app-template/mariadb/Talos/nextcloud/openclaw →
-held; cloudflared/redis → allowed; grouped/unparseable PR → held; bare
-`update busybox to v1.38.0` → parses; `update Flux Operator group to v1.2.3`
-and `update foo to v2` → still refused). Any mismatch means a deny glob or the
-title parser is wrong — fix before the next scheduled run.
+Run the synthetic matrix. **It must assert every deny rule that exists, not a
+memorable subset** — a rule absent from the matrix is a rule the test cannot
+catch the removal of. As of `2026.09.08.1` that is all 21 globs:
+
+| Deny glob | Assert |
+|---|---|
+| `*app-template*` | held at every update_type |
+| `*affine*` | held at every update_type |
+| `*cilium*` | held at every update_type |
+| `*gateway-helm*` | held at every update_type |
+| `*gateway-crds-helm*` | held at every update_type |
+| `*envoy-gateway*` | held at every update_type |
+| `*external-dns*` | held at every update_type — **including `minor`**, which is the case that matters: chart 1.22.x will ship appVersion 0.22.0 and would otherwise score a safe MINOR into the unattended nightly lane |
+| `*mariadb*` | `max: patch` — patch ALLOWED, minor and major held |
+| `*mcpo*` | held at every update_type |
+| `*nocodb*` | held at every update_type (calver month hops parse as `minor`) |
+| `*nextcloud-mcp*` | held **with its own reason**, matched BEFORE `*nextcloud*` |
+| `*nextcloud-redis*` | held **with its own reason**, matched BEFORE `*nextcloud*` |
+| `*nextcloud*` | held at every update_type |
+| `*scrypted*` | held at every update_type |
+| `*grafana*` | held at every update_type (chart minor can move appVersion) |
+| `*unpoller*` | held at every update_type |
+| `*openclaw*` | held at every update_type |
+| `*@openclaw/*` | held at every update_type |
+| `*coredns*` | held at every update_type |
+| `siderolabs/*` | held at every update_type |
+| `*talos*` | held at every update_type |
+
+Rule ORDER is load-bearing for the three `nextcloud` globs: the first match
+wins, so `*nextcloud-mcp*` and `*nextcloud-redis*` must precede `*nextcloud*`.
+If they do not, both are held under the SERVER's chart-lockstep/occ reason,
+which is false for them — and a false reason is what gets a real hold
+overridden. Assert the reason string, not just the held verdict.
+
+Then the non-deny half: cloudflared/redis → allowed; grouped/unparseable PR →
+held; bare `update busybox to v1.38.0` → parses; `update Flux Operator group to
+v1.2.3` and `update foo to v2` → still refused. Any mismatch means a deny glob
+or the title parser is wrong — fix before the next scheduled run.
+
+### Test 2b: the matrix is COMPLETE (guards this section against drift)
+
+Test 2 is a hand-written enumeration, so it decays silently every time a deny
+rule is added: the SOP keeps passing while asserting a policy that no longer
+exists. It did — `*external-dns*` was added in `e97476d3` and eleven other
+globs (`cilium`, the four gateway/envoy globs, `mcpo`, `nocodb`, the two
+`nextcloud-*` variants, `grafana`, `coredns`, `@openclaw/`) had never been
+listed at all. Check completeness mechanically, in BOTH directions:
+
+```bash
+.venv/bin/python3 - <<'EOF'
+import re, yaml
+policy = {r['match'] for r in yaml.safe_load(open('runbooks/auto-update-policy.yaml'))['deny']}
+bt = chr(96)                                   # backtick, kept out of the shell
+sop = set(re.findall(r'^\| ' + bt + r'([^' + bt + r']+)' + bt + r' \|',
+                     open('docs/sops/auto-update.md').read(), re.M))
+missing = policy - sop
+stale   = {g for g in sop - policy if '*' in g or '/' in g}
+print('MISSING from the SOP matrix:', sorted(missing) or 'none')
+print('STALE in the SOP matrix   :', sorted(stale) or 'none')
+raise SystemExit(1 if (missing or stale) else 0)
+EOF
+```
+
+Expected:
+- both lines print `none`, exit 0.
+
+If failed:
+- `MISSING` — a deny rule exists that Test 2 does not assert. Add the row.
+- `STALE` — Test 2 asserts a rule that was deleted from the policy. Either the
+  removal was intentional (drop the row, and say why in the Version History) or
+  a hold was lost.
 
 ### Test 3: apply guard holds on manual runs
 
@@ -294,6 +373,7 @@ git revert --no-edit <merge-sha> && git push origin main
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.08 | 2026-09-08 | **Completed the Test 2 synthetic matrix and added Test 2b to keep it complete.** The matrix enumerated 8 of the then-20 deny globs; `*external-dns*` was added the same day (`e97476d3`, policy `2026.09.08.1`) and 11 others (`cilium`, `gateway-helm`, `gateway-crds-helm`, `envoy-gateway`, `mcpo`, `nocodb`, `nextcloud-mcp`, `nextcloud-redis`, `grafana`, `coredns`, `@openclaw/`) had never been listed — so the SOP's own test asserted a policy the repo no longer had. Test 1 now derives the list from the policy YAML instead of restating it, and Test 2b fails on any missing-or-stale glob in both directions. |
 | 2026.09.05 | 2026-09-05 | Documented the G5 **direct-bump blind spot**: the security waiver reads a marker from the Renovate PR title, so the no-PR direct-bump lane can never trigger it and `age_waive` (retroactive, permanent, per-component) is the only lever. Three occurrences in two days — `3118a96f`, `e813bba0`. |
 | 2026.08.18 | 2026-08-18 | Cross-referenced `docs/sops/immutable-job-image-bumps.md` — an auto-applied image bump landing on a Job wedges the whole Kustomization. |
 | 2026.08.18 | 2026-08-18 | Documented the G0 parse gate; added Renovate's bare `update <dep> to <x.y.z>` shape (PR #205 held on `gate=parse` despite being a green version-only patch); corrected the window cadence to daily. |
