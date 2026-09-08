@@ -149,15 +149,21 @@ spec:
     # Same trap on the DB side. `superset.db.host` in _helpers.tpl coalesces
     # .Values.database.host FIRST and otherwise falls through to
     # "<release>-postgresql", so the chart-generated superset-env Secret — the
-    # ONLY envFrom the wait-for-postgres INIT containers get — still carries
-    # DB_HOST=superset-postgresql even though the app itself moved to
-    # superset-pg via superset-secrets. That stale value is invisible only
-    # while the old Service exists; the moment the bundled postgres is
-    # disabled, every restart of superset / superset-worker /
-    # superset-celerybeat would hang 120s in the init gate and exit 1.
-    # Point the chart at the real metadata DB.
+    # ONLY envFrom the wait-for-postgres INIT containers get — carries whatever
+    # is set here, NOT the DB_HOST in superset-secrets (which reaches the main
+    # containers only). A stale value here is invisible for exactly as long as
+    # the old Service still exists; the moment that DB is retired, every restart
+    # of superset / superset-worker / superset-celerybeat hangs 120s in the init
+    # gate and exits 1.
+    #
+    # THIS KEY MUST MOVE IN THE SAME CHANGE SET AS ANY DB_HOST CUTOVER.
+    # It did not on 2026-09-08 (d9863640 moved only the SOPS key), which left the
+    # init gate probing the retained 17.11 rollback while the app ran on 18.6 —
+    # i.e. the protection was being provided by the very artifact scheduled for
+    # deletion. Caught post-hoc by the doc and security agents; see
+    # docs/sops/container-dependencies.md, whose rule this is.
     database:
-      host: superset-pg
+      host: superset-pg18
 
     # --- Superset web/UI pods ---
     supersetNode:
