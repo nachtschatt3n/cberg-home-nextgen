@@ -24,8 +24,14 @@ rollback_class: backup-restore   # DECLARED 2026-09-06. The change is a DELETE
                           # dashboard's content is byte-equivalent to the
                           # chart ConfigMap that will immediately re-provision
                           # it, so the ConfigMap IS the backup.
-status: vetted
-window: null
+status: awaiting-go   # 2026-09-08 nightly window: condition RE-VERIFIED live (60 x
+                      # "same uid already exists" in 30m on grafana-598f7c549c-rgkxh,
+                      # matching the plan's ~2880/day). NOT run: derived class is
+                      # HUMAN-GATED (rollback_class: backup-restore names no
+                      # backup_gate), and nightly is mode: unattended. go/no-go is
+                      # with OpenClaw home-operation, proposed sat-attended:2026-09-12.
+window: null          # left for the window-scheduler/operator; the proposed slot
+                      # rides on the go/no-go issue, not self-assigned here.
 ---
 
 # Grafana: free the dashboard uid held by an orphaned provisioning record
