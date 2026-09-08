@@ -34,6 +34,17 @@
 # Nothing is judged against the whole file, and nothing is judged against text
 # the secret itself controls.
 #
+# KNOWN RESIDUALS in THIS layer, measured 2026-09-08. Each is a value shape the
+# structural rules below cannot separate from prose, and each is still caught by
+# security-check.py's history scan — verified, not assumed. Written down because
+# an undocumented hole is one nobody re-attacks:
+#   password: <Hunter2Seven          angle-template opener
+#   password: Hunter2Seven.json      filename-shaped value
+#   # see `x` password: Hunter2Seven a stray backtick in a comment line
+#   password: CORRECT_HORSE_BATTERY  SCREAMING_SNAKE read as an env-var name
+# Do NOT "fix" one of these by widening a word list — that is the defect this
+# file exists to document.
+#
 # Test: runbooks/tests/test-cred-suppressor-scoping.py
 
 BEGIN { hit = 0 }
