@@ -1088,7 +1088,7 @@ _HIST_CRED_KV = re.compile(
 )
 # Value forms that are structurally incapable of being a literal secret.
 _NON_LITERAL_VALUE = re.compile(
-    r"\$\{|\$\(|\$[A-Za-z_][A-Za-z0-9_]*|\{\{|"      # ${X} $(cmd) $X {{ }}
+    r"\$\{|\$\(|^\$[A-Za-z_][A-Za-z0-9_]*$|\{\{|"   # ${X} $(cmd) $X {{ }}
     r"^ENC\[|"                                        # SOPS ciphertext
     r"^<[^>]*>$|"                                     # <template-token>
     r"^\{[A-Za-z_][A-Za-z0-9_]*\}$|"                  # {fstring_name}
@@ -1113,30 +1113,50 @@ _TEMPLATE_LITERALS = {
 }
 # Scaffolding words. Matched ONLY against context, never against a value.
 _PLACEHOLDER_CONTEXT = re.compile(
-    r"(?i)example|sample|placeholder|dummy|template|scaffold|"
-    r"change[_-]?me|replace[_-]?me|replace[_-]?with|your[_-]|my[_-]strong|"
-    r"fixture|redact"
+    r"(?i)example|placeholder|change[_-]?me|replace[_-]?me|replace[_-]?with|"
+    r"your[_-]|my[_-]strong"
 )
 
 
 def _hist_cred_hit_suppressed(line: str) -> bool:
     """True if this git-history hit is a reference/scaffolding line, not a leak."""
-    values, context, non_literal = [], line, 0
+    # CONTEXT is the KEY of each assignment plus any trailing comment -- NOT the
+    # rest of the line. Using the remainder handed the suppressor every
+    # NEIGHBOURING field's value, which the same author writes: on a flow-style
+    # YAML or .env line, `username: example_user, password: <literal>` silenced
+    # the literal. Neighbouring values are secret-controlled text, so they are
+    # cut out for the same reason the credential's own value is.
+    values, context_parts, non_literal = [], [], 0
+    comment = ""
+    cm = re.search(r"(#|//).*$", line)
+    if cm:
+        comment = cm.group(0)
     for m in _HIST_CRED_KV.finditer(line):
         raw = m.group(1)
         inner = raw[1:-1] if len(raw) >= 2 and raw[0] in "\"'`" and raw[-1] == raw[0] else raw
         inner = inner.rstrip(",;")
-        context = context.replace(raw, " ", 1)      # cut the value out of the context
+        # Walk left to the start of the KEY TOKEN: the regex matches at
+        # `password`, so `placeholder_password:` would otherwise lose the very
+        # prefix that marks it as scaffolding.
+        k = m.start()
+        while k > 0 and (line[k - 1].isalnum() or line[k - 1] in "_-.["):
+            k -= 1
+        context_parts.append(line[k:m.start(1)])          # this key, not the line
         # Two more shape rules, both about where the "assignment" sits rather
         # than what the value spells:
-        #   * the key is INSIDE an unclosed `${...}` — `: "${PGPASSWORD:?…}"` is
-        #     shell parameter-expansion syntax, not an assignment at all;
-        #   * the value carries a backtick — markdown inline-code punctuation
-        #     (`export GITHUB_TOKEN=…`), so the run captured is prose, not a value.
-        if _UNCLOSED_EXPANSION.search(line[:m.start()]) or "`" in inner:
+        #   * the key is INSIDE an unclosed `${...}` -- `: "${PGPASSWORD:?...}"`
+        #     is shell parameter-expansion syntax, not an assignment at all;
+        #   * the value sits in a BALANCED markdown inline-code span, i.e. there
+        #     is an opening backtick before the key too (`export TOKEN=...`).
+        #     Requiring the opening tick matters: suppressing on a bare backtick
+        #     anywhere in the value let a real password that merely CONTAINS one
+        #     buy its own silence -- the defect, respelled in punctuation.
+        in_code_span = "`" in inner and "`" in line[:m.start()]
+        if _UNCLOSED_EXPANSION.search(line[:m.start()]) or in_code_span:
             non_literal += 1
             continue
         values.append(inner)
+    context = " ".join(context_parts) + " " + comment
     if not values:
         if non_literal:
             return True                              # every "assignment" was syntax
@@ -1186,6 +1206,7 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # history written before the hook existed.
         "      ':(exclude)runbooks/tests/test-s3-env-var-name-rhs.py' "
         "      ':(exclude)runbooks/tests/test-tag-oracle-veto-discriminator.py' "
+        "      ':(exclude)runbooks/tests/test-cred-suppressor-scoping.py' "
         "      ':(exclude)runbooks/doc-check-current.md' "
         "      ':(exclude)runbooks/health-check.sh' "
         "      ':(exclude)docs/sops/*.md' "
@@ -1204,7 +1225,7 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # false positives); the $[A-Z_]+ var-name part stays effectively case-strict.
         "| grep -viE 'PGPASSWORD=\\$|password=\"?\\$[A-Z_]+|token=\"?\\$[A-Z_]+|api.?key=\"?\\$[A-Z_]+' "
         "| grep -vE '^[+-]?\\s*#|description:' "
-        "| grep -v '\"replace-me\"\\|\"my-strong-password\"\\|\"my-api-key\"\\|\"your-api-key-here\"\\|openssl rand' "
+        "| grep -v '\"replace-me\"\\|\"my-strong-password\"\\|\"my-api-key\"\\|\"your-api-key-here\"\\|\"my-aws-secret-key\"\\|openssl rand' "
         # Template/doc placeholders like <github-personal-access-token>, <web-ui-password>:
         "| grep -v '<[a-z][a-z0-9-]*>' "
         # Shell commands that reference secrets by name, not value:

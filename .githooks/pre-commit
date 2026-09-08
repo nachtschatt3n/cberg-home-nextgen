@@ -300,9 +300,16 @@ check_file() {
     if [ "$file" = "runbooks/tests/test-cred-suppressor-scoping.py" ]; then
         :
     elif [ -f "$PW_GUARD" ]; then
-        local pw_hit
-        pw_hit=$(echo "$content" | awk -f "$PW_GUARD" 2>/dev/null || true)
-        if [ -n "$pw_hit" ]; then
+        local pw_hit pw_rc
+        # Exit status is checked, NOT swallowed by `|| true`. A broken or
+        # incompatible awk returns empty stdout, which is byte-identical to
+        # "no hit" -- so without this the guard fails OPEN and silently reports
+        # every file clean. The missing-file branch below already fails closed;
+        # this makes the broken-file branch behave the same way.
+        pw_hit=$(echo "$content" | awk -f "$PW_GUARD" 2>/dev/null); pw_rc=$?
+        if [ $pw_rc -ne 0 ]; then
+            violations="${violations}  - Password guard FAILED (awk exit $pw_rc) — unscanned, not clean\n"
+        elif [ -n "$pw_hit" ]; then
             violations="${violations}  - Password pattern ($pw_hit)\n"
         fi
     else

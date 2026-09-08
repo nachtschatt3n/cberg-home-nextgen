@@ -205,6 +205,58 @@ for rel in tracked:
 check("hook: no tracked file trips the guard (normal commits still work)", noisy, [])
 
 # ───────────────────────────────────────────────────────────────────────────
+# SECOND-ROUND findings (security-agent review of the first fix). Each one is a
+# false negative the FIRST fix introduced: a suppressor that read the value's
+# CHARACTERS instead of its SHAPE, or a context window that still contained
+# secret-controlled text. Narrowing to kill a false positive created a false
+# negative -- the exact inverse this repo keeps getting bitten by -- so every
+# one gets a row here.
+# ───────────────────────────────────────────────────────────────────────────
+print("\n-- second round: punctuation must not buy silence either --")
+
+ROUND2 = [
+    ("F-A backtick inside the value",   "+      password: \"aB3`x9Qmw12\""),
+    ("F-A pipe + regex metachar",       "+      password: aB3|x9Q+mw12"),
+    ("F-A bare $ mid-value",            "+      password: aB3$xyz9Qmw"),
+    ("F-B commented-out credential",    "+      # password: Hunter2Seven"),
+    ("F-B // commented credential",     "+      // password: Hunter2Seven"),
+    ("F-C neighbour field says example","+  username: example_user, password: Hunter2Seven"),
+    ("F-C neighbour value is a token",  "+  password: Hunter2Seven  secret_key: <example-value>"),
+    ("F-C trailing word 'template'",    "+      password: Hunter2Seven  # app-template chart"),
+    ("F-C neighbour secretName",        "+      password: Hunter2Seven  secretName: foo"),
+]
+for label, line in ROUND2:
+    check(f"history: fires -- {label}", sc._hist_cred_hit_suppressed(line), False)
+    check(f"hook:    fires -- {label}", guard_flags(line.lstrip("+") + "\n"), True)
+
+# The legitimate side of each round-2 rule must still be quiet, or the fix is
+# just "scream at everything" wearing a different hat.
+ROUND2_QUIET = [
+    ("balanced markdown code span",  "+  - Set it: `export GITHUB_TOKEN=your_token_here`"),
+    ("scaffolding word in a comment","+      password: Hunter2Seven  # placeholder, see docs"),
+]
+for label, line in ROUND2_QUIET:
+    check(f"history: quiet -- {label}", sc._hist_cred_hit_suppressed(line), True)
+
+# F-F: three copies of the "same" exact-match allowlist had already drifted.
+awk_src = (ROOT / ".githooks" / "lib" / "password-guard.awk").read_text()
+awk_set = set(re.findall(r'lv == "([a-z0-9-]+)"', awk_src))
+check("F-F: awk and python template allowlists are the same set",
+      awk_set, set(sc._TEMPLATE_LITERALS))
+
+# F-E: the fixture file is credential-shaped by construction and must be
+# excluded from the history scan, as the two older fixture files already are.
+sc_src = (ROOT / "runbooks" / "security-check.py").read_text()
+check("F-E: this fixture file is excluded from the s3 history pathspec",
+      "':(exclude)runbooks/tests/test-cred-suppressor-scoping.py'" in sc_src, True)
+
+# F-D: the hook must fail CLOSED when awk itself fails, not report clean.
+hook_src = (ROOT / ".githooks" / "pre-commit").read_text()
+check("F-D: hook checks awk's exit status instead of swallowing it",
+      "Password guard FAILED" in hook_src and "|| true)" not in hook_src.split("PW_GUARD")[2][:200],
+      True)
+
+# ───────────────────────────────────────────────────────────────────────────
 # The suppressors' own scoping, stated directly.
 # ───────────────────────────────────────────────────────────────────────────
 print("\n-- scoping invariants --")

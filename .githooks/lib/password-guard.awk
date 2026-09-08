@@ -40,9 +40,6 @@ BEGIN { hit = 0 }
 
 hit { next }
 
-# Whole-line comments carry no deployed credential.
-/^[[:space:]]*(#|\/\/)/ { next }
-
 {
     rest = $0
     while (match(tolower(rest), /(password|passwd|secret[_-]?key|blowfish[_-]?secret)["'[:space:]]*[:=][[:space:]]*/)) {
@@ -76,7 +73,16 @@ hit { next }
         if (val ~ /^<.*>$/)                                       continue  # <template-token>
         if (val ~ /__file$|__env$/)                               continue  # bjw-s sentinels
         if (val ~ /^[A-Za-z_][A-Za-z0-9_.]*\(/)                   continue  # f(...) call, computed
-        if (val ~ /`/)                                            continue  # markdown inline code
+        if (val ~ /^</)                                           continue  # <template ...> opener
+        if (val ~ /\.(json|ya?ml|txt|md|conf|ini|toml)$/)          continue  # a filename, not a value
+        # Prose inside a comment that quotes a credential in a code span --
+        # this repo's own scanners document the shapes they detect. Narrow on
+        # purpose: a COMMENTED-OUT credential with no code span still fires.
+        if ($0 ~ /^[[:space:]]*(#|\/\/)/ && head ~ /`/)            continue
+        # Balanced markdown inline-code span only -- an OPENING backtick must
+        # precede the key. Suppressing on a bare backtick inside the value let a
+        # real password that merely contains one buy its own silence.
+        if (val ~ /`/ && head ~ /`/)                              continue
         # An env-var NAME as the value. This is the weakest rule here and it is
         # a knowing trade: `password: CORRECT_HORSE_BATTERY` is a real
         # passphrase shape and would be missed. Kept because the alternative is
@@ -93,19 +99,32 @@ hit { next }
         # has an unclosed `${`. The value is not a value at all.
         if (head ~ /\$\{[^}]*$/)                                  continue
 
-        ctx = tolower(head tail)
+        cmt = ""
+        if (match($0, /(#|\/\/).*$/)) cmt = substr($0, RSTART)
+        # kt = the KEY TOKEN alone. Trim the separator, then everything before
+        # the last non-key character, so a neighbouring field's value on the
+        # same line cannot reach the scaffolding-word test. `placeholder_password`
+        # survives whole; `username: example_user, ` does not.
+        kt = head
+        sub(/[[:space:]]*$/, "", kt)
+        sub(/["']?[[:space:]]*[:=]$/, "", kt)
+        sub(/^.*[^A-Za-z0-9_.[\]-]/, "", kt)
+        ctx = tolower(kt " " cmt)
+        line_ctx = tolower($0)
 
         # --- per-CONTEXT: a regex/search PATTERN, not an assignment --------
         # `rg -n "password:|token:|secret:" kubernetes/` -- the alternation bar
         # is the tell, and it only counts next to a search command.
-        if (val ~ /\|/ && ctx ~ /(^|[^a-z])(rg|grep|ripgrep|egrep|ag)([^a-z]|$)/) continue
-        # Same tell inside a source-level regex literal (this repo's own
-        # scanners match their own patterns): an alternation bar PLUS another
-        # regex metacharacter is a pattern, not a password.
-        if (val ~ /\|/ && val ~ /[\\[\]^*+?]/)                                   continue
+        if (val ~ /\|/ && line_ctx ~ /(^|[^a-z])(rg|grep|ripgrep|egrep|ag)([^a-z]|$)/) continue
+        # Same tell inside a source-level REGEX LITERAL (this repo's own scanners
+        # match their own patterns). Context-gated on the raw-string / regex
+        # syntax around it: ungated, a real password containing a pipe plus any
+        # of []^*+?\ went silent -- and the pre-fix whole-file grep caught those.
+        if (val ~ /\|/ && val ~ /[\\[\]^*+?]/ &&
+            line_ctx ~ /r"|r'|re\.compile|regexp?|pattern|match\(/)                continue
 
         # --- per-CONTEXT: scaffolding words, never read off the value ------
-        if (ctx ~ /example|sample|placeholder|dummy|template|fixture|scaffold/) continue
+        if (ctx ~ /example|placeholder/)                                       continue
         if (ctx ~ /change[_-]?me|replace[_-]?me|replace[_-]?with|your[_-]/)     continue
 
         # --- per-CONTEXT: the line names a secret instead of holding one ---
@@ -116,13 +135,15 @@ hit { next }
         # Deliberately exact, and deliberately tiny. This is NOT the substring
         # match that failed: `placeholder` and `replace-me-now` are not members
         # and still fire. Only a value that IS one of these canonical template
-        # strings is exempt. Same three strings security-check.py allowlists.
+        # strings is exempt. MUST stay equal to _TEMPLATE_LITERALS in
+        # security-check.py -- test-cred-suppressor-scoping.py asserts the two
+        # sets are identical, because three copies had already drifted apart.
         # `my-aws-secret-key` is the AdGuard chart's own unset S3-backup default
         # (kubernetes/apps/network/internal/adguard-home); security-check.py
         # allowlists the same string. Because the match is EXACT, the day that
         # field is given a real value the guard fires again.
         lv = tolower(val)
-        if (lv == "replace-me" || lv == "my-strong-password" ||
+        if (lv == "replace-me" || lv == "my-strong-password" || lv == "my-api-key" ||
             lv == "your-api-key-here" || lv == "my-aws-secret-key") continue
 
         print "line " FNR
