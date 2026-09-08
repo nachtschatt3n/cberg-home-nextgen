@@ -21,7 +21,11 @@ done
 ```
 
 All of them are hermetic: fakes and fixtures only, no cluster, no database, no
-network. Anything that needs the live register is a `--dry-run` script, not a
+network — with ONE deliberate exception. `test-cred-suppressor-scoping.py` also
+scans every tracked file with the pre-commit password guard, because the
+operational cost of that detector IS how many files it would block, and a number
+measured once in a terminal rots. If it fails, a tracked file would now block
+commits: fix the file or the detector's scoping — do NOT delete the assertion. Anything that needs the live register is a `--dry-run` script, not a
 test — see `runbooks/refingerprint-findings.py`.
 
 ## `runbooks/tests/`

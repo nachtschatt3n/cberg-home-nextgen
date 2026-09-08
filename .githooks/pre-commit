@@ -339,19 +339,25 @@ if [ -f "$DISCLOSURE_SCAN" ]; then
 fi
 
 # ───────────────────────────────────────────────────────────────────
-# Layer 5: audit-tooling regression tests — only when runbooks/ is touched
+# Layer 5: audit-tooling regression tests — runbooks/ or .githooks/lib/
 # ───────────────────────────────────────────────────────────────────
 # runbooks/tests/ holds a suite per correctness fix that was found the hard
 # way. Nothing ran them until 2026-08-22, so a regression in any would have
 # surfaced only as a wrong answer in a future sweep — the same silent-failure
-# mode the tests exist to prevent. ~12s, and only when the code they guard is
-# actually being changed.
+# mode the tests exist to prevent. ~48s measured 2026-09-08 (was documented as
+# ~12s and had drifted 4x — a stale budget is how a fail-closed gate gets
+# bypassed for "hanging"), and only when the code they guard is being changed.
+#
+# `.githooks/lib/` is in the trigger because the suite guards code that lives
+# there too (password-guard.awk). Scoping this to `^runbooks/` left the guard
+# editable with NO test run at all, while editing security-check.py ran all 61
+# — a gap created the moment the guard moved out of this file.
 #
 # Fails CLOSED: an audit script whose tests cannot run is exactly the state
 # this layer exists to catch. Bypass with --no-verify if genuinely needed.
-RUNBOOK_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^runbooks/.*\.(py|sh)$' || true)
-if [ -n "$RUNBOOK_STAGED" ] && [ -x runbooks/tests/run-all.sh ]; then
-    echo -e "${YELLOW}🧪 runbooks/ changed — running audit regression tests...${NC}"
+AUDIT_STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^runbooks/.*\.(py|sh)$|^\.githooks/(pre-commit|commit-msg|lib/)' || true)
+if [ -n "$AUDIT_STAGED" ] && [ -x runbooks/tests/run-all.sh ]; then
+    echo -e "${YELLOW}🧪 audit tooling changed — running regression tests...${NC}"
     if bash runbooks/tests/run-all.sh -q; then
         :
     else

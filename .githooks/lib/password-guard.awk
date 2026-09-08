@@ -34,7 +34,7 @@
 # Nothing is judged against the whole file, and nothing is judged against text
 # the secret itself controls.
 #
-# Test: runbooks/tests/test-precommit-password-scoping.py
+# Test: runbooks/tests/test-cred-suppressor-scoping.py
 
 BEGIN { hit = 0 }
 

@@ -184,8 +184,21 @@ grep -ril "$DOMAIN" README.md docs/ runbooks/ 2>/dev/null \
 echo "=== Plaintext credential patterns in git history ==="
 git log --all --oneline -p \
   | grep -iE '(password|secret|token|api.?key|private.?key)\s*[:=]\s*\S{8,}' \
-  | grep -v 'sops\|ENC\[AES\|secretKeyRef\|valueFrom\|EXAMPLE\|your_\|placeholder\|changeme' \
+  | grep -v 'sops\|ENC\[AES\|secretKeyRef\|valueFrom\|process\.env\|__env\|__file\|pullSecret:' \
   | head -30
+
+# NOTE: `placeholder`, `changeme`, `EXAMPLE`, `your_`, `SECRET_` and `${` were REMOVED
+# from that chain on 2026-09-08 (f1720e57). They were matched against the WHOLE LINE, so
+# the credential's own VALUE could satisfy them — an admin password spelled `placeholder`
+# deleted its own finding and survived 4.7 months in this public repo. Anti-correlated
+# with risk: the weaker the secret, the more reliably it hid.
+#
+# Only whole-line-SAFE reference tokens remain above. The rest of the suppression now
+# lives in `_hist_cred_hit_suppressed()` in security-check.py, which scopes each rule to
+# the text it can honestly judge: SHAPE rules (`${X}`, `$X`, `$(cmd)`, `{{X}}`, `ENC[`,
+# `<tpl>`, `f(...)`) against the VALUE only; scaffolding WORDS against the CONTEXT only
+# (the line minus its values). A line the key regex cannot parse fails OPEN — it stays
+# visible. Hand-running the chain above alone reproduces the pre-fix blindness.
 
 echo "=== Domain literal ADDED to git history since the redaction cutoff ==="
 # Scoped to what is still actionable. Everything at or before 84b81004
