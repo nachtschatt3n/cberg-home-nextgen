@@ -30,7 +30,15 @@ spec:
   upgrade:
     cleanupOnFail: true
     remediation:
-      retries: 3
+      # TEMPORARY for the 5.0.0 -> 6.1.0 upgrade attempt (plan superset-6.1.0 §3
+      # step 2). The chart runs `superset db upgrade` from a post-upgrade hook Job,
+      # i.e. AFTER the webserver/worker/beat Deployments have rolled onto the new
+      # image, so there is a real window of 6.1 code against a 5.0 schema. With
+      # rollback remediation active, any wobble in that window yanks the release
+      # back and the one-way migration never runs. RESTORE retries: 3 and drop
+      # remediateLastFailure once the upgrade has verified.
+      retries: 0
+      remediateLastFailure: false
       strategy: rollback
   values:
     image:
