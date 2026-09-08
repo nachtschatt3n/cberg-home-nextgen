@@ -1,8 +1,8 @@
 # SOP: Zigbee2MQTT operations
 
 > Description: Lifecycle operations for the Zigbee2MQTT (Z2M) deployment and its mesh — opening/closing `permit_join`, removing devices safely, recovering from interview failures on CC2652-class router firmware, backup/restore, and post-incident smoke testing.
-> Version: `2026.08.08`
-> Last Updated: `2026-08-08`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cberg-home-ops`
 
 ---
@@ -28,7 +28,7 @@ The rule is about the **pre-flight**, not about the flag. Once the pre-flight pl
 | Namespace | `home-automation` |
 | Z2M HelmRelease | `kubernetes/apps/home-automation/zigbee2mqtt/app/helmrelease.yaml` |
 | Z2M data PVC | `zigbee2mqtt-data` (Longhorn) |
-| Z2M frontend | `the `zigbee2mqtt` internal ingress (`zigbee2mqtt.${SECRET_DOMAIN}`)` |
+| Z2M frontend | HTTPRoute `zigbee2mqtt` (`zigbee2mqtt.${SECRET_DOMAIN}`) -> Gateway `envoy-internal` in ns `network`, `sectionName: https` — LAN-only |
 | Coordinator | SLZB-06P10 @ `192.168.32.20`, IEEE `0x00124b00336cc62a`, TCP serial `tcp://192.168.32.20:6638` |
 | Router (mesh) | SLZB-06 @ `192.168.32.21`, IEEE `0x000000020000001c`, model `ti.router`, friendly name "Router Tub Room" (since 2026-08-08 — it rejoined with a **zeroed IEEE** after losing its network NV; previously `0x00124b0031dffd19`, and `0x00124b002d12beec` before the 2026-06-04 reflash. See §8 Diagnose Example 4) |
 | Other routers | 3 mains-powered Philips Hue lights acting as routers: `0x0017880100f1ec0a` "Guest Room Spot 1", `0x001788010489b6d2` "Guest Room Spot 2", `0x0017880100de1a2e` "Tub Room Light" |
@@ -547,8 +547,11 @@ Z2M operates on the LAN (broker at `192.168.55.15:1883` is plaintext, anonymous 
 ```bash
 # No Z2M secrets in plaintext in the repo:
 git -C . grep -E 'network_key|ext_pan_id' kubernetes/apps/home-automation/zigbee2mqtt | grep -v "test\|sample"
-# Ingress is internal-only (no LAN→WAN exposure of the Z2M frontend):
-mise exec -- kubectl -n home-automation get ingress zigbee2mqtt -o jsonpath='{.spec.ingressClassName}'
+# Routing is internal-only (no LAN→WAN exposure of the Z2M frontend).
+# ingress-nginx was deleted 2026-09-07 (ad1ea7c2): there is no Ingress to check,
+# so assert the HTTPRoute's parent Gateway is envoy-internal, NOT envoy-external:
+mise exec -- kubectl -n home-automation get httproute zigbee2mqtt \
+  -o jsonpath='{range .spec.parentRefs[*]}{.name}/{.sectionName}{"\n"}{end}'
 # permit_join is closed when not in active pairing:
 mise exec -- kubectl -n home-automation exec deploy/mosquitto -c app -- mosquitto_sub \
   -h 127.0.0.1 -p 1883 -t zigbee2mqtt/bridge/info -C 1 -W 4 \
@@ -557,7 +560,7 @@ mise exec -- kubectl -n home-automation exec deploy/mosquitto -c app -- mosquitt
 
 Expected:
 - `grep` returns nothing
-- IngressClassName is `internal`
+- parent Gateway is `envoy-internal/https` (any `envoy-external` parent = external exposure, treat as a finding)
 - `closed`
 
 ---

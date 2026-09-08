@@ -1,8 +1,8 @@
 # SOP: Grafana Image Changes — the datasource pre-flight gate
 
 > Description: How to change the Grafana container image (tag, variant, or chart-driven bump) without silently breaking datasources, and why "the pod started and the UI loads" is not evidence that it worked.
-> Version: `2026.09.06`
-> Last Updated: `2026-09-06`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `homelab-sre`
 
 ---
@@ -277,8 +277,11 @@ datasources — this section is a liveness check, not the gate.
   the manifest, a commit message, or this SOP
   (`docs/sops/vulnerability-disclosure.md`). Plugin/package **counts used to
   compare packaging** are fine; counts of findings are not.
-- Grafana's ingress is `ingressClassName: internal`. Any change that would move
-  it to `external` is out of scope here and needs its own review.
+- Grafana is reached via HTTPRoute `grafana` parented to the LAN-only Gateway
+  `envoy-internal` (ns `network`, `sectionName: https`) — ingress-nginx was
+  deleted 2026-09-07 (`ad1ea7c2`), so there is no ingress class to read. Any
+  change that would reparent it to `envoy-external` is out of scope here and
+  needs its own review.
 - Admin credentials come from the `grafana-admin-secret` Secret. The
   verification commands above read them into shell vars — do not echo them, and
   do not paste command output containing them into a plan file or commit.

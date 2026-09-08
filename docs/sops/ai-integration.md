@@ -3,8 +3,8 @@
 > Standard Operating Procedures for AI/ML service integration and management.
 > Reference: `docs/integration.md` for endpoint reference table.
 > Description: Operating and integrating Ollama-based AI endpoints for cluster applications.
-> Version: `2026.08.24`
-> Last Updated: `2026-08-24`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `Platform`
 
 ---
@@ -25,7 +25,7 @@ Ports 11435 and 11436 are no longer in use — all traffic goes to 11434.
 
 In-cluster AI services (Open WebUI, hermes-agent, etc.) connect to this external endpoint.
 
-**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b-mlx` as its LLM backend. It is on the `internal` ingress class only; the Telegram bot token provides external reachability via the Telegram API, not via cluster ingress.
+**hermes-agent** (`ai` namespace) is a self-improving AI agent with a Telegram gateway and skill-learning loop. It uses the same Ollama endpoint (`http://192.168.30.111:11434`) with `gemma4:26b-mlx` as its LLM backend. Both of its HTTPRoutes (`hermes-agent-api`, `hermes-agent-dashboard`) are parented to the LAN-only Gateway `envoy-internal` (ns `network`, `sectionName: https`) — never `envoy-external`; the Telegram bot token provides external reachability via the Telegram API, not via cluster routing.
 
 ---
 
@@ -289,7 +289,10 @@ OpenAI `model` field selects an OpenClaw AGENT (`openclaw` = default,
 
 - **Security:** this endpoint grants full operator access to the gateway.
   Bearer auth = the gateway token; it is reachable in-cluster/LAN only and
-  must **never** be routed through an ingress.
+  must **never** be exposed publicly. Concretely, post-`ad1ea7c2`: give it no
+  HTTPRoute parented to `envoy-external`. "No Ingress" is no longer a
+  meaningful guard — zero Ingress objects and no controller exist, so the
+  Gateway parent is the only thing that decides internal vs. internet.
 - **Voice agent:** a dedicated small/fast `voice` agent runs on
   `ollama/gemma4:e2b-mlx`. It is runtime-managed
   (`openclaw agents add voice …`) and persists in the PVC — the config-guard
