@@ -52,6 +52,15 @@ spec:
                     name: mariadb
                     key: mariadb-root-password
               UPLOAD_LIMIT: 300M
+              # blowfish_secret is injected as config.user.inc.php (base64) from
+              # the SOPS-encrypted `phpmyadmin` Secret — image-native mechanism,
+              # included AFTER config.inc.php so it pins the cookie-auth key.
+              # Replaces the removed plaintext config-configmap.yaml.
+              PMA_USER_CONFIG_BASE64:
+                valueFrom:
+                  secretKeyRef:
+                    name: phpmyadmin
+                    key: PMA_USER_CONFIG_BASE64
 
             probes:
               liveness:
