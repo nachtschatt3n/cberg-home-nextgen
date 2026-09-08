@@ -1046,6 +1046,112 @@ def _confirm_env_var_names(names: set[str]) -> set[str]:
     return confirmed
 
 
+# ── Value-scoped / context-scoped suppression of git-history credential hits ──
+#
+# THE DEFECT THIS REPLACES (found 2026-09-08). The suppressors above used to be
+# `grep -vi` filters applied to the WHOLE diff line, so the CREDENTIAL'S OWN
+# VALUE could satisfy them. A Superset admin password whose value was the word
+# `placeholder` matched the `placeholder` filter and deleted its own finding: it
+# sat in this public repo for 4.7 months and 28 commits with the scanner running
+# over it every sweep. That failure mode is ANTI-CORRELATED WITH RISK — the
+# weaker and more guessable the secret, the more reliably it hides, because weak
+# secrets are exactly the ones spelled `placeholder` / `changeme` / `test`.
+#
+# The replacement asks each suppressor only the question it can honestly answer:
+#
+#   INTERPOLATION / CIPHERTEXT / TEMPLATE FORM — judged against the VALUE ONLY.
+#     `password: ${SECRET_X}` is a reference. `password: hunter2seven  # see
+#     ${SECRET_DOMAIN}` is a leak with an unrelated `${` further along the line,
+#     and the old whole-line filter dropped it. Only forms that are
+#     SYNTACTICALLY NOT A LITERAL count here (`${…}`, `$VAR`, `$(…)`, `{{…}}`,
+#     `<template>`, `ENC[…]`, `__file`/`__env` sentinels) — never dictionary
+#     words. `placeholder` is a perfectly good literal string, which is the
+#     whole point.
+#
+#   PLACEHOLDER WORDS — judged against the CONTEXT ONLY, i.e. the line with
+#     every credential value cut out of it: the key, the comment, the
+#     surrounding text. `placeholder_password: s3cr3tvalue` is scaffolding;
+#     `password: placeholder` is a password that happens to spell one.
+#
+# Neither is ever evaluated against the whole file, and neither is evaluated
+# against text the secret itself controls.
+#
+# A line with several assignments is suppressed only if EVERY value on it is a
+# non-literal form — same rule, and same reason, as `_env_name_candidates`.
+# A line this regex cannot parse is NOT suppressed: failing open keeps an
+# unparsed credential visible, which is the safe direction for a leak detector.
+
+# Key, then the value as its own group: quoted run, or bare non-space token.
+_HIST_CRED_KV = re.compile(
+    r"(?i)(?:password|passwd|secret|token|api.?key|private.?key)[\"']?\s*[:=]\s*"
+    r"(\"[^\"]*\"|'[^']*'|`[^`]*`|\S+)"
+)
+# Value forms that are structurally incapable of being a literal secret.
+_NON_LITERAL_VALUE = re.compile(
+    r"\$\{|\$\(|\$[A-Za-z_][A-Za-z0-9_]*|\{\{|"      # ${X} $(cmd) $X {{ }}
+    r"^ENC\[|"                                        # SOPS ciphertext
+    r"^<[^>]*>$|"                                     # <template-token>
+    r"^\{[A-Za-z_][A-Za-z0-9_]*\}$|"                  # {fstring_name}
+    r"^[A-Za-z_][A-Za-z0-9_.]*\(|"                    # f(...) -- computed, never a literal
+    r"__file\b|__env\b"                               # bjw-s / helm sentinels
+)
+# The key sits inside an unclosed shell parameter expansion.
+_UNCLOSED_EXPANSION = re.compile(r"\$\{[^}]*$")
+# Reference mechanisms. Whole-line-safe: their presence anywhere means the line
+# points at a secret rather than holding one. Duplicated from the grep chain on
+# purpose, so the predicate is complete when called on its own (tests, reuse).
+_REFERENCE_CONTEXT = re.compile(
+    r"(?i)secretKeyRef|valueFrom|secretRef|existingSecret|secretName|"
+    r"secretStore|envFromSecret|process\.env|getenv|os\.environ|__file|__env"
+)
+# Canonical template strings, matched EXACTLY and deliberately few. This is not
+# the substring match that failed: `placeholder` and `replace-me-now` are not
+# members and still fire. Same set the section-2 scanner allowlists.
+_TEMPLATE_LITERALS = {
+    "replace-me", "my-strong-password", "my-api-key",
+    "your-api-key-here", "my-aws-secret-key",
+}
+# Scaffolding words. Matched ONLY against context, never against a value.
+_PLACEHOLDER_CONTEXT = re.compile(
+    r"(?i)example|sample|placeholder|dummy|template|scaffold|"
+    r"change[_-]?me|replace[_-]?me|replace[_-]?with|your[_-]|my[_-]strong|"
+    r"fixture|redact"
+)
+
+
+def _hist_cred_hit_suppressed(line: str) -> bool:
+    """True if this git-history hit is a reference/scaffolding line, not a leak."""
+    values, context, non_literal = [], line, 0
+    for m in _HIST_CRED_KV.finditer(line):
+        raw = m.group(1)
+        inner = raw[1:-1] if len(raw) >= 2 and raw[0] in "\"'`" and raw[-1] == raw[0] else raw
+        inner = inner.rstrip(",;")
+        context = context.replace(raw, " ", 1)      # cut the value out of the context
+        # Two more shape rules, both about where the "assignment" sits rather
+        # than what the value spells:
+        #   * the key is INSIDE an unclosed `${...}` — `: "${PGPASSWORD:?…}"` is
+        #     shell parameter-expansion syntax, not an assignment at all;
+        #   * the value carries a backtick — markdown inline-code punctuation
+        #     (`export GITHUB_TOKEN=…`), so the run captured is prose, not a value.
+        if _UNCLOSED_EXPANSION.search(line[:m.start()]) or "`" in inner:
+            non_literal += 1
+            continue
+        values.append(inner)
+    if not values:
+        if non_literal:
+            return True                              # every "assignment" was syntax
+        # No parseable assignment, so there is no value for a suppressor to be
+        # fooled by. A plain reference line (`passwordSecretKeyRef: superset-x`)
+        # is safe to drop; anything else fails OPEN and stays visible.
+        return bool(_REFERENCE_CONTEXT.search(line))
+    if _PLACEHOLDER_CONTEXT.search(context):
+        return True                                  # the KEY/comment says scaffolding
+    if _REFERENCE_CONTEXT.search(context):
+        return True                                  # the line names a secret
+    return all(_NON_LITERAL_VALUE.search(v) or v.lower() in _TEMPLATE_LITERALS
+               for v in values)
+
+
 def s3_git_history() -> tuple[str, Findings, str]:
     section_header(3, "Git History Secret Scan")
     f = Findings()
@@ -1084,14 +1190,15 @@ def s3_git_history() -> tuple[str, Findings, str]:
         "      ':(exclude)runbooks/health-check.sh' "
         "      ':(exclude)docs/sops/*.md' "
         "| grep -iE '(password|secret|token|api.?key|private.?key)\\s*[:=]\\s*\\S{8,}' "
-        "| grep -vi 'sops\\|ENC\\[AES\\|secretKeyRef\\|valueFrom\\|EXAMPLE\\|your_\\|your-"
-        "\\|placeholder\\|changeme\\|SECRET_\\|\\${\\|process\\.env\\|__env\\|__file"
-        "\\|REPLACE_WITH\\|pullSecret:' "
-        # Placeholder values in ANY case/separator style: the `changeme` filter
-        # above is case-insensitive but NOT separator-insensitive, so
-        # CHANGE_ME_TO_STRONG_PASSWORD / change-me-in-production sailed through
-        # (2026-08-18 false positives F-2bb5cb28 / F-1eea708e):
-        "| grep -viE 'change[_-]?me|replace[_-]?me' "
+        # Only WHOLE-LINE-safe suppressors remain here. Each names a REFERENCE
+        # mechanism whose presence anywhere on the line means the line carries a
+        # pointer, not a value. The value-text suppressors that used to live in
+        # this chain (`placeholder`, `changeme`, `EXAMPLE`, `your_`, `SECRET_`,
+        # `${`, `REPLACE_WITH`, `change[_-]?me`, `replace[_-]?me`) moved into
+        # `_hist_cred_hit_suppressed()` below, which scopes each of them to the
+        # part of the line it can honestly judge. See that function for why.
+        "| grep -vi 'sops\\|ENC\\[AES\\|secretKeyRef\\|valueFrom"
+        "\\|process\\.env\\|__env\\|__file\\|pullSecret:' "
         # Bare or quoted shell variables like $DB_PASSWORD, "$ICLOUD_PASSWORD":
         # -i: `X-Plex-Token=$TOKEN` must match the token= branch too (2026-08-17
         # false positives); the $[A-Z_]+ var-name part stays effectively case-strict.
@@ -1131,6 +1238,11 @@ def s3_git_history() -> tuple[str, Findings, str]:
         # be a hardcoded literal secret. e.g. sed -E 's/api_key = \"[a-f0-9]+\"/.../'.
         "| grep -vE '\\b(sed|grep)\\b.*\\[[^]]+\\][+*]' "
     )
+    # Value-scoped / context-scoped suppression. Runs in Python, not in the
+    # grep chain, because the question "is the PLACEHOLDER word inside the
+    # value or outside it?" cannot be asked of a whole line at all.
+    cred_hits = [h for h in cred_hits if not _hist_cred_hit_suppressed(h)]
+
     # Cross-line variable-reference filter.
     #
     # A JS/TS object literal like `{ botToken: jerryTok }` matches the credential

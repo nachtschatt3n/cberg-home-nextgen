@@ -31,6 +31,9 @@ GREEN='\033[0;32m'
 DIM='\033[2m'
 NC='\033[0m'
 
+HOOKS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+PW_GUARD="$HOOKS_LIB/password-guard.awk"
+
 # ACMR: renamed files (status R, rename+modify above git's similarity
 # threshold) must be scanned too — with ACM only they skipped ALL layers.
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
@@ -283,16 +286,27 @@ check_file() {
     echo "$content" | grep -qE 'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}' && violations="${violations}  - JWT token\n"
     echo "$content" | grep -qiE '(secret|credential|auth)["\s:=]+[A-Za-z0-9+/=]{32,}' && violations="${violations}  - Generic secret\n"
 
-    # Password patterns — guard against false-positives (templates, examples, ${VAR}).
-    # The value pattern here is [^"\s]{8,} (any non-space), so unlike the API-key/
-    # token detectors it matches a SOPS ciphertext blob after a `password:` key
-    # (e.g. `admin_password: ENC[AES256_GCM,...]`). An ENC[ marker means the value
-    # is encrypted (Layer 2 already verified the file carries a `sops:` block), so
-    # it is by definition not a plaintext password leak — exempt it.
-    if echo "$content" | grep -qE '(password|passwd)["\s:=]+[^"\s]{8,}'; then
-        if ! echo "$content" | grep -qE '(example|sample|placeholder|your-password|CHANGEME|\$\{|\$\(\)|<[A-Z_]+>|ENC\[)'; then
-            violations="${violations}  - Password pattern\n"
+    # Password patterns — PER LINE and PER VALUE, in .githooks/lib/password-guard.awk.
+    # It was two whole-FILE greps until 2026-09-08, which meant one unrelated
+    # `${...}` anywhere in a file disarmed the guard for that entire file (73 of
+    # 112 helmrelease.yaml files qualify), and a value that spelled `placeholder`
+    # suppressed itself. The awk program documents both failures; the scoping
+    # rules it implements are load-bearing, so read it before relaxing anything.
+    # The guard's own fixture file is, by construction, a list of lines shaped
+    # like credential assignments — the same self-reference noise security-check.py
+    # excludes its two fixture files for. Named individually, not as a
+    # `runbooks/tests/*` glob: a directory glob would make a genuine credential
+    # committed anywhere under that path permanently invisible to this layer.
+    if [ "$file" = "runbooks/tests/test-cred-suppressor-scoping.py" ]; then
+        :
+    elif [ -f "$PW_GUARD" ]; then
+        local pw_hit
+        pw_hit=$(echo "$content" | awk -f "$PW_GUARD" 2>/dev/null || true)
+        if [ -n "$pw_hit" ]; then
+            violations="${violations}  - Password pattern ($pw_hit)\n"
         fi
+    else
+        violations="${violations}  - Password guard MISSING (.githooks/lib/password-guard.awk) — unscanned, not clean\n"
     fi
 
     if [ -n "$violations" ]; then
