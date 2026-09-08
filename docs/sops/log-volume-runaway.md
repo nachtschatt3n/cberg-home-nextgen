@@ -1,8 +1,8 @@
 # SOP: Log-Volume Runaway
 
 > Description: How to attribute a sudden jump in Elasticsearch log ingest to a namespace, pod and single log line; how to tell a mislabelled deprecation stream from a real error stream; how to price it against the 14-day DLM window; and the ordered remediation menu (fix at source → change the probe path → drop at the collector, last resort).
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cberg-agent` / platform operator
 
 ---
@@ -284,7 +284,7 @@ to, so that window is identical either way. With multiple replicas, weigh it.
    mise exec -- kubectl get pods -n <ns> -l app.kubernetes.io/name=<app>
    ```
 5. **The probe-only port is not reachable from outside**: `/healthz` must not
-   appear on the Service or the ingress (§10).
+   appear on the Service or the app's HTTPRoute (§10).
 6. **Backing-index size** for the next full day is back in the 736–882 MB band
    (§8.1). This is the only test that proves the storage bill is actually gone.
 
@@ -502,9 +502,10 @@ Post-change, also run `health-check-agent`, `security-agent` and `doc-agent`.
 ## 10) Security Check
 
 - **A probe-only port must stay probe-only.** Confirm the new port is not on
-  the Service and not on the ingress:
+  the Service and not on the HTTPRoute (ingress-nginx was deleted 2026-09-07,
+  `ad1ea7c2`, so `get ingress` returns nothing for every app and cannot fail):
   ```bash
-  mise exec -- kubectl get svc,ingress -n <ns> <app> -o yaml | grep -nE "port|path:"
+  mise exec -- kubectl get svc,httproute -n <ns> <app> -o yaml | grep -nE "port|path:"
   ```
   The reference implementation returns `404` for every path except `/healthz`
   and never serves application content.

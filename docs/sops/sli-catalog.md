@@ -1,8 +1,8 @@
 # SOP: SLI Catalog (sweep-history Track C / Phase 0)
 
 > Description: Inventory of SLI candidates per integration, with explicit signal sources (Prometheus / Elasticsearch / hactl / kubectl / none) and pilot-ready ratings. Drives the `slo_definitions` table in sweep_history Postgres (the runtime SLO catalog).
-> Version: `2026.08.15`
-> Last Updated: `2026-08-15`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `homelab-operator`
 
 ---
@@ -61,7 +61,7 @@ Sorted by readiness. Source citations included so a follow-up can re-confirm wit
 | 2 | **longhorn** storage | `count(longhorn_volume_robustness{robustness="healthy"})` | `count(longhorn_volume_robustness)` | Native Longhorn metrics, ServiceMonitor in `monitoring/kube-prometheus-stack/app/` | Existing PrometheusRule `longhorn-alerts.yaml` defines thresholds — SLO is a generalisation. |
 | 3 | **unifi** device availability (via Unpoller) | `sum(unifipoller_device_uptime_seconds > 0)` | `count(unifipoller_device_uptime_seconds)` | `kubernetes/apps/monitoring/unpoller/app/` | 9 PrometheusRule rules already alert on derived signals — SLO complements with budget-tracking. |
 | 9 | **internal DNS** (k8s-gateway split-horizon) | `(count(probe_success{probe_class="dns"} == 1) or on() (count(probe_success{probe_class="dns"}) * 0))` | `(count(probe_success{probe_class="dns"}) or on() vector(0))` | `prometheus-blackbox-exporter` (chart 11.17.2 / blackbox v0.28.0) + 2 `Probe` CRs in `kubernetes/apps/monitoring/prometheus-blackbox-exporter/app/probes.yaml` | Live as SLO `internal-dns-resolution` — 99.9% / 7d (10.1 min budget), tags `network,dns,pilot`. **Answer-validating, not reachability**: `valid_rcodes=[NOERROR]` AND `validate_answer_rrs` (a real A record in `192.168.0.0/16`), so SERVFAIL, NXDOMAIN and NOERROR-with-empty-answer all count as failures — the 2026-08-15 shape, where every pod was Running and Flux was green. Numerator present-gated (longhorn pattern) so scrape gaps do not NaN-poison the window. `BlackboxProbesAbsent` alerts if the SLI goes silent. |
-| 10 | **internal ingress** (both ingress classes) | `(count(probe_success{probe_class="http"} == 1) or on() (count(probe_success{probe_class="http"}) * 0))` | `(count(probe_success{probe_class="http"}) or on() vector(0))` | same exporter; 2 HTTPS `Probe` CRs, one representative host per ingress class | Live as SLO `internal-ingress-availability` — 99.5% / 7d (50.4 min budget), tags `network,ingress,pilot`. End-to-end user path (CoreDNS → k8s-gateway → ingress → TLS → backend); TLS verification left ON so cert expiry counts as the user-visible failure it is. Deliberately looser than #9 because single-replica backend rollouts land in this number; if backend churn dominates the budget the fix is a dedicated always-on probe endpoint per class, **not** a looser target. |
+| 10 | **internal HTTP routing** (one host per Gateway) | `(count(probe_success{probe_class="http"} == 1) or on() (count(probe_success{probe_class="http"}) * 0))` | `(count(probe_success{probe_class="http"}) or on() vector(0))` | same exporter; 2 HTTPS `Probe` CRs, one representative host per Gateway (verified live 2026-09-08: `http-ingress-internal` -> `sweep.${SECRET_DOMAIN}` on `envoy-internal`, `http-ingress-external` -> `echo-server.${SECRET_DOMAIN}` on `envoy-external`). The CR names still say `ingress` for metric-continuity; the SLI is healthy and was never broken by the ingress-nginx deletion | Live as SLO `internal-ingress-availability` — 99.5% / 7d (50.4 min budget), tags `network,ingress,pilot`. End-to-end user path (CoreDNS → k8s-gateway → Envoy Gateway → TLS → backend); TLS verification left ON so cert expiry counts as the user-visible failure it is. Deliberately looser than #9 because single-replica backend rollouts land in this number; if backend churn dominates the budget the fix is a dedicated always-on probe endpoint per Gateway, **not** a looser target. |
 
 ### Partial (signal exists but needs wiring)
 
@@ -95,7 +95,7 @@ curl -s 'http://localhost:9090/api/v1/query?query=count(longhorn_volume_robustne
 # UniFi (Unpoller)
 curl -s 'http://localhost:9090/api/v1/query?query=count(unifipoller_device_uptime_seconds)' | jq
 
-# Blackbox DNS + ingress probes (must return 4 samples, all value 1)
+# Blackbox DNS + HTTP-routing probes (must return 4 samples, all value 1)
 curl -s 'http://localhost:9090/api/v1/query?query=probe_success' \
   | python3 -c "import sys,json;[print(r['metric']['probe_class'], r['metric']['probe_component'], r['value'][1]) for r in json.load(sys.stdin)['data']['result']]"
 ```
