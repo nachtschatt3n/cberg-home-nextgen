@@ -3,8 +3,8 @@
 > Description: Recovery procedures for cluster, node, storage, and external-
 > dependency failures. Complements `docs/sops/backup.md` (preventive workflow)
 > with the *when-something-broke* response runbook.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `Platform`
 
 ---
@@ -208,8 +208,11 @@ least 1 node of hardware.
 **Verification:**
 - All Flux Kustomizations + HelmReleases `READY=True`.
 - `runbooks/health-check.py` reports 0 critical, 0 major.
-- A user-facing service (Homepage, Authentik, Plex) loads via its external
-  ingress (DNS + Cloudflare Tunnel + ingress-nginx working).
+- A user-facing service (Homepage, Authentik, Plex) loads over its external
+  route: DNS + Cloudflare Tunnel + the `envoy-external` Gateway `Programmed=True`
+  with its HTTPRoutes `Accepted`. **Not** ingress-nginx — it was deleted
+  2026-09-07 (`ad1ea7c2`), so "ingress-nginx working" can never be satisfied and
+  would stall a real recovery on a condition that cannot be met.
 
 ### 4.4 SOPS age key loss
 

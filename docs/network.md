@@ -110,19 +110,19 @@ Nodes connect on VLAN 55 (k8s-network, 192.168.55.0/24).
 
 ```
 LAN Clients → AdGuard Home (192.168.55.5)
-  ├── Internal *.domain → k8s-gateway (192.168.55.101) → Internal Ingress → App
+  ├── Internal *.domain → k8s-gateway (192.168.55.101) → envoy-internal (192.168.55.103) → HTTPRoute → App
   └── External domains → Cloudflare / Quad9 (1.1.1.1 / 9.9.9.9)
 
 Internet → Cloudflare DNS
   → Cloudflare CDN (proxied)
   → Cloudflare Tunnel (QUIC/TLS)
-  → cloudflared pod → External Ingress → App
+  → cloudflared pod → envoy-external (192.168.55.104) → HTTPRoute → App
 ```
 
 **Components:**
 - **AdGuard Home** (192.168.55.5) — network-wide ad blocking, DNS upstream proxy, split-DNS
-- **k8s-gateway** (192.168.55.101) — resolves `*.domain` to internal ingress IP
-- **external-dns** — manages Cloudflare CNAME records for external ingresses automatically
+- **k8s-gateway** (192.168.55.101) — resolves `*.domain` to the `envoy-internal` VIP (192.168.55.103)
+- **external-dns** — manages Cloudflare CNAME records automatically from `HTTPRoute`s parented to `envoy-external`; the record target comes from the **Gateway** annotation, not the route (`docs/sops/external-dns.md`)
 - **cloudflared** — Cloudflare Tunnel outbound connection; no inbound firewall ports required
 
 ---

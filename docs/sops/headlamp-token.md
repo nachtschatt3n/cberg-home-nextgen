@@ -31,7 +31,7 @@ This SOP covers generating a short-lived token on demand for:
 | ClusterRoleBinding | `headlamp-cluster-admin` → `cluster-admin` |
 | RBAC source of truth | `kubernetes/apps/monitoring/headlamp/app/rbac.yaml` |
 | Token type | Short-lived (via `kubectl create token`) — no static secret in repo |
-| Web auth | Authentik forward auth (ingress annotations in `helmrelease.yaml`) |
+| Web auth | Authentik forward auth via Envoy Gateway `SecurityPolicy` `headlamp-forward-auth` + the `headlamp-authentik-outpost` HTTPRoute — **not** ingress annotations; the HelmRelease's `ingress:` block is `enabled: false` and inert |
 
 ---
 

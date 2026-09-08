@@ -21,7 +21,7 @@ and worker). See `docs/applications.md` for the authoritative application count 
 | Storage | Longhorn v1.11.2 |
 | GitOps | Flux (Helm Operator) |
 | Secrets | SOPS + age encryption |
-| Admission Control | Native `ValidatingAdmissionPolicy` (CEL, in-apiserver — no webhook, no Kyverno/Gatekeeper/OPA). 2 policies: `flux-imageupdateautomation-sourceref` (house-owned confused-deputy guardrail, `failurePolicy: Fail`, see `docs/sops/flux-image-automation-push-auth.md`) and `safe-upgrades.gateway.networking.k8s.io` (shipped inside the Gateway API bundle). Separately, 8 `ValidatingWebhookConfiguration` + 5 `MutatingWebhookConfiguration` come from vendor charts (cert-manager, longhorn, kube-prometheus-stack, elastic-operator, otel-operator, intel device plugins, ingress-nginx). |
+| Admission Control | Native `ValidatingAdmissionPolicy` (CEL, in-apiserver — no webhook, no Kyverno/Gatekeeper/OPA). 2 policies: `flux-imageupdateautomation-sourceref` (house-owned confused-deputy guardrail, `failurePolicy: Fail`, see `docs/sops/flux-image-automation-push-auth.md`) and `safe-upgrades.gateway.networking.k8s.io` (shipped inside the Gateway API bundle). Separately, 6 `ValidatingWebhookConfiguration` + 5 `MutatingWebhookConfiguration` come from vendor charts (cert-manager, longhorn, kube-prometheus-stack, elastic-operator, otel-operator, intel device plugins) — verified live 2026-09-08. Was 8+5 until ingress-nginx was deleted (`ad1ea7c2`), which took its two admission webhooks with it. |
 | Auth | Authentik |
 
 ---
@@ -83,9 +83,7 @@ Every existing LB service is pinned via `lbipam.cilium.io/ips` annotation so fut
 | `home-automation/music-assistant-server` | `.29` |
 | `media/plex-plex-media-server` | `.30` |
 | `home-automation/traccar-osmand` | `.31` |
-| `network/internal-ingress-nginx-controller` | `.100` |
 | `network/k8s-gateway` | `.101` |
-| `network/external-ingress-nginx-controller` | `.102` |
 | `network/envoy-internal` (Gateway, EG) | `.103` |
 | `network/envoy-external` (Gateway, EG) | `.104` |
 
@@ -187,7 +185,7 @@ Push to main → GitHub Actions (validate) → Flux detects changes
 | kube-system | Core cluster infrastructure | 12 |
 | storage | Persistent storage (Longhorn) | 1 |
 | cert-manager | TLS certificate management | 1 |
-| network | Ingress controllers, DNS, networking | 6 |
+| network | Gateway API data plane (Envoy), DNS, networking | 6 |
 | default | Dashboard (Homepage) + utilities | 2 |
 | flux-system | Flux GitOps operator + admission guardrails | 2 |
 | backup | External backup integrations | 1 |

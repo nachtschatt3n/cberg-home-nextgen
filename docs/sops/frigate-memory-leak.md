@@ -1,8 +1,8 @@
 # SOP: Frigate Memory Leak — Restart Mitigation
 
 > Description: Why `home-automation/frigate` is restarted on a schedule, how the mitigation is monitored, and the condition under which all of it gets deleted.
-> Version: `2026.08.26`
-> Last Updated: `2026-08-26`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cluster-ops`
 
 ---
@@ -208,7 +208,7 @@ reporting `skipped_fps: 0.0`, and `lastScheduleTime` within the last 24 hours.
 The restart CronJob runs as uid/gid 1000, `runAsNonRoot: true`, with a Role
 scoped to patching the single `frigate` Deployment in `home-automation`. It must
 not be widened. Frigate's port 5000 is unauthenticated and in-cluster only; the
-authenticated path is 8971 behind the ingress and its Authentik outpost.
+authenticated path is 8971 behind its HTTPRoute on `envoy-internal` and the Authentik outpost.
 
 ---
 

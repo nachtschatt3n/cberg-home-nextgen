@@ -1,8 +1,8 @@
 # SOP: Paperless-ngx Document Management
 
 > Description: Operating standard for paperless-ngx and its full ingestion pipeline — Epson ES-580W scanner → SMB inbox → validator → consume, email ingestion, native AI (LLM suggestions + RAG), OCR tuning, and library curation.
-> Version: `2026.09.04`
-> Last Updated: `2026-09-04`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `paperless-agent` (global, `~/.claude/agents/paperless-agent.md`)
 
 ---
@@ -37,7 +37,7 @@ metadata curation.
 | Namespace | `office` |
 | Source of truth | `kubernetes/apps/office/paperless-ngx/app/` + this SOP + `paperless-agent` |
 | Chart / image | gabe565 `paperless-ngx` · app image `3.0.5`. The `scan-inbox-validator` Deployment **reuses the same tag** (it wants only the image's python3 + pikepdf runtime, and overrides the entrypoint) — bump `helmrelease.yaml` and `validator-deployment.yaml` in the SAME commit, or the validator silently keeps running a retired image. |
-| Ingress | `paperless.${SECRET_DOMAIN}` |
+| Route | HTTPRoute `paperless.${SECRET_DOMAIN}` -> Gateway `envoy-external` (`httproute.yaml`); no Ingress object exists |
 | **Memory limit** | **6Gi** (do NOT lower — `OCR_MODE=force` OOMs at 3Gi) |
 | DB / cache | `paperless-db` Deployment + Service — Docker Official `mariadb:11.8.9` on the `longhorn-static` volume `paperless-db-data` (2 replicas; Volume CR hand-applied, charset `utf8mb4`/`utf8mb4_general_ci` — the §6a invariant, enforced by the `--character-set-server` args in `db-deployment.yaml`). Bundled MariaDB subchart retired 2026-08-19; its rollback volume `paperless-mariadb` was **deleted 2026-08-30** (`aa825d8f`) — there is no rollback floor, the live DB is the only copy. Cache: standalone `paperless-redis` Deployment (official `redis:8.10.0-alpine`, no PVC; the old `paperless-redis` PV is likewise gone) |
 | CIFS shares | `//<NAS>/paperless_ngx` → `consume`, `media`, `export`, `log`, `inbox` — StorageClasses `cifs-paperless-*`, **reclaim=Retain** |
@@ -67,7 +67,7 @@ Email: forwarded invoice → GMX INBOX → MailRule (inline+attachment *.pdf) �
 ## 3) Blueprints
 
 - Source of truth files: `kubernetes/apps/office/paperless-ngx/app/helmrelease.yaml`
-  (OCR/consumer env, 6Gi limit, ingress), `validator-configmap.yaml` +
+  (OCR/consumer env, 6Gi limit), `httproute.yaml` (routing), `validator-configmap.yaml` +
   `validator-deployment.yaml` (scan-inbox validator), `storageclass.yaml`,
   `pvc.yaml`.
 - Native AI config (`ai_enabled`, `llm_*`, `llm_embedding_*`) is **DB state**

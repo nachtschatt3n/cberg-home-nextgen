@@ -1,8 +1,8 @@
 # SOP: Immich Photo Library
 
 > Description: Deploy and operate Immich — the self-hosted family photo/video library — as a read-only **external-library viewer** over the iCloud backup on the UniFi NAS, with Intel-iGPU ML face detection, Authentik OIDC SSO, and full Prometheus + Elasticsearch observability.
-> Version: `2026.08.18`
-> Last Updated: `2026-08-18`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cberg-agent / media`
 
 ---
@@ -32,7 +32,7 @@ deletes the originals (`:ro` CIFS mount).
 | Originals | RO CIFS `cifs-immich-icloud-backup` → `/libraries` (`//NAS/backups` subdir `icloud-backup`) |
 | Generated data | Longhorn: `immich-upload` (/data), `immich-ml-cache` (/cache), `immich-pg-data` |
 | ML accel | Intel **iGPU** (OpenVINO, `gpu.intel.com/i915`) — **not** the NPU. CPU fallback = plain image tag |
-| Ingress | `external` (Cloudflare tunnel) `immich.${SECRET_DOMAIN}` |
+| Route | HTTPRoute `immich.${SECRET_DOMAIN}` -> Gateway `envoy-external` (public via Cloudflare tunnel); no Ingress object exists |
 | Auth | Authentik **OIDC** (`immich-oauth2-blueprint.yaml`), Auto Register on |
 | Metrics | `IMMICH_TELEMETRY_INCLUDE=all` → :8081/:8082, scraped by `immich-server-metrics` ServiceMonitor |
 | Logs | Automatic via OTel daemon → edot-collector → ES `logs-generic-default` |
@@ -165,7 +165,8 @@ green.
 
 **T9 — Security**: repo `security-check` over the new manifests → no new criticals
 beyond image-CVE hygiene; secrets SOPS-encrypted only; OIDC secret identical in
-blueprint + app secret; external ingress carries the required annotations; PSA —
+blueprint + app secret; the external HTTPRoute is parented to `envoy-external`
+and carries the Homepage annotations + `gethomepage.dev/enabled` label; PSA —
 only the ML pod is privileged (`/dev/dri`), server/pg/redis run non-root with
 dropped caps; admin registration locked after first admin.
 
@@ -232,7 +233,7 @@ kubectl exec -n kube-system deploy/authentik-server -- ak show_blueprints | grep
 ## 11) Rollback Plan
 
 - **T1–T4 fail badly** → `git revert` the deploy commit(s) + reconcile → Flux
-  prunes the immich HRs/ingress/SM/dashboard/alerts. Read-only CIFS mount + Retain
+  prunes the immich HRs/HTTPRoute/SM/dashboard/alerts. Read-only CIFS mount + Retain
   SC/PV + Longhorn PVCs mean **no photo or DB data is destroyed** (originals never
   touched; PG volume orphaned, reclaimable).
 - **Authentik blueprint errored/collision** → revert the `configmap.sops.yaml`

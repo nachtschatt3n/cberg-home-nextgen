@@ -1,8 +1,8 @@
 # SOP: Envoy Gateway upgrade (chart + Gateway API CRD channel)
 
 > Description: Upgrading Envoy Gateway in this cluster — the `gateway-helm` chart, the Gateway API CRD channel it drags with it, and the k8s-gateway restart gate that must pass twice before the bump is considered done.
-> Version: `2026.08.16`
-> Last Updated: `2026-08-16`
+> Version: `2026.09.08`
+> Last Updated: `2026-09-08`
 > Owner: `cberg-agent / operator`
 
 ## Description
@@ -32,9 +32,14 @@ N/A.
 ## Operational Instructions
 
 1. **Baseline, in writing.** k8s-gateway pod age + zero sync errors; a sample of
-   hosts resolving against 192.168.55.101 (internal → .100, external → .102);
-   both Gateways `Programmed=True`; ingress-nginx pod names, ages and restart
-   counts; the current `gateway.networking.k8s.io/bundle-version`.
+   hosts resolving against 192.168.55.101 (internal → .103, external → .104);
+   both Gateways `Programmed=True`; `envoy-internal`/`envoy-external` proxy pod
+   names, ages and restart counts, and the count of `Accepted` HTTPRoutes on
+   each; the current `gateway.networking.k8s.io/bundle-version`.
+
+   > **This step used to baseline ingress-nginx pods and the `.100`/`.102` VIPs.
+   > Those are gone** — ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`), so
+   > that baseline could not be taken and the check silently produced nothing.
 2. **Check the support matrix before choosing a version.** EG 1.8 covers
    Kubernetes 1.32-1.35; 1.9 covers 1.33-1.36. Running EG off-matrix is easy to
    do accidentally, because nothing warns you — it is a docs fact, not a
@@ -80,9 +85,19 @@ k8s-gateway pod and only bite when a pod *starts* with them present. One clean
 restart can be luck. Then let it soak and re-check — the next real test is the
 next node reboot or eviction.
 
-Also assert **non-regression**, not just success: both ingress-nginx controllers
-unrestarted and still serving, and a sample of live hosts end-to-end. EG must
-stay parallel and traffic-free until the migration phases say otherwise.
+Also assert **non-regression**, not just success: both Envoy proxy Deployments
+serving, every previously-`Accepted` HTTPRoute still `Accepted` (compare against
+the step-1 baseline count), and a sample of live hosts end-to-end.
+
+> **The risk profile of this SOP changed on 2026-09-07 (`ad1ea7c2`).** It was
+> written while EG ran *parallel to* ingress-nginx, traffic-free, with nginx as
+> the standing fallback — which is why the old text said "EG must stay parallel
+> and traffic-free until the migration phases say otherwise". That is no longer
+> true: **Envoy Gateway is the only data plane in the cluster.** There is no
+> parallel controller to fall back to, so an EG upgrade that goes wrong is a
+> total loss of HTTP routing for every host, not a contained experiment. Treat
+> the rollback path as load-bearing, verify it before starting, and do not run
+> this outside a maintenance window.
 
 ## Troubleshooting
 
