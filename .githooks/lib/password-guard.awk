@@ -13,9 +13,11 @@
 # so ANY `${...}` ANYWHERE in the file disarmed the guard for the whole file.
 # 73 of this repo's 112 helmrelease.yaml files carry a Flux postBuild variable,
 # which made the guard inert on ~65% of them. The Superset block that leaked an
-# admin password self-suppressed twice over: its own value spelled
-# `placeholder`, and an `email: admin@${SECRET_DOMAIN}` four lines above
-# supplied the `${`. 4.7 months, 28 commits, public repo.
+# admin password self-suppressed twice over: its own value was a bare
+# scaffolding-style dictionary word matching the suppressor list, and an
+# `email: admin@${SECRET_DOMAIN}` four lines above supplied the `${`.
+# 4.7 months, 28 commits, public repo. (The value is deliberately not
+# reprinted here -- see the note at the CONTEXT rule below.)
 #
 # The rule now — PER LINE, and each suppressor scoped to the text it can
 # honestly judge:
@@ -23,13 +25,18 @@
 #   VALUE ONLY: interpolation (`${X}` `$X` `$(cmd)` `{{X}}`), SOPS ciphertext
 #     (`ENC[...]`), template tokens (`<x>`), `__file`/`__env` sentinels. These
 #     are forms that are SYNTACTICALLY NOT A LITERAL. Dictionary words are
-#     deliberately absent: `placeholder` is a fine literal string, and treating
-#     it as proof of safety is what failed.
+#     deliberately absent: a scaffolding word is a perfectly fine literal
+#     password, and treating it as proof of safety is what failed.
 #
 #   CONTEXT ONLY (the line minus every credential value — the key, the
 #     comment, the rest of the line): scaffolding words and reference
 #     mechanisms. `placeholder_password: s3cr3tvalue` is scaffolding;
-#     `password: placeholder` is a password that happens to spell one.
+#     `password: placeholder-XYZZY` is a password that happens to spell one.
+#     (SYNTHETIC value. The real leaked one was a bare dictionary word; the
+#     property being shown is that a credential whose TEXT resembles a
+#     placeholder defeats a filter that reads the VALUE. Describe the
+#     property, never reprint the credential -- documenting a self-
+#     suppressing value by quoting it reproduces the leak it explains.)
 #
 # Nothing is judged against the whole file, and nothing is judged against text
 # the secret itself controls.

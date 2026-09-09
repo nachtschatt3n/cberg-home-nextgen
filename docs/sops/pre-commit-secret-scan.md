@@ -131,8 +131,16 @@ each suppressor is scoped to text that the credential itself does *not* control:
 Note what is **absent from the per-VALUE column: dictionary words.** A value is
 exempted only for being *syntactically not a literal* — never for containing a
 reassuring word. `placeholder_password: <a real secret>` is scaffolding and is
-suppressed via the key token; `password: placeholder` is a password that merely
-spells one, and it **fires**.
+suppressed via the key token; `password: placeholder-XYZZY` is a password that
+merely spells one, and it **fires**.
+
+> The value above is **synthetic**. The credential that actually leaked was a
+> bare dictionary word, and the property worth teaching is that *a credential
+> whose text resembles a placeholder defeats any filter that reads the value* —
+> which is precisely why it read as a generic example for 4.7 months. Describe
+> that property; do not reprint the value. Documenting a self-suppressing
+> credential by quoting it reproduces the leak it explains, and it is a
+> second-order instance of rule 3 in `docs/sops/audit-script-correctness.md`.
 
 The **`ENC[` exemption** (commit `60293d0e`) survives this scoping because it is
 structural, not lexical: SOPS ciphertext after a `password:` key (e.g.
@@ -150,7 +158,8 @@ has already verified the `sops:` block.
 >   `helmrelease.yaml` files carry a Flux postBuild variable, making the guard
 >   inert on roughly 65% of them;
 > - the placeholder filter matched the **credential's own value**, so a password
->   whose value literally spelled `placeholder` suppressed its own finding.
+>   whose value was itself a bare scaffolding-style dictionary word satisfied its
+>   own exemption and deleted its own finding.
 >
 > A real admin password self-suppressed on both counts at once and survived
 > **4.7 months and 28 commits in this public repository**. Fixes: `f1720e57`,

@@ -1071,7 +1071,11 @@ def _confirm_env_var_names(names: set[str]) -> set[str]:
 #   PLACEHOLDER WORDS — judged against the CONTEXT ONLY, i.e. the line with
 #     every credential value cut out of it: the key, the comment, the
 #     surrounding text. `placeholder_password: s3cr3tvalue` is scaffolding;
-#     `password: placeholder` is a password that happens to spell one.
+#     `password: placeholder-XYZZY` is a password that happens to spell one.
+#     (SYNTHETIC. The real leaked value was a bare dictionary word; quoting it
+#     to explain the bug would reproduce the leak. Teach the property -- a
+#     credential whose text resembles a placeholder defeats a value-matching
+#     filter -- not the string.)
 #
 # Neither is ever evaluated against the whole file, and neither is evaluated
 # against text the secret itself controls.
