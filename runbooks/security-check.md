@@ -1504,7 +1504,65 @@ PYEOF
 
 ---
 
-## 13. Wazuh SIEM Findings
+## 13. Authentik Outpost Ingress Suppression
+
+Slug `s12_authentik_outposts`. (Runbook headings and script slugs are not in
+lockstep — §12 "Cloudflare Tunnel Security Audit" below has no slug in
+`_SECTION_SLUGS` at all, which predates this section. Go by the slug.)
+
+Every Authentik outpost on a **Kubernetes service connection** must carry
+`kubernetes_disabled_components: [ingress]`. Without it the outpost controller
+publishes its own `Ingress` holding the application's hostname — an object that
+exists in no git repository, carries no `ownerReferences`, is invisible to a
+repo grep, and is recreated if you delete it. It has mis-routed a hostname three
+times. Mechanism: `docs/sops/authentik.md` §"Outpost-published Ingress".
+
+**The check enumerates the LIVE outpost list from the Authentik ORM, never the
+repo.** That is the point of the section, not an implementation detail:
+`rg kubernetes_disabled_components` enumerates the outposts we *declared* in
+`configmap.sops.yaml`, not the outposts that *exist*. The `authentik Embedded
+Outpost` is created by authentik in its own code, no blueprint declares it, and
+it therefore sat on `[]` — on a live Kubernetes service connection — invisible
+to every audit that had ever run. A repo-grep implementation would reproduce the
+exact bug the section exists to catch.
+
+Manual equivalent:
+
+```bash
+POD=$(mise exec -- kubectl get pod -n kube-system \
+  -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}')
+mise exec -- kubectl exec -n kube-system $POD -i -- ak shell -c "
+from authentik.outposts.models import Outpost
+for o in Outpost.objects.all().order_by('name'):
+    print(o.name, '| managed=', o.managed,
+          '| svc_conn=', o.service_connection,
+          '| providers=', o.providers.count(),
+          '| disabled=', o._config.get('kubernetes_disabled_components'))
+"
+```
+
+Severity and scoping:
+
+| Case | Result |
+|---|---|
+| Kubernetes service connection, missing `ingress`, ≥1 provider | CRITICAL — it is publishing an Ingress now |
+| Kubernetes service connection, missing `ingress`, 0 providers | WARNING — latent; this is the state the embedded outpost sat in, and when the fix is free |
+| Any other service-connection type | out of scope — no Kubernetes controller, so no Ingress to publish |
+| `managed`/system outpost | **in scope**. Recorded, never exempted — treating "we did not declare it" as "not ours to check" is what hid the embedded outpost |
+| A surviving `ak-outpost-*` Ingress | CRITICAL — disabling the component stops management but does not delete an already-published object |
+
+Two blindness guards, because all outposts are compliant today and a silent pass
+would otherwise be indistinguishable from a broken query: a failed probe returns
+`None` and an empty outpost list are both findings, as is a failed `get ingress`
+read.
+
+Regression test: `runbooks/tests/test-outpost-ingress-suppression.py` (asserts
+both directions, and fails if the check is ever rewritten as a repo grep, if it
+exempts `managed` outposts, or if an empty/failed probe reads as clean).
+
+---
+
+## 14. Wazuh SIEM Findings
 
 Pulls SIEM-identified issues from the Wazuh indexer (`security/wazuh-indexer:9200`,
 admin auth from `wazuh-secret`). Three slices over the last 24h:

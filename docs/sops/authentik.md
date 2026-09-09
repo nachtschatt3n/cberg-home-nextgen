@@ -452,10 +452,13 @@ Three rules that are easy to get wrong:
 1. **REPLACE the existing key, never append a second one.** Every outpost block
    in this repo already ships `kubernetes_disabled_components: []`. YAML is
    last-wins, so adding a second key with the same name is silently discarded
-   and you will believe you fixed something you did not. *(Verified 2026-09-07:
-   all 12 blueprint-managed outposts already contained the key as `[]` — so in
-   this repo it is always an edit, never an addition. If you ever author an
-   outpost block from scratch, include it.)*
+   and you will believe you fixed something you did not. *(Every outpost block
+   in this repo has always shipped the key as `[]`, so here it is always an
+   edit, never an addition. If you ever author an outpost block from scratch,
+   include it. Deliberately no count: the blueprint set moves — the embedded
+   outpost was adopted in `820a2fb8` and `kubernetes-dashboard` was deleted on
+   2026-09-09 — and a stale number stamped "verified" is worse than none. To
+   count, read the live list, not the file.)*
 2. **Disabling stops MANAGEMENT; it does not DELETE the existing object.** The
    already-published Ingress stays until you remove it once by hand. After the
    component is disabled, that delete sticks:
@@ -504,7 +507,10 @@ hostname — the exact failure documented above.
 > count is still 0 — that is when the change is free.
 
 **This audit is now automated** (2026-09-09, F-0e2c62ad). `runbooks/security-check.py`
-§13 "Authentik Outpost Ingress Suppression" runs the probe above on every sweep and
+section `s12_authentik_outposts` — printed as header §13 "Authentik Outpost Ingress
+Suppression", and the slug findings are recorded under, which do not match because
+the slug list is index-aligned and 0-based against 1-based headers — runs the probe
+above on every sweep and
 raises a finding for any outpost on a Kubernetes service connection that is missing
 `kubernetes_disabled_components: [ingress]` — CRITICAL once it has a provider,
 WARNING while it is still latent at 0 providers. Outposts on other service-connection
@@ -602,11 +608,15 @@ kubectl get ingress -A
 kubectl get deploy -n kube-system -o name | grep ak-outpost
 ```
 
-**Not every live outpost is in the blueprints.**
-`kubernetes-dashboard-forward-auth` runs in `kube-system` with **no blueprint
-entry**, no Service behind it and no route — it is unmanaged by GitOps and
-cannot be fixed by editing the ConfigMap. Do not assume the blueprint file is a
-complete inventory of outposts.
+**Not every live outpost is in the blueprints — do not assume the blueprint
+file is a complete inventory.** The worked example was
+`kubernetes-dashboard-forward-auth`: it ran in `kube-system` with no blueprint
+entry, no Service behind it and no route, so it was unmanaged by GitOps and
+could not be fixed by editing the ConfigMap. It was an orphan of the app removed
+in `dbbacb10` and was **deleted on 2026-09-09** together with its application
+and provider, so that specific object is gone — but the rule it demonstrates is
+not, and it is exactly why the audit above enumerates the live outpost list
+rather than the blueprint files.
 
 ---
 

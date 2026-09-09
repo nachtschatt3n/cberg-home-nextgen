@@ -667,8 +667,9 @@ class WazuhPortForward:
 
 def section_header(n: int, title: str) -> None:
     # Header numbers are 1..len(_SECTION_SLUGS) and index-align with it (n=7 is
-    # s6a_error_rate_spikes, n=13 is s13_wazuh_siem), so the slug the writer
-    # uses for `subsection` is also the scope a degraded primitive reports.
+    # s6a_error_rate_spikes, n=13 is s12_authentik_outposts, n=14 is
+    # s13_wazuh_siem), so the slug the writer uses for `subsection` is also
+    # the scope a degraded primitive reports.
     global _CURRENT_SECTION
     try:
         _CURRENT_SECTION = _SECTION_SLUGS[n - 1]
@@ -4333,7 +4334,15 @@ def s12_authentik_outposts() -> tuple[str, Findings, str]:
     # Belt and braces: disabling the component stops MANAGEMENT, it does not
     # DELETE an Ingress already published. A surviving one is a live hijack.
     ing = kubectl_json("get ingress -A")
-    if ing:
+    if ing is None:
+        # Same rule as the outpost probe above, applied to its own sub-probe:
+        # a failed read must not report as "no stale Ingress". kubectl_json
+        # returns a List with empty `items` when there genuinely are none, so
+        # None is always a coverage gap.
+        f.add(WARNING, "Could not read Ingress objects — a surviving "
+                       "outpost-published Ingress would not have been detected")
+        cprint(C.YELLOW, "  🟡 stale-Ingress sub-probe is BLIND (Ingress read failed)")
+    else:
         stale = [f"`{i['metadata']['namespace']}/{i['metadata']['name']}`"
                  for i in ing["items"]
                  if i["metadata"]["name"].startswith("ak-outpost-")]

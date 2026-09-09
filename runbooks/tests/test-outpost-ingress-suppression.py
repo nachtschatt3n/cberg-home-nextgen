@@ -95,6 +95,13 @@ check("an empty outpost list is treated as blind, not as clean",
 check("it also catches an already-published outpost Ingress (disabling the "
       "component stops management but does not delete the object)",
       "ak-outpost-" in sec_src, True)
+# The stale-Ingress sub-probe gets the same blindness rule as the outpost
+# probe. `if ing:` would have read a FAILED Ingress read as "no stale Ingress"
+# -- kubectl_json returns a List with empty items when there genuinely are
+# none, so None is always a coverage gap, never a clean result.
+check("a failed Ingress read is a finding, not a silent pass",
+      "if ing is None:" in sec_src
+      and "would not have been detected" in sec_src, True)
 
 # --- 2 & 3. exercise the REAL predicate, extracted verbatim --------------
 # _outpost_ingress_offenders is module-level and pure precisely so both

@@ -250,7 +250,9 @@ An app is forward-auth protected if an **Authentik proxy outpost** exists for
 its hostname. **Screen on the outpost, never on the app's own annotations** —
 on 2026-09-07 nine outposts existed but only six apps carried `auth-url`;
 `arag-web`, `uptime-kuma` and `kubernetes-dashboard` were missed and `arag-web`
-broke in production (`04f9abc7`, reverted `d7ab1b74`).
+broke in production (`04f9abc7`, reverted `d7ab1b74`). (`kubernetes-dashboard`
+was an orphan of a removed app and its outpost was deleted on 2026-09-09; the
+screening rule stands.)
 
 Per forward-auth app you need **four** objects:
 

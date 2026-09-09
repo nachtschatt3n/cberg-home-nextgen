@@ -1,8 +1,12 @@
 # Sweep tooling tests
 
-Plain-Python tests for the audit scripts. **Nothing runs these automatically** —
-there is no CI stage and no pre-commit hook for them, so they are only worth
-anything if you run them in the same commit as a change to the code they cover.
+Plain-Python tests for the audit scripts. There is no CI stage, but
+`.githooks/pre-commit` DOES run `runbooks/tests/run-all.sh` when a commit stages
+audit tooling — so a staged change to a covered script gates on these. That glob
+is `runbooks/tests/test-*.py` plus `test-*.sh`; it does **not** reach
+`runbooks/lib/test_*.py`, which nothing runs automatically. Run the tests in the
+same commit as the code they cover regardless — the hook only fires on paths it
+recognises as audit tooling.
 
 Each file is dual-mode: run it directly for a readable PASS/FAIL list, or under
 pytest.
@@ -44,6 +48,7 @@ test — see `runbooks/refingerprint-findings.py`.
 | `test-trivy-tally.py` | Two classes. `KernelHeaderExclusionTest` — per-image Trivy tally arithmetic and the header-package exclusion. `GoPseudoVersionTest` — `classify_pseudo_version`, i.e. FIX-STATUS determination when the installed version is a Go pseudo-version: each of the three routes in both directions, the tag guards (bare integer, CalVer, pre-release), the branch-aware fix bar, the owner+name main-module match, and that an undetermined-only image never reports clean | `tally_trivy_report`, `classify_pseudo_version`, `_TRIVY_TALLY_VERSION` or the fix/no-fix/undetermined classification in `security-check.py` |
 | `test-cred-suppressor-scoping.py` | Both credential detectors' suppressor SCOPING: shape rules judged against the VALUE only, scaffolding words against the CONTEXT only (the line minus its values), never the whole file. Carries the witness that survived 4.7 months, with the pre-fix logic transcribed so the witness is proven to be a real regression witness. Also asserts the awk guard trips on zero tracked files. | `_hist_cred_hit_suppressed` in `security-check.py`; `.githooks/lib/password-guard.awk`; the s3 grep chain |
 | `test-disclosure-residual-claims.py` | The residual-claim tier of the commit-message disclosure hook — phrasing that describes what still awaits an upstream release, distinct from the count and advisory-ID tiers | `.githooks/lib/disclosure_patterns.py` or the residual-claim wording set |
+| `test-outpost-ingress-suppression.py` | The Authentik outpost audit. Load-bearing assertion: it reads the LIVE outpost list, never a repo grep — a repo grep enumerates the outposts we *declared*, which is how the managed `authentik Embedded Outpost` sat on `[]` invisibly through every previous audit. Also pins: `managed` outposts are never exempt, non-Kubernetes service connections are out of scope (no Ingress to publish), and neither a failed probe nor an empty list may read as clean | `s12_authentik_outposts` in `security-check.py` |
 
 ## `runbooks/lib/`
 
