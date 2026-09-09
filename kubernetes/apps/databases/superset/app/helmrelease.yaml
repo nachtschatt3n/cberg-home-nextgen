@@ -150,6 +150,42 @@ spec:
     cache:
       host: superset-redis-official
 
+    # --- SQL Lab results backend (Redis auth) ---
+    # RESULTS_BACKEND is the ONE Redis client the chart builds from a HELM VALUE
+    # instead of the runtime env(...) mechanism. `superset.redis.password`
+    # coalesces .Values.cache.password / connections.redis_password — both of
+    # which we deliberately leave unset, because the password lives in the SOPS
+    # secret and putting it in a Helm value would publish it to this public repo.
+    # The result was `RESULTS_BACKEND = RedisCache(..., password="")`, so every
+    # SQL Lab query died with redis.AuthenticationError -> HTTP 500
+    # "Authentication required.", while CACHE_CONFIG / DATA_CACHE_CONFIG kept
+    # working because they are built from env('REDIS_PASSWORD') at RUNTIME.
+    # That is why charts rendered and SQL Lab did not. Broken since 0796573e
+    # (2026-08-17); last successful SQL Lab query 2026-05-01.
+    #
+    # `config.resultsBackend` is the chart's escape hatch: when it is a STRING it
+    # is emitted RAW as `RESULTS_BACKEND = <string>` (_helpers.tpl:419), and the
+    # key is excluded from the generic config-dump loop (_helpers.tpl:644) so it
+    # is not also emitted as a literal. That lets us express the same runtime
+    # lookup CACHE_CONFIG uses successfully — `env` and `RedisCache` are both
+    # already in scope at that point in the generated superset_config.py.
+    # Keep the host/port/key_prefix identical to the chart's own render; the
+    # ONLY thing this changes is where the password comes from.
+    #
+    # NOTE the GLOBAL_ASYNC_QUERIES_* blocks render empty passwords too, but the
+    # GLOBAL_ASYNC_QUERIES feature flag is NOT enabled (verified at runtime: the
+    # only true flag is ALERT_REPORTS), so those blocks are inert. Left untouched
+    # deliberately — if that flag is ever turned on, they must be fixed the same
+    # way, and there is no chart escape hatch for them but `config.<KEY>`.
+    config:
+      resultsBackend: |-
+        RedisCache(
+            host=env("REDIS_HOST", "superset-redis-official"),
+            password=env("REDIS_PASSWORD", ""),
+            port=int(env("REDIS_PORT", "6379")),
+            key_prefix="superset_results",
+        )
+
     # Same trap on the DB side. `superset.db.host` in _helpers.tpl coalesces
     # .Values.database.host FIRST and otherwise falls through to
     # "<release>-postgresql", so the chart-generated superset-env Secret — the
