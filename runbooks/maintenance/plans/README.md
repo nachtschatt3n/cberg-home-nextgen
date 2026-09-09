@@ -111,8 +111,16 @@ needs_reboot: false               # true → only a window with allow_reboot:tru
 touches:                          # interference surface — be precise
   namespaces: [default]
   resources: [helmrelease/affine, pvc/affine-data]
-  shared: []                      # shared infra perturbed: ingress, cert-manager,
-                                  # cni/cilium, coredns, a shared DB, storage/longhorn
+  shared: []                      # shared infra perturbed: gateway/envoy,
+                                  # cert-manager, cni/cilium, coredns, a shared
+                                  # DB, storage/longhorn.  NOT "ingress" —
+                                  # ingress-nginx was deleted 2026-09-07
+                                  # (ad1ea7c2) and there is no ingress
+                                  # controller; routing is HTTPRoute onto the
+                                  # envoy-internal / envoy-external Gateways in
+                                  # ns network, so a plan that perturbs routing
+                                  # must declare gateway/envoy to be scheduled
+                                  # against the right interference surface.
 depends_on: []                    # other plan_ids that must run first
 conflicts_with: []               # plan_ids that must NOT share a window
 security_ref: null                # F-xxxxxxxx if this plan has a security driver.
