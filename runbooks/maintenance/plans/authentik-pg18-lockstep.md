@@ -27,7 +27,13 @@ touches:
     - deployment/ak-outpost-frigate-forward-auth
     - deployment/ak-outpost-headlamp-forward-auth
     - deployment/ak-outpost-homepage-forward-auth
-    - deployment/ak-outpost-kubernetes-dashboard-forward-auth
+    # REMOVED 2026-09-09: deployment/ak-outpost-kubernetes-dashboard-forward-auth.
+    # The kubernetes-dashboard app was deleted in dbbacb10; its orphaned Authentik
+    # outpost/app/provider were reaped 2026-09-09, taking this Deployment with them.
+    # Left as a comment rather than a silent deletion: this list is a cycle-set, and
+    # a step that cycles a Deployment which no longer exists either errors mid-window
+    # or, worse, is skipped quietly and under-covers. Live count is now 12, verified
+    # against `kubectl get deploy -n kube-system | grep ak-outpost`.
     - deployment/ak-outpost-longhorn-forward-auth
     - deployment/ak-outpost-nocodb-forward-auth
     - deployment/ak-outpost-phpmyadmin-forward-auth
