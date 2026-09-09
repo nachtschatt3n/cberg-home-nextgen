@@ -208,6 +208,29 @@ validator collision (only one file carries the id), and
 `runbooks/tests/test-retired-plan-occupancy.py` uses the name only as an inline
 fixture, not by reading this directory.
 
+**Eight other references now resolve to this file while meaning the old work.** A
+doc-agent pass on 2026-09-09 enumerated them; they are listed here rather than
+edited, because several sit in files a concurrent session was writing. Whoever
+next touches each should correct it:
+
+| Reference | What it actually means |
+|---|---|
+| `superset-bitnamilegacy-migration.md:47` | Stage-4 row still **links** to `superset-pg-decommission.md`, describing `postgresql.enabled:false`, 30 m, `tue-early:2026-09-22`. Rows 1–2 are marked *(executed, plan retired)*; row 4 is not, though it executed 2026-09-05. **Highest-value fix: mark it executed and REMOVE the link** — the target is now different work. |
+| `superset-bitnamilegacy-migration.md:32` | `superseded_by: superset-pg-decommission` — same misresolution, in machine-readable frontmatter. |
+| `README.md:55` | Phantom-table owner column says the plan is "**not yet written**". It is. See §1.5 — that whole row should be retired. |
+| `bitnamilegacy-exit-nextcloud-db.md:80`, `:860` | "the last bitnamilegacy image … once superset-pg-decommission has also run" — already true since 2026-09-05. Now reads as blocked on a plan that removes no bitnamilegacy image. |
+| `authentik-pg17-decommission.md:27` | "Same shape as superset-pg-decommission, which used `one-way`." This plan declares `backup-restore` and argues that distinction is deliberate, so the citation now contradicts its referent. |
+| `media-naming-p3.md:45`, `:51` | A co-scheduling guard against `sat-early:2026-09-05`, a slot now in the past, for an id that today has no window. Dead constraint. |
+| `docs/sops/maintenance-windows.md:52` | "sits 10 days after the cutover on purpose" — describes the old stage-4 soak, not this plan's 21-day §2 gate. |
+| `runbooks/maintenance-plan.py:241` | Historical comment, now ambiguous against a live plan of the same id. |
+
+`docs/applications.md:99` also references the id but carries the commit hash
+`90539942`, so it stays unambiguous. **Separately noted by the same pass:**
+`superset-pg-cutover.md` is itself a retired plan whose stated retention
+condition ("until stage 4 retires it") expired on 2026-09-05 — the
+`flux-stack-v0.57` shape the README warns about. It should be deleted per the
+executed-plan convention; that is not this plan's call to make unilaterally.
+
 ## 2. Soak gate — do not schedule this before 2026-09-30
 
 The floor named in the README is "≥7 clean days on `superset-pg18`". **Seven days
@@ -396,14 +419,28 @@ mise exec -- kubectl -n storage get volume | grep superset   # expect exactly on
 
 ### 4.6 Update the documentation in the same change set
 
-`docs/applications.md` describes both volumes as deliberately-orphaned rollback
-artifacts that must not be reclaimed. Replace that framing for **both** with:
-reclaimed on <date> by plan `superset-pg-decommission`; the frozen Longhorn
-backup sets are retained and are the remaining restore path; any restore must
-first reset every local db-provider Admin account (§1.4). Keep the credential
-caveat itself — it survives the volume and applies to the backups.
+**TWO files carry framing that this plan's execution makes wrong. Both must move
+in the same change set** — a doc-agent pass on 2026-09-09 found the second one,
+which an earlier draft of this plan had missed:
 
-Commit `docs/applications.md` separately, again with `git commit --only`.
+1. **`docs/applications.md:99`** describes both volumes as deliberately-orphaned
+   rollback artifacts that must not be reclaimed (the phrase appears **twice** on
+   that line, once per volume). Replace the framing for **both** with: reclaimed
+   on <date> by plan `superset-pg-decommission`; the frozen Longhorn backup sets
+   are retained and are the remaining restore path; any restore must first reset
+   every local db-provider Admin account (§1.4). Keep the credential caveat
+   itself — it survives the volume and applies to the backups.
+2. **`docs/sops/postgres-major-upgrade.md:159`** states the recovery path as
+   *restore-from-volume*: "re-create the Deployment from git history against the
+   retained PVC". Once §4.4 prunes that PVC, this instruction is simply wrong and
+   will send someone looking for an object that no longer exists. Change it to
+   restore-from-frozen-Longhorn-backup and point at §6 of this plan.
+
+Cosmetic, fix if convenient: `runbooks/backup-restore-proof.py:27` uses
+`--volume superset-postgresql-data` as its usage-docstring example, which stops
+being a real volume.
+
+Commit the docs separately from the manifests, again with `git commit --only`.
 
 ## 5. Verification
 
