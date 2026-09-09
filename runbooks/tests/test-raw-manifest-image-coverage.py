@@ -94,7 +94,10 @@ for name, ns in [
     ("nextcloud-notify-push", "office"),
     ("scan-inbox-validator", "office"),
     ("authentik-pg", "kube-system"),
-    ("superset-pg", "databases"),
+    # superset-pg (postgres 17.11) was retired 2026-09-09 — Deployment + Service
+    # deleted, data retained. superset-pg18 is the live metadata DB and carries
+    # the coverage this row is here to assert.
+    ("superset-pg18", "databases"),
     ("paperless-db", "office"),
 ]:
     check(f"raw workload {name!r} is found in {ns!r}",

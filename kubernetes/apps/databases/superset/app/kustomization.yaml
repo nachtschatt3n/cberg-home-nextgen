@@ -16,11 +16,23 @@ resources:
   - helmrelease.yaml
   - redis-deployment.yaml
   - httproute.yaml
-  # Replacement metadata DB (plan superset-pg-standup); pg-longhorn-volume.yaml
-  # is deliberately NOT listed — apply it manually (see NOTE above).
+  # postgres 17.11 metadata DB — WORKLOAD RETIRED 2026-09-09, DATA RETAINED.
+  # Superset cut over to postgres 18.6 (superset-pg18) on 2026-09-08; this DB
+  # was kept running only as the rollback and has been idle since (0 client
+  # backends at teardown). pg-deployment.yaml (Deployment + Service) is DELETED;
+  # the PV and PVC below stay so the 20Gi Longhorn volume `superset-pg-data`
+  # remains Bound and restorable.
+  #
+  # These are a DELIBERATELY-ORPHANED ROLLBACK ARTIFACT, *not* an orphan to
+  # reclaim — same disposition as superset-postgresql-data in 90539942. A PVC
+  # with no workload is exactly what that looks like; do not "clean it up".
+  # Reclaiming it is a separate, later decision.
+  #
+  # NOTE the volume DETACHES once the workload is gone, so
+  # daily-backup-all-volumes stops producing new backups for it: the existing
+  # dailies are a FROZEN restore set that will not age out on its own.
   - pg-pv.yaml
   - pg-pvc.yaml
-  - pg-deployment.yaml
   # postgres 18.6 metadata DB (plan superset-pg-18.6). Same rule:
   # pg18-longhorn-volume.yaml is deliberately NOT listed — apply it manually.
   - pg18-pv.yaml
