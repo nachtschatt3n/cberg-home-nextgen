@@ -4,8 +4,8 @@
 > (`health-check.sh`, `security-check.py`, `doc-check.py`, `slo-check.py`,
 > `sweep-run.py`, `maintenance-plan.py`, the media `audit.py`), so a check that could not measure
 > something never reports it as passing — or as confirmed.
-> Version: `2026.08.24`
-> Last Updated: `2026-08-24`
+> Version: `2026.09.09`
+> Last Updated: `2026-09-09`
 > Owner: `operator + daily-operation agents`
 
 ---
@@ -69,6 +69,60 @@ target = ~120 dropped points/h, so the threshold is 100/h and the first new
 family trips it. A counter that cannot move when the harm grows is not a
 signal.
 
+**Third rule (added 2026-09-09): a suppressor may never be evaluated against
+text the thing being judged controls.**
+
+The tri-state rule is about a check that could not measure. The proportionality
+rule is about a check that measured the wrong quantity. This one is about a
+check that measured the right thing correctly, and then **asked the suspect
+whether to drop the case**.
+
+Every exemption has an *evidence window* — the text the suppressor reads to
+decide. If that window includes text the audited object authors, the object can
+write itself an exemption, and the check reports a confident, clean pass. Two
+instances shipped in this repo, and between them a literal admin password sat
+in a PUBLIC repo for 4.7 months:
+
+- **The value supplied its own exemption.** `security-check.py`'s history scan
+  dropped a hit when the whole diff line matched `example|placeholder|…`. The
+  password's own value was the word `placeholder`, so it satisfied the filter
+  and deleted its own finding. This failure is **anti-correlated with risk**:
+  the weaker and more guessable the secret, the more reliably it hides, because
+  weak secrets are exactly the ones spelled like scaffolding.
+- **The rest of the file supplied it.** `.githooks/pre-commit` treated a `${`
+  ANYWHERE in the file as proof the whole file was templated. 73 of 112
+  `helmrelease.yaml` files carry a Flux postBuild variable, so the detector was
+  inert on ~65% of them — and text four lines away is written by the same author
+  as the line being judged.
+
+Positive form. When adding or reviewing any suppressor:
+
+1. **Name the evidence window, then shrink it** to the narrowest text the judged
+   thing does not control — the KEY token, a trailing comment, the surrounding
+   syntax. Not the value. Not the rest of the line: a neighbouring field has the
+   same author, which is how `username: example_user, <cred-key>: <literal>`
+   silenced the literal on flow-style YAML and `.env` lines. Not the file.
+2. **Prefer STRUCTURAL tests over DICTIONARY tests.** Ask *is this value
+   syntactically incapable of being a literal* — `${X}`, `{{X}}`, `ENC[…]`,
+   `<template-token>`, `f(...)` — not *does this text contain the word
+   "placeholder"*. A scaffolding word is a perfectly good literal string, which
+   is the entire point. Where a dictionary test is genuinely unavoidable, make
+   it **exact-match against a tiny, named, tested set** (`_TEMPLATE_LITERALS`),
+   never a substring.
+3. **Re-attack after narrowing.** Narrowing a check to kill a false positive is
+   how this repo mints false negatives — the round-2 commit swapped dictionary
+   suppression for *punctuation* suppression and produced four, two of them
+   regressions against the very grep it replaced. Confirm each candidate shape
+   goes firing-to-silent on purpose, not by accident.
+
+**This is not a credentials rule.** The shape appears wherever a check consults
+the audited object about whether to audit it: an AR whose description is quoted
+inside the finding it then suppresses (§10 — the detector switched off by the
+thing it detects), and a scanner's own fixtures used as evidence about the tree
+they test (`_confirm_env_var_names` excludes `runbooks/tests/` precisely because
+those files' prose said "no such env var" and confirmed every counter-example
+into silence). Ask of every suppressor: **who wrote the text I am trusting?**
+
 ### The instances (each one a test case for new code)
 
 | Script | What went wrong | Collapsed into |
@@ -124,6 +178,9 @@ signal.
 | `doc-check.py`, `security-check.py`, `health-check.py`, `slo-check.py` | **the same crash-as-clean-run exposure the version-scan row above named as still live, closed for its four siblings.** Each script's `main()` was a bare `sys.exit(main())`; an uncaught exception exits 1 by Python's own default, identical to the "found findings" rc these scripts already use deliberately, so sweep-run.py's `rc in (0, 1, 2)` completed-set could not tell a mid-run crash from a clean pass in ANY of them — only check-all-versions.py had been patched. Each `main()` is now a thin wrapper: parse args, call the renamed `_main_impl(args)` inside try/except, and on any exception print the traceback, record `mark_incomplete()` + `verdict=red` on the shared cycle row, and return **3** — outside the completed set on purpose. Verified per script: an injected crash returns 3 (not 1), a clean 0 and a findings-found 1 both still pass through unchanged, and the traceback still reaches stderr rather than being swallowed by the new wrapper (2026-08-24, `runbooks/tests/test-sweep-step-crash-veto.py`) | pass (four more scripts where a crash would have read as a clean run) |
 | `security-check.py` | **a steady-state exclusion inferred permanence from an environment variable's value THIS run, and the value could plausibly flip between runs for reasons the check could not see.** Private `ghcr.io/nachtschatt3n/*` images unscannable with no registry credentials were classified a permanent, credential-less steady state and deliberately not vetoed — reported as a finding only, per the documented worked example in docs/sops/sweep-findings-lifecycle.md §4.3. But "no credentials this run" also covers an ORCHESTRATED sweep whose `gh auth token` fetch failed mid-schedule — a transient blip identical from inside the function to the genuine steady state. Treating both alike let an expired token silently auto-close 44 findings across ~9 private images in one cycle (2026-08-24). Fixed by dropping the environmental discriminator for a behavioural one: query whether a prior OPEN finding already exists for the image, and component-scope-veto (`mark_uncovered`, bounded by `MAX_SCOPED_COMPONENTS`) only those — an image with no prior finding has nothing to protect regardless of why it is unscannable (`runbooks/tests/test-security-credgap-veto.py`) | pass (an expired credential silently cleared findings the veto existed specifically to protect) |
 | `render-board.py` | **the board that IS the deliverable could not rank a non-security CRITICAL.** `collect()` selected only `finding_id, section, title` for non-security sections — never `severity` — and `render()` then hardcoded `item("MEDIUM", …)` for every one of them. The contextual `risk_tier` model is security-only, so health/version/doc findings have no tier and were flattened to MEDIUM **regardless of the severity stored on the row**. Live blast radius, cycle `6c46d183` (2026-08-24): frigate at 98.6% of its memory cgroup limit — the only actively-degrading thing in the sweep — rendered as `[MEDIUM]` at position **5**, beneath a grouped `doc/new` line, while the board's own contract two sections above states *"CRITICALs are never collapsed"*. The tier board legitimately read `critical 0` because it is explicitly security-scoped, so nothing contradicted it. Fixed by selecting `severity`, promoting stored-`critical` non-security rows to CRITICAL, emitting them individually, and excluding them from the >5 grouping count so a mixed section cannot hide one inside a group total (2026-08-24, `runbooks/tests/test-render-board-ops-critical.py`) | fail (an operational critical rendered as a mid-list medium) |
+| `.githooks/pre-commit` | Layer 3's password detector was two whole-FILE greps — flag on a credential-key assignment with an 8+ char value, then DROP the finding if the file also matched `example\|placeholder\|CHANGEME\|\$\{\|ENC\[`. The suppressor's evidence window was the entire file, so one `${…}` ANYWHERE in it disarmed the guard for every line: 73 of this repo's 112 `helmrelease.yaml` files carry a Flux postBuild variable, leaving the layer inert on ~65% of them. The leaked block self-suppressed twice over — its own value, and an `email: admin@${SECRET_DOMAIN}` four lines above. Rewritten PER LINE and PER VALUE in `.githooks/lib/password-guard.awk`, every suppressor scoped to text the judged line does not control, with an unparseable line failing OPEN. Note the second-order gap the relocation opened: Layer 5's test trigger was `^runbooks/.*\.(py\|sh)$`, so moving the guard into `.githooks/lib/` put it OUTSIDE the enforced surface — editing `security-check.py` ran the whole regression suite, editing the guard that the same suite covers ran none (2026-09-08, `f1720e57` + `47a53c8e`, `runbooks/tests/test-cred-suppressor-scoping.py`) | pass (detector inert on ~65% of helmreleases) |
+| `security-check.py` | the git-history credential scan suppressed a hit when the WHOLE DIFF LINE matched `example\|placeholder\|…` — an evidence window that INCLUDES the credential's own value. A literal admin password whose value was the word `placeholder` therefore satisfied its own exemption and deleted its own finding; it sat in this PUBLIC repo for 4.7 months and 28 commits, matched by two independent detectors and thrown away by both. The failure is ANTI-CORRELATED WITH RISK: the weaker and more guessable the secret, the more reliably it hides, because weak secrets are exactly the ones spelled like scaffolding. Scaffolding words are now matched ONLY against context (`_PLACEHOLDER_CONTEXT`), never against a value; a value may be exempted only on SHAPE (interpolation, `ENC[…]` ciphertext, template token) or by exact membership of the tiny `_TEMPLATE_LITERALS` set — which the regression suite asserts is byte-identical to the awk guard's copy, because three copies had already drifted apart (2026-09-08, `f1720e57`, `runbooks/tests/test-cred-suppressor-scoping.py`) | pass (the credential exempted itself) |
+| `security-check.py`, `.githooks/pre-commit` | **the fix for the two rows above, reproducing their own class in a different alphabet.** `f1720e57` stopped a credential's DICTIONARY WORDS from suppressing its finding and then let its PUNCTUATION do the same job — four measured false negatives, all confirmed firing-to-silent, two of them regressions against the whole-file grep it had just replaced: a value containing a BACKTICK went silent in both detectors; a value containing a PIPE plus any of `[]^*+?\` went silent in the hook; a bare `$` anywhere in a value went silent in the history scan (unanchored in Python, correctly anchored in awk); and COMMENTED-OUT credentials were skipped wholesale, though commenting a block out before committing is a common motion and a commented credential is still committed. The context window itself still held secret-controlled text: "context" was the line minus the values the KEY REGEX recognised, so every NEIGHBOURING field's value survived into it and a same-line `username: example_user, <cred-key>: <literal>` silenced the literal on flow-style YAML, JSON one-liners and `.env` lines. Context is now the KEY TOKEN plus any trailing comment, nothing else (2026-09-08, `588c353a`) | pass (narrowing a false positive minted four false negatives) |
 
 ### Enforcement (added 2026-08-22)
 
@@ -232,6 +289,14 @@ Since 2026-08-18 auto-close lives primarily in the **writer**:
    NOT auto-close unless you opt in with `SWEEP_AUTOCLOSE=1`.
 7. **Fail-safe direction is security-dependent.** Security checks surface on
    `not-measured`; cosmetic checks may stay quiet — but both must say which it is.
+8. **Scope every suppressor to text the judged thing does not control.** Name
+   the evidence window before writing the exemption, then shrink it to the KEY
+   token / trailing comment / surrounding syntax — never the value, never the
+   rest of the line, never the file. Prefer structural tests (is this value
+   syntactically an interpolation, ciphertext, or a template token?) over
+   dictionary tests (does this text contain "placeholder"?), and make any
+   unavoidable dictionary test exact-match against a tiny named set. Full rule,
+   its two instances and the non-credential cases: **Third rule** in §2.
 
 ## 5) Examples
 
@@ -415,3 +480,44 @@ WHERE finding_id IN (...);
 queries, and — worse — the natural read of it, `WHERE status = 'open'`, returns
 **0 rows against a table full of open findings**, which looks exactly like a
 clean cluster. This recipe told you to do that until 2026-08-24.
+
+---
+
+## 12) References
+
+- `.githooks/lib/password-guard.awk` — the Layer 3 per-line password guard; its
+  header documents the whole-file defect it replaces and the residual holes it
+  knowingly leaves
+- `.githooks/pre-commit` — Layer 3 invocation (fails CLOSED on a missing or
+  broken guard) and Layer 5, which runs `runbooks/tests/` whenever audit tooling
+  or `.githooks/lib/` is staged
+- `runbooks/security-check.py` — `_PLACEHOLDER_CONTEXT`, `_TEMPLATE_LITERALS`,
+  `_confirm_env_var_names` (the history-scan half of the Third rule)
+- `runbooks/tests/` — one regression suite per register row; `run-all.sh` is the
+  entry point, `task test:audit` the wrapper
+- [`docs/sops/pre-commit-secret-scan.md`](pre-commit-secret-scan.md) — the hook's
+  own SOP (layers, false-positive classes, bypass policy)
+- [`docs/sops/verification-contents-not-shape.md`](verification-contents-not-shape.md)
+  — the sibling failure class (measuring shape instead of contents)
+- [`docs/sops/sweep-findings-lifecycle.md`](sweep-findings-lifecycle.md) —
+  auto-close contract referenced by rule 6
+- Commits: `f1720e57`, `588c353a`, `47a53c8e`, `09498745` (2026-09-08 secret-detector scoping)
+
+---
+
+## Version History
+
+- `2026.08.24`: State of the register and rules through the version-arity,
+  coverage-comparator and board-severity fixes. (Heading reconstructed on
+  2026-09-09 — this SOP carried no Version History section before then; the
+  authoritative per-defect dating lives in the register rows themselves.)
+- `2026.09.09`: **Third rule** added — a suppressor may never be evaluated
+  against text the thing being judged controls — with its positive form
+  (name and shrink the evidence window; structural over dictionary tests;
+  re-attack after narrowing) and its non-credential instances. Three register
+  rows added for the 2026-09-08 secret-detector defects: the whole-file `${`
+  suppressor in `.githooks/pre-commit`, the value-text placeholder match in
+  `security-check.py`, and the round-2 commit that reproduced the class in
+  punctuation. §4 gains rule 8 as the actionable checklist form. §12 References
+  and this Version History added — both required by `SOP-TEMPLATE.md` and
+  absent until now.
