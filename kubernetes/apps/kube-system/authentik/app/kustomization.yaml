@@ -22,11 +22,29 @@ resources:
 # Authentik blueprints are stored in SOPS-encrypted configmap.sops.yaml
 # This provides security for sensitive domain information in a public repository
 # The ConfigMap is the source of truth - what Authentik loads at runtime
-# To update blueprints:
-# 1. Decrypt: sops -d kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml > /tmp/configmap.yaml
-# 2. Edit the blueprint entry in /tmp/configmap.yaml
-# 3. Re-encrypt: sops -e /tmp/configmap.yaml > kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
-# 4. Commit and push - Flux will decrypt and apply automatically
+# To update blueprints -- EDIT IN PLACE, never via /tmp:
+#
+#   sops kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml
+#
+# That opens the decrypted content in $EDITOR and re-encrypts on save. Then
+# commit and push -- Flux decrypts and applies automatically.
+#
+# The previous recipe here said "sops -d ... > /tmp/configmap.yaml", edit, then
+# "sops -e /tmp/configmap.yaml > configmap.sops.yaml". DO NOT DO THAT. It fails
+# two ways, and the second one destroys the file:
+#
+#   1. It leaves this ConfigMap's blueprints -- including every OIDC provider
+#      client_secret -- sitting in world-readable plaintext in /tmp. Two such
+#      files were found there on 2026-09-09, 14 client_secrets each.
+#   2. SOPS creation rules are PATH-BASED (.sops.yaml path_regex). /tmp matches
+#      no rule, so "sops -e /tmp/configmap.yaml" errors with "no matching
+#      creation rules found" -- but the shell has ALREADY TRUNCATED the target
+#      via ">" before sops runs. Net result: configmap.sops.yaml is left EMPTY
+#      and every blueprint is gone from git.
+#
+# If you genuinely need an out-of-file edit, copy the plaintext to a path INSIDE
+# kubernetes/ first, encrypt in place with "sops -e -i", then move it over the
+# target and shred the plaintext -- the flow in AGENTS.md "SOPS Encryption Rules".
 
 # Note: Blueprints are loaded via init containers in helmrelease.yaml:
 # - ConfigMap (authentik-blueprints) is mounted as a volume (blueprints-source)
