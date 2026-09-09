@@ -63,8 +63,15 @@ residual OCR digit damage, and is worth doing wherever a quantity looks implausi
 
 ## Running it
 
-Both services are reached over port-forwards; Paperless has no external ingress and
-the Mealie ingress caps a request at 900s.
+Both services are reached over port-forwards, which sidesteps the Gateway
+request timeout entirely. Both apps are in fact exposed through Gateway
+`envoy-external`, and the Mealie `HTTPRoute` caps a request at 900s
+(`spec.rules[].timeouts.request` / `.backendRequest`, verified 2026-09-09) —
+an import batch longer than that must go over the port-forward regardless.
+(Corrected 2026-09-09: this used to read "Paperless has no external ingress
+and the Mealie ingress caps a request at 900s". There are no `Ingress` objects
+in this cluster since 2026-09-07, `ad1ea7c2`, and Paperless does have an
+external route.)
 
 ```bash
 kubectl -n office port-forward svc/paperless-ngx 8010:8000 &

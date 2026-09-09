@@ -1950,8 +1950,23 @@ log_section "Section 17: Security Checks"
     LB_SERVICES=$(safe_count "kubectl get svc -A --field-selector spec.type=LoadBalancer --no-headers 2>/dev/null | wc -l" "lb-services" 1)
     echo "LoadBalancer services: $LB_SERVICES"
 
-    INGRESSES=$(safe_count "kubectl get ingress -A --no-headers 2>/dev/null | wc -l" "ingresses" 1)
-    echo "Total ingresses: $INGRESSES"
+    # HTTP attack surface, Gateway API. This replaced
+    #   INGRESSES=$(safe_count "kubectl get ingress -A ..." "ingresses" 1)
+    # which was finding F-b410c310: ingress-nginx was deleted 2026-09-07
+    # (`ad1ea7c2`), so that count is structurally 0 forever while its floor of 1
+    # demanded >=1 — an unclearable MAJOR "measurement did not run" on every
+    # single run, for a surface that no longer exists.
+    # The floor is KEPT, not dropped to 0. A floor of 0 can never fire, which is
+    # the same defect wearing the opposite sign; 103 routes were live on
+    # 2026-09-09, so a 0 here means the query or the Gateway API CRDs broke.
+    HTTPROUTES=$(safe_count "kubectl get httproute -A --no-headers 2>/dev/null | wc -l" "httproutes" 1)
+    echo "Total HTTPRoutes: $HTTPROUTES"
+    # Split by Gateway: envoy-external (192.168.55.104) is internet-facing,
+    # envoy-internal (192.168.55.103) is LAN-only. The internet-facing count is
+    # the security-relevant one for this section. No floor — a deployment that
+    # exposes nothing externally is a legitimate state, unlike a total route loss.
+    HTTPROUTES_EXT=$(safe_count "kubectl get httproute -A -o jsonpath='{.items[*].spec.parentRefs[*].name}' 2>/dev/null | tr ' ' '\\n' | grep -c '^envoy-external$'" "httproutes-external")
+    echo "Internet-facing HTTPRoutes (envoy-external): $HTTPROUTES_EXT"
 
     if [ "$ROOT_PODS" -eq 0 ]; then
         log_success "No pods running as root"
@@ -2266,8 +2281,10 @@ print(len(list(rows(sys.stdin.read()))))" 2>/dev/null || echo "0")
 
 log_section "Section 19: Network Connectivity"
 {
-    echo "Ingress controllers:"
-    kubectl get svc -n network | grep ingress || echo "No ingress services found"
+    echo "Gateway data plane:"
+    # Was `kubectl get svc -n network | grep ingress`, which printed
+    # "No ingress services found" on every run after ingress-nginx was deleted.
+    kubectl get gateway -n network 2>/dev/null || echo "No Gateways found in ns network"
     echo ""
 
     echo "external-dns status:"
@@ -2287,10 +2304,38 @@ log_section "Section 19: Network Connectivity"
     CLOUDFLARED_RUNNING=$(kubectl get pods -n network -l app.kubernetes.io/name=cloudflared -o json 2>/dev/null | jq '[.items[] | select(.status.phase=="Running")] | length' || echo "0")
     echo "cloudflared running pods: $CLOUDFLARED_RUNNING"
 
-    # Check ingress-nginx error rate
+    # Envoy Gateway 5xx rate (last hour). Replaced an ingress-nginx log
+    # selector that matched no pods after 2026-09-07 (`ad1ea7c2`) — it returned
+    # "No resources found" with rc=0, so INGRESS_ERRORS was 0 forever and the
+    # `-gt 10` warning below was unreachable. Envoy emits ONE JSON object per
+    # request; response codes are PARSED, never grepped, and `-c envoy` skips
+    # the shutdown-manager sidecar. --max-log-requests covers all 6 proxy pods
+    # (3 per Gateway); without it kubectl caps at 5 and silently undercounts.
+    #
+    # `--tail=2000` IS LOAD-BEARING, do not drop it. `kubectl logs` with a LABEL
+    # SELECTOR defaults to --tail=10 PER POD, so the unqualified form returns 60
+    # lines total no matter how wide --since is, and this counter reads ~0
+    # forever — a fresh silent zero of exactly the kind this rewrite removed.
+    # Measured 2026-09-09 over the same 6h window: default tail = 60 lines /
+    # 0 5xx; --tail=2000 = 5417 lines / 97 5xx. Caught only because the new
+    # check was tested against a window known to CONTAIN errors.
     echo ""
-    INGRESS_ERRORS=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=100 --since=1h 2>&1 | grep -E '\[error\]|\[emerg\]' | wc -l" "ingress-errors")
-    echo "Ingress controller errors (last hour): $INGRESS_ERRORS"
+    ENVOY_5XX=$(safe_count "kubectl logs -n network -l app.kubernetes.io/name=envoy -c envoy --since=1h --max-log-requests=10 --tail=2000 2>/dev/null | python3 -c \"
+import sys, json
+n = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith('{'):
+        continue
+    try:
+        rc = json.loads(line).get('response_code')
+    except Exception:
+        continue
+    if isinstance(rc, int) and rc >= 500:
+        n += 1
+print(n)
+\"" "envoy-5xx")
+    echo "Envoy Gateway 5xx responses (last hour): $ENVOY_5XX"
 
     # Check NAS connectivity (important for storage)
     # Use curl (HTTP) as primary check — more reliable than ping across all platforms
@@ -2310,9 +2355,13 @@ log_section "Section 19: Network Connectivity"
         add_major_issue "Cloudflare tunnel pods not running - external access may be broken"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
     fi
-    if [ "$INGRESS_ERRORS" -gt 10 ]; then
-        log_warning "High ingress controller error rate: $INGRESS_ERRORS in last hour"
-        add_minor_issue "Ingress controller errors: $INGRESS_ERRORS in last hour"
+    # Threshold set from measured traffic, not invented: a 6h sample on
+    # 2026-09-09 held 97 5xx, all connection-refused against ONE host during an
+    # app restart. 100/h therefore sits just above routine restart noise while
+    # still catching a Gateway-wide fault.
+    if [ "$ENVOY_5XX" -gt 100 ]; then
+        log_warning "High Envoy Gateway 5xx rate: $ENVOY_5XX in last hour"
+        add_minor_issue "Envoy Gateway 5xx responses: $ENVOY_5XX in last hour"
         NETWORK_ISSUES=$((NETWORK_ISSUES + 1))
     fi
     if ! { nc -z -w 2 192.168.55.240 445 2>/dev/null || nc -z -w 2 192.168.55.240 22 2>/dev/null; }; then
@@ -4058,24 +4107,36 @@ log_section "Section 25: External Services & Connectivity"
     # Production app health checks (my-software-production namespace)
     echo ""
     echo "=== Production App Health ==="
-    PROD_INGRESSES=$(kubectl get ingress -n my-software-production -o json 2>/dev/null | python3 -c "
+    # Ported from Ingress to HTTPRoute 2026-09-09. This walked
+    # `kubectl get ingress -n my-software-production`, which has returned zero
+    # objects since ingress-nginx was deleted (`ad1ea7c2`) — so the whole loop
+    # was skipped and 4 live production apps went UNCHECKED while the section
+    # printed a benign "No ingresses found". A silent skip, not a pass.
+    PROD_ROUTES=$(kubectl get httproute -n my-software-production -o json 2>/dev/null | python3 -c "
 import sys, json
 try:
-    ing = json.load(sys.stdin)['items']
-    for i in ing:
-        name = i['metadata']['name']
-        for rule in i.get('spec', {}).get('rules', []):
-            host = rule.get('host', '')
-            if host:
-                print(f'{name}:{host}')
-except:
-    pass
+    items = json.load(sys.stdin)['items']
+except Exception:
+    sys.exit(0)
+for r in items:
+    name = r['metadata']['name']
+    for host in (r.get('spec', {}) or {}).get('hostnames', []) or []:
+        if host:
+            print(f'{name}:{host}')
 " 2>/dev/null || echo "")
     PROD_ISSUES=0
-    if [ -z "$PROD_INGRESSES" ]; then
-        echo "  No ingresses found in my-software-production namespace"
+    if [ -z "$PROD_ROUTES" ]; then
+        # Fails LOUD. The namespace exists and is expected to serve; finding no
+        # routes means the query broke or routing was lost, and either way this
+        # check did not run. Reporting nothing as "fine" is the defect above.
+        if kubectl get ns my-software-production >/dev/null 2>&1; then
+            log_warning "my-software-production exists but exposes NO HTTPRoutes — production app checks did not run"
+            add_major_issue "Production app reachability UNMEASURED — no HTTPRoutes found in my-software-production"
+        else
+            echo "  Namespace my-software-production not present — skipping"
+        fi
     else
-        for entry in $PROD_INGRESSES; do
+        for entry in $PROD_ROUTES; do
             APP_NAME="${entry%%:*}"
             HOST="${entry##*:}"
             echo "Checking $APP_NAME ($HOST):"
@@ -4087,13 +4148,18 @@ except:
                 add_major_issue "Production app $APP_NAME unreachable externally (https://$HOST): HTTP $EXT_CODE"
                 PROD_ISSUES=$((PROD_ISSUES + 1))
             fi
-            # Internal check (bypasses Cloudflare, tests ingress → pod)
+            # Internal check (bypasses Cloudflare, tests Gateway → pod).
+            # 192.168.55.102 was ingress-nginx's LoadBalancer IP and answers
+            # nothing since its deletion; the internet-facing Gateway
+            # envoy-external is 192.168.55.104. Port 80 is served by the
+            # cluster-wide https-redirect route, so a 301 here is the healthy
+            # answer and only 000/5xx are treated as failures.
             INT_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 5 \
-                -H "Host: $HOST" "http://192.168.55.102" 2>/dev/null || echo "000")
-            echo "  Internal ingress (192.168.55.102, Host: $HOST): HTTP $INT_CODE"
+                -H "Host: $HOST" "http://192.168.55.104" 2>/dev/null || echo "000")
+            echo "  Internal Gateway (192.168.55.104, Host: $HOST): HTTP $INT_CODE"
             if [[ "$INT_CODE" == "000" ]] || [[ "$INT_CODE" == "5"* ]]; then
-                log_warning "$APP_NAME internal ingress failing: HTTP $INT_CODE"
-                add_major_issue "Production app $APP_NAME internal ingress failing (Host: $HOST): HTTP $INT_CODE"
+                log_warning "$APP_NAME internal Gateway path failing: HTTP $INT_CODE"
+                add_major_issue "Production app $APP_NAME internal Gateway path failing (Host: $HOST): HTTP $INT_CODE"
                 PROD_ISSUES=$((PROD_ISSUES + 1))
             fi
         done

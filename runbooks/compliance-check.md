@@ -319,7 +319,7 @@ Pass criteria:
 
 ### 8.2 Inventory & Documentation
 - [ ] **Application Inventory**: Run `python3 runbooks/doc-check.py` and verify Section 3 (Application Documentation) is clean. New apps MUST be in `docs/applications.md`.
-- [ ] **Ingress Integration**: Verify the app has the required annotations/labels for Homepage (checked by `doc-check.py` Section 5).
+- [ ] **HTTPRoute / Homepage Integration**: Verify the app is exposed with an `HTTPRoute` (never an `Ingress` — ingress-nginx was deleted 2026-09-07, `ad1ea7c2`, so an `Ingress` is inert and the app is simply unreachable) whose `parentRefs` name Gateway `envoy-internal` or `envoy-external` in ns `network` with `sectionName: https`, and that the required Homepage `gethomepage.dev/*` annotations plus the `gethomepage.dev/enabled` label sit **on the HTTPRoute** (Homepage runs `kubernetes.gateway: true`). Checked by `doc-check.py` Section 5.
 
 ### 8.3 Health & Version Integration
 - [ ] **Version Tracking**: Verify `python3 runbooks/check-all-versions.py` picks up the new app's `HelmRelease` (automatic for `kubernetes/apps/**/helmrelease.yaml`).

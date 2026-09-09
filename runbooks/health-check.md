@@ -53,7 +53,7 @@ confirmation must never be written as a finding: `docs/sops/sweep-findings-lifec
 - Hardware resource pressure and temperatures
 - Flux GitOps sync status (HelmReleases, HelmRepositories, Kustomizations, Git sources, OCI sources)
 - Backup staleness: alerts if last successful backup is older than 48 hours
-- Network connectivity: external-dns, Cloudflare tunnel, NAS reachability, ingress errors, AdGuard Home availability
+- Network connectivity: external-dns, Cloudflare tunnel, NAS reachability, Envoy Gateway route/5xx health, AdGuard Home availability
 - Ollama AI backend (Mac Mini 192.168.30.111) reachability
 - Security: Authentik auth failures, SOPS age key presence, pods running as root
 - Home automation: Home Assistant, Zigbee2MQTT (offline devices, coordinator errors), MQTT, Frigate cameras
@@ -582,8 +582,18 @@ kubectl get pods -A -o json | jq -r '.items[] | select(.spec.securityContext.run
 # Check for LoadBalancer services (potential external exposure)
 kubectl get svc -A --field-selector spec.type=LoadBalancer | wc -l
 
-# List ingresses (check TLS)
-kubectl get ingress -A | wc -l
+# Externally-reachable HTTP surface, split by Gateway. `envoy-external`
+# (192.168.55.104) is internet-facing; `envoy-internal` (192.168.55.103) is
+# LAN-only. This replaced `kubectl get ingress -A | wc -l`, which has counted
+# zero since ingress-nginx was deleted 2026-09-07 (`ad1ea7c2`).
+kubectl get httproute -A -o json | python3 -c "
+import sys, json, collections
+c = collections.Counter()
+for r in json.load(sys.stdin).get('items', []):
+    for p in (r.get('spec', {}) or {}).get('parentRefs', []) or []:
+        c[p.get('name')] += 1
+print(dict(c))
+"
 ```
 
 **AI Analysis**: Identify security issues, check for unauthorized exposures.
@@ -714,9 +724,9 @@ killall kubectl
 ## 19. Network Connectivity (Kubernetes)
 
 **Objective**: Test internal networking and external connectivity infrastructure
-**Success Criteria**: external-dns ready, Cloudflare tunnel running, NAS reachable, ingress controller error rate low
+**Success Criteria**: external-dns ready, Cloudflare tunnel running, NAS reachable, Envoy Gateway 5xx rate low
 
-**Automated**: external-dns readiness, Cloudflare tunnel pod status, NAS reachability (192.168.31.230), and ingress controller error rate are checked by the script.
+**Automated**: external-dns readiness, Cloudflare tunnel pod status, NAS reachability (192.168.55.240 — the NAS moved to VLAN 55 on 2026-06-07; the old 192.168.31.230 address documented here was on the retired Servers VLAN), and the Envoy Gateway 5xx rate are checked by the script.
 
 **Manual Investigation** (if network issues detected):
 ```bash
@@ -1764,50 +1774,130 @@ and skips all three verdicts — a failed query must never score as a clean zero
 
 ---
 
-## 35. Ingress Backend Health
+## 35. HTTPRoute Backend Health
 
-**Objective**: Verify all ingress backends have healthy endpoints and monitor ingress controller errors
-**Success Criteria**: All ingress services have available backends, ingress controller error rate is acceptable
+**Objective**: Verify every HTTPRoute is bound to its Gateway with resolvable
+backends, and monitor Envoy proxy 5xx / error rates
+**Success Criteria**: All routes `Accepted=True` and `ResolvedRefs=True`, every
+Service backend has ready endpoints, Envoy 5xx rate is acceptable
+
+> **Ported from Ingress to Gateway API (2026-09-09).** This section used to walk
+> `kubectl get ingress -A -o json` and read `kubectl logs -l
+> app.kubernetes.io/name=ingress-nginx`. ingress-nginx was deleted on 2026-09-07
+> (`ad1ea7c2`): there are **zero** Ingress objects and **zero** IngressClasses in
+> this cluster, so both commands returned "No resources found" with **rc=0** —
+> the section could not fail, and its "Critical: any ingress with 0 backend
+> endpoints" threshold was unreachable. Routing is now 103 HTTPRoutes onto
+> Gateways `envoy-internal` / `envoy-external` (ns `network`). Measured
+> 2026-09-09: 103 routes, 102 Service backend refs.
 
 **Commands to Execute:**
 ```bash
-# Check for ingresses with missing backend endpoints
-kubectl get ingress -A -o json | python3 -c "
+# 35a. Route status — the Gateway-API-native check. Accepted=False means the
+# route never bound to its Gateway (bad parentRef/sectionName/hostname);
+# ResolvedRefs=False means a backendRef points at a Service that is absent or
+# cross-namespace without a ReferenceGrant. Either way the host 404s or 503s.
+kubectl get httproute -A -o json | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-for ing in data.get('items', []):
-    ns = ing['metadata']['namespace']
-    name = ing['metadata']['name']
-    rules = ing.get('spec', {}).get('rules', [])
-    for rule in rules:
-        host = rule.get('host', 'unknown')
-        paths = rule.get('http', {}).get('paths', [])
-        for path in paths:
-            backend = path.get('backend', {})
-            svc_name = backend.get('service', {}).get('name')
-            if svc_name:
-                print(f'{ns}|{host}|{svc_name}')
-" | while IFS='|' read ns host svc; do
-    ENDPOINTS=$(kubectl get endpoints "$svc" -n "$ns" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || echo "")
-    if [ -z "$ENDPOINTS" ]; then
-        echo "⚠️  No backends for $host (service: $ns/$svc)"
+routes = data.get('items', [])
+bad = 0
+for r in routes:
+    ns = r['metadata']['namespace']; name = r['metadata']['name']
+    for parent in (r.get('status', {}) or {}).get('parents', []) or []:
+        for c in parent.get('conditions', []) or []:
+            if c['type'] in ('Accepted', 'ResolvedRefs') and c['status'] != 'True':
+                bad += 1
+                print(f\"NOT-OK {ns}/{name} {c['type']}={c['status']} reason={c.get('reason')}\")
+print(f'routes={len(routes)} not-ok-conditions={bad}')
+"
+
+# 35b. Backend endpoint walk — a route can be Accepted with ResolvedRefs=True
+# (the Service object exists) while that Service has NO ready pods behind it.
+# That is the 503 class the old Ingress check was built for; it still needs an
+# explicit endpoint lookup. EndpointSlice, not the deprecated Endpoints API.
+kubectl get httproute -A -o json | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+seen = set()
+for r in data.get('items', []):
+    ns = r['metadata']['namespace']; name = r['metadata']['name']
+    for rule in (r.get('spec', {}) or {}).get('rules', []) or []:
+        for br in rule.get('backendRefs', []) or []:
+            if br.get('kind', 'Service') != 'Service':
+                continue
+            seen.add((br.get('namespace', ns), f'{ns}/{name}', br['name']))
+for bns, route, svc in sorted(seen):
+    print(f'{bns}|{route}|{svc}')
+" | while IFS='|' read bns route svc; do
+    EP=$(kubectl get endpointslice -n "$bns" \
+        -l kubernetes.io/service-name="$svc" \
+        -o jsonpath='{.items[*].endpoints[*].addresses[*]}' 2>/dev/null || true)
+    if [ -z "$EP" ]; then
+        SVCTYPE=$(kubectl get svc -n "$bns" "$svc" -o jsonpath='{.spec.type}' 2>/dev/null || true)
+        echo "NO-BACKENDS $route -> $bns/$svc (svc type=${SVCTYPE:-MISSING})"
     fi
 done
 
-# Check ingress controller errors
-kubectl logs -n network -l app.kubernetes.io/name=ingress-nginx --tail=200 --since=1h | grep -E '\[error\]|\[emerg\]'
+# 35c. Envoy proxy errors. The label is the Gateway API one; `-c envoy` avoids
+# the shutdown-manager sidecar, and --max-log-requests covers all proxy
+# replicas (3 per Gateway) — without it kubectl caps at 5 and silently
+# undercounts. Envoy emits ONE JSON object per request, so response codes are
+# parsed, not grepped.
+#
+# `--tail=2000` is REQUIRED. `kubectl logs` with a LABEL SELECTOR defaults to
+# --tail=10 per pod, so the unqualified command returns 60 lines total (6 pods)
+# regardless of --since, and the 5xx tally reads ~0 forever. Measured
+# 2026-09-09 over one 6h window: default = 60 lines / 0 5xx; --tail=2000 =
+# 5417 lines / 97 5xx.
+kubectl logs -n network -l app.kubernetes.io/name=envoy -c envoy \
+    --since=1h --max-log-requests=10 --tail=2000 2>/dev/null | python3 -c "
+import sys, json, collections
+codes = collections.Counter(); unparsed = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith('{'):
+        unparsed += 1; continue
+    try: d = json.loads(line)
+    except Exception: unparsed += 1; continue
+    rc = d.get('response_code')
+    if isinstance(rc, int) and rc >= 500:
+        host = (d.get(':authority') or '?').split('.')[0]   # short name only
+        codes[(host, rc, d.get('response_code_details'))] += 1
+total = sum(codes.values())
+for k, v in codes.most_common(15): print(v, k)
+print(f'5xx_total={total} unparsed_lines={unparsed}')
+"
 ```
 
 **AI Analysis**:
-- Identify any ingresses with no backend endpoints (leads to 503 errors)
-- Check for high error rates in ingress controller logs
-- Verify SSL/TLS certificate issues
-- Flag any ingress configuration problems
-- **KNOWN FALSE POSITIVE**: Authentik outpost services (e.g., `nocodb-authentik-outpost`, `frigate-authentik-outpost`, `longhorn-authentik-outpost`, etc.) are `ExternalName` type services that resolve via DNS to `ak-outpost-*` ClusterIP services in `kube-system`. ExternalName services do **not** have `Endpoints` objects, so `kubectl get endpoints` returns empty. This is expected behavior - verify the actual outpost services in `kube-system` have healthy endpoints instead. Typically ~11 Authentik outpost ExternalName services will show "no backends" and should be excluded from the missing backends count.
+- Any `NOT-OK` route is a routing outage for that hostname — treat
+  `Accepted=False` as "the route never attached" (check `parentRefs` names the
+  Gateway, `sectionName: https`, and that the hostname is in the Gateway's
+  allowed set) and `ResolvedRefs=False` as "the backend Service is missing".
+- Any `NO-BACKENDS` line is the classic 503: route and Service both exist, no
+  ready pods. Cross-check the workload before blaming routing.
+- Group 5xx by `:authority` — a single host dominating the count is that app
+  restarting, not a Gateway fault. `upstream_reset_before_response_started` with
+  `Connection_refused` is the shape of a pod that is down or still starting.
+  (Observed 2026-09-09: 97 × 503 on one host across 6h, all
+  connection-refused — a Home Assistant restart, not an Envoy problem.)
+- `unparsed_lines` well above single digits means the access-log format changed
+  and the 5xx tally is undercounting — investigate before trusting a low total.
+- **The old Authentik-ExternalName false positive no longer applies.** Under
+  Ingress, ~11 `ExternalName` outpost Services appeared as "no backends"
+  because ExternalName has no Endpoints. Verified 2026-09-09: only 2
+  ExternalName Services remain cluster-wide and **neither is an HTTPRoute
+  backend**, so 35b has no known false-positive class. If that changes, exclude
+  by `svc type=ExternalName` (35b already prints the type) rather than by
+  hardcoding names.
 
 **Thresholds:**
-- **Critical**: Any ingress with 0 backend endpoints (excluding Authentik ExternalName outpost services)
-- **Warning**: >10 ingress controller errors in last hour
+- **Critical**: any route with `Accepted=False` or `ResolvedRefs=False`
+- **Critical**: any `NO-BACKENDS` route whose Service type is not `ExternalName`
+- **Warning**: `5xx_total` > 100 in the last hour, or any single host > 50
+- **Warning**: `routes=0` — with 103 routes in this cluster a zero means the
+  query or the Gateway API CRDs failed, not that routing is clean
 
 ---
 
