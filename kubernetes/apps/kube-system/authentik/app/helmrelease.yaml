@@ -93,7 +93,7 @@ spec:
                 sleep 2
               done
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2026.8.0
+          image: ghcr.io/goauthentik/server:2026.8.1
           command:
             - sh
             - -c
@@ -226,7 +226,7 @@ spec:
                 sleep 2
               done
         - name: patch-session-settings
-          image: ghcr.io/goauthentik/server:2026.8.0
+          image: ghcr.io/goauthentik/server:2026.8.1
           command:
             - sh
             - -c
