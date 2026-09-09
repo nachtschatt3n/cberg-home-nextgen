@@ -46,9 +46,18 @@ window: "sat-attended:2026-09-26"     # attended (external request path), and th
                                       # which is at 140 of 150 min for talos-1.14.0,
                                       # and not a Sunday slot generally — this is
                                       # not reboot work.
-security_ref: null                    # the gap itself is already described in
-                                      # 9d9dad86 in this repo; no undisclosed
-                                      # vulnerability detail is added here
+security_ref: F-aae0f363              # CORRECTED 2026-09-09 after a security-agent
+                                      # pass. The earlier value was `null`, on the
+                                      # reasoning that 9d9dad86 already describes
+                                      # the gap. That reasoning does not hold:
+                                      # 9d9dad86 disclosed the blind spot AND
+                                      # asserted a mitigation, and this plan's
+                                      # thesis is that the mitigation does not
+                                      # exist. Prior publication of a fact does
+                                      # not license publishing its negation, so
+                                      # the plan needs a durable finding to cite.
+                                      # See §1.6 for what still belongs on the
+                                      # finding record rather than in this file.
 finding_refs:
   - F-aae0f363                        # external attack attribution blind: real client IP absent
 sops_refs:
@@ -100,8 +109,9 @@ The **collection** path exists; the **parse and detect** path does not.
 - There is **no authentik decoder and no authentik rule** anywhere in
   `kubernetes/apps/security/wazuh/` — the only four matches are passing comments
   in the envoy and unifi decoders.
-- Ground truth on the manager: authentik-derived alerts in `alerts.json` = **0**.
-- `logall`/`logall_json` are `no`, so there is no archive to retro-hunt either.
+- Ground truth on the manager confirms the consequence: the rules that do not
+  exist have never produced an alert. Retention/archive posture is recorded on
+  `F-aae0f363` rather than here — see §1.6.
 
 ### 1.3 The blocker that makes Phase 1 first: the client IP is destroyed
 
@@ -150,6 +160,38 @@ into one bucket and reports it as normal.
   detection uses it as the client IP, the port must be stripped before
   correlation, or per-IP grouping fragments into one bucket per connection and
   every threshold silently becomes unreachable.
+
+### 1.6 Disclosure posture — what still needs to move off this file
+
+A security-agent pass on 2026-09-09 rated this file **Warning** under the
+two-part test in `docs/sops/vulnerability-disclosure.md`: it is `status: draft`
+in a **public** repo, so §1.1–§1.3 sit publicly for the ~17 days until the
+window, and read together they concentrate more measured present-state detail
+about named internet-facing services than that test allows. No single sentence
+crosses the line; the concentration is what does.
+
+Two corrections were applied immediately: `security_ref` now cites
+`F-aae0f363` (the previous `null` rested on reasoning that does not hold — see
+the frontmatter comment), and the archive/retention line was removed from §1.2.
+
+**Still owed, and it needs DB write scope this plan's author did not have:**
+migrate the measured present-state in §1.1–§1.3 — the per-source event counts,
+the transport/rule inventory, and the indexing-gap figures — onto
+`F-aae0f363`'s `security_detail`, and replace them here with the citation. Keep
+§2–§5 as they are: scope, pre-checks, diagnosis and steps are "how to fix" prose,
+which the SOP puts squarely on the publishable side.
+
+Do not simply delete the measurements. `README.md` is explicit that losing the
+"why" is worse than the disclosure — the finding record is where the "why" must
+land first, and only then does the deletion here become safe.
+
+Also for the record, since a commit message cannot be quietly edited: the commit
+that added this file (`88c170f5`) carries a document-volume figure that does not
+appear in the file itself, and residual present-tense claims about named
+components. That is a permanent artifact. The narrower lesson is that the
+disclosure hook's residual tier is a closed list of phrasings and paraphrase
+defeats it by design (SOP §2.4), which is an argument for extending
+`.githooks/lib/disclosure_patterns.py`, not for trusting the hook's silence.
 
 ## 2. Scope of THIS plan
 
