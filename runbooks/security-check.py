@@ -3113,46 +3113,120 @@ def s6_attack_patterns(es: ElasticPortForward) -> tuple[str, Findings, str]:
         for s in sample:
             lines.append(f"- `{s}`\n")
 
-    # ─── P2.3: per-source-IP correlation via Cloudflare-injected headers ────
-    # The external ingress logs cf_connecting_ip, cf_ray, cf_country
-    # (commit e6816990 + 1c9ac6a3 wired this through). Slice the same 24h
-    # window by real client IP and flag specific abuse patterns:
-    #   - >50 4xx responses from one IP (enumeration/brute force)
-    #   - bidirectional join with Cloudflare WAF events via cf_ray as key
-    #     (a future P3.x extension)
+    # ─── P2.3: per-source-IP 4xx correlation from Envoy access logs ────────
+    # REWRITTEN 2026-09-09. This aggregated on `cf_connecting_ip.keyword` and
+    # range-filtered on `http.response.status_code`. NEITHER FIELD HAS EVER
+    # EXISTED in this data stream, and after ingress-nginx was deleted
+    # (2026-09-07, `ad1ea7c2`) nothing emits cf_connecting_ip at all. Verified
+    # against live ES on 2026-09-09: `exists` on cf_connecting_ip = 0 docs,
+    # downstream_remote_address = 0 docs, http.response.status_code = 0 docs,
+    # body.text = 10000+. So the whole section matched nothing and produced
+    # nothing.
+    #
+    # Worse than inert: its empty branch printed "cf_connecting_ip not yet
+    # populated in ES (field will appear as fresh ingress logs index)" — a
+    # permanently dead detector reported as benign rollout lag, so an operator
+    # concludes "give it time", forever. That is the third rule of
+    # docs/sops/audit-script-correctness.md: a non-result scored as a result.
+    #
+    # Envoy access logs arrive as a JSON STRING in `body.text`; the collector
+    # does not parse them into fields, which is why no field-based aggregation
+    # can work here. A terms agg is therefore impossible — the JSON is parsed
+    # CLIENT-SIDE instead. The client IP is `downstream_remote_address` (NOT
+    # x-forwarded-for: the external Gateway sets clientIPDetection.customHeader
+    # CF-Connecting-IP, so x-forwarded-for is null on the large majority of
+    # external requests), and it carries a `:port` suffix that must be stripped
+    # or per-IP correlation fragments across ports. Corroborates the Wazuh
+    # decoder port in `9d9dad86`, which strips the same suffix in a child
+    # decoder.
     ip_body = {
-        "size": 0,
+        "size": 2000,
+        "_source": ["body.text", "resource.attributes.k8s.deployment.name"],
         "query": {"bool": {"must": [
             {"term": {"resource.attributes.k8s.namespace.name": "network"}},
-            {"range": {"http.response.status_code": {"gte": 400, "lt": 500}}},
-        ], "filter": {"range": {"@timestamp": {"gte": "now-24h"}}}}},
-        "aggs": {
-            "by_ip": {"terms": {"field": "cf_connecting_ip.keyword", "size": 20}},
-        },
+            {"term": {"resource.attributes.k8s.container.name": "envoy"}},
+            # Narrows to 4xx before transfer. body.text is a non-analyzed
+            # keyword, so a wildcard is the only option; anchored on the JSON
+            # key so it is not a leading wildcard (~2s over 24h, measured).
+            {"wildcard": {"body.text": '*"response_code":4*'}},
+        ], "filter": [{"range": {"@timestamp": {"gte": "now-24h"}}}]}}
     }
     ip_data = es.query(ip_body)
-    abusers: list[tuple[str, int]] = []
+
+    def _client_ip(raw: str) -> str:
+        """Strip the :port suffix Envoy appends. IPv6 keeps its bracket form."""
+        if not raw:
+            return ""
+        if raw.startswith("["):                      # [::1]:443
+            return raw.split("]")[0].lstrip("[")
+        return raw.rsplit(":", 1)[0] if ":" in raw else raw
+
+    def _is_public(ip: str) -> bool:
+        try:
+            import ipaddress
+            return ipaddress.ip_address(ip).is_global
+        except Exception:
+            return False
+
+    # per-IP 4xx counts, split by which Gateway saw them. Only envoy-external
+    # carries real internet clients; envoy-internal is LAN-only, so an IP that
+    # only ever appears there is a local probe, not an abuser.
+    ext_counts: dict[str, int] = {}
+    parsed_4xx = 0
     if ip_data:
-        for b in ip_data.get("aggregations", {}).get("by_ip", {}).get("buckets", []):
-            ip = b.get("key", "") or "(empty)"
-            count = b.get("doc_count", 0)
-            if count > 50 and ip not in ("", "(empty)"):
-                abusers.append((ip, count))
+        for h in ip_data.get("hits", {}).get("hits", []):
+            src = h.get("_source", {})
+            txt = (src.get("body", {}) or {}).get("text", "")
+            try:
+                doc = json.loads(txt)
+            except Exception:
+                continue
+            rc = doc.get("response_code")
+            if not (isinstance(rc, int) and 400 <= rc < 500):
+                continue
+            parsed_4xx += 1
+            gw = (src.get("resource", {}).get("attributes", {}) or {}).get(
+                "k8s.deployment.name", "")
+            if gw != "envoy-external":
+                continue
+            ip = _client_ip(doc.get("downstream_remote_address") or "")
+            if ip:
+                ext_counts[ip] = ext_counts.get(ip, 0) + 1
+
+    # Public sources are the abuse signal. Private sources on the external
+    # Gateway are LAN clients and monitoring probes -- reported as context, and
+    # deliberately NOT findings: on 2026-09-09 the top private source alone had
+    # 62 4xx in 24h, so rating those would page on internal probe traffic.
+    abusers = sorted(((ip, n) for ip, n in ext_counts.items()
+                      if n > 50 and _is_public(ip)),
+                     key=lambda t: -t[1])
+    private_top = max((n for ip, n in ext_counts.items() if not _is_public(ip)),
+                      default=0)
 
     if abusers:
-        lines.append(f"\n**Per-source-IP abuse (24h, >50 4xx):** {len(abusers)} IPs\n")
+        lines.append(f"\n**Per-source-IP abuse (24h, >50 4xx, public sources):** "
+                     f"{len(abusers)} IPs\n")
         for ip, n in abusers[:10]:
             f.add(WARNING, f"Source IP `{redact(ip)}` triggered {n} 4xx responses (24h)")
             cprint(C.YELLOW, f"  🟡 {redact(ip)}: {n} 4xx responses")
             lines.append(f"- `{redact(ip)}`: {n} responses\n")
-    elif ip_data and ip_data.get("hits", {}).get("total", {}).get("value", 0) > 0:
-        cprint(C.GREEN, "  🟢 No per-source-IP abuse pattern (no IP >50 4xx in 24h)")
+    elif parsed_4xx > 0:
+        # CONTROL: we parsed real 4xx events, so the detector is demonstrably
+        # wired to live data. A clean verdict here is a measurement, not a
+        # silence -- which is exactly what the old branch could never say.
+        cprint(C.GREEN, f"  🟢 No public-source 4xx abuse (>50/24h) "
+                        f"(control={parsed_4xx} 4xx parsed, "
+                        f"top private source={private_top} — detector proven live)")
+        lines.append(f"\nPer-source-IP: no public source >50 4xx in 24h "
+                     f"({parsed_4xx} 4xx events parsed).\n")
     elif ip_data is not None:
-        # Query worked but no cf_connecting_ip-keyed events: log format may
-        # not have rolled out yet, or the field was indexed without keyword
-        # subfield. Will start populating as nginx logs accumulate post-rollout.
-        cprint(C.YELLOW, "  🟡 cf_connecting_ip not yet populated in ES "
-                       "(field will appear as fresh ingress logs index)")
+        # Query succeeded and returned no 4xx at all. Say so as a RESULT. This
+        # is a real possible state (a genuinely quiet 24h), and it is reported
+        # as such -- never as "the field has not populated yet".
+        f.add(WARNING, "Per-source-IP 4xx correlation parsed 0 events in 24h — "
+                       "verify Envoy access logs are still reaching ES")
+        cprint(C.YELLOW, "  🟡 0 Envoy 4xx events parsed in 24h — either a very "
+                         "quiet window or access-log ingestion has stopped")
 
     return f.worst(), f, "\n".join(lines)
 
