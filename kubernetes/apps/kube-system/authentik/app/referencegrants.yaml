@@ -206,15 +206,19 @@ spec:
 # ---------------------------------------------------------------------------
 # ADDED 2026-09-07 after the original set proved incomplete. The first pass
 # screened for forward-auth apps by the nginx `auth-url` annotation, which
-# finds 6 apps — but 9 Authentik outpost Ingresses exist. The three the
-# annotation screen misses are arag-web, uptime-kuma and kubernetes-dashboard,
-# and because the grants were generated from that same screen, those three had
-# none. SCREEN ON THE OUTPOST, NOT THE ANNOTATION:
-#   kubectl get ingress -n kube-system | grep ak-outpost-
+# found only 6 apps while more outposts existed. arag-web and uptime-kuma were
+# missed for exactly that reason. SCREEN ON THE OUTPOST, NOT THE ANNOTATION —
+# and screen the LIVE outpost list, not the blueprint files, because
+# authentik creates system outposts in code that no blueprint declares:
+#   kubectl exec -n kube-system deploy/authentik-worker -- ak shell -c \
+#     "from authentik.outposts.models import Outpost; \
+#      print([o.name for o in Outpost.objects.all()])"
 #
-# kubernetes-dashboard is deliberately NOT granted: its outpost has no app
-# behind it at all (no Service, no Ingress outside the outpost's own). It is an
-# orphan squatting a hostname and should be deleted, not authorised.
+# The third outpost that screen originally surfaced, kubernetes-dashboard, was
+# an orphan of the app removed in dbbacb10 — deliberately never granted, and
+# DELETED on 2026-09-09 (outpost + application + provider) together with the
+# langfuse app/provider (app removed in 8714dbd1) and a duplicate phpMyAdmin
+# proxy provider that was bound to no application and no outpost.
 # ---------------------------------------------------------------------------
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
