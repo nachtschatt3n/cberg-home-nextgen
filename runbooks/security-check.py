@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -665,7 +666,7 @@ class WazuhPortForward:
 # ---------------------------------------------------------------------------
 
 def section_header(n: int, title: str) -> None:
-    # Header numbers are 1..13 and index-align with _SECTION_SLUGS (n=7 is
+    # Header numbers are 1..len(_SECTION_SLUGS) and index-align with it (n=7 is
     # s6a_error_rate_spikes, n=13 is s13_wazuh_siem), so the slug the writer
     # uses for `subsection` is also the scope a degraded primitive reports.
     global _CURRENT_SECTION
@@ -673,7 +674,7 @@ def section_header(n: int, title: str) -> None:
         _CURRENT_SECTION = _SECTION_SLUGS[n - 1]
     except (IndexError, NameError):  # pragma: no cover — defensive
         _CURRENT_SECTION = f"s{n}"
-    cprint(C.BLUE, f"\n[{n}/13] {title}")
+    cprint(C.BLUE, f"\n[{n}/{len(_SECTION_SLUGS)}] {title}")
 
 
 def s1_sops_coverage() -> tuple[str, Findings, str]:
@@ -4177,6 +4178,184 @@ def flag_wazuh_groups(buckets, concerning, rare, volume_floor=5):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Section 13 — Authentik outpost Ingress suppression (F-0e2c62ad)
+#
+# Every Authentik outpost on a Kubernetes service connection MUST carry
+# `kubernetes_disabled_components: [ingress]`. Without it the outpost
+# controller publishes its OWN Ingress holding the application's hostname, on
+# the default ingress class. That object exists in no git repository (authentik
+# creates it at runtime) and carries no ownerReferences (nothing GCs it, and it
+# is not owned by the app, the HelmRelease or the outpost Deployment), so it is
+# invisible to a repo grep and it is recreated if deleted. It has mis-routed a
+# hostname three times. Full mechanism: docs/sops/authentik.md
+# §"Outpost-published Ingress".
+#
+# THIS CHECK ENUMERATES THE LIVE OUTPOST LIST, NEVER THE REPO. That is the
+# entire reason it exists. `rg kubernetes_disabled_components` over this repo
+# enumerates the outposts we DECLARED in configmap.sops.yaml — it does not
+# enumerate the outposts that EXIST. The `authentik Embedded Outpost` is a
+# managed/system object that authentik creates for itself in code
+# (AuthentikOutpostConfig.embedded_outpost in authentik/outposts/apps.py); no
+# blueprint declares it, so it never appeared in a repo grep, was never
+# audited, and sat on `[]` on a live Kubernetes service connection. A
+# repo-grep-based implementation here would reproduce the exact bug the check
+# exists to catch.
+# ---------------------------------------------------------------------------
+
+# Printed by `ak shell` inside the authentik worker. Sentinel-delimited because
+# `ak shell` writes a large JSON log preamble to the same stream on every boot.
+_AK_OUTPOST_SENTINEL_START = "<<<AK_OUTPOSTS_JSON>>>"
+_AK_OUTPOST_SENTINEL_END   = "<<<AK_OUTPOSTS_END>>>"
+
+_AK_OUTPOST_PROBE = f'''
+import json
+from authentik.outposts.models import Outpost
+rows = []
+for o in Outpost.objects.all().order_by("name"):
+    sc = o.service_connection
+    sc_kind = type(sc).__name__ if sc is not None else None
+    rows.append({{
+        "name": o.name,
+        # Truthy for authentik's own system objects (e.g. the embedded
+        # outpost). Recorded, but deliberately NOT used to exempt anything.
+        "managed": bool(o.managed),
+        "service_connection": sc_kind,
+        "kubernetes_service_connection": sc_kind == "KubernetesServiceConnection",
+        "disabled_components": list(o._config.get("kubernetes_disabled_components") or []),
+        "providers": o.providers.count(),
+    }})
+print("{_AK_OUTPOST_SENTINEL_START}" + json.dumps(rows) + "{_AK_OUTPOST_SENTINEL_END}")
+'''
+
+
+def _live_authentik_outposts() -> list[dict] | None:
+    """Enumerate the LIVE Authentik outposts. None means the probe failed.
+
+    None is NOT the same as "no outposts" and callers must not conflate them:
+    an empty list from a broken probe would make every assertion below pass
+    vacuously, which is the failure mode this whole section exists to prevent.
+    """
+    pod = kubectl("get pod -n kube-system "
+                  "-l app.kubernetes.io/component=worker "
+                  "-o jsonpath='{.items[0].metadata.name}'").strip().strip("'")
+    if not pod:
+        return None
+    raw = kubectl(f"exec -n kube-system {pod} -i -- ak shell -c "
+                  f"{shlex.quote(_AK_OUTPOST_PROBE)}", timeout=120)
+    if _AK_OUTPOST_SENTINEL_START not in raw or _AK_OUTPOST_SENTINEL_END not in raw:
+        return None
+    blob = raw.split(_AK_OUTPOST_SENTINEL_START, 1)[1].split(_AK_OUTPOST_SENTINEL_END, 1)[0]
+    try:
+        rows = json.loads(blob)
+    except (ValueError, TypeError):
+        return None
+    return rows if isinstance(rows, list) else None
+
+
+def _outpost_ingress_offenders(outposts: list[dict]) -> list[dict]:
+    """PURE. Outposts whose controller can publish an Ingress for them.
+
+    Two scoping rules, both deliberate:
+
+    * **Only Kubernetes service connections.** The ingress reconciler is part
+      of the Kubernetes controller; a Docker (or absent) service connection has
+      no Ingress to publish, so flagging one would be crying wolf.
+    * **`managed` is recorded but never exempts.** The embedded outpost is a
+      system object and was non-compliant precisely because every previous
+      audit treated "we didn't declare it" as "not ours to check".
+
+    Kept module-level and pure so both directions are testable without a live
+    cluster — a check that can only be exercised against production is a check
+    nobody exercises.
+    """
+    offenders = []
+    for o in outposts:
+        if not o.get("kubernetes_service_connection"):
+            continue
+        disabled = [str(c).strip().lower() for c in (o.get("disabled_components") or [])]
+        if "ingress" not in disabled:
+            offenders.append(o)
+    return offenders
+
+
+def s12_authentik_outposts() -> tuple[str, Findings, str]:
+    section_header(13, "Authentik Outpost Ingress Suppression")
+    f = Findings()
+    lines: list[str] = []
+
+    outposts = _live_authentik_outposts()
+
+    # BLINDNESS GUARD. A failed probe must never read as a clean result.
+    if outposts is None:
+        f.add(WARNING, "Authentik outpost audit did NOT run — the live outpost list "
+                       "could not be read, so 'no non-compliant outpost' proves nothing")
+        cprint(C.YELLOW, "  🟡 outpost audit is BLIND (probe failed)")
+        DEGRADED.record("s12_authentik_outposts", "authentik outpost list",
+                        "ak shell probe failed — outpost Ingress suppression unverified")
+        return f.worst(), f, "Authentik outpost audit did not run (probe failed).\n"
+
+    if not outposts:
+        f.add(WARNING, "Authentik outpost audit returned ZERO outposts — this cluster "
+                       "runs forward-auth outposts, so an empty list is a broken query, "
+                       "not a clean result")
+        cprint(C.YELLOW, "  🟡 outpost audit returned 0 outposts (treated as blind)")
+        return f.worst(), f, "Authentik outpost audit returned no outposts.\n"
+
+    k8s_outposts = [o for o in outposts if o.get("kubernetes_service_connection")]
+    offenders    = _outpost_ingress_offenders(outposts)
+
+    for o in offenders:
+        origin = "system/managed, no blueprint" if o.get("managed") else "blueprint-declared"
+        n_prov = o.get("providers", 0)
+        if n_prov:
+            f.add(CRITICAL,
+                  f"Authentik outpost `{o['name']}` ({origin}) is on a Kubernetes service "
+                  f"connection WITHOUT kubernetes_disabled_components: [ingress] and has "
+                  f"{n_prov} provider(s) — its controller publishes an Ingress holding the "
+                  f"app's hostname, an object in no git repo and with no ownerRefs")
+            cprint(C.RED, f"  🔴 {o['name']}: ingress component NOT disabled ({n_prov} provider(s))")
+        else:
+            # Latent, not active: with no provider the controller has no
+            # hostname to publish yet. Still a finding — this is the state the
+            # embedded outpost sat in, and it is the moment the fix is free.
+            f.add(WARNING,
+                  f"Authentik outpost `{o['name']}` ({origin}) is on a Kubernetes service "
+                  f"connection WITHOUT kubernetes_disabled_components: [ingress]. It has 0 "
+                  f"providers so nothing is published yet — assigning one makes it publish "
+                  f"an Ingress for that app's hostname. Fix it now, while it is free")
+            cprint(C.YELLOW, f"  🟡 {o['name']}: ingress component NOT disabled (latent, 0 providers)")
+
+    if not offenders:
+        cprint(C.GREEN, f"  🟢 all {len(k8s_outposts)} Kubernetes outposts disable the "
+                        f"ingress component")
+
+    # Belt and braces: disabling the component stops MANAGEMENT, it does not
+    # DELETE an Ingress already published. A surviving one is a live hijack.
+    ing = kubectl_json("get ingress -A")
+    if ing:
+        stale = [f"`{i['metadata']['namespace']}/{i['metadata']['name']}`"
+                 for i in ing["items"]
+                 if i["metadata"]["name"].startswith("ak-outpost-")]
+        for s in stale:
+            f.add(CRITICAL, f"Outpost-published Ingress still present: {s} — disabling the "
+                            f"component stops management but does not delete the object; "
+                            f"it must be removed by hand once")
+            cprint(C.RED, f"  🔴 stale outpost Ingress: {s}")
+
+    non_k8s = len(outposts) - len(k8s_outposts)
+    lines.append(
+        f"**Outposts (live, from the Authentik DB — not a repo grep):** {len(outposts)}\n\n"
+        f"- On a Kubernetes service connection (in scope): {len(k8s_outposts)}\n"
+        f"- On another/no service connection (no ingress reconciler, out of scope): {non_k8s}\n"
+        f"- Missing `kubernetes_disabled_components: [ingress]`: {len(offenders)}\n"
+    )
+
+    f.suppress_accepted(_ACCEPTED_RISKS)
+    return f.worst(), f, "\n".join(lines)
+
+
+
 def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     """Surface SIEM-identified issues from the Wazuh indexer.
 
@@ -4191,7 +4370,7 @@ def s13_wazuh_siem(wz: WazuhPortForward) -> tuple[str, Findings, str]:
     in upstream defaults; 7-11 is "notable but tunable"; 0-6 is routine.
     Homelab-tuned: only escalate medium counts when they exceed a cluster
     of >5 events (single-event noise gets filtered)."""
-    section_header(13, "Wazuh SIEM Findings")
+    section_header(14, "Wazuh SIEM Findings")
     f = Findings()
     lines = []
 
@@ -4524,6 +4703,7 @@ _SECTION_SLUGS = [
     "s9_certificates",
     "s10_flux_posture",
     "s11_unifi",
+    "s12_authentik_outposts",
     "s13_wazuh_siem",
 ]
 
@@ -4752,6 +4932,7 @@ def _main_impl(args) -> int:
     results.append(s9_certificates())
     results.append(s10_flux_posture())
     results.append(s11_unifi())
+    results.append(s12_authentik_outposts())
 
     # Section 13: Wazuh SIEM findings (separate indexer cluster)
     cprint(C.CYAN, "\nStarting Wazuh indexer port-forward for section 13...")

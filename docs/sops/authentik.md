@@ -503,6 +503,21 @@ hostname — the exact failure documented above.
 > hostname hijack, whether or not it has a blueprint. Fix it while its provider
 > count is still 0 — that is when the change is free.
 
+**This audit is now automated** (2026-09-09, F-0e2c62ad). `runbooks/security-check.py`
+§13 "Authentik Outpost Ingress Suppression" runs the probe above on every sweep and
+raises a finding for any outpost on a Kubernetes service connection that is missing
+`kubernetes_disabled_components: [ingress]` — CRITICAL once it has a provider,
+WARNING while it is still latent at 0 providers. Outposts on other service-connection
+types are out of scope (no Kubernetes controller, so no Ingress to publish). The
+section also flags a surviving `ak-outpost-*` Ingress, because disabling the
+component stops management but does not delete an already-published object.
+
+The check reads the LIVE outpost list and must keep doing so;
+`runbooks/tests/test-outpost-ingress-suppression.py` fails if it is ever rewritten
+as a repo grep, if it exempts `managed` outposts, or if an empty/failed probe is
+allowed to read as a clean result. Run it with
+`python3 runbooks/tests/test-outpost-ingress-suppression.py`.
+
 #### A managed outpost CAN be blueprinted — verify these three things first
 
 Adopting a system object with a blueprint is normally risky, because authentik
