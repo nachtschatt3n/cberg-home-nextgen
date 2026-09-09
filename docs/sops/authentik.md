@@ -3,8 +3,8 @@
 > Standard Operating Procedures for Authentik authentication and authorization management.
 > Reference: `docs/security.md` for security overview, Authentik blueprint pattern details.
 > Description: Managing Authentik forward-auth, OIDC and SAML integrations through GitOps blueprints.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.09`
+> Last Updated: `2026-09-09`
 > Owner: `Platform`
 
 ---
@@ -467,6 +467,92 @@ Three rules that are easy to get wrong:
 3. **`kubernetes_ingress_class_name: ""` is the trap, not a safe default.**
    Empty string means "default class" — it does not mean "no Ingress". Only
    `kubernetes_disabled_components` suppresses the object.
+
+### The rule covers MANAGED/SYSTEM outposts too — not just the ones with blueprints
+
+The rule above was originally written assuming every outpost is one *we* declared
+in `configmap.sops.yaml`. That assumption left a hole, and one object fell
+straight through it: the **`authentik Embedded Outpost`**.
+
+It is a `managed:` system object (`goauthentik.io/outposts/embedded`) that
+authentik creates for itself in code — `AuthentikOutpostConfig.embedded_outpost`
+in `authentik/outposts/apps.py`. Nobody wrote a blueprint for it, so it never
+appeared in a repo grep, it was never audited, and it shipped with
+`kubernetes_disabled_components: []`. It sits on the **`Local Kubernetes Cluster`
+service connection**, which means its ingress reconciler is *live*: the moment a
+provider is assigned to it, it publishes its own `Ingress` holding that app's
+hostname — the exact failure documented above.
+
+> **Audit outposts from the LIVE object list, never from the blueprint files.**
+> `rg kubernetes_disabled_components` over this repo enumerates the outposts we
+> declared. It does not enumerate the outposts that exist.
+>
+> ```bash
+> POD=$(kubectl get pod -n kube-system -l app.kubernetes.io/component=worker \
+>   -o jsonpath='{.items[0].metadata.name}')
+> kubectl exec -n kube-system $POD -i -- ak shell -c "
+> from authentik.outposts.models import Outpost
+> for o in Outpost.objects.all().order_by('name'):
+>     print(o.name, '| managed=', o.managed,
+>           '| svc_conn=', o.service_connection,
+>           '| providers=', o.providers.count(),
+>           '| disabled=', o._config.get('kubernetes_disabled_components'))
+> "
+> ```
+> Anything with a Kubernetes service connection and `disabled=[]` is a latent
+> hostname hijack, whether or not it has a blueprint. Fix it while its provider
+> count is still 0 — that is when the change is free.
+
+#### A managed outpost CAN be blueprinted — verify these three things first
+
+Adopting a system object with a blueprint is normally risky, because authentik
+may reconcile it back and the two writers then fight every boot. For the
+embedded outpost specifically it is safe, and the reasoning generalises — check
+the same three points before adopting any managed object:
+
+1. **Does authentik's own reconciler write the field you want to own?** Here it
+   does not. The reconciler is
+   `Outpost.objects.update_or_create(defaults={"type": ..., "name": ...},
+   managed=MANAGED_OUTPOST)` — `defaults` holds only `type` and `name`, so
+   `config` is never touched by authentik and there is nothing to fight.
+2. **Does the blueprint importer overwrite `.managed`?** It does not. The marker
+   authentik looks itself up by survives the apply, so no duplicate object is
+   created on the next boot.
+3. **Does the serializer accept the state you are declaring?**
+   `OutpostSerializer` special-cases this object twice: `validate_name` rejects
+   any name other than `authentik Embedded Outpost`, and `validate_providers`
+   permits an **empty** provider list for it (every other outpost requires at
+   least one). Declare it exactly as live or the apply fails.
+
+Bind on `managed:`, not on `name:` — it is the field authentik itself keys on,
+it cannot be edited from the UI, and a display name is precisely the thing that
+drifted and left the pgAdmin blueprint inert for five months.
+
+Prove it before you commit, with `Importer.validate()` — it runs the real import
+in a transaction and rolls back, so it tells you whether the entry binds to the
+existing pk (UPDATE) or falls through to a CREATE:
+
+```bash
+kubectl cp <blueprint>.yaml kube-system/$POD:/tmp/bp.yaml -c worker
+kubectl exec -n kube-system $POD -i -- ak shell -c "
+from authentik.blueprints.v1.importer import Importer
+print(Importer.from_string(open('/tmp/bp.yaml').read()).validate())
+"
+```
+Then re-read the live object and confirm the dry run left it untouched.
+
+**The `config` dict is REPLACED wholesale on apply, never merged.** Capture the
+complete live `config` first (`o._config`) and declare every key at its live
+value, changing only `kubernetes_disabled_components`. A partial `config` block
+silently resets every key you omitted.
+
+The live blueprint for this is `embedded-outpost-blueprint.yaml` in
+`kubernetes/apps/kube-system/authentik/app/configmap.sops.yaml`.
+
+**Re-check this object after every authentik upgrade.** It is created by
+application code, so a future release can change its defaults or its reconciler
+without any signal in this repo. The `ak shell` audit above is the check.
+
 
 ### The two provider modes behave completely differently
 
