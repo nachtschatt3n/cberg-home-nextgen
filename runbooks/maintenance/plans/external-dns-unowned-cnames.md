@@ -4,7 +4,7 @@ component: external-dns
 pr: null
 kind: infra
 current: "8 live public CNAMEs carry no external-dns ownership TXT: drive, echo-server, flux-webhook, hass, kuma, n8n, open-webui, paperless. All 8 were created out-of-band in one 0.55-second scripted burst on 2025-04-19T23:34:30Z and have modified_on == created_on — never touched since, by anything. external-dns reports 25 verified CNAMEs; 18 carry a k8s.cname-* registry record. Because external-dns does not know it owns the 8, a delete would not be repaired."
-target: "The 7 unowned records that HAVE a live envoy-external HTTPRoute source are adopted into the txt registry by writing their k8s.cname-* ownership TXT out-of-band — zero CNAME churn, no Create ever emitted. echo-server is deliberately EXCLUDED and decided separately (§3.2). The 4 k8s.a-* and 9 legacy k8s.<host> TXT leftovers are deliberately LEFT IN PLACE (§6)."
+target: "The 7 unowned records that HAVE a live envoy-external HTTPRoute source are adopted into the txt registry by writing their k8s.cname-* ownership TXT out-of-band — zero CNAME churn, no Create ever emitted. echo-server is deliberately EXCLUDED and decided separately (§3.2). The 4 k8s.a-* and 9 legacy k8s.<host> TXT leftovers are deliberately LEFT IN PLACE (§7)."
 update_type: refactor                 # no version moves; this changes who owns what
 risk: medium                          # small change set, but the objects are the
                                       # public names of flux-webhook and hass
@@ -21,7 +21,7 @@ touches:
 depends_on: []
 conflicts_with: []                    # deliberately EMPTY as a FIELD. The real
                                       # constraint — must not share a window with
-                                      # wazuh-2xx-edge-coverage — is stated in §8
+                                      # wazuh-2xx-edge-coverage — is stated in §10
                                       # rather than encoded here, because that
                                       # plan is `draft` and a guard is only worth
                                       # what the referenced plan's liveness is
@@ -61,7 +61,7 @@ window: "sat-attended:2026-10-03"     # see §2 for why deliberately NOT sooner.
                                       # Attended; empty slot; separated by a week
                                       # from wazuh-2xx-edge-coverage (09-26) so
                                       # the two external-path plans cannot share
-                                      # a window (§9). NOT sun-attended:2026-09-27,
+                                      # a window (§10). NOT sun-attended:2026-09-27,
                                       # which is at 140 of 150 min for talos-1.14.0,
                                       # and not a Sunday slot generally — this is
                                       # not reboot work.
@@ -79,7 +79,7 @@ generated: "2026-09-09"
 # Adopt the unowned public CNAMEs into the external-dns registry
 
 Read `docs/sops/external-dns.md` (v2026.09.08) before executing. This plan does
-not contradict it; §5 flags the one place where it needs a narrow amendment, and
+not contradict it; §6.3 flags the one place where it needs a narrow amendment, and
 that amendment is a step.
 
 ## 1. Diagnosis first — why the 8 are unowned
@@ -91,7 +91,7 @@ live Deployment args, and 30 h of controller logs.
 |---|---|---|
 | A TXT exists under an **older prefix** and simply isn't matched | **FALSE** | All 31 TXT records in the zone were enumerated. There is **no** TXT of any shape — `k8s.cname-*`, `k8s.a-*`, bare `k8s.*` — for any of the 8. |
 | Created by a **different owner id** (second external-dns, old K3s cluster) | **FALSE** | Every TXT in the zone carries `external-dns/owner=default`. There is no second owner value anywhere. |
-| The **record pattern changed** (`k8s.a-*` → `k8s.cname-*`) | **Not the cause** | It *is* the cause of the `k8s.a-*` leftovers in §6, but the 8 have no TXT under either pattern. |
+| The **record pattern changed** (`k8s.a-*` → `k8s.cname-*`) | **Not the cause** | It *is* the cause of the `k8s.a-*` leftovers in §7, but the 8 have no TXT under either pattern. |
 | Created **out-of-band, never seen by external-dns** | **TRUE** | All 8 were created 2025-04-19T23:34:30 → :34.19Z, ~0.55 s apart — a script or bulk import — with `modified_on == created_on`. The oldest external-dns-authored TXT in the zone is `k8s.a-auth` from 2025-10-05, six months later. |
 
 ### 1.1 The structural reason it will never self-heal
@@ -211,12 +211,68 @@ records survived only because `FilterEndpointsByOwnerID` dropped them from
 `Delete`.** Their `modified_on` is still 2025-04-19.
 
 **The sequencing rule this dictates: never let this plan cause external-dns to
-emit a `Create` for a CNAME that still exists.** That is the entire reason §5
+emit a `Create` for a CNAME that still exists.** That is the entire reason §6
 takes Path A.
 
-## 5. Steps
+## 5. Pre-checks
 
-### 5.1 Path A — write the ownership TXTs out-of-band (zero CNAME churn)
+Run these in the window, before the backup_gate and before any write. The gate
+proves the *rollback source* is good; this section proves the *cluster* is in a
+safe pre-state. Both are required.
+
+```bash
+cd /Users/mu/code/cberg-home-nextgen
+
+# 5.0.1 external-dns is healthy and quiescent — not mid-reconcile, not erroring
+mise exec -- kubectl -n network get deploy external-dns
+mise exec -- kubectl -n network logs deploy/external-dns --tail=40
+# EXPECT: `All records are already up to date` on the last reconciles, no
+# `Failed to submit all changes`, no Cloudflare error codes.
+
+# 5.0.2 The live config still matches what §1 was diagnosed against.
+# If ANY of these drifted since 2026-09-09, re-do the §1 diagnosis first —
+# the whole of Path A depends on policy=sync + txt registry + owner id `default`.
+mise exec -- kubectl -n network get deploy external-dns \
+  -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n'
+# EXPECT: --policy=sync, --registry=txt, --txt-owner-id=default,
+#         --txt-prefix=k8s., sources WITHOUT `ingress`.
+
+# 5.0.3 Every hostname being adopted still has its live source route.
+# A hostname whose HTTPRoute vanished since §3.1 must be DROPPED from this run —
+# adopting a sourceless record makes the next sync DELETE it (the echo-server
+# trap in §3.2, which is the single most dangerous mistake available here).
+mise exec -- kubectl get httproutes -A -o json | .venv/bin/python3 -c "
+import sys, json
+want = {'drive','flux-webhook','hass','kuma','n8n','open-webui','paperless'}
+seen = {}
+for r in json.load(sys.stdin)['items']:
+    parents = [p.get('name') for p in r['spec'].get('parentRefs', [])]
+    for h in r['spec'].get('hostnames', []):
+        label = h.split('.')[0]
+        if label in want:
+            seen.setdefault(label, []).append(
+                (r['metadata']['namespace'] + '/' + r['metadata']['name'], parents))
+for h in sorted(want):
+    print(h, seen.get(h, 'MISSING — DROP FROM THIS RUN'))
+"
+# EXPECT all 7 present AND parented by envoy-external. A route parented only by
+# envoy-internal is the echo-server shape — exclude it.
+
+# 5.0.4 Cluster is otherwise quiet
+mise exec -- flux get kustomizations -A | awk 'NR==1 || $5 != "True"'
+mise exec -- kubectl -n network get gateway envoy-external -o wide
+
+# 5.0.5 Capture the pre-adoption public baseline (this is the §8.2 comparison set)
+# Edge-pinned — see §8.1 for why a plain curl from the LAN measures nothing.
+```
+
+Record the §8.2 status codes for all 7 hosts here, before writing anything. A
+verification with no pre-baseline cannot distinguish "still working" from "was
+already broken".
+
+## 6. Steps
+
+### 6.1 Path A — write the ownership TXTs out-of-band (zero CNAME churn)
 
 `Create` is the only TXT-writing path, and no `Create` will ever be emitted while
 the CNAME already matches desired state. So write the TXT directly. On the next
@@ -246,7 +302,7 @@ on all seven before anything is checked.
 **Silent-failure mode to guard against:** the heritage string must parse exactly.
 If `NewLabelsFromString` returns `ErrInvalidHeritage`, external-dns treats the
 record as a plain unowned TXT endpoint — **adoption fails with no error, no log
-line, and a TXT sitting in the zone that looks right.** This is why §6's
+line, and a TXT sitting in the zone that looks right.** This is why §8's
 verification reads ownership behaviour and not merely "the TXT exists".
 
 **Path B (rejected, recorded so it is not re-proposed):** delete the CNAME to
@@ -261,7 +317,7 @@ exists`, which increments `external_dns_registry_errors_total` and fires
 "active public-DNS outage". A false page on that rule in its third week burns its
 credibility permanently.
 
-### 5.2 Pin `registry: txt` in the HelmRelease (same window, its own commit)
+### 6.2 Pin `registry: txt` in the HelmRelease (same window, its own commit)
 
 `--registry=txt` currently comes from the **chart default**; it is not pinned in
 `kubernetes/apps/network/external/external-dns/helmrelease.yaml`. Under
@@ -276,7 +332,7 @@ git show --stat HEAD     # every file must be yours — shared worktree
 git push
 ```
 
-### 5.3 Amend `docs/sops/external-dns.md` with a narrow carve-out
+### 6.3 Amend `docs/sops/external-dns.md` with a narrow carve-out
 
 SOP §5 Example C says: *"❌ creating a record by hand in the Cloudflare UI —
 deleted at next reconcile."* That is correct for **data** records, which `sync`
@@ -289,7 +345,7 @@ naming registry-TXT backfill specifically, bounded to correctly-formed
 `k8s.cname-*` records for hostnames that already have a live source object.
 Commit separately with `--only`.
 
-## 6. The leftovers — an explicit decision to LEAVE them
+## 7. The leftovers — an explicit decision to LEAVE them
 
 Confirmed present and confirmed unreconcilable:
 
@@ -320,9 +376,9 @@ scope**: `ui.${SECRET_DOMAIN}`, an `A` record, `proxied=false`, modified
 2026-09-06, with no TXT and no cluster source object. It is not external-dns's and
 this plan does not touch it.
 
-## 7. Verification
+## 8. Verification
 
-### 7.1 The trap that invalidates the obvious probe
+### 8.1 The trap that invalidates the obvious probe
 
 **A plain `curl https://<host>.${SECRET_DOMAIN}/` from a LAN machine does NOT
 test the public path.** The LAN resolver (AdGuard / k8s-gateway) answers
@@ -332,7 +388,7 @@ test the public path.** The LAN resolver (AdGuard / k8s-gateway) answers
 round trip — while the same host pinned to the Cloudflare edge returns **404**.
 The SOP warns about this for `dig`; it applies to `curl` just as hard.
 
-### 7.2 Assertions
+### 8.2 Assertions
 
 ```
 CONTENTS ASSERTION 1 — ownership is REAL, not merely present.
@@ -377,11 +433,11 @@ NEGATIVE CONTROL — proves a "success" could have failed:
 
 Then run `health-check-agent` and `security-agent`.
 
-## 8. Rollback
+## 9. Rollback
 
 Per-host and immediate: **delete the `k8s.cname-<host>` TXT just written.** The
 record returns to unowned — byte-identical to its 2025-04-19 state, since the
-CNAME was never touched. Verify with the §7.2 probe for that host and with
+CNAME was never touched. Verify with the §8.2 probe for that host and with
 `external_dns_registry_errors_total` still at 0.
 
 If a CNAME is somehow lost despite Path A never emitting a Create, recreate it
@@ -389,9 +445,9 @@ from the §backup_gate zone export using the reconstructed API call proved in ga
 (c). This is the only reason that gate exists and the only reason it demands a
 *usable* export rather than a saved response body.
 
-`git revert` covers §5.2 and §5.3, which are ordinary manifest/doc commits.
+`git revert` covers §6.2 and §6.3, which are ordinary manifest/doc commits.
 
-## 9. Interference notes for the window agent
+## 10. Interference notes for the window agent
 
 - **Must NOT share a window with `wazuh-2xx-edge-coverage`.** Both perturb the
   external request/name path; a failure in either would be misattributed to the
@@ -402,7 +458,7 @@ from the §backup_gate zone export using the reconstructed API call proved in ga
   reference to a plan_id that has not been confirmed to exist.
 - **Do not co-schedule with any cert-manager, Cloudflare-tunnel, or Gateway API
   change** for the same reason.
-- **Attended, and needs someone who can probe from off-LAN** — §7.1 makes an
+- **Attended, and needs someone who can probe from off-LAN** — §8.1 makes an
   on-LAN-only verification meaningless.
 - **Not reboot work.** `needs_reboot: false`; it must not consume the Sunday
   reboot-capable slot, and specifically not `sun-attended:2026-09-27`
