@@ -52,7 +52,11 @@ conflicts_with:                       # THIS PLAN NEEDS THE WHOLE sun-attended S
   - authentik-pg18-lockstep           # currently sun-attended:2026-09-13, 35 min
   - authentik-pg17-decommission       # must not destroy the auth DB rollback in a
                                       # window that also reboots every node
-  - superset-pg-cutover               # its §5 is a LIVE rollback; do not perturb
+  # RESOLVED 2026-09-09: superset-pg-cutover dropped. Its §5 rollback repointed
+  # DB_HOST at superset-postgresql (retired 2026-09-05, 90539942), and the
+  # alternate leg superset-pg was retired 2026-09-09 (9d10199c). Neither leg
+  # exists, so the guard protected nothing — same dead-ref shape as the
+  # longhorn-1.12.1-engine entries cleaned out on 2026-09-05.
   - multus-macvlan-foundation         # also mutates Talos machine config
   # General rule, not a list: NO other plan may share this window. A node roll
   # evicts every pod in the cluster, so any concurrent plan's verification is
@@ -306,12 +310,25 @@ print('total',len(d),'not-healthy',len(bad))
 for b in bad: print(' ',b)
 print('replica counts:',collections.Counter(v['spec'].get('numberOfReplicas') for v in d))"
 ```
-**PASS:** every volume `healthy` **except** the one known exception —
-`superset-postgresql-data` is `detached`/`robustness: unknown`. That is the deliberate
-Superset rollback volume left behind by the 2026-09-08 `superset-pg18` cutover
-(`d9863640`); it is listed as a known phantom in this directory's `README.md`. It is
-detached because nothing mounts it, **not** because it is broken. Any *other*
-non-healthy volume is a no-go.
+**PASS:** every volume `healthy` **except** the two known exceptions, both
+`detached`/`robustness: unknown` because nothing mounts them — **not** because they
+are broken:
+
+| Volume | Deliberately orphaned by | Disposition |
+|---|---|---|
+| `superset-postgresql-data` | bitnamilegacy retirement, 2026-09-05 (`90539942`) | retained rollback artifact, PV `Retain` |
+| `superset-pg-data` | postgres 17.11 workload retirement, 2026-09-09 (`9d10199c`) | retained rollback artifact, PV `Retain` |
+
+Longhorn only computes `robustness` while a volume is attached, so `unknown` on a
+deliberately-detached volume is the expected reading, not a fault. Confirm each has
+its full replica count with no `failedAt` if you want positive evidence.
+
+Any *other* non-healthy volume is a no-go.
+
+> **Keep this list current when a rollback datastore is retired.** Every such
+> retirement adds a permanently-detached volume; if the list is not updated the gate
+> false-fails, and a gate that cries wolf gets waved through on the one occasion it
+> is real.
 
 **PASS also:** `replica counts: Counter({2: 95})`. **This is the number that sizes the
 gate.** At `numberOfReplicas: 2` across 3 nodes, taking one node down leaves a large

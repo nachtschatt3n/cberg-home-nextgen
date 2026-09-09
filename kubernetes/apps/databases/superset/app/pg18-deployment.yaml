@@ -1,8 +1,10 @@
 ---
-# Replacement Superset metadata DB (postgres 18.6), plan superset-pg-18.6.
-# Runs ALONGSIDE the current superset-pg (17.11) until this plan's cutover, and
-# superset-pg (17.11) then stays up as the rollback through a soak — do NOT scale
-# it down or delete it here.
+# THE Superset metadata DB (postgres 18.6), plan superset-pg-18.6.
+# Cut over 2026-09-08. The predecessor superset-pg (17.11) ran alongside as the
+# rollback through the soak and was RETIRED 2026-09-09 (Deployment + Service
+# deleted); its data volume superset-pg-data is retained, so rolling back means
+# re-creating that Deployment from git history against the retained PVC.
+# This is now the only live metadata DB — nothing else serves DB_HOST.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

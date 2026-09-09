@@ -152,9 +152,13 @@ nothing goes wrong.
 - **Side-by-side, not in-place.** A NEW Deployment/Service/PV/PVC
   (`pg18-*.yaml`, `longhorn-static` volume `superset-pg18-data`) was stood up
   alongside the running 17.11 instance (`a753e95e`) and only then repointed
-  (`d9863640`). The old `superset-pg` is **retained as the rollback** and is not
-  to be cleaned up — see §11: a major upgrade has no manifest rollback, so the
-  previous instance IS the recovery path until the soak ends.
+  (`d9863640`). The old `superset-pg` was **retained as the rollback** — see §11:
+  a major upgrade has no manifest rollback, so the previous instance IS the
+  recovery path until the soak ends.
+  **Workload retired 2026-09-09 (`9d10199c`)** after the soak: the Deployment and
+  Service were deleted while the volume `superset-pg-data` was retained, so the
+  recovery path is now a **restore-from-volume**, not a repoint at a running
+  Service. Re-create the Deployment from git history against the retained PVC.
 - **`PGDATA` pinned inside the mount**, `/var/lib/postgresql/data/pgdata`, per
   §5 — the whole reason this SOP exists. `POSTGRES_INITDB_ARGS` was dropped
   because PG18 enables data checksums by default, and that was **asserted with
