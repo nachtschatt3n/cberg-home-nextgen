@@ -34,7 +34,14 @@ touches:
                                                 # `kubectl get all -n ai` + grep for the service
                                                 # name across every other app's manifests.
 depends_on: []
-conflicts_with: [superset-pg-18.6]    # FORWARD REFERENCE, unconfirmed plan_id — see §6. Verify
+conflicts_with: []                    # RESOLVED 2026-09-09. The forward reference named
+                                      # `superset-pg-18.6`, which was the correct plan_id — that
+                                      # plan EXECUTED 2026-09-08 and its file was retired on
+                                      # execution, which is why the ref then dangled and
+                                      # maintenance-plan.py reported the guard as unenforced.
+                                      # Both plans are now `executed`, so the conflict is moot;
+                                      # emptied rather than left pointing at a retired file.
+                                      # Original note kept below for provenance. Verify
                                       # at vetting time: `ls runbooks/maintenance/plans/ | grep
                                       # -i 'superset-pg\|postgres-major'`. If the sibling
                                       # planner landed a different plan_id, fix this field to

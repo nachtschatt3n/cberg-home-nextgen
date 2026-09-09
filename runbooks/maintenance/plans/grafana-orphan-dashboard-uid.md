@@ -18,6 +18,12 @@ touches:
 depends_on: []
 conflicts_with: []
 capability_change: false
+backup_gate: "BEFORE the DELETE: (a) confirm the kube-prometheus-stack sidecar ConfigMap
+  carrying prometheus.json exists and contains the dashboard JSON for uid
+  9fa0d141-d019-4ad7-8bc5-42196ee308bd -- this ConfigMap IS the restore path, so an absent or
+  empty one means STOP; (b) copy grafana.db off the grafana-config PVC and verify the copy opens
+  (`sqlite3 <copy> 'pragma integrity_check;'` -> ok) -- a copy taken from a live sqlite file that
+  does not open is not a backup. Both must pass before any row is deleted."
 rollback_class: backup-restore   # DECLARED 2026-09-06. The change is a DELETE
                           # against grafana's sqlite, so there is no commit to
                           # revert. It is nevertheless cheap to undo: the
@@ -30,8 +36,13 @@ status: awaiting-go   # 2026-09-08 nightly window: condition RE-VERIFIED live (6
                       # HUMAN-GATED (rollback_class: backup-restore names no
                       # backup_gate), and nightly is mode: unattended. go/no-go is
                       # with OpenClaw home-operation, proposed sat-attended:2026-09-12.
-window: null          # left for the window-scheduler/operator; the proposed slot
-                      # rides on the go/no-go issue, not self-assigned here.
+window: "sat-attended:2026-09-12"
+                      # SET 2026-09-09 on operator approval. Was `null`, which
+                      # combined with status: awaiting-go is a silent no-run:
+                      # maintenance-plan.py flags "a slotless 'awaiting-go' plan
+                      # silently never runs". The slot is the one the go/no-go
+                      # issue already proposed; it is attended, which suits a
+                      # DELETE against grafana's sqlite.
 ---
 
 # Grafana: free the dashboard uid held by an orphaned provisioning record
