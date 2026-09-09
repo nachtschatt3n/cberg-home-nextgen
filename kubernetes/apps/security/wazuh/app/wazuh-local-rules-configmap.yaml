@@ -18,8 +18,8 @@ data:
            In this cluster it fires ONLY on internal Longhorn volume-management
            traffic (POST /v1/volumes/...?action=trimFilesystem|snapshotCRList
            from longhorn-manager pods) — never real external bots, which are
-           covered separately by the ingress-nginx decoder rules watching
-           cf_connecting_ip. The earlier srcip-scoped child rules (100600-602
+           covered separately by the Envoy Gateway decoder rules (100700-100708)
+           correlating on client_ip. The earlier srcip-scoped child rules (100600-602
            matching 10.0.0.0/8 etc.) did NOT suppress it — the <srcip> element
            wasn't matching the decoder's data.srcip field, so 31533 kept
            flooding (4857 events/24h after the penpot migration added more

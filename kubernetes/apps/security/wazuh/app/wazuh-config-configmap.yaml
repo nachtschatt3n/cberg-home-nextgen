@@ -136,7 +136,9 @@ data:
            the prior event. This was previously `<log_format>syslog</log_format>`
            but production diagnostic on 2026-05-12 showed 0 forwarded
            events from this glob despite 12k+ lines/file in
-           ingress-nginx logs — the syslog pre-decoder was silently
+           the then-current ingress-nginx logs (that controller was deleted
+           2026-09-07; the same glob now carries Envoy Gateway access logs)
+           — the syslog pre-decoder was silently
            filtering CRI-prefixed lines that didn't match classic
            `<priority>timestamp host proc:` grammar. multi-line-regex
            bypasses the pre-decoder grammar check while keeping
@@ -461,10 +463,10 @@ data:
              ...) work fine via `<field name="...">`. -->
         <decoder_dir>etc/decoders</decoder_dir>
         <decoder_dir>etc/decoders/unifi</decoder_dir>
-        <decoder_dir>etc/decoders/ingress-nginx</decoder_dir>
+        <decoder_dir>etc/decoders/envoy</decoder_dir>
         <rule_dir>etc/rules</rule_dir>
         <rule_dir>etc/rules/unifi</rule_dir>
-        <rule_dir>etc/rules/ingress-nginx</rule_dir>
+        <rule_dir>etc/rules/envoy</rule_dir>
         <rule_dir>etc/rules/local</rule_dir>
       </ruleset>
 

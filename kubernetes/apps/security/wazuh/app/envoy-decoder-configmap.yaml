@@ -1,0 +1,244 @@
+---
+# Wazuh decoder + rules for Envoy Gateway access logs (HTTP edge detection).
+#
+# REPLACES ingress-nginx-decoder-configmap.yaml (rules 100500-100520), which
+# went INERT on 2026-09-07 when ingress-nginx was deleted (ad1ea7c2). Those
+# rules keyed on the nginx `log-format-upstream` JSON shape
+# (`{"time":...,"remote_addr":...,"x_forwarded_for":...`), a log source that
+# no longer exists: zero Ingress objects, zero IngressClasses, no controller
+# pods. Last alert they ever produced was 2026-09-07T21:07:36Z; every day
+# before that they fired continuously (211 on 09-07, 662 on 09-06). They did
+# not error — they simply matched nothing, which is why the gap was invisible.
+#
+# All HTTP(S) now flows through Envoy Gateway: `envoy-internal` (LAN-only) and
+# `envoy-external` (internet-facing, behind the cloudflared tunnel), both in
+# namespace `network`. Their `envoy` containers emit the Envoy Gateway DEFAULT
+# JSON access log to stdout, so the wazuh-agent DaemonSet already ships them
+# via the existing `/host/var/log/containers/*.log` localfile — no logging
+# pipeline change was needed, only this decoder + ruleset.
+#
+# ---------------------------------------------------------------------------
+# The REAL emitted schema (read off a live pod, not assumed)
+# ---------------------------------------------------------------------------
+# Raw line as the agent sees it on the node (CRI envelope + compact JSON,
+# NO spaces after separators — verified 2026-09-09):
+#
+#   2026-09-09T05:48:41.14839161Z stdout F {":authority":"app.${SECRET_DOMAIN}",
+#   "bytes_received":0,"bytes_sent":0,"connection_termination_details":null,
+#   "downstream_local_address":"10.69.1.170:10443",
+#   "downstream_remote_address":"[2a01:db8::1]:0","duration":136,"method":"GET",
+#   "protocol":"HTTP/1.1","requested_server_name":null,"response_code":404,
+#   "response_code_details":"via_upstream","response_flags":"-",
+#   "route_name":"httproute/ns/app/rule/0/match/0/host","start_time":"...",
+#   "upstream_cluster":"...","upstream_host":"...","upstream_local_address":"...",
+#   "upstream_transport_failure_reason":null,"user-agent":"...",
+#   "x-envoy-origin-path":"/path","x-envoy-upstream-service-time":"...",
+#   "x-forwarded-for":null,"x-request-id":"..."}
+#
+# Field mapping from the retired nginx ruleset:
+#   nginx cf_connecting_ip -> downstream_remote_address   (see CLIENT IP below)
+#   nginx status           -> response_code               (INTEGER, unquoted)
+#   nginx vhost            -> :authority
+#   nginx path             -> x-envoy-origin-path
+#   nginx http_user_agent  -> user-agent
+#
+# CLIENT IP: do NOT use `x-forwarded-for` — it is null on 192 of 200 sampled
+# external requests, because the external Gateway's ClientTrafficPolicy uses
+# `clientIPDetection.customHeader: CF-Connecting-IP` (not xForwardedFor). Envoy
+# substitutes the detected client IP into `downstream_remote_address`, so THAT
+# is the real client IP (public IPs confirmed present there). The internal
+# Gateway trusts XFF from RFC1918/pod CIDRs and lands the result in the same
+# field. One field covers both gateways.
+#
+# ---------------------------------------------------------------------------
+# Matching strategy — inherited hard-won constraints, do not "simplify"
+# ---------------------------------------------------------------------------
+# 1. Phase 1 pre-decoding eats the leading RFC3339 timestamp, so an anchor on
+#    the CRI prefix (`^\d{4}-...stdout F`) NEVER fires. Pin the prematch on the
+#    JSON shape instead. `{":authority":` is unique to Envoy's access log —
+#    no other JSON-emitting workload in this cluster starts with a pseudo-header.
+# 2. `<field name="status">` crashes wazuh-analysisd ("Field 'status' is
+#    static"), and reserved <status>/<url> match elements are NOT populated by
+#    JSON_Decoder running as a plugin_decoder. So numeric/path matching is done
+#    with `<match type="pcre2">` over the raw JSON text, exactly as the retired
+#    ruleset did (that approach fired 8762 times, so it is proven).
+# 3. `\s*` after every separator anyway: Envoy emits compact JSON today, but a
+#    no-space assumption is what kept the nginx decoder dead 2026-05-10 -> 05-11.
+#
+# CORRELATION CAVEAT (`same_field`): `downstream_remote_address` carries a
+# ":port" suffix. For external traffic the port is always ":0" (Envoy sets 0
+# when the address is derived from CF-Connecting-IP), so the string is stable
+# and correlation is exact. For LAN clients hitting the internal Gateway the
+# ephemeral port varies per connection, which would fragment correlation — so
+# the child decoder `envoy-access-client` below regex-extracts the bare IP into
+# `client_ip`, and the frequency rules correlate on THAT.
+#
+# ---------------------------------------------------------------------------
+# Thresholds are measured, not guessed (17,989 real requests, 2026-09-07..09)
+# ---------------------------------------------------------------------------
+#   response codes: 200:8370+ 302:174 101:132 503:97 207:77 404:60 405:5 400:2
+#   max 4xx in 60s from a single IP ...... 18   -> rule 100703 fires at 50 (2.8x headroom)
+#   suspicious-path hits ................. 0    -> rule 100705 is safe at level 6 single-shot
+#   5xx outside one outage burst ......... 1 in 32h
+#   max 5xx in any 120s window ........... 97   -> a REAL Home Assistant outage
+#       (all response_flags "UF", connection refused, 05:41-05:42 on 09-09).
+#       Rule 100704 firing on that is a true positive, which is the calibration:
+#       12/120s sits far above idle (~0) and below a genuine outage (97).
+#
+# Mounted into the manager at:
+#   /var/ossec/etc/decoders/envoy/envoy_decoders.xml
+#   /var/ossec/etc/rules/envoy/envoy_rules.xml
+#
+# After ANY edit here, bump `checksum/envoy-decoder` on the wazuh-manager
+# StatefulSet template, or wazuh-analysisd never reloads and the change is
+# inert — the same failure mode this whole configmap exists to correct.
+#   sha256sum kubernetes/apps/security/wazuh/app/envoy-decoder-configmap.yaml | awk '{print substr($1,1,12)}'
+#
+# Validate after deploy:
+#   kubectl -n security exec -i wazuh-manager-master-0 -- /var/ossec/bin/wazuh-logtest
+#   (paste a real line; expect decoder `envoy-access`, then `envoy-access-client`,
+#    with client_ip extracted, and the matching 1007xx rule.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-decoder
+  namespace: security
+data:
+  envoy_decoders.xml: |
+    <!--
+      Parent: matches the Envoy Gateway default JSON access log and hands the
+      body to Wazuh's built-in JSON_Decoder, which parses every key into a
+      structured field (response_code, :authority, x-envoy-origin-path,
+      user-agent, downstream_remote_address, ...).
+    -->
+    <decoder name="envoy-access">
+      <prematch type="pcre2">\{\s*":authority":\s*"[^"]*"\s*,\s*"bytes_received":</prematch>
+      <plugin_decoder>JSON_Decoder</plugin_decoder>
+    </decoder>
+
+    <!--
+      Child: extract the BARE client IP (no port) so the frequency rules can
+      correlate per-source. Handles both bracketed IPv6 ("[2a01:db8::1]:0")
+      and plain IPv4 ("192.168.50.136:58308"). Without this, same_field on
+      downstream_remote_address would fragment on the ephemeral port for every
+      LAN client and the scanner rules would never reach their threshold.
+    -->
+    <decoder name="envoy-access-client">
+      <parent>envoy-access</parent>
+      <regex type="pcre2">"downstream_remote_address":\s*"\[?([0-9a-fA-F:.]+?)\]?:\d+"</regex>
+      <order>client_ip</order>
+    </decoder>
+
+  envoy_rules.xml: |
+    <group name="web,envoy,gateway,homelab,">
+
+      <!--
+        Baseline — silent (level 0), parent for every child below. Level 0
+        keeps 2xx/3xx out of the indexer (~hundreds of MB/day at this volume);
+        only error-class and signature events surface via the children.
+        Same trade-off the nginx ruleset made: attack traffic that returns 2xx
+        (valid creds on a valid endpoint) is invisible here and must be caught
+        by the app's own auth logging / Authentik rules.
+      -->
+      <rule id="100700" level="0">
+        <decoded_as>envoy-access</decoded_as>
+        <description>Envoy Gateway access log (decoded baseline)</description>
+        <group>web,envoy,</group>
+      </rule>
+
+      <!-- 4xx — scanners, missing-auth probes, broken clients.
+           response_code is an unquoted integer in Envoy's JSON; the optional
+           quotes keep this working if the encoder ever changes. -->
+      <rule id="100701" level="3">
+        <if_sid>100700</if_sid>
+        <match type="pcre2">"response_code":\s*"?4\d\d"?</match>
+        <description>Envoy Gateway 4xx response from $(client_ip)</description>
+        <group>web,envoy,attack,</group>
+      </rule>
+
+      <!-- 5xx — a SINGLE 5xx is routine churn in a GitOps cluster (every Flux
+           roll, node drain or backend restart briefly 503s while endpoints
+           flip), so it stays at level 3: logged and searchable, but below the
+           level>=5 "notable" threshold the sweep counts. Real signal is
+           SUSTAINED 5xx, caught by 100704. -->
+      <rule id="100702" level="3">
+        <if_sid>100700</if_sid>
+        <match type="pcre2">"response_code":\s*"?5\d\d"?</match>
+        <description>Envoy Gateway 5xx response from $(client_ip)</description>
+        <group>web,envoy,</group>
+      </rule>
+
+      <!-- Same-source 4xx burst — classic enumeration/scanner shape.
+           Measured ceiling for legitimate use is 18/60s (Nextcloud preview
+           404s), so 50 leaves 2.8x headroom. Level 10 = alert, not paged. -->
+      <rule id="100703" level="10" frequency="50" timeframe="60">
+        <if_matched_sid>100701</if_matched_sid>
+        <same_field>client_ip</same_field>
+        <description>Envoy Gateway: 50+ 4xx in 60s from same client IP — likely scanner/enumeration</description>
+        <group>web,envoy,attack,recon,</group>
+      </rule>
+
+      <!-- Sustained 5xx burst = backends genuinely unreachable.
+           AVAILABILITY, NOT an intrusion — this is deliberately NOT in the
+           `attack` group. The retired 100504 was originally grouped `attack`
+           and a Talos rolling reboot then read as an intrusion in the SIEM
+           (Wazuh finding N-04, 2026-08-02). Planned maintenance windows will
+           legitimately trip this; correlate with change activity first. -->
+      <rule id="100704" level="7" frequency="12" timeframe="120">
+        <if_matched_sid>100702</if_matched_sid>
+        <description>Envoy Gateway: 12+ 5xx in 120s — sustained backend outage (availability)</description>
+        <group>web,envoy,availability,</group>
+      </rule>
+
+      <!--
+        NEW vs the nginx ruleset: explicit suspicious-path probing. The nginx
+        rules only ever counted 4xx volume, so a single high-signal probe
+        (/.env, /.git/, phpunit RCE, path traversal) was indistinguishable
+        from a typo'd URL. Envoy logs the path as `x-envoy-origin-path`, so
+        this is now matchable directly.
+
+        Measured base rate over 17,989 real requests: ZERO. That is what makes
+        a single-shot level 6 safe here — one hit is genuinely anomalous, and
+        it will not flood. Kept at 6 (not 10) so a lone opportunistic bot scan,
+        which the internet does constantly, is notable but not an incident;
+        REPEATED probing escalates via 100706.
+      -->
+      <rule id="100705" level="6">
+        <if_sid>100700</if_sid>
+        <match type="pcre2">"x-envoy-origin-path":\s*"[^"]*(/\.env|/\.git/|/wp-login\.php|/wp-admin|/xmlrpc\.php|/phpmyadmin|/vendor/phpunit|/actuator/env|/\.aws/|/\.ssh/|/etc/passwd|/cgi-bin/|/solr/|/_ignition/|/eval-stdin\.php|/server-status|\.\./|%2e%2e)</match>
+        <description>Envoy Gateway: suspicious path probe from $(client_ip)</description>
+        <group>web,envoy,attack,recon,web_scan,</group>
+      </rule>
+
+      <!-- Repeated suspicious-path probing from one source = a real scan run,
+           not a stray bot hit. -->
+      <rule id="100706" level="10" frequency="5" timeframe="300">
+        <if_matched_sid>100705</if_matched_sid>
+        <same_field>client_ip</same_field>
+        <description>Envoy Gateway: 5+ suspicious path probes in 300s from same client IP — active scan</description>
+        <group>web,envoy,attack,recon,web_scan,</group>
+      </rule>
+
+      <!--
+        NEW vs the nginx ruleset: edge authentication/authorization denials.
+        Ten hosts sit behind Authentik forward-auth SecurityPolicy objects; a
+        denial surfaces here as 401/403 at the gateway. Measured base rate over
+        17,989 requests: ZERO 401/403, so level 5 does not inflate alert volume.
+      -->
+      <rule id="100707" level="5">
+        <if_sid>100700</if_sid>
+        <match type="pcre2">"response_code":\s*"?40[13]"?</match>
+        <description>Envoy Gateway: edge auth denied (401/403) from $(client_ip)</description>
+        <group>web,envoy,authentication_failed,</group>
+      </rule>
+
+      <!-- Sustained 401/403 from one source — credential stuffing or forced
+           browsing against the Authentik-protected hosts. -->
+      <rule id="100708" level="10" frequency="20" timeframe="120">
+        <if_matched_sid>100707</if_matched_sid>
+        <same_field>client_ip</same_field>
+        <description>Envoy Gateway: 20+ auth denials in 120s from same client IP — credential stuffing / forced browsing</description>
+        <group>web,envoy,attack,authentication_failures,</group>
+      </rule>
+
+    </group>

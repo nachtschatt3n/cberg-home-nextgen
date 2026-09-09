@@ -35,10 +35,10 @@ spec:
         # so a single configmap edit is a minimal-diff template change.
         # Recipe (run after any decoder configmap edit):
         #   sha256sum kubernetes/apps/security/wazuh/app/<configmap>.yaml | awk '{print substr($1,1,12)}'
-        checksum/wazuh-config: "d6212dd4b98d"
+        checksum/wazuh-config: "929a00b847ee"
         checksum/unifi-decoder: "742b4950c2ee"
-        checksum/ingress-nginx-decoder: "2659dbc6ea7b"
-        checksum/wazuh-local-rules: "b0fbc08ce6f3"
+        checksum/envoy-decoder: "6f62f6342128"
+        checksum/wazuh-local-rules: "083f77322744"
     spec:
       securityContext:
         fsGroup: 999
@@ -65,18 +65,18 @@ spec:
             items:
               - key: unifi_rules.xml
                 path: unifi_rules.xml
-        - name: ingress-nginx-decoders
+        - name: envoy-decoders
           configMap:
-            name: ingress-nginx-decoder
+            name: envoy-decoder
             items:
-              - key: ingress-nginx_decoders.xml
-                path: ingress-nginx_decoders.xml
-        - name: ingress-nginx-rules
+              - key: envoy_decoders.xml
+                path: envoy_decoders.xml
+        - name: envoy-rules
           configMap:
-            name: ingress-nginx-decoder
+            name: envoy-decoder
             items:
-              - key: ingress-nginx_rules.xml
-                path: ingress-nginx_rules.xml
+              - key: envoy_rules.xml
+                path: envoy_rules.xml
         - name: local-rules
           configMap:
             name: wazuh-local-rules
@@ -181,15 +181,17 @@ spec:
             - name: unifi-rules
               mountPath: /var/ossec/etc/rules/unifi
               readOnly: true
-            # Ingress-nginx decoder/rules (CRI-wrapped JSON access logs from
-            # external ingress; produces structured cf_connecting_ip / status /
-            # vhost / path fields for security-check.py section 6 attacker
-            # correlation.)
-            - name: ingress-nginx-decoders
-              mountPath: /var/ossec/etc/decoders/ingress-nginx
+            # Envoy Gateway decoder/rules (CRI-wrapped JSON access logs from
+            # envoy-internal/envoy-external; produces structured client_ip /
+            # response_code / :authority / x-envoy-origin-path fields for
+            # security-check.py section 6 attacker correlation. Replaced the
+            # ingress-nginx decoder, inert since ingress-nginx was deleted
+            # 2026-09-07.)
+            - name: envoy-decoders
+              mountPath: /var/ossec/etc/decoders/envoy
               readOnly: true
-            - name: ingress-nginx-rules
-              mountPath: /var/ossec/etc/rules/ingress-nginx
+            - name: envoy-rules
+              mountPath: /var/ossec/etc/rules/envoy
               readOnly: true
             # Local rule overrides (RFC1918 srcip suppression for rule 31533).
             - name: local-rules
