@@ -16,7 +16,7 @@
 #
 # Edit → commit → push (git-tracked on purpose: an unattended-merge allowlist
 # must be code-reviewed, not a mutable DB row). Bump `version` on every change.
-version: "2026.09.08.1"
+version: "2026.09.10.1"
 
 # ── G5: release-age cooldown (added 2026-08-26, operator set 48h) ───────────
 # An unattended merge waits until the PR's newest Renovate commit is this old.
@@ -108,6 +108,27 @@ deny:
     max: patch
   - match: "*mcpo*"
     reason: "python init base image major (3.11→3.14) rides these tags."
+  # Added 2026-09-10. n8n publishes its BETA on the next minor line: npm
+  # dist-tags read latest=2.38.5 stable=2.38.5 beta=2.39.1 next=2.39.1, so the
+  # open PR #213 (2.38.4 -> 2.39.1) is a prerelease wearing a bare semver tag.
+  # Nothing in the pipeline can see that: the tag carries no marker for
+  # channel_hold(), CHANNEL_RULES lists only scrypted, and auto-update.py has no
+  # plan awareness -- so #213 classified as a plain MINOR and would have merged
+  # UNATTENDED at Step 0 of the 2026-09-12 nightly window once G5 lapsed
+  # (2026-09-11T11:39Z), onto a 512Mi SQLite instance whose plan documents six
+  # migrations that are destructive on the way down.
+  #
+  # `max: patch` is deliberate rather than a full block: it holds the 2.39.x
+  # beta line (minor) while still admitting 2.38.4 -> 2.38.5, which IS the
+  # correct stable successor and appears nowhere in the tooling today. Revisit
+  # when n8n promotes 2.39.x to stable -- the hold is on the CHANNEL, not the
+  # version.
+  - match: "*n8n*"
+    reason: "n8n ships its beta/next channel on the next MINOR line (2.39.x today) with no
+      prerelease marker in the tag, so a bare semver bump can carry a beta unattended. Patch
+      bumps stay on the stable line and remain safe to auto-merge. Minor+ is PLAN lane only,
+      attended, after confirming npm dist-tag `stable` actually points at the target."
+    max: patch
   # Added 2026-08-19 with the 0.301.5 -> 2026.08.0 execution. NocoDB left semver
   # for calver, so the classifier's tuple comparison reads a routine month hop
   # (2026.08.0 -> 2026.09.0) as major=equal / minor=greater, i.e. "minor" — which
