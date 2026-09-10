@@ -4580,6 +4580,7 @@ SECTION_NAMES = [
     "Certificate Integrity",
     "Flux Security Posture",
     "UniFi Network Security",
+    "Authentik Outpost Ingress Suppression",
     "Wazuh SIEM Findings",
 ]
 
@@ -4715,6 +4716,17 @@ _SECTION_SLUGS = [
     "s12_authentik_outposts",
     "s13_wazuh_siem",
 ]
+
+# Adding a section means touching BOTH lists. When only one is updated, the
+# mismatch used to surface as an IndexError inside write_report() — i.e. AFTER
+# the full scan had already run, discarding every result and leaving the section
+# INCOMPLETE with no findings written. Fail at import instead, so the drift costs
+# a second rather than a whole audit. Do NOT soften this into a bounds-check
+# fallback: a silently mislabelled section is drift that never gets fixed.
+assert len(SECTION_NAMES) == len(_SECTION_SLUGS), (
+    f"section list drift: {len(SECTION_NAMES)} SECTION_NAMES vs "
+    f"{len(_SECTION_SLUGS)} _SECTION_SLUGS — both must list every section"
+)
 
 
 def _build_indexes() -> tuple["rm.ExposureIndex | None", "rm.KevIndex"]:
