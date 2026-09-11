@@ -1615,7 +1615,7 @@ def s7_coding_guidelines() -> tuple[str, Findings, str]:
             # Only check directory-level paths (skip files with wildcards or
             # placeholders). `$` covers unexpanded shell vars like `$INSTANCE`
             # (e.g. icloud-docker-$INSTANCE) — a template, not a real broken path.
-            if "{" in ref or "*" in ref or "..." in ref or "$" in ref:
+            if "{" in ref or "*" in ref or "..." in ref or "$" in ref or "<" in ref:
                 continue
             if not ref_path.exists():
                 sop_path_issues.append(f"`{sop_path.name}` references non-existent path `{ref}`")

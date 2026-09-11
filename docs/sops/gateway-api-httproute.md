@@ -42,8 +42,8 @@ are not style preferences.
 |---------|-------|
 | GatewayClass | `envoy` |
 | Internal Gateway | `envoy-internal` in `network` — LB **192.168.55.103**, 68 hostnames / 79 routes |
-| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 25 hostnames / 27 routes |
-| Total HTTPRoutes | 104 |
+| External Gateway | `envoy-external` in `network` — LB **192.168.55.104**, 24 hostnames / 25 routes |
+| Total HTTPRoutes | 103 |
 | Listeners (both) | `http` (80, redirect-only) and `https` (443, Terminate, wildcard cert `${SECRET_DOMAIN/./-}-production-tls`) |
 | Source of truth | `kubernetes/apps/network/envoy-gateway/app/` (`gateways.yaml`, `policies.yaml`, `gatewayclass.yaml`, `helmrelease.yaml`) |
 | Per-app routes | `kubernetes/apps/<ns>/<app>/app/httproute.yaml`, or the bjw-s `route:` values key in the HelmRelease |
@@ -297,11 +297,13 @@ the Envoy migration. The shape:
                                # assets whatever Accept says. `cookie` is the fix.
       - user-agent             # the outpost's own request log
     # Do NOT add x-forwarded-for / x-forwarded-proto. Envoy APPENDS to XFF rather
-    # than sanitising it and the internal gateway trusts all of 192.168.0.0/16,
-    # so forwarding XFF lets any LAN client dictate the client IP authentik
-    # records and scores lockouts on (measured with a TEST-NET-3 sentinel). It is
-    # not a bypass, and it is not needed: the redirect URI is built correctly
-    # without x-forwarded-proto.
+    # than sanitising it, so the header handed to ext-auth still CONTAINS whatever
+    # the client sent — the gateway's own client-IP selection (pod CIDR only since
+    # `097269ba`) does NOT clean the header it forwards. Forwarding it therefore
+    # puts a client-chosen address in front of the outpost, which is what
+    # authentik's IP-keyed lockout scoring reads. Not a bypass, and not needed:
+    # the redirect URI is built correctly without x-forwarded-proto (verified
+    # against the live outpost — the 302 carries the right `redirect_uri`).
     http:
       ...
 ```
@@ -310,6 +312,22 @@ the Envoy migration. The shape:
 against a forward-auth app returns `302 ext_authz_denied` in both the working
 and the broken configuration, so the redirect proves nothing. The gate is: a
 request that reaches the app backend. Check it on the data, not the status:
+
+> **`upstream_cluster` is set when the route is SELECTED, so it is populated on
+> an ext-auth DENIAL too** (`response_flags: UAEX`, `upstream_host: null`). A
+> backend-reached test that greps only `upstream_cluster` counts denials as
+> successes. Require `response_code_details == "via_upstream"` as below, or a
+> non-null `upstream_host`.
+>
+> **The cheapest unambiguous gate is the counter:**
+> `sum(envoy_http_ext_authz_ok{namespace="network"})` — cumulative allowed
+> ext-auth checks over the envoy pods' lifetime. `0` with a non-zero
+> `envoy_http_ext_authz_denied` means NO request has ever passed the gate. It
+> read `0` for all ten apps on 2026-09-11 because only a real interactive login
+> increments it; anonymous probing never can.
+>
+> The cheapest gate that needs no login at all is the session-stability A/B in
+> §10 item 1b — it proves the cookie reaches the outpost.
 
 ```bash
 # expect a non-zero count of allowed requests; 0 means forward-auth is broken
@@ -424,6 +442,44 @@ Shape-A (`app-template`) caveats:
   `--api-versions gateway.networking.k8s.io/v1/HTTPRoute`, or you are
   validating a shape the API would reject. This affects CI too (`flux-local
   test` runs without cluster capabilities).
+
+---
+
+### 4.6 Client-IP detection — what each gateway trusts
+
+Each Gateway derives the client IP differently, via its own `ClientTrafficPolicy`
+in `kubernetes/apps/network/envoy-gateway/app/policies.yaml`:
+
+| Gateway | Mechanism | Trusts |
+|---------|-----------|--------|
+| `envoy-internal` | `xForwardedFor.trustedCIDRs` | `10.69.0.0/16` (pod CIDR) **only** |
+| `envoy-external` | `customHeader: CF-Connecting-IP`, `failClosed: false` | the cloudflared tunnel |
+
+**How Envoy picks the address.** It APPENDS the connection peer to `X-Forwarded-For`
+(it never sanitises the header), then walks the list right-to-left, skipping
+entries inside a trusted CIDR, and selects the first untrusted one. Two
+consequences:
+
+- A genuine in-cluster proxy works: its own pod IP is trusted and skipped, so the
+  address it forwards is honoured.
+- Trusting a range that clients sit in makes the recorded IP **client-chosen**.
+  `192.168.0.0/16` was trusted here until `097269ba` "for parity with
+  ingress-nginx `use-forwarded-headers`", and a LAN client sending its own
+  `X-Forwarded-For:` had that value selected — measured with a TEST-NET-3
+  sentinel, Envoy logged `downstream_remote_address: 203.0.113.77:0` instead of
+  the real peer. Narrowed to the pod CIDR, the same forged request records the
+  real LAN address. **This gateway has no legitimate upstream proxy to trust:**
+  over 100h of access logs every XFF value on `envoy-internal` was a single
+  address identical to its connection peer.
+
+**Still true after the narrowing:** the forged entry REMAINS in the XFF header
+passed to backends. Envoy fixes *its own* selection, not the header. A backend
+doing naive leftmost-XFF parsing still reads the attacker's value — which is why
+`x-forwarded-for` must not be added to `headersToExtAuth` (§4.3).
+
+**Scope warning:** recorded client IPs on `envoy-internal` changed cluster-wide on
+2026-09-11 — both access logs and the XFF backends receive now carry the real LAN
+address. Anything correlating on historical client IPs crosses that boundary.
 
 ---
 
@@ -594,7 +650,9 @@ curl -o /dev/null -w '%{http_code} %{remote_ip}\n' https://<app>.${SECRET_DOMAIN
 Expected:
 - Plain app → `200`, `remote_ip` = `192.168.55.103`.
 - Forward-auth app → `302` to the auth host. **A `200` is a FAIL-OPEN** and
-  means the SecurityPolicy did not attach.
+  means the SecurityPolicy did not attach. **A `302` does not prove login
+  works** — a policy missing `cookie` 302s forever. The real gates are §6
+  Test 4 and §10 item 1b.
 
 ```bash
 # EXTERNAL apps: resolve via a PUBLIC resolver, through the Cloudflare edge
@@ -675,6 +733,7 @@ Expected:
 | Long requests truncate at ~15s | Route bypassing the gateway policy, or the policy is `Conflicted` | Check Test 5, then set `rules[].timeouts` |
 | Long requests truncate at ~60s | Inheriting the gateway default; app needs an explicit longer timeout | Set `rules[].timeouts` (3600s streaming, 0s persistent WS) |
 | `Accepted=True`, `ResolvedRefs=True`, still nothing works | Wrong `backendRef.port` number (rule 8) | Compare against `kubectl get svc -n <ns> <svc>` |
+| Forward-auth app answers **HTTP 400**, outpost logs `oauth state does not match the session` | `extAuth.headersToExtAuth` missing `cookie` — the outpost never sees the session, so every check is anonymous (§4.3) | Add `cookie`; verify with the §10 1b session A/B, never a status code |
 | Login redirect loop | Callback folded into the app route, or SecurityPolicy targets the callback route | Split into two routes; target only the app route |
 | Homepage tile vanished | `gethomepage.dev/*` annotations or the label not carried onto the route | Add both the label and the annotations |
 
@@ -851,9 +910,12 @@ kubectl get referencegrant -A
 Expected:
 - Every forward-auth host returns `302`, never `200` (a `200` is a fail-open
   and an incident).
+- All ten read **SESSION-STABLE** in check 1b. A `SESSION-CHURN` means that
+  policy lost `cookie` from `headersToExtAuth`: the app answers 400 to real
+  browsers while still returning the expected `302` above.
 - No `failOpen: true` or unset anywhere.
 - The `envoy-external` list contains **only** intentionally internet-exposed
-  apps (25 hostnames as of 2026-09-07) — anything unexpected there is a
+  apps (24 hostnames as of 2026-09-11) — anything unexpected there is a
   material exposure change.
 - All hostnames in git are templated `${SECRET_DOMAIN}`; no literal domain.
 - All ReferenceGrants in `kube-system`, each naming a specific
@@ -928,7 +990,7 @@ Rollback cautions specific to this migration:
 
 ## Version History
 
-- `2026.09.11b`: Closed the defect across the remaining nine forward-auth
+- `2026.09.11` (second pass): Closed the defect across the remaining nine forward-auth
   policies (`c4c50755`) — nocodb, phpmyadmin, esphome, frigate,
   solarfocus-scraper, alertmanager, headlamp, prometheus, longhorn-ui. All nine
   read SESSION-CHURN before and SESSION-STABLE after; delivered over xDS with no
@@ -939,7 +1001,11 @@ Rollback cautions specific to this migration:
   verification: `upstream_cluster` in the access log is set on route SELECTION,
   so it is populated even for an ext-auth denial — a true backend-reached test
   must require a non-null `upstream_host` (and `response_flags` other than
-  `UAEX`).
+  `UAEX`). Added §4.6 documenting what each gateway trusts for client-IP
+  detection, a §7 row for the HTTP 400 symptom, the `envoy_http_ext_authz_ok`
+  counter gate, and the 1b pass condition in §10's Expected list; caveated
+  §6 Test 3's bare `302`; corrected the external-gateway counts to 24
+  hostnames / 25 routes and the total to 103 routes (measured).
 - `2026.09.11`: §4.3 — `extAuth.headersToExtAuth` MUST list `cookie`, because an
   HTTP ext-auth service otherwise receives only Host/Method/Path/Content-Length/
   Authorization and the outpost can never see the session. Added the

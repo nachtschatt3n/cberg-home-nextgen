@@ -798,8 +798,9 @@ spec:
     # without `cookie` the outpost never sees `authentik_proxy_*`, can never tell
     # the client is logged in, and the app answers HTTP 400 to every browser.
     # Do NOT add x-forwarded-for/-proto: Envoy appends to XFF instead of
-    # sanitising it, so forwarding it lets a LAN client dictate the client IP
-    # authentik records. Full reasoning: docs/sops/gateway-api-httproute.md §4.3.
+    # sanitising it, so the header reaching the outpost still carries whatever the
+    # client sent — regardless of the gateway's own client-IP trust list. Full
+    # reasoning: docs/sops/gateway-api-httproute.md §4.3.
     headersToExtAuth:
       - cookie
       - accept

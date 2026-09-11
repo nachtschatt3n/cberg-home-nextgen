@@ -1,8 +1,8 @@
 # SOP: Headlamp Short-Lived Token Generation
 
 > Description: How to generate a short-lived cluster-admin token for Headlamp when manual kubectl or UI access is needed. Long-lived tokens are intentionally not stored in the repo.
-> Version: `2026.09.08`
-> Last Updated: `2026-09-08`
+> Version: `2026.09.11`
+> Last Updated: `2026-09-11`
 > Owner: `ops`
 
 ---
@@ -294,7 +294,9 @@ kubectl get securitypolicy -n monitoring headlamp-forward-auth \
 # ...and that the gate can actually PASS someone. Without `cookie` here the
 # outpost never sees the session and headlamp answers HTTP 400 to every browser
 # while the check above still looks perfect (docs/sops/gateway-api-httproute.md
-# section 4.3). As of 2026-09-11 headlamp is in exactly that state.
+# section 4.3). Headlamp WAS in exactly that state 2026-09-07..2026-09-11;
+# fixed in `c4c50755`. The gate below is what proves it stayed fixed — and it
+# must be the session A/B, not a status code: a broken policy still 302s.
 kubectl get securitypolicy -n monitoring headlamp-forward-auth \
   -o jsonpath='{.spec.extAuth.headersToExtAuth}{"\n"}'
 kubectl get httproute -n monitoring headlamp-authentik-outpost \

@@ -124,7 +124,7 @@ manages all subsequent deployments including upgrades to these components.
 | Container Runtime | Containerd 2.2.7 + Spegel (distributed image caching) |
 | CNI | Cilium v1.20.1 (eBPF networking, load balancing, network policies) |
 | DNS | AdGuard Home `192.168.55.5` (default DNS, ad-blocking) + CoreDNS v1.14.7 (cluster-internal; image tag pinned ahead of the chart) + k8s-gateway (split-DNS for `*.domain`) |
-| Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 104 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
+| Ingress | **Envoy Gateway only (migration completed 2026-09-07).** ingress-nginx is DELETED — zero `Ingress` objects, zero `IngressClass` objects, zero nginx controllers. All HTTP traffic rides 103 `HTTPRoute`s on `envoy-internal` `192.168.55.103` (internal) and `envoy-external` `192.168.55.104` (external, behind the cloudflared wildcard). k8s-gateway publishes DNS from HTTPRoutes. Routing model, conversion rules and the verification gate: `docs/sops/gateway-api-httproute.md`; version upgrades: `docs/sops/envoy-gateway-upgrade.md`. |
 | Storage | Longhorn v1.11.2 (distributed, replicated, with backup) |
 | Certificate Management | cert-manager v1.21.0 + Let's Encrypt |
 | Secrets | SOPS + age encryption |
