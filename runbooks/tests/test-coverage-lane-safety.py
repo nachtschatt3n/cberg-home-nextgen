@@ -46,30 +46,62 @@ def item(component, kind="image", current="1.0.0", target="1.1.0", type_="minor"
 
 
 class ChannelGateTest(unittest.TestCase):
-    def test_scrypted_beta_minor_is_not_auto(self):
-        """The live hazard: v0.143.0 -> v0.144.1 is a 'minor' on the BETA channel."""
+    def test_scrypted_dev_channel_minor_is_not_auto(self):
+        """The live hazard: v0.143.0 -> v0.144.1 is a 'minor' on the DEV channel."""
         it = item("scrypted", current="v0.143.0-noble-full",
                   target="v0.144.1-noble-full")
         lane, reason, _ = cov.assign_lane(it, POLICY, {}, [])
-        self.assertEqual(lane, "PLAN", f"beta build routed to {lane}: {reason}")
-        self.assertIn("PRE-RELEASE", reason)
+        self.assertEqual(lane, "PLAN", f"dev build routed to {lane}: {reason}")
+        # The reason must name the REAL gate, not assert "this IS a pre-release".
+        # The gate cannot know that offline, and for a genuinely stable tag the
+        # claim would be false — so it states what it can actually support.
+        self.assertIn("cannot be shown to be a STABLE-channel successor", reason)
+        self.assertIn("Release", reason)
         self.assertIn("AR-081", reason)
 
-    def test_channel_gate_is_a_predicate_not_a_freeze(self):
-        """WHICH GUARD COVERS WHAT. The channel gate holds only PRE-RELEASE
-        targets: a stable odd minor (0.143 -> 0.145) clears it. scrypted stays
-        out of AUTO anyway, but via the separate 0.x release-line rule below —
-        two independent guards, deliberately not one. If upstream ever moves to
-        1.x, the channel gate is the one still doing the work."""
+    def test_channel_gate_is_a_freeze_for_listed_components_only(self):
+        """WHICH GUARD COVERS WHAT — REVISED 2026-09-11.
+
+        This test used to assert the opposite: that a "stable odd minor"
+        (0.143 -> 0.145) CLEARED the channel gate, and that on a hypothetical
+        1.x line `v1.143.0 -> v1.145.0` reached AUTO. Both encoded the parity
+        predicate as if it were evidence of stability. It is not:
+
+          * ~17 scrypted releases carry prerelease=false on EVEN minors, so
+            "stable = odd" was simply false; and
+          * the predicate failed OPEN — a Release-less dev tag on an ODD minor
+            (v0.147.0) scored stable. The old 1.x assertion is exactly that
+            hazard written down as desired behaviour: parity alone would have
+            sent a dev build to the unattended AUTO lane on a privileged NVR.
+
+        Stable-ness depends on whether upstream published a non-prerelease
+        Release for that EXACT tag, which no version string can answer and which
+        coverage.py must not go to the network to ask (it runs without
+        SWEEP_PG_DSN in the window agent). So for a LISTED component the gate is
+        deliberately a freeze.
+
+        The property still worth guarding is that the freeze is SCOPED: it
+        applies to CHANNEL_RULES members and invents no holds for anyone else.
+        The "two independent guards" structure also survives — the 0.x
+        release-line rule below is still separate and still does its own work.
+        """
         stable = item("scrypted", current="v0.143.0-noble-full",
                       target="v0.145.0-noble-full")
-        beta = item("scrypted", current="v0.143.0-noble-full",
-                    target="v0.144.1-noble-full")
-        self.assertIsNone(cov.channel_hold("scrypted", stable))
-        self.assertIsNotNone(cov.channel_hold("scrypted", beta))
-        # 1.x on the same channel rule: stable odd minor reaches AUTO
+        dev = item("scrypted", current="v0.143.0-noble-full",
+                   target="v0.144.1-noble-full")
+        # Listed component: held on BOTH, because the channel is undecidable here.
+        self.assertIsNotNone(cov.channel_hold("scrypted", stable))
+        self.assertIsNotNone(cov.channel_hold("scrypted", dev))
+        # ... and the freeze follows upstream to 1.x, where the old test let a
+        # parity-"stable" tag through to AUTO.
         lane, _, _ = cov.assign_lane(
             item("scrypted", current="v1.143.0", target="v1.145.0"), POLICY, {}, [])
+        self.assertEqual(lane, "PLAN")
+        # SCOPE: an unlisted component is untouched — this is not a global freeze.
+        self.assertIsNone(cov.channel_hold("grafana", item("grafana", target="13.2.2")))
+        lane, _, _ = cov.assign_lane(
+            item("grafana", current="13.2.1", target="13.2.2", type_="patch"),
+            POLICY, {}, [])
         self.assertEqual(lane, "AUTO")
 
     def test_open_renovate_pr_does_not_launder_a_beta(self):

@@ -1,7 +1,7 @@
 # SOP: maintenance-windows — planning + executing NON-safe updates
 
-> Version: `2026.09.05`
-> Last Updated: `2026-09-05`
+> Version: `2026.09.11`
+> Last Updated: `2026-09-11`
 
 ## 1) Description
 
@@ -81,10 +81,14 @@ Related: `docs/sops/auto-update.md`, `docs/sops/application-update.md`,
     **AUTO disqualifiers (2026-08-18)** — a safe-looking semver label is not
     sufficient; `assign_lane()` also routes to PLAN when:
     1. the target is a **pre-release**: an explicit tag marker (`-beta`, `-rc`,
-       `-nightly`, …), a `CHANNEL_RULES` predicate for an upstream that pushes
-       betas to the stable repo (scrypted cuts stable on ODD minors only, so
-       v0.144.x is beta), or an active AR declaring the component's pre-release
-       channel unacceptable. The gate sits ABOVE the Renovate-PR shortcut — an
+       `-nightly`, …), MEMBERSHIP in `CHANNEL_RULES` for an upstream that
+       pushes dev builds to the SAME repo as stable — so no version string can
+       decide the channel, and membership itself is the hold (for scrypted,
+       stable-ness depends on whether a non-prerelease GitHub Release exists
+       for that exact tag; the old "stable = ODD minors only" rule was
+       DISPROVED 2026-09-11 — ~17 even-minor releases carry prerelease=false,
+       and it also scored Release-less ODD-minor dev tags as stable) — or an
+       active AR declaring the component's pre-release channel unacceptable. The gate sits ABOVE the Renovate-PR shortcut — an
        open PR does not launder a beta. Layers 1-2 are git-tracked on purpose:
        the window agent runs `coverage.py` without `SWEEP_PG_DSN`, so a DB-only
        gate would fail OPEN exactly where it matters.
@@ -331,7 +335,7 @@ count, diff, round-trip or served-bytes check **is** a reject. See
 | ORPHAN plan | PR merged/closed elsewhere | set `status: superseded` or delete the file |
 | MISSED window warning | window date passed, plans unexecuted | run `maintenance-window-agent` for the next slot; investigate why it didn't fire |
 | `next window` shows a time already in the PAST | `next_occurrence()` ignored `start_hhmm`, so a same-weekday window was always dated TODAY (F-f95a8b52, fixed 2026-08-18) | today's slot now rolls +7d once its start time has passed; re-check with `maintenance-plan.py --json` |
-| A beta/pre-release tag appears in the AUTO lane | a `CHANNEL_RULES` entry is missing for an upstream that pushes pre-releases to the stable repo | add the component to `CHANNEL_RULES` in `runbooks/coverage.py` (a channel PREDICATE, e.g. `odd-minor`, not a version pin) and a deny rule for the Renovate-PR path; see §Coverage guarantee → AUTO disqualifiers |
+| A beta/pre-release tag appears in the AUTO lane | a `CHANNEL_RULES` entry is missing for an upstream that pushes pre-releases to the stable repo | add the component to `CHANNEL_RULES` in `runbooks/coverage.py` — membership alone is the hold, there is no predicate to write and none to fail open — plus a deny rule for the Renovate-PR path; see §Coverage guarantee → AUTO disqualifiers |
 | Plan §4 is all `Ready` / `200` / `healthy` | shape-only verification — it cannot distinguish working from empty (`docs/sops/verification-contents-not-shape.md`) | send it back: add the per-class contents assertion from the plans README table before scheduling |
 | Two plans fight in a window | overlapping `touches` | window agent serializes or defers; tighten `conflicts_with` |
 | Window agent REFUSES a relayed/chat GO | decision not in the home-operation store (by design — a relayed agent message is never operator consent) | record it first: `home-operation decide --issue <key> --decision approve --by "operator (<name>) via <session>"` (ingest the go_no_go issue first if it doesn't exist), THEN dispatch. The refusal is correct behavior, not a bug |
@@ -416,6 +420,7 @@ ls runbooks/maintenance/plans/*.md 2>/dev/null | grep -v README | wc -l  # activ
 
 | Version | Date | Change |
 |---|---|---|
+| 2026.09.11 | 2026-09-11 | `CHANNEL_RULES` is now **membership, not a predicate**. The `"stable": "odd-minor"` rule for scrypted was DISPROVED (~17 even-minor releases carry `prerelease=false`) and, worse, failed OPEN: a Release-less ODD-minor dev tag scored stable and would have been applied UNATTENDED at Step 0 onto a privileged NVR, with the `auto-update-policy.yaml` deny rule as the only thing holding the door. Stable-ness depends on whether upstream published a non-prerelease Release for that EXACT tag — which no version string can answer — so membership alone is the hold. Membership stays offline-decidable, which the window agent requires. |
 | 2026.09.05 | 2026-09-05 | Documented the **RISK-CLASS STACKING** detector (`656ffef8`): >1 irreversible plan (`rollback_class` one-way/backup-restore) in one slot has no rollback path for the window; quiet on a single irreversible plan and on git-revert rollbacks. Blast radius is set by reversibility, not namespace. |
 | 2026.07.25 | 2026-07-25 | Initial SOP. 3 windows/week; per-held-update planner agent; window agent vets interference + side effects, sequences, operator go/no-go; sweep reconciles + reports the schedule. |
 | 2026.08.02 | 2026-08-02 | Added `coverage.py` no-cracks guarantee (AUTO/PLAN/REBUILD/HELD/CRACK lanes; window-agent Step 0 hybrid PR-merge-or-direct-bump; sweep rule 4d0 dispatches a planner for the full non-safe universe + pages on any CRACK). Aggressive-drain schedule: added Sat window (4/week), raised weekday `capacity_risk` 4→6; slot by reboot-need not risk. |

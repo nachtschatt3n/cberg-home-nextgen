@@ -113,16 +113,34 @@ SELF_BUILT_REPO_PREFIXES = ("ghcr.io/nachtschatt3n/",)
 # the FINDING on the board, it does not stop the AUTO lane, and the workload is
 # a PRIVILEGED NVR (privileged: true, SYS_ADMIN, i915 device).
 #
-# These rules are CHANNEL predicates, not version pins: they keep holding as
-# upstream ships 0.145 (stable) / 0.146.x (beta), so they can't drift the way a
-# pinned AR description does (memory: feedback_sweep_ar_version_drift).
+# CHANNEL_RULES lists components whose STABLE channel CANNOT be decided from a
+# version string. Membership alone is the hold: never AUTO, always an assessed
+# window plan. There is deliberately no predicate to evaluate.
+#
+# It used to hold a parity predicate ("stable": "odd-minor"), and that was
+# DISPROVED on 2026-09-11: v0.118/120/122/124/126 and ~17 more scrypted releases
+# all carry prerelease=false on EVEN minors. Parity was never the rule — the
+# real gate is "does upstream publish a non-prerelease Release for this EXACT
+# tag", which a version string cannot answer.
+#
+# Worse, the predicate failed OPEN in the direction that matters. `odd-minor`
+# returned stable=True for ANY odd minor, so a Release-less dev tag such as
+# v0.147.0 would have scored stable, routed to AUTO, and been applied unattended
+# at Step 0 onto a privileged NVR. The deny rule in auto-update-policy.yaml was
+# the only thing holding that door — so the "defence in depth" this comment used
+# to claim was a single layer wearing two hats.
+#
+# Membership must stay OFFLINE-decidable: the window agent runs coverage.py
+# without SWEEP_PG_DSN, so a DB- or network-gated check would fail open exactly
+# where it matters. A set membership test cannot fail open.
 CHANNEL_RULES = {
     "scrypted": {
-        "stable": "odd-minor",
         "ar": "AR-081",
-        "why": ("upstream releases stable on ODD minors only; even minors "
-                "(v0.144.x) are the beta channel — no GitHub release, and "
-                "v0.144.0 predates stable v0.143.0"),
+        "why": ("upstream pushes dev builds to the SAME docker repo as stable, "
+                "and stable-ness is decided by whether a non-prerelease GitHub "
+                "Release exists for that exact tag — not by the version string. "
+                "v0.146.1 was pullable from the registry with NO Release and no "
+                "git tag at all (verified 2026-09-11)"),
         "workload": "privileged NVR (privileged: true, SYS_ADMIN, i915)",
     },
 }
@@ -143,19 +161,6 @@ def _is_self_built_repo(repo: str) -> bool:
     return any(str(repo).lower().startswith(p) for p in SELF_BUILT_REPO_PREFIXES)
 
 
-def _stable_by_rule(rule: str, version: str) -> bool:
-    """Is `version` on the component's STABLE channel per `rule`?
-    Unparseable / unknown rule → treat as stable (never invent a hold)."""
-    t = _ver_tuple(version)
-    if not t:
-        return True
-    if rule == "odd-minor":
-        return t[1] % 2 == 1
-    if rule == "even-minor":
-        return t[1] % 2 == 0
-    return True
-
-
 def channel_hold(comp: str, item: dict, ar_holds: dict | None = None) -> str | None:
     """Reason why `item`'s TARGET is not a stable-channel successor, else None.
 
@@ -170,10 +175,12 @@ def channel_hold(comp: str, item: dict, ar_holds: dict | None = None) -> str | N
     tgt = str(item.get("target") or "")
     if _PRERELEASE_TAG.search(tgt):
         return f"target {tgt} is an explicit pre-release tag — never unattended"
+    # Membership IS the hold — see CHANNEL_RULES. No predicate to fail open.
     rule = CHANNEL_RULES.get(comp)
-    if rule and not _stable_by_rule(rule["stable"], tgt):
+    if rule:
         ar = f" ({rule['ar']}: unacceptable for a {rule['workload']})" if rule.get("ar") else ""
-        return (f"{tgt} is on upstream's PRE-RELEASE channel — {rule['why']}{ar}. "
+        return (f"{tgt} cannot be shown to be a STABLE-channel successor "
+                f"offline — {rule['why']}{ar}. "
                 f"Needs an assessed window plan, never an unattended bump")
     if ar_holds and comp in ar_holds:
         return (f"{ar_holds[comp]} declares this component's pre-release channel "
