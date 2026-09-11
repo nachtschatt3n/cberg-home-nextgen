@@ -23,8 +23,18 @@ metadata:
 # kubernetes-csi/ and kubernetes-sigs/ all deny (no such package), and
 # registry.k8s.io/sig-storage/charts/csi-driver-smb returns the SAME
 # empty-repository body as a deliberately bogus path (the 307 is just the
-# registry.k8s.io redirector, not a hit). Upstream ships this chart from the
-# git repo below and from a GitHub Pages mirror, nothing else.
+# registry.k8s.io redirector, not a hit). UPSTREAM ships this chart from the git
+# repo below and from a GitHub Pages mirror, nothing else.
+#
+# A THIRD-PARTY OCI MIRROR DOES EXIST and is deliberately not used here:
+# oci://ghcr.io/home-operations/charts-mirror/csi-driver-smb carries 1.20.3, and
+# runbooks/maintenance/plans/flux-oci-chart-sources.md stage 2 targets it. That
+# is a re-publisher, not the project, so it would move the trust root from
+# kubernetes-csi to a third party AND require proving the mirror's bytes equal
+# upstream's. Pinning upstream's own commit avoids both. If the house later
+# standardises on charts-mirror for consistency that is a legitimate operator
+# choice -- but it is a DIFFERENT trust decision, not a cleanup of this one, and
+# it should not be applied as routine plan execution. See the report on 001ab0ad.
 #
 # WHY NOT SIMPLY PIN THE HTTP INDEX TO A TAG -- the trap worth recording.
 # It does not work, while LOOKING like it does. The index.yaml in this repo
@@ -67,11 +77,42 @@ metadata:
 # when Chart.yaml's version changes -- preserving the no-silent-re-pull
 # property the old HelmRepository had.
 #
+# NO `spec.verify` BLOCK ON PURPOSE. The pinned commit IS signed and GitHub
+# reports it verified -- but by GitHub's `web-flow` key, which signs every merge
+# made through the GitHub UI in every repository, so it attests routing rather
+# than maintainer intent; the TLS fetch already implies as much and the commit
+# SHA already fixes the content. Against that near-zero gain it fails CLOSED
+# inside the cluster-meta gate described at `timeout` below, turning an upstream
+# key rotation into a cluster-wide reconciliation stop. Revisit if: (a)
+# kubernetes-csi starts signing releases with maintainer keys, (b) upstream
+# publishes a real OCI chart artifact (then OCIRepository + ref.digest +
+# cosign verify is the better shape, as on k8s-gateway), or (c) the repo moves
+# to SHA-256 objects -- git object naming here is SHA-1, so "content-addressed"
+# is a SHA-1-strength assumption, not cryptographic finality.
+#
+# KNOWN COST OF THIS CHOICE: no automated version tracking. Renovate's flux
+# manager reads a GitRepository only via ref.tag, and the HelmRelease no longer
+# carries a `version:` field, so neither Renovate nor runbooks/check-all-versions.py
+# can compare against upstream. The chart's image tags come from Chart.yaml at
+# this commit, so they are frozen with it. Upgrades are therefore MANUAL until a
+# tracking shape is agreed -- do not read silence as "up to date".
+#
 # To move versions: change ref.commit, ref.branch and the HelmRelease's chart
 # path together, and re-derive the commit from the upstream tag rather than
 # trusting this note.
 spec:
   interval: 1h
+  # NOT the 60s default. This clone is ~118 MB and it sits INSIDE the
+  # cluster-meta health gate: cluster-meta runs `wait: true`, its inventory
+  # contains this object, and cluster-apps dependsOn cluster-meta -- so a fetch
+  # that exceeds the timeout stops app reconciliation CLUSTER-WIDE, which is the
+  # exact failure this migration set out to remove. The first clone took ~14s on
+  # a warm link, and source-controller's artifact storage is an emptyDir, so
+  # every controller restart pays that cost again from cold. 60s was ~4x margin
+  # against a measured best case; 5m is margin against a cold node or a degraded
+  # GitHub. Slower failure is the right trade here: cluster-meta's own interval
+  # is 30m, so a 5m ceiling costs nothing it cannot absorb.
+  timeout: 5m
   url: https://github.com/kubernetes-csi/csi-driver-smb
   ref:
     branch: release-1.20
