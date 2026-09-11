@@ -18,10 +18,14 @@ namespace: databases
 # removed here; the Volume CRs were deleted by hand in namespace `storage`.
 # This supersedes the earlier "deliberately-orphaned rollback artifact — do not
 # clean it up" framing: reclaiming them WAS the explicit decision, not an
-# oversight. Their frozen Longhorn backup sets are deliberately RETAINED and are
-# now the only restore path (see §6/§7 of the plan). Any restore from those
-# backups crosses the 2026-09-08 credential rotation and MUST reset every local
-# db-provider Admin account before Superset serves traffic.
+# oversight. Their backup retention was then TRIMMED on 2026-09-11 (§7.2 of the
+# plan): superset-postgresql-data's backups are ALL GONE, and superset-pg-data is
+# down to a SINGLE backup, `backup-5876963a2bce454c`, which is now the only
+# pre-pg18 restore path that exists anywhere (see §6/§7 of the plan). Do not
+# delete it, and do not delete BackupVolume/superset-pg-data-26df02ea — the
+# backup is owned by it and would cascade. Any restore from it crosses the
+# 2026-09-08 credential rotation and MUST reset every local db-provider Admin
+# account before Superset serves traffic.
 resources:
   - secret.sops.yaml
   - helmrelease.yaml

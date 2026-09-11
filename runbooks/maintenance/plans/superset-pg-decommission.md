@@ -4,7 +4,7 @@ component: superset
 pr: null
 kind: infra
 current: "Two retired Superset metadata DBs still hold cluster storage: the 20Gi longhorn-static volume `superset-pg-data` (postgres 17.11, workload retired 2026-09-09 in 9d10199c, PVC Bound with no consumer) and `superset-postgresql-data` (bundled bitnamilegacy postgres 14.17, workload retired 2026-09-05 in 90539942, same disposition). Both PVs are Retain; both volumes are detached; neither receives new daily backups."
-target: "Both PVCs, PVs and Longhorn Volume CRs deleted and their manifests removed from git; ~80 GiB of scheduled Longhorn capacity released. The two FROZEN Longhorn backup sets are DELIBERATELY RETAINED and remain the restore path — retiring them is a separate, later decision (see §7)."
+target: "Both PVCs, PVs and Longhorn Volume CRs deleted and their manifests removed from git; ~80 GiB of scheduled Longhorn capacity released. The two FROZEN Longhorn backup sets were retained at volume-reclaim time, then TRIMMED TO ONE on 2026-09-11 (§7.2): the single backup backup-5876963a2bce454c survives as the restore path and is now SINGLE-COPY; the other 13 are deleted."
 update_type: decommission
 risk: medium                          # small blast radius, but it deletes the
                                       # last in-cluster copy of two metadata DBs
@@ -35,12 +35,16 @@ capability_change: false              # nothing user-visible changes; Superset
                                       # has served off superset-pg18 since
                                       # 2026-09-08 08:36
 rollback_class: backup-restore        # NOT one-way, and the distinction is the
-                                      # whole design of this plan: the frozen
-                                      # backup sets are retained, so the undo
-                                      # path is "restore the backup into a new
-                                      # volume", not "it is gone". It becomes
-                                      # one-way only when §7 (backup retirement)
-                                      # is separately decided and executed.
+                                      # whole design of this plan: a backup is
+                                      # retained, so the undo path is "restore
+                                      # the backup into a new volume", not "it
+                                      # is gone". UPDATED 2026-09-11: §7
+                                      # (backup retirement) HAS now been decided
+                                      # and executed, so this is one-way for
+                                      # superset-postgresql-data (all backups
+                                      # deleted) and SINGLE-COPY for
+                                      # superset-pg-data (one backup left). Still
+                                      # backup-restore, but with no redundancy.
 backup_gate: >-
   BEFORE any PVC/PV/Volume is deleted, all four must pass, in this order:
   (a) `kubectl -n storage get backups.longhorn.io` lists a backup for volume
@@ -516,6 +520,11 @@ CONTENTS ASSERTION 3 — the restore path we chose to keep still exists:
   backups turns rollback_class: backup-restore into a lie.
 ```
 
+> **Reading note (added 2026-09-11): this assertion is DATED, not current.** All
+> 14 did survive the volume deletes, which is what it was written to prove. §7.2
+> then deliberately deleted 13 of them in a separate, operator-approved step.
+> **Today exactly ONE exists.** Do not read "all 14 present" as the end state.
+
 Plus:
 
 ```bash
@@ -540,10 +549,23 @@ Run `runbooks/health-check.sh` and the `health-check-agent` afterwards.
 PV and PVC; they re-bind to the still-existing Longhorn volumes. Free.
 
 **After the deletes:** the in-cluster objects are gone and recovery is a
-**restore from the retained frozen backup set**:
+**restore from the one retained backup**.
 
-1. Restore `superset-pg-data`'s **2026-09-09** backup (the only member carrying
-   the 6.1.0 alembic schema — §1.3) into a new Longhorn volume.
+> ⚠ **SINGLE-COPY, as of 2026-09-11 (§7.2).** There is no longer a "backup set"
+> to choose from. `backup-5876963a2bce454c` is the ONLY surviving artifact of the
+> pre-pg18 metadata DB — no second copy exists anywhere, its source volume is
+> deleted so it can never be re-taken, and `superset-pg18-data`'s own backups
+> roll back to pg18 states only, never across the 2026-09-08 cutover. If this
+> one object is lost or fails to restore, **there is no Superset metadata
+> rollback at all.** Do not delete it, and do not delete
+> `BackupVolume/superset-pg-data-26df02ea` — the backup is owned by it and would
+> cascade. Its restore proof predates the sibling deletions (`F-059aca4a`), so
+> treat a clean `runbooks/backup-restore-proof.py` drill as a precondition you
+> should establish *before* you need it, not during an incident.
+
+1. Restore `superset-pg-data`'s **2026-09-09** backup `backup-5876963a2bce454c`
+   (the only member carrying the 6.1.0 alembic schema — §1.3, and since
+   2026-09-11 the only member at all) into a new Longhorn volume.
 2. Re-create the 17.11 Deployment and Service from git history:
    `git show 9d10199c^:kubernetes/apps/databases/superset/app/pg-deployment.yaml`,
    plus the PV/PVC from this plan's own revert.
@@ -559,8 +581,10 @@ PV and PVC; they re-bind to the still-existing Longhorn volumes. Free.
 4. Only then repoint `DB_HOST` and let Superset start.
 
 `superset-postgresql-data` (postgres 14.17, Superset ≤5.0.0 schema) has **no**
-viable restore into today's 6.1.0 app and should be treated as unrecoverable
-once deleted. That is accepted: it is obsolete twice over.
+viable restore into today's 6.1.0 app and is unrecoverable. That is accepted: it
+is obsolete twice over. **Its backups are GONE** — all seven were deleted
+2026-09-11 (§7.2), so this is not "a fallback that is merely unattractive"; there
+is nothing there.
 
 ## 7. The frozen backup sets — EXECUTED 2026-09-11, retention trimmed to one
 
@@ -629,8 +653,10 @@ Incremental-chain note, since it is the non-obvious risk: `backup-92946861d1654e
 Longhorn block-refcounts the backup store, so deleting it does not strand the
 keeper's blocks — but that was verified rather than assumed (deep re-read of the
 keeper's `state`/`progress`/`size`/`snapshotName`/`messages` immediately after,
-all unchanged), and the `superset-pg-data-26df02ea` BackupVolume correctly
-re-pointed `lastBackupName` at the keeper.
+all unchanged), and the `superset-pg-data-26df02ea` BackupVolume still reports
+`lastBackupName` = the keeper. (To be precise: that pointer cannot have *moved*,
+since the keeper was already the newest member of the set — the check confirms it
+did not become empty or dangling.)
 
 **Both `BackupVolume` records were deliberately left in place.** The keeper's
 `ownerReferences` point at `BackupVolume/superset-pg-data-26df02ea`, so deleting
@@ -646,7 +672,11 @@ BackupVolume record is harmless, and removing it was outside the approved scope.
   `superset-postgresql-data`, 4 on `superset-pg18-data` = 18.
 - Keeper verified `Completed`, `progress: 100`, `messages: null` **before** any
   delete, and re-verified after each of the 13.
-- All 4 `superset-pg18-data` backups present and `Completed` throughout and after.
+- All 4 `superset-pg18-data` backups present and `Completed` throughout and after
+  (3 dailies 09-09…09-11 plus the on-demand `ondemand-superset-pg18-20260909-1110`).
+  Worth stating explicitly because it is *why* §7.3 holds: **none of the four
+  crosses the 2026-09-08 cutover**, so they roll back to pg18 states only and
+  cannot substitute for the keeper.
 - Superset total backup count **18 → 5** (1 keeper + 4 live). Cluster-wide
   backup count 862.
 - CONTENTS ASSERTION 1 — live `superset-pg18` table counts diffed before/after
@@ -762,7 +792,10 @@ plan's ~80 GiB estimate exactly. Volume count 95 → 93. No orphaned replicas.
   redirects to Authentik SSO as expected.
 - CONTENTS ASSERTION 3 — **all 14 backup rows still present and Completed after
   the deletes**, byte-identical to the pre-delete inventory. `rollback_class:
-  backup-restore` is intact rather than a lie.
+  backup-restore` is intact rather than a lie. **(Dated record. Later the same
+  day, §7.2 deliberately deleted 13 of those 14 as a separate operator-approved
+  step — one survives. See §7.2/§7.3 for the current state; do not read this
+  line as today's inventory.)**
 - `superset-pg18-data` attached + healthy throughout; all Superset pods Running
   with 0 restarts.
 

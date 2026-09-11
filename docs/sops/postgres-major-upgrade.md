@@ -159,12 +159,18 @@ nothing goes wrong.
   Service were deleted while the volume `superset-pg-data` was retained.
   **Volume reclaimed 2026-09-11** by plan `superset-pg-decommission`, so there is
   no retained PVC left to bind and the recovery path is now a
-  **restore-from-backup**: restore the frozen Longhorn backup into a new volume,
-  then re-create the Deployment from git history against it. Use the
-  **2026-09-09** backup — the older dailies predate the 5.0.0→6.1.0 alembic
-  migration and carry the wrong schema. The restore MUST reset every local
-  db-provider Admin account before Superset serves traffic (those backups predate
-  the 2026-09-08 credential rotation). Full procedure: §6 of
+  **restore-from-backup**: restore the surviving Longhorn backup into a new
+  volume, then re-create the Deployment from git history against it.
+  **There is no longer a set to choose from — as of 2026-09-11 the backup
+  retention was trimmed to ONE and the path is SINGLE-COPY:**
+  `backup-5876963a2bce454c` (2026-09-09) is the only surviving pre-pg18 metadata
+  backup. The older dailies predated the 5.0.0→6.1.0 alembic migration, carried
+  the wrong schema, and were deleted. Its source volume no longer exists, so it
+  can never be re-taken; if it is lost there is no rollback across the cutover at
+  all. Do not delete `BackupVolume/superset-pg-data-26df02ea` — the backup is
+  owned by it and would cascade. The restore MUST reset every local db-provider
+  Admin account before Superset serves traffic (that backup predates the
+  2026-09-08 credential rotation). Full procedure: §6 of
   `runbooks/maintenance/plans/superset-pg-decommission.md`.
 - **`PGDATA` pinned inside the mount**, `/var/lib/postgresql/data/pgdata`, per
   §5 — the whole reason this SOP exists. `POSTGRES_INITDB_ARGS` was dropped

@@ -117,15 +117,19 @@ spec:
     # Deployment and Service are gone, and its volume was DECOMMISSIONED
     # 2026-09-11 by plan `superset-pg-decommission`. Rolling back onto 17.11 is
     # therefore a RESTORE-FROM-BACKUP operation: there is no retained PVC left to
-    # bind. Restore the 2026-09-09 frozen Longhorn backup of superset-pg-data —
-    # the only member of that set carrying the 6.1.0 alembic schema — into a new
-    # volume, reset every local db-provider Admin account BEFORE serving traffic
-    # (all those backups predate the 2026-09-08 rotation), then move DB_HOST.
-    # See §6 of runbooks/maintenance/plans/superset-pg-decommission.md.)
+    # bind. Restore backup-5876963a2bce454c (2026-09-09) of superset-pg-data into
+    # a new volume, reset every local db-provider Admin account BEFORE serving
+    # traffic (it predates the 2026-09-08 rotation), then move DB_HOST.
+    # SINGLE-COPY since the 2026-09-11 retention trim (§7.2): that backup is the
+    # ONLY surviving pre-pg18 metadata copy, its source volume is gone so it can
+    # never be re-taken, and deleting BackupVolume/superset-pg-data-26df02ea
+    # would cascade-delete it. See §6 of
+    # runbooks/maintenance/plans/superset-pg-decommission.md.)
     # The bundled-chart volume superset-postgresql-data (postgres 14.17) was
     # decommissioned by the same plan; its pv.yaml / data-pvc.yaml /
-    # longhorn-volume.yaml are gone from this folder. Its frozen backups are
-    # retained but have no viable restore into today's 6.1.0 schema.
+    # longhorn-volume.yaml are gone from this folder. Its backups are GONE too
+    # (all 7 deleted 2026-09-11) — there is no fallback there to look for; they
+    # had no viable restore into today's 6.1.0 schema anyway.
     postgresql:
       enabled: false
 

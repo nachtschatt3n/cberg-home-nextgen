@@ -4,11 +4,13 @@
 # rollback through the soak and was RETIRED 2026-09-09 (Deployment + Service
 # deleted). Its data volume superset-pg-data was then DECOMMISSIONED 2026-09-11
 # by plan `superset-pg-decommission`, so rolling back onto 17.11 is no longer a
-# bind-the-retained-PVC operation: it is a RESTORE from the frozen Longhorn
-# backup set (use the 2026-09-09 backup — the only member carrying the 6.1.0
-# alembic schema) into a new volume, and the restore MUST reset every local
-# db-provider Admin account before Superset serves traffic, because every one of
-# those backups predates the 2026-09-08 credential rotation.
+# bind-the-retained-PVC operation: it is a RESTORE from a single Longhorn backup,
+# backup-5876963a2bce454c (2026-09-09), into a new volume. That backup is
+# SINGLE-COPY as of the 2026-09-11 retention trim (§7.2) — the six siblings were
+# deleted, its source volume is gone so it cannot be re-taken, and deleting
+# BackupVolume/superset-pg-data-26df02ea would cascade-delete it. The restore MUST
+# reset every local db-provider Admin account before Superset serves traffic,
+# because it predates the 2026-09-08 credential rotation.
 # See §6 of runbooks/maintenance/plans/superset-pg-decommission.md.
 # This is now the only live metadata DB — nothing else serves DB_HOST.
 apiVersion: apps/v1
