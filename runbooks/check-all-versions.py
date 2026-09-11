@@ -59,6 +59,12 @@ def _activate_mise() -> None:
 
 _activate_mise()
 
+# Path segments that merely CONTAIN charts in an OCI registry and are never a
+# GitHub repository name. Used when deriving release-note sources from an OCI
+# chart URL — see get_chart_repo_info().
+_GENERIC_CHART_PATH_SEGMENTS = frozenset(
+    {'charts', 'charts-mirror', 'helm-charts', 'helm'})
+
 # Module-level cache for bjw-s chart latest versions (keyed by chart name)
 _BJW_S_CHART_CACHE: Dict[str, Optional[str]] = {}
 
@@ -750,12 +756,31 @@ class VersionChecker:
                 entry['file_path'] = str(file_path.relative_to(self.repo_root))
                 key = (kind, name)
                 prev = self.chart_sources.get(key)
-                if prev and prev.get('url') != entry.get('url'):
+                # Compare the FULL resolved identity, not `url` alone. Every
+                # HelmChart resolves to `url: ''`, so a url-only comparison
+                # made two same-named HelmChart CRs in different namespaces
+                # look identical: the second silently overwrote the first and
+                # the version reported as current could belong to the wrong
+                # object. That is the mask-a-stale-chart direction, which is
+                # worse than a false positive. Recorded WITHOUT `component=`
+                # so the veto is section-wide: when two objects share a key we
+                # cannot know which rows the wrong one contaminated.
+                if prev and self._chart_source_identity(prev) != \
+                        self._chart_source_identity(entry):
                     self.degraded.record(
                         f"chart source {kind}/{name}", 'chart source manifest',
-                        f"duplicate definition: {prev.get('file_path')} vs "
-                        f"{entry['file_path']}")
+                        f"COLLISION: two different {kind}/{name} definitions — "
+                        f"{prev.get('file_path')} vs {entry['file_path']}; "
+                        f"last one wins, so a chartRef to it may resolve to "
+                        f"the wrong chart/version")
                 self.chart_sources[key] = entry
+
+    @staticmethod
+    def _chart_source_identity(entry: Dict) -> tuple:
+        """What makes two chart-source CRs the same object, for collision checks."""
+        return (entry.get('chart', ''), entry.get('version', ''),
+                entry.get('semver', ''), entry.get('url', ''),
+                entry.get('source_name', ''))
 
     @staticmethod
     def _parse_chart_source(kind: str, doc: Dict) -> Dict:
@@ -784,6 +809,7 @@ class VersionChecker:
                 'url': '',
                 'type': 'default',
                 'digest': '',
+                'semver': '',
                 # A HelmChart delegates to its own sourceRef (a
                 # HelmRepository), so the repo name is resolvable by the
                 # existing HelmRepository index.
@@ -795,11 +821,19 @@ class VersionChecker:
         ref = spec.get('ref') or {}
         chart = url.rpartition('/')[2] if url else ''
         parent = url.rpartition('/')[0] if url else ''
-        version = str(ref.get('tag') or ref.get('semver') or '').strip()
+        # ONLY `ref.tag` is a version. `ref.semver` is a RANGE
+        # (">=3.7.0 <4.0.0") that source-controller resolves against the
+        # registry at reconcile time, so the string in git is not what is
+        # deployed. Accepting it as a version would feed a garbage string to
+        # tags_are_equal() / is_reportable_update() and to coverage.py's
+        # `ver == cur` equality — a pre-armed false negative of exactly the
+        # class this parser exists to close. It is surfaced as an unresolved
+        # chart source instead, and carried here so the reason can say why.
         return {
             'kind': kind,
             'chart': chart,
-            'version': version,
+            'version': str(ref.get('tag') or '').strip(),
+            'semver': str(ref.get('semver') or '').strip(),
             'url': parent,
             'type': 'oci',
             'digest': str(ref.get('digest') or '').strip(),
@@ -842,10 +876,19 @@ class VersionChecker:
             out['reason'] = (f"{kind}/{name} yields no chart name "
                              f"(url={src.get('url') or '?'})")
         elif not out['version']:
-            out['reason'] = (
-                f"{kind}/{name} pins no version: no ref.tag / ref.semver"
-                + (" (digest-only ref — a digest is an immutability pin, not "
-                   "a version)" if src.get('digest') else ""))
+            if src.get('semver'):
+                # A range is resolved against the registry at reconcile time,
+                # so the string in git is NOT what is deployed. Reporting it as
+                # a version would feed a garbage string to the comparators.
+                out['reason'] = (
+                    f"{kind}/{name} pins ref.semver {src['semver']!r}, a RANGE "
+                    f"rather than a version — what is deployed is whatever the "
+                    f"registry resolved it to, which is not in git")
+            else:
+                out['reason'] = (
+                    f"{kind}/{name} pins no version: no ref.tag"
+                    + (" (digest-only ref — a digest is an immutability pin, "
+                       "not a version)" if src.get('digest') else ""))
         return out
 
     def parse_helmrelease(self, file_path: Path) -> Optional[Dict]:
@@ -1209,6 +1252,17 @@ class VersionChecker:
         repo_url = repo_url or repo.get('url', '')
         repo_type = repo_type or repo.get('type', 'default')
         if not repo_url:
+            # A KNOWN repo with no URL. The old code fell through to a resolver
+            # that failed and recorded the degradation; returning early here
+            # would have swallowed that signal, so record it explicitly. The
+            # precondition is a malformed HelmRepository that would also break
+            # Flux, but "would also break elsewhere" is not a reason for this
+            # script to go quiet.
+            if repo_name in self.helm_repositories:
+                self.degraded.record(
+                    f"chart {chart_name}", f"Helm repo {repo_name}",
+                    "HelmRepository has no spec.url — cannot resolve a latest "
+                    "chart version")
             return None
 
         try:
@@ -2384,6 +2438,12 @@ class VersionChecker:
             'metrics-server': ('kubernetes-sigs', 'metrics-server'),
             'coredns': ('coredns', 'coredns'),
             'csi-driver-smb': ('kubernetes-csi', 'csi-driver-smb'),
+            # Verified against the GitHub API 2026-09-11: the repo is
+            # `k8s_gateway` with an UNDERSCORE, so neither the OCI path
+            # (`.../charts`) nor the chart name derives it. Without this entry
+            # the only chartRef-sourced chart in the repo resolves to a
+            # nonexistent repo and its release notes silently never load.
+            'k8s-gateway': ('k8s-gateway', 'k8s_gateway'),
         }
         
         # Check direct mapping
@@ -2396,7 +2456,29 @@ class VersionChecker:
             if 'ghcr.io' in repo_url:
                 parts = repo_url.replace('oci://', '').replace('ghcr.io/', '').split('/')
                 if len(parts) >= 2:
-                    return (parts[0], parts[1])
+                    # A generic chart-CONTAINER segment is not a GitHub repo.
+                    # `oci://ghcr.io/k8s-gateway/charts` resolved to
+                    # `k8s-gateway/charts`, which does not exist — so the
+                    # release-note fetch 404s and the breaking-change scan has
+                    # nothing to read. Treat the chart name as the repo instead
+                    # and let the mapping table above override it where the
+                    # real repo differs. Stage 0 item 3 of
+                    # runbooks/maintenance/plans/flux-oci-chart-sources.md;
+                    # the FAIL-OPEN half of that item (auto-update.py's G3
+                    # treating an unresolved lookup as "no breaking changes")
+                    # is a separate, policy-bearing change and is NOT fixed
+                    # here — do not read this as closing it.
+                    if parts[1] in _GENERIC_CHART_PATH_SEGMENTS:
+                        # Still a HEURISTIC, not a resolved fact: a mirror
+                        # namespace (`home-operations/charts-mirror/frigate`)
+                        # has an owner that does not own the upstream project
+                        # at all. It is strictly better than a segment that
+                        # provably cannot be a repo, and the mapping table
+                        # above is where a known-wrong derivation gets pinned.
+                        if chart_name:
+                            return (parts[0], chart_name)
+                    else:
+                        return (parts[0], parts[1])
             
             # GitHub pattern: https://github.com/owner/repo or https://owner.github.io/repo
             if 'github.com' in repo_url or 'github.io' in repo_url:
@@ -4041,18 +4123,35 @@ def _emit_findings(writer: FindingsWriter, checker: 'VersionChecker', evidence_p
 
     # Coverage gaps FIRST: a HelmRelease whose chart source could not be
     # resolved was never version-checked at all, and the rest of this function
-    # can only report on what WAS measured. Emitted at `monitor` on purpose —
-    # it belongs on the board (the operator has to either extend the parser or
-    # accept the gap) but it is a coverage gap, not an incident, so it must not
-    # drive the section verdict yellow on every cycle. Correctness is already
-    # protected separately by the per-component auto-close veto that
-    # _record_unresolved_chart_source() arms.
+    # can only report on what WAS measured.
+    #
+    # WARNING, not `monitor`, and deliberately with no per-component allowlist.
+    # The first cut rated these `monitor` to avoid painting the section yellow
+    # every cycle over a gap the operator had effectively accepted. Measurement
+    # killed that reasoning: csi-driver-smb — the driver behind all 19 CIFS
+    # StorageClasses — turns out to have lost EVERY automated version signal
+    # when it moved to a git chart source, Renovate's flux manager included
+    # (F-2e76c058), because that manager tracks HelmRepository charts and
+    # OCIRepository tags, not a GitRepository path. This bucket is the only
+    # thing that can see it. Burying the sole remaining signal at a severity
+    # that never reaches the verdict is the same failure this commit set out to
+    # fix, wearing a severity label instead of an empty string.
+    #
+    # A shape-based tier ("structural gaps stay quiet") would have buried
+    # exactly that case, and a hardcoded accepted-component list is policy in
+    # code that goes stale silently. The legitimate exits are both explicit and
+    # reviewable: extend the parser, or record an accepted risk with a
+    # re-review trigger via runbooks/policy-cli.py. Both are named in `action`.
     for u in getattr(checker, 'unresolved_chart_sources', []):
+        warn += 1
         writer.emit(
-            severity='monitor',
+            severity='warning',
             title=f"{u['name']}: chart source UNRESOLVED — not version-checked",
-            action=("teach runbooks/check-all-versions.py this chart-source "
-                    "shape, or accept the gap explicitly: " + u['reason']),
+            action=("no upstream comparison ran for this component. Either "
+                    "teach runbooks/check-all-versions.py this chart-source "
+                    "shape, or record an accepted risk with a re-review "
+                    "trigger (runbooks/policy-cli.py risk add) — do not leave "
+                    "it silently unmeasured. Reason: " + u['reason']),
             evidence_path=evidence_path,
             subsection="helmrelease_chart",
             metadata={

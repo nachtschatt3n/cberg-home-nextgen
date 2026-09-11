@@ -7,7 +7,7 @@ pr: null                              # No Renovate PR exists or can exist: this
                                       # understands; it has no opinion about which KIND of
                                       # source holds the chart.
 kind: infra
-current: "36 HTTP HelmRepository chart sources (30 referenced, 6 unreferenced) + 10 type:oci HelmRepository + 1 OCIRepository"
+current: "30 HTTP HelmRepository chart sources + 10 type:oci HelmRepository + 1 OCIRepository + 2 GitRepository — recounted 2026-09-11 after 4dfc3e32 (pajikos deleted) and 001ab0ad (csi-driver-smb moved to a commit-pinned GitRepository). The 6 unreferenced HelmRepositories of Stage 1 are still live; a 7th orphan (GitRepository k8s-self-ai-ops) was measured the same day (F-c73cd510)"
 target: "every referenced chart with an immutable OCI source migrated to OCIRepository pinned by tag AND digest; unreferenced sources deleted; the rest explicitly parked with a named reason — delivered in 11 stages, each independently abandonable"
 update_type: refactor
 risk: high                            # NOT from any single stage. Two drivers, both
@@ -257,17 +257,31 @@ number". Note also that `reconcileStrategy: ChartVersion` means an unchanged
 version string does **not** re-pull, so a source move can leave the old tarball
 deployed and look like a success.
 
-**(c) Our own version tooling is blind to `chartRef`** — measured, not feared:
+**(c) Our own version tooling WAS blind to `chartRef` — FIXED 2026-09-11 in
+`97c3e913`.** Kept here because the hazard it describes is the reason Stage 0
+exists, and because one half of it is still open. What was measured:
 
 ```
 # runbooks/check-all-versions.py parse_helmrelease() on the migrated file:
 chart_name='' chart_version='' repo=''   chartRef={'kind': 'OCIRepository', 'name': 'k8s-gateway'}
 ```
 
-It reads `spec.chart.spec` only. A migrated release drops out of the version
-snapshot with **no degradation record** — it does not look broken, it looks
-chart-less. `coverage.py` reads that snapshot, so it would stop proposing chart
-bumps for every migrated component: not "held", *absent*. And G3 (the
+It read `spec.chart.spec` only. A migrated release dropped out of the version
+snapshot with **no degradation record** — it did not look broken, it looked
+chart-less. `coverage.py` read that snapshot, so it would have stopped proposing
+chart bumps for every migrated component: not "held", *absent*.
+
+Both parsers now resolve `chartRef`, and an unreadable chart source is counted
+and announced instead of returning empty strings (`unresolved_chart_sources` →
+stderr + report table + a `warning` finding + a per-component auto-close veto).
+Measured after the fix: 123 of 124 chart sources resolve, k8s-gateway among
+them. **Still open:** `csi-driver-smb` resolves to nothing at all — a
+GitRepository-path chart has no version in git, and Renovate's flux manager
+cannot track that shape either (F-2e76c058), so the driver behind all 19 CIFS
+StorageClasses currently has no automated version signal. The bucket makes that
+loud; it does not close it.
+
+And G3 (the
 breaking-change scan in `auto-update.py`) resolves release notes by mapping the
 dep name to a GitHub repo, which OCI chart paths break:
 
@@ -282,6 +296,18 @@ would quietly remove breaking-change scanning from chart updates while leaving
 them auto-mergeable. **Stage 0 fixes the tooling first** — the
 `docs/sops/audit-script-correctness.md` standard: a check that cannot measure
 must not report a pass.
+
+Status after `97c3e913`: the derivation half is fixed — a generic
+`charts` / `charts-mirror` / `helm-charts` / `helm` path segment is no longer
+used as a GitHub repo name (it produced the provably nonexistent
+`k8s-gateway/charts`), and k8s-gateway's real repo — `k8s_gateway`, with an
+underscore, verified against the GitHub API — is pinned in the mapping table.
+**The FAIL-OPEN itself is NOT fixed:** `auto-update.py`'s G3 still treats an
+unresolved release-note lookup as "no breaking changes", and a derived
+owner/repo remains a heuristic that can 404 silently (a mirror namespace does
+not own the upstream project). Closing it means making G3 refuse to pass on an
+unresolvable lookup, which changes what is auto-mergeable — a policy-bearing
+change that needs its own operator decision, not a side effect of a parser fix.
 
 **(d) Signature probing by `.sig` tag alone gives false negatives.** Three cosign
 layouts are in play: the legacy `sha256-<digest>.sig` tag (cert-manager, NFD,
@@ -345,7 +371,7 @@ source inventory this table is derived from is in §7.
 
 | # | Stage | components | min | risk | rolls? | buys |
 |---|---|---|---|---|---|---|
-| 0 | **Teach the version/update pipeline about `chartRef`** | tooling only | 30 | low | no | stops the migration from blinding `coverage.py` and fail-open-ing G3 |
+| 0 | **Teach the version/update pipeline about `chartRef`** — **3 of 4 items DONE `97c3e913`; item 3's G3 fail-open still OPEN, and Stage 0 has not yet survived a sweep, so the §4.1 gate on stages 2-7 HOLDS** | tooling only | 30 → ~10 left | low | no | stops the migration from blinding `coverage.py` and fail-open-ing G3 |
 | 1 | **Delete the 6 unreferenced HelmRepositories** | backube, democratic-csi, external-secrets, guerzon, piraeus, rook-ceph | 15 | low | no | removes 6 third-party URLs from the `cluster-meta` gate — the best risk-per-minute in this plan |
 | 2 | ~~`csi-driver-smb` → charts-mirror OCI~~ **DONE 2026-09-11 via a DIFFERENT route — see §3.4** | csi-driver-smb | 0 | — | **no roll occurred** | executed as a GitRepository pinned to commit `59dce96e` (the v1.20.3 cut), NOT charts-mirror. **Do not execute this row.** |
 | 3 | **No-roll, upstream-native OCI** | intel (3 releases), node-feature-discovery, gabe565/paperless-ngx, falcosecurity/falco | 15 ea | low | **no** | 6 releases off HTTP with zero workload impact — build confidence here |
@@ -526,21 +552,35 @@ pinned `ref.digest`, and **which workloads are expected to roll**.
 
 ### 3.3 Stage 0 — teach the pipeline about `chartRef` (do this first)
 
+> **STATUS 2026-09-11: items 1, 2 and 4 are DONE in `97c3e913`; item 3 is
+> PARTIALLY done and its fail-open half is still OPEN.** Stage 0 has not yet
+> survived a sweep, so the §4.1 gate on stages 2-7 still stands. Do not read
+> three ticked boxes as Stage 0 complete — item 3's fail-open is the half that
+> silently removes breaking-change scanning, which is the risk this stage was
+> created to prevent.
+
 Repo-only; no cluster change. Three edits plus a ground-truth test:
 
-1. `runbooks/check-all-versions.py` → `parse_helmrelease()`: when `spec.chartRef`
+1. **DONE (`97c3e913`).** `runbooks/check-all-versions.py` → `parse_helmrelease()`: when `spec.chartRef`
    is present, resolve the sibling `ocirepository.yaml` in the same directory to
    recover `chart_name` (OCI path's last segment / CR name) and `chart_version`
    (from `ref.tag`), and register the `oci://` URL so
    `get_latest_chart_version()` takes its existing OCI branch.
-2. Same for `coverage.py` → `_chart_source_for()`, so the chart-publish-age
+2. **DONE (`97c3e913`).** Same for `coverage.py` → `_chart_source_for()`, so the chart-publish-age
    cooldown keeps working instead of silently returning `None`.
-3. `get_repo_info_from_image()` / `get_chart_repo_info()`: strip a
+3. **PARTIAL — derivation fixed, FAIL-OPEN STILL OPEN.** `get_repo_info_from_image()` / `get_chart_repo_info()`: strip a
    `charts` / `charts-mirror` / `helm-charts` / `helm` path segment so G3
    resolves real upstream release notes. Today
    `ghcr.io/k8s-gateway/charts/k8s-gateway` resolves to the nonexistent repo
    `k8s-gateway/charts` and G3 fails **open**.
-4. `runbooks/tests/` — a test that feeds the real migrated
+   The segment strip landed in `97c3e913`, and k8s-gateway's real repo
+   (`k8s-gateway/k8s_gateway`, underscore — API-verified) is pinned in the
+   mapping table. What remains: a derived `owner/chart` is still a HEURISTIC
+   that can 404 (a mirror namespace does not own the upstream project), and
+   `auto-update.py`'s G3 still treats an unresolvable lookup as "no breaking
+   changes". **Closing this means G3 must refuse to pass when it cannot
+   measure**, which changes what is auto-mergeable — own operator decision.
+4. **DONE (`97c3e913`).** `runbooks/tests/` — a test that feeds the real migrated
    `kubernetes/apps/network/internal/k8s-gateway/helmrelease.yaml` in and asserts
    `chart_name == 'k8s-gateway'` and `chart_version == '3.7.2'`, with the
    pre-migration file as the negative case. Per

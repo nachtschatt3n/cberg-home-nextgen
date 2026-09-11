@@ -762,6 +762,10 @@ def _helm_repo_urls() -> dict:
 
 
 _CHART_REF_CACHE: dict = {}
+# Sentinel, not `if _CHART_REF_CACHE:` — on a tree with no OCIRepository /
+# HelmChart the cache stays legitimately EMPTY, and an emptiness test would
+# re-walk every kubernetes/**/*.yaml with read_text on every call.
+_CHART_REF_SCANNED = False
 
 
 def _chart_ref_sources() -> dict:
@@ -782,8 +786,10 @@ def _chart_ref_sources() -> dict:
     version: k8s-gateway carries `tag: 3.7.2` AND a `digest:` together, and the
     tag is the human-meaningful version.
     """
-    if _CHART_REF_CACHE:
+    global _CHART_REF_SCANNED
+    if _CHART_REF_SCANNED:
         return _CHART_REF_CACHE
+    _CHART_REF_SCANNED = True
     for f in sorted((REPO_ROOT / "kubernetes").rglob("*.yaml")):
         try:
             text = f.read_text(errors="ignore")
@@ -808,15 +814,33 @@ def _chart_ref_sources() -> dict:
                 ref = spec.get("ref") or {}
                 chart = url.rpartition("/")[2]
                 parent = url.rpartition("/")[0]
-                ver = str(ref.get("tag") or ref.get("semver") or "").strip()
-                _CHART_REF_CACHE[(kind, name)] = (chart, ver, parent)
+                # ONLY ref.tag. `ref.semver` is a RANGE resolved against the
+                # registry at reconcile time, so it is not the deployed
+                # version; accepting it would make the `ver == cur` equality
+                # below match on a garbage string.
+                ver = str(ref.get("tag") or "").strip()
+                entry = (chart, ver, parent)
             elif kind == "HelmChart" and name:
                 ref = (spec.get("sourceRef") or {}).get("name")
-                _CHART_REF_CACHE[(kind, name)] = (
+                entry = (
                     str(spec.get("chart") or "").strip(),
                     str(spec.get("version") or "").strip(),
                     _helm_repo_urls().get(ref),
                 )
+            else:
+                continue
+            prev = _CHART_REF_CACHE.get((kind, name))
+            if prev is not None and prev != entry:
+                # Two DIFFERENT objects sharing a (kind, name) key: last one
+                # wins, so a chartRef could resolve to the wrong chart. Drop
+                # the key entirely rather than pick a winner — `_chart_source_for`
+                # then returns (None, None) and `direct_bump_age_gate` holds
+                # fail-safe, which is the correct answer to an ambiguous
+                # source. Silently overwriting risks the mask-a-stale-chart
+                # direction instead.
+                _CHART_REF_CACHE[(kind, name)] = (None, None, None)
+                continue
+            _CHART_REF_CACHE[(kind, name)] = entry
     return _CHART_REF_CACHE
 
 

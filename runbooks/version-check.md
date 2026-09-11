@@ -55,6 +55,11 @@ A comprehensive Python script that:
 `_pick_latest_semver_tag` selection logic — variant pinning, clean-tag
 tie-break, and the 2026-08-18 same-major masking fix. Run it after any
 change to the tag-selection code.
+`runbooks/tests/test-helmrelease-chartref-shape.py` guards the CHART-SOURCE
+parser — both `spec.chart.spec` and `spec.chartRef` shapes, tag-vs-digest, the
+semver-range rejection, and the loud unresolved bucket. Run it after any change
+to `parse_helmrelease()`, `load_chart_sources()`, `check_chart_freshness()`,
+`get_latest_chart_version()`, or `coverage.py`'s `_chart_source_for()`.
 
 **GitHub Authentication:**
 - **Preferred:** GitHub CLI (`gh`) - automatically authenticated, no rate limits
@@ -204,6 +209,13 @@ The script generates `runbooks/version-check-current.md` containing:
 - Breaking changes count
 - **Renovate PRs table** — open Renovate bot PRs with type (🔴 major / 🟡 minor / 🟢 patch / 🔒 security) and status (✅ Ready / ⚡ Conflicts / 📝 Draft)
 - Quick overview table of all deployments
+- **⚠️ Unresolved chart sources table** — HelmReleases whose CHART could not be
+  resolved to a (chart, version) pair, so no upstream comparison or freshness
+  verdict ran for them. Each row also emits a **`warning`**-severity finding
+  (`subsection: helmrelease_chart`, `metadata.component = chart:<name>`) and
+  arms a per-component auto-close veto, so an unmeasured component cannot be
+  read as a fixed one. An empty table is the normal state; a row is a coverage
+  gap that needs either a parser extension or a recorded acceptance.
 - Detailed breakdown by namespace
 - For each deployment:
   - Chart name, repository, current and latest versions
@@ -293,9 +305,14 @@ values:
 ### 4. Checking Chart Versions
 
 For each chart, the script:
-1. Looks up the HelmRepository definition
+1. Resolves the chart's repository — from the `HelmRepository` definition for an
+   inline `spec.chart.spec`, or from the source CR the `spec.chartRef` points at.
+   An `OCIRepository` is **not** a `HelmRepository` and is absent from the
+   HelmRepository index, which is why `check_chart_freshness()` and
+   `get_latest_chart_version()` take the resolved URL and type explicitly.
 2. Determines repository type (OCI or traditional)
-3. Uses `helm search repo` to find latest version
+3. Uses `helm search repo` (traditional) or `helm show chart oci://…` (OCI) to
+   find the latest version
 
 **OCI Repositories:**
 - Examples: `oci://ghcr.io/prometheus-community/charts`
@@ -429,6 +446,17 @@ gh pr list --author app/renovate --state open \
 - **Network access**: Needs to reach Helm repository URLs
 - **OCI repositories**: May require authentication for private repos
 - **Rate limiting**: Some registries may rate limit requests
+- **A `GitRepository` chart source cannot be version-tracked at all.** There
+  `spec.chart.spec.chart` is a PATH and `version` is absent — the version lives
+  in `Chart.yaml` at the GitRepository's pinned commit, which is not in this
+  repo. The script does NOT guess it from the path (`charts/v1.20.3/…` is a
+  convention, not a contract); the component lands in the unresolved bucket
+  instead. Renovate's flux manager does not track this shape either, so such a
+  component has **no** automated version signal — check the bucket before
+  concluding a silent row is up to date.
+- **OCI freshness is `unverifiable`, never `fresh`.** An OCI tag list carries no
+  publish dates, so the frozen-upstream detector cannot date an OCI-sourced
+  chart. It is reported as unverifiable rather than counted as current.
 
 ### Image Tag Checking
 

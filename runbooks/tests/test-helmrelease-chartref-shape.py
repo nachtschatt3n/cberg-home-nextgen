@@ -209,6 +209,61 @@ spec:
     name: digestonly-app
 """
 
+# A semver RANGE, not a pinned tag. source-controller resolves this against the
+# registry at reconcile time, so the string in git is NOT what is deployed.
+OCI_SEMVER_RANGE = """---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: semverrange-app
+spec:
+  ref:
+    semver: ">=3.7.0 <4.0.0"
+  url: oci://ghcr.io/example/charts/semverrange
+"""
+
+HR_SEMVER_RANGE = """---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: semverrange-app
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: semverrange-app
+"""
+
+# Two DIFFERENT HelmChart objects sharing one (kind, name) key — the shape that
+# used to last-win silently, because every HelmChart resolves to url='' and the
+# old guard compared url alone.
+HELMCHART_DUP_A = """---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmChart
+metadata:
+  name: dup-chart
+  namespace: alpha
+spec:
+  chart: chart-one
+  version: 1.0.0
+  sourceRef:
+    kind: HelmRepository
+    name: repo-a
+"""
+
+HELMCHART_DUP_B = """---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmChart
+metadata:
+  name: dup-chart
+  namespace: beta
+spec:
+  chart: chart-two
+  version: 2.0.0
+  sourceRef:
+    kind: HelmRepository
+    name: repo-b
+"""
+
 FILES = {
     "apps/network/classic-app/app/helmrelease.yaml": HR_CLASSIC,
     "apps/network/ref-app/ocirepository.yaml": OCI_DIGEST_PINNED,
@@ -219,6 +274,10 @@ FILES = {
     "apps/network/future-app/helmrelease.yaml": HR_FUTURE_SHAPE,
     "apps/network/digestonly-app/ocirepository.yaml": OCI_DIGEST_ONLY,
     "apps/network/digestonly-app/helmrelease.yaml": HR_DIGEST_ONLY,
+    "apps/network/semverrange-app/ocirepository.yaml": OCI_SEMVER_RANGE,
+    "apps/network/semverrange-app/helmrelease.yaml": HR_SEMVER_RANGE,
+    "apps/alpha/dup/helmchart.yaml": HELMCHART_DUP_A,
+    "apps/beta/dup/helmchart.yaml": HELMCHART_DUP_B,
 }
 
 with tempfile.TemporaryDirectory() as td:
@@ -282,10 +341,49 @@ with tempfile.TemporaryDirectory() as td:
     # operator to ignore the signal, which is the same failure by another road.
     check("resolved rows are not listed as unresolved",
           {"classic-app", "ref-app", "chart-app"} & set(unresolved), set())
-    # The denominator: everything except the three deliberately-broken rows.
+    # The denominator: everything except the deliberately-broken rows.
     check("resolved count",
           sum(1 for h in parsed.values()
               if h["chart_name"] and h["chart_version"]), 3)
+
+    # Carried out of the temp-dir scope for the hardening assertions below.
+    unresolved_rows = list(getattr(checker, "unresolved_chart_sources", []))
+    unresolved_names = set(unresolved)
+    semver_row = parsed.get("semverrange-app", {})
+    # The collision must be RECORDED, not silently resolved by last-wins. It is
+    # recorded without a `component=`, i.e. a section-wide veto, because when
+    # two objects share a key we cannot know which rows the wrong one touched.
+    collision_recorded = any(
+        "COLLISION" in r for r in getattr(checker.degraded, "reasons", []))
+
+def _emitted_severity_for_unresolved():
+    """Severity `_emit_findings()` actually gives an unresolved-chart-source row.
+
+    Asserted on the EMITTED value rather than by reading the source, because the
+    severity is the whole question: at `monitor` the row never reaches the
+    section verdict, and for a component whose only remaining version signal is
+    this bucket (csi-driver-smb, F-2e76c058) that is indistinguishable from the
+    silence this file exists to prevent.
+    """
+    class _W:
+        enabled = True
+
+        def __init__(self):
+            self.items = []
+
+        def emit(self, **kw):
+            self.items.append(kw)
+
+    w = _W()
+    stub = cav.VersionChecker.__new__(cav.VersionChecker)
+    stub.unresolved_chart_sources = [
+        {"name": "probe-app", "file_path": "x/y.yaml", "reason": "because"}]
+    stub.results = []
+    stub.external_infra_results = []
+    cav._emit_findings(w, stub, "evidence.md")
+    rows = [i for i in w.items if "UNRESOLVED" in i.get("title", "")]
+    return rows[0]["severity"] if len(rows) == 1 else f"{len(rows)} rows emitted"
+
 
 # ── The real repo: k8s-gateway is the live instance of the bug ──────────────
 live = cav.VersionChecker(str(ROOT))
@@ -331,16 +429,93 @@ check("chart-source index is loaded before parsing",
       callable(getattr(live, "load_chart_sources", None)), True)
 
 # ── coverage.py carried the same blindness ─────────────────────────────────
+# The `current` versions are READ FROM THE MANIFESTS, never hardcoded.
+# `_chart_source_for()` pins the HelmRelease by matching item['current'] against
+# the deployed version, so a literal here would silently stop matching at the
+# next routine chart bump — and because run-all.sh is a fail-closed pre-commit
+# gate for any staged runbooks/ script, that would block an unrelated commit in
+# someone else's session. Same brittleness the live-bucket assertion avoids.
+import yaml as _yaml
+
+KG_OCI = ROOT / "kubernetes/apps/network/internal/k8s-gateway/ocirepository.yaml"
+AD_HR = ROOT / "kubernetes/apps/network/internal/adguard-home/app/helmrelease.yaml"
+kg_tag = ((_yaml.safe_load(KG_OCI.read_text()) or {})
+          .get("spec", {}).get("ref", {}).get("tag"))
+ad_ver = None
+for _d in _yaml.safe_load_all(AD_HR.read_text()):
+    if isinstance(_d, dict) and _d.get("kind") == "HelmRelease":
+        ad_ver = (((_d.get("spec") or {}).get("chart") or {})
+                  .get("spec") or {}).get("version")
+check("fixture: k8s-gateway tag read from the manifest", bool(kg_tag), True)
+check("fixture: adguard-home version read from the manifest", bool(ad_ver), True)
+
 cov = _load(os.environ.get("COV_PATH", str(ROOT / "runbooks" / "coverage.py")),
             "cov_chartref")
 check("coverage: chartRef chart source resolves",
-      cov._chart_source_for({"namespace": "network", "current": "3.7.2",
-                             "component": "k8s-gateway", "target": "3.7.3"}),
+      cov._chart_source_for({"namespace": "network", "current": str(kg_tag),
+                             "component": "k8s-gateway", "target": "9.9.9"}),
       ("k8s-gateway", "oci://ghcr.io/k8s-gateway/charts"))
 check("coverage: classic chart source still resolves (control)",
-      cov._chart_source_for({"namespace": "network", "current": "0.24.1",
-                             "component": "adguard-home", "target": "0.24.2"}),
+      cov._chart_source_for({"namespace": "network", "current": str(ad_ver),
+                             "component": "adguard-home", "target": "9.9.9"}),
       ("adguard-home", "https://helm-charts.rm3l.org"))
+# A semver RANGE is not a version: it must not satisfy the `current` match.
+# Exercised against a TEMP tree with REPO_ROOT repointed — asserting it against
+# the real repo would pass vacuously, because no OCIRepository here uses semver
+# and a missing key looks identical to a correctly-rejected range.
+with tempfile.TemporaryDirectory() as td2:
+    root2 = pathlib.Path(td2)
+    d2 = root2 / "kubernetes" / "apps" / "network" / "semverrange-app"
+    d2.mkdir(parents=True)
+    (d2 / "ocirepository.yaml").write_text(OCI_SEMVER_RANGE)
+    (d2 / "helmrelease.yaml").write_text(HR_SEMVER_RANGE)
+    cov2 = _load(os.environ.get("COV_PATH", str(ROOT / "runbooks" / "coverage.py")),
+                 "cov_semver")
+    cov2.REPO_ROOT = root2
+    entry = cov2._chart_ref_sources().get(("OCIRepository", "semverrange-app"))
+    check("coverage: a semver range resolves to NO version",
+          (entry or ("?", "?", "?"))[1], "")
+    # …and therefore can never be matched as the deployed version, whatever
+    # `current` says — including the range string itself.
+    check("coverage: a semver range never matches as `current`",
+          [cov2._chart_source_for({"namespace": "network", "current": c,
+                                   "component": "semverrange-app",
+                                   "target": "9.9.9"})
+           for c in (">=3.7.0 <4.0.0", "3.7.2", "")],
+          [(None, None), (None, None), (None, None)])
+
+# ── Hardening pinned after the 97c3e913 review ─────────────────────────────
+# 1. `ref.semver` is a RANGE, not a pinned version.
+check("semver-range ref is counted unresolved",
+      "semverrange-app" in unresolved_names, True)
+check("semver-range reason names the range, not a version",
+      any("RANGE" in u["reason"] for u in unresolved_rows
+          if u["name"] == "semverrange-app"), True)
+check("semver-range resolves to NO version",
+      semver_row.get("chart_version"), "")
+# 2. Two different CRs sharing a (kind, name) key must not silently last-win.
+check("chart-source collision is recorded as a degradation",
+      collision_recorded, True)
+# 3. An OCI path's generic container segment is not a GitHub repo.
+live_checker = live
+check("chart repo info: generic `charts` segment is not used as the repo",
+      live_checker.get_chart_repo_info(
+          "some-chart", "x", "oci://ghcr.io/some-owner/charts"),
+      ("some-owner", "some-chart"))
+check("chart repo info: a real middle segment is still used",
+      live_checker.get_chart_repo_info(
+          "zzz-unmapped", "x", "oci://ghcr.io/some-owner/real-repo"),
+      ("some-owner", "real-repo"))
+# The one live chartRef chart must resolve to a repo that EXISTS (verified
+# against the GitHub API 2026-09-11: the underscore form is the real one).
+check("chart repo info: k8s-gateway maps to its real (underscore) repo",
+      live_checker.get_chart_repo_info(
+          "k8s-gateway", "k8s-gateway", "oci://ghcr.io/k8s-gateway/charts"),
+      ("k8s-gateway", "k8s_gateway"))
+# 4. The unresolved finding must reach the section verdict. `monitor` would
+#    keep the SOLE remaining signal for a component off the board.
+check("unresolved rows are emitted at warning, not monitor",
+      _emitted_severity_for_unresolved(), "warning")
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

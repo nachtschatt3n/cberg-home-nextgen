@@ -1157,6 +1157,13 @@ for r in routes:
 
 ### 12.4 Cloudflare Configuration Version Drift
 
+> **`.spec.chart.spec.version` is empty, not an error, on a `chartRef` release.**
+> A HelmRelease that sources its chart via `spec.chartRef` (OCIRepository /
+> HelmChart) keeps no inline version, so the jsonpath below exits 0 with an
+> empty string and the `||` fallback never fires. The fallback to the Deployment
+> image is what makes this command safe today; if you copy the jsonpath
+> elsewhere, resolve `spec.chartRef` too — see `runbooks/version-check.md` §2.
+
 ```bash
 # Check cloudflared image version vs latest release
 kubectl get helmrelease cloudflared -n network -o jsonpath='{.spec.chart.spec.version}' 2>/dev/null \

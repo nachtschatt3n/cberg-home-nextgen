@@ -25,7 +25,13 @@ done
 ```
 
 All of them are hermetic: fakes and fixtures only, no cluster, no database, no
-network — with ONE deliberate exception. `test-cred-suppressor-scoping.py` also
+network — with TWO deliberate exceptions, both reading the repo's own tracked
+files rather than any live system. `test-helmrelease-chartref-shape.py` parses
+the real `kubernetes/` manifests, because a chart-source parser validated only
+on synthetic input is not validated (`docs/sops/audit-script-correctness.md`);
+it reads versions OUT of those manifests instead of hardcoding them, so a
+routine chart bump cannot turn this fail-closed gate into a blocked commit.
+`test-cred-suppressor-scoping.py` also
 scans every tracked file with the pre-commit password guard, because the
 operational cost of that detector IS how many files it would block, and a number
 measured once in a terminal rots. If it fails, a tracked file would now block
