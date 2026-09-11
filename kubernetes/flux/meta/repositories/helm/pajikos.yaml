@@ -7,4 +7,4 @@ metadata:
   namespace: flux-system
 spec:
   interval: 12h
-  url: http://pajikos.github.io/home-assistant-helm-chart/
+  url: https://blog.pavelsklenar.com/home-assistant-helm-chart/
