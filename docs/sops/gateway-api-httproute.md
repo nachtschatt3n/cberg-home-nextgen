@@ -289,7 +289,8 @@ the Envoy migration. The shape:
     failOpen: false
     headersToExtAuth:
       - cookie                 # the session — without it nothing works
-      - accept                 # outpost 401s assets instead of redirecting them
+      - accept                 # completeness only — measured: this outpost 302s
+                               # assets whatever Accept says. `cookie` is the fix.
       - user-agent             # authentik login events, not the Envoy pod
       - x-forwarded-for
       - x-forwarded-proto

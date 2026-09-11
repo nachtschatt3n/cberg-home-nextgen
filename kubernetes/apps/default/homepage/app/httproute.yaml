@@ -85,8 +85,12 @@ spec:
     # implicitly, which is why this only appeared after the Envoy migration.
     headersToExtAuth:
       - cookie                   # the session — the one that actually fixes it
-      - accept                   # lets the outpost 401 assets instead of
-                                 # redirecting them (kills the clobber storm)
+      - accept                   # forwarded for completeness only: MEASURED on
+                                 # this Rust outpost, an unauthenticated asset
+                                 # request is answered 302 whatever Accept says,
+                                 # so this does NOT suppress the clobber storm.
+                                 # The storm stops because `cookie` above makes
+                                 # the first callback stick.
       - user-agent               # authentik login events, not the Envoy pod
       - x-forwarded-for          # real client IP in those events
       - x-forwarded-proto
