@@ -912,15 +912,21 @@ Expected:
 
 ```bash
 # 1. Every forward-auth app still denies anonymously (302, never 200).
-#    These ten are the actual extAuth subjects, by HOSTNAME — the old list named
-#    `arag-web` and `uptime-kuma`, neither of which is a hostname (they are
-#    `arag` and `kuma`) and neither of which has a SecurityPolicy, so the loop
-#    scored two non-existent hosts and missed seven real ones.
-#    `kuma` is protected differently — its route sends `/` straight to the
-#    outpost (proxy mode), no SecurityPolicy needed. `arag` answers 200
-#    anonymously by accepted risk AR-118, not by accident. Neither belongs here.
+#    These eleven are the actual extAuth subjects, by HOSTNAME — an older list
+#    named `arag-web` and `uptime-kuma`, neither of which is a hostname (they are
+#    `arag` and `kuma`), so the loop scored two non-existent hosts and missed
+#    seven real ones.
+#    `kuma` is still protected differently — its route sends `/` straight to the
+#    outpost (proxy mode), no SecurityPolicy needed, so it does not belong here.
+#    `arag` DOES belong here as of 2026-09-11 (`d1440d50`): it was excluded while
+#    it answered 200 anonymously under AR-118, and leaving it out after the gate
+#    landed made this very check blind to an arag fail-open — the one thing it
+#    exists to catch. Add a host here the moment it gains a SecurityPolicy.
+#    NOTE on arag: probe `/` ONLY. Its `/api` prefix is a SEPARATE, deliberately
+#    ungated route (token-auth in-app, for the Mac-mini scraper), so `/api` there
+#    answers 401/404/503 and NOT 302. A 302 on `/api` would be the regression.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn; do
+         alertmanager prometheus longhorn arag; do
   printf '%s ' "$h"
   curl -s -o /dev/null -w '%{http_code}\n' https://$h.${SECRET_DOMAIN}/
 done
@@ -931,7 +937,7 @@ done
 #     a fresh one per request. Churn => `headersToExtAuth` is missing `cookie`
 #     and the app answers 400 to real browsers.
 for h in homepage headlamp nocodb phpmyadmin esphome frigate solarfocus \
-         alertmanager prometheus longhorn; do
+         alertmanager prometheus longhorn arag; do
   c=$(curl -s -D - -o /dev/null https://$h.${SECRET_DOMAIN}/ \
         | awk 'tolower($1)=="set-cookie:"{print $2; exit}')
   c2=$(curl -s -D - -o /dev/null -H "Cookie: ${c%%;*}" https://$h.${SECRET_DOMAIN}/ \
@@ -963,7 +969,7 @@ kubectl get referencegrant -A
 Expected:
 - Every forward-auth host returns `302`, never `200` (a `200` is a fail-open
   and an incident).
-- All ten read **SESSION-STABLE** in check 1b. A `SESSION-CHURN` means that
+- All eleven read **SESSION-STABLE** in check 1b. A `SESSION-CHURN` means that
   policy lost `cookie` from `headersToExtAuth`: the app answers 400 to real
   browsers while still returning the expected `302` above.
 - No `failOpen: true` or unset anywhere.
