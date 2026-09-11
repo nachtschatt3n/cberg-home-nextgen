@@ -45,12 +45,60 @@ spec:
       kind: Gateway
       name: envoy-external
   clientIPDetection:
-    customHeader:
-      # External traffic arrives via the cloudflared tunnel, which sets
-      # CF-Connecting-IP. failClosed: false keeps behaviour equivalent to
-      # nginx's real-ip module (fall back to the socket peer, do not 403).
-      name: CF-Connecting-IP
-      failClosed: false
+    xForwardedFor:
+      # Was `customHeader: CF-Connecting-IP` until 2026-09-11. That trusted the
+      # header UNCONDITIONALLY -- the custom_header original-IP-detection
+      # extension has no notion of peer trust, which the CRD schema confirms:
+      # its only fields are `name` and `failClosed`. Since this gateway holds a
+      # LAN VIP (192.168.55.104), any LAN device could connect to it directly
+      # and dictate its own client IP. Reproduced: a direct LAN request to
+      # .104 carrying `CF-Connecting-IP: 203.0.113.201` was logged by Envoy
+      # itself as `downstream_remote_address: 203.0.113.201:0`, with the real
+      # peer discarded. That header feeds auth's client-IP attribution, so the
+      # forgery is an attribution defect (there is no unauthenticated surface
+      # here, so it is not an access bypass).
+      #
+      # XFF is the only listener-level mode Envoy Gateway offers that CAN gate
+      # on the peer, so the fix is a mode switch, not an extra field.
+      #
+      # Why the pod CIDR is the correct trust set and Cloudflare's published
+      # ranges are NOT: external traffic reaches this gateway through the
+      # in-cluster cloudflared tunnel
+      # (configs/config.yaml -> service: https://envoy-external.network...),
+      # so the TCP peer of a legitimate external request is a cloudflared POD
+      # IP, never a Cloudflare edge address. Public DNS for every external
+      # hostname returns Cloudflare proxy addresses and external-dns publishes
+      # CNAMEs to the tunnel hostname, so no Cloudflare IP has a path to .104
+      # at all. Listing CF's ranges here would match no peer, ever -- it would
+      # look like a Cloudflare check while doing nothing. If the topology is
+      # ever changed to a direct port-forward onto .104, CF's ips-v4/ips-v6
+      # MUST be added here and that indirection reintroduced.
+      #
+      # Verified before the switch that this preserves real client IPs:
+      # Cloudflare sets X-Forwarded-For to the client address on every proxied
+      # request, and across 3 distinct real external clients (an IPv6 monitor,
+      # a GitHub webhook, an httpx client) the logged x-forwarded-for matched
+      # the CF-Connecting-IP-derived address exactly. Envoy walks XFF
+      # right-to-left skipping trusted entries, so the cloudflared pod IP is
+      # skipped and the genuine client address is selected.
+      #
+      # A direct LAN peer is untrusted, so Envoy ignores XFF entirely for it
+      # and records the real socket address. The ~1149 LAN-direct requests/hr
+      # this gateway already serves (Shelly devices, the Nextcloud desktop
+      # client, the HA companion app via split-horizon DNS) send no XFF and are
+      # unaffected -- they fell back to the peer before and still do.
+      #
+      # CAVEAT, same as the internal gateway's fix: this corrects Envoy's
+      # SELECTION, not the header. A forged CF-Connecting-IP (and a forged XFF
+      # entry) still reaches the backend verbatim, so a backend that
+      # leftmost-parses either header on its own can still be misled. Envoy's
+      # recorded client IP, the access log, and the XFF tail are now correct.
+      #
+      # Trusting the whole pod CIDR means any pod could forge XFF. That is the
+      # same posture accepted for envoy-internal in 097269ba, and is bounded by
+      # pod IPs being dynamic and in-cluster only.
+      trustedCIDRs:
+        - 10.69.0.0/16           # pod CIDR, per bootstrap/talos/talconfig.yaml
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
