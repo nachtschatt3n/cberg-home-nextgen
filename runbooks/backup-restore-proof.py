@@ -27,11 +27,26 @@ Usage:
   runbooks/backup-restore-proof.py --volume superset-pg18-data \\
       --image postgres:18.6-alpine --keep           # keep scratch for inspection
 
-NOTE the smoke step connects as the `postgres` role over the local socket. A
-volume whose cluster was initdb'd under a different superuser (Superset's, for
-instance, uses `superset`) will restore and start correctly but fail the smoke
-with `role "postgres" does not exist` — that is a probe limitation, NOT a bad
-backup. Use --keep and query it yourself with the right -U before concluding.
+SUPERUSER DETECTION. The smoke step connects over the local socket, and the
+role it connects AS is discovered, not assumed. A cluster initdb'd under a
+non-default superuser (Superset's is `superset`) has no `postgres` role, and
+hardcoding `-U postgres` made this probe report RESTORE PROOF FAILED on a
+perfectly good backup — observed 2026-09-11 during the superset-pg
+decommission, where the restore HAD succeeded and only the auth failed. That is
+the worst failure mode a backup verifier can have: it says the backup is bad
+when the backup is fine, which teaches the reader to distrust the one tool they
+will reach for in a disaster.
+
+So: candidates are tried in order (--superuser, then `postgres`, then tokens
+derived from the volume name), and the outcome is three-valued, not two:
+
+  * postgres never becomes ready            -> FAILED  (the backup really is bad)
+  * ready + a superuser answers             -> PROVEN
+  * ready but NO candidate role exists      -> INCONCLUSIVE, exit 2
+
+INCONCLUSIVE is deliberately NOT a failure: postgres starting on the restored
+volume is the substantive proof, and an auth miss says nothing about the data.
+Re-run with `--superuser <role>` (or `--keep` and query by hand) to upgrade it.
 
 Exit: 0 restore PROVEN · 1 FAILED · 2 preconditions (leftovers / no backup).
 """
@@ -40,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -76,6 +92,9 @@ def main() -> int:
     ap.add_argument("--volume", default="postgresql-data-5g")
     ap.add_argument("--image", default="pgvector/pgvector:0.8.6-pg16")
     ap.add_argument("--pgdata", default="/var/lib/postgresql/data/pgdata")
+    ap.add_argument("--superuser", default=None,
+                    help="superuser role to smoke-test as. Default: try "
+                         "`postgres`, then roles derived from the volume name.")
     ap.add_argument("--namespace", default="databases")
     ap.add_argument("--smoke-table", default=None,
                     help="db.table to count (default: just count databases)")
@@ -177,8 +196,10 @@ def main() -> int:
         deadline = time.time() + a.timeout_start
         up = False
         while time.time() < deadline:
+            # No -U: readiness is a server property, and pinning a role that
+            # may not exist conflates "server down" with "role absent".
             rc, out, _ = sh(["kubectl", "-n", ns, "exec", scratch, "--",
-                             "pg_isready", "-U", "postgres"], 30)
+                             "pg_isready"], 30)
             if rc == 0 and "accepting connections" in out:
                 up = True
                 print(" up")
@@ -189,24 +210,57 @@ def main() -> int:
             rc, out, _ = sh(["kubectl", "-n", ns, "logs", scratch, "--tail=15"], 30)
             raise RuntimeError(f"postgres never became ready. tail: {out[-400:]}")
 
-        # 3. smoke — local socket, peer auth as the in-container postgres user
-        rc, out, err = sh(["kubectl", "-n", ns, "exec", scratch, "--",
-                           "psql", "-U", "postgres", "-tA",
-                           "-c", "SELECT count(*) FROM pg_database"], 30)
-        if rc != 0 or not out.strip().isdigit() or int(out) < 3:
-            raise RuntimeError(f"database-count smoke failed: rc={rc} out={out!r} {err[:150]}")
-        ndb = int(out)
+        # 3. smoke — local socket, peer auth. The superuser ROLE is DISCOVERED:
+        # a cluster initdb'd under e.g. `superset` has no `postgres` role, and
+        # hardcoding it reported FAILED on a good backup (2026-09-11).
+        candidates = []
+        if a.superuser:
+            candidates.append(a.superuser)
+        candidates.append("postgres")
+        # Volume names are `{app}-{purpose}` by house convention, so the leading
+        # token is the likeliest non-default superuser (superset-pg-data ->
+        # superset). Cheap to try, and only reached if `postgres` is absent.
+        for tok in re.split(r"[^a-z0-9]+", a.volume.lower()):
+            if tok and tok not in candidates and not tok.isdigit():
+                candidates.append(tok)
+
+        role, ndb, auth_errors = None, None, []
+        for cand in candidates:
+            rc, out, err = sh(["kubectl", "-n", ns, "exec", scratch, "--",
+                               "psql", "-U", cand, "-tA",
+                               "-c", "SELECT count(*) FROM pg_database"], 30)
+            if rc == 0 and out.strip().isdigit():
+                role, ndb = cand, int(out)
+                break
+            auth_errors.append(f"{cand}: {(err or out).strip()[:90]}")
+
+        if role is None:
+            # Postgres IS up (we got past the readiness gate), we just cannot
+            # authenticate. That is NOT evidence of a bad backup — exit 2.
+            print("\nRESTORE PROOF INCONCLUSIVE: postgres booted on the restored "
+                  f"volume but no candidate superuser role answered.\n"
+                  f"  tried: {', '.join(candidates)}\n"
+                  + "".join(f"  - {e}\n" for e in auth_errors)
+                  + "  The volume restored and the server STARTED — this says nothing\n"
+                    "  about the data. Re-run with --superuser <role>, or --keep and\n"
+                    "  query it by hand. Do NOT read this as a failed backup.",
+                  file=sys.stderr)
+            return 2
+
+        if ndb < 3:
+            raise RuntimeError(f"database-count smoke failed: only {ndb} databases "
+                               f"as role {role!r} (expected >=3)")
         extra = ""
         if a.smoke_table:
             db, table = a.smoke_table.split(".", 1)
             rc, out, err = sh(["kubectl", "-n", ns, "exec", scratch, "--",
-                               "psql", "-U", "postgres", "-d", db, "-tA",
+                               "psql", "-U", role, "-d", db, "-tA",
                                "-c", f"SELECT count(*) FROM {table}"], 30)
             if rc != 0 or not out.strip().isdigit():
-                raise RuntimeError(f"table smoke failed: {err[:200]}")
+                raise RuntimeError(f"table smoke failed as role {role!r}: {err[:200]}")
             extra = f", {a.smoke_table}={out} rows"
         print(f"RESTORE PROVEN: backup {bk['metadata']['name']} ({when}) boots "
-              f"postgres with {ndb} databases{extra}")
+              f"postgres with {ndb} databases as superuser {role!r}{extra}")
         return 0
     except Exception as e:  # noqa: BLE001
         print(f"\nRESTORE PROOF FAILED: {e}", file=sys.stderr)
