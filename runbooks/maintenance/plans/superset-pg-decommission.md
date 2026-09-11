@@ -562,15 +562,135 @@ PV and PVC; they re-bind to the still-existing Longhorn volumes. Free.
 viable restore into today's 6.1.0 app and should be treated as unrecoverable
 once deleted. That is accepted: it is obsolete twice over.
 
-## 7. Out of scope — the frozen backup sets
+## 7. The frozen backup sets — EXECUTED 2026-09-11, retention trimmed to one
 
-This plan does **not** delete the fourteen frozen Longhorn backups. Doing so is
-the step that makes this genuinely one-way, and it deserves its own decision
-with its own date rather than riding along in a storage-hygiene window.
+### 7.1 Original scope note (kept for the record)
+
+This plan, as written, did **not** delete the fourteen frozen Longhorn backups.
+Doing so is the step that makes this genuinely one-way, and it deserved its own
+decision with its own date rather than riding along in a storage-hygiene window.
 Recommended shape when someone takes it up: keep the single 2026-09-09
 `superset-pg-data` backup until Superset has run a full quarter on 6.1.0/pg18,
 delete the other thirteen, and record the expiry date in `docs/applications.md`
 so the set does not silently become permanent a second time.
+
+### 7.2 That decision was taken and executed — 2026-09-11
+
+**Operator-approved, destructive, irreversible.** The retention trim above was
+executed on 2026-09-11 (NOT deferred a quarter — the operator took the decision
+on the day). Thirteen of the fourteen frozen backups were deleted; one was kept.
+
+**Why it was taken now rather than held.** The trigger was not capacity. Both
+source volumes were deleted earlier the same day (`06c954d2`), so
+`daily-backup-all-volumes` can never rotate their backups — the set was frozen
+with nobody's name on its expiry, which is the exact failure mode §1.2 named.
+And per §1.4 every one of the fourteen predates the 2026-09-08 credential
+rotation (`dad8922c`), so each carried pre-rotation local db-provider Admin
+material on a share with no at-rest encryption. Keeping thirteen redundant
+copies of that was cost with no matching rollback benefit: §1.3 had already
+established that only the 2026-09-09 backup is restorable into the running
+6.1.0 app, so deleting the other six on `superset-pg-data` and all seven on
+`superset-postgresql-data` **cost zero rollback capability**.
+
+**KEPT — exactly one:**
+
+| Backup | Volume | Created | Size | Why |
+|---|---|---|---|---|
+| `backup-5876963a2bce454c` | `superset-pg-data` | 2026-09-09T03:04:08Z | 922,746,880 B | The only member of either frozen set carrying the **6.1.0 alembic schema** (§1.3), and the only one **proven bootable**: restored to a scratch volume under `postgres:17.11-alpine`, `ab_user`=2 and `alembic_version`=`4b2a8c9d3e1f`, equal to live pg18 (§9 limb (c)). It is the entire rollback path. |
+
+**DELETED — thirteen**, each by exact name with a pre-check asserting
+`.status.volumeName` matched the expected dead volume, one at a time:
+
+- `superset-pg-data` (6, all pre-6.1.0-alembic per §1.3, restorable only
+  alongside an image downgrade that does not exist):
+  `backup-2229284ade6b4d28` (09-03) · `backup-b547f116304a481b` (09-04) ·
+  `backup-3cea5d70ecf746b8` (09-05) · `backup-280e922e529c48ee` (09-06) ·
+  `backup-b1d9ce382358454d` (09-07) · `backup-92946861d1654e0a` (09-08)
+- `superset-postgresql-data` (7, the bundled bitnamilegacy postgres 14.17 set —
+  obsolete twice over per §6, unrecoverable into Superset 6.1.0):
+  `backup-b96b8dc8e4754059` (08-29) · `backup-1697404b20d443c6` (08-30) ·
+  `backup-02f86468c50d4883` (08-31) · `backup-34bd89679c6444eb` (09-01) ·
+  `backup-08cf61b70b1e4941` (09-02) · `backup-515156dbcd7f4cdf` (09-03) ·
+  `backup-1b88356cb3ec4330` (09-04)
+
+**The near-miss this step is designed around, and how it was handled.** §8's
+"dangerous neighbour" warning applies with more force here than to the volume
+deletes: `superset-pg-data` and `superset-pg18-data` differ by two characters,
+and `superset-pg18-data`'s four backups are the **live** service's real rollback.
+Controls used: no wildcard, no label selector, no loop over "superset"; a
+delete helper that **refused** any name on a hardcoded survivor list and any
+name whose live `.status.volumeName` did not equal the expected dead volume; and
+after **every single delete**, a re-assertion that all five survivors
+(the keeper plus the four `superset-pg18-data` backups) were still present and
+`Completed`. That check passed 13 times out of 13.
+
+Incremental-chain note, since it is the non-obvious risk: `backup-92946861d1654e0a`
+(09-08) is the keeper's immediate predecessor in an `incremental` backup chain.
+Longhorn block-refcounts the backup store, so deleting it does not strand the
+keeper's blocks — but that was verified rather than assumed (deep re-read of the
+keeper's `state`/`progress`/`size`/`snapshotName`/`messages` immediately after,
+all unchanged), and the `superset-pg-data-26df02ea` BackupVolume correctly
+re-pointed `lastBackupName` at the keeper.
+
+**Both `BackupVolume` records were deliberately left in place.** The keeper's
+`ownerReferences` point at `BackupVolume/superset-pg-data-26df02ea`, so deleting
+that record would **cascade-delete the keeper** — the one object this step exists
+to protect. `superset-postgresql-data-b3f40529` now shows
+`lastBackupName: ""` and `dataStored: 0` and was also left alone; an empty
+BackupVolume record is harmless, and removing it was outside the approved scope.
+
+**Verification:**
+
+- Inventory re-enumerated from the live cluster BEFORE acting and matched the
+  approved list exactly: 7 on `superset-pg-data`, 7 on
+  `superset-postgresql-data`, 4 on `superset-pg18-data` = 18.
+- Keeper verified `Completed`, `progress: 100`, `messages: null` **before** any
+  delete, and re-verified after each of the 13.
+- All 4 `superset-pg18-data` backups present and `Completed` throughout and after.
+- Superset total backup count **18 → 5** (1 keeper + 4 live). Cluster-wide
+  backup count 862.
+- CONTENTS ASSERTION 1 — live `superset-pg18` table counts diffed before/after
+  the trim: byte-identical (`ab_user`=2, `dashboards`=1, `slices`=10,
+  `dashboard_slices`=9, `tables`=10, `table_columns`=92,
+  `alembic_version`=`4b2a8c9d3e1f`).
+- CONTENTS ASSERTION 2 — SQL Lab exercised against the live data DB: HTTP 200
+  `status=success` with real rows, including a real-table probe returning five
+  base tables and an aggregate over the pellet-price table (4,791 rows, newest
+  observation 2026-09-11 18:00 UTC — i.e. current, not a stale shell). Dashboard
+  1 published, charts endpoint HTTP 200 with its 9 charts. Per §4.7 `/health`
+  alone was explicitly not accepted.
+- All Superset pods `Running` with 0 restarts; `superset-pg18-data` untouched.
+
+**Space reclaimed: NOT measured, and this is a real gap.** Longhorn exposes no
+retrospective per-backup stored-bytes figure, and the pre-delete `dataStored` on
+the two `BackupVolume` records was not captured as a baseline. Post-trim,
+`superset-pg-data-26df02ea` holds 50,331,648 B and
+`superset-postgresql-data-b3f40529` holds 0. The deleted backups' *logical*
+sizes totalled ~12.3 GiB, but the backup store is compressed (`lz4`) and
+block-deduplicated, so actual freed bytes are materially lower and are
+**unverified**. Anyone repeating a trim should record
+`backupvolumes.longhorn.io -o jsonpath={.status.dataStored}` first.
+
+### 7.3 Consequence: the rollback is now SINGLE-COPY
+
+`rollback_class: backup-restore` still holds, but it now rests on **one backup
+with no second copy anywhere**. `backup-5876963a2bce454c` is the sole surviving
+artifact of the pre-pg18 metadata DB; if it is lost or fails to restore, there is
+**no Superset metadata rollback at all** — the live `superset-pg18-data` backups
+roll back to pg18 states only, not across the 2026-09-08 cutover. Treat it
+accordingly:
+
+- Do **not** delete it, and do **not** delete
+  `BackupVolume/superset-pg-data-26df02ea` (cascade, see above).
+- Its §1.4 obligation is undiminished: **restoring it re-arms both local
+  db-provider Admin bypasses.** Resetting or disabling every local Admin account
+  is a mandatory step *of the restore itself*, before Superset serves traffic.
+  See §6, which reproduces this verbatim.
+- Set and record an expiry. The shape §7.1 recommended — retire the keeper once
+  Superset has run a full quarter on 6.1.0/pg18, i.e. **on or after
+  2026-12-08** — is still the right one, and is now the only thing standing
+  between this set and the "silently permanent" outcome §1.2 warned about. That
+  date belongs in `docs/applications.md`; recording it there is **not yet done**.
 
 ## 8. Interference notes for the window agent
 
