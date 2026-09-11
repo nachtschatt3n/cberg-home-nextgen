@@ -107,7 +107,16 @@ spec:
                   echo "connections=$CONNS_USED/$CONNS_MAX now=$NOW"
                   echo "age_seconds=$((NOW - NEWEST_TS))"
 
-                  PAYLOAD=$(printf '%s\n' \
+                  # Written to a FILE and sent with --post-file, NOT built in a
+                  # variable and sent with --post-data. Command substitution
+                  # strips trailing newlines, and the Prometheus text format
+                  # requires the final line to be newline-terminated: pushgateway
+                  # answers an unterminated body with "HTTP 400 Bad Request" and
+                  # stores nothing. That is exactly how the first run of this
+                  # CronJob failed (2026-09-12, job -29819417); --post-file
+                  # preserves the bytes printf wrote and returns 200. Both
+                  # variants were measured side by side before this was changed.
+                  printf '%s\n' \
                     "# HELP authentik_audit_newest_event_timestamp_seconds Unix timestamp of the newest row in authentik_events_event on the LIVE database." \
                     "# TYPE authentik_audit_newest_event_timestamp_seconds gauge" \
                     "authentik_audit_newest_event_timestamp_seconds $NEWEST_TS" \
@@ -122,11 +131,12 @@ spec:
                     "authentik_db_connections_max $CONNS_MAX" \
                     "# HELP authentik_db_probe_last_success_timestamp_seconds Unix timestamp of the last successful probe run." \
                     "# TYPE authentik_db_probe_last_success_timestamp_seconds gauge" \
-                    "authentik_db_probe_last_success_timestamp_seconds $NOW")
+                    "authentik_db_probe_last_success_timestamp_seconds $NOW" \
+                    > /tmp/authentik-db-probe.prom
 
                   # Short service name, not the svc.cluster.local FQDN: this is a
                   # public repo. One dot + ndots:5 resolves via the search path.
-                  wget -q -O - -T 15 --post-data "$PAYLOAD" \
+                  wget -q -O - -T 15 --post-file /tmp/authentik-db-probe.prom \
                     "http://prometheus-pushgateway.monitoring:9091/metrics/job/authentik-db-probe"
                   echo "pushed to pushgateway job=authentik-db-probe"
               env:
